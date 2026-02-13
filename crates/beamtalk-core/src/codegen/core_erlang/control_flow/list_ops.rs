@@ -9,6 +9,7 @@
 //! `select:`, `reject:`, and `inject:into:`.
 
 use super::super::document::Document;
+use super::super::intrinsics::validate_block_arity_exact;
 use super::super::{CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, Expression};
 use crate::docvec;
@@ -23,6 +24,15 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
+        // BT-493: Validate body block arity (must be 1-arg)
+        validate_block_arity_exact(
+            body,
+            1,
+            "do:",
+            "Fix: The body block must take one argument (each element):\n\
+             \x20 list do: [:item | item printString]",
+        )?;
+
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {
             // Analyze block for mutations
@@ -155,6 +165,15 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
+        // BT-493: Validate body block arity (must be 1-arg)
+        validate_block_arity_exact(
+            body,
+            1,
+            "collect:",
+            "Fix: The body block must take one argument (each element):\n\
+             \x20 list collect: [:item | item * 2]",
+        )?;
+
         // list collect: is map
         self.generate_simple_list_op(receiver, body, "map")
     }
@@ -164,6 +183,15 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
+        // BT-493: Validate body block arity (must be 1-arg)
+        validate_block_arity_exact(
+            body,
+            1,
+            "select:",
+            "Fix: The body block must take one argument (each element):\n\
+             \x20 list select: [:item | item > 0]",
+        )?;
+
         // list select: is filter
         self.generate_simple_list_op(receiver, body, "filter")
     }
@@ -173,6 +201,15 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
+        // BT-493: Validate body block arity (must be 1-arg)
+        validate_block_arity_exact(
+            body,
+            1,
+            "reject:",
+            "Fix: The body block must take one argument (each element):\n\
+             \x20 list reject: [:item | item < 0]",
+        )?;
+
         // list reject: is opposite of filter - we need to negate the predicate
         // BT-416: Add runtime is_list guard for non-list receivers
         let list_var = self.fresh_temp_var("temp");
@@ -237,6 +274,15 @@ impl CoreErlangGenerator {
         initial: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
+        // BT-493: Validate body block arity (must be 2-arg: element and accumulator)
+        validate_block_arity_exact(
+            body,
+            2,
+            "inject:into:",
+            "Fix: The body block must take two arguments (element and accumulator):\n\
+             \x20 list inject: 0 into: [:each :sum | sum + each]",
+        )?;
+
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {
             // Analyze block for mutations

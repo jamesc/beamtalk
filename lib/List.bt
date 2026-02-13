@@ -318,6 +318,14 @@ sealed Collection subclass: List
   /// ```
   add: item => @primitive 'add:'
 
+  /// Return a lazy Stream over the list elements.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (#(1, 2, 3) stream) asList       // => #(1, 2, 3)
+  /// ```
+  stream => @primitive 'stream'
+
   /// Human-readable description of the receiver.
   ///
   /// ## Examples

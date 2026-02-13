@@ -410,6 +410,14 @@ sealed Object subclass: String
   /// ```
   describe => self
 
+  /// Return a lazy Stream over the characters (grapheme clusters).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ('hello' stream) take: 3         // => #('h', 'e', 'l')
+  /// ```
+  stream => @primitive 'stream'
+
   /// Return the string itself.
   ///
   /// ## Examples

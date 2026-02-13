@@ -9,6 +9,7 @@
 //! `to:do:`, and `to:by:do:`.
 
 use super::super::document::Document;
+use super::super::intrinsics::validate_block_arity_exact;
 use super::super::{CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, Expression};
 use crate::docvec;
@@ -41,6 +42,16 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
+        // BT-493: Validate body block arity (must be 0-arg)
+        validate_block_arity_exact(
+            body,
+            0,
+            "timesRepeat:",
+            "Fix: Use a zero-arg block. If you need the iteration index, use to:do: instead:\n\
+             \x20 3 timesRepeat: [self doSomething]\n\
+             \x20 1 to: 3 do: [:i | self doSomethingWith: i]",
+        )?;
+
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {
             // Use mutations version if there are any writes (local or field)
@@ -216,6 +227,15 @@ impl CoreErlangGenerator {
         limit: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
+        // BT-493: Validate body block arity (must be 1-arg for iteration index)
+        validate_block_arity_exact(
+            body,
+            1,
+            "to:do:",
+            "Fix: The body block must take one argument (the iteration index):\n\
+             \x20 1 to: 10 do: [:i | i printString]",
+        )?;
+
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {
             // Use mutations version if there are any writes (local or field)
@@ -440,6 +460,15 @@ impl CoreErlangGenerator {
         step: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
+        // BT-493: Validate body block arity (must be 1-arg for iteration index)
+        validate_block_arity_exact(
+            body,
+            1,
+            "to:by:do:",
+            "Fix: The body block must take one argument (the iteration index):\n\
+             \x20 1 to: 10 by: 2 do: [:i | i printString]",
+        )?;
+
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {
             let analysis = block_analysis::analyze_block(body_block);

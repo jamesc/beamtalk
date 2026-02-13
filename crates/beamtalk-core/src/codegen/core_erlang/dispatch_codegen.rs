@@ -39,17 +39,6 @@ use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{Expression, MessageSelector};
 use crate::docvec;
 
-/// BT-374 / ADR 0010: Compile-time known workspace binding names.
-///
-/// These names resolve to workspace singletons via `persistent_term` rather than
-/// direct module function calls. The set is static — dynamic bindings are out of scope.
-const WORKSPACE_BINDING_NAMES: &[&str] = &["Transcript", "Beamtalk", "Workspace"];
-
-/// Returns true if the given class name is a workspace binding (ADR 0010).
-pub(super) fn is_workspace_binding(name: &str) -> bool {
-    WORKSPACE_BINDING_NAMES.contains(&name)
-}
-
 impl CoreErlangGenerator {
     /// Generates a comma-separated argument list for function/message calls.
     ///
@@ -261,9 +250,17 @@ impl CoreErlangGenerator {
         Ok(None)
     }
 
-    /// Handles `ClassReference` receivers: workspace bindings and class method calls.
+    /// Handles `ClassReference` receivers as class method calls.
     ///
-    /// Returns `Some(())` if the receiver is a `ClassReference`, `None` otherwise.
+    /// ADR 0019 Phase 3: In REPL context, checks REPL bindings first for
+    /// convenience names (Transcript, Beamtalk, Workspace). If found in bindings,
+    /// dispatches via `beamtalk_message_dispatch:send/3` (instance dispatch).
+    /// Falls back to `class_send` for actual class names.
+    ///
+    /// In actor/value-type methods compiled in workspace mode, uses `class_send`
+    /// with fallback to workspace binding for convenience names.
+    ///
+    /// Returns `Some(doc)` if the receiver is a `ClassReference`, `None` otherwise.
     fn try_handle_class_reference(
         &mut self,
         receiver: &Expression,
@@ -271,15 +268,17 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
         if let Expression::ClassReference { name, .. } = receiver {
-            if is_workspace_binding(&name.name) {
-                if self.workspace_mode {
-                    let doc =
-                        self.generate_workspace_binding_send(&name.name, selector, arguments)?;
-                    return Ok(Some(doc));
-                }
-                return Err(CodeGenError::WorkspaceBindingInBatchMode {
-                    name: name.name.to_string(),
-                });
+            if self.workspace_mode && self.context == CodeGenContext::Repl {
+                // REPL top-level: check session bindings first
+                let doc =
+                    self.generate_binding_aware_class_send(&name.name, selector, arguments)?;
+                return Ok(Some(doc));
+            }
+            if self.workspace_mode {
+                // Actor/ValueType methods in workspace mode: try class_send,
+                // fall back to workspace binding for convenience names
+                let doc = self.generate_workspace_class_send(&name.name, selector, arguments)?;
+                return Ok(Some(doc));
             }
             let doc = self.generate_class_method_call(&name.name, selector, arguments)?;
             return Ok(Some(doc));
@@ -978,44 +977,84 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
-    /// Generates a workspace binding message send (BT-374 / ADR 0010).
+    /// Generates a binding-aware class method call (ADR 0019 Phase 3).
     ///
-    /// Workspace bindings (`Transcript`, `Beamtalk`) are singleton actors whose
-    /// `beamtalk_object` tuples are stored in `persistent_term`. The generated code:
-    ///
-    /// 1. Looks up binding: `persistent_term:get({beamtalk_binding, 'Name'})`
-    /// 2. Extracts PID: `element(4, Binding)`
-    /// 3. Creates a future: `beamtalk_future:new()`
-    /// 4. Sends async message: `beamtalk_actor:async_send(Pid, Selector, Args, Future)`
-    /// 5. Returns the future
+    /// In workspace mode, checks REPL bindings first for convenience names.
+    /// If the name is found in bindings, it's an instance (e.g., Transcript is a
+    /// `TranscriptStream` actor), so dispatch via `beamtalk_message_dispatch:send/3`.
+    /// If not found, fall back to `class_send` for actual class names.
     ///
     /// ```erlang
-    /// let Binding = call 'persistent_term':'get'({'beamtalk_binding', 'Transcript'}) in
-    /// let Pid = call 'erlang':'element'(4, Binding) in
-    /// let Future = call 'beamtalk_future':'new'() in
-    /// let _ = call 'beamtalk_actor':'async_send'(Pid, 'show:', [Arg], Future) in Future
+    /// case call 'maps':'find'('Name', State) of
+    ///   <{'ok', BindingVal}> -> call 'beamtalk_message_dispatch':'send'(BindingVal, Sel, Args)
+    ///   <'error'> -> call 'beamtalk_object_class':'class_send'(whereis_class('Name'), Sel, Args)
+    /// end
     /// ```
-    pub(super) fn generate_workspace_binding_send(
+    fn generate_binding_aware_class_send(
         &mut self,
-        binding_name: &str,
+        class_name: &str,
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
-        let pid_var = self.fresh_var("BindingPid");
-        let future_var = self.fresh_var("Future");
         let selector_atom = selector.to_erlang_atom();
-        let binding_var = self.fresh_var("BindingObj");
+        let class_pid_var = self.fresh_var("ClassPid");
+        let binding_val_var = self.fresh_var("BindingVal");
+        let state_var = self.current_state_var();
         let args_doc = self.capture_argument_list_doc(arguments)?;
 
         let doc = docvec![
+            format!("case call 'maps':'find'('{class_name}', {state_var}) of "),
+            format!("<{{'ok', {binding_val_var}}}> when 'true' -> "),
             format!(
-                "let {binding_var} = call 'persistent_term':'get'({{'beamtalk_binding', '{binding_name}'}}) in "
+                "call 'beamtalk_message_dispatch':'send'({binding_val_var}, '{selector_atom}', ["
             ),
-            format!("let {pid_var} = call 'erlang':'element'(4, {binding_var}) in "),
-            format!("let {future_var} = call 'beamtalk_future':'new'() in "),
-            format!("let _ = call 'beamtalk_actor':'async_send'({pid_var}, '{selector_atom}', ["),
+            args_doc.clone(),
+            "]) ",
+            "<'error'> when 'true' -> ",
+            format!(
+                "let {class_pid_var} = call 'beamtalk_object_class':'whereis_class'('{class_name}') in "
+            ),
+            format!(
+                "call 'beamtalk_object_class':'class_send'({class_pid_var}, '{selector_atom}', ["
+            ),
             args_doc,
-            format!("], {future_var}) in {future_var}")
+            "]) end"
+        ];
+
+        Ok(doc)
+    }
+
+    /// Generates workspace-mode class send for actor/value-type methods.
+    ///
+    /// Tries `class_send` first (for real class names like `Counter`),
+    /// falls back to `persistent_term` binding lookup for convenience names
+    /// like `Transcript`, `Beamtalk`, `Workspace`.
+    fn generate_workspace_class_send(
+        &mut self,
+        class_name: &str,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Document<'static>> {
+        let selector_atom = selector.to_erlang_atom();
+        let class_pid_var = self.fresh_var("ClassPid");
+        let binding_var = self.fresh_var("BindingVal");
+        let args_doc = self.capture_argument_list_doc(arguments)?;
+
+        let doc = docvec![
+            format!("case call 'beamtalk_object_class':'whereis_class'('{class_name}') of "),
+            "<'undefined'> when 'true' -> ",
+            format!(
+                "let {binding_var} = call 'persistent_term':'get'({{'beamtalk_binding', '{class_name}'}}, 'nil') in "
+            ),
+            format!("call 'beamtalk_message_dispatch':'send'({binding_var}, '{selector_atom}', ["),
+            args_doc.clone(),
+            "]) ",
+            format!("<{class_pid_var}> when 'true' -> "),
+            format!(
+                "call 'beamtalk_object_class':'class_send'({class_pid_var}, '{selector_atom}', ["
+            ),
+            args_doc,
+            "]) end"
         ];
 
         Ok(doc)

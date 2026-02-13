@@ -121,6 +121,14 @@ sealed Collection subclass: Set
   /// ```
   printString => @primitive 'printString'
 
+  /// Return a lazy Stream over the set elements.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((Set new add: 1) stream) asList   // => #(1)
+  /// ```
+  stream => @primitive 'stream'
+
   /// Human-readable description of the receiver.
   ///
   /// ## Examples

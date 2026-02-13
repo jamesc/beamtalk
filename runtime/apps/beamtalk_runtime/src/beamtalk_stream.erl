@@ -84,13 +84,37 @@ from_by(Start, StepFun) when is_function(StepFun, 1) ->
 from_by(_, _) ->
     raise_type_error('from:by:', <<"Expected a Block as step function">>).
 
-%% @doc Create a Stream from a collection (list).
+%% @doc Create a Stream from a collection (list, set, dictionary, or string).
 %% `Stream on: #(1, 2, 3)` => 1, 2, 3
--spec on(list()) -> map().
+%% BT-514: Extended to support Set, Dictionary, and String.
+-spec on(term()) -> map().
 on(List) when is_list(List) ->
     make_stream(make_list_gen(List), <<"Stream(on: [...])">>);
+on(Str) when is_binary(Str) ->
+    Graphemes = beamtalk_string_ops:as_list(Str),
+    make_stream(make_list_gen(Graphemes), <<"Stream(on: '...')">>);
+on(Map) when is_map(Map) ->
+    case beamtalk_tagged_map:class_of(Map) of
+        'Set' ->
+            Elements = beamtalk_set_ops:as_list(Map),
+            make_stream(make_list_gen(Elements), <<"Stream(on: Set(...))">>);
+        undefined ->
+            %% Dictionary (plain map without $beamtalk_class tag)
+            Assocs = maps:fold(
+                fun(K, V, Acc) ->
+                    [#{'$beamtalk_class' => 'Association', key => K, value => V} | Acc]
+                end,
+                [],
+                Map
+            ),
+            make_stream(make_list_gen(lists:reverse(Assocs)), <<"Stream(on: #{...})">>);
+        Other ->
+            raise_type_error('on:', iolist_to_binary([
+                <<"Expected a collection, got ">>,
+                atom_to_binary(Other, utf8)]))
+    end;
 on(_) ->
-    raise_type_error('on:', <<"Expected a List argument">>).
+    raise_type_error('on:', <<"Expected a collection (List, String, Set, or Dictionary)">>).
 
 %%% ============================================================================
 %%% Lazy Operations (return new Stream)

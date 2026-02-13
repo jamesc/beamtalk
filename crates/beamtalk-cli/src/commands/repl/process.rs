@@ -30,13 +30,13 @@ pub(super) fn start_beam_node(
     project_root: &Path,
 ) -> Result<Child> {
     // Find runtime directory - try multiple locations
-    let runtime_dir = repl_startup::find_runtime_dir()?;
+    let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout()?;
     info!("Using runtime at: {}", runtime_dir.display());
 
-    let paths = repl_startup::beam_paths(&runtime_dir);
+    let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
 
-    // Check if runtime is built
-    if !paths.runtime_ebin.exists() {
+    // Auto-build runtime if not compiled (dev mode only)
+    if layout == repl_startup::RuntimeLayout::Dev && !paths.runtime_ebin.exists() {
         info!("Building Beamtalk runtime...");
         let status = Command::new("rebar3")
             .arg("compile")
@@ -47,6 +47,15 @@ pub(super) fn start_beam_node(
         if !status.success() {
             return Err(miette!("Failed to build Beamtalk runtime"));
         }
+    }
+
+    // In installed mode, runtime must already be present
+    if layout == repl_startup::RuntimeLayout::Installed && !paths.runtime_ebin.exists() {
+        return Err(miette!(
+            "Installed runtime not found at {}.\n\
+            Reinstall Beamtalk using your original installation method, or set BEAMTALK_RUNTIME_DIR.",
+            paths.runtime_ebin.display()
+        ));
     }
 
     info!("Starting BEAM node with REPL backend on port {port}...");

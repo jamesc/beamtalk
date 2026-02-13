@@ -10,6 +10,7 @@
 -behaviour(gen_server).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+-include("beamtalk_workspace.hrl").
 
 -export([start_link/1, get_port/0, handle_client/2, parse_request/1, format_response/1, format_error/1,
          format_response_with_warnings/2, format_error_with_warnings/2,
@@ -297,8 +298,11 @@ handle_op(<<"clear">>, _Params, Msg, SessionPid) ->
 
 handle_op(<<"bindings">>, _Params, Msg, SessionPid) ->
     {ok, Bindings} = beamtalk_repl_shell:get_bindings(SessionPid),
+    %% ADR 0019 Phase 3: Filter out workspace convenience bindings from display.
+    %% Users shouldn't see Transcript/Beamtalk/Workspace as "their" bindings.
+    UserBindings = maps:without(?WORKSPACE_BINDINGS, Bindings),
     beamtalk_repl_protocol:encode_bindings(
-        Bindings, Msg, fun term_to_json/1);
+        UserBindings, Msg, fun term_to_json/1);
 
 handle_op(<<"load-file">>, Params, Msg, SessionPid) ->
     Path = binary_to_list(maps:get(<<"path">>, Params, <<>>)),

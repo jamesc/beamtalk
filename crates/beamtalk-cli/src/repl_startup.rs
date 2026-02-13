@@ -17,6 +17,15 @@ use std::path::{Path, PathBuf};
 
 use miette::{Result, miette};
 
+/// Whether the runtime was found in a development checkout or an installed layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeLayout {
+    /// Development: `runtime/_build/default/lib/<app>/ebin/`
+    Dev,
+    /// Installed: `PREFIX/lib/beamtalk/lib/<app>/ebin/`
+    Installed,
+}
+
 /// Directories that must be on the BEAM code path (`-pa`) for the REPL to work.
 #[derive(Debug)]
 pub struct BeamPaths {
@@ -27,14 +36,35 @@ pub struct BeamPaths {
 }
 
 /// Compute the standard `-pa` directories from a runtime root.
+///
+/// For development layout (`runtime/` dir), paths are under `_build/default/lib/`.
+/// For installed layout (`PREFIX/lib/beamtalk/`), paths are under `lib/`.
 pub fn beam_paths(runtime_dir: &Path) -> BeamPaths {
-    let build_lib_dir = runtime_dir.join("_build/default/lib");
-    BeamPaths {
-        runtime_ebin: build_lib_dir.join("beamtalk_runtime/ebin"),
-        workspace_ebin: build_lib_dir.join("beamtalk_workspace/ebin"),
-        jsx_ebin: build_lib_dir.join("jsx/ebin"),
-        // Stdlib beams are produced by `beamtalk build-stdlib` under apps/, not _build/
-        stdlib_ebin: runtime_dir.join("apps/beamtalk_stdlib/ebin"),
+    beam_paths_for_layout(runtime_dir, RuntimeLayout::Dev)
+}
+
+/// Compute `-pa` directories for a specific layout.
+pub fn beam_paths_for_layout(runtime_dir: &Path, layout: RuntimeLayout) -> BeamPaths {
+    match layout {
+        RuntimeLayout::Dev => {
+            let build_lib_dir = runtime_dir.join("_build/default/lib");
+            BeamPaths {
+                runtime_ebin: build_lib_dir.join("beamtalk_runtime/ebin"),
+                workspace_ebin: build_lib_dir.join("beamtalk_workspace/ebin"),
+                jsx_ebin: build_lib_dir.join("jsx/ebin"),
+                // Stdlib beams are produced by `beamtalk build-stdlib` under apps/, not _build/
+                stdlib_ebin: runtime_dir.join("apps/beamtalk_stdlib/ebin"),
+            }
+        }
+        RuntimeLayout::Installed => {
+            let lib_dir = runtime_dir.join("lib");
+            BeamPaths {
+                runtime_ebin: lib_dir.join("beamtalk_runtime/ebin"),
+                workspace_ebin: lib_dir.join("beamtalk_workspace/ebin"),
+                jsx_ebin: lib_dir.join("jsx/ebin"),
+                stdlib_ebin: lib_dir.join("beamtalk_stdlib/ebin"),
+            }
+        }
     }
 }
 
@@ -129,44 +159,47 @@ pub fn beam_pa_args(paths: &BeamPaths) -> Vec<OsString> {
 
 // ── Runtime Discovery ──────────────────────────────────────────────
 
-/// Find the runtime directory by checking multiple possible locations.
+/// Find the runtime directory by checking multiple locations.
+///
+/// Delegates to [`find_runtime_dir_with_layout`]; see that function for
+/// layout detection and resolution order.
 ///
 /// # Errors
 ///
 /// Returns an error if no valid runtime directory is found, or if
-/// `BEAMTALK_RUNTIME_DIR` is set but doesn't contain `rebar.config`.
-///
-/// Resolution order:
-/// 1. `BEAMTALK_RUNTIME_DIR` environment variable
-/// 2. `CARGO_MANIFEST_DIR/../../runtime` (when running via `cargo run`)
-/// 3. `./runtime` (running from repo root)
-/// 4. Relative to executable (installed location)
-/// 5. Executable's grandparent (target/debug/beamtalk → repo root)
+/// `BEAMTALK_RUNTIME_DIR` is set but doesn't contain a valid runtime.
 pub fn find_runtime_dir() -> Result<PathBuf> {
+    let (path, _layout) = find_runtime_dir_with_layout()?;
+    Ok(path)
+}
+
+/// Like [`find_runtime_dir`] but also returns the detected [`RuntimeLayout`].
+///
+/// # Errors
+///
+/// Returns an error if no valid runtime directory is found, or if
+/// `BEAMTALK_RUNTIME_DIR` is set but doesn't contain a valid runtime.
+pub fn find_runtime_dir_with_layout() -> Result<(PathBuf, RuntimeLayout)> {
     // Check explicit env var first
     if let Ok(dir) = std::env::var("BEAMTALK_RUNTIME_DIR") {
         let path = PathBuf::from(dir);
         if path.join("rebar.config").exists() {
-            return Ok(path);
+            return Ok((path, RuntimeLayout::Dev));
         }
         return Err(miette!(
             "BEAMTALK_RUNTIME_DIR is set but does not contain a valid runtime (no rebar.config)"
         ));
     }
 
-    // Candidates in order of preference
-    let candidates = [
+    // Dev-mode candidates (checked via rebar.config)
+    let dev_candidates = [
         // 1. CARGO_MANIFEST_DIR (when running via cargo run)
         std::env::var("CARGO_MANIFEST_DIR")
             .ok()
             .map(|d| PathBuf::from(d).join("../../runtime")),
         // 2. Current working directory (running from repo root)
         Some(PathBuf::from("runtime")),
-        // 3. Relative to executable (installed location)
-        std::env::current_exe()
-            .ok()
-            .and_then(|exe| exe.parent().map(|p| p.join("../lib/beamtalk/runtime"))),
-        // 4. Executable's grandparent (target/debug/beamtalk -> repo root)
+        // 3. Executable's grandparent (target/debug/beamtalk -> repo root)
         std::env::current_exe().ok().and_then(|exe| {
             exe.parent()
                 .and_then(|p| p.parent())
@@ -175,9 +208,21 @@ pub fn find_runtime_dir() -> Result<PathBuf> {
         }),
     ];
 
-    for candidate in candidates.into_iter().flatten() {
+    for candidate in dev_candidates.into_iter().flatten() {
         if candidate.join("rebar.config").exists() {
-            return Ok(candidate);
+            return Ok((candidate, RuntimeLayout::Dev));
+        }
+    }
+
+    // Installed-mode candidate: {exe_dir}/../lib/beamtalk/
+    // Validated by checking for .beam files in the runtime ebin dir
+    if let Some(installed_root) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|p| p.join("../lib/beamtalk")))
+        .and_then(|p| p.canonicalize().ok())
+    {
+        if has_beam_files(&installed_root.join("lib/beamtalk_runtime/ebin")) {
+            return Ok((installed_root, RuntimeLayout::Installed));
         }
     }
 
@@ -280,5 +325,44 @@ mod tests {
         for i in (0..args.len()).step_by(2) {
             assert_eq!(args[i], "-pa");
         }
+    }
+
+    #[test]
+    fn beam_paths_installed_layout() {
+        let paths = beam_paths_for_layout(
+            Path::new("/usr/local/lib/beamtalk"),
+            RuntimeLayout::Installed,
+        );
+        assert_eq!(
+            paths.runtime_ebin,
+            PathBuf::from("/usr/local/lib/beamtalk/lib/beamtalk_runtime/ebin")
+        );
+        assert_eq!(
+            paths.workspace_ebin,
+            PathBuf::from("/usr/local/lib/beamtalk/lib/beamtalk_workspace/ebin")
+        );
+        assert_eq!(
+            paths.jsx_ebin,
+            PathBuf::from("/usr/local/lib/beamtalk/lib/jsx/ebin")
+        );
+        assert_eq!(
+            paths.stdlib_ebin,
+            PathBuf::from("/usr/local/lib/beamtalk/lib/beamtalk_stdlib/ebin")
+        );
+    }
+
+    #[test]
+    fn beam_paths_dev_uses_build_dir() {
+        let paths = beam_paths_for_layout(Path::new("/rt"), RuntimeLayout::Dev);
+        // Dev layout uses _build/default/lib/ for runtime/workspace/jsx
+        assert_eq!(
+            paths.runtime_ebin,
+            PathBuf::from("/rt/_build/default/lib/beamtalk_runtime/ebin")
+        );
+        // But stdlib is under apps/
+        assert_eq!(
+            paths.stdlib_ebin,
+            PathBuf::from("/rt/apps/beamtalk_stdlib/ebin")
+        );
     }
 }

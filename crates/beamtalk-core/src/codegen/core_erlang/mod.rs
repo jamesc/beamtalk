@@ -182,18 +182,6 @@ pub enum CodeGenError {
         location: String,
     },
 
-    /// BT-374 / ADR 0010: Workspace binding used in batch compilation mode.
-    #[error(
-        "{name} is a workspace binding, not available in batch compilation.\n\n\
-             Workspace bindings like Transcript and Beamtalk are only available in the REPL \
-             (interactive workspace context).\n\n\
-             Fix: Use `beamtalk repl` to access workspace bindings interactively."
-    )]
-    WorkspaceBindingInBatchMode {
-        /// The binding name (e.g., "Transcript", "Beamtalk").
-        name: String,
-    },
-
     /// Block arity mismatch in nil-testing method.
     #[error(
         "{selector} block must take 0 or 1 arguments, got {arity}.\n\n\
@@ -206,6 +194,22 @@ pub enum CodeGenError {
         selector: String,
         /// The actual arity of the block.
         arity: usize,
+    },
+
+    /// BT-493: Block arity mismatch with method-specific hint.
+    #[error(
+        "{selector} block must take {expected} argument(s), got {actual}.\n\n\
+             {hint}"
+    )]
+    BlockArityError {
+        /// The selector (e.g., "timesRepeat:").
+        selector: String,
+        /// The expected arity.
+        expected: String,
+        /// The actual arity of the block.
+        actual: usize,
+        /// Method-specific fix suggestion.
+        hint: String,
     },
 }
 
@@ -376,15 +380,13 @@ pub fn generate_test_expression(expression: &Expression, module_name: &str) -> R
 
 /// Generates Core Erlang code with workspace mode enabled.
 ///
-/// BT-374 / ADR 0010: When `workspace_mode` is true, workspace binding names
-/// (`Transcript`, `Beamtalk`) generate `persistent_term` lookup + async actor
-/// send instead of direct module function calls. When false (batch compile),
-/// workspace binding names produce a compile error.
+/// Generates Core Erlang source code from a parsed module with workspace mode flag.
+///
+/// When `workspace_mode` is true, the generator is in REPL/workspace context.
 ///
 /// # Errors
 ///
-/// Returns [`CodeGenError::WorkspaceBindingInBatchMode`] if workspace bindings
-/// are used in batch mode. Returns other [`CodeGenError`] variants for other failures.
+/// Returns [`CodeGenError`] variants for code generation failures.
 pub fn generate_with_workspace(
     module: &Module,
     module_name: &str,
@@ -398,8 +400,7 @@ pub fn generate_with_workspace(
 ///
 /// # Errors
 ///
-/// Returns [`CodeGenError::WorkspaceBindingInBatchMode`] if workspace bindings
-/// are used in batch mode. Returns other [`CodeGenError`] variants for other failures.
+/// Returns [`CodeGenError`] variants for code generation failures.
 pub fn generate_with_workspace_and_source(
     module: &Module,
     module_name: &str,
@@ -795,42 +796,7 @@ impl CoreErlangGenerator {
         match expr {
             Expression::Literal(lit, _) => self.generate_literal(lit),
             Expression::Identifier(id) => self.generate_identifier(id),
-            Expression::ClassReference { name, .. } => {
-                // BT-376 / ADR 0010: Workspace bindings resolve to singleton actor objects
-                // stored in persistent_term, not class objects from the registry.
-                if dispatch_codegen::is_workspace_binding(&name.name) {
-                    if self.workspace_mode {
-                        return Ok(Document::String(format!(
-                            "call 'persistent_term':'get'({{'beamtalk_binding', '{}'}})",
-                            name.name
-                        )));
-                    }
-                    return Err(CodeGenError::WorkspaceBindingInBatchMode {
-                        name: name.name.to_string(),
-                    });
-                }
-
-                // BT-215: Standalone class references resolve to class objects
-                let class_pid_var = self.fresh_var("ClassPid");
-                let class_mod_var = self.fresh_var("ClassModName");
-
-                Ok(docvec![
-                    format!(
-                        "case call 'beamtalk_object_class':'whereis_class'('{}') of ",
-                        name.name
-                    ),
-                    "<'undefined'> when 'true' -> 'nil' ",
-                    format!("<{class_pid_var}> when 'true' -> "),
-                    format!(
-                        "let {class_mod_var} = call 'beamtalk_object_class':'module_name'({class_pid_var}) in "
-                    ),
-                    format!(
-                        "{{'beamtalk_object', '{} class', {class_mod_var}, {class_pid_var}}} ",
-                        name.name
-                    ),
-                    "end",
-                ])
-            }
+            Expression::ClassReference { name, .. } => self.generate_class_reference(&name.name),
             Expression::Super(_) => {
                 // Super by itself is not a valid expression - it must be used
                 // as a message receiver (e.g., `super increment`)
@@ -908,6 +874,77 @@ impl CoreErlangGenerator {
                 feature: format!("expression type: {expr:?}"),
                 location: format!("{:?}", expr.span()),
             }),
+        }
+    }
+
+    /// Generates code for a standalone `ClassReference`.
+    ///
+    /// ADR 0019 Phase 3: In workspace mode, checks REPL bindings first for
+    /// convenience names (Transcript, Beamtalk, Workspace), then falls back
+    /// to class registry lookup. In batch mode, goes directly to the registry.
+    #[allow(clippy::unnecessary_wraps)]
+    fn generate_class_reference(&mut self, class_name: &str) -> Result<Document<'static>> {
+        // ADR 0019 Phase 3: Only check bindings in REPL top-level context.
+        // Actor methods compiled in workspace mode should NOT check REPL bindings.
+        if self.workspace_mode && self.context == CodeGenContext::Repl {
+            let class_pid_var = self.fresh_var("ClassPid");
+            let class_mod_var = self.fresh_var("ClassModName");
+            let state_var = self.current_state_var();
+
+            Ok(docvec![
+                format!("case call 'maps':'find'('{class_name}', {state_var}) of "),
+                "<{'ok', _BindingVal}> when 'true' -> _BindingVal ",
+                "<'error'> when 'true' -> ",
+                format!("case call 'beamtalk_object_class':'whereis_class'('{class_name}') of "),
+                "<'undefined'> when 'true' -> 'nil' ",
+                format!("<{class_pid_var}> when 'true' -> "),
+                format!(
+                    "let {class_mod_var} = call 'beamtalk_object_class':'module_name'({class_pid_var}) in "
+                ),
+                format!(
+                    "{{'beamtalk_object', '{class_name} class', {class_mod_var}, {class_pid_var}}} "
+                ),
+                "end end",
+            ])
+        } else if self.workspace_mode {
+            // Actor/ValueType methods in workspace mode: try class lookup first,
+            // fall back to workspace binding for convenience names like Transcript.
+            let class_pid_var = self.fresh_var("ClassPid");
+            let class_mod_var = self.fresh_var("ClassModName");
+            let binding_var = self.fresh_var("BindingVal");
+
+            Ok(docvec![
+                format!("case call 'beamtalk_object_class':'whereis_class'('{class_name}') of "),
+                "<'undefined'> when 'true' -> ",
+                format!(
+                    "let {binding_var} = call 'persistent_term':'get'({{'beamtalk_binding', '{class_name}'}}, 'nil') in "
+                ),
+                format!("{binding_var} "),
+                format!("<{class_pid_var}> when 'true' -> "),
+                format!(
+                    "let {class_mod_var} = call 'beamtalk_object_class':'module_name'({class_pid_var}) in "
+                ),
+                format!(
+                    "{{'beamtalk_object', '{class_name} class', {class_mod_var}, {class_pid_var}}} "
+                ),
+                "end",
+            ])
+        } else {
+            let class_pid_var = self.fresh_var("ClassPid");
+            let class_mod_var = self.fresh_var("ClassModName");
+
+            Ok(docvec![
+                format!("case call 'beamtalk_object_class':'whereis_class'('{class_name}') of "),
+                "<'undefined'> when 'true' -> 'nil' ",
+                format!("<{class_pid_var}> when 'true' -> "),
+                format!(
+                    "let {class_mod_var} = call 'beamtalk_object_class':'module_name'({class_pid_var}) in "
+                ),
+                format!(
+                    "{{'beamtalk_object', '{class_name} class', {class_mod_var}, {class_pid_var}}} "
+                ),
+                "end",
+            ])
         }
     }
 
@@ -3445,12 +3482,12 @@ end
     #[test]
     fn test_class_method_call_generation() {
         // BT-215: Test that ClassReference message sends generate appropriate code
-        // BT-374: Workspace bindings (Beamtalk, Transcript) use persistent_term
-        //         in REPL context; non-bindings use direct function calls
+        // BT-490 / ADR 0019: All classes (including Transcript, Beamtalk, Workspace)
+        //         use standard class dispatch via class_send
         use crate::ast::{Expression, Identifier, MessageSelector};
         use crate::source_analysis::Span;
 
-        // Test 1: Workspace binding (Beamtalk) generates persistent_term lookup in REPL
+        // Test 1: Beamtalk class uses standard class_send dispatch (no special case)
         let expr = Expression::MessageSend {
             receiver: Box::new(Expression::ClassReference {
                 name: Identifier::new("Beamtalk", Span::new(0, 8)),
@@ -3463,18 +3500,14 @@ end
 
         let code = generate_repl_expression(&expr, "repl_eval").expect("codegen should succeed");
 
-        // Workspace binding should use persistent_term lookup + async actor send
+        // ADR 0019: Beamtalk should check bindings first, then class_send fallback
         assert!(
-            code.contains("persistent_term"),
-            "Workspace binding should use persistent_term in REPL. Got:\n{code}"
+            code.contains("maps':'find") && code.contains("class_send"),
+            "Beamtalk should check bindings then class_send. Got:\n{code}"
         );
         assert!(
-            code.contains("beamtalk_binding"),
-            "Should reference beamtalk_binding. Got:\n{code}"
-        );
-        assert!(
-            code.contains("async_send"),
-            "Workspace binding should use async_send. Got:\n{code}"
+            !code.contains("persistent_term"),
+            "Beamtalk should NOT use persistent_term. Got:\n{code}"
         );
 
         // Test 2: Non-binding class (Point) dispatches via class_send in REPL
@@ -3491,11 +3524,10 @@ end
         let code2 = generate_repl_expression(&expr2, "repl_eval2")
             .expect("codegen should succeed for non-binding class");
 
-        // BT-411: Non-binding classes now use class_send for both built-in
-        // and user-defined class methods
+        // BT-411/ADR 0019: In REPL, all class references check bindings then class_send
         assert!(
-            code2.contains("whereis_class") && code2.contains("class_send"),
-            "Non-binding class should use class_send dispatch. Got:\n{code2}"
+            code2.contains("maps':'find") && code2.contains("class_send"),
+            "Non-binding class should check bindings then class_send. Got:\n{code2}"
         );
         assert!(
             !code2.contains("persistent_term"),
