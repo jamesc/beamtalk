@@ -6,8 +6,26 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - 'SECURITY.md'
+      - '.github/skills/**'
+      - '.devcontainer/**'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - 'SECURITY.md'
+      - '.github/skills/**'
+      - '.devcontainer/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -19,6 +37,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         with:
@@ -110,6 +129,7 @@ jobs:
 
   coverage:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
 
