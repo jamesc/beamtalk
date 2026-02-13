@@ -79,6 +79,14 @@ sealed Collection subclass: Tuple
   /// ```
   asString => @primitive 'asString'
 
+  /// Return the human-readable representation of the tuple.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Tuple new) printString   // => '{}'
+  /// ```
+  printString => self asString
+
   /// Iterate over each element, evaluating `block` with each one.
   ///
   /// ## Examples

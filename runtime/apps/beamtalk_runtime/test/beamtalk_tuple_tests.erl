@@ -102,10 +102,11 @@ unwrap_or_else_non_function_test() ->
 %%% ============================================================================
 
 as_string_test() ->
-    ?assertEqual(<<"{a, b}">>, beamtalk_tuple_ops:as_string({a, b})),
-    ?assertEqual(<<"{ok, 42}">>, beamtalk_tuple_ops:as_string({ok, 42})),
-    ?assertEqual(<<"{error, not_found}">>, beamtalk_tuple_ops:as_string({error, not_found})),
-    ?assertEqual(<<"{hello}">>, beamtalk_tuple_ops:as_string({hello})),
+    %% BT-536: Atoms now use #symbol notation via beamtalk_primitive:print_string/1
+    ?assertEqual(<<"{#a, #b}">>, beamtalk_tuple_ops:as_string({a, b})),
+    ?assertEqual(<<"{#ok, 42}">>, beamtalk_tuple_ops:as_string({ok, 42})),
+    ?assertEqual(<<"{#error, #not_found}">>, beamtalk_tuple_ops:as_string({error, not_found})),
+    ?assertEqual(<<"{#hello}">>, beamtalk_tuple_ops:as_string({hello})),
     ?assertEqual(<<"{}">>, beamtalk_tuple_ops:as_string({})).
 
 %%% ============================================================================
@@ -144,7 +145,8 @@ dispatch_unwrap_or_test() ->
     ?assertEqual(default, 'bt@stdlib@tuple':dispatch('unwrapOr:', [default], {error, reason})).
 
 dispatch_as_string_test() ->
-    ?assertEqual(<<"{ok, 42}">>, 'bt@stdlib@tuple':dispatch('asString', [], {ok, 42})).
+    %% BT-536: Atoms now use #symbol notation
+    ?assertEqual(<<"{#ok, 42}">>, 'bt@stdlib@tuple':dispatch('asString', [], {ok, 42})).
 
 dispatch_unwrap_or_else_test() ->
     ?assertEqual(42, 'bt@stdlib@tuple':dispatch('unwrapOrElse:', [fun() -> default end], {ok, 42})),

@@ -889,8 +889,9 @@ term_to_json(Value) when is_tuple(Value) ->
             %% Future that was rejected - format the reason as error message
             iolist_to_binary([<<"#Future<rejected: ">>, format_rejection_reason(Reason), <<">">>]);
         _ ->
-            %% Format generic tuple with marker
-            #{<<"__tuple__">> => [term_to_json(E) || E <- tuple_to_list(Value)]}
+            %% BT-536: Format tuple as {el1, el2, ...} matching Beamtalk syntax
+            ElementStrs = [beamtalk_primitive:print_string(E) || E <- tuple_to_list(Value)],
+            iolist_to_binary([<<"{">>, lists:join(<<", ">>, ElementStrs), <<"}">>])
     end;
 term_to_json(Value) ->
     %% Fallback: format using io_lib

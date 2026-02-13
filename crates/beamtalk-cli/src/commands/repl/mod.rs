@@ -804,8 +804,9 @@ mod tests {
 
     #[test]
     fn format_value_tuple() {
-        let value = serde_json::json!({"__tuple__": [1, "hello"]});
-        assert_eq!(format_value(&value), "(1, hello)");
+        // BT-536: Tuples are pre-formatted as strings by the backend
+        let value = serde_json::json!("{1, hello}");
+        assert_eq!(format_value(&value), "{1, hello}");
     }
 
     /// Uses `#[serial(env_var)]` because it modifies the `BEAMTALK_RUNTIME_DIR`

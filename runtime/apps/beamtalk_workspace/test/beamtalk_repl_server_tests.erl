@@ -145,8 +145,8 @@ format_response_tuple_test() ->
     Response = beamtalk_repl_server:format_response({ok, value}),
     Decoded = jsx:decode(Response, [return_maps]),
     Value = maps:get(<<"value">>, Decoded),
-    %% Tuples are wrapped with __tuple__ marker
-    ?assertMatch(#{<<"__tuple__">> := _}, Value).
+    %% BT-536: Tuples are formatted as {el1, el2, ...} with symbol notation
+    ?assertEqual(<<"{#ok, #value}">>, Value).
 
 %%% Error formatting tests
 
@@ -560,9 +560,8 @@ term_to_json_future_rejected_test() ->
 
 term_to_json_generic_tuple_test() ->
     Result = beamtalk_repl_server:term_to_json({a, b, c}),
-    ?assert(is_map(Result)),
-    ?assert(maps:is_key(<<"__tuple__">>, Result)),
-    ?assertEqual([<<"a">>, <<"b">>, <<"c">>], maps:get(<<"__tuple__">>, Result)).
+    %% BT-536: Tuples formatted with symbol notation for atoms
+    ?assertEqual(<<"{#a, #b, #c}">>, Result).
 
 term_to_json_fallback_reference_test() ->
     Ref = make_ref(),
@@ -978,13 +977,23 @@ term_to_json_map_with_mixed_keys_test() ->
 
 term_to_json_single_element_tuple_test() ->
     Result = beamtalk_repl_server:term_to_json({only}),
-    ?assert(maps:is_key(<<"__tuple__">>, Result)),
-    ?assertEqual([<<"only">>], maps:get(<<"__tuple__">>, Result)).
+    %% BT-536: Tuples formatted with symbol notation for atoms
+    ?assertEqual(<<"{#only}">>, Result).
 
 term_to_json_large_tuple_test() ->
     Result = beamtalk_repl_server:term_to_json({a, b, c, d, e}),
-    Elements = maps:get(<<"__tuple__">>, Result),
-    ?assertEqual(5, length(Elements)).
+    %% BT-536: Tuples formatted with symbol notation for atoms
+    ?assertEqual(<<"{#a, #b, #c, #d, #e}">>, Result).
+
+term_to_json_mixed_tuple_test() ->
+    %% BT-536: Tuple with mixed types: integer, atom, string
+    Result = beamtalk_repl_server:term_to_json({ok, 42, <<"hello">>}),
+    ?assertEqual(<<"{#ok, 42, hello}">>, Result).
+
+term_to_json_empty_tuple_test() ->
+    %% BT-536: Empty tuple
+    Result = beamtalk_repl_server:term_to_json({}),
+    ?assertEqual(<<"{}">>, Result).
 
 term_to_json_nested_list_with_maps_test() ->
     %% BT-535: Maps in lists are pre-formatted as strings
