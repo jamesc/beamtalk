@@ -12,7 +12,7 @@
 //! ┌──────────────────────────────────────────────────────────┐
 //! │ Workspace: my-feature (detached BEAM node)               │
 //! │ Node: beamtalk_workspace_abc123@localhost                │
-//! │ Port: 49152  Cookie: ~/.beamtalk/workspaces/abc123/cookie│
+//! │ Port: OS-assigned  Cookie: ~/.beamtalk/workspaces/abc123/cookie│
 //! │                                                           │
 //! │   beamtalk_workspace_sup                                 │
 //! │     ├─ beamtalk_repl           (TCP server + eval)       │
@@ -238,6 +238,24 @@ pub fn save_node_info(workspace_id: &str, info: &NodeInfo) -> Result<()> {
     Ok(())
 }
 
+/// Read the actual port from the port file written by `beamtalk_repl_server`.
+/// Returns `None` if the file doesn't exist or can't be parsed.
+fn read_port_file(workspace_id: &str) -> Result<Option<u16>> {
+    let port_file_path = workspace_dir(workspace_id)?.join("port");
+
+    if !port_file_path.exists() {
+        return Ok(None);
+    }
+
+    let content = fs::read_to_string(&port_file_path).into_diagnostic()?;
+    if let Ok(port) = content.trim().parse::<u16>() {
+        Ok(Some(port))
+    } else {
+        tracing::warn!("Invalid port file content: {content:?}");
+        Ok(None)
+    }
+}
+
 /// Read process start time from `/proc/{pid}/stat` (field 22 per proc(5)).
 /// Returns `None` if the process doesn't exist or the file can't be read.
 /// Linux-only: `/proc` filesystem does not exist on macOS/BSD.
@@ -313,9 +331,15 @@ pub fn is_node_running(info: &NodeInfo) -> bool {
 
 /// Clean up stale node.info file.
 pub fn cleanup_stale_node_info(workspace_id: &str) -> Result<()> {
-    let node_info_path = workspace_dir(workspace_id)?.join("node.info");
+    let ws_dir = workspace_dir(workspace_id)?;
+    let node_info_path = ws_dir.join("node.info");
     if node_info_path.exists() {
         fs::remove_file(node_info_path).into_diagnostic()?;
+    }
+    // Also clean up port file (written by beamtalk_repl_server for ephemeral port discovery)
+    let port_file_path = ws_dir.join("port");
+    if port_file_path.exists() {
+        let _ = fs::remove_file(port_file_path);
     }
     Ok(())
 }
@@ -422,7 +446,8 @@ pub fn start_detached_node(
                                                           tcp_port => {port}, \
                                                           auto_cleanup => {auto_cleanup}, \
                                                           max_idle_seconds => {idle_timeout}}}), \
-         io:format(\"Workspace {workspace_id} started on port {port}~n\"), \
+         {{ok, ActualPort}} = beamtalk_repl_server:get_port(), \
+         io:format(\"Workspace {workspace_id} started on port ~B~n\", [ActualPort]), \
          receive stop -> ok end."
     );
 
@@ -448,10 +473,32 @@ pub fn start_detached_node(
     // Find the BEAM process by node name
     let (pid, start_time) = find_beam_pid_by_node(&node_name)?;
 
+    // Read actual port from port file (written by beamtalk_repl_server after binding).
+    // This is essential when port=0 is used (OS assigns ephemeral port).
+    // Retry a few times since the BEAM node may still be initializing.
+    let actual_port = if port == 0 {
+        let mut discovered = None;
+        for _ in 0..10 {
+            if let Some(p) = read_port_file(workspace_id)? {
+                discovered = Some(p);
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        discovered.ok_or_else(|| {
+            miette!(
+                "BEAM node did not report its port.\n\
+                 The workspace may have failed to start. Check logs."
+            )
+        })?
+    } else {
+        read_port_file(workspace_id)?.unwrap_or(port)
+    };
+
     // Create node info
     let node_info = NodeInfo {
         node_name: node_name.clone(),
-        port,
+        port: actual_port,
         pid,
         start_time,
     };
@@ -974,6 +1021,18 @@ mod tests {
         let from_none = workspace_id_for(&path, None).unwrap();
         let from_hash = generate_workspace_id(&path).unwrap();
         assert_eq!(from_none, from_hash, "None should fall through to hash");
+    }
+
+    #[test]
+    fn test_different_paths_produce_different_workspace_ids() {
+        // Verifies worktree isolation: different project paths (as with git worktrees)
+        // produce different workspace IDs, ensuring separate workspaces per worktree.
+        let id1 = generate_workspace_id(Path::new("/")).unwrap();
+        let id2 = generate_workspace_id(Path::new("/tmp")).unwrap();
+        assert_ne!(
+            id1, id2,
+            "Different paths must produce different workspace IDs"
+        );
     }
 
     #[test]
@@ -1534,5 +1593,33 @@ mod tests {
             Some(expected_socket.as_os_str()),
             "BEAMTALK_DAEMON_SOCKET must match socket_path()"
         );
+    }
+
+    #[test]
+    fn test_read_port_file_returns_none_when_missing() {
+        let tw = TestWorkspace::new("port_missing");
+        let _ = fs::create_dir_all(tw.dir());
+        let result = read_port_file(&tw.id).unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_read_port_file_returns_port() {
+        let tw = TestWorkspace::new("port_read");
+        let _ = fs::create_dir_all(tw.dir());
+        let port_file = tw.dir().join("port");
+        fs::write(&port_file, "54321").unwrap();
+        let result = read_port_file(&tw.id).unwrap();
+        assert_eq!(result, Some(54321));
+    }
+
+    #[test]
+    fn test_read_port_file_handles_invalid_content() {
+        let tw = TestWorkspace::new("port_invalid");
+        let _ = fs::create_dir_all(tw.dir());
+        let port_file = tw.dir().join("port");
+        fs::write(&port_file, "not_a_port").unwrap();
+        let result = read_port_file(&tw.id).unwrap();
+        assert_eq!(result, None);
     }
 }

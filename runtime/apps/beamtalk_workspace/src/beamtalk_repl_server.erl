@@ -11,7 +11,7 @@
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
--export([start_link/1, handle_client/2, parse_request/1, format_response/1, format_error/1,
+-export([start_link/1, get_port/0, handle_client/2, parse_request/1, format_response/1, format_error/1,
          format_response_with_warnings/2, format_error_with_warnings/2,
          format_bindings/1, format_loaded/1, format_actors/1, format_modules/1, format_docs/1,
          term_to_json/1, format_error_message/1, safe_to_existing_atom/1]).
@@ -39,10 +39,18 @@ start_link(#{port := _} = Config) ->
 start_link(Port) when is_integer(Port) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, #{port => Port}, []).
 
+%% @doc Get the actual port the server is listening on.
+%% Useful when port 0 was requested (OS-assigned ephemeral port).
+-spec get_port() -> {ok, inet:port_number()}.
+get_port() ->
+    gen_server:call(?MODULE, get_port).
+
 %%% gen_server callbacks
 
 %% @private
-init(#{port := Port}) ->
+init(Config) ->
+    Port = maps:get(port, Config),
+    WorkspaceId = maps:get(workspace_id, Config, undefined),
     %% SECURITY: Bind to loopback only (127.0.0.1) so that only local
     %% processes can connect. No authentication is performed — the loopback
     %% restriction is the sole access control, matching the security model of
@@ -52,14 +60,20 @@ init(#{port := Port}) ->
                   {ip, {127, 0, 0, 1}}],
     case gen_tcp:listen(Port, ListenOpts) of
         {ok, ListenSocket} ->
+            %% Discover actual bound port (important when Port=0 for OS-assigned ephemeral port)
+            {ok, ActualPort} = inet:port(ListenSocket),
+            %% Write port file so CLI can discover the actual port
+            write_port_file(WorkspaceId, ActualPort),
             %% Start acceptor process
             {ok, AcceptorPid} = start_acceptor(ListenSocket),
-            {ok, #state{listen_socket = ListenSocket, port = Port, acceptor_pid = AcceptorPid}};
+            {ok, #state{listen_socket = ListenSocket, port = ActualPort, acceptor_pid = AcceptorPid}};
         {error, Reason} ->
             {stop, {listen_failed, Reason}}
     end.
 
 %% @private
+handle_call(get_port, _From, State) ->
+    {reply, {ok, State#state.port}, State};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
@@ -85,6 +99,42 @@ terminate(_Reason, #state{listen_socket = ListenSocket}) ->
 %% @private
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
+
+%%% Port File
+
+%% @private
+%% @doc Write the actual bound port to a file in the workspace directory.
+%% This is needed when port=0 is used (OS assigns ephemeral port) so the
+%% CLI can discover the actual port after BEAM startup.
+-spec write_port_file(binary() | undefined, inet:port_number()) -> ok.
+write_port_file(undefined, _Port) ->
+    ok;
+write_port_file(WorkspaceId, Port) ->
+    case os:getenv("HOME") of
+        false ->
+            logger:warning("HOME not set; skipping port file write for workspace ~p",
+                           [WorkspaceId]),
+            ok;
+        Home ->
+            PortFilePath = filename:join([Home, ".beamtalk", "workspaces",
+                                          binary_to_list(WorkspaceId), "port"]),
+            case filelib:ensure_dir(PortFilePath) of
+                ok ->
+                    case file:write_file(PortFilePath, integer_to_list(Port)) of
+                        ok ->
+                            logger:debug("Wrote port file: ~s (port ~p)", [PortFilePath, Port]),
+                            ok;
+                        {error, Reason} ->
+                            logger:warning("Failed to write port file ~s: ~p",
+                                           [PortFilePath, Reason]),
+                            ok
+                    end;
+                {error, Reason} ->
+                    logger:warning("Failed to create directory for port file ~s: ~p",
+                                   [PortFilePath, Reason]),
+                    ok
+            end
+    end.
 
 %%% Acceptor Process
 

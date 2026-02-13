@@ -70,8 +70,8 @@ mod process;
 use client::ReplClient;
 use display::{format_value, history_path, print_help};
 use process::{
-    BeamChildGuard, connect_with_retries, resolve_node_name, resolve_port, start_beam_node,
-    start_daemon,
+    BeamChildGuard, connect_with_retries, read_port_from_child, resolve_node_name, resolve_port,
+    start_beam_node, start_daemon,
 };
 
 /// JSON response from the REPL backend.
@@ -243,15 +243,20 @@ pub fn run(
     }
 
     // Choose startup mode: workspace (default) or foreground (debug)
-    let (beam_guard_opt, is_new_workspace) = if foreground {
+    let (beam_guard_opt, is_new_workspace, connect_port) = if foreground {
         // Foreground mode: start node directly (original behavior)
         println!("Starting BEAM node in foreground mode (--foreground)...");
-        (
-            Some(BeamChildGuard {
-                child: start_beam_node(port, node_name.as_ref())?,
-            }),
-            true,
-        )
+        let mut child = start_beam_node(port, node_name.as_ref())?;
+
+        // Discover the actual port from the BEAM node's stdout.
+        // The BEAM prints "BEAMTALK_PORT:<port>" after binding.
+        let actual_port = if port == 0 {
+            read_port_from_child(&mut child)?
+        } else {
+            port
+        };
+
+        (Some(BeamChildGuard { child }), true, actual_port)
     } else {
         // Workspace mode: start or connect to detached node
         let current_dir = std::env::current_dir().into_diagnostic()?;
@@ -279,6 +284,8 @@ pub fn run(
             !persistent, // auto_cleanup is opposite of persistent flag
             timeout,
         )?;
+
+        let actual_port = node_info.port;
 
         if is_new {
             println!("Started new workspace node: {}", node_info.node_name);
@@ -311,13 +318,13 @@ pub fn run(
 
         println!();
 
-        (None, is_new) // No guard needed - node is detached
+        (None, is_new, actual_port) // No guard needed - node is detached
     };
 
     // Connect to REPL backend
-    let mut client = connect_with_retries(port)?;
+    let mut client = connect_with_retries(connect_port)?;
 
-    println!("Connected to REPL backend on port {port}.");
+    println!("Connected to REPL backend on port {connect_port}.");
 
     // If reconnecting to existing workspace, show available actors
     if beam_guard_opt.is_none() && !is_new_workspace {
@@ -968,8 +975,7 @@ mod tests {
 
     #[test]
     fn resolve_port_cli_flag_default_still_takes_priority() {
-        // Even if CLI flag is 49152 (the default), it should be used
-        // This was the bug reported in the PR review
+        // Even if CLI flag is 0 (the default), it should be used
         let result = resolve_port(Some(DEFAULT_REPL_PORT));
         assert_eq!(result.unwrap(), DEFAULT_REPL_PORT);
     }
@@ -977,7 +983,7 @@ mod tests {
     #[test]
     #[serial(env_var)]
     fn resolve_port_default_without_env() {
-        // When no CLI flag and no env var, should return default (49152)
+        // When no CLI flag and no env var, should return default (0 = OS-assigned)
         let result = resolve_port(None);
         // If env var is set, it will return that; if not, default
         // The test verifies the function runs without error
