@@ -996,6 +996,64 @@ impl ReplClient {
             Ok(format!("Loaded: {}", classes.join(", ")))
         }
     }
+
+    /// Inspect an actor's state by PID string.
+    fn inspect_actor(&mut self, pid_str: &str) -> Result<String, String> {
+        let response = self.send_op(&serde_json::json!({
+            "op": "inspect",
+            "id": "e2e-inspect",
+            "actor": pid_str
+        }))?;
+        let state = response
+            .get("state")
+            .cloned()
+            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+        Ok(state.to_string())
+    }
+
+    /// Kill an actor by PID string.
+    fn kill_actor(&mut self, pid_str: &str) -> Result<String, String> {
+        self.send_op(&serde_json::json!({
+            "op": "kill",
+            "id": "e2e-kill",
+            "actor": pid_str
+        }))?;
+        Ok("ok".to_string())
+    }
+
+    /// Unload a module by name.
+    fn unload_module(&mut self, module: &str) -> Result<String, String> {
+        self.send_op(&serde_json::json!({
+            "op": "unload",
+            "id": "e2e-unload",
+            "module": module
+        }))?;
+        Ok("ok".to_string())
+    }
+
+    /// Get the PID of the first actor of a given class from the actors list.
+    /// Note: actor ordering from the server is non-deterministic (map-based).
+    /// This is acceptable for E2E tests where we need any valid actor of a class.
+    fn get_first_actor_pid(&mut self, class_name: &str) -> Result<String, String> {
+        let response = self.send_op(&serde_json::json!({
+            "op": "actors",
+            "id": "e2e-actors-pid"
+        }))?;
+        let actors = response
+            .get("actors")
+            .and_then(|a| a.as_array())
+            .cloned()
+            .unwrap_or_default();
+        for actor in &actors {
+            let class = actor.get("class").and_then(|c| c.as_str()).unwrap_or("");
+            if class == class_name {
+                if let Some(pid) = actor.get("pid").and_then(|p| p.as_str()) {
+                    return Ok(pid.to_string());
+                }
+            }
+        }
+        Err(format!("No actor of class {class_name} found"))
+    }
 }
 
 /// Pattern matcher for test assertions (BT-502).
@@ -1200,6 +1258,31 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
             } else if case.expression.starts_with(":reload ") {
                 let module = case.expression.strip_prefix(":reload ").unwrap().trim();
                 client.reload_module(module)
+            } else if case.expression.starts_with(":inspect ") {
+                let arg = case.expression.strip_prefix(":inspect ").unwrap().trim();
+                if arg.starts_with('<') {
+                    // Direct PID string like <0.123.0>
+                    client.inspect_actor(arg)
+                } else {
+                    // Class name — find first actor of that class
+                    match client.get_first_actor_pid(arg) {
+                        Ok(pid) => client.inspect_actor(&pid),
+                        Err(e) => Err(e),
+                    }
+                }
+            } else if case.expression.starts_with(":kill ") {
+                let arg = case.expression.strip_prefix(":kill ").unwrap().trim();
+                if arg.starts_with('<') {
+                    client.kill_actor(arg)
+                } else {
+                    match client.get_first_actor_pid(arg) {
+                        Ok(pid) => client.kill_actor(&pid),
+                        Err(e) => Err(e),
+                    }
+                }
+            } else if case.expression.starts_with(":unload ") {
+                let module = case.expression.strip_prefix(":unload ").unwrap().trim();
+                client.unload_module(module)
             } else {
                 client.eval(&case.expression)
             };
@@ -1295,8 +1378,8 @@ fn e2e_language_tests() {
         }
     };
 
-    // Find all test files
-    let test_files: Vec<PathBuf> = fs::read_dir(&cases_dir)
+    // Find all test files (sorted for deterministic execution order)
+    let mut test_files: Vec<PathBuf> = fs::read_dir(&cases_dir)
         .expect("Failed to read test cases directory")
         .filter_map(|entry| {
             let entry = entry.ok()?;
@@ -1308,6 +1391,7 @@ fn e2e_language_tests() {
             }
         })
         .collect();
+    test_files.sort();
 
     if test_files.is_empty() {
         eprintln!("No test files found in {}", cases_dir.display());
