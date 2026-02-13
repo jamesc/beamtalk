@@ -1299,9 +1299,8 @@ build_flattened_methods(CurrentClass, Superclass, LocalMethods, QueryMsg) ->
                     %% BT-510: Superclass not registered yet (out-of-order loading).
                     %% Return local methods only; invalidate_subclass_flattened_tables
                     %% will trigger a rebuild once the superclass registers.
-                    logger:debug("Class ~p: superclass ~p unavailable during init, "
-                                 "flattened methods incomplete",
-                                 [CurrentClass, SuperclassName]),
+                    logger:debug("Superclass unavailable during init, flattened methods incomplete",
+                                 #{class => CurrentClass, superclass => SuperclassName}),
                     LocalFlattened;
                 SuperclassPid ->
                     SuperclassFlattenedMethods = try gen_server:call(SuperclassPid, QueryMsg, 5000) of
