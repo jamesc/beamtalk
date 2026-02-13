@@ -32,7 +32,7 @@
 
 // Tuple new returns an empty tuple
 Tuple new
-// => {}
+// => _
 
 (Tuple new) class
 // => Tuple
