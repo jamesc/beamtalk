@@ -18,7 +18,6 @@ Actor subclass: CollectionMutationCounter
 
   // inject:into: with field mutation on a Dictionary receiver
   // The block mutates self.total as a side effect while accumulating
-  // Note: inject:into: block params are (element, accumulator) per Erlang foldl
   sumDictValues: aDict =>
     aDict inject: 0 into: [:val :acc |
       self.total := self.total + val.

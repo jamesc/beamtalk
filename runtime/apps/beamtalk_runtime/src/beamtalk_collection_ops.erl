@@ -78,7 +78,9 @@ all_satisfy(Self, Block) when is_function(Block, 1) ->
 %%% Internal Helpers
 %%% ============================================================================
 
-%% @private Convert any collection to a list by iterating with do:.
+%% @doc Convert any collection to a list by iterating with do:.
+%% Also called from compiler-generated Core Erlang for mutation-threading
+%% paths that need lists:foldl but receive non-list collections.
 -spec to_list(term()) -> list().
 to_list(Self) when is_list(Self) ->
     Self;
