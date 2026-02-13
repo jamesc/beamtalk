@@ -19,6 +19,7 @@
 %%%   ├─ beamtalk_system_dictionary   % Beamtalk singleton (ADR 0010)
 %%%   ├─ beamtalk_actor_registry      % Workspace-wide actor registry
 %%%   ├─ beamtalk_workspace_actor     % Workspace singleton (BT-423)
+%%%   ├─ beamtalk_workspace_bootstrap % Class var bootstrap (ADR 0019)
 %%%   ├─ beamtalk_repl_server         % TCP server (session-per-connection)
 %%%   ├─ beamtalk_idle_monitor        % Tracks activity, self-terminates if idle
 %%%   ├─ beamtalk_actor_sup           % Supervises user actors
@@ -116,6 +117,18 @@ init(Config) ->
             shutdown => 5000,
             type => worker,
             modules => [beamtalk_workspace_actor]
+        },
+        
+        %% Bootstrap worker — sets singleton class variables (ADR 0019 Phase 2)
+        %% Must start after all singletons but before REPL server accepts connections.
+        %% Monitors singleton PIDs and re-sets class vars on restart.
+        #{
+            id => beamtalk_workspace_bootstrap,
+            start => {beamtalk_workspace_bootstrap, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_workspace_bootstrap]
         },
         
         %% REPL TCP server (session-per-connection architecture)

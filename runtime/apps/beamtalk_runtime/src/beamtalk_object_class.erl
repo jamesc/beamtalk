@@ -88,7 +88,8 @@
     class_send/3,
     class_object_tag/1,
     inherits_from/2,
-    ensure_hierarchy_table/0
+    ensure_hierarchy_table/0,
+    set_class_var/3
 ]).
 
 %% gen_server callbacks
@@ -166,6 +167,14 @@ whereis_class(ClassName) ->
 -spec all_classes() -> [pid()].
 all_classes() ->
     pg:get_members(beamtalk_classes).
+
+%% @doc Set a class variable on a class by name.
+-spec set_class_var(class_name(), atom(), term()) -> term().
+set_class_var(ClassName, Name, Value) ->
+    case whereis_class(ClassName) of
+        undefined -> error({class_not_found, ClassName});
+        Pid -> gen_server:call(Pid, {set_class_var, Name, Value})
+    end.
 
 %% @doc Create a new instance of this class.
 -spec new(pid()) -> {ok, #beamtalk_object{}} | {error, term()}.
