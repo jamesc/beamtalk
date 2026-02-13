@@ -20,12 +20,14 @@
 -export([start_link/0]).
 -export([init/1, handle_info/2, handle_call/3, handle_cast/2, terminate/2]).
 
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
+
 %% Singleton class ↔ registered process name ↔ binding class name mapping
 %% BindingClassName matches what the original singleton init uses in persistent_term
 -define(SINGLETONS, [
     {'TranscriptStream',    'Transcript',   'TranscriptStream'},
     {'SystemDictionary',    'Beamtalk',     'SystemDictionary'},
-    {'WorkspaceEnvironment', 'Workspace',   'Workspace'}
+    {'WorkspaceEnvironment', 'Workspace',   'WorkspaceEnvironment'}
 ]).
 
 -record(state, {
@@ -117,6 +119,7 @@ build_object_ref(BindingClassName, Pid) ->
 %% @private Map binding class name to its Erlang module.
 class_module('TranscriptStream') -> beamtalk_transcript_stream;
 class_module('SystemDictionary') -> beamtalk_system_dictionary;
+class_module('WorkspaceEnvironment') -> beamtalk_workspace_actor;
 class_module('Workspace') -> beamtalk_workspace_actor.
 
 %% @private Set the `current` class variable on the class.
@@ -124,7 +127,7 @@ set_class_variable(ClassName, Obj) ->
     try
         beamtalk_object_class:set_class_var(ClassName, current, Obj)
     catch
-        error:{class_not_found, _} ->
+        error:#beamtalk_error{kind = class_not_found} ->
             logger:warning("Bootstrap: class not loaded yet", #{class => ClassName})
     end.
 

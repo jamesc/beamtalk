@@ -113,7 +113,7 @@ init([IsSingleton]) ->
     case IsSingleton of
         true ->
             persistent_term:put({beamtalk_binding, 'Workspace'},
-                {beamtalk_object, 'Workspace', ?MODULE, self()}),
+                {beamtalk_object, 'WorkspaceEnvironment', ?MODULE, self()}),
             %% Self-register class since we're in beamtalk_workspace app
             %% (beamtalk_stdlib in beamtalk_runtime can't reference us)
             register_class();

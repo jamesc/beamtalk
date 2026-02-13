@@ -362,7 +362,7 @@ singleton_terminate_cleans_persistent_term_test() ->
 
     %% Verify binding exists
     Binding = persistent_term:get({beamtalk_binding, 'Workspace'}),
-    ?assertMatch({beamtalk_object, 'Workspace', beamtalk_workspace_actor, _}, Binding),
+    ?assertMatch({beamtalk_object, 'WorkspaceEnvironment', beamtalk_workspace_actor, _}, Binding),
 
     gen_server:stop(Pid),
 

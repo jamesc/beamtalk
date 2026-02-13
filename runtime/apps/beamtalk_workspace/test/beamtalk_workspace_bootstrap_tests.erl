@@ -96,6 +96,25 @@ bootstrap_sets_beamtalk_binding_test_() ->
          end)]
      end}.
 
+%% Test that bootstrap sets workspace bindings for workspace actor
+bootstrap_sets_workspace_binding_test_() ->
+    {setup,
+     fun() -> ensure_runtime() end,
+     fun(_) -> cleanup_all() end,
+     fun(_) ->
+         [?_test(begin
+             %% Start the workspace actor singleton
+             {ok, WPid} = beamtalk_workspace_actor:start_link_singleton(),
+             
+             %% Start the bootstrap worker
+             {ok, _} = beamtalk_workspace_bootstrap:start_link(),
+             
+             %% Verify persistent_term binding was updated with WorkspaceEnvironment class name
+             Binding = persistent_term:get({beamtalk_binding, 'Workspace'}),
+             ?assertMatch({beamtalk_object, 'WorkspaceEnvironment', beamtalk_workspace_actor, WPid}, Binding)
+         end)]
+     end}.
+
 %% Test that bootstrap sets class variables when classes are loaded
 bootstrap_sets_class_variables_test_() ->
     {setup,

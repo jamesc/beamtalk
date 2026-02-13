@@ -172,7 +172,9 @@ all_classes() ->
 -spec set_class_var(class_name(), atom(), term()) -> term().
 set_class_var(ClassName, Name, Value) ->
     case whereis_class(ClassName) of
-        undefined -> error({class_not_found, ClassName});
+        undefined ->
+            Error0 = beamtalk_error:new(class_not_found, ClassName),
+            error(Error0);
         Pid -> gen_server:call(Pid, {set_class_var, Name, Value})
     end.
 
