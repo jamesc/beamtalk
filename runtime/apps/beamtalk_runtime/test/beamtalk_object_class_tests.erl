@@ -939,11 +939,17 @@ hierarchy_methods_inherited_test_() ->
                          instance_methods => #{parentMethod => #{arity => 0}}
                      }),
 
-                     %% Synchronous barrier to ensure child processed rebuild
-                     _ = beamtalk_object_class:superclass(ChildPid),
-
-                     %% After parent registered — inherited methods included
-                     MethodsAfter = beamtalk_object_class:methods(ChildPid),
+                     %% Wait until rebuild is processed (bounded retry)
+                     WaitForInherited = fun Wait(0) ->
+                                                ?assert(false);
+                                            Wait(N) ->
+                                                M = beamtalk_object_class:methods(ChildPid),
+                                                case lists:member(parentMethod, M) of
+                                                    true -> M;
+                                                    false -> timer:sleep(10), Wait(N - 1)
+                                                end
+                                        end,
+                     MethodsAfter = WaitForInherited(50),
                      ?assert(lists:member(childMethod, MethodsAfter)),
                      ?assert(lists:member(parentMethod, MethodsAfter))
                  end)]
