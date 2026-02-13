@@ -42,9 +42,17 @@ Tuple new: #{#a => 1}
 // => ERROR: instantiation_error
 
 // ===========================================================================
-// DISPLAY (BT-477)
+// DISPLAY (BT-536)
 // ===========================================================================
 
-// Tuple printString uses Object default
+// Tuple printString shows tuple format
 (Tuple new) printString
-// => a Tuple
+// => {}
+
+// ===========================================================================
+// SIZE
+// ===========================================================================
+
+// Empty tuple has size 0
+(Tuple new) size
+// => 0

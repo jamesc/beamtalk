@@ -200,6 +200,10 @@ print_string(X) when is_map(X) ->
                     iolist_to_binary([<<"a ">>, erlang:atom_to_binary(ClassName, utf8)])
             end
     end;
+print_string(X) when is_tuple(X) ->
+    %% BT-536: Format Erlang tuples as {el1, el2, ...}
+    Elements = tuple_to_list(X),
+    iolist_to_binary([<<"{">>, lists:join(<<", ">>, [print_string(E) || E <- Elements]), <<"}">>]);
 print_string(X) ->
     iolist_to_binary(io_lib:format("~p", [X])).
 
