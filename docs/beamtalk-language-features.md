@@ -163,6 +163,7 @@ str := String fromCharlist: [72, 101, 108, 108, 111]  // => 'Hello'
 | Field access & assignment | ✅ Implemented (with limitations) | `actor_state_mutation` |
 | Class definitions | ✅ Implemented | `class_definition` |
 | Map literals | ✅ Implemented | `map_literals` |
+| Pattern matching (`match:`) | ✅ Implemented (BT-406) | `pattern_matching` (stdlib + E2E) |
 | Comments | ✅ Implemented | `comment_handling` |
 | Async message sends | ✅ Implemented | `async_with_await`, `async_keyword_message` |
 
@@ -586,7 +587,56 @@ value := agent analyzeSync: data
 
 Smalltalk lacks pattern matching - this is a major ergonomic addition.
 
-### In Message Handlers
+### Match Expression (BT-406)
+
+**Status:** ✅ Implemented
+
+The `match:` keyword message takes a block of pattern arms separated by `;`:
+
+```
+// Basic match with literals
+x match: [1 -> 'one'; 2 -> 'two'; _ -> 'other']
+
+// Variable binding in patterns
+42 match: [n -> n + 1]
+// => 43
+
+// Symbol matching
+status match: [#ok -> 'success'; #error -> 'failure'; _ -> 'unknown']
+
+// String matching
+greeting match: ['hello' -> 'hi'; _ -> 'huh?']
+
+// Guard clauses with when:
+x match: [
+  n when: [n > 100] -> 'big';
+  n when: [n > 10] -> 'medium';
+  _ -> 'small'
+]
+
+// Negative number patterns
+temp match: [-1 -> 'minus one'; 0 -> 'zero'; _ -> 'other']
+
+// Match on computed expression
+(3 + 4) match: [7 -> 'correct'; _ -> 'wrong']
+```
+
+**Supported pattern types:**
+| Pattern | Example | Description |
+|---------|---------|-------------|
+| Wildcard | `_` | Matches anything |
+| Literal integer | `42` | Exact integer match |
+| Literal float | `3.14` | Exact float match |
+| Literal string | `'hello'` | Exact string match |
+| Literal symbol | `#ok` | Exact symbol match |
+| Literal character | `$a` | Exact character match |
+| Negative number | `-1` | Negative integer/float match |
+| Variable | `x` | Binds matched value to name |
+| Tuple | `{a, b}` | Destructure tuple (planned) |
+
+**Guard expressions** support: `>`, `<`, `>=`, `<=`, `=`, `~=`, `+`, `-`, `*`, `/`
+
+### In Message Handlers (Future)
 
 ```
 // Match on message structure
