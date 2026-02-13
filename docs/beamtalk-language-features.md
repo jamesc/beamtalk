@@ -1016,9 +1016,152 @@ Core classes implemented and tested:
 | **List** | ✅ Implemented | Linked list with fast prepend (`#()` syntax) | `stdlib_list`, `collections` |
 | **Dictionary** | ✅ Implemented | Key-value map | `stdlib_dictionary`, `map_literals` |
 | **Set** | ✅ Implemented | Unordered unique elements | `stdlib_set` |
+| **Stream** | ✅ Implemented | Lazy, closure-based sequences ([ADR 0021](ADR/0021-streams-and-io-design.md)) | `stream`, `stream_collections`, `file_stream` |
 | **Nil** | ✅ Implemented | Null object pattern | `stdlib_nil`, `stdlib_nil_object` |
 
 For detailed API documentation, see [`lib/README.md`](../lib/README.md).
+
+### Stream — Lazy Pipelines
+
+**Status:** ✅ Implemented ([ADR 0021](ADR/0021-streams-and-io-design.md))
+
+Stream is Beamtalk's universal interface for sequential data. A single, sealed, closure-based type that unifies collection processing, file I/O, and generators under one protocol.
+
+Operations are either **lazy** (return a new Stream) or **terminal** (force evaluation and return a result). Nothing computes until a terminal operation pulls elements through.
+
+#### Constructors
+
+```beamtalk
+// Infinite stream starting from a value, incrementing by 1
+Stream from: 1                     // 1, 2, 3, 4, ...
+
+// Infinite stream with custom step function
+Stream from: 1 by: [:n | n * 2]   // 1, 2, 4, 8, ...
+
+// Stream from a collection (List, String, Set, Dictionary)
+Stream on: #(1, 2, 3)             // wraps collection lazily
+
+// Collection shorthand — any collection responds to `stream`
+#(1, 2, 3) stream                  // same as Stream on: #(1, 2, 3)
+'hello' stream                     // Stream over characters
+#{#a => 1} stream                  // Stream over Associations
+(Set new add: 1) stream            // Stream over set elements
+
+// File streaming — lazy, constant memory
+File lines: 'data.csv'            // Stream of lines
+File open: 'data.csv' do: [:handle |
+  handle lines take: 10           // block-scoped handle
+]
+```
+
+#### Lazy Operations
+
+Lazy operations return a new Stream without evaluating anything:
+
+| Method | Description | Example |
+|--------|-------------|---------|
+| `select:` | Filter elements matching predicate | `s select: [:n \| n > 2]` |
+| `collect:` | Transform each element | `s collect: [:n \| n * 10]` |
+| `reject:` | Exclude elements matching predicate | `s reject: [:n \| n isEven]` |
+| `drop:` | Skip first N elements | `s drop: 5` |
+
+```beamtalk
+// Build a pipeline — nothing computes yet
+s := Stream from: 1
+s := s select: [:n | n isEven]
+s := s collect: [:n | n * n]
+// s is still a Stream — no values computed
+```
+
+#### Terminal Operations
+
+Terminal operations force evaluation and return a concrete result:
+
+| Method | Description | Example |
+|--------|-------------|---------|
+| `take:` | First N elements as List | `s take: 5` → `[2,4,6,8,10]` |
+| `asList` | Materialize entire stream to List | `s asList` → `[1,2,3]` |
+| `do:` | Iterate with side effects, return nil | `s do: [:n \| Transcript show: n]` |
+| `inject:into:` | Fold/reduce with initial value | `s inject: 0 into: [:sum :n \| sum + n]` |
+| `detect:` | First matching element, or nil | `s detect: [:n \| n > 10]` |
+| `anySatisfy:` | True if any element matches | `s anySatisfy: [:n \| n > 2]` |
+| `allSatisfy:` | True if all elements match | `s allSatisfy: [:n \| n > 0]` |
+
+```beamtalk
+// Terminal forces computation through the pipeline
+((Stream from: 1) select: [:n | n isEven]) take: 5
+// => [2,4,6,8,10]
+
+(Stream on: #(1, 2, 3, 4)) inject: 0 into: [:sum :n | sum + n]
+// => 10
+```
+
+#### printString — Pipeline Inspection
+
+Stream's `printString` shows pipeline structure, not values — keeping the REPL inspectable even for lazy data:
+
+```beamtalk
+(Stream from: 1) printString
+// => Stream(from: 1)
+
+(Stream on: #(1, 2, 3)) printString
+// => Stream(on: [...])
+
+((Stream from: 1) select: [:n | n isEven]) printString
+// => Stream(from: 1) | select: [...]
+```
+
+#### Eager vs Lazy — The Boundary
+
+Collections keep their **eager** methods (`select:`, `collect:`, `do:`, etc.) for simple cases. The `stream` message is the explicit opt-in to **lazy** evaluation:
+
+```beamtalk
+// Eager — List methods return a List immediately
+#(1, 2, 3, 4, 5) select: [:n | n > 2]
+// => [3,4,5]  (a List)
+
+// Lazy — stream methods return a Stream (unevaluated)
+(#(1, 2, 3, 4, 5) stream) select: [:n | n > 2]
+// => Stream  (unevaluated — call asList or take: to materialize)
+```
+
+The receiver makes the boundary visible: you always know whether you're working with a Collection (eager) or a Stream (lazy).
+
+#### File Streaming
+
+`File lines:` returns a lazy Stream of lines — constant memory, safe for large files:
+
+```beamtalk
+// Read lines lazily
+(File lines: 'data.csv') do: [:line | Transcript show: line]
+
+// Pipeline composition
+(File lines: 'app.log') select: [:l | l includes: 'ERROR']
+
+// Block-scoped handle for explicit lifecycle control
+File open: 'data.csv' do: [:handle |
+  handle lines take: 10
+]
+// handle closed automatically when block exits
+```
+
+**Cross-process constraint:** File-backed Streams must be consumed by the same process that created them (BEAM file handles are process-local). To pass file data to an actor, materialize first: `(File lines: 'data.csv') take: 100` returns a List that can be sent safely. Collection-backed Streams have no such restriction.
+
+#### Side-Effect Timing ⚠️
+
+Side effects in lazy pipelines run at **terminal** time, not at definition time:
+
+```beamtalk
+// This prints NOTHING — the pipeline is just a recipe
+s := (Stream on: #(1, 2, 3)) collect: [:n | Transcript show: n. n * 2]
+
+// This is when printing actually happens
+s asList
+// Transcript shows: 1, 2, 3
+// => [2,4,6]
+```
+
+If you need immediate side effects, use the eager collection method (`List do:`) or call a terminal operation right away.
 
 ### Pragma Annotations (`@primitive` and `@intrinsic`)
 
