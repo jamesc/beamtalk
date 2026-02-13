@@ -1,0 +1,55 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for REPL power-user commands (BT-529).
+//
+// Tests :inspect and :unload commands
+// routed through their proper protocol operations.
+//
+// NOTE: :kill is tested separately in zz_repl_kill.bt because
+// killing an actor terminates the REPL session (known issue).
+
+// @load tests/e2e/fixtures/counter.bt
+
+// ===========================================================================
+// :inspect — INSPECT ACTOR STATE
+// ===========================================================================
+
+// Spawn a counter and inspect its state
+c := Counter spawn
+// => #Actor<Counter,_>
+
+// Inspect the Counter actor state — should show the value field
+:inspect Counter
+// => _
+
+// Increment and inspect again to verify state changed
+c increment
+// => 1
+
+:inspect Counter
+// => _
+
+// ===========================================================================
+// :unload — UNLOAD A MODULE
+// ===========================================================================
+
+// Load a separate module for unload testing
+:load tests/e2e/fixtures/point.bt
+// => Loaded: Point
+
+// Verify it appears in modules list
+:modules
+// => _
+
+// Unload the point module
+:unload Point
+// => ok
+
+// ===========================================================================
+// :unload — ERROR: MODULE NOT LOADED
+// ===========================================================================
+
+// Unloading a module that isn't loaded should error
+:unload NonExistentModule
+// => ERROR: Module not loaded

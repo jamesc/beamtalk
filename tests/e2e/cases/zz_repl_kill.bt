@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E test for :kill command (BT-529).
+//
+// This file sorts last alphabetically to avoid affecting other tests,
+// because killing an actor currently terminates the REPL session.
+
+// @load tests/e2e/fixtures/counter.bt
+
+// Spawn a counter to kill
+c := Counter spawn
+// => #Actor<Counter,_>
+
+// Kill the Counter actor
+:kill Counter
+// => ok
