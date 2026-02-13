@@ -389,13 +389,14 @@ pub fn run(
                             continue;
                         }
 
-                        // Parse "ClassName" or "ClassName selector"
-                        let (class_name, selector) = match args.split_once(' ') {
-                            Some((cls, sel)) => (cls.trim(), Some(sel.trim())),
-                            None => (args, None),
+                        // Parse "ClassName", "ClassName all", or "ClassName selector"
+                        let (class_name, selector, show_inherited) = match args.split_once(' ') {
+                            Some((cls, "all")) => (cls.trim(), None, true),
+                            Some((cls, sel)) => (cls.trim(), Some(sel.trim()), false),
+                            None => (args, None, false),
                         };
 
-                        match client.get_docs(class_name, selector) {
+                        match client.get_docs(class_name, selector, show_inherited) {
                             Ok(response) => {
                                 if response.is_error() {
                                     if let Some(msg) = response.error_message() {

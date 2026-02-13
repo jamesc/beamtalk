@@ -141,7 +141,12 @@ impl ReplClient {
     }
 
     /// Get documentation for a class or method.
-    pub(super) fn get_docs(&mut self, class: &str, selector: Option<&str>) -> Result<ReplResponse> {
+    pub(super) fn get_docs(
+        &mut self,
+        class: &str,
+        selector: Option<&str>,
+        show_inherited: bool,
+    ) -> Result<ReplResponse> {
         let mut req = serde_json::json!({
             "op": "docs",
             "id": protocol::next_msg_id(),
@@ -149,6 +154,9 @@ impl ReplClient {
         });
         if let Some(sel) = selector {
             req["selector"] = serde_json::Value::String(sel.to_string());
+        }
+        if show_inherited {
+            req["show_inherited"] = serde_json::Value::Bool(true);
         }
         self.send_request(&req)
     }

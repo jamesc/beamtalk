@@ -12,12 +12,13 @@
 
 -module(beamtalk_repl_docs).
 
--export([format_class_docs/1, format_method_doc/2]).
+-export([format_class_docs/2, format_method_doc/2]).
 
 %% @doc Format documentation for a class, including method listing.
+%% When ShowInherited is false, only own methods are shown.
 %% Returns `{ok, FormattedBinary}` or `{error, Reason}`.
--spec format_class_docs(atom()) -> {ok, binary()} | {error, term()}.
-format_class_docs(ClassName) ->
+-spec format_class_docs(atom(), boolean()) -> {ok, binary()} | {error, term()}.
+format_class_docs(ClassName, ShowInherited) ->
     case beamtalk_object_class:whereis_class(ClassName) of
         undefined ->
             {error, {class_not_found, ClassName}};
@@ -52,7 +53,8 @@ format_class_docs(ClassName) ->
 
                 %% Format the output
                 Output = format_class_output(ClassName, Superclass, ModuleDoc,
-                                              OwnDocs, InheritedGrouped),
+                                              OwnDocs, InheritedGrouped,
+                                              ShowInherited),
                 {ok, Output}
             catch
                 exit:{timeout, _} ->
@@ -209,19 +211,17 @@ group_by_class(Methods) ->
 %% @private Format the complete class documentation output.
 -spec format_class_output(atom(), atom() | none, binary() | none,
                           [{atom(), binary(), binary() | none}],
-                          [{atom(), [atom()]}]) -> binary().
-format_class_output(ClassName, Superclass, ModuleDoc, OwnDocs, InheritedGrouped) ->
+                          [{atom(), [atom()]}], boolean()) -> binary().
+format_class_output(ClassName, Superclass, ModuleDoc, OwnDocs, InheritedGrouped, ShowInherited) ->
     Parts = [
         %% Header
         iolist_to_binary([<<"== ">>, atom_to_binary(ClassName, utf8),
                           format_superclass(Superclass), <<" ==">>]),
 
-        %% Module doc (first paragraph only for overview)
+        %% Full module doc
         case ModuleDoc of
             none -> <<>>;
-            Text ->
-                FirstPara = first_paragraph(Text),
-                iolist_to_binary([<<"\n">>, FirstPara])
+            Text -> iolist_to_binary([<<"\n">>, Text])
         end,
 
         %% Own methods
@@ -238,22 +238,31 @@ format_class_output(ClassName, Superclass, ModuleDoc, OwnDocs, InheritedGrouped)
                                   lists:join(<<"\n">>, MethodLines)])
         end,
 
-        %% Inherited methods (grouped by class)
-        lists:map(
-            fun({FromClass, Selectors}) ->
-                SelectorStrs = lists:map(
-                    fun(S) -> iolist_to_binary([<<"  ">>, atom_to_binary(S, utf8)]) end,
-                    Selectors
-                ),
-                iolist_to_binary([<<"\nInherited from ">>,
-                                  atom_to_binary(FromClass, utf8), <<":\n">>,
-                                  lists:join(<<"\n">>, SelectorStrs)])
-            end,
-            InheritedGrouped
-        ),
+        %% Inherited methods (only if requested)
+        case ShowInherited of
+            true ->
+                lists:map(
+                    fun({FromClass, Selectors}) ->
+                        SelectorStrs = lists:map(
+                            fun(S) -> iolist_to_binary([<<"  ">>, atom_to_binary(S, utf8)]) end,
+                            Selectors
+                        ),
+                        iolist_to_binary([<<"\nInherited from ">>,
+                                          atom_to_binary(FromClass, utf8), <<":\n">>,
+                                          lists:join(<<"\n">>, SelectorStrs)])
+                    end,
+                    InheritedGrouped
+                );
+            false ->
+                []
+        end,
 
-        %% Hint
-        <<"\nUse :help ClassName selector for method details.">>
+        %% Hints
+        <<"\nUse :help ClassName selector for method details.">>,
+        case ShowInherited of
+            true -> <<>>;
+            false -> <<"\nUse :help ClassName all to include inherited methods.">>
+        end
     ],
     iolist_to_binary(lists:filter(fun(<<>>) -> false; (_) -> true end,
                                    lists:flatten(Parts))).
@@ -281,12 +290,3 @@ format_method_output(ClassName, SelectorBin, DefiningClass, {Signature, DocText}
         Text -> iolist_to_binary([<<"\n\n">>, Text])
     end,
     iolist_to_binary([Header, Inherited, SignatureLine, Doc]).
-
-%% @private Extract first paragraph from markdown text.
--spec first_paragraph(binary()) -> binary().
-first_paragraph(Text) ->
-    %% Split on double newline to get first paragraph
-    case binary:split(Text, <<"\n\n">>) of
-        [First | _] -> First;
-        _ -> Text
-    end.

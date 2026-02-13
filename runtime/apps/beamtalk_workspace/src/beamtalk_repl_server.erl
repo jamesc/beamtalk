@@ -515,9 +515,10 @@ handle_op(<<"docs">>, Params, Msg, _SessionPid) ->
                 {class_not_found, ClassBin}, Msg, fun format_error_message/1);
         {ok, ClassName} ->
             Selector = maps:get(<<"selector">>, Params, undefined),
+            ShowInherited = maps:get(<<"show_inherited">>, Params, false),
             case Selector of
                 undefined ->
-                    case beamtalk_repl_docs:format_class_docs(ClassName) of
+                    case beamtalk_repl_docs:format_class_docs(ClassName, ShowInherited) of
                         {ok, DocText} ->
                             beamtalk_repl_protocol:encode_docs(DocText, Msg);
                         {error, {class_not_found, _}} ->
