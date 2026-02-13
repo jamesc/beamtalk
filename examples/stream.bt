@@ -35,7 +35,7 @@ s := Stream from: 1
 s := s select: [:n | n isEven]
 s := s collect: [:n | n * n]
 s take: 5
-// => [4, 16, 36, 64, 100]
+// => [4,16,36,64,100]
 
 // Sum of first 100 natural numbers
 ((Stream from: 1) take: 100) inject: 0 into: [:sum :n | sum + n]
@@ -55,7 +55,7 @@ s take: 5
 
 // Filter and transform lazily, then materialize
 ((#(1, 2, 3, 4, 5) stream) select: [:n | n > 2]) asList
-// => [3, 4, 5]
+// => [3,4,5]
 
 // String characters as a stream
 ('hello' stream) collect: [:ch | ch uppercase]
@@ -74,7 +74,7 @@ s := ((Set new add: 3) add: 1) add: 2
 
 // Eager: List select: returns a List immediately
 #(1, 2, 3, 4, 5) select: [:n | n > 2]
-// => [3, 4, 5]
+// => [3,4,5]
 
 // Lazy: stream select: returns a Stream (unevaluated)
 (#(1, 2, 3, 4, 5) stream) select: [:n | n > 2]
@@ -115,11 +115,11 @@ s := ((Set new add: 3) add: 1) add: 2
 
 // take: — first N elements as a List
 (Stream from: 1) take: 5
-// => [1, 2, 3, 4, 5]
+// => [1,2,3,4,5]
 
 // asList — materialize finite stream
 (Stream on: #(10, 20, 30)) asList
-// => [10, 20, 30]
+// => [10,20,30]
 
 // do: — iterate for side effects, returns nil
 (Stream on: #(1, 2, 3)) do: [:n | Transcript show: n]

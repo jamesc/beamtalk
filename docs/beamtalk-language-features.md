@@ -1090,7 +1090,7 @@ Terminal operations force evaluation and return a concrete result:
 ```beamtalk
 // Terminal forces computation through the pipeline
 ((Stream from: 1) select: [:n | n isEven]) take: 5
-// => [2, 4, 6, 8, 10]
+// => [2,4,6,8,10]
 
 (Stream on: #(1, 2, 3, 4)) inject: 0 into: [:sum :n | sum + n]
 // => 10
@@ -1118,7 +1118,7 @@ Collections keep their **eager** methods (`select:`, `collect:`, `do:`, etc.) fo
 ```beamtalk
 // Eager — List methods return a List immediately
 #(1, 2, 3, 4, 5) select: [:n | n > 2]
-// => [3, 4, 5]  (a List)
+// => [3,4,5]  (a List)
 
 // Lazy — stream methods return a Stream (unevaluated)
 (#(1, 2, 3, 4, 5) stream) select: [:n | n > 2]
@@ -1158,7 +1158,7 @@ s := (Stream on: #(1, 2, 3)) collect: [:n | Transcript show: n. n * 2]
 // This is when printing actually happens
 s asList
 // Transcript shows: 1, 2, 3
-// => [2, 4, 6]
+// => [2,4,6]
 ```
 
 If you need immediate side effects, use the eager collection method (`List do:`) or call a terminal operation right away.

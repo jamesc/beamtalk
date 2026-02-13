@@ -302,7 +302,7 @@ Read files lazily — constant memory, safe for large files:
 ["// Copyright 2026 James Casey","// SPDX-License-Identifier: Apache-2.0",""]
 
 > (File lines: 'examples/hello.bt') inject: 0 into: [:count :line | count + 1]
-5
+15
 ```
 
 Block-scoped handles close automatically:
