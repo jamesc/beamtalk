@@ -13,13 +13,6 @@
       "env": {
         "LINEAR_API_TOKEN": "${LINEAR_API_TOKEN}"
       }
-    },
-    "beamtalk": {
-      "type": "stdio",
-      "command": "./target/debug/beamtalk-mcp",
-      "tools": [
-        "*"
-      ]
-    }
+    }   
   }
 }
