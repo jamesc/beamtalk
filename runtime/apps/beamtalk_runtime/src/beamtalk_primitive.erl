@@ -280,7 +280,18 @@ send(X, Selector, Args) when is_map(X) ->
                 'lines' ->
                     beamtalk_file:handle_lines(X);
                 _ ->
-                    beamtalk_object_ops:dispatch(Selector, Args, X)
+                    %% Fall back to Object protocol (class, printString, etc.)
+                    case beamtalk_object_ops:has_method(Selector) of
+                        true ->
+                            case beamtalk_object_ops:dispatch(Selector, Args, X, X) of
+                                {reply, Result, _State} -> Result;
+                                {error, Error, _State} -> beamtalk_error:raise(Error)
+                            end;
+                        false ->
+                            Error0 = beamtalk_error:new(does_not_understand, 'FileHandle'),
+                            Error1 = beamtalk_error:with_selector(Error0, Selector),
+                            beamtalk_error:raise(Error1)
+                    end
             end;
         'TestCase' ->
             %% BT-438: TestCase value type - dispatch to compiled stdlib
@@ -369,7 +380,8 @@ responds_to(X, Selector) when is_map(X) ->
             'bt@stdlib@stream':has_method(Selector);
         'FileHandle' ->
             %% BT-513: FileHandle value type
-            beamtalk_file:handle_has_method(Selector);
+            beamtalk_file:handle_has_method(Selector) orelse
+                beamtalk_object_ops:has_method(Selector);
         undefined ->
             'bt@stdlib@dictionary':has_method(Selector);
         Class ->

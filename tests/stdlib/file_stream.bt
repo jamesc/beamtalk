@@ -138,3 +138,19 @@ File open: "tests/stdlib/fixtures/stream_empty.txt" do: [:handle | handle lines 
 
 (File lines: "tests/stdlib/fixtures/stream_test.txt") printString
 // => File.lines('tests/stdlib/fixtures/stream_test.txt')
+
+// ===========================================================================
+// ERROR PATHS
+// ===========================================================================
+
+// File not found
+File lines: "tests/stdlib/fixtures/nonexistent.txt"
+// => ERROR: file_not_found
+
+// Type error: non-string path
+File lines: 42
+// => ERROR: type_error
+
+// File not found with open:do:
+File open: "tests/stdlib/fixtures/nonexistent.txt" do: [:h | h lines asList]
+// => ERROR: file_not_found

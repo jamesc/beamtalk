@@ -296,7 +296,12 @@ handle_has_method(_) -> false.
 %% already-open file handle. The handle's lifetime is managed by open:do:.
 -spec handle_lines(map()) -> map().
 handle_lines(#{'$beamtalk_class' := 'FileHandle', fd := Fd}) ->
-    make_line_stream_from_fd(Fd).
+    make_line_stream_from_fd(Fd);
+handle_lines(_) ->
+    Error0 = beamtalk_error:new(type_error, 'FileHandle'),
+    Error1 = beamtalk_error:with_selector(Error0, 'lines'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Expected a FileHandle">>),
+    beamtalk_error:raise(Error2).
 
 %%% ============================================================================
 %%% Internal Functions
