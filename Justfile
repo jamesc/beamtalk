@@ -117,42 +117,82 @@ test-mcp: build-stdlib
     set -euo pipefail
     echo "🧪 Running MCP server integration tests..."
 
-    # Start a REPL workspace in the background
-    MCP_TEST_PORT=19876
-    ./target/debug/beamtalk repl --port "$MCP_TEST_PORT" &
+    # Start a REPL workspace on ephemeral port, capture stdout to discover it
+    OUTFILE=$(mktemp)
+    ./target/debug/beamtalk repl --port 0 > "$OUTFILE" 2>&1 &
     REPL_PID=$!
 
     # Ensure cleanup on exit
     cleanup() {
         kill "$REPL_PID" 2>/dev/null || true
         wait "$REPL_PID" 2>/dev/null || true
+        rm -f "$OUTFILE"
     }
     trap cleanup EXIT
 
-    # Wait for REPL to be ready
+    # Wait for "Connected to REPL backend on port <N>" line
+    MCP_TEST_PORT=""
     for i in $(seq 1 30); do
-        if ss -tlnp 2>/dev/null | grep -q ":${MCP_TEST_PORT} " || \
-           nc -z 127.0.0.1 "$MCP_TEST_PORT" 2>/dev/null; then
-            break
-        fi
+        MCP_TEST_PORT=$(grep -oP 'Connected to REPL backend on port \K[0-9]+' "$OUTFILE" 2>/dev/null || true)
+        if [ -n "$MCP_TEST_PORT" ]; then break; fi
         sleep 1
     done
 
-    # Verify connection
-    if ! nc -z 127.0.0.1 "$MCP_TEST_PORT" 2>/dev/null; then
-        echo "❌ REPL failed to start on port $MCP_TEST_PORT"
+    if [ -z "$MCP_TEST_PORT" ]; then
+        echo "❌ REPL failed to start (no port detected)"
+        cat "$OUTFILE"
         exit 1
     fi
 
     echo "  REPL running on port $MCP_TEST_PORT (pid $REPL_PID)"
 
-    # Run the MCP integration tests
-    cargo test -p beamtalk-mcp -- --ignored --test-threads=1
+    # Run the MCP integration tests with discovered port
+    BEAMTALK_TEST_PORT="$MCP_TEST_PORT" cargo test -p beamtalk-mcp -- --ignored --test-threads=1
 
     echo "✅ MCP integration tests complete"
 
 # Run ALL tests (unit + integration + E2E + Erlang runtime)
 test-all: test-rust test-stdlib test-integration test-mcp test-e2e test-runtime
+
+# Smoke test installed layout (install to temp dir, verify REPL starts)
+test-install: build-release build-stdlib
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🧪 Smoke-testing installed layout..."
+    TMPDIR=$(mktemp -d)
+    OUTFILE=$(mktemp)
+
+    just install "$TMPDIR"
+
+    # Start REPL on ephemeral port, capture stdout to discover actual port
+    "$TMPDIR/bin/beamtalk" repl --port 0 > "$OUTFILE" 2>&1 &
+    REPL_PID=$!
+    cleanup() { kill $REPL_PID 2>/dev/null || true; wait $REPL_PID 2>/dev/null || true; rm -rf "$TMPDIR" "$OUTFILE"; }
+    trap cleanup EXIT
+
+    # Wait for "Connected to REPL backend on port <N>" line
+    PORT=""
+    for i in $(seq 1 30); do
+        PORT=$(grep -oP 'Connected to REPL backend on port \K[0-9]+' "$OUTFILE" 2>/dev/null || true)
+        if [ -n "$PORT" ]; then break; fi
+        sleep 1
+    done
+
+    if [ -z "$PORT" ]; then
+        echo "❌ REPL failed to start (no port detected)"
+        cat "$OUTFILE"
+        exit 1
+    fi
+
+    # Evaluate 1 + 1 via TCP protocol
+    RESPONSE=$(echo '{"op":"eval","id":"smoke","code":"1 + 1"}' | nc -w 5 127.0.0.1 "$PORT" || true)
+
+    if echo "$RESPONSE" | grep -qE '"value":\s*"?2"?'; then
+        echo "✅ Installed REPL evaluated 1 + 1 = 2 (port $PORT)"
+    else
+        echo "❌ Unexpected response: $RESPONSE"
+        exit 1
+    fi
 
 # Run compiled stdlib tests (ADR 0014 Phase 1, ~14s)
 test-stdlib: build-stdlib
@@ -446,12 +486,80 @@ check-tools:
     @echo "✅ All required tools found"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Release
+# Release & Installation
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Prepare for release (run all checks)
 pre-release: clean-all ci coverage
     @echo "✅ Pre-release checks passed"
+
+# Install beamtalk to PREFIX (default: /usr/local)
+install PREFIX="/usr/local": build-release build-stdlib
+    #!/usr/bin/env bash
+    set -euo pipefail
+    PREFIX="{{PREFIX}}"
+    echo "📦 Installing beamtalk to ${PREFIX}..."
+
+    # Validate build artifacts exist
+    if [ ! -f target/release/beamtalk ]; then
+        echo "❌ Release binary not found. Run 'just build-release' first."
+        exit 1
+    fi
+
+    # Binary
+    install -d "${PREFIX}/bin"
+    install -m 755 target/release/beamtalk "${PREFIX}/bin/beamtalk"
+
+    # OTP application ebin directories
+    for app in beamtalk_runtime beamtalk_workspace jsx; do
+        SRC="runtime/_build/default/lib/${app}/ebin"
+        if ! ls "${SRC}"/*.beam 1>/dev/null 2>&1; then
+            echo "❌ No .beam files found in ${SRC}. Run 'just build-erlang' first."
+            exit 1
+        fi
+        install -d "${PREFIX}/lib/beamtalk/lib/${app}/ebin"
+        install -m 644 "${SRC}"/*.beam "${PREFIX}/lib/beamtalk/lib/${app}/ebin/"
+        # Copy .app file if present
+        if ls "${SRC}"/*.app 1>/dev/null 2>&1; then
+            install -m 644 "${SRC}"/*.app "${PREFIX}/lib/beamtalk/lib/${app}/ebin/"
+        fi
+    done
+
+    # Stdlib (built under apps/, not _build/)
+    STDLIB_SRC="runtime/apps/beamtalk_stdlib/ebin"
+    if ! ls "${STDLIB_SRC}"/*.beam 1>/dev/null 2>&1; then
+        echo "❌ No stdlib .beam files found. Run 'just build-stdlib' first."
+        exit 1
+    fi
+    install -d "${PREFIX}/lib/beamtalk/lib/beamtalk_stdlib/ebin"
+    install -m 644 "${STDLIB_SRC}"/*.beam "${PREFIX}/lib/beamtalk/lib/beamtalk_stdlib/ebin/"
+    if ls "${STDLIB_SRC}"/*.app 1>/dev/null 2>&1; then
+        install -m 644 "${STDLIB_SRC}"/*.app "${PREFIX}/lib/beamtalk/lib/beamtalk_stdlib/ebin/"
+    fi
+
+    echo "✅ Installed beamtalk to ${PREFIX}"
+    echo "   Binary:  ${PREFIX}/bin/beamtalk"
+    echo "   Runtime: ${PREFIX}/lib/beamtalk/lib/"
+
+# Uninstall beamtalk from PREFIX (default: /usr/local)
+uninstall PREFIX="/usr/local":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    PREFIX="{{PREFIX}}"
+    echo "🗑️  Uninstalling beamtalk from ${PREFIX}..."
+    rm -f "${PREFIX}/bin/beamtalk"
+    rm -rf "${PREFIX}/lib/beamtalk"
+    echo "✅ Uninstalled beamtalk from ${PREFIX}"
+
+# Create a distributable install in dist/
+dist: build-release build-stdlib
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📦 Creating distribution in dist/..."
+    rm -rf dist
+    just install dist
+    echo "✅ Distribution ready in dist/"
+    echo "   Run: dist/bin/beamtalk repl"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Documentation
