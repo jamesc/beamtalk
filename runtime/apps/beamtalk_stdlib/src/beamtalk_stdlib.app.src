@@ -35,6 +35,7 @@
         {'bt@stdlib@true', 'True', 'Boolean'},
         {'bt@stdlib@tuple', 'Tuple', 'Collection'},
         {'bt@stdlib@type_error', 'TypeError', 'Error'},
-        {'bt@stdlib@undefined_object', 'UndefinedObject', 'Object'}]}
+        {'bt@stdlib@undefined_object', 'UndefinedObject', 'Object'},
+        {'bt@stdlib@workspace_environment', 'WorkspaceEnvironment', 'Actor'}]}
     ]}
 ]}.
