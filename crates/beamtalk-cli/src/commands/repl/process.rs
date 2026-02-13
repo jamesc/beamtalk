@@ -22,10 +22,10 @@ use super::{MAX_CONNECT_RETRIES, RETRY_DELAY_MS, ReplClient};
 /// Start the BEAM node with REPL backend.
 pub(super) fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<Child> {
     // Find runtime directory - try multiple locations
-    let runtime_dir = repl_startup::find_runtime_dir()?;
+    let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout()?;
     info!("Using runtime at: {}", runtime_dir.display());
 
-    let paths = repl_startup::beam_paths(&runtime_dir);
+    let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
 
     // Check if runtime is built
     if !paths.runtime_ebin.exists() {

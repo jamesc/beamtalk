@@ -265,8 +265,8 @@ pub fn run(
         let project_root = workspace::discovery::discover_project_root(&current_dir);
 
         // Use the same runtime paths as foreground mode
-        let runtime_dir = beamtalk_cli::repl_startup::find_runtime_dir()?;
-        let paths = beamtalk_cli::repl_startup::beam_paths(&runtime_dir);
+        let (runtime_dir, layout) = beamtalk_cli::repl_startup::find_runtime_dir_with_layout()?;
+        let paths = beamtalk_cli::repl_startup::beam_paths_for_layout(&runtime_dir, layout);
 
         // Warn if stdlib is not compiled (directory may exist without .beam files)
         if !beamtalk_cli::repl_startup::has_beam_files(&paths.stdlib_ebin) {
