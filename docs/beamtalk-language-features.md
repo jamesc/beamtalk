@@ -593,7 +593,7 @@ Smalltalk lacks pattern matching - this is a major ergonomic addition.
 
 The `match:` keyword message takes a block of pattern arms separated by `;`:
 
-```
+```beamtalk
 // Basic match with literals
 x match: [1 -> 'one'; 2 -> 'two'; _ -> 'other']
 
@@ -622,6 +622,7 @@ temp match: [-1 -> 'minus one'; 0 -> 'zero'; _ -> 'other']
 ```
 
 **Supported pattern types:**
+
 | Pattern | Example | Description |
 |---------|---------|-------------|
 | Wildcard | `_` | Matches anything |

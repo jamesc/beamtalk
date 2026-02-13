@@ -3,6 +3,7 @@
 
 // E2E tests for match expression parsing and codegen (BT-406)
 // Tests pattern matching via `expr match: [pattern -> body; ...]`
+// No @load directive needed — all tests use only built-in primitives.
 
 // ===========================================================================
 // BASIC MATCH EXPRESSIONS
