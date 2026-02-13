@@ -498,6 +498,9 @@ init({ClassName, ClassInfo}) ->
     %% Ensure pg is started (needed for class registry)
     ensure_pg_started(),
     
+    %% BT-510: Ensure hierarchy ETS table exists and register this class
+    ensure_hierarchy_table(),
+    
     %% Name registration is handled by gen_server:start_link({local, Name}, ...)
     %% Join pg group for all_classes enumeration
     ok = pg:join(beamtalk_classes, self()),
@@ -508,6 +511,9 @@ init({ClassName, ClassInfo}) ->
     IsAbstract = maps:get(is_abstract, ClassInfo, false),
     InstanceMethods = maps:get(instance_methods, ClassInfo, #{}),
     ClassMethods = maps:get(class_methods, ClassInfo, #{}),
+    
+    %% BT-510: Record hierarchy in ETS (immediately visible to all processes)
+    ets:insert(beamtalk_class_hierarchy, {ClassName, Superclass}),
     
     %% Build flattened method tables (ADR 0006 Phase 2)
     FlattenedMethods = build_flattened_methods(ClassName, Superclass, InstanceMethods),
@@ -1068,6 +1074,18 @@ ensure_pg_started() ->
             ok
     end.
 
+%% BT-510: Ensure the class hierarchy ETS table exists.
+%% Stores {ClassName, SuperclassName | none} pairs for O(1) hierarchy queries.
+%% Public named_table so any process can read; written only in init/1.
+ensure_hierarchy_table() ->
+    case ets:info(beamtalk_class_hierarchy) of
+        undefined ->
+            ets:new(beamtalk_class_hierarchy,
+                    [set, public, named_table, {read_concurrency, true}]);
+        _ ->
+            ok
+    end.
+
 registry_name(ClassName) ->
     list_to_atom("beamtalk_class_" ++ atom_to_list(ClassName)).
 
@@ -1097,21 +1115,25 @@ invalidate_subclass_flattened_tables(ChangedClass) ->
 
 %% @doc Check if a class inherits from a given ancestor (walks superclass chain).
 %%
+%% BT-510: Uses ETS hierarchy table for O(1) lookups per level instead of
+%% gen_server calls. No process messaging needed — pure ETS reads.
+%%
 %% Returns true if ClassName is equal to or a subclass of Ancestor.
-%% Returns false if the class is not registered (safe during bootstrap).
+%% Returns false if the class is not in the hierarchy table (safe during bootstrap).
 %% Used by beamtalk_exception_handler for hierarchy-aware matching (BT-475).
 -spec inherits_from(class_name() | none, class_name()) -> boolean().
 inherits_from(none, _Ancestor) ->
     false;
-inherits_from(SuperclassName, Ancestor) when SuperclassName =:= Ancestor ->
+inherits_from(ClassName, Ancestor) when ClassName =:= Ancestor ->
     true;
-inherits_from(SuperclassName, Ancestor) ->
-    case whereis_class(SuperclassName) of
+inherits_from(ClassName, Ancestor) ->
+    case ets:info(beamtalk_class_hierarchy) of
         undefined -> false;
-        SuperclassPid ->
-            case gen_server:call(SuperclassPid, superclass, 5000) of
-                none -> false;
-                GrandparentName -> inherits_from(GrandparentName, Ancestor)
+        _ ->
+            case ets:lookup(beamtalk_class_hierarchy, ClassName) of
+                [{_, none}] -> false;
+                [{_, SuperclassName}] -> inherits_from(SuperclassName, Ancestor);
+                [] -> false
             end
     end.
 
@@ -1267,6 +1289,12 @@ build_flattened_methods(CurrentClass, Superclass, LocalMethods, QueryMsg) ->
             %% Get inherited methods from superclass
             case whereis_class(SuperclassName) of
                 undefined ->
+                    %% BT-510: Superclass not registered yet (out-of-order loading).
+                    %% Return local methods only; invalidate_subclass_flattened_tables
+                    %% will trigger a rebuild once the superclass registers.
+                    logger:debug("Class ~p: superclass ~p unavailable during init, "
+                                 "flattened methods incomplete",
+                                 [CurrentClass, SuperclassName]),
                     LocalFlattened;
                 SuperclassPid ->
                     SuperclassFlattenedMethods = try gen_server:call(SuperclassPid, QueryMsg, 5000) of
