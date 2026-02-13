@@ -495,30 +495,15 @@ uninstall PREFIX="/usr/local":
     rm -rf "${PREFIX}/lib/beamtalk"
     echo "✅ Uninstalled beamtalk from ${PREFIX}"
 
-# Create a distributable tarball
+# Create a distributable install in dist/
 dist: build-release build-stdlib
     #!/usr/bin/env bash
     set -euo pipefail
-    VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
-    OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-    ARCH=$(uname -m)
-    TARBALL="beamtalk-${VERSION}-${OS}-${ARCH}.tar.gz"
-    STAGING=$(mktemp -d)
-    DIST_DIR="beamtalk-${VERSION}"
-
-    echo "📦 Creating distributable tarball: ${TARBALL}..."
-
-    # Install into staging directory
-    just install "${STAGING}/${DIST_DIR}"
-
-    # Create tarball
-    tar -czf "${TARBALL}" -C "${STAGING}" "${DIST_DIR}"
-    rm -rf "${STAGING}"
-
-    SIZE=$(du -h "${TARBALL}" | cut -f1)
-    echo "✅ Created ${TARBALL} (${SIZE})"
-    echo "   Extract: tar xzf ${TARBALL}"
-    echo "   Run:     ${DIST_DIR}/bin/beamtalk repl"
+    echo "📦 Creating distribution in dist/..."
+    rm -rf dist
+    just install dist
+    echo "✅ Distribution ready in dist/"
+    echo "   Run: dist/bin/beamtalk repl"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Documentation

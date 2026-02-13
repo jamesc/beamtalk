@@ -209,9 +209,8 @@ just install
 # Install to a custom prefix
 just install PREFIX=$HOME/.local
 
-# Create a portable tarball
+# Create a local distribution in dist/
 just dist
-# => beamtalk-0.1.0-linux-x86_64.tar.gz
 
 # Uninstall
 just uninstall PREFIX=$HOME/.local
