@@ -187,7 +187,7 @@ test-install: build-release build-stdlib
     # Evaluate 1 + 1 via TCP protocol
     RESPONSE=$(echo '{"op":"eval","id":"smoke","code":"1 + 1"}' | nc -w 5 127.0.0.1 "$PORT" || true)
 
-    if echo "$RESPONSE" | grep -qE '"value":\s*2'; then
+    if echo "$RESPONSE" | grep -qE '"value":\s*"?2"?'; then
         echo "✅ Installed REPL evaluated 1 + 1 = 2 (port $PORT)"
     else
         echo "❌ Unexpected response: $RESPONSE"

@@ -159,24 +159,15 @@ pub fn beam_pa_args(paths: &BeamPaths) -> Vec<OsString> {
 
 // ── Runtime Discovery ──────────────────────────────────────────────
 
-/// Find the runtime directory and its layout by checking multiple locations.
+/// Find the runtime directory by checking multiple locations.
 ///
-/// Returns `(path, layout)` where layout indicates whether this is a
-/// development checkout or an OTP-standard installed layout.
+/// Delegates to [`find_runtime_dir_with_layout`]; see that function for
+/// layout detection and resolution order.
 ///
 /// # Errors
 ///
 /// Returns an error if no valid runtime directory is found, or if
 /// `BEAMTALK_RUNTIME_DIR` is set but doesn't contain a valid runtime.
-///
-/// Resolution order (dev mode — checked via `rebar.config`):
-/// 1. `BEAMTALK_RUNTIME_DIR` environment variable
-/// 2. `CARGO_MANIFEST_DIR/../../runtime` (when running via `cargo run`)
-/// 3. `./runtime` (running from repo root)
-/// 4. Executable's grandparent (target/debug/beamtalk → repo root)
-///
-/// Resolution order (installed mode — checked via `.beam` files):
-/// 5. `{exe_dir}/../lib/beamtalk/` (OTP-standard installed layout)
 pub fn find_runtime_dir() -> Result<PathBuf> {
     let (path, _layout) = find_runtime_dir_with_layout()?;
     Ok(path)
