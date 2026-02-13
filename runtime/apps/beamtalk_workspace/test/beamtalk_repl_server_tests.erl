@@ -974,6 +974,16 @@ term_to_json_large_tuple_test() ->
     %% BT-536: Tuples formatted with symbol notation for atoms
     ?assertEqual(<<"{#a, #b, #c, #d, #e}">>, Result).
 
+term_to_json_mixed_tuple_test() ->
+    %% BT-536: Tuple with mixed types: integer, atom, string
+    Result = beamtalk_repl_server:term_to_json({ok, 42, <<"hello">>}),
+    ?assertEqual(<<"{#ok, 42, hello}">>, Result).
+
+term_to_json_empty_tuple_test() ->
+    %% BT-536: Empty tuple
+    Result = beamtalk_repl_server:term_to_json({}),
+    ?assertEqual(<<"{}">>, Result).
+
 term_to_json_nested_list_with_maps_test() ->
     Result = beamtalk_repl_server:term_to_json([#{a => 1}, #{b => 2}]),
     ?assertEqual(2, length(Result)),
