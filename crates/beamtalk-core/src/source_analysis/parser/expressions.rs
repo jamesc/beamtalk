@@ -18,7 +18,7 @@
 
 use crate::ast::{
     Block, BlockParameter, CascadeMessage, Expression, Identifier, KeywordPart, Literal, MapPair,
-    MessageSelector,
+    MatchArm, MessageSelector, Pattern,
 };
 use crate::source_analysis::{Token, TokenKind};
 use ecow::EcoString;
@@ -202,6 +202,13 @@ impl Parser {
             || self.current_token().has_leading_newline()
         {
             return receiver;
+        }
+
+        // Special handling for `match:` — produces Expression::Match
+        if matches!(self.current_kind(), TokenKind::Keyword(k) if k.as_str() == "match:")
+            && self.peek_at(1) == Some(&TokenKind::LeftBracket)
+        {
+            return self.parse_match_expression(receiver);
         }
 
         // Parse keyword message
@@ -560,6 +567,206 @@ impl Parser {
         let span = start.merge(end);
         let block = Block::new(parameters, body, span);
         Expression::Block(block)
+    }
+
+    /// Parses a match expression: `receiver match: [pattern -> body ...]`
+    ///
+    /// The receiver has already been parsed and `match:` keyword is the current token.
+    fn parse_match_expression(&mut self, receiver: Expression) -> Expression {
+        self.advance(); // consume `match:` keyword
+
+        let bracket_start = self
+            .expect(&TokenKind::LeftBracket, "Expected '[' after match:")
+            .map_or_else(|| self.current_token().span(), |t: Token| t.span());
+
+        let mut arms = Vec::new();
+
+        while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
+            arms.push(self.parse_match_arm());
+
+            // Semicolon or newline separates arms
+            if self.match_token(&TokenKind::Semicolon) {
+                // Explicit semicolon — continue
+            } else if !self.is_at_end()
+                && !self.check(&TokenKind::RightBracket)
+                && self.current_token().has_leading_newline()
+            {
+                // Newline acts as implicit separator
+            } else {
+                break;
+            }
+        }
+
+        let end = self
+            .expect(&TokenKind::RightBracket, "Expected ']' to close match")
+            .map_or(bracket_start, |t: Token| t.span());
+
+        let span = receiver.span().merge(end);
+
+        Expression::Match {
+            value: Box::new(receiver),
+            arms,
+            span,
+        }
+    }
+
+    /// Parses a single match arm: `pattern -> body` or `pattern when: [guard] -> body`
+    fn parse_match_arm(&mut self) -> MatchArm {
+        let pattern = self.parse_pattern();
+        let pat_span = pattern.span();
+
+        // Check for optional guard: `when: [guard_expr]`
+        let guard = if matches!(self.current_kind(), TokenKind::Keyword(k) if k.as_str() == "when:")
+        {
+            self.advance(); // consume `when:`
+            // Guard must be in a block [expr]
+            if self.check(&TokenKind::LeftBracket) {
+                self.advance(); // consume [
+                let guard_expr = self.parse_expression();
+                self.expect(
+                    &TokenKind::RightBracket,
+                    "Expected ']' to close guard expression",
+                );
+                Some(guard_expr)
+            } else {
+                self.error("Expected '[' after when:");
+                None
+            }
+        } else {
+            None
+        };
+
+        // Expect -> separator
+        if !self.match_binary_selector("->") {
+            self.error("Expected '->' after pattern in match arm");
+        }
+
+        // Parse body expression — use keyword message level to avoid consuming
+        // semicolons (arm separators) or assignment operators
+        let body = self.parse_keyword_message();
+        let span = pat_span.merge(body.span());
+
+        if let Some(guard_expr) = guard {
+            MatchArm::with_guard(pattern, guard_expr, body, span)
+        } else {
+            MatchArm::new(pattern, body, span)
+        }
+    }
+
+    /// Parses a pattern for match arms.
+    ///
+    /// Supported patterns:
+    /// - `_` — wildcard
+    /// - identifier — variable binding
+    /// - integer, float, string, symbol, character — literal
+    /// - `{p1, p2, ...}` — tuple
+    fn parse_pattern(&mut self) -> Pattern {
+        match self.current_kind() {
+            // Wildcard: `_`
+            TokenKind::Identifier(name) if name.as_str() == "_" => {
+                let span = self.advance().span();
+                Pattern::Wildcard(span)
+            }
+
+            // Variable binding
+            TokenKind::Identifier(name) => {
+                let name = name.clone();
+                let token = self.advance();
+                let span = token.span();
+                Pattern::Variable(Identifier::new(name, span))
+            }
+
+            // Literal patterns: integer, float, string, character
+            TokenKind::Integer(_)
+            | TokenKind::Float(_)
+            | TokenKind::String(_)
+            | TokenKind::Character(_) => {
+                let expr = self.parse_literal();
+                let span = expr.span();
+                if let Expression::Literal(lit, _) = expr {
+                    Pattern::Literal(lit, span)
+                } else {
+                    // parse_literal returned an error
+                    Pattern::Wildcard(span)
+                }
+            }
+
+            // Symbol patterns: #ok, #error, etc.
+            TokenKind::Symbol(_) => {
+                let token = self.advance();
+                let span = token.span();
+                if let TokenKind::Symbol(s) = token.into_kind() {
+                    Pattern::Literal(Literal::Symbol(s), span)
+                } else {
+                    unreachable!()
+                }
+            }
+
+            // Negative number patterns: -1, -3.14
+            TokenKind::BinarySelector(op) if op.as_str() == "-" => {
+                let start = self.advance().span();
+                match self.current_kind() {
+                    TokenKind::Integer(_) | TokenKind::Float(_) => {
+                        let expr = self.parse_literal();
+                        let span = start.merge(expr.span());
+                        if let Expression::Literal(lit, _) = expr {
+                            let neg_lit = match lit {
+                                Literal::Integer(n) => Literal::Integer(-n),
+                                Literal::Float(f) => Literal::Float(-f),
+                                other => other,
+                            };
+                            Pattern::Literal(neg_lit, span)
+                        } else {
+                            Pattern::Wildcard(span)
+                        }
+                    }
+                    _ => {
+                        self.error("Expected number after '-' in pattern");
+                        Pattern::Wildcard(start)
+                    }
+                }
+            }
+
+            // Tuple pattern: {p1, p2, ...}
+            TokenKind::LeftBrace => self.parse_tuple_pattern(),
+
+            _ => {
+                let bad_token = self.advance();
+                let span = bad_token.span();
+                self.diagnostics.push(Diagnostic::error(
+                    format!(
+                        "Unexpected token in pattern: expected identifier, literal, '_', or '{{', found {}",
+                        bad_token.kind()
+                    ),
+                    span,
+                ));
+                Pattern::Wildcard(span)
+            }
+        }
+    }
+
+    /// Parses a tuple pattern: `{p1, p2, ...}`
+    fn parse_tuple_pattern(&mut self) -> Pattern {
+        let start = self
+            .expect(&TokenKind::LeftBrace, "Expected '{'")
+            .unwrap()
+            .span();
+
+        let mut elements = Vec::new();
+
+        if !self.check(&TokenKind::RightBrace) {
+            elements.push(self.parse_pattern());
+            while self.match_binary_selector(",") {
+                elements.push(self.parse_pattern());
+            }
+        }
+
+        let end = self
+            .expect(&TokenKind::RightBrace, "Expected '}'")
+            .map_or(start, |t: Token| t.span());
+
+        let span = start.merge(end);
+        Pattern::Tuple { elements, span }
     }
 
     /// Parses a `@primitive` or `@intrinsic` pragma: `@primitive 'selector'` or `@intrinsic intrinsicName`.

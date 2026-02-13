@@ -1,0 +1,129 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for match expression parsing and codegen (BT-406)
+// Tests pattern matching via `expr match: [pattern -> body; ...]`
+// No @load directive needed — all tests use only built-in primitives.
+
+// ===========================================================================
+// BASIC MATCH EXPRESSIONS
+// ===========================================================================
+
+// Wildcard match
+42 match: [_ -> 'matched']
+// => matched
+
+// Literal integer match
+1 match: [1 -> 'one'; 2 -> 'two'; _ -> 'other']
+// => one
+
+// Second arm match
+2 match: [1 -> 'one'; 2 -> 'two'; _ -> 'other']
+// => two
+
+// Default arm match
+99 match: [1 -> 'one'; 2 -> 'two'; _ -> 'other']
+// => other
+
+// ===========================================================================
+// SYMBOL PATTERN MATCHING
+// ===========================================================================
+
+// Match on symbol
+#ok match: [#ok -> 'success'; #error -> 'failure'; _ -> 'unknown']
+// => success
+
+#error match: [#ok -> 'success'; #error -> 'failure'; _ -> 'unknown']
+// => failure
+
+// ===========================================================================
+// STRING PATTERN MATCHING
+// ===========================================================================
+
+// Match on string
+'hello' match: ['hello' -> 'greeting'; _ -> 'other']
+// => greeting
+
+// ===========================================================================
+// VARIABLE BINDING IN PATTERNS
+// ===========================================================================
+
+// Variable binding - use matched value
+42 match: [x -> x + 1]
+// => 43
+
+// Variable binding in one arm
+10 match: [0 -> 'zero'; n -> n * 2]
+// => 20
+
+// ===========================================================================
+// GUARD CLAUSES
+// ===========================================================================
+
+// Guard with comparison
+10 match: [x when: [x > 0] -> 'positive'; _ -> 'non-positive']
+// => positive
+
+-5 match: [x when: [x > 0] -> 'positive'; _ -> 'non-positive']
+// => non-positive
+
+// Multiple guards
+42 match: [x when: [x > 100] -> 'big'; x when: [x > 10] -> 'medium'; _ -> 'small']
+// => medium
+
+// ===========================================================================
+// NEGATIVE NUMBER PATTERNS
+// ===========================================================================
+
+// Match negative literal
+-1 match: [-1 -> 'minus one'; 0 -> 'zero'; _ -> 'other']
+// => minus one
+
+0 match: [-1 -> 'minus one'; 0 -> 'zero'; _ -> 'other']
+// => zero
+
+// ===========================================================================
+// COMPUTED VALUE AS MATCH TARGET
+// ===========================================================================
+
+// Match on computed expression
+(3 + 4) match: [7 -> 'correct'; _ -> 'wrong']
+// => correct
+
+// ===========================================================================
+// MULTI-LINE MATCH EXPRESSIONS
+// ===========================================================================
+
+// Match expression spanning multiple lines
+42 match: [
+  1 -> 'one';
+  2 -> 'two';
+  _ -> 'other'
+]
+// => other
+
+// Multi-line with guards
+25 match: [
+  x when: [x > 100] -> 'big';
+  x when: [x > 10] -> 'medium';
+  _ -> 'small'
+]
+// => medium
+
+// Multi-line with variable binding
+7 match: [
+  0 -> 'zero';
+  n -> n * n
+]
+// => 49
+
+// ===========================================================================
+// MATCH WITH VARIABLE AS TARGET
+// ===========================================================================
+
+// Match on a variable
+val := 42
+// => _
+
+val match: [42 -> 'found'; _ -> 'not found']
+// => found

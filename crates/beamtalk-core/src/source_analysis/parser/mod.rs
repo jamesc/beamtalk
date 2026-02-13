@@ -625,6 +625,17 @@ impl Parser {
     pub(super) fn peek_at(&self, offset: usize) -> Option<&TokenKind> {
         self.tokens.get(self.current + offset).map(Token::kind)
     }
+
+    /// Checks if the current token is a specific binary selector, and consumes it if so.
+    pub(super) fn match_binary_selector(&mut self, expected: &str) -> bool {
+        if let TokenKind::BinarySelector(s) = self.current_kind() {
+            if s.as_str() == expected {
+                self.advance();
+                return true;
+            }
+        }
+        false
+    }
 }
 
 #[cfg(test)]
@@ -3012,5 +3023,77 @@ Actor subclass: Counter
     #[test]
     fn incomplete_trailing_caret() {
         assert!(!is_input_complete("^"));
+    }
+
+    // === Match expression parsing ===
+
+    #[test]
+    fn parse_simple_match() {
+        let module = parse_ok("42 match: [_ -> 99]");
+        assert_eq!(module.expressions.len(), 1);
+        assert!(
+            matches!(&module.expressions[0], Expression::Match { arms, .. } if arms.len() == 1)
+        );
+    }
+
+    #[test]
+    fn parse_match_with_semicolons() {
+        let module = parse_ok("x match: [1 -> 'one'; 2 -> 'two'; _ -> 'other']");
+        assert_eq!(module.expressions.len(), 1);
+        assert!(
+            matches!(&module.expressions[0], Expression::Match { arms, .. } if arms.len() == 3)
+        );
+    }
+
+    #[test]
+    fn parse_match_with_tuple_pattern() {
+        let module = parse_ok("r match: [{#ok, v} -> v; {#error, _} -> nil]");
+        assert_eq!(module.expressions.len(), 1);
+        assert!(
+            matches!(&module.expressions[0], Expression::Match { arms, .. } if arms.len() == 2)
+        );
+    }
+
+    #[test]
+    fn parse_match_with_guard() {
+        let module = parse_ok("n match: [x when: [x > 0] -> x; _ -> 0]");
+        assert_eq!(module.expressions.len(), 1);
+        if let Expression::Match { arms, .. } = &module.expressions[0] {
+            assert_eq!(arms.len(), 2);
+            assert!(arms[0].guard.is_some());
+            assert!(arms[1].guard.is_none());
+        } else {
+            panic!("Expected Match expression");
+        }
+    }
+
+    #[test]
+    fn codegen_simple_match() {
+        let module = parse_ok("42 match: [_ -> 99]");
+        let expr = &module.expressions[0];
+        let result = crate::codegen::core_erlang::generate_test_expression(expr, "test_match");
+        assert!(result.is_ok(), "Codegen failed: {:?}", result.err());
+        let code = result.unwrap();
+        eprintln!("Generated code:\n{code}");
+        assert!(code.contains("case"), "Expected case expression in: {code}");
+    }
+
+    #[test]
+    fn codegen_match_with_arms() {
+        let module = parse_ok("1 match: [1 -> 'one'; 2 -> 'two'; _ -> 'other']");
+        let expr = &module.expressions[0];
+        let result = crate::codegen::core_erlang::generate_test_expression(expr, "test_match");
+        assert!(result.is_ok(), "Codegen failed: {:?}", result.err());
+        let code = result.unwrap();
+        eprintln!("Generated code:\n{code}");
+        assert!(code.contains("case"), "Expected case expression in: {code}");
+    }
+
+    #[test]
+    fn codegen_empty_match_errors() {
+        let module = parse_ok("42 match: []");
+        let expr = &module.expressions[0];
+        let result = crate::codegen::core_erlang::generate_test_expression(expr, "test_match");
+        assert!(result.is_err(), "Empty match should fail codegen");
     }
 }

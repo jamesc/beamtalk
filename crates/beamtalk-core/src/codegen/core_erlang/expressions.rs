@@ -18,7 +18,8 @@
 use super::document::Document;
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{
-    Block, CascadeMessage, Expression, Identifier, Literal, MapPair, MessageSelector,
+    Block, CascadeMessage, Expression, Identifier, Literal, MapPair, MatchArm, MessageSelector,
+    Pattern,
 };
 use crate::docvec;
 use std::fmt::Write; // For write!() on local String buffers (not self.output)
@@ -701,5 +702,199 @@ impl CoreErlangGenerator {
         }
 
         Ok(Document::Vec(docs))
+    }
+
+    /// Generates code for a match expression.
+    ///
+    /// `value match: [pattern -> body ...]` compiles to Core Erlang:
+    /// `let _Match1 = <value> in case _Match1 of <Pattern1> when Guard1 -> Body1 ... end`
+    pub(super) fn generate_match(
+        &mut self,
+        value: &Expression,
+        arms: &[MatchArm],
+    ) -> Result<Document<'static>> {
+        if arms.is_empty() {
+            return Err(CodeGenError::UnsupportedFeature {
+                feature: "match expression with no arms".to_string(),
+                location: format!("{:?}", value.span()),
+            });
+        }
+
+        let match_var = self.fresh_temp_var("Match");
+        let value_doc = self.expression_doc(value)?;
+
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        parts.push(Document::String(format!("let {match_var} = ")));
+        parts.push(value_doc);
+        parts.push(Document::String(format!(" in case {match_var} of ")));
+
+        for (i, arm) in arms.iter().enumerate() {
+            if i > 0 {
+                parts.push(Document::String(" ".to_string()));
+            }
+
+            // Generate pattern
+            let pattern_doc = self.generate_pattern(&arm.pattern)?;
+            parts.push(Document::String("<".to_string()));
+            parts.push(pattern_doc);
+            parts.push(Document::String(">".to_string()));
+
+            // Push scope and bind pattern variables so the guard and body
+            // can reference them directly instead of looking up the bindings map.
+            self.push_scope();
+            Self::collect_pattern_variables(&arm.pattern, |name, core_var| {
+                self.bind_var(name, core_var);
+            });
+
+            // Generate guard
+            if let Some(guard) = &arm.guard {
+                parts.push(Document::String(" when ".to_string()));
+                let guard_doc = self.generate_guard_expression(guard)?;
+                parts.push(guard_doc);
+            } else {
+                parts.push(Document::String(" when 'true'".to_string()));
+            }
+
+            // Generate body
+            parts.push(Document::String(" -> ".to_string()));
+            let body_doc = self.expression_doc(&arm.body)?;
+            parts.push(body_doc);
+
+            self.pop_scope();
+        }
+
+        parts.push(Document::String(" end".to_string()));
+        Ok(Document::Vec(parts))
+    }
+
+    /// Generates a Core Erlang pattern from a Pattern AST node.
+    fn generate_pattern(&self, pattern: &Pattern) -> Result<Document<'static>> {
+        match pattern {
+            Pattern::Wildcard(_) => Ok(Document::String("_".to_string())),
+            Pattern::Variable(id) => {
+                let var_name = Self::to_core_erlang_var(&id.name);
+                Ok(Document::String(var_name))
+            }
+            Pattern::Literal(lit, _) => self.generate_literal(lit),
+            Pattern::Tuple { elements, .. } => {
+                let mut parts = vec![Document::String("{".to_string())];
+                for (i, elem) in elements.iter().enumerate() {
+                    if i > 0 {
+                        parts.push(Document::String(", ".to_string()));
+                    }
+                    parts.push(self.generate_pattern(elem)?);
+                }
+                parts.push(Document::String("}".to_string()));
+                Ok(Document::Vec(parts))
+            }
+            Pattern::List { elements, tail, .. } => {
+                if elements.is_empty() && tail.is_none() {
+                    return Ok(Document::String("[]".to_string()));
+                }
+                let mut parts = vec![Document::String("[".to_string())];
+                for (i, elem) in elements.iter().enumerate() {
+                    if i > 0 {
+                        parts.push(Document::String(", ".to_string()));
+                    }
+                    parts.push(self.generate_pattern(elem)?);
+                }
+                if let Some(tail_pat) = tail {
+                    parts.push(Document::String(" | ".to_string()));
+                    parts.push(self.generate_pattern(tail_pat)?);
+                }
+                parts.push(Document::String("]".to_string()));
+                Ok(Document::Vec(parts))
+            }
+            Pattern::Binary { .. } => Err(CodeGenError::UnsupportedFeature {
+                feature: "binary pattern matching".to_string(),
+                location: format!("{:?}", pattern.span()),
+            }),
+        }
+    }
+
+    /// Generates a Core Erlang guard expression.
+    ///
+    /// Core Erlang guards only allow a restricted set of BIFs:
+    /// comparisons, arithmetic, and type checks.
+    fn generate_guard_expression(&mut self, expr: &Expression) -> Result<Document<'static>> {
+        match expr {
+            Expression::Literal(lit, _) => self.generate_literal(lit),
+            Expression::Identifier(id) => match id.name.as_str() {
+                "true" => Ok(Document::String("'true'".to_string())),
+                "false" => Ok(Document::String("'false'".to_string())),
+                "nil" => Ok(Document::String("'nil'".to_string())),
+                _ => {
+                    if let Some(var_name) = self.lookup_var(&id.name) {
+                        Ok(Document::String(var_name.clone()))
+                    } else {
+                        let var_name = Self::to_core_erlang_var(&id.name);
+                        Ok(Document::String(var_name))
+                    }
+                }
+            },
+            Expression::MessageSend {
+                receiver,
+                selector: MessageSelector::Binary(op),
+                arguments,
+                ..
+            } => {
+                let left = self.generate_guard_expression(receiver)?;
+                let right = self.generate_guard_expression(&arguments[0])?;
+                let erlang_op = match op.as_str() {
+                    ">" => ">",
+                    "<" => "<",
+                    ">=" => ">=",
+                    "<=" => "=<",
+                    "=" => "=:=",
+                    "~=" | "!=" => "=/=",
+                    "+" => "+",
+                    "-" => "-",
+                    "*" => "*",
+                    "/" => "/",
+                    _ => {
+                        return Err(CodeGenError::UnsupportedFeature {
+                            feature: format!("operator '{op}' in guard expression"),
+                            location: format!("{:?}", expr.span()),
+                        });
+                    }
+                };
+                Ok(docvec![
+                    format!("call 'erlang':'{erlang_op}'("),
+                    left,
+                    ", ",
+                    right,
+                    ")",
+                ])
+            }
+            _ => Err(CodeGenError::UnsupportedFeature {
+                feature: "complex guard expression (only comparisons and arithmetic allowed)"
+                    .to_string(),
+                location: format!("{:?}", expr.span()),
+            }),
+        }
+    }
+
+    /// Collects all variable names from a pattern and calls the callback
+    /// with the Beamtalk name and the corresponding Core Erlang variable name.
+    fn collect_pattern_variables(pattern: &Pattern, mut bind: impl FnMut(&str, &str)) {
+        Self::collect_pattern_variables_inner(pattern, &mut bind);
+    }
+
+    fn collect_pattern_variables_inner(pattern: &Pattern, bind: &mut impl FnMut(&str, &str)) {
+        match pattern {
+            Pattern::Variable(id) => {
+                let core_var = Self::to_core_erlang_var(&id.name);
+                bind(&id.name, &core_var);
+            }
+            Pattern::Tuple { elements, .. } | Pattern::List { elements, .. } => {
+                for elem in elements {
+                    Self::collect_pattern_variables_inner(elem, bind);
+                }
+                if let Pattern::List { tail: Some(t), .. } = pattern {
+                    Self::collect_pattern_variables_inner(t, bind);
+                }
+            }
+            Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Binary { .. } => {}
+        }
     }
 }
