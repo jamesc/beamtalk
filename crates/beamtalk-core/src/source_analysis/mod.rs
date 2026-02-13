@@ -43,6 +43,6 @@ mod token;
 
 pub use error::{LexError, LexErrorKind};
 pub use lexer::{Lexer, lex, lex_with_eof};
-pub use parser::{Diagnostic, Severity, parse};
+pub use parser::{Diagnostic, Severity, is_input_complete, parse};
 pub use span::Span;
 pub use token::{Token, TokenKind, Trivia};

@@ -53,7 +53,7 @@
 use crate::ast::{Comment, CommentKind, Module};
 #[cfg(test)]
 use crate::ast::{Expression, Literal, MessageSelector};
-use crate::source_analysis::{Span, Token, TokenKind};
+use crate::source_analysis::{Span, Token, TokenKind, Trivia, lex_with_eof};
 use ecow::EcoString;
 
 // Submodules with additional impl blocks for Parser
@@ -174,6 +174,112 @@ pub fn parse(tokens: Vec<Token>) -> (Module, Vec<Diagnostic>) {
     let mut parser = Parser::new(tokens);
     let module = parser.parse_module();
     (module, parser.diagnostics)
+}
+
+/// Checks whether the given source text appears syntactically complete for REPL
+/// evaluation.
+///
+/// This is a heuristic used by the REPL to decide whether to evaluate the
+/// current input buffer or show a continuation prompt for multi-line input.
+/// It returns `false` (incomplete) when:
+///
+/// - Delimiters are unclosed: `[`, `(`, `{`, `#{`, `#(`
+/// - A string or block comment is unterminated
+/// - The last token is a keyword (`at:`), binary operator (`+`), assignment
+///   (`:=`), cascade (`;`), or return (`^`) — all of which expect a following
+///   expression
+///
+/// Extra closing delimiters (e.g., `]` alone) are treated as complete so
+/// the evaluator can report the syntax error rather than waiting forever.
+///
+/// # Examples
+///
+/// ```
+/// use beamtalk_core::source_analysis::is_input_complete;
+///
+/// assert!(is_input_complete("3 + 4"));
+/// assert!(!is_input_complete("[:x | x * 2"));  // unclosed block
+/// assert!(!is_input_complete("array at:"));     // keyword missing argument
+/// ```
+#[must_use]
+pub fn is_input_complete(source: &str) -> bool {
+    if source.trim().is_empty() {
+        return true;
+    }
+
+    let tokens = lex_with_eof(source);
+
+    let mut bracket_depth: i32 = 0; // [ ]
+    let mut paren_depth: i32 = 0; // ( )
+    let mut brace_depth: i32 = 0; // { }
+    let mut last_meaningful_kind: Option<&TokenKind> = None;
+
+    for token in &tokens {
+        let kind = token.kind();
+
+        // Check for unterminated block comments in the EOF token's leading trivia
+        if kind.is_eof() {
+            for trivia in token.leading_trivia() {
+                if let Trivia::BlockComment(text) = trivia {
+                    if !text.ends_with("*/") {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        match kind {
+            // Error tokens indicate unterminated strings or other lexer failures
+            TokenKind::Error(_) => return false,
+
+            // Opening delimiters
+            TokenKind::LeftBracket => bracket_depth += 1,
+            TokenKind::LeftParen | TokenKind::ListOpen => paren_depth += 1,
+            TokenKind::LeftBrace | TokenKind::MapOpen => brace_depth += 1,
+
+            // Closing delimiters
+            TokenKind::RightBracket => bracket_depth -= 1,
+            TokenKind::RightParen => paren_depth -= 1,
+            TokenKind::RightBrace => brace_depth -= 1,
+
+            TokenKind::Eof => break,
+            _ => {}
+        }
+
+        if !kind.is_eof() {
+            last_meaningful_kind = Some(kind);
+        }
+    }
+
+    // Unclosed delimiters
+    if bracket_depth > 0 || paren_depth > 0 || brace_depth > 0 {
+        return false;
+    }
+
+    // Trailing keyword missing its argument (e.g., "array at:" or "x ifTrue:")
+    if let Some(TokenKind::Keyword(_)) = last_meaningful_kind {
+        return false;
+    }
+
+    // Trailing binary operator missing its right operand (e.g., "1 +" or "3 *")
+    if let Some(TokenKind::BinarySelector(_)) = last_meaningful_kind {
+        return false;
+    }
+
+    // Trailing assignment missing its value (e.g., "x :=")
+    if let Some(TokenKind::Assign) = last_meaningful_kind {
+        return false;
+    }
+
+    // Trailing cascade separator or return operator (e.g., "x foo;" or "^")
+    if matches!(
+        last_meaningful_kind,
+        Some(TokenKind::Semicolon | TokenKind::Caret)
+    ) {
+        return false;
+    }
+
+    true
 }
 
 /// A diagnostic message (error or warning).
@@ -2718,5 +2824,193 @@ Actor subclass: Counter
             method.doc_comment.as_deref(),
             Some("Creates a counter starting at the given value.")
         );
+    }
+
+    // === is_input_complete tests ===
+
+    #[test]
+    fn complete_simple_expression() {
+        assert!(is_input_complete("3 + 4"));
+    }
+
+    #[test]
+    fn complete_empty_input() {
+        assert!(is_input_complete(""));
+        assert!(is_input_complete("   "));
+    }
+
+    #[test]
+    fn complete_assignment() {
+        assert!(is_input_complete("x := 42"));
+    }
+
+    #[test]
+    fn complete_keyword_message() {
+        assert!(is_input_complete("array at: 1 put: 'hello'"));
+    }
+
+    #[test]
+    fn complete_block() {
+        assert!(is_input_complete("[:x | x * 2]"));
+    }
+
+    #[test]
+    fn complete_nested_blocks() {
+        assert!(is_input_complete("[:x | [:y | x + y]]"));
+    }
+
+    #[test]
+    fn complete_parenthesized() {
+        assert!(is_input_complete("(3 + 4) * 2"));
+    }
+
+    #[test]
+    fn complete_map_literal() {
+        assert!(is_input_complete("#{name => 'Alice', age => 30}"));
+    }
+
+    #[test]
+    fn complete_list_literal() {
+        assert!(is_input_complete("#(1, 2, 3)"));
+    }
+
+    #[test]
+    fn complete_tuple_literal() {
+        assert!(is_input_complete("{1, 2, 3}"));
+    }
+
+    #[test]
+    fn complete_string() {
+        assert!(is_input_complete("'hello world'"));
+    }
+
+    #[test]
+    fn complete_interpolated_string() {
+        assert!(is_input_complete("\"hello world\""));
+    }
+
+    #[test]
+    fn complete_with_period() {
+        assert!(is_input_complete("x := 1."));
+    }
+
+    #[test]
+    fn complete_multi_statement() {
+        assert!(is_input_complete("x := 1.\ny := 2"));
+    }
+
+    #[test]
+    fn incomplete_unclosed_block() {
+        assert!(!is_input_complete("["));
+        assert!(!is_input_complete("[:x | x * 2"));
+        assert!(!is_input_complete("[:x | [:y | x + y]"));
+    }
+
+    #[test]
+    fn incomplete_unclosed_paren() {
+        assert!(!is_input_complete("("));
+        assert!(!is_input_complete("(3 + 4"));
+    }
+
+    #[test]
+    fn incomplete_unclosed_brace() {
+        assert!(!is_input_complete("{"));
+        assert!(!is_input_complete("{1, 2"));
+    }
+
+    #[test]
+    fn incomplete_unclosed_map() {
+        assert!(!is_input_complete("#{"));
+        assert!(!is_input_complete("#{name => 'Alice'"));
+    }
+
+    #[test]
+    fn incomplete_unclosed_list() {
+        assert!(!is_input_complete("#("));
+        assert!(!is_input_complete("#(1, 2"));
+    }
+
+    #[test]
+    fn incomplete_unterminated_string() {
+        assert!(!is_input_complete("'hello"));
+    }
+
+    #[test]
+    fn incomplete_unterminated_interpolated_string() {
+        assert!(!is_input_complete("\"hello"));
+    }
+
+    #[test]
+    fn incomplete_trailing_keyword() {
+        assert!(!is_input_complete("array at:"));
+        assert!(!is_input_complete("array at: 1 put:"));
+        assert!(!is_input_complete("x ifTrue:"));
+    }
+
+    #[test]
+    fn incomplete_unterminated_block_comment() {
+        assert!(!is_input_complete("/* unterminated comment"));
+        assert!(!is_input_complete("x := 1 /* still going"));
+    }
+
+    #[test]
+    fn complete_block_comment() {
+        assert!(is_input_complete("/* comment */ x := 1"));
+    }
+
+    #[test]
+    fn complete_multiline_block() {
+        assert!(is_input_complete("[:x |\n  x * 2\n]"));
+    }
+
+    #[test]
+    fn complete_multiline_map() {
+        assert!(is_input_complete("#{\n  name => 'Alice',\n  age => 30\n}"));
+    }
+
+    #[test]
+    fn incomplete_multiline_block() {
+        assert!(!is_input_complete("[:x |\n  x * 2"));
+    }
+
+    #[test]
+    fn incomplete_trailing_binary_operator() {
+        assert!(!is_input_complete("x := 1 +"));
+        assert!(!is_input_complete("3 *"));
+    }
+
+    #[test]
+    fn incomplete_trailing_assign() {
+        assert!(!is_input_complete("x :="));
+    }
+
+    #[test]
+    fn complete_binary_continuation_on_new_line() {
+        assert!(is_input_complete("x := 1 +\n  2"));
+    }
+
+    #[test]
+    fn complete_line_comment_only() {
+        assert!(is_input_complete("// just a comment"));
+    }
+
+    #[test]
+    fn complete_extra_closing_delimiters() {
+        // Extra closing delimiters are "complete" — they'll produce syntax errors
+        // when evaluated, which is the desired behavior (show the error, don't
+        // loop waiting for more input that can never balance them).
+        assert!(is_input_complete("]"));
+        assert!(is_input_complete(")"));
+        assert!(is_input_complete("}"));
+    }
+
+    #[test]
+    fn incomplete_trailing_cascade() {
+        assert!(!is_input_complete("x foo;"));
+    }
+
+    #[test]
+    fn incomplete_trailing_caret() {
+        assert!(!is_input_complete("^"));
     }
 }
