@@ -290,7 +290,7 @@ impl CoreErlangGenerator {
             "    let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
             hint_binary,
             ") in\n",
-            "    call 'erlang':'error'(Error2)\n",
+            "    call 'beamtalk_error':'raise'(Error2)\n",
             "\n",
         ])
     }

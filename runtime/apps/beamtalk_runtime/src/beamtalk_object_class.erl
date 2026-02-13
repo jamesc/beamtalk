@@ -581,7 +581,7 @@ handle_call({spawn, Args}, _From, #class_state{
                 Error0 = beamtalk_error:new(type_error, ClassName),
                 Error1 = beamtalk_error:with_selector(Error0, 'spawnWith:'),
                 Error2 = beamtalk_error:with_hint(Error1, <<"spawnWith: expects a Dictionary argument">>),
-                error(Error2)
+                beamtalk_error:raise(Error2)
         end,
         case SpawnResult of
             {beamtalk_object, _, _, _} = Obj ->
@@ -703,7 +703,7 @@ handle_call({new, Args}, _From, #class_state{
                                 Error0 = beamtalk_error:new(type_error, ClassName),
                                 Error1 = beamtalk_error:with_selector(Error0, 'new:'),
                                 Error2 = beamtalk_error:with_hint(Error1, <<"new: expects a Dictionary argument">>),
-                                error(Error2)
+                                beamtalk_error:raise(Error2)
                         end
                 end,
                 {reply, {ok, Result}, State}
@@ -978,11 +978,15 @@ code_change(OldVsn, State, Extra) ->
 %% @private
 %% @doc Unwrap a class gen_server call result for use in class_send.
 %%
-%% Translates {ok, Value} → Value, {error, Error} → raise(Error).
-%% This DRYs the repeated unwrap pattern in class_send/3 clauses.
+%% Translates {ok, Value} → Value, {error, Error} → re-raise as exception.
+%% Handles both raw #beamtalk_error{} records and already-wrapped Exception
+%% maps (from raise/1 inside handle_call). Uses ensure_wrapped/1 for
+%% idempotent wrapping (BT-525).
 -spec unwrap_class_call(term()) -> term().
 unwrap_class_call({ok, Value}) -> Value;
-unwrap_class_call({error, Error}) -> beamtalk_error:raise(Error).
+unwrap_class_call({error, Error}) ->
+    Wrapped = beamtalk_exception_handler:ensure_wrapped(Error),
+    error(Wrapped).
 
 %% @private
 %% @doc Build a structured instantiation_error for abstract classes.
