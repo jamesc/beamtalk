@@ -81,6 +81,29 @@ fn validate_block_arity_range(
     Ok(())
 }
 
+/// BT-493: Validates that an `on:do:` handler block has arity 0 or 1.
+/// Returns `true` if the handler takes an argument (arity 1 or non-literal), `false` for arity 0.
+/// Follows the same pattern as `validate_if_not_nil_block`.
+pub(in crate::codegen::core_erlang) fn validate_on_do_handler(
+    expr: &Expression,
+    selector: &str,
+) -> Result<bool> {
+    match block_arity(expr) {
+        Some(0) => Ok(false),
+        Some(n) if n > 1 => Err(CodeGenError::BlockArityError {
+            selector: selector.to_string(),
+            expected: "0 or 1".to_string(),
+            actual: n,
+            hint: "Fix: The handler block must take 0 or 1 arguments (the exception):\n\
+                   \x20 [...] on: Exception do: [:e | e message]\n\
+                   \x20 [...] on: Exception do: ['error occurred']"
+                .to_string(),
+        }),
+        // Arity 1 or non-literal block — pass the exception
+        _ => Ok(true),
+    }
+}
+
 /// Validates that an `ifNotNil:` block has arity 0 or 1.
 /// Returns `true` if the block takes an argument (arity 1 or non-literal), `false` for arity 0.
 fn validate_if_not_nil_block(expr: &Expression, selector: &str) -> Result<bool> {
@@ -1072,5 +1095,37 @@ mod tests {
     fn test_validate_range_non_literal_passes() {
         let expr = Expression::Identifier(crate::ast::Identifier::new("myBlock", Span::new(0, 7)));
         assert!(validate_block_arity_range(&expr, 0, 1, "on:do:", "hint").is_ok());
+    }
+
+    // BT-493: Tests for validate_on_do_handler
+
+    #[test]
+    fn test_validate_on_do_handler_zero_args() {
+        // 0-arg handler: valid, returns false (don't pass exception)
+        assert!(!validate_on_do_handler(&make_block(0), "on:do:").unwrap());
+    }
+
+    #[test]
+    fn test_validate_on_do_handler_one_arg() {
+        // 1-arg handler: valid, returns true (pass exception)
+        assert!(validate_on_do_handler(&make_block(1), "on:do:").unwrap());
+    }
+
+    #[test]
+    fn test_validate_on_do_handler_two_args_errors() {
+        let result = validate_on_do_handler(&make_block(2), "on:do:");
+        assert!(result.is_err());
+        if let Err(CodeGenError::BlockArityError { actual, .. }) = result {
+            assert_eq!(actual, 2);
+        } else {
+            panic!("Expected BlockArityError");
+        }
+    }
+
+    #[test]
+    fn test_validate_on_do_handler_non_literal() {
+        // Non-block expression — assumes 1 arg (pass exception)
+        let expr = Expression::Identifier(crate::ast::Identifier::new("myBlock", Span::new(0, 7)));
+        assert!(validate_on_do_handler(&expr, "on:do:").unwrap());
     }
 }
