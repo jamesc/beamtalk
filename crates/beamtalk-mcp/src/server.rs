@@ -228,7 +228,7 @@ impl BeamtalkMcp {
     }
 
     #[tool(
-        description = "List all running actors in the workspace. Returns each actor's PID, class, module, and spawn time."
+        description = "List all running actors in the workspace. Returns each actor's PID, class, and module."
     )]
     async fn list_actors(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         let response = self

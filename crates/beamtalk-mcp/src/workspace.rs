@@ -57,7 +57,8 @@ pub fn discover_any_port() -> Option<u16> {
     let entries = std::fs::read_dir(dir).ok()?;
 
     for entry in entries.flatten() {
-        if entry.file_type().ok()?.is_dir() {
+        let is_dir = entry.file_type().is_ok_and(|ft| ft.is_dir());
+        if is_dir {
             let port_file = entry.path().join("port");
             if let Ok(content) = std::fs::read_to_string(port_file) {
                 if let Ok(port) = content.trim().parse::<u16>() {
