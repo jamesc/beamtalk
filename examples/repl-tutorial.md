@@ -236,6 +236,110 @@ After editing a file:
 Error: Actor process <0.125.0> is not alive
 ```
 
+## Streams — Lazy Data Pipelines
+
+Beamtalk has a `Stream` class for lazy, composable data processing. Operations build up a pipeline — nothing computes until you use a **terminal** operation like `take:` or `asList`.
+
+### Infinite Sequences
+
+```beamtalk
+> (Stream from: 1) take: 5
+[1,2,3,4,5]
+
+> (Stream from: 1 by: [:n | n * 2]) take: 6
+[1,2,4,8,16,32]
+```
+
+### Pipeline Composition
+
+Chain lazy operations to build a pipeline, then pull results with a terminal:
+
+```beamtalk
+> evens := (Stream from: 1) select: [:n | n isEven]
+a Stream
+
+> evens take: 5
+[2,4,6,8,10]
+
+> squares := evens collect: [:n | n * n]
+a Stream
+
+> squares take: 4
+[4,16,36,64]
+```
+
+### Streaming Collections
+
+Any collection responds to `stream` for lazy processing:
+
+```beamtalk
+> (#(1, 2, 3, 4, 5) stream) select: [:n | n > 2]
+a Stream
+
+> ((#(1, 2, 3, 4, 5) stream) select: [:n | n > 2]) asList
+[3,4,5]
+
+> ('hello' stream) take: 3
+["h","e","l"]
+```
+
+**Eager vs Lazy:** Collection methods like `List select:` return a List immediately. Using `stream` first makes it lazy — you choose:
+
+```beamtalk
+> #(1, 2, 3) select: [:n | n > 1]
+[2,3]
+
+> (#(1, 2, 3) stream) select: [:n | n > 1]
+a Stream
+```
+
+### File Streaming
+
+Read files lazily — constant memory, safe for large files:
+
+```beamtalk
+> (File lines: 'examples/hello.bt') take: 3
+["// Copyright 2026 James Casey","// SPDX-License-Identifier: Apache-2.0",""]
+
+> (File lines: 'examples/hello.bt') inject: 0 into: [:count :line | count + 1]
+5
+```
+
+Block-scoped handles close automatically:
+
+```beamtalk
+> File open: 'examples/hello.bt' do: [:handle | handle lines take: 2]
+["// Copyright 2026 James Casey","// SPDX-License-Identifier: Apache-2.0"]
+```
+
+**Note:** File-backed Streams must be consumed by the same process that created them. To send file data to an actor, materialize with `take:` or `asList` first.
+
+### Inspecting Pipelines
+
+`printString` shows the pipeline structure without evaluating it:
+
+```beamtalk
+> (Stream from: 1) printString
+Stream(from: 1)
+
+> ((Stream from: 1) select: [:n | n isEven]) printString
+Stream(from: 1) | select: [...]
+```
+
+### Terminal Operations Reference
+
+| Method | Description |
+|--------|-------------|
+| `take:` | First N elements as List |
+| `asList` | Materialize entire stream |
+| `do:` | Iterate with side effects |
+| `inject:into:` | Fold/reduce |
+| `detect:` | First match or nil |
+| `anySatisfy:` | Any element matches? |
+| `allSatisfy:` | All elements match? |
+
+**⚠️ Side effects are lazy:** In a pipeline like `stream collect: [:x | Transcript show: x. x * 2]`, the `show:` only runs when a terminal operation pulls elements through — not when the pipeline is defined.
+
 ## Exiting the REPL
 
 ```beamtalk
@@ -291,6 +395,7 @@ Goodbye!
 ## Next Steps
 
 - Explore the `examples/` directory for more sample programs
+- Try `examples/stream.bt` for lazy pipeline and file streaming examples
 - Read `docs/beamtalk-language-features.md` for full language syntax
 - Check out `docs/beamtalk-principles.md` to understand the design philosophy
 - Try building your own actors and experimenting with message passing!
