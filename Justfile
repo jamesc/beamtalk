@@ -90,8 +90,8 @@ dialyzer:
 # Testing
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Run fast tests (Rust unit/integration + Erlang runtime, skip slow E2E)
-test: test-rust test-runtime
+# Run fast tests (Rust unit/integration + stdlib + Erlang runtime, skip slow E2E)
+test: test-rust test-runtime test-stdlib
 
 # Run Rust tests (unit + integration, skip slow E2E)
 test-rust:
@@ -324,7 +324,7 @@ purge-cargo-cache:
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Start the REPL (builds Rust first if needed)
-repl: build-rust
+repl: build-stdlib
     @echo "🚀 Starting Beamtalk REPL..."
     cargo run --bin beamtalk -- repl
 
@@ -341,6 +341,29 @@ daemon-stop:
 # Check daemon status
 daemon-status:
     @cargo run --bin beamtalk -- daemon status
+
+# Stop the current project's workspace
+workspace-stop:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if ! STATUS_OUT=$(cargo run --bin beamtalk --quiet -- workspace status 2>&1); then
+        echo "No running workspace found for this project."
+        exit 0
+    fi
+    WS_ID=$(echo "$STATUS_OUT" | head -1 | awk '{print $2}')
+    if [ -n "$WS_ID" ]; then
+        cargo run --bin beamtalk --quiet -- workspace stop "$WS_ID" 2>&1 || echo "Workspace $WS_ID is not running."
+    else
+        echo "No running workspace found for this project."
+    fi
+
+# Show workspace status
+workspace-status:
+    @cargo run --bin beamtalk --quiet -- workspace status
+
+# List all workspaces
+workspace-list:
+    @cargo run --bin beamtalk --quiet -- workspace list
 
 # Run a Beamtalk file
 run FILE: build-rust
