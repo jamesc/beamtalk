@@ -111,6 +111,46 @@ test-integration: build-stdlib
     cargo test --bin beamtalk -- --ignored --test-threads=1
     @echo "✅ Integration tests complete"
 
+# Run MCP server integration tests (starts REPL, runs tests, tears down, ~15s)
+test-mcp: build-stdlib
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🧪 Running MCP server integration tests..."
+
+    # Start a REPL workspace in the background
+    MCP_TEST_PORT=19876
+    ./target/debug/beamtalk repl --port "$MCP_TEST_PORT" &
+    REPL_PID=$!
+
+    # Ensure cleanup on exit
+    cleanup() {
+        kill "$REPL_PID" 2>/dev/null || true
+        wait "$REPL_PID" 2>/dev/null || true
+    }
+    trap cleanup EXIT
+
+    # Wait for REPL to be ready
+    for i in $(seq 1 30); do
+        if ss -tlnp 2>/dev/null | grep -q ":${MCP_TEST_PORT} " || \
+           nc -z 127.0.0.1 "$MCP_TEST_PORT" 2>/dev/null; then
+            break
+        fi
+        sleep 1
+    done
+
+    # Verify connection
+    if ! nc -z 127.0.0.1 "$MCP_TEST_PORT" 2>/dev/null; then
+        echo "❌ REPL failed to start on port $MCP_TEST_PORT"
+        exit 1
+    fi
+
+    echo "  REPL running on port $MCP_TEST_PORT (pid $REPL_PID)"
+
+    # Run the MCP integration tests
+    cargo test -p beamtalk-mcp -- --ignored --test-threads=1
+
+    echo "✅ MCP integration tests complete"
+
 # Run ALL tests (unit + integration + E2E + Erlang runtime)
 test-all: test-rust test-stdlib test-integration test-e2e test-runtime
 
