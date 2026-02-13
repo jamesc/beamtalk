@@ -6,12 +6,29 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - 'SECURITY.md'
+      - '.github/skills/**'
+      - '.devcontainer/**'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - 'SECURITY.md'
+      - '.github/skills/**'
+      - '.devcontainer/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
-  pull-requests: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -19,6 +36,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         with:
@@ -109,7 +127,11 @@ jobs:
         run: just test-runtime
 
   coverage:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v6
 
@@ -247,6 +269,8 @@ jobs:
           echo "📁 **Detailed HTML Reports:** Download the \`coverage-reports\` artifact for per-module breakdowns" >> $GITHUB_STEP_SUMMARY
 
       - name: Check Coverage Thresholds
+        id: rust_thresholds
+        continue-on-error: true
         run: |
           # Extract Rust line coverage percentage from CodeCoverageSummary output
           # The action outputs to rust-coverage-results.md (markdown format)
@@ -263,6 +287,7 @@ jobs:
           
           echo "Rust Line Coverage: ${rust_coverage}%"
           echo "Rust Branch Coverage: ${rust_branch}%"
+          echo "rust_coverage=${rust_coverage}" >> "$GITHUB_OUTPUT"
           
           # Check thresholds using awk for portability (no bc dependency)
           line_check=$(awk -v cov="$rust_coverage" 'BEGIN { if (cov < 70.0) print "FAIL"; else print "PASS" }')
@@ -281,6 +306,8 @@ jobs:
           echo "✅ Coverage thresholds met"
 
       - name: Check Erlang Coverage Thresholds
+        id: erlang_thresholds
+        continue-on-error: true
         run: |
           if [ ! -f erlang-coverage-results.md ]; then
             echo "⚠️ WARNING: erlang-coverage-results.md not found, skipping threshold check"
@@ -292,6 +319,7 @@ jobs:
           
           echo "Erlang Line Coverage: ${erlang_coverage}%"
           echo "Erlang Branch Coverage: ${erlang_branch}%"
+          echo "erlang_coverage=${erlang_coverage}" >> "$GITHUB_OUTPUT"
           
           line_check=$(awk -v cov="$erlang_coverage" 'BEGIN { if (cov < 50.0) print "FAIL"; else print "PASS" }')
           branch_check=$(awk -v cov="$erlang_branch" 'BEGIN { if (cov < 60.0) print "WARN"; else print "PASS" }')
@@ -308,33 +336,57 @@ jobs:
           
           echo "✅ Erlang coverage thresholds met"
 
-      - name: Prepare PR Comment
-        if: github.event_name == 'pull_request'
+      - name: Publish coverage badges
         run: |
-          # Get short commit hash
-          COMMIT_HASH=$(echo "${{ github.event.pull_request.head.sha }}" | cut -c1-7)
-          
-          cat > pr-comment.md << EOF
-          ## 📊 Code Coverage Report (${COMMIT_HASH})
-          
-          ### Rust Coverage
-          EOF
-          if [ -f rust-coverage-results.md ]; then
-            cat rust-coverage-results.md >> pr-comment.md
-          else
-            echo "⚠️ WARNING: Rust coverage report not generated" >> pr-comment.md
-          fi
-          echo "" >> pr-comment.md
-          echo "### Erlang Coverage" >> pr-comment.md
-          if [ -f erlang-coverage-results.md ]; then
-            cat erlang-coverage-results.md >> pr-comment.md
-          else
-            echo "⚠️ WARNING: Erlang coverage report not generated" >> pr-comment.md
+          # Determine badge colors based on coverage percentage
+          badge_color() {
+            local cov=$1
+            awk -v c="$cov" 'BEGIN {
+              if (c >= 80) print "brightgreen"
+              else if (c >= 70) print "green"
+              else if (c >= 60) print "yellowgreen"
+              else if (c >= 50) print "yellow"
+              else print "red"
+            }'
+          }
+
+          RUST_COV="${{ steps.rust_thresholds.outputs.rust_coverage }}"
+          ERLANG_COV="${{ steps.erlang_thresholds.outputs.erlang_coverage }}"
+
+          # Guard against missing or non-numeric coverage values
+          RUST_MSG="unknown"
+          RUST_COLOR="lightgrey"
+          ERLANG_MSG="unknown"
+          ERLANG_COLOR="lightgrey"
+
+          if echo "$RUST_COV" | grep -Eq '^[0-9]+([.][0-9]+)?$'; then
+            RUST_MSG="${RUST_COV}%"
+            RUST_COLOR=$(badge_color "$RUST_COV")
           fi
 
-      - name: Add PR Comment
-        if: github.event_name == 'pull_request'
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          recreate: true
-          path: pr-comment.md
+          if echo "$ERLANG_COV" | grep -Eq '^[0-9]+([.][0-9]+)?$'; then
+            ERLANG_MSG="${ERLANG_COV}%"
+            ERLANG_COLOR=$(badge_color "$ERLANG_COV")
+          fi
+
+          # Create badge JSON files (shields.io endpoint format)
+          mkdir -p badges
+          echo "{\"schemaVersion\":1,\"label\":\"Rust coverage\",\"message\":\"${RUST_MSG}\",\"color\":\"${RUST_COLOR}\"}" > badges/rust-coverage.json
+          echo "{\"schemaVersion\":1,\"label\":\"Erlang coverage\",\"message\":\"${ERLANG_MSG}\",\"color\":\"${ERLANG_COLOR}\"}" > badges/erlang-coverage.json
+
+          # Commit to badges branch
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan badges-tmp
+          git rm -rf . > /dev/null 2>&1 || true
+          cp -r badges/* .
+          rm -rf badges
+          git add rust-coverage.json erlang-coverage.json
+          git commit -m "Update coverage badges [skip ci]"
+          git push origin HEAD:badges --force
+
+      - name: Fail if coverage thresholds not met
+        if: steps.rust_thresholds.outcome == 'failure' || steps.erlang_thresholds.outcome == 'failure'
+        run: |
+          echo "❌ Coverage thresholds not met (see above for details)"
+          exit 1
