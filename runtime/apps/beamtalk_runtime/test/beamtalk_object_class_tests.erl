@@ -69,6 +69,8 @@ teardown(_) ->
          beamtalk_class_HierRoot, beamtalk_class_HierMid, beamtalk_class_HierLeaf,
          beamtalk_class_HierOrphan, beamtalk_class_HierParent, beamtalk_class_HierChild]
     ),
+    %% Clean up ETS hierarchy table entries
+    try ets:delete_all_objects(beamtalk_class_hierarchy) catch _:_ -> ok end,
     ok.
 
 %%====================================================================

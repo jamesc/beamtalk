@@ -1084,7 +1084,8 @@ ensure_hierarchy_table() ->
         undefined ->
             try
                 ets:new(beamtalk_class_hierarchy,
-                        [set, public, named_table, {read_concurrency, true}])
+                        [set, public, named_table, {read_concurrency, true}]),
+                ok
             catch
                 error:badarg -> ok  % Another process created it first
             end;
