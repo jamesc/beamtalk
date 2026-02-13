@@ -110,16 +110,30 @@ code_change(_OldVsn, State, _Extra) ->
 write_port_file(undefined, _Port) ->
     ok;
 write_port_file(WorkspaceId, Port) ->
-    Home = os:getenv("HOME", "/tmp"),
-    PortFilePath = filename:join([Home, ".beamtalk", "workspaces",
-                                  binary_to_list(WorkspaceId), "port"]),
-    case file:write_file(PortFilePath, integer_to_list(Port)) of
-        ok ->
-            logger:debug("Wrote port file: ~s (port ~p)", [PortFilePath, Port]),
+    case os:getenv("HOME") of
+        false ->
+            logger:warning("HOME not set; skipping port file write for workspace ~p",
+                           [WorkspaceId]),
             ok;
-        {error, Reason} ->
-            logger:warning("Failed to write port file ~s: ~p", [PortFilePath, Reason]),
-            ok
+        Home ->
+            PortFilePath = filename:join([Home, ".beamtalk", "workspaces",
+                                          binary_to_list(WorkspaceId), "port"]),
+            case filelib:ensure_dir(PortFilePath) of
+                ok ->
+                    case file:write_file(PortFilePath, integer_to_list(Port)) of
+                        ok ->
+                            logger:debug("Wrote port file: ~s (port ~p)", [PortFilePath, Port]),
+                            ok;
+                        {error, Reason} ->
+                            logger:warning("Failed to write port file ~s: ~p",
+                                           [PortFilePath, Reason]),
+                            ok
+                    end;
+                {error, Reason} ->
+                    logger:warning("Failed to create directory for port file ~s: ~p",
+                                   [PortFilePath, Reason]),
+                    ok
+            end
     end.
 
 %%% Acceptor Process

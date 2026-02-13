@@ -134,27 +134,52 @@ impl Drop for BeamChildGuard {
 
 /// Read the actual port from a BEAM child process's stdout.
 /// The BEAM node prints `BEAMTALK_PORT:<port>` after binding to the OS-assigned port.
+///
+/// Uses a background thread for reading so the deadline is enforced even if
+/// the child blocks without producing a full line. Takes ownership of stdout
+/// via `take()` since it must be moved into the thread; this is fine because
+/// all further BEAM communication uses TCP, not stdout.
 pub(super) fn read_port_from_child(child: &mut Child) -> Result<u16> {
     let stdout = child
         .stdout
         .take()
         .ok_or_else(|| miette!("Cannot read stdout from BEAM child process"))?;
 
-    let reader = BufReader::new(stdout);
-    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    let (tx, rx) = std::sync::mpsc::channel();
 
-    for line in reader.lines() {
-        if std::time::Instant::now() > deadline {
+    // Read lines in a background thread so the main thread can enforce a timeout.
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            match line {
+                Ok(line) => {
+                    if tx.send(line).is_err() {
+                        break; // receiver dropped (timeout)
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
             break;
         }
-        let line = line.into_diagnostic()?;
-        if let Some(port_str) = line.strip_prefix("BEAMTALK_PORT:") {
-            let port = port_str
-                .trim()
-                .parse::<u16>()
-                .map_err(|_| miette!("Invalid port in BEAMTALK_PORT line: {port_str}"))?;
-            info!("BEAM node bound to port {port}");
-            return Ok(port);
+        match rx.recv_timeout(remaining) {
+            Ok(line) => {
+                if let Some(port_str) = line.strip_prefix("BEAMTALK_PORT:") {
+                    let port = port_str
+                        .trim()
+                        .parse::<u16>()
+                        .map_err(|_| miette!("Invalid port in BEAMTALK_PORT line: {port_str}"))?;
+                    info!("BEAM node bound to port {port}");
+                    return Ok(port);
+                }
+            }
+            Err(_) => break,
         }
     }
 
