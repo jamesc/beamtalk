@@ -184,12 +184,14 @@ handle_cast({recent, [], FuturePid}, State) when is_pid(FuturePid) ->
 handle_cast({clear, [], FuturePid}, State) when is_pid(FuturePid) ->
     beamtalk_future:resolve(FuturePid, nil),
     {noreply, State#state{buffer = queue:new(), buffer_size = 0}};
-handle_cast({subscribe, [Pid], FuturePid}, State) when is_pid(FuturePid), is_pid(Pid) ->
+handle_cast({subscribe, [], FuturePid}, State) when is_pid(FuturePid) ->
+    CallerPid = caller_from_future(FuturePid),
     beamtalk_future:resolve(FuturePid, nil),
-    {noreply, add_subscriber(Pid, State)};
-handle_cast({'unsubscribe:', [Pid], FuturePid}, State) when is_pid(FuturePid), is_pid(Pid) ->
+    {noreply, add_subscriber(CallerPid, State)};
+handle_cast({unsubscribe, [], FuturePid}, State) when is_pid(FuturePid) ->
+    CallerPid = caller_from_future(FuturePid),
     beamtalk_future:resolve(FuturePid, nil),
-    {noreply, remove_subscriber(Pid, State)};
+    {noreply, remove_subscriber(CallerPid, State)};
 %% Legacy format (direct gen_server:cast without Future)
 handle_cast({'show:', Value}, State) ->
     Text = to_string(Value),
@@ -209,7 +211,7 @@ handle_cast({unsubscribe, Pid}, State) ->
 handle_cast({UnknownSelector, _Args, FuturePid}, State) when is_pid(FuturePid), is_atom(UnknownSelector) ->
     Error0 = beamtalk_error:new(does_not_understand, 'Transcript'),
     Error1 = beamtalk_error:with_selector(Error0, UnknownSelector),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Supported methods: show:, cr, recent, clear, subscribe, unsubscribe:">>),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Supported methods: show:, cr, recent, clear, subscribe, unsubscribe">>),
     beamtalk_future:reject(FuturePid, Error2),
     {noreply, State};
 handle_cast(_Msg, State) ->
@@ -234,6 +236,17 @@ terminate(_Reason, _State) ->
 %%% ============================================================================
 %%% Internal Functions
 %%% ============================================================================
+
+%% @private
+%% @doc Derive the caller's session PID from a future process.
+%% Uses group_leader to identify the session that spawned the future.
+%% Falls back to the FuturePid itself if the future has already exited.
+-spec caller_from_future(pid()) -> pid().
+caller_from_future(FuturePid) ->
+    case erlang:process_info(FuturePid, group_leader) of
+        {group_leader, GL} -> GL;
+        undefined -> FuturePid
+    end.
 
 %% @private
 %% @doc Add text to the ring buffer, dropping oldest if at capacity.
