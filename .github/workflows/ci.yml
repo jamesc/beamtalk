@@ -29,7 +29,6 @@ concurrency:
 
 permissions:
   contents: read
-  pull-requests: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -128,6 +127,7 @@ jobs:
         run: just test-runtime
 
   coverage:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -327,34 +327,3 @@ jobs:
           fi
           
           echo "✅ Erlang coverage thresholds met"
-
-      - name: Prepare PR Comment
-        if: github.event_name == 'pull_request'
-        run: |
-          # Get short commit hash
-          COMMIT_HASH=$(echo "${{ github.event.pull_request.head.sha }}" | cut -c1-7)
-          
-          cat > pr-comment.md << EOF
-          ## 📊 Code Coverage Report (${COMMIT_HASH})
-          
-          ### Rust Coverage
-          EOF
-          if [ -f rust-coverage-results.md ]; then
-            cat rust-coverage-results.md >> pr-comment.md
-          else
-            echo "⚠️ WARNING: Rust coverage report not generated" >> pr-comment.md
-          fi
-          echo "" >> pr-comment.md
-          echo "### Erlang Coverage" >> pr-comment.md
-          if [ -f erlang-coverage-results.md ]; then
-            cat erlang-coverage-results.md >> pr-comment.md
-          else
-            echo "⚠️ WARNING: Erlang coverage report not generated" >> pr-comment.md
-          fi
-
-      - name: Add PR Comment
-        if: github.event_name == 'pull_request'
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          recreate: true
-          path: pr-comment.md
