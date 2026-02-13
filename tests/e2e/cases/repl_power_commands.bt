@@ -21,14 +21,14 @@ c := Counter spawn
 
 // Inspect the Counter actor state — should show the value field
 :inspect Counter
-// => _
+// => _"value":_
 
-// Increment and inspect again to verify state changed
+// Increment and inspect again to verify state is accessible
 c increment
 // => 1
 
 :inspect Counter
-// => _
+// => _"value":_
 
 // ===========================================================================
 // :unload — UNLOAD A MODULE

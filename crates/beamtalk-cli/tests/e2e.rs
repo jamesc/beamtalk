@@ -1032,6 +1032,8 @@ impl ReplClient {
     }
 
     /// Get the PID of the first actor of a given class from the actors list.
+    /// Note: actor ordering from the server is non-deterministic (map-based).
+    /// This is acceptable for E2E tests where we need any valid actor of a class.
     fn get_first_actor_pid(&mut self, class_name: &str) -> Result<String, String> {
         let response = self.send_op(&serde_json::json!({
             "op": "actors",
