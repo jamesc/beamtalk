@@ -1,0 +1,59 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for class methods reflection (BT-510)
+//
+// Verifies that `methods` returns both local and inherited methods
+// for user-defined classes, not just local methods.
+
+// @load tests/e2e/fixtures/counter.bt
+
+// ---------------------------------------------------------------------------
+// Counter local methods
+// ---------------------------------------------------------------------------
+
+counterMethods := Counter methods
+// => _
+
+counterMethods isEmpty
+// => false
+
+// Counter defines increment, decrement, getValue
+counterMethods includes: #increment
+// => true
+
+counterMethods includes: #decrement
+// => true
+
+counterMethods includes: #getValue
+// => true
+
+// ---------------------------------------------------------------------------
+// Counter should inherit Object methods via Actor
+// ---------------------------------------------------------------------------
+
+counterMethods includes: #isNil
+// => true
+
+counterMethods includes: #printString
+// => true
+
+counterMethods includes: #respondsTo:
+// => true
+
+counterMethods includes: #yourself
+// => true
+
+// ---------------------------------------------------------------------------
+// Primitive class methods still work
+// ---------------------------------------------------------------------------
+
+intMethods := Integer methods
+// => _
+
+intMethods isEmpty
+// => false
+
+// Integer inherits Object methods
+intMethods includes: #isNil
+// => true
