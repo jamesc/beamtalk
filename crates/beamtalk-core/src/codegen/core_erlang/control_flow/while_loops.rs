@@ -9,6 +9,7 @@
 //! with both pure and state-threading variants.
 
 use super::super::document::Document;
+use super::super::intrinsics::validate_block_arity_exact;
 use super::super::{CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, Expression};
 use crate::docvec;
@@ -19,6 +20,15 @@ impl CoreErlangGenerator {
         condition: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
+        // BT-493: Validate body block arity (must be 0-arg)
+        validate_block_arity_exact(
+            body,
+            0,
+            "whileTrue:",
+            "Fix: The body block must take no arguments:\n\
+             \x20 [x < 10] whileTrue: [x := x + 1]",
+        )?;
+
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {
             // Use mutations version if there are any writes (local or field)
@@ -219,6 +229,15 @@ impl CoreErlangGenerator {
         condition: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
+        // BT-493: Validate body block arity (must be 0-arg)
+        validate_block_arity_exact(
+            body,
+            0,
+            "whileFalse:",
+            "Fix: The body block must take no arguments:\n\
+             \x20 [x > 0] whileFalse: [x := x + 1]",
+        )?;
+
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {
             // Use mutations version if there are any writes (local or field)

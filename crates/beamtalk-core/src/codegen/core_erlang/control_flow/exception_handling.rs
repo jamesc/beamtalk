@@ -48,6 +48,7 @@
 //! ```
 
 use super::super::document::Document;
+use super::super::intrinsics::{validate_block_arity_exact, validate_on_do_handler};
 use super::super::{CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, Expression};
 use crate::docvec;
@@ -64,6 +65,18 @@ impl CoreErlangGenerator {
         ex_class: &Expression,
         handler: &Expression,
     ) -> Result<Document<'static>> {
+        // BT-493: Validate protected block arity (must be 0-arg)
+        validate_block_arity_exact(
+            receiver,
+            0,
+            "on:do:",
+            "Fix: The protected block must take no arguments:\n\
+             \x20 [riskyOperation] on: Exception do: [:e | handle error]",
+        )?;
+        // BT-493: Validate handler block arity (must be 0 or 1-arg)
+        // Returns true if handler takes an argument, false for 0-arg
+        let handler_takes_arg = validate_on_do_handler(handler, "on:do:")?;
+
         // BT-410: Check both blocks for field/state mutations
         let receiver_needs = if let Expression::Block(b) = receiver {
             self.needs_mutation_threading(&block_analysis::analyze_block(b))
@@ -114,8 +127,13 @@ impl CoreErlangGenerator {
                  let {ex_obj_var} = call 'beamtalk_exception_handler':'ensure_wrapped'({error_var}) in \
                  let {match_var} = call 'beamtalk_exception_handler':'matches_class'({ex_class_var}, {error_var}) in \
                  case {match_var} of \
-                 <'true'> when 'true' -> apply {handler_var} ({ex_obj_var}) \
-                 <'false'> when 'true' -> primop 'raw_raise'({type_var}, {error_var}, {stack_var}) end"
+                 <'true'> when 'true' -> {handler_apply} \
+                 <'false'> when 'true' -> primop 'raw_raise'({type_var}, {error_var}, {stack_var}) end",
+                handler_apply = if handler_takes_arg {
+                    format!("apply {handler_var} ({ex_obj_var})")
+                } else {
+                    format!("apply {handler_var} ()")
+                },
             ),
         ])
     }
@@ -241,6 +259,15 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         cleanup: &Expression,
     ) -> Result<Document<'static>> {
+        // BT-493: Validate cleanup block arity (must be 0-arg)
+        validate_block_arity_exact(
+            cleanup,
+            0,
+            "ensure:",
+            "Fix: The cleanup block must take no arguments:\n\
+             \x20 [operation] ensure: [resource close]",
+        )?;
+
         // BT-410: Check both blocks for field/state mutations
         let receiver_needs = if let Expression::Block(b) = receiver {
             self.needs_mutation_threading(&block_analysis::analyze_block(b))
