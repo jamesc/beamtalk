@@ -430,10 +430,6 @@ impl CoreErlangGenerator {
     /// ```
     ///
     /// The cascade returns the result of the final message.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "cascade codegen handles both normal and fallback paths"
-    )]
     pub(super) fn generate_cascade(
         &mut self,
         receiver: &Expression,
@@ -462,40 +458,8 @@ impl CoreErlangGenerator {
             ..
         } = receiver
         {
-            // BT-374 / ADR 0010: Workspace binding cascade support.
-            // When the underlying receiver is a workspace binding (e.g., `Transcript show: 'Hello'; cr`),
-            // look up the binding object from persistent_term instead of evaluating the receiver.
-            let is_binding_cascade =
-                if let Expression::ClassReference { name, .. } = underlying_receiver.as_ref() {
-                    super::dispatch_codegen::is_workspace_binding(&name.name)
-                } else {
-                    false
-                };
-
             let mut result = String::new();
-            let receiver_var = if is_binding_cascade {
-                let binding_name =
-                    if let Expression::ClassReference { name, .. } = underlying_receiver.as_ref() {
-                        &name.name
-                    } else {
-                        unreachable!()
-                    };
-
-                if !self.workspace_mode {
-                    return Err(CodeGenError::WorkspaceBindingInBatchMode {
-                        name: binding_name.to_string(),
-                    });
-                }
-
-                // Look up binding object from persistent_term (beamtalk_object tuple)
-                let binding_var = self.fresh_temp_var("BindingObj");
-                write!(
-                    result,
-                    "let {binding_var} = call 'persistent_term':'get'({{'beamtalk_binding', '{binding_name}'}}) in "
-                )
-                .unwrap();
-                binding_var
-            } else {
+            let receiver_var = {
                 // Bind the underlying receiver once
                 let receiver_var = self.fresh_temp_var("Receiver");
                 let recv_str = self.capture_expression(underlying_receiver)?;
