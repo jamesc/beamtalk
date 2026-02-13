@@ -154,6 +154,43 @@ test-mcp: build-stdlib
 # Run ALL tests (unit + integration + E2E + Erlang runtime)
 test-all: test-rust test-stdlib test-integration test-mcp test-e2e test-runtime
 
+# Smoke test installed layout (install to temp dir, verify REPL starts)
+test-install: build-release build-stdlib
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🧪 Smoke-testing installed layout..."
+    TMPDIR=$(mktemp -d)
+
+    just install "$TMPDIR"
+
+    # Use a fixed test port
+    TEST_PORT=19877
+    "$TMPDIR/bin/beamtalk" repl --port "$TEST_PORT" &
+    REPL_PID=$!
+    cleanup() { kill $REPL_PID 2>/dev/null || true; wait $REPL_PID 2>/dev/null || true; rm -rf "$TMPDIR"; }
+    trap cleanup EXIT
+
+    # Wait for REPL to accept connections
+    for i in $(seq 1 30); do
+        if nc -z 127.0.0.1 "$TEST_PORT" 2>/dev/null; then break; fi
+        sleep 1
+    done
+
+    if ! nc -z 127.0.0.1 "$TEST_PORT" 2>/dev/null; then
+        echo "❌ REPL failed to start on port $TEST_PORT"
+        exit 1
+    fi
+
+    # Evaluate 1 + 1 via TCP protocol
+    RESPONSE=$(echo '{"op":"eval","id":"smoke","code":"1 + 1"}' | nc -w 5 127.0.0.1 "$TEST_PORT" || true)
+
+    if echo "$RESPONSE" | grep -qE '"value":\s*2'; then
+        echo "✅ Installed REPL evaluated 1 + 1 = 2"
+    else
+        echo "❌ Unexpected response: $RESPONSE"
+        exit 1
+    fi
+
 # Run compiled stdlib tests (ADR 0014 Phase 1, ~14s)
 test-stdlib: build-stdlib
     @echo "🧪 Running stdlib tests..."

@@ -183,6 +183,11 @@ pub fn find_runtime_dir() -> Result<PathBuf> {
 }
 
 /// Like [`find_runtime_dir`] but also returns the detected [`RuntimeLayout`].
+///
+/// # Errors
+///
+/// Returns an error if no valid runtime directory is found, or if
+/// `BEAMTALK_RUNTIME_DIR` is set but doesn't contain a valid runtime.
 pub fn find_runtime_dir_with_layout() -> Result<(PathBuf, RuntimeLayout)> {
     // Check explicit env var first
     if let Ok(dir) = std::env::var("BEAMTALK_RUNTIME_DIR") {
@@ -332,7 +337,10 @@ mod tests {
 
     #[test]
     fn beam_paths_installed_layout() {
-        let paths = beam_paths_for_layout(Path::new("/usr/local/lib/beamtalk"), RuntimeLayout::Installed);
+        let paths = beam_paths_for_layout(
+            Path::new("/usr/local/lib/beamtalk"),
+            RuntimeLayout::Installed,
+        );
         assert_eq!(
             paths.runtime_ebin,
             PathBuf::from("/usr/local/lib/beamtalk/lib/beamtalk_runtime/ebin")
