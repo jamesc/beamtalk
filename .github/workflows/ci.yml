@@ -287,6 +287,7 @@ jobs:
           
           echo "Rust Line Coverage: ${rust_coverage}%"
           echo "Rust Branch Coverage: ${rust_branch}%"
+          echo "rust_coverage=${rust_coverage}" >> "$GITHUB_OUTPUT"
           
           # Check thresholds using awk for portability (no bc dependency)
           line_check=$(awk -v cov="$rust_coverage" 'BEGIN { if (cov < 70.0) print "FAIL"; else print "PASS" }')
@@ -303,7 +304,6 @@ jobs:
           fi
           
           echo "✅ Coverage thresholds met"
-          echo "rust_coverage=${rust_coverage}" >> "$GITHUB_OUTPUT"
 
       - name: Check Erlang Coverage Thresholds
         id: erlang_thresholds
@@ -319,6 +319,7 @@ jobs:
           
           echo "Erlang Line Coverage: ${erlang_coverage}%"
           echo "Erlang Branch Coverage: ${erlang_branch}%"
+          echo "erlang_coverage=${erlang_coverage}" >> "$GITHUB_OUTPUT"
           
           line_check=$(awk -v cov="$erlang_coverage" 'BEGIN { if (cov < 50.0) print "FAIL"; else print "PASS" }')
           branch_check=$(awk -v cov="$erlang_branch" 'BEGIN { if (cov < 60.0) print "WARN"; else print "PASS" }')
@@ -334,7 +335,6 @@ jobs:
           fi
           
           echo "✅ Erlang coverage thresholds met"
-          echo "erlang_coverage=${erlang_coverage}" >> "$GITHUB_OUTPUT"
 
       - name: Publish coverage badges
         run: |
@@ -352,13 +352,27 @@ jobs:
 
           RUST_COV="${{ steps.rust_thresholds.outputs.rust_coverage }}"
           ERLANG_COV="${{ steps.erlang_thresholds.outputs.erlang_coverage }}"
-          RUST_COLOR=$(badge_color "$RUST_COV")
-          ERLANG_COLOR=$(badge_color "$ERLANG_COV")
+
+          # Guard against missing or non-numeric coverage values
+          RUST_MSG="unknown"
+          RUST_COLOR="lightgrey"
+          ERLANG_MSG="unknown"
+          ERLANG_COLOR="lightgrey"
+
+          if echo "$RUST_COV" | grep -Eq '^[0-9]+([.][0-9]+)?$'; then
+            RUST_MSG="${RUST_COV}%"
+            RUST_COLOR=$(badge_color "$RUST_COV")
+          fi
+
+          if echo "$ERLANG_COV" | grep -Eq '^[0-9]+([.][0-9]+)?$'; then
+            ERLANG_MSG="${ERLANG_COV}%"
+            ERLANG_COLOR=$(badge_color "$ERLANG_COV")
+          fi
 
           # Create badge JSON files (shields.io endpoint format)
           mkdir -p badges
-          echo "{\"schemaVersion\":1,\"label\":\"Rust coverage\",\"message\":\"${RUST_COV}%\",\"color\":\"${RUST_COLOR}\"}" > badges/rust-coverage.json
-          echo "{\"schemaVersion\":1,\"label\":\"Erlang coverage\",\"message\":\"${ERLANG_COV}%\",\"color\":\"${ERLANG_COLOR}\"}" > badges/erlang-coverage.json
+          echo "{\"schemaVersion\":1,\"label\":\"Rust coverage\",\"message\":\"${RUST_MSG}\",\"color\":\"${RUST_COLOR}\"}" > badges/rust-coverage.json
+          echo "{\"schemaVersion\":1,\"label\":\"Erlang coverage\",\"message\":\"${ERLANG_MSG}\",\"color\":\"${ERLANG_COLOR}\"}" > badges/erlang-coverage.json
 
           # Commit to badges branch
           git config user.name "github-actions[bot]"

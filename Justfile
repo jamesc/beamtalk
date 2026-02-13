@@ -346,11 +346,15 @@ daemon-status:
 workspace-stop:
     #!/usr/bin/env bash
     set -uo pipefail
-    WS_ID=$(cargo run --bin beamtalk --quiet -- workspace status 2>/dev/null | head -1 | awk '{print $2}')
+    if ! STATUS_OUT=$(cargo run --bin beamtalk --quiet -- workspace status 2>&1); then
+        echo "No running workspace found for this project."
+        exit 0
+    fi
+    WS_ID=$(echo "$STATUS_OUT" | head -1 | awk '{print $2}')
     if [ -n "$WS_ID" ]; then
         cargo run --bin beamtalk --quiet -- workspace stop "$WS_ID" 2>&1 || echo "Workspace $WS_ID is not running."
     else
-        echo "No workspace found for this project."
+        echo "No running workspace found for this project."
     fi
 
 # Show workspace status
