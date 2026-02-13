@@ -252,6 +252,16 @@ pub fn is_input_complete(source: &str) -> bool {
         return false;
     }
 
+    // Trailing binary operator missing its right operand (e.g., "1 +" or "3 *")
+    if let Some(TokenKind::BinarySelector(_)) = last_meaningful_kind {
+        return false;
+    }
+
+    // Trailing assignment missing its value (e.g., "x :=")
+    if let Some(TokenKind::Assign) = last_meaningful_kind {
+        return false;
+    }
+
     true
 }
 
@@ -2944,5 +2954,26 @@ Actor subclass: Counter
     #[test]
     fn incomplete_multiline_block() {
         assert!(!is_input_complete("[:x |\n  x * 2"));
+    }
+
+    #[test]
+    fn incomplete_trailing_binary_operator() {
+        assert!(!is_input_complete("x := 1 +"));
+        assert!(!is_input_complete("3 *"));
+    }
+
+    #[test]
+    fn incomplete_trailing_assign() {
+        assert!(!is_input_complete("x :="));
+    }
+
+    #[test]
+    fn complete_binary_continuation_on_new_line() {
+        assert!(is_input_complete("x := 1 +\n  2"));
+    }
+
+    #[test]
+    fn complete_line_comment_only() {
+        assert!(is_input_complete("// just a comment"));
     }
 }
