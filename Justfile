@@ -446,12 +446,79 @@ check-tools:
     @echo "✅ All required tools found"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Release
+# Release & Installation
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Prepare for release (run all checks)
 pre-release: clean-all ci coverage
     @echo "✅ Pre-release checks passed"
+
+# Install beamtalk to PREFIX (default: /usr/local)
+install PREFIX="/usr/local": build-release build-stdlib
+    #!/usr/bin/env bash
+    set -euo pipefail
+    PREFIX="{{PREFIX}}"
+    echo "📦 Installing beamtalk to ${PREFIX}..."
+
+    # Binary
+    install -d "${PREFIX}/bin"
+    install -m 755 target/release/beamtalk "${PREFIX}/bin/beamtalk"
+
+    # OTP application ebin directories
+    for app in beamtalk_runtime beamtalk_workspace jsx; do
+        install -d "${PREFIX}/lib/beamtalk/lib/${app}/ebin"
+        install -m 644 runtime/_build/default/lib/${app}/ebin/*.beam "${PREFIX}/lib/beamtalk/lib/${app}/ebin/"
+        # Copy .app file if present
+        if ls runtime/_build/default/lib/${app}/ebin/*.app 1>/dev/null 2>&1; then
+            install -m 644 runtime/_build/default/lib/${app}/ebin/*.app "${PREFIX}/lib/beamtalk/lib/${app}/ebin/"
+        fi
+    done
+
+    # Stdlib (built under apps/, not _build/)
+    install -d "${PREFIX}/lib/beamtalk/lib/beamtalk_stdlib/ebin"
+    install -m 644 runtime/apps/beamtalk_stdlib/ebin/*.beam "${PREFIX}/lib/beamtalk/lib/beamtalk_stdlib/ebin/"
+    if ls runtime/apps/beamtalk_stdlib/ebin/*.app 1>/dev/null 2>&1; then
+        install -m 644 runtime/apps/beamtalk_stdlib/ebin/*.app "${PREFIX}/lib/beamtalk/lib/beamtalk_stdlib/ebin/"
+    fi
+
+    echo "✅ Installed beamtalk to ${PREFIX}"
+    echo "   Binary:  ${PREFIX}/bin/beamtalk"
+    echo "   Runtime: ${PREFIX}/lib/beamtalk/lib/"
+
+# Uninstall beamtalk from PREFIX (default: /usr/local)
+uninstall PREFIX="/usr/local":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    PREFIX="{{PREFIX}}"
+    echo "🗑️  Uninstalling beamtalk from ${PREFIX}..."
+    rm -f "${PREFIX}/bin/beamtalk"
+    rm -rf "${PREFIX}/lib/beamtalk"
+    echo "✅ Uninstalled beamtalk from ${PREFIX}"
+
+# Create a distributable tarball
+dist: build-release build-stdlib
+    #!/usr/bin/env bash
+    set -euo pipefail
+    VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+    OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+    ARCH=$(uname -m)
+    TARBALL="beamtalk-${VERSION}-${OS}-${ARCH}.tar.gz"
+    STAGING=$(mktemp -d)
+    DIST_DIR="beamtalk-${VERSION}"
+
+    echo "📦 Creating distributable tarball: ${TARBALL}..."
+
+    # Install into staging directory
+    just install "${STAGING}/${DIST_DIR}"
+
+    # Create tarball
+    tar -czf "${TARBALL}" -C "${STAGING}" "${DIST_DIR}"
+    rm -rf "${STAGING}"
+
+    SIZE=$(du -h "${TARBALL}" | cut -f1)
+    echo "✅ Created ${TARBALL} (${SIZE})"
+    echo "   Extract: tar xzf ${TARBALL}"
+    echo "   Run:     ${DIST_DIR}/bin/beamtalk repl"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Documentation
