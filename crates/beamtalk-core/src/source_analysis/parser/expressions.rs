@@ -677,7 +677,9 @@ impl Parser {
             }
 
             // Literal patterns: integer, float, string, character
-            TokenKind::Integer(_) | TokenKind::Float(_) | TokenKind::String(_)
+            TokenKind::Integer(_)
+            | TokenKind::Float(_)
+            | TokenKind::String(_)
             | TokenKind::Character(_) => {
                 let expr = self.parse_literal();
                 let span = expr.span();

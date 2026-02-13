@@ -780,9 +780,7 @@ impl CoreErlangGenerator {
                 parts.push(Document::String("}".to_string()));
                 Ok(Document::Vec(parts))
             }
-            Pattern::List {
-                elements, tail, ..
-            } => {
+            Pattern::List { elements, tail, .. } => {
                 if elements.is_empty() && tail.is_none() {
                     return Ok(Document::String("[]".to_string()));
                 }

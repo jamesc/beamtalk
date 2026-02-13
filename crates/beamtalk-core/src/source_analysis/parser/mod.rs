@@ -3031,21 +3031,27 @@ Actor subclass: Counter
     fn parse_simple_match() {
         let module = parse_ok("42 match: [_ -> 99]");
         assert_eq!(module.expressions.len(), 1);
-        assert!(matches!(&module.expressions[0], Expression::Match { arms, .. } if arms.len() == 1));
+        assert!(
+            matches!(&module.expressions[0], Expression::Match { arms, .. } if arms.len() == 1)
+        );
     }
 
     #[test]
     fn parse_match_with_semicolons() {
         let module = parse_ok("x match: [1 -> 'one'; 2 -> 'two'; _ -> 'other']");
         assert_eq!(module.expressions.len(), 1);
-        assert!(matches!(&module.expressions[0], Expression::Match { arms, .. } if arms.len() == 3));
+        assert!(
+            matches!(&module.expressions[0], Expression::Match { arms, .. } if arms.len() == 3)
+        );
     }
 
     #[test]
     fn parse_match_with_tuple_pattern() {
         let module = parse_ok("r match: [{#ok, v} -> v; {#error, _} -> nil]");
         assert_eq!(module.expressions.len(), 1);
-        assert!(matches!(&module.expressions[0], Expression::Match { arms, .. } if arms.len() == 2));
+        assert!(
+            matches!(&module.expressions[0], Expression::Match { arms, .. } if arms.len() == 2)
+        );
     }
 
     #[test]
@@ -3065,8 +3071,7 @@ Actor subclass: Counter
     fn codegen_simple_match() {
         let module = parse_ok("42 match: [_ -> 99]");
         let expr = &module.expressions[0];
-        let result =
-            crate::codegen::core_erlang::generate_test_expression(expr, "test_match");
+        let result = crate::codegen::core_erlang::generate_test_expression(expr, "test_match");
         assert!(result.is_ok(), "Codegen failed: {:?}", result.err());
         let code = result.unwrap();
         eprintln!("Generated code:\n{code}");
@@ -3077,8 +3082,7 @@ Actor subclass: Counter
     fn codegen_match_with_arms() {
         let module = parse_ok("1 match: [1 -> 'one'; 2 -> 'two'; _ -> 'other']");
         let expr = &module.expressions[0];
-        let result =
-            crate::codegen::core_erlang::generate_test_expression(expr, "test_match");
+        let result = crate::codegen::core_erlang::generate_test_expression(expr, "test_match");
         assert!(result.is_ok(), "Codegen failed: {:?}", result.err());
         let code = result.unwrap();
         eprintln!("Generated code:\n{code}");
