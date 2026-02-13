@@ -160,32 +160,35 @@ test-install: build-release build-stdlib
     set -euo pipefail
     echo "🧪 Smoke-testing installed layout..."
     TMPDIR=$(mktemp -d)
+    OUTFILE=$(mktemp)
 
     just install "$TMPDIR"
 
-    # Use a fixed test port
-    TEST_PORT=19877
-    "$TMPDIR/bin/beamtalk" repl --port "$TEST_PORT" &
+    # Start REPL on ephemeral port, capture stdout to discover actual port
+    "$TMPDIR/bin/beamtalk" repl --port 0 > "$OUTFILE" 2>&1 &
     REPL_PID=$!
-    cleanup() { kill $REPL_PID 2>/dev/null || true; wait $REPL_PID 2>/dev/null || true; rm -rf "$TMPDIR"; }
+    cleanup() { kill $REPL_PID 2>/dev/null || true; wait $REPL_PID 2>/dev/null || true; rm -rf "$TMPDIR" "$OUTFILE"; }
     trap cleanup EXIT
 
-    # Wait for REPL to accept connections
+    # Wait for "Connected to REPL backend on port <N>" line
+    PORT=""
     for i in $(seq 1 30); do
-        if nc -z 127.0.0.1 "$TEST_PORT" 2>/dev/null; then break; fi
+        PORT=$(grep -oP 'Connected to REPL backend on port \K[0-9]+' "$OUTFILE" 2>/dev/null || true)
+        if [ -n "$PORT" ]; then break; fi
         sleep 1
     done
 
-    if ! nc -z 127.0.0.1 "$TEST_PORT" 2>/dev/null; then
-        echo "❌ REPL failed to start on port $TEST_PORT"
+    if [ -z "$PORT" ]; then
+        echo "❌ REPL failed to start (no port detected)"
+        cat "$OUTFILE"
         exit 1
     fi
 
     # Evaluate 1 + 1 via TCP protocol
-    RESPONSE=$(echo '{"op":"eval","id":"smoke","code":"1 + 1"}' | nc -w 5 127.0.0.1 "$TEST_PORT" || true)
+    RESPONSE=$(echo '{"op":"eval","id":"smoke","code":"1 + 1"}' | nc -w 5 127.0.0.1 "$PORT" || true)
 
     if echo "$RESPONSE" | grep -qE '"value":\s*2'; then
-        echo "✅ Installed REPL evaluated 1 + 1 = 2"
+        echo "✅ Installed REPL evaluated 1 + 1 = 2 (port $PORT)"
     else
         echo "❌ Unexpected response: $RESPONSE"
         exit 1

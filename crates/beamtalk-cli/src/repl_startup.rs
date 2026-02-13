@@ -228,6 +228,7 @@ pub fn find_runtime_dir_with_layout() -> Result<(PathBuf, RuntimeLayout)> {
     if let Some(installed_root) = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(|p| p.join("../lib/beamtalk")))
+        .and_then(|p| p.canonicalize().ok())
     {
         if has_beam_files(&installed_root.join("lib/beamtalk_runtime/ebin")) {
             return Ok((installed_root, RuntimeLayout::Installed));

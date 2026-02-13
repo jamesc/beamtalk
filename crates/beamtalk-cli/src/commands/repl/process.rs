@@ -27,8 +27,8 @@ pub(super) fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<C
 
     let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
 
-    // Check if runtime is built
-    if !paths.runtime_ebin.exists() {
+    // Auto-build runtime if not compiled (dev mode only)
+    if layout == repl_startup::RuntimeLayout::Dev && !paths.runtime_ebin.exists() {
         info!("Building Beamtalk runtime...");
         let status = Command::new("rebar3")
             .arg("compile")
