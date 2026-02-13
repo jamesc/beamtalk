@@ -3,6 +3,8 @@
 
 //! Beamtalk MCP server — agent interaction with live objects.
 //!
+//! **DDD Context:** Language Service / Interactive Development
+//!
 //! This binary starts an MCP server over stdio that connects to
 //! a running beamtalk REPL and exposes its operations as MCP tools.
 //!
@@ -79,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create MCP server and serve on stdio
     let mcp_server = server::BeamtalkMcp::new(Arc::new(repl_client));
     let service = mcp_server.serve(stdio()).await.inspect_err(|e| {
-        tracing::error!("MCP server error: {:?}", e);
+        tracing::error!(error = ?e, "MCP server error");
     })?;
 
     service.waiting().await?;

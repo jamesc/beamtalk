@@ -67,7 +67,7 @@ The MCP server is automatically available when configured in your MCP settings.
 
 ## Architecture
 
-```
+```text
 MCP Client (Copilot, Claude, Cursor)
     ↕ stdio (JSON-RPC / MCP protocol)
 beamtalk-mcp server
@@ -81,7 +81,7 @@ The MCP server maintains a **persistent TCP connection** to the REPL for the lif
 
 ## CLI Options
 
-```
+```text
 beamtalk-mcp [OPTIONS]
 
 Options:

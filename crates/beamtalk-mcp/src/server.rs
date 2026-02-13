@@ -88,6 +88,7 @@ pub struct DocsParams {
 
 #[tool_router]
 impl BeamtalkMcp {
+    /// Create a new MCP server backed by the provided REPL client.
     pub fn new(client: Arc<ReplClient>) -> Self {
         Self {
             client,

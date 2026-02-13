@@ -24,7 +24,7 @@ An AI agent connected via MCP performs the following sequence:
 ```
 
 **Response:**
-```
+```text
 Loaded classes: Counter
 ```
 
@@ -36,7 +36,7 @@ Loaded classes: Counter
 ```
 
 **Response:**
-```
+```text
 Counter (Actor)
   Instance Methods:
     increment — Increment the counter
@@ -53,7 +53,7 @@ Counter (Actor)
 ```
 
 **Response:**
-```
+```text
 #Actor<Counter,0.173.0>
 ```
 
@@ -65,7 +65,7 @@ Counter (Actor)
 ```
 
 **Response:**
-```
+```text
 1
 ```
 
@@ -75,7 +75,7 @@ Counter (Actor)
 ```
 
 **Response:**
-```
+```text
 nil
 ```
 
@@ -101,7 +101,7 @@ nil
 **Tool call:** `list_actors`
 
 **Response:**
-```
+```text
 Counter (counter) — pid: <0.173.0>
 ```
 
@@ -115,7 +115,7 @@ After modifying `examples/counter.bt` to add a new method:
 ```
 
 **Response:**
-```
+```text
 Module reloaded successfully
 Affected actors: 1
 ```
@@ -128,7 +128,7 @@ Affected actors: 1
 ```
 
 **Response:**
-```
+```text
 4
 ```
 

@@ -3,6 +3,8 @@
 
 //! Workspace discovery for finding a running REPL server's port.
 //!
+//! **DDD Context:** Language Service / Interactive Development
+//!
 //! Mirrors the logic in `beamtalk-cli` for workspace ID generation
 //! and port file reading.
 
@@ -24,7 +26,17 @@ fn workspaces_dir() -> Option<PathBuf> {
 }
 
 /// Get the directory for a specific workspace.
+///
+/// Validates the workspace ID to prevent path traversal attacks.
 fn workspace_dir(workspace_id: &str) -> Option<PathBuf> {
+    // Reject path traversal components
+    if workspace_id.contains('/')
+        || workspace_id.contains('\\')
+        || workspace_id.contains("..")
+        || workspace_id.is_empty()
+    {
+        return None;
+    }
     workspaces_dir().map(|d| d.join(workspace_id))
 }
 
@@ -195,5 +207,21 @@ mod tests {
     fn test_discover_port_missing_id() {
         let result = discover_port(Some("nonexistent_workspace_xyz"));
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_workspace_dir_rejects_path_traversal() {
+        assert_eq!(workspace_dir("../etc"), None);
+        assert_eq!(workspace_dir(".."), None);
+        assert_eq!(workspace_dir("foo/bar"), None);
+        assert_eq!(workspace_dir("foo\\bar"), None);
+        assert_eq!(workspace_dir(""), None);
+    }
+
+    #[test]
+    fn test_workspace_dir_accepts_valid_ids() {
+        let dir = workspace_dir("abc123def456");
+        assert!(dir.is_some());
+        assert!(dir.unwrap().ends_with("abc123def456"));
     }
 }

@@ -3,14 +3,22 @@
 
 //! Async TCP client for the beamtalk REPL JSON protocol.
 //!
+//! **DDD Context:** Language Service / Interactive Development
+//!
 //! Connects to a running REPL server and sends/receives
 //! newline-delimited JSON messages over TCP.
 
-use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
+use tracing::instrument;
+
+/// Default timeout for REPL I/O operations.
+const REPL_IO_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Async TCP client for the beamtalk REPL protocol.
 #[derive(Debug)]
@@ -43,6 +51,10 @@ impl ReplClient {
     }
 
     /// Send a JSON request and receive a JSON response.
+    ///
+    /// Times out after [`REPL_IO_TIMEOUT`] to prevent hanging MCP calls
+    /// if the REPL becomes unresponsive.
+    #[instrument(skip(self, request))]
     pub async fn send(&self, request: &serde_json::Value) -> Result<ReplResponse, String> {
         let mut inner = self.inner.lock().await;
 
@@ -50,30 +62,41 @@ impl ReplClient {
             serde_json::to_string(request).map_err(|e| format!("Failed to serialize: {e}"))?;
         request_str.push('\n');
 
-        inner
-            .writer
-            .write_all(request_str.as_bytes())
-            .await
-            .map_err(|e| format!("Failed to send: {e}"))?;
-        inner
-            .writer
-            .flush()
-            .await
-            .map_err(|e| format!("Failed to flush: {e}"))?;
+        let io_future = async {
+            inner
+                .writer
+                .write_all(request_str.as_bytes())
+                .await
+                .map_err(|e| format!("Failed to send: {e}"))?;
+            inner
+                .writer
+                .flush()
+                .await
+                .map_err(|e| format!("Failed to flush: {e}"))?;
 
-        let mut response_line = String::new();
-        inner
-            .reader
-            .read_line(&mut response_line)
+            let mut response_line = String::new();
+            inner
+                .reader
+                .read_line(&mut response_line)
+                .await
+                .map_err(|e| format!("Failed to read response: {e}"))?;
+
+            if response_line.is_empty() {
+                return Err("Connection closed by REPL server".to_string());
+            }
+
+            serde_json::from_str(&response_line)
+                .map_err(|e| format!("Failed to parse response: {e}\nRaw: {response_line}"))
+        };
+
+        tokio::time::timeout(REPL_IO_TIMEOUT, io_future)
             .await
-            .map_err(|e| format!("Failed to read response: {e}"))?;
-
-        if response_line.is_empty() {
-            return Err("Connection closed by REPL server".to_string());
-        }
-
-        serde_json::from_str(&response_line)
-            .map_err(|e| format!("Failed to parse response: {e}\nRaw: {response_line}"))
+            .map_err(|_| {
+                format!(
+                    "REPL I/O timed out after {}s — the REPL may be unresponsive",
+                    REPL_IO_TIMEOUT.as_secs()
+                )
+            })?
     }
 
     /// Send an eval operation.
