@@ -1,0 +1,96 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for multi-line expression support (BT-139)
+// Tests that expressions spanning multiple lines evaluate correctly
+// when sent to the REPL server as a single accumulated string.
+
+// ===========================================================================
+// MULTI-LINE BLOCKS
+// ===========================================================================
+
+// Block spanning multiple lines
+[
+  :x |
+  x * 2
+] value: 21
+// => 42
+
+// Nested blocks spanning multiple lines
+[
+  :x |
+  [:y | x + y] value: 10
+] value: 32
+// => 42
+
+// Block with multiple statements
+[
+  :n |
+  n * n
+] value: 7
+// => 49
+
+// ===========================================================================
+// MULTI-LINE COLLECTIONS
+// ===========================================================================
+
+// Map literal spanning multiple lines
+#{
+  #name => 'Alice',
+  #age => 30
+} at: #name
+// => Alice
+
+// List literal spanning multiple lines
+#(
+  10,
+  20,
+  30
+) at: 2
+// => 20
+
+// ===========================================================================
+// MULTI-LINE KEYWORD MESSAGES
+// ===========================================================================
+
+// Keyword message with trailing keyword and argument on next line
+#{#a => 1} at: #b put:
+  2
+// => {"a":1,"b":2}
+
+// ===========================================================================
+// MULTI-LINE ASSIGNMENTS
+// ===========================================================================
+
+// Assignment with value on continuation line
+result :=
+  42
+// => 42
+
+result
+// => 42
+
+// Assignment with block on continuation lines
+doubler := [
+  :x |
+  x * 2
+]
+// => _
+
+doubler value: 21
+// => 42
+
+// ===========================================================================
+// MULTI-LINE BINARY OPERATORS
+// ===========================================================================
+
+// Binary operator continued on next line
+10 +
+  20 +
+  12
+// => 42
+
+// Arithmetic with continuation
+100 -
+  58
+// => 42

@@ -35,6 +35,7 @@
 //! ```
 
 use beamtalk_cli::repl_startup;
+use beamtalk_core::source_analysis::is_input_complete;
 use serial_test::serial;
 use std::env;
 use std::fs;
@@ -175,6 +176,19 @@ struct ParsedTestFile {
     warnings: Vec<String>,
 }
 
+/// Collect continuation lines for a multi-line expression using `is_input_complete()`
+/// to detect unclosed delimiters, trailing operators, etc.
+fn collect_continuation_lines(lines: &[&str], i: &mut usize, expression_lines: &mut Vec<String>) {
+    while *i < lines.len() && !is_input_complete(&expression_lines.join("\n")) {
+        let next_line = lines[*i].trim();
+        if next_line.starts_with("// =>") || next_line.is_empty() || next_line.starts_with("//") {
+            break;
+        }
+        expression_lines.push(next_line.to_string());
+        *i += 1;
+    }
+}
+
 /// Parse test cases from a `.bt` file.
 ///
 /// Test format:
@@ -259,12 +273,14 @@ fn parse_test_file(content: &str) -> ParsedTestFile {
             continue;
         }
 
-        // This should be an expression
-        let expression = line.to_string();
+        // This should be an expression — possibly spanning multiple lines.
+        let mut expression_lines = vec![line.to_string()];
         let expr_line = i + 1;
-
-        // Look for the expected result on the next line
         i += 1;
+        collect_continuation_lines(&lines, &mut i, &mut expression_lines);
+        let expression = expression_lines.join("\n");
+
+        // Look for the expected result on the current line
         if i < lines.len() {
             let next_line = lines[i].trim();
             if let Some(expected) = next_line.strip_prefix("// =>") {
@@ -1462,6 +1478,82 @@ expr3
         assert!(parsed.warnings[0].contains("expr1"));
         assert!(parsed.warnings[1].contains("Line 3"));
         assert!(parsed.warnings[1].contains("expr2"));
+    }
+
+    #[test]
+    fn test_parse_multiline_expression() {
+        // Multi-line expressions: unclosed bracket causes continuation
+        let content = r"
+[
+  :x |
+  x * 2
+] value: 21
+// => 42
+";
+        let parsed = parse_test_file(content);
+        assert_eq!(parsed.cases.len(), 1);
+        assert_eq!(parsed.cases[0].expression, "[\n:x |\nx * 2\n] value: 21");
+        assert_eq!(parsed.cases[0].expected, "42");
+        assert!(parsed.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_parse_multiline_map() {
+        // Multi-line map literal
+        let content = r"
+#{
+  name => 'Alice',
+  age => 30
+} at: #name
+// => Alice
+";
+        let parsed = parse_test_file(content);
+        assert_eq!(parsed.cases.len(), 1);
+        assert!(parsed.cases[0].expression.starts_with("#{"));
+        assert!(parsed.cases[0].expression.contains("name => 'Alice'"));
+        assert_eq!(parsed.cases[0].expected, "Alice");
+    }
+
+    #[test]
+    fn test_parse_multiline_trailing_operator() {
+        // Trailing binary operator causes continuation
+        let content = r"
+10 +
+  20
+// => 30
+";
+        let parsed = parse_test_file(content);
+        assert_eq!(parsed.cases.len(), 1);
+        assert_eq!(parsed.cases[0].expression, "10 +\n20");
+        assert_eq!(parsed.cases[0].expected, "30");
+    }
+
+    #[test]
+    fn test_parse_multiline_trailing_assign() {
+        // Trailing := causes continuation
+        let content = r"
+x :=
+  42
+// => 42
+";
+        let parsed = parse_test_file(content);
+        assert_eq!(parsed.cases.len(), 1);
+        assert_eq!(parsed.cases[0].expression, "x :=\n42");
+        assert_eq!(parsed.cases[0].expected, "42");
+    }
+
+    #[test]
+    fn test_parse_multiline_trailing_keyword() {
+        // Trailing keyword (without argument) causes continuation
+        let content = r#"
+#{#a => 1} at: #b put:
+  2
+// => {"a":1,"b":2}
+"#;
+        let parsed = parse_test_file(content);
+        assert_eq!(parsed.cases.len(), 1);
+        assert!(parsed.cases[0].expression.contains("put:\n2"));
+        assert_eq!(parsed.cases[0].expected, r#"{"a":1,"b":2}"#);
     }
 
     #[test]
