@@ -365,6 +365,7 @@ impl DaemonManager {
     /// and not start its own processes. This is useful for development but means
     /// the test won't manage the lifecycle. If the external REPL fails or stops
     /// mid-test, errors may be confusing. For CI, always start with a clean state.
+    #[allow(clippy::too_many_lines)]
     fn start() -> Self {
         // Check if REPL is already running by trying to connect
         if TcpStream::connect(format!("127.0.0.1:{REPL_PORT}")).is_ok() {
@@ -463,6 +464,7 @@ impl DaemonManager {
         let beam_child = Command::new("erl")
             .arg("-noshell")
             .args(&pa_args)
+            .current_dir(workspace_root())
             .env("BEAMTALK_DAEMON_SOCKET", daemon_socket.to_str().unwrap())
             .stdout(stdout_cfg)
             .stderr(stderr_cfg)

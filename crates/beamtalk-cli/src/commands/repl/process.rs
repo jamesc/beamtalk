@@ -7,6 +7,7 @@
 
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader};
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
@@ -20,7 +21,14 @@ use crate::paths::{is_daemon_running, socket_path};
 use super::{MAX_CONNECT_RETRIES, RETRY_DELAY_MS, ReplClient};
 
 /// Start the BEAM node with REPL backend.
-pub(super) fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<Child> {
+///
+/// The BEAM process's working directory is set to `project_root` so that
+/// relative file paths (e.g., `File lines: "data.csv"`) resolve correctly.
+pub(super) fn start_beam_node(
+    port: u16,
+    node_name: Option<&String>,
+    project_root: &Path,
+) -> Result<Child> {
     // Find runtime directory - try multiple locations
     let runtime_dir = repl_startup::find_runtime_dir()?;
     info!("Using runtime at: {}", runtime_dir.display());
@@ -94,6 +102,7 @@ pub(super) fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<C
     let child = Command::new("erl")
         .arg("-noshell")
         .args(&args)
+        .current_dir(project_root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
