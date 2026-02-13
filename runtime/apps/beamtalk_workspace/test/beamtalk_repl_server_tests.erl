@@ -120,8 +120,10 @@ format_response_map_test() ->
     Response = beamtalk_repl_server:format_response(#{x => 1, y => 2}),
     Decoded = jsx:decode(Response, [return_maps]),
     Value = maps:get(<<"value">>, Decoded),
-    ?assertEqual(1, maps:get(<<"x">>, Value)),
-    ?assertEqual(2, maps:get(<<"y">>, Value)).
+    %% BT-535: Maps are now pre-formatted as Beamtalk syntax strings
+    ?assert(is_binary(Value)),
+    ?assert(binary:match(Value, <<"#x => 1">>) =/= nomatch),
+    ?assert(binary:match(Value, <<"#y => 2">>) =/= nomatch).
 
 format_response_pid_test() ->
     Pid = self(),
@@ -492,25 +494,29 @@ term_to_json_empty_list_test() ->
     ?assertEqual([], beamtalk_repl_server:term_to_json([])).
 
 term_to_json_map_with_atom_keys_test() ->
+    %% BT-535: Maps are pre-formatted as Beamtalk syntax strings
     Result = beamtalk_repl_server:term_to_json(#{name => <<"test">>, count => 5}),
-    ?assertEqual(<<"test">>, maps:get(<<"name">>, Result)),
-    ?assertEqual(5, maps:get(<<"count">>, Result)).
+    ?assert(is_binary(Result)),
+    ?assert(binary:match(Result, <<"#count => 5">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"#name => test">>) =/= nomatch).
 
 term_to_json_map_with_binary_keys_test() ->
     Result = beamtalk_repl_server:term_to_json(#{<<"key">> => <<"val">>}),
-    ?assertEqual(<<"val">>, maps:get(<<"key">>, Result)).
+    ?assertEqual(<<"#{key => val}">>, Result).
 
 term_to_json_map_with_list_keys_test() ->
+    %% BT-535: List keys are printed using print_string format
     Result = beamtalk_repl_server:term_to_json(#{"stringkey" => 42}),
-    ?assertEqual(42, maps:get(<<"stringkey">>, Result)).
+    ?assert(is_binary(Result)),
+    ?assert(binary:match(Result, <<"42">>) =/= nomatch).
 
 term_to_json_map_with_non_printable_list_key_test() ->
     Result = beamtalk_repl_server:term_to_json(#{[1,2,3] => <<"val">>}),
-    ?assert(is_map(Result)).
+    ?assert(is_binary(Result)).
 
 term_to_json_map_with_integer_key_test() ->
     Result = beamtalk_repl_server:term_to_json(#{99 => <<"val">>}),
-    ?assert(is_map(Result)).
+    ?assert(is_binary(Result)).
 
 term_to_json_dead_pid_test() ->
     Pid = spawn(fun() -> ok end),
@@ -705,14 +711,16 @@ format_modules_single_test() ->
 format_response_empty_map_test() ->
     Response = beamtalk_repl_server:format_response(#{}),
     Decoded = jsx:decode(Response, [return_maps]),
-    ?assertEqual(#{}, maps:get(<<"value">>, Decoded)).
+    %% BT-535: Empty map is pre-formatted as "#{}"
+    ?assertEqual(<<"#{}">>, maps:get(<<"value">>, Decoded)).
 
 format_response_nested_map_test() ->
     Response = beamtalk_repl_server:format_response(#{a => #{b => 1}}),
     Decoded = jsx:decode(Response, [return_maps]),
     Value = maps:get(<<"value">>, Decoded),
-    Inner = maps:get(<<"a">>, Value),
-    ?assertEqual(1, maps:get(<<"b">>, Inner)).
+    %% BT-535: Nested maps are pre-formatted as Beamtalk syntax
+    ?assert(is_binary(Value)),
+    ?assertEqual(<<"#{#a => #{#b => 1}}">>, Value).
 
 format_response_true_false_test() ->
     ResponseT = beamtalk_repl_server:format_response(true),
@@ -751,7 +759,9 @@ format_response_with_warnings_complex_value_test() ->
         #{x => 1, y => 2}, [<<"shadow">>]),
     Decoded = jsx:decode(Response, [return_maps]),
     Value = maps:get(<<"value">>, Decoded),
-    ?assertEqual(1, maps:get(<<"x">>, Value)),
+    %% BT-535: Maps are pre-formatted as Beamtalk syntax strings
+    ?assert(is_binary(Value)),
+    ?assert(binary:match(Value, <<"#x => 1">>) =/= nomatch),
     ?assertEqual([<<"shadow">>], maps:get(<<"warnings">>, Decoded)).
 
 %%% BT-520: format_error_with_warnings tests
@@ -952,18 +962,19 @@ term_to_json_future_pending_test() ->
     exit(Pid, kill).
 
 term_to_json_nested_map_test() ->
+    %% BT-535: Nested maps are pre-formatted as Beamtalk syntax
     Result = beamtalk_repl_server:term_to_json(#{a => #{b => #{c => 42}}}),
-    Inner = maps:get(<<"a">>, Result),
-    Middle = maps:get(<<"b">>, Inner),
-    ?assertEqual(42, maps:get(<<"c">>, Middle)).
+    ?assertEqual(<<"#{#a => #{#b => #{#c => 42}}}">>, Result).
 
 term_to_json_empty_map_test() ->
-    ?assertEqual(#{}, beamtalk_repl_server:term_to_json(#{})).
+    ?assertEqual(<<"#{}">>, beamtalk_repl_server:term_to_json(#{})).
 
 term_to_json_map_with_mixed_keys_test() ->
+    %% BT-535: Mixed keys are formatted as Beamtalk syntax
     Result = beamtalk_repl_server:term_to_json(#{atom_key => 1, <<"bin_key">> => 2}),
-    ?assertEqual(1, maps:get(<<"atom_key">>, Result)),
-    ?assertEqual(2, maps:get(<<"bin_key">>, Result)).
+    ?assert(is_binary(Result)),
+    ?assert(binary:match(Result, <<"#atom_key => 1">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"bin_key => 2">>) =/= nomatch).
 
 term_to_json_single_element_tuple_test() ->
     Result = beamtalk_repl_server:term_to_json({only}),
@@ -976,11 +987,12 @@ term_to_json_large_tuple_test() ->
     ?assertEqual(5, length(Elements)).
 
 term_to_json_nested_list_with_maps_test() ->
+    %% BT-535: Maps in lists are pre-formatted as strings
     Result = beamtalk_repl_server:term_to_json([#{a => 1}, #{b => 2}]),
     ?assertEqual(2, length(Result)),
     [First, Second] = Result,
-    ?assertEqual(1, maps:get(<<"a">>, First)),
-    ?assertEqual(2, maps:get(<<"b">>, Second)).
+    ?assertEqual(<<"#{#a => 1}">>, First),
+    ?assertEqual(<<"#{#b => 2}">>, Second).
 
 term_to_json_list_with_pids_test() ->
     Parent = self(),

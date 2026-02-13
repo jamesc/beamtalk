@@ -644,6 +644,7 @@ fn generate_dictionary_bif(selector: &str, params: &[String]) -> Option<String> 
             let p0 = params.first().map_or("_Element", String::as_str);
             Some(format!("call 'beamtalk_map_ops':'includes'(Self, {p0})"))
         }
+        "printString" => Some("call 'beamtalk_map_ops':'print_string'(Self)".to_string()),
         _ => None,
     }
 }

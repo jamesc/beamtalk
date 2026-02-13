@@ -22,7 +22,7 @@ room := ChatRoom spawn
 
 // Initially no members
 online := room online
-// => {"$beamtalk_class":"Set","elements":[]}
+// => Set()
 
 online isEmpty
 // => true
@@ -68,14 +68,14 @@ bob setRoom: room
 
 // Join the room
 room join: alice
-// => {"$beamtalk_class":"Set","elements":_}
+// => Set(_)
 
 room join: bob
-// => {"$beamtalk_class":"Set","elements":_}
+// => Set(_)
 
 // Check online members (Set of actor references)
 members := room online
-// => {"$beamtalk_class":"Set","elements":_}
+// => Set(_)
 
 members size
 // => 2
@@ -159,11 +159,11 @@ bobInbox2 size
 
 // Alice leaves
 room leave: alice
-// => {"$beamtalk_class":"Set","elements":_}
+// => Set(_)
 
 // Online members now has only bob
 onlineAfter := room online
-// => {"$beamtalk_class":"Set","elements":_}
+// => Set(_)
 
 onlineAfter size
 // => 1
