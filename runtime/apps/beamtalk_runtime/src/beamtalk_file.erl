@@ -351,7 +351,8 @@ validate_path(Path) when is_binary(Path) ->
 make_line_stream(Fd, Path) ->
     Gen = make_line_gen(Fd),
     Desc = iolist_to_binary([<<"File.lines('">>, Path, <<"')">>]),
-    beamtalk_stream:make_stream(Gen, Desc).
+    Finalizer = fun() -> file:close(Fd) end,
+    beamtalk_stream:make_stream(Gen, Desc, Finalizer).
 
 %% @private
 %% @doc Create a Stream of lines from an already-open file handle.
