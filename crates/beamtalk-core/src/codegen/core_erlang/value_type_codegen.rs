@@ -261,6 +261,11 @@ impl CoreErlangGenerator {
 
     /// Generates a `new` or `new:` function that raises `instantiation_error`
     /// for primitive types that cannot be instantiated with `new`.
+    ///
+    /// NOTE: Uses `erlang:error` (not `beamtalk_error:raise`) because this
+    /// generated code runs inside `beamtalk_object_class:handle_call/3` via
+    /// `erlang:apply`. The `handle_call` catch clause captures the error and
+    /// `unwrap_class_call/1` already wraps it via `raise/1` (BT-525).
     #[allow(clippy::unnecessary_wraps, clippy::unused_self)]
     fn generate_primitive_new_error(
         &mut self,

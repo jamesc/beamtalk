@@ -578,6 +578,8 @@ handle_call({spawn, Args}, _From, #class_state{
             _ ->
                 %% Defensive: class_send always provides [] or [Arg], but guard
                 %% against unexpected multi-arg calls with a structured error.
+                %% NOTE: Use error() not raise() — unwrap_class_call/1 already
+                %% wraps via raise/1 after gen_server:call returns (BT-525).
                 Error0 = beamtalk_error:new(type_error, ClassName),
                 Error1 = beamtalk_error:with_selector(Error0, 'spawnWith:'),
                 Error2 = beamtalk_error:with_hint(Error1, <<"spawnWith: expects a Dictionary argument">>),
@@ -700,6 +702,8 @@ handle_call({new, Args}, _From, #class_state{
                                 erlang:apply(Module, new, []);
                             true ->
                                 %% Class IS constructible but got wrong arg type.
+                                %% NOTE: Use error() not raise() — unwrap_class_call/1 already
+                                %% wraps via raise/1 after gen_server:call returns (BT-525).
                                 Error0 = beamtalk_error:new(type_error, ClassName),
                                 Error1 = beamtalk_error:with_selector(Error0, 'new:'),
                                 Error2 = beamtalk_error:with_hint(Error1, <<"new: expects a Dictionary argument">>),
