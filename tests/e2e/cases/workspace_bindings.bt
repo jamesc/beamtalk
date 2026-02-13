@@ -123,3 +123,15 @@ recentAfterClear := (Transcript recent) await
 
 recentAfterClear isEmpty
 // => true
+
+// ===========================================================================
+// TRANSCRIPT BINDING — SUBSCRIBE / UNSUBSCRIBE
+// ===========================================================================
+
+// Transcript subscribe dispatches as unary method (BT-530)
+(Transcript subscribe) await
+// => nil
+
+// Transcript unsubscribe dispatches as unary method (BT-530)
+(Transcript unsubscribe) await
+// => nil
