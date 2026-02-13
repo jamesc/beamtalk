@@ -903,6 +903,7 @@ impl CoreErlangGenerator {
             Expression::Primitive {
                 name, is_quoted, ..
             } => self.generate_primitive(name, *is_quoted),
+            Expression::Match { value, arms, .. } => self.generate_match(value, arms),
             _ => Err(CodeGenError::UnsupportedFeature {
                 feature: format!("expression type: {expr:?}"),
                 location: format!("{:?}", expr.span()),

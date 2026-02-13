@@ -18,7 +18,8 @@
 use super::document::Document;
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{
-    Block, CascadeMessage, Expression, Identifier, Literal, MapPair, MessageSelector,
+    Block, CascadeMessage, Expression, Identifier, Literal, MapPair, MatchArm, MessageSelector,
+    Pattern,
 };
 use crate::docvec;
 use std::fmt::Write; // For write!() on local String buffers (not self.output)
@@ -701,5 +702,165 @@ impl CoreErlangGenerator {
         }
 
         Ok(Document::Vec(docs))
+    }
+
+    /// Generates code for a match expression.
+    ///
+    /// `value match: [pattern -> body ...]` compiles to Core Erlang:
+    /// `let _Match1 = <value> in case _Match1 of <Pattern1> when Guard1 -> Body1 ... end`
+    pub(super) fn generate_match(
+        &mut self,
+        value: &Expression,
+        arms: &[MatchArm],
+    ) -> Result<Document<'static>> {
+        let match_var = self.fresh_temp_var("Match");
+        let value_doc = self.expression_doc(value)?;
+
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        parts.push(Document::String(format!("let {match_var} = ")));
+        parts.push(value_doc);
+        parts.push(Document::String(format!(" in case {match_var} of ")));
+
+        for (i, arm) in arms.iter().enumerate() {
+            if i > 0 {
+                parts.push(Document::String(" ".to_string()));
+            }
+
+            // Generate pattern
+            let pattern_doc = self.generate_pattern(&arm.pattern)?;
+            parts.push(Document::String("<".to_string()));
+            parts.push(pattern_doc);
+            parts.push(Document::String(">".to_string()));
+
+            // Generate guard
+            if let Some(guard) = &arm.guard {
+                parts.push(Document::String(" when ".to_string()));
+                let guard_doc = self.generate_guard_expression(guard)?;
+                parts.push(guard_doc);
+            } else {
+                parts.push(Document::String(" when 'true'".to_string()));
+            }
+
+            // Generate body
+            parts.push(Document::String(" -> ".to_string()));
+            let body_doc = self.expression_doc(&arm.body)?;
+            parts.push(body_doc);
+        }
+
+        parts.push(Document::String(" end".to_string()));
+        Ok(Document::Vec(parts))
+    }
+
+    /// Generates a Core Erlang pattern from a Pattern AST node.
+    fn generate_pattern(&self, pattern: &Pattern) -> Result<Document<'static>> {
+        match pattern {
+            Pattern::Wildcard(_) => Ok(Document::String("_".to_string())),
+            Pattern::Variable(id) => {
+                let var_name = Self::erlang_var_name(&id.name);
+                Ok(Document::String(var_name))
+            }
+            Pattern::Literal(lit, _) => self.generate_literal(lit),
+            Pattern::Tuple { elements, .. } => {
+                let mut parts = vec![Document::String("{".to_string())];
+                for (i, elem) in elements.iter().enumerate() {
+                    if i > 0 {
+                        parts.push(Document::String(", ".to_string()));
+                    }
+                    parts.push(self.generate_pattern(elem)?);
+                }
+                parts.push(Document::String("}".to_string()));
+                Ok(Document::Vec(parts))
+            }
+            Pattern::List {
+                elements, tail, ..
+            } => {
+                if elements.is_empty() && tail.is_none() {
+                    return Ok(Document::String("[]".to_string()));
+                }
+                let mut parts = vec![Document::String("[".to_string())];
+                for (i, elem) in elements.iter().enumerate() {
+                    if i > 0 {
+                        parts.push(Document::String(", ".to_string()));
+                    }
+                    parts.push(self.generate_pattern(elem)?);
+                }
+                if let Some(tail_pat) = tail {
+                    parts.push(Document::String(" | ".to_string()));
+                    parts.push(self.generate_pattern(tail_pat)?);
+                }
+                parts.push(Document::String("]".to_string()));
+                Ok(Document::Vec(parts))
+            }
+            Pattern::Binary { .. } => Err(CodeGenError::UnsupportedFeature {
+                feature: "binary pattern matching".to_string(),
+                location: format!("{:?}", pattern.span()),
+            }),
+        }
+    }
+
+    /// Generates a Core Erlang guard expression.
+    ///
+    /// Core Erlang guards only allow a restricted set of BIFs:
+    /// comparisons, arithmetic, and type checks.
+    fn generate_guard_expression(&mut self, expr: &Expression) -> Result<Document<'static>> {
+        match expr {
+            Expression::Literal(lit, _) => self.generate_literal(lit),
+            Expression::Identifier(id) => {
+                let var_name = Self::erlang_var_name(&id.name);
+                Ok(Document::String(var_name))
+            }
+            Expression::MessageSend {
+                receiver,
+                selector: MessageSelector::Binary(op),
+                arguments,
+                ..
+            } => {
+                let left = self.generate_guard_expression(receiver)?;
+                let right = self.generate_guard_expression(&arguments[0])?;
+                let erlang_op = match op.as_str() {
+                    ">" => ">",
+                    "<" => "<",
+                    ">=" => ">=",
+                    "<=" => "=<",
+                    "=" => "==",
+                    "~=" | "!=" => "/=",
+                    "+" => "+",
+                    "-" => "-",
+                    "*" => "*",
+                    "/" => "/",
+                    _ => {
+                        return Err(CodeGenError::UnsupportedFeature {
+                            feature: format!("operator '{op}' in guard expression"),
+                            location: format!("{:?}", expr.span()),
+                        });
+                    }
+                };
+                Ok(docvec![
+                    format!("call 'erlang':'{erlang_op}'("),
+                    left,
+                    ", ",
+                    right,
+                    ")",
+                ])
+            }
+            _ => Err(CodeGenError::UnsupportedFeature {
+                feature: "complex guard expression (only comparisons and arithmetic allowed)"
+                    .to_string(),
+                location: format!("{:?}", expr.span()),
+            }),
+        }
+    }
+
+    /// Converts a Beamtalk identifier to Core Erlang variable name convention.
+    fn erlang_var_name(name: &str) -> String {
+        let mut var = String::with_capacity(name.len() + 1);
+        for (i, c) in name.chars().enumerate() {
+            if i == 0 {
+                var.push(c.to_ascii_uppercase());
+            } else {
+                var.push(c);
+            }
+        }
+        var
     }
 }
