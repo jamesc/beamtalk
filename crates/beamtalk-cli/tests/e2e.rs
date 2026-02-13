@@ -1378,8 +1378,8 @@ fn e2e_language_tests() {
         }
     };
 
-    // Find all test files
-    let test_files: Vec<PathBuf> = fs::read_dir(&cases_dir)
+    // Find all test files (sorted for deterministic execution order)
+    let mut test_files: Vec<PathBuf> = fs::read_dir(&cases_dir)
         .expect("Failed to read test cases directory")
         .filter_map(|entry| {
             let entry = entry.ok()?;
@@ -1391,6 +1391,7 @@ fn e2e_language_tests() {
             }
         })
         .collect();
+    test_files.sort();
 
     if test_files.is_empty() {
         eprintln!("No test files found in {}", cases_dir.display());
