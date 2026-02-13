@@ -117,37 +117,37 @@ test-mcp: build-stdlib
     set -euo pipefail
     echo "🧪 Running MCP server integration tests..."
 
-    # Start a REPL workspace in the background
-    MCP_TEST_PORT=19876
-    ./target/debug/beamtalk repl --port "$MCP_TEST_PORT" &
+    # Start a REPL workspace on ephemeral port, capture stdout to discover it
+    OUTFILE=$(mktemp)
+    ./target/debug/beamtalk repl --port 0 > "$OUTFILE" 2>&1 &
     REPL_PID=$!
 
     # Ensure cleanup on exit
     cleanup() {
         kill "$REPL_PID" 2>/dev/null || true
         wait "$REPL_PID" 2>/dev/null || true
+        rm -f "$OUTFILE"
     }
     trap cleanup EXIT
 
-    # Wait for REPL to be ready
+    # Wait for "Connected to REPL backend on port <N>" line
+    MCP_TEST_PORT=""
     for i in $(seq 1 30); do
-        if ss -tlnp 2>/dev/null | grep -q ":${MCP_TEST_PORT} " || \
-           nc -z 127.0.0.1 "$MCP_TEST_PORT" 2>/dev/null; then
-            break
-        fi
+        MCP_TEST_PORT=$(grep -oP 'Connected to REPL backend on port \K[0-9]+' "$OUTFILE" 2>/dev/null || true)
+        if [ -n "$MCP_TEST_PORT" ]; then break; fi
         sleep 1
     done
 
-    # Verify connection
-    if ! nc -z 127.0.0.1 "$MCP_TEST_PORT" 2>/dev/null; then
-        echo "❌ REPL failed to start on port $MCP_TEST_PORT"
+    if [ -z "$MCP_TEST_PORT" ]; then
+        echo "❌ REPL failed to start (no port detected)"
+        cat "$OUTFILE"
         exit 1
     fi
 
     echo "  REPL running on port $MCP_TEST_PORT (pid $REPL_PID)"
 
-    # Run the MCP integration tests
-    cargo test -p beamtalk-mcp -- --ignored --test-threads=1
+    # Run the MCP integration tests with discovered port
+    BEAMTALK_TEST_PORT="$MCP_TEST_PORT" cargo test -p beamtalk-mcp -- --ignored --test-threads=1
 
     echo "✅ MCP integration tests complete"
 
