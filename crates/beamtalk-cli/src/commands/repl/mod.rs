@@ -629,6 +629,29 @@ pub fn run(
                     _ => {}
                 }
 
+                // Detect common commands typed without ':' prefix.
+                // Only match full command names to avoid false positives with
+                // single-letter variable names (e.g. `r`, `l`, `b`).
+                let first_word = line.split_whitespace().next().unwrap_or("");
+                if let Some(suggestion) = match first_word {
+                    "load" => Some(":load"),
+                    "reload" => Some(":reload"),
+                    "help" => Some(":help"),
+                    "exit" | "quit" => Some(":exit"),
+                    "clear" => Some(":clear"),
+                    "bindings" => Some(":bindings"),
+                    "actors" => Some(":actors"),
+                    "modules" => Some(":modules"),
+                    "unload" => Some(":unload"),
+                    "kill" => Some(":kill"),
+                    "inspect" => Some(":inspect"),
+                    "sessions" => Some(":sessions"),
+                    _ => None,
+                } {
+                    eprintln!("Hint: did you mean `{suggestion}`? REPL commands start with `:`");
+                    continue;
+                }
+
                 // Evaluate expression
                 match client.eval(line) {
                     Ok(response) => {
