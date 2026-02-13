@@ -76,3 +76,50 @@ version isEmpty
 // Cascade on workspace binding: all messages dispatched to same actor
 Transcript show: 'Hello'; cr; show: 'World'
 // => nil
+
+// ===========================================================================
+// BEAMTALK BINDING — GLOBALS
+// ===========================================================================
+
+// Beamtalk globals returns a map (empty in Phase 1)
+globals := (Beamtalk globals) await
+// => _
+
+// ===========================================================================
+// BEAMTALK BINDING — CLASS NAMED
+// ===========================================================================
+
+// Beamtalk classNamed: looks up a class by symbol
+intClass := (Beamtalk classNamed: #Integer) await
+// => Integer
+
+// ===========================================================================
+// TRANSCRIPT BINDING — BUFFER OPERATIONS
+// ===========================================================================
+
+// Clear transcript buffer first
+(Transcript clear) await
+// => nil
+
+// Write something to transcript
+(Transcript show: 'TestOutput') await
+// => nil
+
+// Recent returns buffer contents (list of recent output)
+recent := (Transcript recent) await
+// => _
+
+// Buffer should not be empty after writing
+recent isEmpty
+// => false
+
+// Clear empties the buffer
+(Transcript clear) await
+// => nil
+
+// Buffer should be empty after clear
+recentAfterClear := (Transcript recent) await
+// => _
+
+recentAfterClear isEmpty
+// => true

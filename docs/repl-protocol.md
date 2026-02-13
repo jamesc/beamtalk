@@ -7,7 +7,7 @@ The Beamtalk REPL uses a JSON-based message protocol over TCP for communication 
 - **Protocol:** TCP
 - **Encoding:** JSON, one message per line (newline-delimited)
 - **Binding:** `127.0.0.1` (loopback only, for security)
-- **Default port:** `49152`
+- **Default port:** OS-assigned (port 0); override with `--port` or `BEAMTALK_REPL_PORT`
 
 ## Message Format
 

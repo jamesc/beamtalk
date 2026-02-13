@@ -6,6 +6,7 @@
 //! **DDD Context:** REPL — Process Management
 
 use std::ffi::OsString;
+use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
@@ -131,12 +132,70 @@ impl Drop for BeamChildGuard {
     }
 }
 
-/// Default REPL port in the ephemeral range (49152-65535).
-/// This avoids conflicts with common services (PHP-FPM on 9000, Prometheus on 9090, etc.)
-pub(super) const DEFAULT_REPL_PORT: u16 = 49152;
+/// Read the actual port from a BEAM child process's stdout.
+/// The BEAM node prints `BEAMTALK_PORT:<port>` after binding to the OS-assigned port.
+///
+/// Uses a background thread for reading so the deadline is enforced even if
+/// the child blocks without producing a full line. Takes ownership of stdout
+/// via `take()` since it must be moved into the thread; this is fine because
+/// all further BEAM communication uses TCP, not stdout.
+pub(super) fn read_port_from_child(child: &mut Child) -> Result<u16> {
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| miette!("Cannot read stdout from BEAM child process"))?;
+
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    // Read lines in a background thread so the main thread can enforce a timeout.
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            match line {
+                Ok(line) => {
+                    if tx.send(line).is_err() {
+                        break; // receiver dropped (timeout)
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        match rx.recv_timeout(remaining) {
+            Ok(line) => {
+                if let Some(port_str) = line.strip_prefix("BEAMTALK_PORT:") {
+                    let port = port_str
+                        .trim()
+                        .parse::<u16>()
+                        .map_err(|_| miette!("Invalid port in BEAMTALK_PORT line: {port_str}"))?;
+                    info!("BEAM node bound to port {port}");
+                    return Ok(port);
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    Err(miette!(
+        "Timed out waiting for BEAM node to report its port.\n\
+         The BEAM node may have failed to start."
+    ))
+}
+
+/// Default REPL port: 0 means the OS assigns an available ephemeral port.
+/// This eliminates port conflicts between multiple workspaces or other services.
+/// Use `BEAMTALK_REPL_PORT` env var or `--port` flag to override.
+pub(super) const DEFAULT_REPL_PORT: u16 = 0;
 
 /// Resolve the REPL port from CLI arg and environment variable.
-/// Priority: CLI flag > `BEAMTALK_REPL_PORT` env var > default (49152)
+/// Priority: CLI flag > `BEAMTALK_REPL_PORT` env var > default (0 = OS-assigned)
 pub(super) fn resolve_port(port_arg: Option<u16>) -> Result<u16> {
     if let Some(p) = port_arg {
         // CLI flag explicitly set

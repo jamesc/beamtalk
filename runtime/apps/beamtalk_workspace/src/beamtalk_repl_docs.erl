@@ -216,12 +216,11 @@ format_class_output(ClassName, Superclass, ModuleDoc, OwnDocs, InheritedGrouped)
         iolist_to_binary([<<"== ">>, atom_to_binary(ClassName, utf8),
                           format_superclass(Superclass), <<" ==">>]),
 
-        %% Module doc (first paragraph only for overview)
+        %% Module doc
         case ModuleDoc of
             none -> <<>>;
             Text ->
-                FirstPara = first_paragraph(Text),
-                iolist_to_binary([<<"\n">>, FirstPara])
+                iolist_to_binary([<<"\n">>, Text])
         end,
 
         %% Own methods
@@ -238,16 +237,37 @@ format_class_output(ClassName, Superclass, ModuleDoc, OwnDocs, InheritedGrouped)
                                   lists:join(<<"\n">>, MethodLines)])
         end,
 
-        %% Inherited methods (grouped by class)
+        %% Inherited methods (compact summary per class)
         lists:map(
             fun({FromClass, Selectors}) ->
-                SelectorStrs = lists:map(
-                    fun(S) -> iolist_to_binary([<<"  ">>, atom_to_binary(S, utf8)]) end,
-                    Selectors
-                ),
+                Count = length(Selectors),
+                Summary = case Count =< 5 of
+                    true ->
+                        %% Show all if 5 or fewer
+                        SelectorStrs = lists:map(
+                            fun(S) -> atom_to_binary(S, utf8) end,
+                            Selectors
+                        ),
+                        lists:join(<<", ">>, SelectorStrs);
+                    false ->
+                        %% Show first 3 + count of remaining
+                        {First3, _Rest} = lists:split(3, Selectors),
+                        Shown = lists:map(
+                            fun(S) -> atom_to_binary(S, utf8) end,
+                            First3
+                        ),
+                        Remaining = Count - 3,
+                        iolist_to_binary([
+                            lists:join(<<", ">>, Shown),
+                            <<", ... (">>,
+                            integer_to_binary(Remaining),
+                            <<" more)">>
+                        ])
+                end,
                 iolist_to_binary([<<"\nInherited from ">>,
-                                  atom_to_binary(FromClass, utf8), <<":\n">>,
-                                  lists:join(<<"\n">>, SelectorStrs)])
+                                  atom_to_binary(FromClass, utf8),
+                                  <<" (">>, integer_to_binary(Count), <<" methods): ">>,
+                                  Summary])
             end,
             InheritedGrouped
         ),
@@ -282,11 +302,3 @@ format_method_output(ClassName, SelectorBin, DefiningClass, {Signature, DocText}
     end,
     iolist_to_binary([Header, Inherited, SignatureLine, Doc]).
 
-%% @private Extract first paragraph from markdown text.
--spec first_paragraph(binary()) -> binary().
-first_paragraph(Text) ->
-    %% Split on double newline to get first paragraph
-    case binary:split(Text, <<"\n\n">>) of
-        [First | _] -> First;
-        _ -> Text
-    end.

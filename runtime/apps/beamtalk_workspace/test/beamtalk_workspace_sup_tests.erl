@@ -93,7 +93,7 @@ repl_server_spec_test() ->
     [ReplSpec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_repl_server],
     ?assertEqual(worker, maps:get(type, ReplSpec)),
     ?assertEqual(permanent, maps:get(restart, ReplSpec)),
-    ?assertEqual({beamtalk_repl_server, start_link, [#{port => 49152}]}, 
+    ?assertEqual({beamtalk_repl_server, start_link, [#{port => 49152, workspace_id => <<"test123">>}]}, 
                  maps:get(start, ReplSpec)).
 
 idle_monitor_spec_test() ->

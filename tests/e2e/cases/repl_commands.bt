@@ -1,0 +1,151 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for REPL commands (BT-527).
+//
+// Tests :bindings, :clear, :actors, :modules, and :reload commands
+// routed through their proper protocol operations.
+
+// @load tests/e2e/fixtures/counter.bt
+
+// ===========================================================================
+// :bindings — EMPTY STATE
+// ===========================================================================
+
+// Bindings should be empty at start (clear happens before each file)
+:bindings
+// => No bindings
+
+// ===========================================================================
+// :bindings — AFTER ASSIGNMENT
+// ===========================================================================
+
+// Assign a variable and check bindings
+x := 42
+// => 42
+
+// Bindings should show the variable
+:bindings
+// => x = 42
+
+// ===========================================================================
+// :clear — REMOVES BINDINGS
+// ===========================================================================
+
+// Clear all bindings
+:clear
+// => ok
+
+// Bindings should be empty after clear
+:bindings
+// => No bindings
+
+// Accessing cleared variable should error
+x
+// => ERROR: Undefined variable
+
+// ===========================================================================
+// :bindings — MULTIPLE VARIABLES (sorted alphabetically)
+// ===========================================================================
+
+a := 1
+// => 1
+
+b := 2
+// => 2
+
+// Multiple bindings (use wildcard since output is multi-line)
+:bindings
+// => _
+
+// Clean up for next section
+:clear
+// => ok
+
+// ===========================================================================
+// :actors — AFTER SPAWNING
+// ===========================================================================
+
+// Spawn a counter actor
+c := Counter spawn
+// => #Actor<Counter,_>
+
+// Actors list should include our Counter (other actors may exist from prior tests)
+:actors
+// => _
+
+// ===========================================================================
+// :load — LOAD A VALUE TYPE
+// ===========================================================================
+
+// Load point fixture via :load command (Counter already loaded via @load directive)
+:load tests/e2e/fixtures/point.bt
+// => Loaded: Point
+
+// Verify loaded value type is usable
+p := Point new
+// => _
+
+p getX
+// => 0
+
+// ===========================================================================
+// :load — LOAD AN ACTOR AND USE IT
+// ===========================================================================
+
+// Load a different actor via :load
+:load tests/e2e/fixtures/class_methods_fixture.bt
+// => Loaded: Calculator
+
+// Verify class methods work on the loaded class
+Calculator defaultValue
+// => 42
+
+Calculator add: 3 to: 7
+// => 10
+
+// ===========================================================================
+// :load — METACLASS OPERATIONS ON LOADED CLASSES
+// ===========================================================================
+
+// Class of a Counter instance
+c class
+// => Counter
+
+// Class introspection: respondsTo: on instances
+c respondsTo: #increment
+// => true
+
+c respondsTo: #nonExistent
+// => false
+
+// Class of a Point instance
+p class
+// => Point
+
+// Class introspection on Point instances
+p respondsTo: #getX
+// => true
+
+// ===========================================================================
+// :modules — AFTER LOAD
+// ===========================================================================
+
+// Modules should show the loaded counter module
+:modules
+// => _
+
+// ===========================================================================
+// :reload — RELOAD LOADED MODULE
+// ===========================================================================
+
+// Reload the counter module by its compiled module name
+:reload bt@counter
+// => _
+
+// Counter should still work after reload
+c2 := Counter spawn
+// => #Actor<Counter,_>
+
+c2 increment
+// => 1

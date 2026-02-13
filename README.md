@@ -1,6 +1,8 @@
 # Beamtalk
 
 [![CI](https://github.com/jamesc/beamtalk/actions/workflows/ci.yml/badge.svg)](https://github.com/jamesc/beamtalk/actions/workflows/ci.yml)
+[![Rust coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jamesc/beamtalk/badges/rust-coverage.json)](https://github.com/jamesc/beamtalk/actions/workflows/ci.yml)
+[![Erlang coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jamesc/beamtalk/badges/erlang-coverage.json)](https://github.com/jamesc/beamtalk/actions/workflows/ci.yml)
 
 **A live, interactive Smalltalk-like language for the BEAM VM**
 
@@ -359,10 +361,9 @@ $env:GH_TOKEN = (gh auth token)  # Set for current session
 5. Opens bash shell inside container
 
 **Port assignment:**
-- `BT-<N>` branches → port `49152 + N` (e.g., `BT-190` → `49342`)
-- `main` branch → port `49152` (default)
-- Other branches → hash-based port `50152-51051`
-- All ports in IANA ephemeral range (49152-65535)
+- REPL ports are OS-assigned (ephemeral) by default — no port conflicts
+- Override with `--port` flag or `BEAMTALK_REPL_PORT` env var
+- Each worktree gets a unique node name and daemon socket for isolation
 
 #### Removing a Worktree
 
@@ -666,7 +667,9 @@ Beamtalk combines ideas from:
 
 ## Contributing
 
-See [AGENTS.md](AGENTS.md) for development guidelines, coding standards, and task tracking.
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for how to get started — covering dev setup, running tests, PR guidelines, and where to help.
+
+For AI agent contributors, see [AGENTS.md](AGENTS.md) for detailed development guidelines.
 
 We use [Linear](https://linear.app) for issue tracking (project prefix: `BT`).
 

@@ -51,7 +51,8 @@ pub fn beam_paths(runtime_dir: &Path) -> BeamPaths {
 pub fn build_eval_cmd(port: u16) -> String {
     format!(
         "{}, \
-         io:format(\"REPL backend started on port {port}~n\"), \
+         {{ok, ActualPort}} = beamtalk_repl_server:get_port(), \
+         io:format(\"BEAMTALK_PORT:~B~n\", [ActualPort]), \
          receive stop -> ok end.",
         startup_prelude(port),
     )
@@ -69,7 +70,8 @@ pub fn build_eval_cmd_with_node(port: u16, node_name: &str) -> String {
     format!(
         "application:set_env(beamtalk_runtime, node_name, '{safe_name}'), \
          {}, \
-         io:format(\"REPL backend started on port {port} (node: {safe_name})~n\"), \
+         {{ok, ActualPort}} = beamtalk_repl_server:get_port(), \
+         io:format(\"BEAMTALK_PORT:~B~n\", [ActualPort]), \
          receive stop -> ok end.",
         startup_prelude(port),
     )
@@ -211,6 +213,9 @@ mod tests {
         // Must start the workspace supervisor
         assert!(cmd.contains("beamtalk_workspace_sup:start_link"));
         assert!(cmd.contains("tcp_port => 9000"));
+        // Must query and print the actual bound port (for ephemeral port discovery)
+        assert!(cmd.contains("beamtalk_repl_server:get_port()"));
+        assert!(cmd.contains("BEAMTALK_PORT:"));
         // Must block to keep the VM alive
         assert!(cmd.contains("receive stop -> ok end"));
     }
