@@ -123,6 +123,14 @@ sealed Collection subclass: Dictionary
   /// ```
   printString => @primitive 'printString'
 
+  /// Return a lazy Stream over the dictionary entries as Associations.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (#{#a => 1} stream) asList
+  /// ```
+  stream => @primitive 'stream'
+
   /// Human-readable description of the receiver.
   ///
   /// ## Examples

@@ -222,6 +222,8 @@ fn generate_string_bif(selector: &str, params: &[String]) -> Option<String> {
         "each:" => Some(format!("call 'beamtalk_string_ops':'each'(Self, {p0})")),
         "collect:" => Some(format!("call 'beamtalk_string_ops':'collect'(Self, {p0})")),
         "select:" => Some(format!("call 'beamtalk_string_ops':'select'(Self, {p0})")),
+        // Streaming (BT-514)
+        "stream" => Some("call 'beamtalk_stream':'on'(Self)".to_string()),
         _ => None,
     }
 }
@@ -595,6 +597,8 @@ fn generate_list_bif(selector: &str, params: &[String]) -> Option<String> {
         }
         // Display
         "printString" => Some("call 'beamtalk_primitive':'print_string'(Self)".to_string()),
+        // Streaming (BT-514)
+        "stream" => Some("call 'beamtalk_stream':'on'(Self)".to_string()),
         _ => None,
     }
 }
@@ -650,6 +654,8 @@ fn generate_dictionary_bif(selector: &str, params: &[String]) -> Option<String> 
             Some(format!("call 'beamtalk_map_ops':'includes'(Self, {p0})"))
         }
         "printString" => Some("call 'beamtalk_map_ops':'print_string'(Self)".to_string()),
+        // Streaming (BT-514)
+        "stream" => Some("call 'beamtalk_stream':'on'(Self)".to_string()),
         _ => None,
     }
 }
@@ -736,6 +742,8 @@ fn generate_set_bif(selector: &str, params: &[String]) -> Option<String> {
             // formats Sets as "Set(element1, element2, ...)"
             Some("call 'beamtalk_primitive':'print_string'(Self)".to_string())
         }
+        // Streaming (BT-514)
+        "stream" => Some("call 'beamtalk_stream':'on'(Self)".to_string()),
         _ => None,
     }
 }
