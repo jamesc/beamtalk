@@ -3088,4 +3088,12 @@ Actor subclass: Counter
         eprintln!("Generated code:\n{code}");
         assert!(code.contains("case"), "Expected case expression in: {code}");
     }
+
+    #[test]
+    fn codegen_empty_match_errors() {
+        let module = parse_ok("42 match: []");
+        let expr = &module.expressions[0];
+        let result = crate::codegen::core_erlang::generate_test_expression(expr, "test_match");
+        assert!(result.is_err(), "Empty match should fail codegen");
+    }
 }

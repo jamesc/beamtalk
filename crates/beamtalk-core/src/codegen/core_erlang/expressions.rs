@@ -713,6 +713,13 @@ impl CoreErlangGenerator {
         value: &Expression,
         arms: &[MatchArm],
     ) -> Result<Document<'static>> {
+        if arms.is_empty() {
+            return Err(CodeGenError::UnsupportedFeature {
+                feature: "match expression with no arms".to_string(),
+                location: format!("{:?}", value.span()),
+            });
+        }
+
         let match_var = self.fresh_temp_var("Match");
         let value_doc = self.expression_doc(value)?;
 
@@ -765,7 +772,7 @@ impl CoreErlangGenerator {
         match pattern {
             Pattern::Wildcard(_) => Ok(Document::String("_".to_string())),
             Pattern::Variable(id) => {
-                let var_name = Self::erlang_var_name(&id.name);
+                let var_name = Self::to_core_erlang_var(&id.name);
                 Ok(Document::String(var_name))
             }
             Pattern::Literal(lit, _) => self.generate_literal(lit),
@@ -813,7 +820,7 @@ impl CoreErlangGenerator {
         match expr {
             Expression::Literal(lit, _) => self.generate_literal(lit),
             Expression::Identifier(id) => {
-                let var_name = Self::erlang_var_name(&id.name);
+                let var_name = Self::to_core_erlang_var(&id.name);
                 Ok(Document::String(var_name))
             }
             Expression::MessageSend {
@@ -867,7 +874,7 @@ impl CoreErlangGenerator {
     fn collect_pattern_variables_inner(pattern: &Pattern, bind: &mut impl FnMut(&str, &str)) {
         match pattern {
             Pattern::Variable(id) => {
-                let core_var = Self::erlang_var_name(&id.name);
+                let core_var = Self::to_core_erlang_var(&id.name);
                 bind(&id.name, &core_var);
             }
             Pattern::Tuple { elements, .. } | Pattern::List { elements, .. } => {
@@ -880,18 +887,5 @@ impl CoreErlangGenerator {
             }
             Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Binary { .. } => {}
         }
-    }
-
-    /// Converts a Beamtalk identifier to Core Erlang variable name convention.
-    fn erlang_var_name(name: &str) -> String {
-        let mut var = String::with_capacity(name.len() + 1);
-        for (i, c) in name.chars().enumerate() {
-            if i == 0 {
-                var.push(c.to_ascii_uppercase());
-            } else {
-                var.push(c);
-            }
-        }
-        var
     }
 }
