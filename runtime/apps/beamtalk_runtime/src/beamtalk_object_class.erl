@@ -87,7 +87,8 @@
     class_display_name/1,
     class_send/3,
     class_object_tag/1,
-    inherits_from/2
+    inherits_from/2,
+    ensure_hierarchy_table/0
 ]).
 
 %% gen_server callbacks
@@ -1077,11 +1078,16 @@ ensure_pg_started() ->
 %% BT-510: Ensure the class hierarchy ETS table exists.
 %% Stores {ClassName, SuperclassName | none} pairs for O(1) hierarchy queries.
 %% Public named_table so any process can read; written only in init/1.
+%% Uses try/catch to handle concurrent creation race (TOCTOU safe).
 ensure_hierarchy_table() ->
     case ets:info(beamtalk_class_hierarchy) of
         undefined ->
-            ets:new(beamtalk_class_hierarchy,
-                    [set, public, named_table, {read_concurrency, true}]);
+            try
+                ets:new(beamtalk_class_hierarchy,
+                        [set, public, named_table, {read_concurrency, true}])
+            catch
+                error:badarg -> ok  % Another process created it first
+            end;
         _ ->
             ok
     end.

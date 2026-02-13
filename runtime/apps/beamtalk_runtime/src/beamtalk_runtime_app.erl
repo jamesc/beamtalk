@@ -13,6 +13,10 @@ start(_StartType, _StartArgs) ->
     %% Initialize extension registry ETS tables
     beamtalk_extensions:init(),
     
+    %% BT-510: Create class hierarchy ETS table at app startup so it's owned
+    %% by the application master (survives individual class process crashes).
+    beamtalk_object_class:ensure_hierarchy_table(),
+    
     %% Start the runtime supervisor tree (which starts beamtalk_bootstrap, beamtalk_stdlib,
     %% and beamtalk_object_instances; pg is conditionally started inside beamtalk_bootstrap:init/1)
     beamtalk_runtime_sup:start_link().
