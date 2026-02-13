@@ -16,9 +16,8 @@ default:
 # Quick Commands (CI equivalents)
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Run local CI checks (build, lint, unit & E2E tests)
-# Note: Runtime integration tests run only in GitHub Actions CI
-ci: build lint test test-stdlib test-e2e
+# Run local CI checks (build, lint, unit, integration & E2E tests)
+ci: build lint test test-stdlib test-integration test-e2e
 
 # Full clean and rebuild everything
 clean-all: clean clean-erlang
@@ -106,8 +105,14 @@ test-e2e: build-stdlib _clean-daemon-state
     @echo "🧪 Running E2E tests (slow - ~50s)..."
     cargo test --test e2e -- --ignored
 
+# Run workspace integration tests (requires Erlang/OTP runtime, ~10s)
+test-integration: build-stdlib
+    @echo "🧪 Running workspace integration tests..."
+    cargo test --bin beamtalk -- --ignored --test-threads=1
+    @echo "✅ Integration tests complete"
+
 # Run ALL tests (unit + integration + E2E + Erlang runtime)
-test-all: test-rust test-stdlib test-e2e test-runtime
+test-all: test-rust test-stdlib test-integration test-e2e test-runtime
 
 # Run compiled stdlib tests (ADR 0014 Phase 1, ~14s)
 test-stdlib: build-stdlib
