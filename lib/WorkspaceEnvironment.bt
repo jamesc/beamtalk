@@ -1,0 +1,48 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// WorkspaceEnvironment — Per-workspace actor introspection and binding container.
+///
+/// Modeled on Squeak 5.2+'s `Environment` class: a scoped container for
+/// workspace-level bindings and actor introspection. Each workspace has its
+/// own WorkspaceEnvironment instance. The global binding `Workspace` is an
+/// instance of WorkspaceEnvironment scoped to the current workspace.
+///
+/// ## Examples
+/// ```beamtalk
+/// Workspace actors
+/// Workspace actorAt: '<0.132.0>'
+/// Workspace actorsOf: Counter
+/// ```
+Actor subclass: WorkspaceEnvironment
+  classVar: current = nil
+
+  /// Return the current singleton instance (nil before workspace bootstrap).
+  class current => self.current
+
+  /// Set the current singleton instance.
+  class current: instance => self.current := instance
+
+  /// Return a list of all live actors as object references.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace actors
+  /// ```
+  actors => @primitive 'actors'
+
+  /// Look up a specific actor by pid string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace actorAt: '<0.132.0>'
+  /// ```
+  actorAt: pidString => @primitive 'actorAt:'
+
+  /// Return all actors of a given class.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace actorsOf: Counter
+  /// ```
+  actorsOf: className => @primitive 'actorsOf:'

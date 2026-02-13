@@ -15,6 +15,14 @@
 /// Transcript recent
 /// ```
 Actor subclass: TranscriptStream
+  classVar: current = nil
+
+  /// Return the current singleton instance (nil before workspace bootstrap).
+  class current => self.current
+
+  /// Set the current singleton instance.
+  class current: instance => self.current := instance
+
   /// Write a value to the transcript.
   ///
   /// ## Examples
