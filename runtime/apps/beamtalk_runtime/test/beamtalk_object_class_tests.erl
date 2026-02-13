@@ -67,7 +67,9 @@ teardown(_) ->
          beamtalk_class_AsyncUnkTest, beamtalk_class_AsyncIgnoreTest,
          beamtalk_class_InfoTestClass, beamtalk_class_TermTestClass,
          beamtalk_class_HierRoot, beamtalk_class_HierMid, beamtalk_class_HierLeaf,
-         beamtalk_class_HierOrphan, beamtalk_class_HierParent, beamtalk_class_HierChild]
+         beamtalk_class_HierOrphan, beamtalk_class_HierParent, beamtalk_class_HierChild,
+         beamtalk_class_NewErrorTestClass, beamtalk_class_DoubleWrapTestClass,
+         beamtalk_class_PrimTestInteger]
     ),
     %% Clean up ETS hierarchy table entries
     try ets:delete_all_objects(beamtalk_class_hierarchy) catch _:_ -> ok end,
@@ -1002,4 +1004,146 @@ hierarchy_orphan_registration_test_() ->
                      %% But NonExistentParent has no entry, so deeper queries stop
                      ?assertNot(beamtalk_object_class:inherits_from('HierOrphan', 'SomeOtherClass'))
                  end)]
+     end}.
+
+%%====================================================================
+%% BT-525: raise/1 inside handle_call — unwrap_class_call idempotency
+%%====================================================================
+
+%% Compile a minimal test module in-memory for BT-525 tests.
+%% Returns the module name atom. The module exports new/0 (returns
+%% an empty map) so compute_is_constructible/2 sees it as constructible.
+compile_bt525_test_module() ->
+    ModName = bt525_test_mod,
+    Forms = [
+        {attribute, 1, module, ModName},
+        {attribute, 2, export, [{new, 0}]},
+        {function, 3, new, 0, [
+            {clause, 3, [], [], [{map, 3, []}]}
+        ]}
+    ],
+    {ok, ModName, Binary} = compile:forms(Forms, []),
+    {module, ModName} = code:load_binary(ModName, "bt525_test_mod.erl", Binary),
+    ModName.
+
+%% Test that new: with a non-map argument raises a singly-wrapped
+%% type_error via class_send (exercises raise → catch → unwrap_class_call).
+%% Before BT-525 fix, raise/1 in handle_call produced an already-wrapped
+%% Exception map, and unwrap_class_call called raise/1 again → double-wrap.
+new_with_non_map_raises_type_error_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              Mod = compile_bt525_test_module(),
+              ClassInfo = #{
+                  name => 'NewErrorTestClass',
+                  module => Mod,
+                  superclass => none,
+                  instance_methods => #{}
+              },
+              {ok, ClassPid} = beamtalk_object_class:start_link('NewErrorTestClass', ClassInfo),
+
+              %% class_send new: with integer (not a map) should raise
+              %% a singly-wrapped Exception with type_error kind.
+              %% The '$beamtalk_class' key uses := (match) to verify
+              %% the error is a proper Exception map, not double-wrapped.
+              ?assertError(
+                  #{'$beamtalk_class' := 'TypeError',
+                    error := #beamtalk_error{kind = type_error,
+                                             selector = 'new:'}},
+                  beamtalk_object_class:class_send(ClassPid, 'new:', [42])
+              ),
+
+              %% Class process must survive the error
+              ?assert(is_process_alive(ClassPid)),
+
+              %% Class still responds to normal queries
+              ?assertEqual('NewErrorTestClass',
+                           gen_server:call(ClassPid, class_name))
+          end)]
+     end}.
+
+%% Test that the error from new: is singly-wrapped — the inner 'error'
+%% field must be a #beamtalk_error{} record, NOT another Exception map.
+%% This is the specific assertion that would have caught double-wrapping.
+new_with_non_map_not_double_wrapped_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              Mod = compile_bt525_test_module(),
+              ClassInfo = #{
+                  name => 'DoubleWrapTestClass',
+                  module => Mod,
+                  superclass => none,
+                  instance_methods => #{}
+              },
+              {ok, ClassPid} = beamtalk_object_class:start_link('DoubleWrapTestClass', ClassInfo),
+
+              %% Catch the error and inspect its structure directly
+              CaughtError = try
+                  beamtalk_object_class:class_send(ClassPid, 'new:', [42]),
+                  no_error
+              catch
+                  error:E -> E
+              end,
+              ?assertNotEqual(no_error, CaughtError),
+
+              %% Must be a map with '$beamtalk_class' key (Exception object)
+              ?assertMatch(#{'$beamtalk_class' := _}, CaughtError),
+
+              %% The inner 'error' field must be a #beamtalk_error{} record,
+              %% NOT another Exception map (which would indicate double-wrapping)
+              #{error := Inner} = CaughtError,
+              ?assert(is_record(Inner, beamtalk_error)),
+
+              %% Verify the inner error has the expected fields
+              ?assertEqual(type_error, Inner#beamtalk_error.kind),
+              ?assertEqual('new:', Inner#beamtalk_error.selector)
+          end)]
+     end}.
+
+%% Test that new: errors from non-constructible classes (e.g. primitives)
+%% also go through unwrap_class_call correctly without double-wrapping.
+%% This exercises the is_constructible=false → Module:new/0 error path.
+new_on_primitive_not_double_wrapped_test_() ->
+    {setup,
+     fun() ->
+         setup(),
+         %% Need stdlib loaded for primitive class modules
+         case whereis(beamtalk_bootstrap) of
+             undefined -> beamtalk_bootstrap:start_link();
+             _ -> ok
+         end,
+         beamtalk_stdlib:init()
+     end,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              %% Integer's new/0 raises instantiation_error (sealed primitive)
+              ClassInfo = #{
+                  name => 'PrimTestInteger',
+                  module => 'bt@stdlib@integer',
+                  superclass => none,
+                  instance_methods => #{}
+              },
+              {ok, ClassPid} = beamtalk_object_class:start_link('PrimTestInteger', ClassInfo),
+
+              %% new on a primitive should raise an InstantiationError,
+              %% singly-wrapped through unwrap_class_call
+              CaughtError = try
+                  beamtalk_object_class:class_send(ClassPid, 'new', []),
+                  no_error
+              catch
+                  error:E -> E
+              end,
+              ?assertNotEqual(no_error, CaughtError),
+              ?assertMatch(#{'$beamtalk_class' := _}, CaughtError),
+              #{error := Inner} = CaughtError,
+              ?assert(is_record(Inner, beamtalk_error)),
+              ?assertEqual(instantiation_error, Inner#beamtalk_error.kind)
+          end)]
      end}.
