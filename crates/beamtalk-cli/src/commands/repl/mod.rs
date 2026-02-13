@@ -373,6 +373,11 @@ pub fn run(
                 // First line: check if it's a REPL command (only when not
                 // already accumulating a multi-line expression)
                 if line_buffer.is_empty() {
+                    // Add to history (commands and single-line expressions).
+                    // Multi-line expressions will also be added as a joined
+                    // entry after accumulation completes.
+                    let _ = rl.add_history_entry(line);
+
                     // Handle special commands
                     match line {
                         ":exit" | ":quit" | ":q" => {

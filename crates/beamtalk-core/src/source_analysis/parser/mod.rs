@@ -176,12 +176,21 @@ pub fn parse(tokens: Vec<Token>) -> (Module, Vec<Diagnostic>) {
     (module, parser.diagnostics)
 }
 
-/// Checks whether the given source text forms a syntactically complete expression.
+/// Checks whether the given source text appears syntactically complete for REPL
+/// evaluation.
 ///
-/// Returns `true` if the input has balanced delimiters, no unterminated strings
-/// or comments, and does not end with a keyword expecting an argument. This is
-/// used by the REPL to determine whether to evaluate the current buffer or show
-/// a continuation prompt for multi-line input.
+/// This is a heuristic used by the REPL to decide whether to evaluate the
+/// current input buffer or show a continuation prompt for multi-line input.
+/// It returns `false` (incomplete) when:
+///
+/// - Delimiters are unclosed: `[`, `(`, `{`, `#{`, `#(`
+/// - A string or block comment is unterminated
+/// - The last token is a keyword (`at:`), binary operator (`+`), assignment
+///   (`:=`), cascade (`;`), or return (`^`) — all of which expect a following
+///   expression
+///
+/// Extra closing delimiters (e.g., `]` alone) are treated as complete so
+/// the evaluator can report the syntax error rather than waiting forever.
 ///
 /// # Examples
 ///
@@ -259,6 +268,14 @@ pub fn is_input_complete(source: &str) -> bool {
 
     // Trailing assignment missing its value (e.g., "x :=")
     if let Some(TokenKind::Assign) = last_meaningful_kind {
+        return false;
+    }
+
+    // Trailing cascade separator or return operator (e.g., "x foo;" or "^")
+    if matches!(
+        last_meaningful_kind,
+        Some(TokenKind::Semicolon | TokenKind::Caret)
+    ) {
         return false;
     }
 
@@ -2985,5 +3002,15 @@ Actor subclass: Counter
         assert!(is_input_complete("]"));
         assert!(is_input_complete(")"));
         assert!(is_input_complete("}"));
+    }
+
+    #[test]
+    fn incomplete_trailing_cascade() {
+        assert!(!is_input_complete("x foo;"));
+    }
+
+    #[test]
+    fn incomplete_trailing_caret() {
+        assert!(!is_input_complete("^"));
     }
 }
