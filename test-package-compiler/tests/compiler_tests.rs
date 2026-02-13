@@ -80,9 +80,7 @@ fn test_codegen_snapshot(case_name: &str) {
 ///
 /// Returns a tuple of (module_name, core_erlang_code).
 ///
-/// BT-374: Uses workspace mode so test cases referencing workspace bindings
-/// (`Transcript`, `Beamtalk`) compile to `persistent_term` lookup + actor send.
-/// Batch mode error handling is tested via dedicated test cases.
+/// Uses workspace mode for code generation.
 fn generate_core_erlang(case_name: &str) -> (String, String) {
     let source = read_test_case(case_name);
     let tokens = lex_with_eof(&source);
@@ -178,74 +176,49 @@ fn test_semantic_snapshot(case_name: &str) {
 // Test cases will be generated here by build.rs
 include!(concat!(env!("OUT_DIR"), "/generated_tests.rs"));
 
-/// BT-374: Workspace bindings in batch mode produce a clear compile error.
+/// BT-490 / ADR 0019 Phase 3: Workspace bindings compile as normal class references.
+/// Transcript, Beamtalk, Workspace are no longer special-cased — they go through
+/// standard class dispatch (class_send) like any other class.
 #[test]
-fn test_workspace_binding_batch_mode_error() {
+fn test_workspace_binding_compiles_as_normal_class() {
     let source = "Actor subclass: Greeter\n  greet => Transcript show: 'Hello'";
     let tokens = lex_with_eof(source);
     let (module, _) = parse(tokens);
 
-    // Batch mode (workspace_mode = false) should produce an error
-    let result = generate_with_workspace(&module, "test_batch", false);
+    // Both batch and workspace mode should succeed — no special treatment
+    let batch_result = generate_with_workspace(&module, "test_batch", false);
     assert!(
-        result.is_err(),
-        "Expected error for workspace binding in batch mode"
+        batch_result.is_ok(),
+        "Transcript should compile in batch mode: {:?}",
+        batch_result.err()
     );
 
-    let err = result.unwrap_err();
-    let msg = err.to_string();
+    let ws_result = generate_with_workspace(&module, "test_ws", true);
     assert!(
-        msg.contains("Transcript is a workspace binding"),
-        "Error should mention binding name, got: {msg}"
-    );
-    assert!(
-        msg.contains("batch compilation"),
-        "Error should mention batch compilation, got: {msg}"
-    );
-}
-
-/// BT-374: Non-binding ClassReferences are unchanged in batch mode.
-#[test]
-fn test_non_binding_class_unchanged_in_batch_mode() {
-    let source = "Actor subclass: Foo\n  run => Counter spawn";
-    let tokens = lex_with_eof(source);
-    let (module, _) = parse(tokens);
-
-    // Batch mode should work fine for non-binding classes
-    let result = generate_with_workspace(&module, "test_batch", false);
-    assert!(
-        result.is_ok(),
-        "Counter spawn should work in batch mode: {:?}",
-        result.err()
+        ws_result.is_ok(),
+        "Transcript should compile in workspace mode: {:?}",
+        ws_result.err()
     );
 
-    let code = result.unwrap();
+    let batch_code = batch_result.unwrap();
     assert!(
-        code.contains("call 'bt@counter':'spawn'()"),
-        "Should generate direct module call for Counter, got:\n{code}"
-    );
-}
-
-/// BT-374: Workspace binding in workspace mode generates persistent_term lookup.
-#[test]
-fn test_workspace_binding_generates_persistent_term() {
-    let source = "Actor subclass: Greeter\n  greet => Transcript show: 'Hello'";
-    let tokens = lex_with_eof(source);
-    let (module, _) = parse(tokens);
-
-    let core_erlang = generate_with_workspace(&module, "test_ws", true)
-        .expect("Should succeed in workspace mode");
-
-    assert!(
-        core_erlang.contains("persistent_term"),
-        "Should generate persistent_term lookup, got:\n{core_erlang}"
+        batch_code.contains("class_send"),
+        "Batch mode should use class_send for Transcript, got:\n{batch_code}"
     );
     assert!(
-        core_erlang.contains("beamtalk_binding"),
-        "Should reference beamtalk_binding key, got:\n{core_erlang}"
+        !batch_code.contains("persistent_term"),
+        "Should NOT generate persistent_term lookup, got:\n{batch_code}"
+    );
+
+    // ADR 0019: Actor methods in workspace mode use class_send with
+    // persistent_term fallback for convenience binding names
+    let ws_code = ws_result.unwrap();
+    assert!(
+        ws_code.contains("class_send"),
+        "Actor methods in workspace mode should use class_send for Transcript, got:\n{ws_code}"
     );
     assert!(
-        core_erlang.contains("async_send"),
-        "Should use async actor send, got:\n{core_erlang}"
+        ws_code.contains("persistent_term"),
+        "Actor methods should fall back to persistent_term for workspace bindings, got:\n{ws_code}"
     );
 }

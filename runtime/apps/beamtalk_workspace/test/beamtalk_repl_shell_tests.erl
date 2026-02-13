@@ -49,7 +49,10 @@ bindings_initially_empty_test_() ->
          [?_test(begin
               {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-bindings-1">>),
               {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
-              ?assertEqual(#{}, Bindings),
+              %% ADR 0019: Workspace bindings are injected automatically;
+              %% verify no USER bindings are present.
+              UserBindings = maps:without(['Transcript', 'Beamtalk', 'Workspace'], Bindings),
+              ?assertEqual(#{}, UserBindings),
               beamtalk_repl_shell:stop(Pid)
           end)]
      end}.
@@ -64,7 +67,9 @@ clear_bindings_test_() ->
               %% Clear on empty bindings should be ok
               ok = beamtalk_repl_shell:clear_bindings(Pid),
               {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
-              ?assertEqual(#{}, Bindings),
+              %% ADR 0019: Workspace bindings re-injected after clear
+              UserBindings = maps:without(['Transcript', 'Beamtalk', 'Workspace'], Bindings),
+              ?assertEqual(#{}, UserBindings),
               beamtalk_repl_shell:stop(Pid)
           end)]
      end}.
@@ -159,11 +164,13 @@ multiple_sessions_independent_test_() ->
               {ok, Pid1} = beamtalk_repl_shell:start_link(<<"session-a">>),
               {ok, Pid2} = beamtalk_repl_shell:start_link(<<"session-b">>),
               ?assertNotEqual(Pid1, Pid2),
-              %% Both have empty bindings
+              %% ADR 0019: Both have only workspace bindings (no user bindings)
               {ok, B1} = beamtalk_repl_shell:get_bindings(Pid1),
               {ok, B2} = beamtalk_repl_shell:get_bindings(Pid2),
-              ?assertEqual(#{}, B1),
-              ?assertEqual(#{}, B2),
+              UserB1 = maps:without(['Transcript', 'Beamtalk', 'Workspace'], B1),
+              UserB2 = maps:without(['Transcript', 'Beamtalk', 'Workspace'], B2),
+              ?assertEqual(#{}, UserB1),
+              ?assertEqual(#{}, UserB2),
               beamtalk_repl_shell:stop(Pid1),
               beamtalk_repl_shell:stop(Pid2)
           end)]
