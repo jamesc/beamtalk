@@ -4,8 +4,8 @@
 // E2E tests for File streaming (BT-513)
 // Tests File lines: and File open:do: in the REPL environment.
 //
-// Fixture files are in tests/stdlib/fixtures/ (relative to project root).
-// The BEAM process's cwd is set to the project root.
+// Uses stdlib fixture files in tests/stdlib/fixtures/ (relative to project
+// root). The BEAM process cwd is set to the project root.
 
 // ===========================================================================
 // FILE LINES: IN REPL
