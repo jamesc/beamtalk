@@ -756,7 +756,7 @@ impl Parser {
 
         if !self.check(&TokenKind::RightBrace) {
             elements.push(self.parse_pattern());
-            while self.match_token(&TokenKind::BinarySelector(",".into())) {
+            while self.match_binary_selector(",") {
                 elements.push(self.parse_pattern());
             }
         }

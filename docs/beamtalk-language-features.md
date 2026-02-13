@@ -632,7 +632,7 @@ temp match: [-1 -> 'minus one'; 0 -> 'zero'; _ -> 'other']
 | Literal character | `$a` | Exact character match |
 | Negative number | `-1` | Negative integer/float match |
 | Variable | `x` | Binds matched value to name |
-| Tuple | `{a, b}` | Destructure tuple (planned) |
+| Tuple | `{a, b}` | Destructure tuple (patterns supported; tuple literals planned) |
 
 **Guard expressions** support: `>`, `<`, `>=`, `<=`, `=`, `~=`, `+`, `-`, `*`, `/`
 

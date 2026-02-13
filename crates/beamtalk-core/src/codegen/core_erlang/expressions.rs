@@ -819,10 +819,19 @@ impl CoreErlangGenerator {
     fn generate_guard_expression(&mut self, expr: &Expression) -> Result<Document<'static>> {
         match expr {
             Expression::Literal(lit, _) => self.generate_literal(lit),
-            Expression::Identifier(id) => {
-                let var_name = Self::to_core_erlang_var(&id.name);
-                Ok(Document::String(var_name))
-            }
+            Expression::Identifier(id) => match id.name.as_str() {
+                "true" => Ok(Document::String("'true'".to_string())),
+                "false" => Ok(Document::String("'false'".to_string())),
+                "nil" => Ok(Document::String("'nil'".to_string())),
+                _ => {
+                    if let Some(var_name) = self.lookup_var(&id.name) {
+                        Ok(Document::String(var_name.clone()))
+                    } else {
+                        let var_name = Self::to_core_erlang_var(&id.name);
+                        Ok(Document::String(var_name))
+                    }
+                }
+            },
             Expression::MessageSend {
                 receiver,
                 selector: MessageSelector::Binary(op),
@@ -836,8 +845,8 @@ impl CoreErlangGenerator {
                     "<" => "<",
                     ">=" => ">=",
                     "<=" => "=<",
-                    "=" => "==",
-                    "~=" | "!=" => "/=",
+                    "=" => "=:=",
+                    "~=" | "!=" => "=/=",
                     "+" => "+",
                     "-" => "-",
                     "*" => "*",
