@@ -68,6 +68,11 @@ init(SessionId) ->
     %% We use undefined for listen_socket and port since session doesn't own TCP connection
     State0 = beamtalk_repl_state:new(undefined, 0),
     
+    %% ADR 0019 Phase 3: Inject workspace convenience bindings into session
+    %% so that Transcript, Beamtalk, Workspace resolve from bindings map.
+    Bindings0 = inject_workspace_bindings(#{}),
+    State0b = beamtalk_repl_state:set_bindings(Bindings0, State0),
+
     %% Get workspace-wide actor registry
     %% The registry is registered globally in the workspace
     RegistryPid = case whereis(beamtalk_actor_registry) of
@@ -77,7 +82,7 @@ init(SessionId) ->
         Pid ->
             Pid
     end,
-    State1 = beamtalk_repl_state:set_actor_registry(RegistryPid, State0),
+    State1 = beamtalk_repl_state:set_actor_registry(RegistryPid, State0b),
     
     {ok, {SessionId, State1}}.
 
@@ -95,7 +100,10 @@ handle_call(get_bindings, _From, {SessionId, State}) ->
     {reply, {ok, Bindings}, {SessionId, State}};
 
 handle_call(clear_bindings, _From, {SessionId, State}) ->
-    NewState = beamtalk_repl_state:clear_bindings(State),
+    %% ADR 0019 Phase 3: Re-inject workspace bindings after clearing
+    %% so that Transcript, Beamtalk, Workspace remain available.
+    Bindings = inject_workspace_bindings(#{}),
+    NewState = beamtalk_repl_state:set_bindings(Bindings, State),
     {reply, ok, {SessionId, NewState}};
 
 handle_call({load_file, Path}, _From, {SessionId, State}) ->
@@ -128,3 +136,23 @@ terminate(_Reason, _State) ->
 %% @private
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
+
+%%% Internal functions
+
+%% @private ADR 0019 Phase 3: Inject workspace convenience bindings.
+%% Reads Transcript, Beamtalk, Workspace from persistent_term and adds
+%% them to the bindings map so ClassReference codegen can resolve them.
+-include("beamtalk_workspace.hrl").
+
+inject_workspace_bindings(Bindings) ->
+    lists:foldl(
+        fun(Name, Acc) ->
+            try persistent_term:get({beamtalk_binding, Name}) of
+                Value -> maps:put(Name, Value, Acc)
+            catch
+                error:badarg -> Acc  % Binding not set yet
+            end
+        end,
+        Bindings,
+        ?WORKSPACE_BINDINGS
+    ).
