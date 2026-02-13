@@ -5,14 +5,17 @@
 ///
 /// Modeled on Squeak 5.2+'s `Environment` class: a scoped container for
 /// workspace-level bindings and actor introspection. Each workspace has its
-/// own WorkspaceEnvironment instance. The global binding `Workspace` is an
-/// instance of WorkspaceEnvironment scoped to the current workspace.
+/// own WorkspaceEnvironment instance.
+///
+/// After workspace bootstrap (ADR 0019 Phase 2), `WorkspaceEnvironment current`
+/// returns the singleton instance and the convenience binding `Workspace` will
+/// be available. Before bootstrap, `current` returns `nil`.
 ///
 /// ## Examples
 /// ```beamtalk
-/// Workspace actors
-/// Workspace actorAt: '<0.132.0>'
-/// Workspace actorsOf: Counter
+/// WorkspaceEnvironment current actors
+/// WorkspaceEnvironment current actorAt: '<0.132.0>'
+/// WorkspaceEnvironment current actorsOf: Counter
 /// ```
 Actor subclass: WorkspaceEnvironment
   classVar: current = nil
