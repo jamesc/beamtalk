@@ -255,3 +255,164 @@ fn next_msg_id() -> String {
     let n = MSG_COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("msg-{n:03}")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Port for integration tests. Must have a running REPL:
+    ///   beamtalk repl --port 19876
+    const TEST_PORT: u16 = 19876;
+
+    #[tokio::test]
+    #[ignore = "integration test — requires running REPL on port 19876"]
+    async fn test_eval_arithmetic() {
+        let client = ReplClient::connect(TEST_PORT).await.unwrap();
+        let resp = client.eval("2 + 3").await.unwrap();
+        assert!(!resp.is_error(), "eval should succeed");
+        assert_eq!(resp.value_string(), "5");
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test — requires running REPL on port 19876"]
+    async fn test_eval_string() {
+        let client = ReplClient::connect(TEST_PORT).await.unwrap();
+        let resp = client.eval("'hello'").await.unwrap();
+        assert!(!resp.is_error(), "eval should succeed");
+        assert_eq!(resp.value_string(), "hello");
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test — requires running REPL on port 19876"]
+    async fn test_eval_error() {
+        let client = ReplClient::connect(TEST_PORT).await.unwrap();
+        let resp = client.eval("42 nonexistentMethod").await.unwrap();
+        assert!(resp.is_error(), "should be an error");
+        assert!(resp.error_message().is_some(), "should have error message");
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test — requires running REPL on port 19876"]
+    async fn test_bindings() {
+        let client = ReplClient::connect(TEST_PORT).await.unwrap();
+
+        // Set a binding
+        let resp = client.eval("testVar := 99").await.unwrap();
+        assert!(!resp.is_error());
+
+        // Read bindings
+        let resp = client.bindings().await.unwrap();
+        assert!(!resp.is_error());
+        let bindings = resp.bindings.unwrap();
+        assert!(
+            bindings.get("testVar").is_some(),
+            "testVar should be in bindings: {bindings}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test — requires running REPL on port 19876"]
+    async fn test_actors_list() {
+        let client = ReplClient::connect(TEST_PORT).await.unwrap();
+        let resp = client.actors().await.unwrap();
+        assert!(!resp.is_error());
+        assert!(resp.actors.is_some(), "should return actors list");
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test — requires running REPL on port 19876"]
+    async fn test_modules_list() {
+        let client = ReplClient::connect(TEST_PORT).await.unwrap();
+        let resp = client.modules().await.unwrap();
+        assert!(!resp.is_error());
+        assert!(resp.modules.is_some(), "should return modules list");
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test — requires running REPL on port 19876"]
+    async fn test_complete() {
+        let client = ReplClient::connect(TEST_PORT).await.unwrap();
+        let resp = client.complete("Integer ").await.unwrap();
+        assert!(!resp.is_error());
+        assert!(resp.completions.is_some(), "should return completions list");
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test — requires running REPL on port 19876"]
+    async fn test_load_file_and_spawn_actor() {
+        let client = ReplClient::connect(TEST_PORT).await.unwrap();
+
+        // Load counter
+        let resp = client.load_file("examples/counter.bt").await.unwrap();
+        assert!(!resp.is_error(), "load should succeed: {:?}", resp.error);
+        let classes = resp.classes.unwrap_or_default();
+        assert!(
+            classes.contains(&"Counter".to_string()),
+            "Counter should be loaded"
+        );
+
+        // Spawn actor
+        let resp = client.eval("testCounter := Counter spawn").await.unwrap();
+        assert!(!resp.is_error());
+        let value = resp.value_string();
+        assert!(
+            value.contains("Actor"),
+            "spawn should return actor ref: {value}"
+        );
+
+        // Increment
+        let resp = client.eval("testCounter increment").await.unwrap();
+        assert!(!resp.is_error());
+
+        // Check actors list
+        let resp = client.actors().await.unwrap();
+        let actors = resp.actors.unwrap_or_default();
+        assert!(
+            actors.iter().any(|a| a.class == "Counter"),
+            "Counter should appear in actors list"
+        );
+
+        // Inspect
+        let counter = actors.iter().find(|a| a.class == "Counter").unwrap();
+        let resp = client.inspect(&counter.pid).await.unwrap();
+        assert!(!resp.is_error());
+        assert!(resp.state.is_some(), "inspect should return state");
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test — requires running REPL on port 19876"]
+    async fn test_docs() {
+        let client = ReplClient::connect(TEST_PORT).await.unwrap();
+        let resp = client.docs("Integer", None).await.unwrap();
+        assert!(!resp.is_error());
+        assert!(resp.docs.is_some(), "should return docs");
+        let docs = resp.docs.unwrap();
+        assert!(!docs.is_empty(), "docs should not be empty");
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test — requires running REPL on port 19876"]
+    async fn test_value_string_formats_correctly() {
+        let client = ReplClient::connect(TEST_PORT).await.unwrap();
+
+        // Integer value
+        let resp = client.eval("42").await.unwrap();
+        assert_eq!(resp.value_string(), "42");
+
+        // String value
+        let resp = client.eval("'test'").await.unwrap();
+        assert_eq!(resp.value_string(), "test");
+
+        // Nil value
+        let resp = client.eval("nil").await.unwrap();
+        assert_eq!(resp.value_string(), "nil");
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test — requires running REPL on port 19876"]
+    async fn test_connection_failure() {
+        // Port 1 should never have a REPL running
+        let result = ReplClient::connect(1).await;
+        assert!(result.is_err(), "connecting to port 1 should fail");
+    }
+}

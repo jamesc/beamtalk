@@ -79,3 +79,121 @@ fn hex_encode(bytes: &[u8]) -> String {
             s
         })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_generate_workspace_id_deterministic() {
+        let path = Path::new("/tmp/test-beamtalk-workspace");
+        let id1 = generate_workspace_id(path);
+        let id2 = generate_workspace_id(path);
+        assert_eq!(id1, id2, "Same path should produce same workspace ID");
+    }
+
+    #[test]
+    fn test_generate_workspace_id_length() {
+        let path = Path::new("/tmp/test-beamtalk-workspace");
+        let id = generate_workspace_id(path);
+        assert_eq!(
+            id.len(),
+            12,
+            "Workspace ID should be 12 hex chars (6 bytes)"
+        );
+    }
+
+    #[test]
+    fn test_generate_workspace_id_hex_format() {
+        let path = Path::new("/tmp/test-beamtalk-workspace");
+        let id = generate_workspace_id(path);
+        assert!(
+            id.chars().all(|c| c.is_ascii_hexdigit()),
+            "Workspace ID should be all hex digits, got: {id}"
+        );
+    }
+
+    #[test]
+    fn test_different_paths_produce_different_ids() {
+        let id1 = generate_workspace_id(Path::new("/tmp/project-a"));
+        let id2 = generate_workspace_id(Path::new("/tmp/project-b"));
+        assert_ne!(id1, id2, "Different paths should produce different IDs");
+    }
+
+    #[test]
+    fn test_hex_encode() {
+        assert_eq!(hex_encode(&[0x00]), "00");
+        assert_eq!(hex_encode(&[0xff]), "ff");
+        assert_eq!(hex_encode(&[0xde, 0xad, 0xbe, 0xef]), "deadbeef");
+        assert_eq!(hex_encode(&[]), "");
+    }
+
+    #[test]
+    fn test_read_port_file_missing_workspace() {
+        let result = read_port_file("nonexistent_workspace_id_abc123");
+        assert_eq!(result, None, "Missing workspace should return None");
+    }
+
+    #[test]
+    fn test_read_port_file_valid() {
+        let workspace_id = format!("test_mcp_{}", std::process::id());
+        let dir = workspaces_dir().unwrap().join(&workspace_id);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("port"), "9876\n").unwrap();
+
+        let result = read_port_file(&workspace_id);
+        assert_eq!(result, Some(9876));
+
+        // Cleanup
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_read_port_file_invalid_content() {
+        let workspace_id = format!("test_mcp_invalid_{}", std::process::id());
+        let dir = workspaces_dir().unwrap().join(&workspace_id);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("port"), "not_a_number\n").unwrap();
+
+        let result = read_port_file(&workspace_id);
+        assert_eq!(result, None, "Invalid port file content should return None");
+
+        // Cleanup
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_read_port_file_empty() {
+        let workspace_id = format!("test_mcp_empty_{}", std::process::id());
+        let dir = workspaces_dir().unwrap().join(&workspace_id);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("port"), "").unwrap();
+
+        let result = read_port_file(&workspace_id);
+        assert_eq!(result, None, "Empty port file should return None");
+
+        // Cleanup
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_discover_port_with_explicit_id() {
+        let workspace_id = format!("test_mcp_discover_{}", std::process::id());
+        let dir = workspaces_dir().unwrap().join(&workspace_id);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("port"), "5555").unwrap();
+
+        let result = discover_port(Some(&workspace_id));
+        assert_eq!(result, Some(5555));
+
+        // Cleanup
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_discover_port_missing_id() {
+        let result = discover_port(Some("nonexistent_workspace_xyz"));
+        assert_eq!(result, None);
+    }
+}
