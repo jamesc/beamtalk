@@ -65,8 +65,12 @@ teardown(_) ->
          beamtalk_class_AsyncTestClass, beamtalk_class_AsyncSuperTest,
          beamtalk_class_AsyncNameTest, beamtalk_class_AsyncModTest,
          beamtalk_class_AsyncUnkTest, beamtalk_class_AsyncIgnoreTest,
-         beamtalk_class_InfoTestClass, beamtalk_class_TermTestClass]
+         beamtalk_class_InfoTestClass, beamtalk_class_TermTestClass,
+         beamtalk_class_HierRoot, beamtalk_class_HierMid, beamtalk_class_HierLeaf,
+         beamtalk_class_HierOrphan, beamtalk_class_HierParent, beamtalk_class_HierChild]
     ),
+    %% Clean up ETS hierarchy table entries
+    try ets:delete_all_objects(beamtalk_class_hierarchy) catch _:_ -> ok end,
     ok.
 
 %%====================================================================
@@ -832,4 +836,170 @@ terminate_graceful_test_() ->
               timer:sleep(50),
               ?assertNot(is_process_alive(ClassPid))
           end)]
+     end}.
+
+%%====================================================================
+%% BT-510: ETS Class Hierarchy Tests
+%%====================================================================
+
+%% Test that class registration populates the hierarchy ETS table
+hierarchy_ets_populated_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [
+          ?_test(begin
+                     %% Register root, then child with superclass
+                     RootInfo = #{
+                         name => 'HierRoot',
+                         module => hier_root,
+                         superclass => none,
+                         instance_methods => #{rootMethod => #{arity => 0}}
+                     },
+                     {ok, _} = beamtalk_object_class:start_link('HierRoot', RootInfo),
+                     %% ETS table should have an entry for root
+                     ?assertEqual([{'HierRoot', none}],
+                                  ets:lookup(beamtalk_class_hierarchy, 'HierRoot')),
+                     %% Register child with superclass
+                     ChildInfo = #{
+                         name => 'HierMid',
+                         module => hier_mid,
+                         superclass => 'HierRoot',
+                         instance_methods => #{midMethod => #{arity => 0}}
+                     },
+                     {ok, _} = beamtalk_object_class:start_link('HierMid', ChildInfo),
+                     ?assertEqual([{'HierMid', 'HierRoot'}],
+                                  ets:lookup(beamtalk_class_hierarchy, 'HierMid'))
+                 end)]
+     end}.
+
+%% Test inherits_from/2 uses ETS for fast hierarchy lookups
+hierarchy_inherits_from_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [
+          ?_test(begin
+                     %% Build 3-level hierarchy: Root -> Mid -> Leaf
+                     {ok, _} = beamtalk_object_class:start_link('HierRoot', #{
+                         name => 'HierRoot', module => hier_root,
+                         superclass => none,
+                         instance_methods => #{rootMethod => #{arity => 0}}
+                     }),
+                     {ok, _} = beamtalk_object_class:start_link('HierMid', #{
+                         name => 'HierMid', module => hier_mid,
+                         superclass => 'HierRoot',
+                         instance_methods => #{midMethod => #{arity => 0}}
+                     }),
+                     {ok, _} = beamtalk_object_class:start_link('HierLeaf', #{
+                         name => 'HierLeaf', module => hier_leaf,
+                         superclass => 'HierMid',
+                         instance_methods => #{leafMethod => #{arity => 0}}
+                     }),
+                     %% Direct parent
+                     ?assert(beamtalk_object_class:inherits_from('HierMid', 'HierRoot')),
+                     %% Grandparent
+                     ?assert(beamtalk_object_class:inherits_from('HierLeaf', 'HierRoot')),
+                     %% Self
+                     ?assert(beamtalk_object_class:inherits_from('HierRoot', 'HierRoot')),
+                     %% Not an ancestor
+                     ?assertNot(beamtalk_object_class:inherits_from('HierRoot', 'HierLeaf')),
+                     %% Unrelated class
+                     ?assertNot(beamtalk_object_class:inherits_from('HierRoot', 'NonExistent')),
+                     %% none base case
+                     ?assertNot(beamtalk_object_class:inherits_from(none, 'HierRoot'))
+                 end)]
+     end}.
+
+%% BT-510: Test that methods includes inherited methods even with out-of-order registration
+hierarchy_methods_inherited_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [
+          %% Register child BEFORE parent — methods should still include inherited
+          ?_test(begin
+                     {ok, ChildPid} = beamtalk_object_class:start_link('HierChild', #{
+                         name => 'HierChild', module => hier_child,
+                         superclass => 'HierParent',
+                         instance_methods => #{childMethod => #{arity => 0}}
+                     }),
+                     %% Before parent registered — only local methods
+                     MethodsBefore = beamtalk_object_class:methods(ChildPid),
+                     ?assert(lists:member(childMethod, MethodsBefore)),
+                     ?assertNot(lists:member(parentMethod, MethodsBefore)),
+
+                     %% Register parent — triggers rebuild_flattened broadcast
+                     {ok, _ParentPid} = beamtalk_object_class:start_link('HierParent', #{
+                         name => 'HierParent', module => hier_parent,
+                         superclass => none,
+                         instance_methods => #{parentMethod => #{arity => 0}}
+                     }),
+
+                     %% Wait until rebuild is processed (bounded retry)
+                     WaitForInherited = fun Wait(0) ->
+                                                ?assert(false);
+                                            Wait(N) ->
+                                                M = beamtalk_object_class:methods(ChildPid),
+                                                case lists:member(parentMethod, M) of
+                                                    true -> M;
+                                                    false -> timer:sleep(10), Wait(N - 1)
+                                                end
+                                        end,
+                     MethodsAfter = WaitForInherited(50),
+                     ?assert(lists:member(childMethod, MethodsAfter)),
+                     ?assert(lists:member(parentMethod, MethodsAfter))
+                 end)]
+     end}.
+
+%% BT-510: Normal order — parent first, child inherits immediately
+hierarchy_methods_normal_order_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [
+          ?_test(begin
+                     {ok, _} = beamtalk_object_class:start_link('HierParent', #{
+                         name => 'HierParent', module => hier_parent,
+                         superclass => none,
+                         instance_methods => #{parentMethod => #{arity => 0}}
+                     }),
+                     {ok, ChildPid} = beamtalk_object_class:start_link('HierChild', #{
+                         name => 'HierChild', module => hier_child,
+                         superclass => 'HierParent',
+                         instance_methods => #{childMethod => #{arity => 0}}
+                     }),
+                     Methods = beamtalk_object_class:methods(ChildPid),
+                     ?assert(lists:member(childMethod, Methods)),
+                     ?assert(lists:member(parentMethod, Methods))
+                 end)]
+     end}.
+
+%% BT-510: Test that ETS hierarchy records orphan relationships
+hierarchy_orphan_registration_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [
+          ?_test(begin
+                     %% Register orphan class whose superclass doesn't exist yet
+                     {ok, _Pid} = beamtalk_object_class:start_link('HierOrphan', #{
+                         name => 'HierOrphan', module => hier_orphan,
+                         superclass => 'NonExistentParent',
+                         instance_methods => #{orphanMethod => #{arity => 0}}
+                     }),
+                     %% ETS records the declared relationship regardless
+                     ?assertEqual([{'HierOrphan', 'NonExistentParent'}],
+                                  ets:lookup(beamtalk_class_hierarchy, 'HierOrphan')),
+                     %% inherits_from follows the declared chain:
+                     %% HierOrphan -> NonExistentParent (self-match = true)
+                     ?assert(beamtalk_object_class:inherits_from('HierOrphan', 'NonExistentParent')),
+                     %% But NonExistentParent has no entry, so deeper queries stop
+                     ?assertNot(beamtalk_object_class:inherits_from('HierOrphan', 'SomeOtherClass'))
+                 end)]
      end}.

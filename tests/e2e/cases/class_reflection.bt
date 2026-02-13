@@ -84,6 +84,26 @@ counterMethods := counterClass methods
 counterMethods isEmpty
 // => false
 
+// Counter should have its local methods
+counterMethods includes: #increment
+// => true
+
+counterMethods includes: #decrement
+// => true
+
+counterMethods includes: #getValue
+// => true
+
+// Counter should inherit Object methods via Actor
+counterMethods includes: #isNil
+// => true
+
+counterMethods includes: #printString
+// => true
+
+counterMethods includes: #respondsTo:
+// => true
+
 // ---------------------------------------------------------------------------
 // Get methods list from Integer class
 // ---------------------------------------------------------------------------
