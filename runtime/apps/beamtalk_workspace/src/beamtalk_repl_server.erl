@@ -1053,7 +1053,7 @@ format_error_message({no_source_file, Module}) ->
     iolist_to_binary([<<"No source file recorded for module: ">>, list_to_binary(Module),
                       <<". Try :load <path> to load it first.">>]);
 format_error_message({module_not_loaded, Module}) ->
-    iolist_to_binary([<<"Module not loaded: ">>, list_to_binary(Module),
+    iolist_to_binary([<<"Module not loaded: ">>, format_name(Module),
                       <<". Use :load <path> to load it first.">>]);
 format_error_message({missing_module_name, reload}) ->
     <<"Usage: :reload <ModuleName> or :reload (to reload last file)">>;
