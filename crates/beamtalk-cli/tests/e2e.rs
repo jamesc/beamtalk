@@ -686,25 +686,7 @@ impl ReplClient {
 
     /// Clear REPL bindings between tests.
     fn clear_bindings(&mut self) -> Result<(), String> {
-        let request = serde_json::json!({
-            "op": "clear",
-            "id": "e2e-clear"
-        });
-
-        writeln!(self.stream, "{request}")
-            .map_err(|e| format!("Failed to send clear request: {e}"))?;
-
-        self.stream
-            .flush()
-            .map_err(|e| format!("Failed to flush: {e}"))?;
-
-        // Read and discard response
-        let mut response = String::new();
-        self.reader
-            .read_line(&mut response)
-            .map_err(|e| format!("Failed to read clear response: {e}"))?;
-
-        Ok(())
+        self.clear_and_report().map(|_| ())
     }
 
     /// Load a Beamtalk file (for actor/class definitions).
@@ -836,6 +818,167 @@ impl ReplClient {
             .and_then(|d| d.as_str())
             .map(String::from)
             .ok_or_else(|| format!("No docs field in response: {response_line}"))
+    }
+
+    /// Send a generic op request and return the raw JSON response.
+    fn send_op(&mut self, request: &serde_json::Value) -> Result<serde_json::Value, String> {
+        writeln!(self.stream, "{request}").map_err(|e| format!("Failed to send request: {e}"))?;
+
+        self.stream
+            .flush()
+            .map_err(|e| format!("Failed to flush: {e}"))?;
+
+        let mut response_line = String::new();
+        self.reader
+            .read_line(&mut response_line)
+            .map_err(|e| format!("Failed to read response: {e}"))?;
+
+        let response: serde_json::Value = serde_json::from_str(&response_line)
+            .map_err(|e| format!("Failed to parse response: {e}"))?;
+
+        // Check for errors
+        if let Some(status) = response.get("status").and_then(|s| s.as_array()) {
+            if status.iter().any(|s| s.as_str() == Some("error")) {
+                let message = response
+                    .get("error")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("Unknown error");
+                return Err(message.to_string());
+            }
+        }
+
+        Ok(response)
+    }
+
+    /// Clear bindings and return "ok" (for use as a testable expression).
+    fn clear_and_report(&mut self) -> Result<String, String> {
+        let response = self.send_op(&serde_json::json!({
+            "op": "clear",
+            "id": "e2e-clear"
+        }))?;
+        Ok(response
+            .get("value")
+            .and_then(|v| v.as_str())
+            .unwrap_or("ok")
+            .to_string())
+    }
+
+    /// Get current bindings formatted as a readable string.
+    fn get_bindings(&mut self) -> Result<String, String> {
+        let response = self.send_op(&serde_json::json!({
+            "op": "bindings",
+            "id": "e2e-bindings"
+        }))?;
+        let bindings = response
+            .get("bindings")
+            .and_then(|b| b.as_object())
+            .cloned()
+            .unwrap_or_default();
+        if bindings.is_empty() {
+            return Ok("No bindings".to_string());
+        }
+        let mut entries: Vec<String> = bindings
+            .iter()
+            .map(|(k, v)| {
+                let val = if v.is_string() {
+                    v.as_str().unwrap().to_string()
+                } else {
+                    v.to_string()
+                };
+                format!("{k} = {val}")
+            })
+            .collect();
+        entries.sort();
+        Ok(entries.join("\n"))
+    }
+
+    /// Get list of running actors formatted as a readable string.
+    fn get_actors(&mut self) -> Result<String, String> {
+        let response = self.send_op(&serde_json::json!({
+            "op": "actors",
+            "id": "e2e-actors"
+        }))?;
+        let actors = response
+            .get("actors")
+            .and_then(|a| a.as_array())
+            .cloned()
+            .unwrap_or_default();
+        if actors.is_empty() {
+            return Ok("No actors".to_string());
+        }
+        let entries: Vec<String> = actors
+            .iter()
+            .map(|a| {
+                let class = a.get("class").and_then(|c| c.as_str()).unwrap_or("?");
+                let pid = a.get("pid").and_then(|p| p.as_str()).unwrap_or("?");
+                format!("{class} ({pid})")
+            })
+            .collect();
+        Ok(entries.join("\n"))
+    }
+
+    /// Get list of loaded modules formatted as a readable string.
+    fn get_modules(&mut self) -> Result<String, String> {
+        let response = self.send_op(&serde_json::json!({
+            "op": "modules",
+            "id": "e2e-modules"
+        }))?;
+        let modules = response
+            .get("modules")
+            .and_then(|m| m.as_array())
+            .cloned()
+            .unwrap_or_default();
+        if modules.is_empty() {
+            return Ok("No modules".to_string());
+        }
+        let entries: Vec<String> = modules
+            .iter()
+            .map(|m| {
+                let name = m.get("name").and_then(|n| n.as_str()).unwrap_or("?");
+                let actors = m
+                    .get("actor_count")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0);
+                format!("{name} ({actors} actors)")
+            })
+            .collect();
+        Ok(entries.join("\n"))
+    }
+
+    /// Reload a module by name.
+    fn reload_module(&mut self, module: &str) -> Result<String, String> {
+        let response = self.send_op(&serde_json::json!({
+            "op": "reload",
+            "id": "e2e-reload",
+            "module": module
+        }))?;
+        let classes = response
+            .get("classes")
+            .and_then(|c| c.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if classes.is_empty() {
+            Ok("Reloaded".to_string())
+        } else {
+            Ok(format!("Reloaded: {}", classes.join(", ")))
+        }
+    }
+
+    /// Load a file and return a formatted string for test assertions.
+    fn load_and_report(&mut self, path: &str) -> Result<String, String> {
+        let root = workspace_root();
+        let full_path = root.join(path);
+        let full_path_str = full_path.to_string_lossy().to_string();
+        let classes = self.load_file(&full_path_str)?;
+        if classes.is_empty() {
+            Ok("Loaded".to_string())
+        } else {
+            Ok(format!("Loaded: {}", classes.join(", ")))
+        }
     }
 }
 
@@ -1014,7 +1157,7 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
     }
 
     for case in &test_file.cases {
-        // Route :help commands through the docs op instead of eval
+        // Route REPL commands through their proper protocol ops
         let eval_result =
             if case.expression.starts_with(":help ") || case.expression.starts_with(":h ") {
                 let args = if case.expression.starts_with(":help ") {
@@ -1027,6 +1170,20 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
                     None => (args, None),
                 };
                 client.get_docs(class_name, selector)
+            } else if case.expression == ":clear" {
+                client.clear_and_report()
+            } else if case.expression == ":bindings" {
+                client.get_bindings()
+            } else if case.expression == ":actors" {
+                client.get_actors()
+            } else if case.expression == ":modules" {
+                client.get_modules()
+            } else if case.expression.starts_with(":load ") {
+                let path = case.expression.strip_prefix(":load ").unwrap().trim();
+                client.load_and_report(path)
+            } else if case.expression.starts_with(":reload ") {
+                let module = case.expression.strip_prefix(":reload ").unwrap().trim();
+                client.reload_module(module)
             } else {
                 client.eval(&case.expression)
             };
