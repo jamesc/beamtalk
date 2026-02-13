@@ -114,16 +114,13 @@ Shows orphaned containers with their worktree names and lets you confirm before 
 
 ## Port and Node Name Auto-Assignment
 
-Each worktree automatically gets a unique REPL port and Erlang node name to avoid conflicts when running multiple parallel sessions.
+Each worktree automatically gets a unique Erlang node name and compiler daemon socket to avoid conflicts when running multiple parallel sessions.
 
-### Port derivation
+### Port assignment
 
-- `BT-190` branch → port `49342` (49152 + issue number, capped at 999)
-- `BT-64` branch → port `49216`
-- `main` branch → port `49152` (default)
-- Other branches → port `50152-51051` (hash-based, non-overlapping with BT range)
+REPL ports are **OS-assigned** (ephemeral port 0) by default (BT-192). The OS picks an available port, eliminating all port conflict risk. The actual port is written to `~/.beamtalk/workspaces/<id>/port` and stored in `node.info` for reconnection.
 
-The base port 49152 is the start of the IANA ephemeral port range, avoiding conflicts with common services.
+To override: `beamtalk repl --port 9001` or set `BEAMTALK_REPL_PORT` env var.
 
 ### Node name derivation
 

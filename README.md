@@ -359,10 +359,9 @@ $env:GH_TOKEN = (gh auth token)  # Set for current session
 5. Opens bash shell inside container
 
 **Port assignment:**
-- `BT-<N>` branches → port `49152 + N` (e.g., `BT-190` → `49342`)
-- `main` branch → port `49152` (default)
-- Other branches → hash-based port `50152-51051`
-- All ports in IANA ephemeral range (49152-65535)
+- REPL ports are OS-assigned (ephemeral) by default — no port conflicts
+- Override with `--port` flag or `BEAMTALK_REPL_PORT` env var
+- Each worktree gets a unique node name and daemon socket for isolation
 
 #### Removing a Worktree
 
