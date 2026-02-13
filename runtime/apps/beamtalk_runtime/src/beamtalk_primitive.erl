@@ -195,9 +195,11 @@ print_string(X) when is_map(X) ->
                 true ->
                     %% BT-338/BT-452: Format exception hierarchy objects
                     beamtalk_exception_handler:dispatch('printString', [], X);
+                false when Class =:= undefined ->
+                    %% BT-535: Plain maps (Dictionary) use #{key => value} format
+                    beamtalk_map_ops:print_string(X);
                 false ->
-                    ClassName = beamtalk_tagged_map:class_of(X, 'Dictionary'),
-                    iolist_to_binary([<<"a ">>, erlang:atom_to_binary(ClassName, utf8)])
+                    iolist_to_binary([<<"a ">>, erlang:atom_to_binary(Class, utf8)])
             end
     end;
 print_string(X) ->

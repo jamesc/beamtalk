@@ -859,29 +859,8 @@ term_to_json(Value) when is_function(Value) ->
     {arity, Arity} = erlang:fun_info(Value, arity),
     iolist_to_binary([<<"a Block/">>, integer_to_binary(Arity)]);
 term_to_json(Value) when is_map(Value) ->
-    %% Convert map keys and values
-    maps:fold(
-        fun(K, V, Acc) ->
-            KeyBin = if
-                is_atom(K) -> atom_to_binary(K, utf8);
-                is_binary(K) -> beamtalk_transcript_stream:ensure_utf8(K);
-                is_list(K) ->
-                    case io_lib:printable_list(K) of
-                        true ->
-                            case unicode:characters_to_binary(K) of
-                                Bin when is_binary(Bin) -> Bin;
-                                {error, _, _} -> list_to_binary(io_lib:format("~p", [K]));
-                                {incomplete, _, _} -> list_to_binary(io_lib:format("~p", [K]))
-                            end;
-                        false -> list_to_binary(io_lib:format("~p", [K]))
-                    end;
-                true -> list_to_binary(io_lib:format("~p", [K]))
-            end,
-            maps:put(KeyBin, term_to_json(V), Acc)
-        end,
-        #{},
-        Value
-    );
+    %% BT-535: Pre-format maps as Beamtalk display strings
+    beamtalk_primitive:print_string(Value);
 term_to_json(#beamtalk_error{} = Error) ->
     %% Format beamtalk_error records as user-friendly strings
     iolist_to_binary(beamtalk_error:format(Error));

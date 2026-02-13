@@ -13,7 +13,7 @@
 
 // Create a Point with default values
 Point new
-// => {"$beamtalk_class":"Point","x":0,"y":0}
+// => a Point
 
 // TODO(BT-213): Enable once keyword message with map literal works
 // Create a Point with explicit values
@@ -26,7 +26,7 @@ Point new
 
 // Access fields via instance methods (BT-354)
 p := Point new
-// => {"$beamtalk_class":"Point","x":0,"y":0}
+// => a Point
 
 p getX
 // => 0

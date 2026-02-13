@@ -58,7 +58,7 @@ nil printString
 
 // --- Dictionaries ---
 #{} printString
-// => a Dictionary
+// => #{}
 
 // --- Class objects (BT-477: class_send printString) ---
 42 class printString
