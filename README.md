@@ -198,6 +198,27 @@ cargo run -p beamtalk-cli --bin beamtalk -- repl
 cargo clean  # Use `just clean` instead in devcontainer
 ```
 
+### Installation
+
+You can install beamtalk to a system prefix for use outside the development checkout:
+
+```bash
+# Install to /usr/local (may need sudo)
+just install
+
+# Install to a custom prefix
+just install PREFIX=$HOME/.local
+
+# Create a portable tarball
+just dist
+# => beamtalk-0.1.0-linux-x86_64.tar.gz
+
+# Uninstall
+just uninstall PREFIX=$HOME/.local
+```
+
+The install layout follows the OTP convention (`PREFIX/lib/beamtalk/lib/<app>/ebin/`), so `beamtalk repl` and `beamtalk build` work correctly from any directory when the binary is on `PATH`.
+
 ### REPL Usage
 
 **New to Beamtalk?** See the [REPL Tutorial](examples/repl-tutorial.md) for a complete beginner's guide!
