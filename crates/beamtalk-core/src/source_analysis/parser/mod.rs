@@ -2976,4 +2976,14 @@ Actor subclass: Counter
     fn complete_line_comment_only() {
         assert!(is_input_complete("// just a comment"));
     }
+
+    #[test]
+    fn complete_extra_closing_delimiters() {
+        // Extra closing delimiters are "complete" — they'll produce syntax errors
+        // when evaluated, which is the desired behavior (show the error, don't
+        // loop waiting for more input that can never balance them).
+        assert!(is_input_complete("]"));
+        assert!(is_input_complete(")"));
+        assert!(is_input_complete("}"));
+    }
 }

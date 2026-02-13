@@ -78,6 +78,11 @@ pub(super) fn print_help() {
     println!("  counter increment    # Send a message (auto-awaits result)");
     println!("  counter getValue     # Query actor state (auto-awaits)");
     println!();
+    println!("Multi-line input:");
+    println!("  Expressions with unclosed brackets, strings, or trailing");
+    println!("  operators automatically continue on the next line (..> prompt).");
+    println!("  Press Ctrl+C to cancel multi-line input.");
+    println!();
     println!("Workspace introspection:");
     println!("  Workspace actors           # List all live actors");
     println!("  Workspace actorAt: '<pid>' # Look up actor by PID");
