@@ -3,22 +3,24 @@
 
 /// File — File system operations.
 ///
-/// Provides basic file I/O operations using Erlang's `file` module.
-/// All operations are class methods. Errors use structured
+/// Provides file I/O operations and lazy file streaming using Erlang's
+/// `file` module. All operations are class methods. Errors use structured
 /// `#beamtalk_error{}` records.
 ///
 /// ## Examples
 /// ```beamtalk
-/// File exists: '/tmp/test.txt'
-/// File readAll: '/tmp/test.txt'
-/// File writeAll: '/tmp/test.txt' contents: 'hello'
+/// File exists: 'test.txt'
+/// File readAll: 'test.txt'
+/// File writeAll: 'output.txt' contents: 'hello'
+/// (File lines: 'data.csv') do: [:line | Transcript show: line]
+/// File open: 'data.csv' do: [:handle | handle lines take: 10]
 /// ```
 Object subclass: File
   /// Test if a file exists at the given path (class method).
   ///
   /// ## Examples
   /// ```beamtalk
-  /// File exists: '/tmp/test.txt'   // => true or false
+  /// File exists: 'test.txt'   // => true or false
   /// ```
   class sealed exists: path => @primitive 'exists:'
 
@@ -26,7 +28,7 @@ Object subclass: File
   ///
   /// ## Examples
   /// ```beamtalk
-  /// File readAll: '/tmp/test.txt'  // => 'file contents...'
+  /// File readAll: 'test.txt'  // => 'file contents...'
   /// ```
   class sealed readAll: path => @primitive 'readAll:'
 
@@ -34,6 +36,41 @@ Object subclass: File
   ///
   /// ## Examples
   /// ```beamtalk
-  /// File writeAll: '/tmp/test.txt' contents: 'hello'
+  /// File writeAll: 'output.txt' contents: 'hello'
   /// ```
   class sealed writeAll: path contents: text => @primitive 'writeAll:contents:'
+
+  /// Return a lazy Stream of lines from a file (class method).
+  ///
+  /// Opens the file and returns a Stream whose generator reads one line
+  /// at a time. The handle closes automatically when the stream is
+  /// exhausted. Constant memory — safe for large files.
+  ///
+  /// Cross-process constraint: file-backed Streams must be consumed
+  /// by the same process that created them.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (File lines: 'data.csv') take: 5
+  /// (File lines: 'log.txt') select: [:l | l includes: 'ERROR']
+  /// ```
+  class sealed lines: path => @primitive 'lines:'
+
+  /// Block-scoped file handle with automatic cleanup (class method).
+  ///
+  /// Opens the file, passes a FileHandle to the block, and ensures
+  /// the handle is closed when the block exits (normally or via exception).
+  /// Returns the result of the block.
+  ///
+  /// The handle responds to `lines` which returns a Stream of lines.
+  /// Both the handle and any Streams derived from it must be consumed
+  /// within the block — they must not escape, as the file descriptor
+  /// is closed when the block returns.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// File open: 'data.csv' do: [:handle |
+  ///   handle lines take: 10
+  /// ]
+  /// ```
+  class sealed open: path do: block => @primitive 'open:do:'
