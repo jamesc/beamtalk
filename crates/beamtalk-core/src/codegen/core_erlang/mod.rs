@@ -207,6 +207,22 @@ pub enum CodeGenError {
         /// The actual arity of the block.
         arity: usize,
     },
+
+    /// BT-493: Block arity mismatch with method-specific hint.
+    #[error(
+        "{selector} block must take {expected} argument(s), got {actual}.\n\n\
+             {hint}"
+    )]
+    BlockArityError {
+        /// The selector (e.g., "timesRepeat:").
+        selector: String,
+        /// The expected arity.
+        expected: String,
+        /// The actual arity of the block.
+        actual: usize,
+        /// Method-specific fix suggestion.
+        hint: String,
+    },
 }
 
 /// Result type for code generation operations.

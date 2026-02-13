@@ -48,6 +48,7 @@
 //! ```
 
 use super::super::document::Document;
+use super::super::intrinsics::validate_block_arity_exact;
 use super::super::{CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, Expression};
 use crate::docvec;
@@ -64,6 +65,23 @@ impl CoreErlangGenerator {
         ex_class: &Expression,
         handler: &Expression,
     ) -> Result<Document<'static>> {
+        // BT-493: Validate protected block arity (must be 0-arg)
+        validate_block_arity_exact(
+            receiver,
+            0,
+            "on:do:",
+            "Fix: The protected block must take no arguments:\n\
+             \x20 [riskyOperation] on: Exception do: [:e | handle error]",
+        )?;
+        // BT-493: Validate handler block arity (must be 1-arg for the exception)
+        validate_block_arity_exact(
+            handler,
+            1,
+            "on:do:",
+            "Fix: The handler block must take one argument (the exception):\n\
+             \x20 [...] on: Exception do: [:e | e message]",
+        )?;
+
         // BT-410: Check both blocks for field/state mutations
         let receiver_needs = if let Expression::Block(b) = receiver {
             self.needs_mutation_threading(&block_analysis::analyze_block(b))
@@ -241,6 +259,15 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         cleanup: &Expression,
     ) -> Result<Document<'static>> {
+        // BT-493: Validate cleanup block arity (must be 0-arg)
+        validate_block_arity_exact(
+            cleanup,
+            0,
+            "ensure:",
+            "Fix: The cleanup block must take no arguments:\n\
+             \x20 [operation] ensure: [resource close]",
+        )?;
+
         // BT-410: Check both blocks for field/state mutations
         let receiver_needs = if let Expression::Block(b) = receiver {
             self.needs_mutation_threading(&block_analysis::analyze_block(b))
