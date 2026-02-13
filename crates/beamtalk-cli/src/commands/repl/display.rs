@@ -36,11 +36,6 @@ pub(super) fn format_value(value: &serde_json::Value) -> String {
             format!("[{}]", items.join(", "))
         }
         serde_json::Value::Object(obj) => {
-            // Check for tuple marker
-            if let Some(serde_json::Value::Array(items)) = obj.get("__tuple__") {
-                let formatted: Vec<String> = items.iter().map(format_value).collect();
-                return format!("({})", formatted.join(", "));
-            }
             // Regular object
             let pairs: Vec<String> = obj
                 .iter()

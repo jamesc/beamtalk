@@ -97,9 +97,7 @@ do(Tuple, Block) when is_function(Block, 1) ->
 %%% ============================================================================
 
 %% @doc Format a single tuple element for string representation.
+%% BT-536: Delegates to beamtalk_primitive:print_string/1 for consistent
+%% formatting (atoms as #symbol, nested tuples as {el1, el2}, etc.)
 -spec format_element(term()) -> binary().
-format_element(X) when is_binary(X) -> X;
-format_element(X) when is_atom(X) -> atom_to_binary(X, utf8);
-format_element(X) when is_integer(X) -> integer_to_binary(X);
-format_element(X) when is_float(X) -> float_to_binary(X);
-format_element(_X) -> <<"<term>">>.
+format_element(X) -> beamtalk_primitive:print_string(X).

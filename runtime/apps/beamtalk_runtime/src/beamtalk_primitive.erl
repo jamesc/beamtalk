@@ -202,6 +202,13 @@ print_string(X) when is_map(X) ->
                     iolist_to_binary([<<"a ">>, erlang:atom_to_binary(Class, utf8)])
             end
     end;
+print_string(#beamtalk_error{} = Error) ->
+    %% BT-536: Format error records using their format function
+    iolist_to_binary(beamtalk_error:format(Error));
+print_string(X) when is_tuple(X) ->
+    %% BT-536: Format Erlang tuples as {el1, el2, ...}
+    Elements = tuple_to_list(X),
+    iolist_to_binary([<<"{">>, lists:join(<<", ">>, [print_string(E) || E <- Elements]), <<"}">>]);
 print_string(X) ->
     iolist_to_binary(io_lib:format("~p", [X])).
 
