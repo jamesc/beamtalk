@@ -22,6 +22,8 @@
     from/1,
     from_by/2,
     on/1,
+    %% Stream construction (used by other modules, e.g. beamtalk_file)
+    make_stream/2,
     %% Lazy operations
     'select'/2,
     'collect'/2,

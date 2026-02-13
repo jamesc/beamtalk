@@ -460,6 +460,7 @@ pub fn start_detached_node(
         jsx_beam_dir,
         stdlib_beam_dir,
         &eval_cmd,
+        &project_path,
     )?;
 
     let _child = cmd.spawn().map_err(|e| {
@@ -513,6 +514,7 @@ pub fn start_detached_node(
 ///
 /// Extracted from `start_detached_node` so the command configuration
 /// (args, env vars) can be inspected in tests without spawning a process.
+#[allow(clippy::too_many_arguments)]
 fn build_detached_node_command(
     node_name: &str,
     cookie: &str,
@@ -521,6 +523,7 @@ fn build_detached_node_command(
     jsx_beam_dir: &Path,
     stdlib_beam_dir: &Path,
     eval_cmd: &str,
+    project_root: &Path,
 ) -> Result<Command> {
     let (node_flag, node_arg) = if node_name.contains('@') {
         ("-name", node_name.to_string())
@@ -549,6 +552,7 @@ fn build_detached_node_command(
 
     let mut cmd = Command::new("erl");
     cmd.args(&args)
+        .current_dir(project_root)
         .env("BEAMTALK_DAEMON_SOCKET", socket_path()?.as_os_str())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -1606,6 +1610,7 @@ mod tests {
             Path::new("/tmp/jsx"),
             Path::new("/tmp/stdlib"),
             "ok.",
+            Path::new("/tmp/project"),
         )
         .unwrap();
 
