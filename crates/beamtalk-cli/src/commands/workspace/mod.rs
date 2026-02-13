@@ -1627,12 +1627,15 @@ mod tests {
     //
     // These tests spawn real BEAM nodes and are `#[ignore]` by default.
     // Run them with: `just test-integration` or `cargo test -- --ignored`
+    // Unix-only: uses `kill` and `ps` commands.
 
     /// Guard that kills a BEAM node by PID when dropped, preventing orphans.
+    #[cfg(unix)]
     struct NodeGuard {
         pid: u32,
     }
 
+    #[cfg(unix)]
     impl Drop for NodeGuard {
         fn drop(&mut self) {
             // Send SIGKILL (detached BEAM nodes ignore SIGTERM)
@@ -1645,6 +1648,7 @@ mod tests {
     }
 
     /// Locate BEAM directories needed to start a workspace node.
+    #[cfg(unix)]
     fn beam_dirs_for_tests() -> (PathBuf, PathBuf, PathBuf, PathBuf) {
         let runtime_dir = beamtalk_cli::repl_startup::find_runtime_dir()
             .expect("Cannot find runtime dir — run from repo root or set BEAMTALK_RUNTIME_DIR");
@@ -1663,6 +1667,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     #[ignore = "integration test — requires Erlang/OTP runtime"]
     fn test_start_detached_node_integration() {
         let tw = TestWorkspace::new("integ_start");
@@ -1719,6 +1724,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     #[ignore = "integration test — requires Erlang/OTP runtime"]
     fn test_is_node_running_true_then_false_integration() {
         let tw = TestWorkspace::new("integ_running");
@@ -1760,6 +1766,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     #[ignore = "integration test — requires Erlang/OTP runtime"]
     fn test_get_or_start_workspace_lifecycle_integration() {
         let tw = TestWorkspace::new("integ_lifecycle");
