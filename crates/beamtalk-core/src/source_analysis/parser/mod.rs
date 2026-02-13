@@ -225,10 +225,8 @@ pub fn is_input_complete(source: &str) -> bool {
 
             // Opening delimiters
             TokenKind::LeftBracket => bracket_depth += 1,
-            TokenKind::LeftParen => paren_depth += 1,
-            TokenKind::LeftBrace => brace_depth += 1,
-            TokenKind::MapOpen => brace_depth += 1,
-            TokenKind::ListOpen => paren_depth += 1,
+            TokenKind::LeftParen | TokenKind::ListOpen => paren_depth += 1,
+            TokenKind::LeftBrace | TokenKind::MapOpen => brace_depth += 1,
 
             // Closing delimiters
             TokenKind::RightBracket => bracket_depth -= 1,

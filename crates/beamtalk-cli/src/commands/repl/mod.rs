@@ -373,297 +373,300 @@ pub fn run(
                 // First line: check if it's a REPL command (only when not
                 // already accumulating a multi-line expression)
                 if line_buffer.is_empty() {
-                // Handle special commands
-                match line {
-                    ":exit" | ":quit" | ":q" => {
-                        println!("Goodbye!");
-                        break;
-                    }
-                    ":help" | ":h" | ":?" => {
-                        print_help();
-                        continue;
-                    }
-                    _ if line.starts_with(":help ") || line.starts_with(":h ") => {
-                        let args = if line.starts_with(":help ") {
-                            line.strip_prefix(":help ").unwrap().trim()
-                        } else {
-                            line.strip_prefix(":h ").unwrap().trim()
-                        };
-
-                        if args.is_empty() {
+                    // Handle special commands
+                    match line {
+                        ":exit" | ":quit" | ":q" => {
+                            println!("Goodbye!");
+                            break;
+                        }
+                        ":help" | ":h" | ":?" => {
                             print_help();
                             continue;
                         }
+                        _ if line.starts_with(":help ") || line.starts_with(":h ") => {
+                            let args = if line.starts_with(":help ") {
+                                line.strip_prefix(":help ").unwrap().trim()
+                            } else {
+                                line.strip_prefix(":h ").unwrap().trim()
+                            };
 
-                        // Parse "ClassName" or "ClassName selector"
-                        let (class_name, selector) = match args.split_once(' ') {
-                            Some((cls, sel)) => (cls.trim(), Some(sel.trim())),
-                            None => (args, None),
-                        };
-
-                        match client.get_docs(class_name, selector) {
-                            Ok(response) => {
-                                if response.is_error() {
-                                    if let Some(msg) = response.error_message() {
-                                        eprintln!("{msg}");
-                                    }
-                                } else if let Some(docs) = &response.docs {
-                                    println!("{docs}");
-                                }
+                            if args.is_empty() {
+                                print_help();
+                                continue;
                             }
-                            Err(e) => eprintln!("Error: {e}"),
+
+                            // Parse "ClassName" or "ClassName selector"
+                            let (class_name, selector) = match args.split_once(' ') {
+                                Some((cls, sel)) => (cls.trim(), Some(sel.trim())),
+                                None => (args, None),
+                            };
+
+                            match client.get_docs(class_name, selector) {
+                                Ok(response) => {
+                                    if response.is_error() {
+                                        if let Some(msg) = response.error_message() {
+                                            eprintln!("{msg}");
+                                        }
+                                    } else if let Some(docs) = &response.docs {
+                                        println!("{docs}");
+                                    }
+                                }
+                                Err(e) => eprintln!("Error: {e}"),
+                            }
+                            continue;
                         }
-                        continue;
-                    }
-                    ":clear" => {
-                        match client.clear_bindings() {
-                            Ok(_) => println!("Bindings cleared."),
-                            Err(e) => eprintln!("Error: {e}"),
+                        ":clear" => {
+                            match client.clear_bindings() {
+                                Ok(_) => println!("Bindings cleared."),
+                                Err(e) => eprintln!("Error: {e}"),
+                            }
+                            continue;
                         }
-                        continue;
-                    }
-                    ":bindings" | ":b" => {
-                        match client.get_bindings() {
-                            Ok(response) => {
-                                if let Some(serde_json::Value::Object(map)) = response.bindings {
-                                    if map.is_empty() {
-                                        println!("No bindings.");
-                                    } else {
-                                        for (name, value) in map {
-                                            println!("  {name} = {}", format_value(&value));
+                        ":bindings" | ":b" => {
+                            match client.get_bindings() {
+                                Ok(response) => {
+                                    if let Some(serde_json::Value::Object(map)) = response.bindings
+                                    {
+                                        if map.is_empty() {
+                                            println!("No bindings.");
+                                        } else {
+                                            for (name, value) in map {
+                                                println!("  {name} = {}", format_value(&value));
+                                            }
                                         }
                                     }
                                 }
+                                Err(e) => eprintln!("Error: {e}"),
                             }
-                            Err(e) => eprintln!("Error: {e}"),
-                        }
-                        continue;
-                    }
-                    _ if line.starts_with(":load ") || line.starts_with(":l ") => {
-                        let path = if line.starts_with(":load ") {
-                            line.strip_prefix(":load ").unwrap().trim()
-                        } else {
-                            line.strip_prefix(":l ").unwrap().trim()
-                        };
-
-                        if path.is_empty() {
-                            eprintln!("Usage: :load <path>");
                             continue;
                         }
+                        _ if line.starts_with(":load ") || line.starts_with(":l ") => {
+                            let path = if line.starts_with(":load ") {
+                                line.strip_prefix(":load ").unwrap().trim()
+                            } else {
+                                line.strip_prefix(":l ").unwrap().trim()
+                            };
 
-                        match client.load_file(path) {
-                            Ok(response) => {
-                                if response.is_error() {
-                                    if let Some(msg) = response.error_message() {
-                                        eprintln!("Error: {msg}");
-                                    }
-                                } else if let Some(classes) = response.classes {
-                                    if classes.is_empty() {
+                            if path.is_empty() {
+                                eprintln!("Usage: :load <path>");
+                                continue;
+                            }
+
+                            match client.load_file(path) {
+                                Ok(response) => {
+                                    if response.is_error() {
+                                        if let Some(msg) = response.error_message() {
+                                            eprintln!("Error: {msg}");
+                                        }
+                                    } else if let Some(classes) = response.classes {
+                                        if classes.is_empty() {
+                                            println!("Loaded {path}");
+                                        } else {
+                                            println!("Loaded {}", classes.join(", "));
+                                        }
+                                    } else {
                                         println!("Loaded {path}");
-                                    } else {
-                                        println!("Loaded {}", classes.join(", "));
                                     }
-                                } else {
-                                    println!("Loaded {path}");
                                 }
+                                Err(e) => eprintln!("Error: {e}"),
                             }
-                            Err(e) => eprintln!("Error: {e}"),
+                            continue;
                         }
-                        continue;
-                    }
-                    _ if line.starts_with(":reload ") || line.starts_with(":r ") => {
-                        let module_name = if line.starts_with(":reload ") {
-                            line.strip_prefix(":reload ").unwrap().trim()
-                        } else {
-                            line.strip_prefix(":r ").unwrap().trim()
-                        };
-                        match client.reload_module(module_name) {
-                            Ok(response) => {
-                                display_reload_result(&response, Some(module_name));
+                        _ if line.starts_with(":reload ") || line.starts_with(":r ") => {
+                            let module_name = if line.starts_with(":reload ") {
+                                line.strip_prefix(":reload ").unwrap().trim()
+                            } else {
+                                line.strip_prefix(":r ").unwrap().trim()
+                            };
+                            match client.reload_module(module_name) {
+                                Ok(response) => {
+                                    display_reload_result(&response, Some(module_name));
+                                }
+                                Err(e) => eprintln!("Error: {e}"),
                             }
-                            Err(e) => eprintln!("Error: {e}"),
+                            continue;
                         }
-                        continue;
-                    }
-                    ":reload" | ":r" => {
-                        match client.reload_file() {
-                            Ok(response) => {
-                                display_reload_result(&response, None);
+                        ":reload" | ":r" => {
+                            match client.reload_file() {
+                                Ok(response) => {
+                                    display_reload_result(&response, None);
+                                }
+                                Err(e) => eprintln!("Error: {e}"),
                             }
-                            Err(e) => eprintln!("Error: {e}"),
+                            continue;
                         }
-                        continue;
-                    }
-                    ":actors" | ":a" => {
-                        match client.list_actors() {
-                            Ok(response) => {
-                                if response.is_error() {
-                                    if let Some(msg) = response.error_message() {
-                                        eprintln!("Error: {msg}");
-                                    }
-                                } else if let Some(actors) = response.actors {
-                                    if actors.is_empty() {
-                                        println!("No running actors.");
-                                    } else {
-                                        println!("Running actors:");
-                                        for actor in actors {
-                                            println!(
-                                                "  {} - {} ({})",
-                                                actor.pid, actor.class, actor.module
-                                            );
+                        ":actors" | ":a" => {
+                            match client.list_actors() {
+                                Ok(response) => {
+                                    if response.is_error() {
+                                        if let Some(msg) = response.error_message() {
+                                            eprintln!("Error: {msg}");
+                                        }
+                                    } else if let Some(actors) = response.actors {
+                                        if actors.is_empty() {
+                                            println!("No running actors.");
+                                        } else {
+                                            println!("Running actors:");
+                                            for actor in actors {
+                                                println!(
+                                                    "  {} - {} ({})",
+                                                    actor.pid, actor.class, actor.module
+                                                );
+                                            }
                                         }
                                     }
                                 }
+                                Err(e) => eprintln!("Error: {e}"),
                             }
-                            Err(e) => eprintln!("Error: {e}"),
+                            continue;
                         }
-                        continue;
-                    }
-                    ":modules" | ":m" => {
-                        match client.list_modules() {
-                            Ok(response) => {
-                                if response.is_error() {
-                                    if let Some(msg) = response.error_message() {
-                                        eprintln!("Error: {msg}");
-                                    }
-                                } else if let Some(modules) = response.modules {
-                                    if modules.is_empty() {
-                                        println!("No modules loaded.");
-                                    } else {
-                                        println!("Loaded modules:");
-                                        for module in modules {
-                                            let actors_text = if module.actor_count == 0 {
-                                                String::new()
-                                            } else if module.actor_count == 1 {
-                                                " - 1 actor".to_string()
-                                            } else {
-                                                format!(" - {} actors", module.actor_count)
-                                            };
-                                            println!(
-                                                "  {} ({}){} - loaded {}",
-                                                module.name,
-                                                module.source_file,
-                                                actors_text,
-                                                module.time_ago
-                                            );
+                        ":modules" | ":m" => {
+                            match client.list_modules() {
+                                Ok(response) => {
+                                    if response.is_error() {
+                                        if let Some(msg) = response.error_message() {
+                                            eprintln!("Error: {msg}");
+                                        }
+                                    } else if let Some(modules) = response.modules {
+                                        if modules.is_empty() {
+                                            println!("No modules loaded.");
+                                        } else {
+                                            println!("Loaded modules:");
+                                            for module in modules {
+                                                let actors_text = if module.actor_count == 0 {
+                                                    String::new()
+                                                } else if module.actor_count == 1 {
+                                                    " - 1 actor".to_string()
+                                                } else {
+                                                    format!(" - {} actors", module.actor_count)
+                                                };
+                                                println!(
+                                                    "  {} ({}){} - loaded {}",
+                                                    module.name,
+                                                    module.source_file,
+                                                    actors_text,
+                                                    module.time_ago
+                                                );
+                                            }
                                         }
                                     }
                                 }
+                                Err(e) => eprintln!("Error: {e}"),
                             }
-                            Err(e) => eprintln!("Error: {e}"),
-                        }
-                        continue;
-                    }
-                    _ if line.starts_with(":unload ") => {
-                        let module_name = line.strip_prefix(":unload ").unwrap().trim();
-                        if module_name.is_empty() {
-                            eprintln!("Usage: :unload <module>");
                             continue;
                         }
-
-                        match client.unload_module(module_name) {
-                            Ok(response) => {
-                                if response.is_error() {
-                                    if let Some(msg) = response.error_message() {
-                                        eprintln!("Error: {msg}");
-                                    }
-                                } else {
-                                    println!("Module {module_name} unloaded.");
-                                }
+                        _ if line.starts_with(":unload ") => {
+                            let module_name = line.strip_prefix(":unload ").unwrap().trim();
+                            if module_name.is_empty() {
+                                eprintln!("Usage: :unload <module>");
+                                continue;
                             }
-                            Err(e) => eprintln!("Error: {e}"),
-                        }
-                        continue;
-                    }
-                    _ if line.starts_with(":kill ") => {
-                        let pid_str = line.strip_prefix(":kill ").unwrap().trim();
-                        if pid_str.is_empty() {
-                            eprintln!("Usage: :kill <pid>");
-                            continue;
-                        }
 
-                        match client.kill_actor(pid_str) {
-                            Ok(response) => {
-                                if response.is_error() {
-                                    if let Some(msg) = response.error_message() {
-                                        eprintln!("Error: {msg}");
-                                    }
-                                } else {
-                                    println!("Actor {pid_str} killed.");
-                                }
-                            }
-                            Err(e) => eprintln!("Error: {e}"),
-                        }
-                        continue;
-                    }
-                    ":sessions" => {
-                        match client.list_sessions() {
-                            Ok(response) => {
-                                if response.is_error() {
-                                    if let Some(msg) = response.error_message() {
-                                        eprintln!("Error: {msg}");
-                                    }
-                                } else if let Some(sessions) = response.sessions {
-                                    if sessions.is_empty() {
-                                        println!("No active sessions.");
+                            match client.unload_module(module_name) {
+                                Ok(response) => {
+                                    if response.is_error() {
+                                        if let Some(msg) = response.error_message() {
+                                            eprintln!("Error: {msg}");
+                                        }
                                     } else {
-                                        println!("Active sessions:");
-                                        for s in sessions {
-                                            println!("  {}", s.id);
+                                        println!("Module {module_name} unloaded.");
+                                    }
+                                }
+                                Err(e) => eprintln!("Error: {e}"),
+                            }
+                            continue;
+                        }
+                        _ if line.starts_with(":kill ") => {
+                            let pid_str = line.strip_prefix(":kill ").unwrap().trim();
+                            if pid_str.is_empty() {
+                                eprintln!("Usage: :kill <pid>");
+                                continue;
+                            }
+
+                            match client.kill_actor(pid_str) {
+                                Ok(response) => {
+                                    if response.is_error() {
+                                        if let Some(msg) = response.error_message() {
+                                            eprintln!("Error: {msg}");
+                                        }
+                                    } else {
+                                        println!("Actor {pid_str} killed.");
+                                    }
+                                }
+                                Err(e) => eprintln!("Error: {e}"),
+                            }
+                            continue;
+                        }
+                        ":sessions" => {
+                            match client.list_sessions() {
+                                Ok(response) => {
+                                    if response.is_error() {
+                                        if let Some(msg) = response.error_message() {
+                                            eprintln!("Error: {msg}");
+                                        }
+                                    } else if let Some(sessions) = response.sessions {
+                                        if sessions.is_empty() {
+                                            println!("No active sessions.");
+                                        } else {
+                                            println!("Active sessions:");
+                                            for s in sessions {
+                                                println!("  {}", s.id);
+                                            }
                                         }
                                     }
                                 }
+                                Err(e) => eprintln!("Error: {e}"),
                             }
-                            Err(e) => eprintln!("Error: {e}"),
-                        }
-                        continue;
-                    }
-                    _ if line.starts_with(":inspect ") => {
-                        let pid_str = line.strip_prefix(":inspect ").unwrap().trim();
-                        if pid_str.is_empty() {
-                            eprintln!("Usage: :inspect <pid>");
                             continue;
                         }
-
-                        match client.inspect_actor(pid_str) {
-                            Ok(response) => {
-                                if response.is_error() {
-                                    if let Some(msg) = response.error_message() {
-                                        eprintln!("Error: {msg}");
-                                    }
-                                } else if let Some(state) = response.state {
-                                    println!("{}", format_value(&state));
-                                }
+                        _ if line.starts_with(":inspect ") => {
+                            let pid_str = line.strip_prefix(":inspect ").unwrap().trim();
+                            if pid_str.is_empty() {
+                                eprintln!("Usage: :inspect <pid>");
+                                continue;
                             }
-                            Err(e) => eprintln!("Error: {e}"),
+
+                            match client.inspect_actor(pid_str) {
+                                Ok(response) => {
+                                    if response.is_error() {
+                                        if let Some(msg) = response.error_message() {
+                                            eprintln!("Error: {msg}");
+                                        }
+                                    } else if let Some(state) = response.state {
+                                        println!("{}", format_value(&state));
+                                    }
+                                }
+                                Err(e) => eprintln!("Error: {e}"),
+                            }
+                            continue;
                         }
+                        _ => {}
+                    }
+
+                    // Detect common commands typed without ':' prefix.
+                    // Only match full command names to avoid false positives with
+                    // single-letter variable names (e.g. `r`, `l`, `b`).
+                    let first_word = line.split_whitespace().next().unwrap_or("");
+                    if let Some(suggestion) = match first_word {
+                        "load" => Some(":load"),
+                        "reload" => Some(":reload"),
+                        "help" => Some(":help"),
+                        "exit" | "quit" => Some(":exit"),
+                        "clear" => Some(":clear"),
+                        "bindings" => Some(":bindings"),
+                        "actors" => Some(":actors"),
+                        "modules" => Some(":modules"),
+                        "unload" => Some(":unload"),
+                        "kill" => Some(":kill"),
+                        "inspect" => Some(":inspect"),
+                        "sessions" => Some(":sessions"),
+                        _ => None,
+                    } {
+                        eprintln!(
+                            "Hint: did you mean `{suggestion}`? REPL commands start with `:`"
+                        );
                         continue;
                     }
-                    _ => {}
-                }
-
-                // Detect common commands typed without ':' prefix.
-                // Only match full command names to avoid false positives with
-                // single-letter variable names (e.g. `r`, `l`, `b`).
-                let first_word = line.split_whitespace().next().unwrap_or("");
-                if let Some(suggestion) = match first_word {
-                    "load" => Some(":load"),
-                    "reload" => Some(":reload"),
-                    "help" => Some(":help"),
-                    "exit" | "quit" => Some(":exit"),
-                    "clear" => Some(":clear"),
-                    "bindings" => Some(":bindings"),
-                    "actors" => Some(":actors"),
-                    "modules" => Some(":modules"),
-                    "unload" => Some(":unload"),
-                    "kill" => Some(":kill"),
-                    "inspect" => Some(":inspect"),
-                    "sessions" => Some(":sessions"),
-                    _ => None,
-                } {
-                    eprintln!("Hint: did you mean `{suggestion}`? REPL commands start with `:`");
-                    continue;
-                }
                 } // end if line_buffer.is_empty() (command handling)
 
                 // Accumulate input for multi-line expression detection
