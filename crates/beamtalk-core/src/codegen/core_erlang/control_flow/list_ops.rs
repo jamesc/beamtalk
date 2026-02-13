@@ -46,11 +46,12 @@ impl CoreErlangGenerator {
             self.repl_loop_mutated = true;
         }
 
-        // Generate: let List = <receiver> in
-        //           let Lambda = fun (Item, StateAcc) -> body in
-        //           let State{n} = call 'lists':'foldl'(Lambda, initial, List) in <continuation>
+        // BT-524: Add is_list guard for non-list collection types.
+        // Convert non-list receivers to a list via beamtalk_collection_ops:to_list/1
+        // so that state mutations are properly threaded through lists:foldl.
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
+        let safe_list_var = self.fresh_temp_var("temp");
 
         let lambda_var = self.fresh_temp_var("temp");
         let item_param = body.parameters.first().map_or("_", |p| p.name.as_str());
@@ -59,7 +60,13 @@ impl CoreErlangGenerator {
         let mut docs: Vec<Document<'static>> = vec![docvec![
             format!("let {list_var} = "),
             recv_code,
-            format!(" in let {lambda_var} = fun ({item_var}, StateAcc) -> "),
+            format!(
+                " in let {safe_list_var} = case call 'erlang':'is_list'({list_var}) of \
+                 <'true'> when 'true' -> {list_var} \
+                 <'false'> when 'true' -> \
+                 call 'beamtalk_collection_ops':'to_list'({list_var}) end \
+                 in let {lambda_var} = fun ({item_var}, StateAcc) -> "
+            ),
         ]];
 
         // Generate body with state threading
@@ -72,7 +79,7 @@ impl CoreErlangGenerator {
         // BT-483: Return {Result, State} tuple — do: returns nil as result
         let fold_result = self.fresh_temp_var("FoldResult");
         docs.push(docvec![format!(
-            " in let {fold_result} = call 'lists':'foldl'({lambda_var}, {initial_state}, {list_var}) \
+            " in let {fold_result} = call 'lists':'foldl'({lambda_var}, {initial_state}, {safe_list_var}) \
              in {{'nil', {fold_result}}}"
         )]);
 
@@ -276,8 +283,12 @@ impl CoreErlangGenerator {
             self.repl_loop_mutated = true;
         }
 
+        // BT-524: Add is_list guard for non-list collection types.
+        // Convert non-list receivers to a list via beamtalk_collection_ops:to_list/1
+        // so that state mutations are properly threaded through lists:foldl.
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
+        let safe_list_var = self.fresh_temp_var("temp");
         let init_var = self.fresh_temp_var("temp");
         let init_code = self.expression_doc(initial)?;
         let lambda_var = self.fresh_temp_var("temp");
@@ -286,7 +297,13 @@ impl CoreErlangGenerator {
         let mut docs: Vec<Document<'static>> = vec![docvec![
             format!("let {list_var} = "),
             recv_code,
-            format!(" in let {init_var} = "),
+            format!(
+                " in let {safe_list_var} = case call 'erlang':'is_list'({list_var}) of \
+                 <'true'> when 'true' -> {list_var} \
+                 <'false'> when 'true' -> \
+                 call 'beamtalk_collection_ops':'to_list'({list_var}) end \
+                 in let {init_var} = "
+            ),
             init_code,
             format!(
                 " in let {lambda_var} = fun (Item, {acc_state_var}) -> \
@@ -306,7 +323,7 @@ impl CoreErlangGenerator {
         let state_out = self.fresh_temp_var("StOut");
 
         docs.push(docvec![format!(
-            " in let {result_var} = call 'lists':'foldl'({lambda_var}, {{{init_var}, {initial_state}}}, {list_var}) \
+            " in let {result_var} = call 'lists':'foldl'({lambda_var}, {{{init_var}, {initial_state}}}, {safe_list_var}) \
              in let {acc_out} = call 'erlang':'element'(1, {result_var}) \
              in let {state_out} = call 'erlang':'element'(2, {result_var}) \
              in {{{acc_out}, {state_out}}}"

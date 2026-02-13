@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Actor that tests collection iteration with field mutations (BT-524)
+// Verifies is_list guard works for non-list receivers in mutation-threading paths
+
+Actor subclass: CollectionMutationCounter
+  state: total = 0
+
+  getTotal => ^self.total
+
+  setTotal: v => self.total := v
+
+  // do: with field mutation on a Set receiver
+  sumSet: aSet =>
+    aSet do: [:item | self.total := self.total + item].
+    ^self.total
+
+  // inject:into: with field mutation on a Dictionary receiver
+  // The block mutates self.total as a side effect while accumulating
+  // Note: inject:into: block params are (element, accumulator) per Erlang foldl
+  sumDictValues: aDict =>
+    aDict inject: 0 into: [:val :acc |
+      self.total := self.total + val.
+      acc + val
+    ].
+    ^self.total

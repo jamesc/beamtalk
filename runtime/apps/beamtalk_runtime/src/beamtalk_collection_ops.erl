@@ -21,7 +21,8 @@
     detect/2,
     detect_if_none/3,
     any_satisfy/2,
-    all_satisfy/2
+    all_satisfy/2,
+    to_list/1
 ]).
 
 %%% ============================================================================
