@@ -152,21 +152,27 @@ format_method_output_no_doc_test() ->
 
 %% Setup: ensure stdlib code path is available
 stdlib_setup() ->
-    StdlibEbin = filename:join([code:lib_dir(beamtalk_stdlib), "ebin"]),
-    case filelib:is_dir(StdlibEbin) of
-        true ->
-            code:add_pathz(StdlibEbin),
-            ok;
-        false ->
-            %% Try relative path from project root
-            RelPath = "apps/beamtalk_stdlib/ebin",
-            case filelib:is_dir(RelPath) of
+    case code:lib_dir(beamtalk_stdlib, ebin) of
+        StdlibEbin when is_list(StdlibEbin) ->
+            case filelib:is_dir(StdlibEbin) of
                 true ->
-                    code:add_pathz(RelPath),
+                    code:add_pathz(StdlibEbin),
                     ok;
                 false ->
-                    {skip, stdlib_not_built}
-            end
+                    stdlib_setup_fallback()
+            end;
+        {error, _} ->
+            stdlib_setup_fallback()
+    end.
+
+stdlib_setup_fallback() ->
+    RelPath = "apps/beamtalk_stdlib/ebin",
+    case filelib:is_dir(RelPath) of
+        true ->
+            code:add_pathz(RelPath),
+            ok;
+        false ->
+            {skip, stdlib_not_built}
     end.
 
 get_module_doc_existing_test_() ->
