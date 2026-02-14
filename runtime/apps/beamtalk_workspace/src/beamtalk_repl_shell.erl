@@ -141,20 +141,25 @@ code_change(_OldVsn, State, _Extra) ->
 
 %%% Internal functions
 
-%% @private ADR 0019 Phase 3: Inject workspace convenience bindings.
-%% Reads Transcript, Beamtalk, Workspace from persistent_term and adds
-%% them to the bindings map so ClassReference codegen can resolve them.
+%% @private ADR 0019 Phase 4: Inject workspace convenience bindings.
+%% Looks up Transcript, Beamtalk, Workspace singletons by registered name
+%% and adds them to the bindings map so ClassReference codegen can resolve them.
 -include("beamtalk_workspace.hrl").
+
+-define(BINDING_INFO, [
+    {'Transcript',  'TranscriptStream',      beamtalk_transcript_stream},
+    {'Beamtalk',    'SystemDictionary',       beamtalk_system_dictionary},
+    {'Workspace',   'WorkspaceEnvironment',   beamtalk_workspace_actor}
+]).
 
 inject_workspace_bindings(Bindings) ->
     lists:foldl(
-        fun(Name, Acc) ->
-            try persistent_term:get({beamtalk_binding, Name}) of
-                Value -> maps:put(Name, Value, Acc)
-            catch
-                error:badarg -> Acc  % Binding not set yet
+        fun({Name, ClassName, Module}, Acc) ->
+            case erlang:whereis(Name) of
+                undefined -> Acc;
+                Pid -> maps:put(Name, {beamtalk_object, ClassName, Module, Pid}, Acc)
             end
         end,
         Bindings,
-        ?WORKSPACE_BINDINGS
+        ?BINDING_INFO
     ).

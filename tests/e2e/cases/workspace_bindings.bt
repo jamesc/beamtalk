@@ -4,9 +4,9 @@
 // E2E tests for workspace bindings (BT-376 / ADR 0010 Phase 4).
 //
 // Workspace bindings (Transcript, Beamtalk) are singleton actors
-// looked up via persistent_term. These tests validate that the
-// full dispatch pipeline works end-to-end: codegen → persistent_term
-// lookup → actor send → future resolution.
+// accessed via workspace convenience bindings. The explicit form
+// (e.g., TranscriptStream current) also works via class variables
+// (ADR 0019).
 
 // ===========================================================================
 // TRANSCRIPT BINDING — BASIC DISPATCH
@@ -135,3 +135,16 @@ recentAfterClear isEmpty
 // Transcript unsubscribe dispatches as unary method (BT-530)
 (Transcript unsubscribe) await
 // => #Actor<TranscriptStream,_>
+// => #Actor<TranscriptStream,_>
+
+// ===========================================================================
+// EXPLICIT FORM — SINGLETON CLASS VARIABLE ACCESS (ADR 0019 Phase 4)
+// ===========================================================================
+
+// TranscriptStream current returns the same singleton as Transcript binding
+(TranscriptStream current show: 'hello from explicit form') await
+// => #Actor<TranscriptStream,_>
+
+// SystemDictionary current works as explicit form of Beamtalk
+(SystemDictionary current version) await
+// => 0.1.0

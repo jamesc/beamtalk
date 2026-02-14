@@ -357,21 +357,19 @@ async_unknown_selector_rejects_future_test() ->
 %%% Terminate Tests
 %%% ===========================================================================
 
-singleton_terminate_cleans_persistent_term_test() ->
-    {ok, Pid} = beamtalk_workspace_actor:start_link_singleton(),
+named_terminate_cleans_registration_test() ->
+    {ok, Pid} = beamtalk_workspace_actor:start_link({local, 'Workspace'}),
 
-    %% Verify binding exists
-    Binding = persistent_term:get({beamtalk_binding, 'Workspace'}),
-    ?assertMatch({beamtalk_object, 'WorkspaceEnvironment', beamtalk_workspace_actor, _}, Binding),
+    %% Verify name is registered
+    ?assertEqual(Pid, whereis('Workspace')),
 
     gen_server:stop(Pid),
 
-    %% Verify binding is cleaned up
-    ?assertException(error, badarg,
-        persistent_term:get({beamtalk_binding, 'Workspace'})).
+    %% Verify name is cleaned up
+    ?assertEqual(undefined, whereis('Workspace')).
 
-non_singleton_terminate_no_persistent_term_test() ->
+non_named_terminate_test() ->
     {ok, Pid} = beamtalk_workspace_actor:start_link(),
     gen_server:stop(Pid),
-    %% Should not crash — no persistent_term to erase
+    %% Should not crash
     ok.

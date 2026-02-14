@@ -1027,8 +1027,8 @@ impl CoreErlangGenerator {
     /// Generates workspace-mode class send for actor/value-type methods.
     ///
     /// Tries `class_send` first (for real class names like `Counter`),
-    /// falls back to `persistent_term` binding lookup for convenience names
-    /// like `Transcript`, `Beamtalk`, `Workspace`.
+    /// returns nil for unresolved names. ADR 0019 Phase 4: No `persistent_term`
+    /// fallback — convenience names resolve via session bindings in REPL context.
     fn generate_workspace_class_send(
         &mut self,
         class_name: &str,
@@ -1037,18 +1037,11 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let selector_atom = selector.to_erlang_atom();
         let class_pid_var = self.fresh_var("ClassPid");
-        let binding_var = self.fresh_var("BindingVal");
         let args_doc = self.capture_argument_list_doc(arguments)?;
 
         let doc = docvec![
             format!("case call 'beamtalk_object_class':'whereis_class'('{class_name}') of "),
-            "<'undefined'> when 'true' -> ",
-            format!(
-                "let {binding_var} = call 'persistent_term':'get'({{'beamtalk_binding', '{class_name}'}}, 'nil') in "
-            ),
-            format!("call 'beamtalk_message_dispatch':'send'({binding_var}, '{selector_atom}', ["),
-            args_doc.clone(),
-            "]) ",
+            "<'undefined'> when 'true' -> 'nil' ",
             format!("<{class_pid_var}> when 'true' -> "),
             format!(
                 "call 'beamtalk_object_class':'class_send'({class_pid_var}, '{selector_atom}', ["

@@ -45,7 +45,7 @@
 %% API
 -export([
     start_link/0,
-    start_link_singleton/0,
+    start_link/1,
     has_method/1,
     class_info/0
 ]).
@@ -63,7 +63,6 @@
 -type selector() :: atom().
 
 -record(workspace_actor_state, {
-    is_singleton :: boolean()
 }).
 
 %%====================================================================
@@ -75,11 +74,11 @@
 start_link() ->
     gen_server:start_link(?MODULE, [false], []).
 
-%% @doc Start a named Workspace singleton for workspace use.
-%% Registers as 'Workspace' via register/2 and persistent_term binding.
--spec start_link_singleton() -> {ok, pid()} | {error, term()}.
-start_link_singleton() ->
-    gen_server:start_link({local, 'Workspace'}, ?MODULE, [true], []).
+%% @doc Start a named Workspace actor for workspace use.
+%% Registers with the given name via gen_server name registration.
+-spec start_link({local, atom()}) -> {ok, pid()} | {error, term()}.
+start_link(ServerName) ->
+    gen_server:start_link(ServerName, ?MODULE, [true], []).
 
 %% @doc Check if Workspace supports a given method selector.
 -spec has_method(selector()) -> boolean().
@@ -110,18 +109,13 @@ class_info() ->
 
 %% @doc Initialize the Workspace actor state.
 -spec init([boolean()]) -> {ok, #workspace_actor_state{}}.
-init([IsSingleton]) ->
-    case IsSingleton of
-        true ->
-            persistent_term:put({beamtalk_binding, 'Workspace'},
-                {beamtalk_object, 'WorkspaceEnvironment', ?MODULE, self()}),
-            %% Self-register class since we're in beamtalk_workspace app
-            %% (beamtalk_stdlib in beamtalk_runtime can't reference us)
-            register_class();
-        false ->
-            ok
-    end,
-    {ok, #workspace_actor_state{is_singleton = IsSingleton}}.
+init([true]) ->
+    %% Named instances self-register class since we're in beamtalk_workspace app
+    %% (beamtalk_stdlib in beamtalk_runtime can't reference us)
+    register_class(),
+    {ok, #workspace_actor_state{}};
+init([false]) ->
+    {ok, #workspace_actor_state{}}.
 
 %% @doc Handle synchronous method calls.
 -spec handle_call(term(), {pid(), term()}, #workspace_actor_state{}) ->
@@ -190,9 +184,6 @@ handle_info(Info, State) ->
 
 %% @doc Handle process termination.
 -spec terminate(term(), #workspace_actor_state{}) -> ok.
-terminate(_Reason, #workspace_actor_state{is_singleton = true}) ->
-    persistent_term:erase({beamtalk_binding, 'Workspace'}),
-    ok;
 terminate(_Reason, _State) ->
     ok.
 

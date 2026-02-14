@@ -210,15 +210,15 @@ fn test_workspace_binding_compiles_as_normal_class() {
         "Should NOT generate persistent_term lookup, got:\n{batch_code}"
     );
 
-    // ADR 0019: Actor methods in workspace mode use class_send with
-    // persistent_term fallback for convenience binding names
+    // ADR 0019 Phase 4: Actor methods in workspace mode use class_send only,
+    // no persistent_term fallback (removed in BT-491).
     let ws_code = ws_result.unwrap();
     assert!(
         ws_code.contains("class_send"),
         "Actor methods in workspace mode should use class_send for Transcript, got:\n{ws_code}"
     );
     assert!(
-        ws_code.contains("persistent_term"),
-        "Actor methods should fall back to persistent_term for workspace bindings, got:\n{ws_code}"
+        !ws_code.contains("persistent_term"),
+        "Workspace mode should NOT use persistent_term (ADR 0019 Phase 4), got:\n{ws_code}"
     );
 }

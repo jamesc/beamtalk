@@ -49,9 +49,8 @@ pub struct CompilerOptions {
     /// Emits a warning instead of an error.
     pub allow_primitives: bool,
 
-    /// BT-374 / ADR 0010: Whether workspace bindings (`Transcript`, `Beamtalk`)
-    /// are available. When true, workspace binding class references generate
-    /// `persistent_term` lookup + async actor send. When false (batch compile),
-    /// workspace binding names produce a compile error.
+    /// BT-374 / ADR 0010 / ADR 0019: Whether workspace bindings are available.
+    /// When true, class references resolve through session bindings or class
+    /// registry. When false (batch compile), they go directly to the registry.
     pub workspace_mode: bool,
 }
