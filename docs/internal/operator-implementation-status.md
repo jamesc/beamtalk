@@ -47,14 +47,13 @@ Binary operators have precedence levels:
 | `==` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 10, loose equality `==` |
 | `/=` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 10, loose inequality `/=` |
 | `=/=` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 10, strict inequality `=/=` |
-| **Logical (Not Operators - Keyword Messages)** |
+| **Logical (Not Operators - Keyword Messages)** | | | | | | | | |
 | `and:` | Partial | Keyword | Keyword | Partial | N/A | N/A | ✓ | Short-circuit via keyword message with block |
 | `or:` | Partial | Keyword | Keyword | Partial | N/A | N/A | ✓ | Short-circuit via keyword message with block |
-| **Removed** |
+| **Removed** | | | | | | | | |
 | `!=` | ❌ | ❌ | ❌ | ❌ | N/A | N/A | ❌ | Removed - use `/=` instead |
 | `&&` | ❌ | ❌ | ❌ | ❌ | N/A | N/A | ❌ | Not an operator - use `and:` keyword message |
 | `\|\|` | ❌ | ❌ | ❌ | ❌ | N/A | N/A | ❌ | Not an operator - use `or:` keyword message |
-| `==` | - | ✓ | ❌ | ✓ | N/A | N/A | ❌ | Not documented, lexer tokenizes but parser doesn't support |
 
 ## Implementation Details
 

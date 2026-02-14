@@ -51,12 +51,12 @@
 | > | erlang:'>' | blocks_no_args, binary_operators | ✓ |
 | <= | erlang:'=<' | binary_operators | ✓ |
 | >= | erlang:'>=' | binary_operators | ✓ |
+| ** | math:pow + round | binary_operators | ✓ |
 | ++ | iolist_to_binary | stdlib_string, binary_operators | ✓ |
 
-**Coverage**: 13/13 operators (100%)
+**Coverage**: 15/15 operators (100%)
 - All documented operators are fully implemented and tested
 - Removed: `!=` (use `/=` instead)
-- Note: `**` (exponentiation) is supported and tested in binary_operators
 - Note: `and:` and `or:` are keyword messages, not binary operators
 
 ## Unary Messages/Operators Coverage

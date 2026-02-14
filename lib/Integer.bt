@@ -88,7 +88,7 @@ sealed Number subclass: Integer
   /// 1 /= 2        // => true
   /// 42 /= 42      // => false
   /// ```
-  /= other => (self =:= other) not
+  /= other => @primitive '/='
 
   /// Test if the receiver is less than another integer.
   ///

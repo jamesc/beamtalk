@@ -110,8 +110,8 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `/` | @primitive selector | ✅ | 🧪 | `Integer>>/` |
 | `%` | @primitive selector | ✅ | 🧪 | `Integer>>\\` |
 | `**` | @primitive selector | ✅ | | `Integer>>raisedTo:` |
-| `=:=` | @primitive selector | ✅ | 🧪 | `Integer>>=:=` |
-| `/=` | pure BT | ✅ | 🧪 | `Integer>>/=` |
+| `=:=` | @primitive selector | ✅ | 🧪 | `Integer>>=` |
+| `/=` | @primitive selector | ✅ | 🧪 | `Integer>>~=` |
 | `<` | @primitive selector | ✅ | 🧪 | `Integer>><` |
 | `>` | @primitive selector | ✅ | 🧪 | `Integer>>>` |
 | `<=` | @primitive selector | ✅ | 🧪 | `Integer>><=` |
@@ -150,8 +150,8 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 
 | Selector | Mechanism | Status | E2E | Pharo Equivalent |
 |----------|-----------|--------|-----|------------------|
-| `=:=` | @primitive selector | ✅ | 🧪 | `String>>=:=` |
-| `/=` | pure BT | ✅ | 🧪 | `String>>/=` |
+| `=:=` | @primitive selector | ✅ | 🧪 | `String>>=` |
+| `/=` | @primitive selector | ✅ | 🧪 | `String>>~=` |
 | `<` | @primitive selector | ✅ | 🧪 | `String>><` |
 | `>` | @primitive selector | ✅ | 🧪 | `String>>>` |
 | `<=` | @primitive selector | ✅ | 🧪 | `String>><=` |
@@ -313,8 +313,8 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `-` | @primitive selector | ✅ | 🧪 | `Float>>-` |
 | `*` | @primitive selector | ✅ | 🧪 | `Float>>*` |
 | `/` | @primitive selector | ✅ | 🧪 | `Float>>/` |
-| `=:=` | @primitive selector | ✅ | 🧪 | `Float>>=:=` |
-| `/=` | pure BT | ✅ | | `Float>>/=` |
+| `=:=` | @primitive selector | ✅ | 🧪 | `Float>>=` |
+| `/=` | @primitive selector | ✅ | | `Float>>~=` |
 | `<` | @primitive selector | ✅ | 🧪 | `Float>><` |
 | `>` | @primitive selector | ✅ | 🧪 | `Float>>>` |
 | `<=` | @primitive selector | ✅ | | `Float>><=` |
@@ -450,8 +450,8 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `asAtom` | @primitive selector | ✅ | 🧪 | N/A (BEAM-specific) |
 | `printString` | @primitive selector | ✅ | 🧪 | `Symbol>>printString` |
 | `describe` | @primitive selector | ✅ | 🧪 | N/A |
-| `=:=` | @primitive selector | ✅ | 🧪 | `Symbol>>=:=` |
-| `/=` | @primitive selector | ✅ | 🧪 | `Symbol>>/=` |
+| `=:=` | @primitive selector | ✅ | 🧪 | `Symbol>>=` |
+| `/=` | @primitive selector | ✅ | 🧪 | `Symbol>>~=` |
 | `hash` | @primitive selector | ✅ | 🧪 | `Symbol>>hash` |
 
 ### Association (`lib/Association.bt`)
@@ -530,7 +530,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | Selector | Mechanism | Status | E2E | Notes |
 |----------|-----------|--------|-----|-------|
 | `=:=` | @primitive selector | ✅ | 🧪 | Character equality |
-| `/=` | pure BT | ✅ | 🧪 | Character not-equal |
+| `/=` | @primitive selector | ✅ | 🧪 | Character not-equal |
 | `<` | @primitive selector | ✅ | 🧪 | Ordering |
 | `>` | @primitive selector | ✅ | 🧪 | Ordering |
 | `<=` | @primitive selector | ✅ | 🧪 | Ordering |

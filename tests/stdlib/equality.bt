@@ -53,7 +53,7 @@ true /= false
 1.5 =:= 1
 // => false
 
-// But they ARE loosely equal (with coercion)
+// Note: 1.5 and 1 are NOT loosely equal (different numeric values)
 1.5 == 1
 // => false
 

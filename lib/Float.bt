@@ -64,7 +64,7 @@ sealed Number subclass: Float
   /// 1.0 /= 2.0       // => true
   /// 3.14 /= 3.14     // => false
   /// ```
-  /= other => (self =:= other) not
+  /= other => @primitive '/='
 
   /// Test if the receiver is less than another number.
   ///

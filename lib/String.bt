@@ -32,7 +32,7 @@ sealed Object subclass: String
   /// 'abc' /= 'xyz'     // => true
   /// 'abc' /= 'abc'     // => false
   /// ```
-  /= other => (self =:= other) not
+  /= other => @primitive '/='
 
   /// Test if the receiver sorts before another string.
   ///

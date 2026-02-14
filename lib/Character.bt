@@ -31,7 +31,7 @@ sealed Object subclass: Character
   /// $A /= $B                 // => true
   /// $A /= $A                 // => false
   /// ```
-  /= other => (self =:= other) not
+  /= other => @primitive '/='
 
   /// Test if the receiver sorts before another character.
   ///
