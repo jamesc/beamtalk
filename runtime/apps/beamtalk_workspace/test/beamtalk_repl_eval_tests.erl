@@ -512,8 +512,7 @@ io_capture_reset_does_not_affect_unrelated_processes_test() ->
     %% Pre-existing process should keep its original GL
     {group_leader, PostGL} = erlang:process_info(PreExisting, group_leader),
     ?assertEqual(PreGL, PostGL),
-    %% Restore and clean up
-    group_leader(OrigGL, self()),
+    %% Clean up
     PreExisting ! stop.
 
 %% === is_stdlib_path tests ===

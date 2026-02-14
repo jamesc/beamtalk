@@ -777,8 +777,10 @@ reset_captured_group_leaders(CapturePid, OldGL) ->
                     case erlang:process_info(Pid, group_leader) of
                         {group_leader, CapturePid} ->
                             group_leader(OldGL, Pid);
-                        _ ->
-                            ok
+                        {group_leader, _} ->
+                            ok;  % Different GL, leave it alone
+                        undefined ->
+                            ok   % Process died between checks, nothing to do
                     end;
                 false ->
                     ok
