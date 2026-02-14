@@ -1,7 +1,8 @@
 {application, beamtalk_compiler, [
-    {description, "Beamtalk Compiler - OTP Port to Rust compiler binary (ADR 0022)"},
+    {description, "Beamtalk Compiler - Anti-Corruption Layer to Rust compiler (ADR 0022)"},
     {vsn, "0.1.0"},
+    {mod, {beamtalk_compiler_app, []}},
     {modules, []},
-    {registered, []},
-    {applications, [kernel, stdlib]}
+    {registered, [beamtalk_compiler_sup, beamtalk_compiler_server]},
+    {applications, [kernel, stdlib, compiler]}
 ]}.
