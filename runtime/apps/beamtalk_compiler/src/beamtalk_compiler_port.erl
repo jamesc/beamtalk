@@ -63,12 +63,12 @@ compile_expression(Port, Source, ModuleName, KnownVars) ->
                     ?LOG_ERROR("Compiler port exited", #{status => Status}),
                     {error, [<<"Compiler port exited unexpectedly">>]}
             after 30000 ->
-                ?LOG_ERROR("Compiler port timeout", #{}),
+                ?LOG_ERROR("Compiler port timeout", #{port => Port}),
                 {error, [<<"Compiler port timed out">>]}
             end
     catch
         error:badarg ->
-            ?LOG_ERROR("Compiler port not available", #{}),
+            ?LOG_ERROR("Compiler port not available", #{port => Port}),
             {error, [<<"Compiler port is not available">>]}
     end.
 
