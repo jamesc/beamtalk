@@ -175,3 +175,55 @@ multiple_sessions_independent_test_() ->
               beamtalk_repl_shell:stop(Pid2)
           end)]
      end}.
+
+%%====================================================================
+%% Unload Module Tests (BT-519)
+%%====================================================================
+
+unload_module_removes_from_tracker_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-unload-1">>),
+              %% Create a dummy module in the code server
+              DummyMod = 'bt519_test_dummy',
+              Forms = [{attribute,1,module,DummyMod},
+                       {attribute,2,export,[{hello,0}]},
+                       {function,3,hello,0,
+                        [{clause,3,[],[],[{atom,3,world}]}]}],
+              {ok, DummyMod, Binary} = compile:forms(Forms),
+              {module, DummyMod} = code:load_binary(DummyMod, "test.erl", Binary),
+              %% Inject module into the session's tracker
+              sys:replace_state(Pid, fun({SId, State}) ->
+                  Tracker = beamtalk_repl_state:get_module_tracker(State),
+                  NewTracker = beamtalk_repl_modules:add_module(DummyMod, "/tmp/test.bt", Tracker),
+                  {SId, beamtalk_repl_state:set_module_tracker(NewTracker, State)}
+              end),
+              %% Verify module is in tracker
+              {ok, Tracker1} = beamtalk_repl_shell:get_module_tracker(Pid),
+              ?assert(beamtalk_repl_modules:module_exists(DummyMod, Tracker1)),
+              %% Unload the module
+              ok = beamtalk_repl_shell:unload_module(Pid, DummyMod),
+              %% Verify module is removed from tracker
+              {ok, Tracker2} = beamtalk_repl_shell:get_module_tracker(Pid),
+              ?assertNot(beamtalk_repl_modules:module_exists(DummyMod, Tracker2)),
+              %% Verify module is no longer loaded in code server
+              ?assertEqual(false, code:is_loaded(DummyMod)),
+              beamtalk_repl_shell:stop(Pid)
+          end)]
+     end}.
+
+unload_module_not_loaded_returns_error_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-unload-2">>),
+              Result = beamtalk_repl_shell:unload_module(Pid, 'nonexistent_module_xyz'),
+              ?assertMatch({error, {module_not_loaded, _}}, Result),
+              beamtalk_repl_shell:stop(Pid)
+          end)]
+     end}.

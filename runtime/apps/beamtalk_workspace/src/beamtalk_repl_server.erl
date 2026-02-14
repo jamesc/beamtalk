@@ -461,7 +461,7 @@ handle_op(<<"modules">>, _Params, Msg, SessionPid) ->
     ),
     beamtalk_repl_protocol:encode_modules(ModulesWithInfo, Msg, fun term_to_json/1);
 
-handle_op(<<"unload">>, Params, Msg, _SessionPid) ->
+handle_op(<<"unload">>, Params, Msg, SessionPid) ->
     ModuleBin = maps:get(<<"module">>, Params, <<>>),
     case ModuleBin of
         <<>> ->
@@ -474,12 +474,10 @@ handle_op(<<"unload">>, Params, Msg, _SessionPid) ->
                 {file, _} -> Module;
                 false -> resolve_class_to_module(Module)
             end,
-            case code:is_loaded(ResolvedModule) of
-                {file, _} ->
-                    _ = code:soft_purge(ResolvedModule),
-                    _ = code:delete(ResolvedModule),
+            case beamtalk_repl_shell:unload_module(SessionPid, ResolvedModule) of
+                ok ->
                     beamtalk_repl_protocol:encode_status(ok, Msg, fun term_to_json/1);
-                false ->
+                {error, {module_not_loaded, _}} ->
                     beamtalk_repl_protocol:encode_error(
                         {module_not_loaded, Module}, Msg, fun format_error_message/1)
             end
