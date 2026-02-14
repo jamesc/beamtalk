@@ -12,13 +12,13 @@
 // TRANSCRIPT BINDING — BASIC DISPATCH
 // ===========================================================================
 
-// Transcript show: dispatches through workspace binding (async send, REPL auto-awaits to nil)
+// Transcript show: dispatches through workspace binding (async send, returns self)
 Transcript show: 'Hello'
-// => nil
+// => #Actor<TranscriptStream,_>
 
-// Transcript cr dispatches through workspace binding (async send, REPL auto-awaits to nil)
+// Transcript cr dispatches through workspace binding (async send, returns self)
 Transcript cr
-// => nil
+// => #Actor<TranscriptStream,_>
 
 // ===========================================================================
 // TRANSCRIPT BINDING — CLASS INTROSPECTION
@@ -75,7 +75,7 @@ version isEmpty
 
 // Cascade on workspace binding: all messages dispatched to same actor
 Transcript show: 'Hello'; cr; show: 'World'
-// => nil
+// => #Actor<TranscriptStream,_>
 
 // ===========================================================================
 // BEAMTALK BINDING — GLOBALS
@@ -99,11 +99,11 @@ intClass := (Beamtalk classNamed: #Integer) await
 
 // Clear transcript buffer first
 (Transcript clear) await
-// => nil
+// => #Actor<TranscriptStream,_>
 
 // Write something to transcript
 (Transcript show: 'TestOutput') await
-// => nil
+// => #Actor<TranscriptStream,_>
 
 // Recent returns buffer contents (list of recent output)
 recent := (Transcript recent) await
@@ -115,7 +115,7 @@ recent isEmpty
 
 // Clear empties the buffer
 (Transcript clear) await
-// => nil
+// => #Actor<TranscriptStream,_>
 
 // Buffer should be empty after clear
 recentAfterClear := (Transcript recent) await
@@ -130,8 +130,8 @@ recentAfterClear isEmpty
 
 // Transcript subscribe dispatches as unary method (BT-530)
 (Transcript subscribe) await
-// => nil
+// => #Actor<TranscriptStream,_>
 
 // Transcript unsubscribe dispatches as unary method (BT-530)
 (Transcript unsubscribe) await
-// => nil
+// => #Actor<TranscriptStream,_>

@@ -90,7 +90,7 @@ dialyzer:
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Run fast tests (Rust unit/integration + stdlib + Erlang runtime, skip slow E2E)
-test: test-rust test-runtime test-stdlib
+test: test-rust test-stdlib test-runtime
 
 # Run Rust tests (unit + integration, skip slow E2E)
 test-rust:
@@ -207,7 +207,7 @@ _clean-daemon-state:
 
 # Run Erlang runtime unit tests
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
-test-runtime:
+test-runtime: build-stdlib
     #!/usr/bin/env bash
     set -euo pipefail
     cd runtime
