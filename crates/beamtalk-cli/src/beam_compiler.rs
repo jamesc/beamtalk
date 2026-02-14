@@ -34,7 +34,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::thread;
-use tracing::{debug, error, instrument, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 /// Embedded compile.escript for batch compilation.
 const COMPILE_ESCRIPT: &str = include_str!("../templates/compile.escript");
@@ -44,6 +44,38 @@ const COMPILE_ESCRIPT: &str = include_str!("../templates/compile.escript");
 /// This ensures each temporary escript file has a unique name, preventing
 /// collisions when multiple compilation processes run in parallel.
 static ESCRIPT_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Compiler backend for Core Erlang → BEAM compilation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompilerBackend {
+    /// Port backend: starts a BEAM node with `beamtalk_build_worker`
+    /// for in-memory compilation (default, ADR 0022 Phase 3).
+    Port,
+    /// Escript backend: uses the embedded `compile.escript` (legacy fallback).
+    Escript,
+}
+
+/// Resolve the compiler backend from the `BEAMTALK_COMPILER` environment variable.
+///
+/// - `"escript"` or `"daemon"` → [`CompilerBackend::Escript`] (daemon maps to escript for build)
+/// - Anything else (including unset) → [`CompilerBackend::Port`] (default)
+pub fn resolve_backend() -> CompilerBackend {
+    match std::env::var("BEAMTALK_COMPILER").as_deref() {
+        Ok("escript" | "daemon") => CompilerBackend::Escript,
+        _ => CompilerBackend::Port,
+    }
+}
+
+/// Sentinel prefix in error messages indicating the Port backend's runtime
+/// is not available. Used by `compile_batch` to decide whether to fall back
+/// to the escript backend.
+const RUNTIME_UNAVAILABLE_PREFIX: &str = "Port backend requires";
+
+/// Check whether an error indicates the Port backend's runtime is unavailable.
+fn is_runtime_unavailable_error(err: &miette::Report) -> bool {
+    let msg = format!("{err}");
+    msg.starts_with(RUNTIME_UNAVAILABLE_PREFIX)
+}
 
 /// Escapes a string for use in an Erlang term.
 ///
@@ -143,10 +175,99 @@ impl BeamCompiler {
     #[allow(clippy::too_many_lines)]
     #[instrument(skip_all, fields(file_count = core_files.len(), output_dir = %self.output_dir))]
     pub fn compile_batch(&self, core_files: &[Utf8PathBuf]) -> Result<Vec<Utf8PathBuf>> {
+        let backend = resolve_backend();
         debug!(
-            "Starting batch compilation of {} Core Erlang files",
-            core_files.len()
+            "Starting batch compilation of {} Core Erlang files (backend: {:?})",
+            core_files.len(),
+            backend,
         );
+
+        match backend {
+            CompilerBackend::Port => {
+                // Try Port backend, fall back to escript if runtime not available
+                match self.compile_batch_port(core_files) {
+                    Ok(result) => Ok(result),
+                    Err(e) if is_runtime_unavailable_error(&e) => {
+                        info!("Port backend unavailable, falling back to escript");
+                        self.compile_batch_escript(core_files)
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            CompilerBackend::Escript => self.compile_batch_escript(core_files),
+        }
+    }
+
+    /// Compile via the Port backend: starts a BEAM node with `beamtalk_build_worker`.
+    ///
+    /// Uses in-memory compilation via `core_scan → core_parse → compile:forms`
+    /// (no escript needed). Requires Erlang/OTP and the runtime to be compiled.
+    #[instrument(skip_all, fields(file_count = core_files.len()))]
+    fn compile_batch_port(&self, core_files: &[Utf8PathBuf]) -> Result<Vec<Utf8PathBuf>> {
+        use beamtalk_cli::repl_startup;
+
+        info!("Using Port backend for Core Erlang → BEAM compilation");
+
+        // Find runtime and build -pa paths (canonicalize for absolute paths,
+        // since the BEAM node runs from temp_dir)
+        let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout().map_err(|_| {
+            miette::miette!(
+                "Port backend requires the Beamtalk runtime.\n\
+                     Falling back to escript: set BEAMTALK_COMPILER=escript\n\
+                     Or build the runtime: cd runtime && rebar3 compile"
+            )
+        })?;
+
+        let runtime_dir = runtime_dir
+            .canonicalize()
+            .into_diagnostic()
+            .wrap_err("Failed to resolve runtime directory")?;
+
+        let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
+
+        // Check that the compiler app is compiled
+        if !repl_startup::has_beam_files(&paths.compiler_ebin) {
+            return Err(miette::miette!(
+                "{} compiled compiler at {}.\n\
+                 Build it with: cd runtime && rebar3 compile\n\
+                 Or use escript backend: BEAMTALK_COMPILER=escript",
+                RUNTIME_UNAVAILABLE_PREFIX,
+                paths.compiler_ebin.display()
+            ));
+        }
+
+        // Ensure output directory exists
+        std::fs::create_dir_all(&self.output_dir)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to create output directory '{}'", self.output_dir))?;
+
+        // Build -pa arguments
+        let pa_args = repl_startup::beam_pa_args(&paths);
+
+        // Start BEAM node with beamtalk_build_worker
+        debug!("Spawning BEAM node with beamtalk_build_worker");
+        let temp_dir = std::env::temp_dir();
+        let mut child = Command::new("erl")
+            .arg("-noshell")
+            .args(&pa_args)
+            .arg("-s")
+            .arg("beamtalk_build_worker")
+            .arg("main")
+            .current_dir(&temp_dir)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .into_diagnostic()
+            .wrap_err("Failed to start BEAM node for compilation.\nIs Erlang/OTP installed?")?;
+
+        // From here, the protocol is identical to the escript backend
+        self.drive_compilation_protocol(&mut child, core_files)
+    }
+
+    /// Compile via the legacy escript backend.
+    #[instrument(skip_all, fields(file_count = core_files.len()))]
+    fn compile_batch_escript(&self, core_files: &[Utf8PathBuf]) -> Result<Vec<Utf8PathBuf>> {
         // Check if escript is available
         check_escript_available()?;
 
@@ -197,18 +318,44 @@ impl BeamCompiler {
             .into_diagnostic()
             .wrap_err("Failed to spawn escript process")?;
 
+        let result = self.drive_compilation_protocol(&mut child, core_files);
+
+        // Clean up temporary escript file
+        if let Err(err) = std::fs::remove_file(&escript_path) {
+            warn!(
+                "Failed to remove temporary escript file '{}': {}",
+                escript_path.display(),
+                err
+            );
+        }
+
+        result
+    }
+
+    /// Drive the stdin/stdout compilation protocol shared by both backends.
+    ///
+    /// Protocol:
+    ///   INPUT:  Erlang term: `{OutputDir, [CoreFile1, CoreFile2, ...]}`
+    ///   OUTPUT: `beamtalk-compile-module:<name>` per module, then
+    ///           `beamtalk-compile-result-ok` or `beamtalk-compile-result-error`
+    #[allow(clippy::too_many_lines)]
+    fn drive_compilation_protocol(
+        &self,
+        child: &mut std::process::Child,
+        core_files: &[Utf8PathBuf],
+    ) -> Result<Vec<Utf8PathBuf>> {
         let mut stdin = child
             .stdin
             .take()
-            .ok_or_else(|| miette::miette!("Failed to capture escript stdin"))?;
+            .ok_or_else(|| miette::miette!("Failed to capture compiler stdin"))?;
         let stdout = child
             .stdout
             .take()
-            .ok_or_else(|| miette::miette!("Failed to capture escript stdout"))?;
+            .ok_or_else(|| miette::miette!("Failed to capture compiler stdout"))?;
         let stderr = child
             .stderr
             .take()
-            .ok_or_else(|| miette::miette!("Failed to capture escript stderr"))?;
+            .ok_or_else(|| miette::miette!("Failed to capture compiler stderr"))?;
 
         // Prepare input: {OutputDir, [CoreFile1, CoreFile2, ...]}
         // Use absolute paths since escript runs from temp_dir
@@ -246,11 +393,11 @@ impl BeamCompiler {
             core_files_str.join(",")
         );
 
-        // Send input to escript
+        // Send input to compiler
         stdin
             .write_all(input.as_bytes())
             .into_diagnostic()
-            .wrap_err("Failed to write to escript stdin")?;
+            .wrap_err("Failed to write to compiler stdin")?;
         drop(stdin); // Close stdin to signal end of input
 
         // Read stderr concurrently to avoid deadlock
@@ -304,16 +451,7 @@ impl BeamCompiler {
         let status = child
             .wait()
             .into_diagnostic()
-            .wrap_err("Failed to wait for escript process")?;
-
-        // Clean up temporary escript file
-        if let Err(err) = std::fs::remove_file(&escript_path) {
-            warn!(
-                "Failed to remove temporary escript file '{}': {}",
-                escript_path.display(),
-                err
-            );
-        }
+            .wrap_err("Failed to wait for compiler process")?;
 
         // Check results
         if !status.success() || !compilation_ok {
