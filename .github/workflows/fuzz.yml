@@ -88,6 +88,12 @@ jobs:
             FAILED=1
           fi
 
+          # Fail if fuzz step failed but produced no artifacts (infra error, cargo-fuzz crash, etc.)
+          if [ $FAILED -eq 0 ]; then
+            echo "❌ Fuzz step failed but no artifacts were produced; failing to avoid false green."
+            FAILED=1
+          fi
+
           exit $FAILED
 
       - name: Create issue on failure
