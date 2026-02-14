@@ -231,6 +231,10 @@ compile_expression_via_port(Expression, ModuleName, Bindings) ->
         exit:{timeout, _} ->
             {error, <<"Compilation timed out.">>};
         exit:{Reason, _} ->
+            {error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason]))};
+        error:Reason ->
+            {error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason]))};
+        throw:Reason ->
             {error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason]))}
     end.
 
@@ -254,7 +258,7 @@ compile_expression_via_daemon(Expression, ModuleName, Bindings, State) ->
 %% Compile a file and extract class metadata.
 %% Dispatches to beamtalk_compiler (port) or legacy daemon.
 -spec compile_file(string(), string(), boolean(), beamtalk_repl_state:state()) ->
-    {ok, binary(), [string()], atom()} | {error, term()}.
+    {ok, binary(), [#{name := string(), superclass := string()}], atom()} | {error, term()}.
 compile_file(Source, Path, StdlibMode, State) ->
     case beamtalk_compiler_backend:backend() of
         port ->
@@ -289,6 +293,10 @@ compile_file_via_port(Source, _Path, StdlibMode) ->
         exit:{timeout, _} ->
             {error, {compile_error, <<"Compilation timed out.">>}};
         exit:{Reason, _} ->
+            {error, {compile_error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason]))}};
+        error:Reason ->
+            {error, {compile_error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason]))}};
+        throw:Reason ->
             {error, {compile_error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason]))}}
     end.
 
@@ -586,7 +594,7 @@ extract_assignment(Expression) ->
 %% The daemon derives the module name from the class definition in the AST
 %% and returns it in the response, so we no longer derive from the filename.
 -spec compile_file_via_daemon(string(), string(), boolean(), beamtalk_repl_state:state()) ->
-    {ok, binary(), [string()], atom()} | {error, term()}.
+    {ok, binary(), [#{name := string(), superclass := string()}], atom()} | {error, term()}.
 compile_file_via_daemon(Source, Path, StdlibMode, _State) ->
     SocketPath = daemon_socket_path(),
     case connect_to_daemon(SocketPath) of
