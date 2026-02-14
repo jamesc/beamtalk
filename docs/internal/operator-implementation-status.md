@@ -15,10 +15,11 @@ From `../beamtalk-syntax-rationale.md`:
 
 ```
 Binary operators have precedence levels:
-1. `*`, `/`, `%` (highest - multiplicative)
-2. `+`, `-`, `++` (additive and string concatenation)
-3. `<`, `>`, `<=`, `>=` (comparison)
-4. `=`, `==`, `~=` (equality - strict and loose)
+1. `**` (highest - exponentiation, right-associative)
+2. `*`, `/`, `%` (multiplicative)
+3. `+`, `-`, `++` (additive and string concatenation)
+4. `<`, `>`, `<=`, `>=` (comparison)
+5. `=`, `==`, `~=` (equality - strict and loose)
 ```
 
 **Note:** `&&`, `||`, `and`, `or` are **not** binary operators. They are keyword messages that take blocks for short-circuit evaluation.
@@ -33,6 +34,7 @@ Binary operators have precedence levels:
 | `%` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 40, maps to `rem` |
 | `+` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 30 |
 | `-` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 30 |
+| `**` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 50, right-associative, `math:pow` + `round` |
 | **String** |
 | `++` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 30, string concatenation |
 | **Comparison** |
@@ -49,7 +51,6 @@ Binary operators have precedence levels:
 | `or:` | Partial | Keyword | Keyword | Partial | N/A | N/A | ✓ | Short-circuit via keyword message with block |
 | **Removed** |
 | `!=` | ❌ | ❌ | ❌ | ❌ | N/A | N/A | ❌ | Removed - use `~=` instead |
-| `**` | ❌ | ❌ | ❌ | ❌ | N/A | N/A | ❌ | Removed - not needed |
 | `&&` | ❌ | ❌ | ❌ | ❌ | N/A | N/A | ❌ | Not an operator - use `and:` keyword message |
 | `\|\|` | ❌ | ❌ | ❌ | ❌ | N/A | N/A | ❌ | Not an operator - use `or:` keyword message |
 | `==` | - | ✓ | ❌ | ✓ | N/A | N/A | ❌ | Not documented, lexer tokenizes but parser doesn't support |
@@ -64,7 +65,6 @@ Binary operators have precedence levels:
 
 **Not Needed:**
 - `!=` - Removed, use `~=` instead
-- `**` - Removed, not needed
 - `&&`, `||` - Not operators, use `and:` and `or:` keyword messages
 - `and`, `or` - Keyword messages, not binary operators
 
@@ -75,6 +75,7 @@ Binary operators have precedence levels:
 - Precedence 20: `<`, `>`, `<=`, `>=` (comparison)
 - Precedence 30: `+`, `-`, `++` (additive and concatenation)
 - Precedence 40: `*`, `/`, `%` (multiplicative)
+- Precedence 50: `**` (exponentiation, right-associative)
 
 **Note:** Lower numbers = lower precedence (inverted from typical convention), but relative order is correct.
 
@@ -86,9 +87,9 @@ Binary operators have precedence levels:
 - `=`, `~=` → Erlang strict equality (`=:=`, `=/=`)
 - `<`, `>`, `<=`, `>=` → Erlang comparison (`<`, `>`, `=<`, `>=`)
 - `++` → String concatenation via `iolist_to_binary`
+- `**` → Exponentiation via `math:pow` + `erlang:round`
 
 **Removed:**
-- `**` → Exponentiation removed (not needed)
 - `!=` → Removed (use `~=` instead)
 
 **Not Operators:**
@@ -126,5 +127,4 @@ All binary operators are now consistently implemented across lexer, parser, code
 
 ### Removed
 - `!=` - Use `~=` for strict inequality
-- `**` - Exponentiation not needed
 - `&&`, `||` - Use `and:` and `or:` keyword messages

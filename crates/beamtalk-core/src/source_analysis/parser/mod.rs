@@ -92,7 +92,6 @@ impl BindingPower {
     }
 
     /// Creates a right-associative binding power.
-    #[allow(dead_code)] // Reserved for future operators like `**`
     const fn right_assoc(precedence: u8) -> Self {
         Self {
             left: precedence + 1,
@@ -116,14 +115,12 @@ impl BindingPower {
 /// | 20 | `<` `>` `<=` `>=`   | Left |
 /// | 30 | `+` `-`             | Left |
 /// | 40 | `*` `/` `%`         | Left |
+/// | 50 | `**`                | Right |
 ///
 /// To add a new operator, just add an entry here. For example:
 /// ```ignore
 /// // Bitwise OR (between comparison and additive)
 /// "|" => Some(BindingPower::left_assoc(25)),
-///
-/// // Exponentiation (right-associative, higher than multiplication)
-/// "**" => Some(BindingPower::right_assoc(50)),
 /// ```
 pub(super) fn binary_binding_power(op: &str) -> Option<BindingPower> {
     match op {
@@ -145,8 +142,11 @@ pub(super) fn binary_binding_power(op: &str) -> Option<BindingPower> {
         // Additive (includes string concatenation ++)
         "+" | "-" | "++" => Some(BindingPower::left_assoc(30)),
 
-        // Multiplicative (highest binary precedence)
+        // Multiplicative
         "*" | "/" | "%" => Some(BindingPower::left_assoc(40)),
+
+        // Exponentiation (right-associative, highest binary precedence)
+        "**" => Some(BindingPower::right_assoc(50)),
 
         // Unknown operator - return None to stop binary expression parsing
         _ => None,
@@ -3113,5 +3113,110 @@ Actor subclass: Counter
     #[test]
     fn unclosed_map_literal_bare_eof_terminates() {
         let _diagnostics = parse_err("#{key");
+    }
+
+    #[test]
+    fn parse_exponentiation_operator() {
+        // BT-414: `**` is a binary operator
+        let module = parse_ok("2 ** 10");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MessageSend {
+                receiver,
+                selector: MessageSelector::Binary(op),
+                arguments,
+                ..
+            } => {
+                assert!(matches!(
+                    **receiver,
+                    Expression::Literal(Literal::Integer(2), _)
+                ));
+                assert_eq!(op.as_str(), "**");
+                assert_eq!(arguments.len(), 1);
+                assert!(matches!(
+                    arguments[0],
+                    Expression::Literal(Literal::Integer(10), _)
+                ));
+            }
+            _ => panic!("Expected binary message send with **"),
+        }
+    }
+
+    #[test]
+    fn parse_exponentiation_higher_precedence_than_multiply() {
+        // BT-414: `3 * 2 ** 4` should be `3 * (2 ** 4)`
+        let module = parse_ok("3 * 2 ** 4");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MessageSend {
+                receiver,
+                selector: MessageSelector::Binary(op),
+                arguments,
+                ..
+            } => {
+                assert!(matches!(
+                    **receiver,
+                    Expression::Literal(Literal::Integer(3), _)
+                ));
+                assert_eq!(op.as_str(), "*");
+                // The argument should be (2 ** 4)
+                match &arguments[0] {
+                    Expression::MessageSend {
+                        receiver: r2,
+                        selector: MessageSelector::Binary(op2),
+                        arguments: args2,
+                        ..
+                    } => {
+                        assert!(matches!(**r2, Expression::Literal(Literal::Integer(2), _)));
+                        assert_eq!(op2.as_str(), "**");
+                        assert!(matches!(
+                            args2[0],
+                            Expression::Literal(Literal::Integer(4), _)
+                        ));
+                    }
+                    _ => panic!("Expected ** as right operand of *"),
+                }
+            }
+            _ => panic!("Expected * at top level"),
+        }
+    }
+
+    #[test]
+    fn parse_exponentiation_right_associative() {
+        // BT-414: `2 ** 3 ** 2` should be `2 ** (3 ** 2)` (right-associative)
+        let module = parse_ok("2 ** 3 ** 2");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MessageSend {
+                receiver,
+                selector: MessageSelector::Binary(op),
+                arguments,
+                ..
+            } => {
+                assert!(matches!(
+                    **receiver,
+                    Expression::Literal(Literal::Integer(2), _)
+                ));
+                assert_eq!(op.as_str(), "**");
+                // The argument should be (3 ** 2), NOT ((2 ** 3) ** 2)
+                match &arguments[0] {
+                    Expression::MessageSend {
+                        receiver: r2,
+                        selector: MessageSelector::Binary(op2),
+                        arguments: args2,
+                        ..
+                    } => {
+                        assert!(matches!(**r2, Expression::Literal(Literal::Integer(3), _)));
+                        assert_eq!(op2.as_str(), "**");
+                        assert!(matches!(
+                            args2[0],
+                            Expression::Literal(Literal::Integer(2), _)
+                        ));
+                    }
+                    _ => panic!("Expected ** as right operand (right-associative)"),
+                }
+            }
+            _ => panic!("Expected ** at top level"),
+        }
     }
 }

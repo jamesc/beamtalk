@@ -14,7 +14,7 @@ impl CoreErlangGenerator {
     /// Generates code for binary operators.
     ///
     /// Maps Beamtalk binary operators to Erlang's built-in operators:
-    /// - Arithmetic: `+`, `-`, `*`, `/`, `%` (rem)
+    /// - Arithmetic: `+`, `-`, `*`, `/`, `%` (rem), `**` (exponentiation)
     /// - Comparison: `==`, `=` (strict), `~=` (inequality), `<`, `>`, `<=`, `>=`
     /// - Concatenation: `++` (list append via `erlang:'++'`, string via `iolist_to_binary`)
     ///
@@ -37,6 +37,11 @@ impl CoreErlangGenerator {
             return Err(CodeGenError::Internal(
                 "binary operator must have exactly one argument".to_string(),
             ));
+        }
+
+        // Special case: ** uses math:pow (no direct Erlang operator)
+        if op == "**" {
+            return self.generate_power_op(left, &arguments[0]);
         }
 
         // Special case: ++ works on both lists and strings
@@ -74,6 +79,30 @@ impl CoreErlangGenerator {
             ", ",
             right_code,
             ")",
+        ])
+    }
+
+    /// Generates `**` exponentiation via `math:pow/2` + `erlang:round/1`.
+    ///
+    /// Converts both operands to float for `math:pow`, then rounds the result
+    /// back to integer for consistent integer exponentiation behavior.
+    ///
+    /// Note: `math:pow` uses IEEE 754 floats, so very large exponents (e.g.,
+    /// `2 ** 100`) may lose precision. A future improvement could use repeated
+    /// multiplication for exact arbitrary-precision integer results.
+    fn generate_power_op(
+        &mut self,
+        left: &Expression,
+        right: &Expression,
+    ) -> Result<Document<'static>> {
+        let left_code = self.expression_doc(left)?;
+        let right_code = self.expression_doc(right)?;
+        Ok(docvec![
+            "call 'erlang':'round'(call 'math':'pow'(call 'erlang':'float'(",
+            left_code,
+            "), call 'erlang':'float'(",
+            right_code,
+            ")))",
         ])
     }
 
