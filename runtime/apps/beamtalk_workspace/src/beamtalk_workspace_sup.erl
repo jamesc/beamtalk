@@ -29,6 +29,8 @@
 -module(beamtalk_workspace_sup).
 -behaviour(supervisor).
 
+-include_lib("kernel/include/logger.hrl").
+
 -export([start_link/1]).
 -export([init/1]).
 
@@ -61,6 +63,9 @@ init(Config) ->
     TcpPort = maps:get(tcp_port, Config),
     AutoCleanup = maps:get(auto_cleanup, Config, true),
     MaxIdleSeconds = maps:get(max_idle_seconds, Config, 3600 * 4),
+    
+    %% Set up file logging before children start (they may log during init)
+    setup_file_logger(WorkspaceId),
     
     ChildSpecs = [
         %% Workspace metadata (must start first - others may query it)
@@ -176,3 +181,57 @@ init(Config) ->
     ],
     
     {ok, {SupFlags, ChildSpecs}}.
+
+%%% File Logging
+
+%% @private
+%% @doc Set up a file-based logger handler for the workspace node.
+%% Writes to ~/.beamtalk/workspaces/{workspace_id}/workspace.log with rotation.
+%% Disabled when BEAMTALK_NO_FILE_LOG=1 is set.
+-spec setup_file_logger(binary()) -> ok.
+setup_file_logger(WorkspaceId) ->
+    case os:getenv("BEAMTALK_NO_FILE_LOG") of
+        "1" ->
+            ok;
+        _ ->
+            do_setup_file_logger(WorkspaceId)
+    end.
+
+%% @private
+do_setup_file_logger(WorkspaceId) ->
+    case os:getenv("HOME") of
+        false ->
+            ?LOG_WARNING("HOME not set; skipping file logger for workspace ~p",
+                           [WorkspaceId]),
+            ok;
+        Home ->
+            LogFile = filename:join([Home, ".beamtalk", "workspaces",
+                                     binary_to_list(WorkspaceId), "workspace.log"]),
+            case filelib:ensure_dir(LogFile) of
+                ok ->
+                    HandlerConfig = #{
+                        config => #{
+                            file => LogFile,
+                            max_no_bytes => 1048576,  % 1 MB per file
+                            max_no_files => 5
+                        },
+                        level => debug,
+                        formatter => {logger_formatter, #{
+                            template => [time, " [", level, "] ", mfa, " ", msg, "\n"],
+                            single_line => true
+                        }}
+                    },
+                    case logger:add_handler(beamtalk_file_log, logger_std_h, HandlerConfig) of
+                        ok ->
+                            ?LOG_INFO("Workspace log file: ~s", [LogFile]),
+                            ok;
+                        {error, Reason} ->
+                            ?LOG_WARNING("Failed to add file logger: ~p", [Reason]),
+                            ok
+                    end;
+                {error, Reason} ->
+                    ?LOG_WARNING("Failed to create log directory for ~s: ~p",
+                                   [LogFile, Reason]),
+                    ok
+            end
+    end.

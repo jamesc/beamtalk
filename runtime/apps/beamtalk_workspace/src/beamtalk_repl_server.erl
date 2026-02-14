@@ -11,6 +11,7 @@
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include("beamtalk_workspace.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 -export([start_link/1, get_port/0, handle_client/2, parse_request/1, format_response/1, format_error/1,
          format_response_with_warnings/2, format_error_with_warnings/2,
@@ -85,7 +86,7 @@ handle_cast(_Msg, State) ->
 %% @private
 handle_info({'DOWN', _Ref, process, AcceptorPid, Reason}, State = #state{acceptor_pid = AcceptorPid, listen_socket = ListenSocket}) ->
     %% Acceptor died, restart it
-    logger:warning("REPL acceptor died: ~p, restarting", [Reason]),
+    ?LOG_WARNING("REPL acceptor died: ~p, restarting", [Reason]),
     {ok, NewAcceptorPid} = start_acceptor(ListenSocket),
     {noreply, State#state{acceptor_pid = NewAcceptorPid}};
 
@@ -113,7 +114,7 @@ write_port_file(undefined, _Port) ->
 write_port_file(WorkspaceId, Port) ->
     case os:getenv("HOME") of
         false ->
-            logger:warning("HOME not set; skipping port file write for workspace ~p",
+            ?LOG_WARNING("HOME not set; skipping port file write for workspace ~p",
                            [WorkspaceId]),
             ok;
         Home ->
@@ -123,15 +124,15 @@ write_port_file(WorkspaceId, Port) ->
                 ok ->
                     case file:write_file(PortFilePath, integer_to_list(Port)) of
                         ok ->
-                            logger:debug("Wrote port file: ~s (port ~p)", [PortFilePath, Port]),
+                            ?LOG_DEBUG("Wrote port file: ~s (port ~p)", [PortFilePath, Port]),
                             ok;
                         {error, Reason} ->
-                            logger:warning("Failed to write port file ~s: ~p",
+                            ?LOG_WARNING("Failed to write port file ~s: ~p",
                                            [PortFilePath, Reason]),
                             ok
                     end;
                 {error, Reason} ->
-                    logger:warning("Failed to create directory for port file ~s: ~p",
+                    ?LOG_WARNING("Failed to create directory for port file ~s: ~p",
                                    [PortFilePath, Reason]),
                     ok
             end
@@ -154,7 +155,7 @@ acceptor_loop(ListenSocket) ->
             %% Start session under supervisor
             case beamtalk_session_sup:start_session(SessionId) of
                 {ok, SessionPid} ->
-                    logger:info("Created session: ~p (pid: ~p)", [SessionId, SessionPid]),
+                    ?LOG_INFO("Created session: ~p (pid: ~p)", [SessionId, SessionPid]),
                     
                     %% Mark activity - new session connected
                     beamtalk_workspace_meta:update_activity(),
@@ -171,14 +172,14 @@ acceptor_loop(ListenSocket) ->
                         beamtalk_repl_shell:stop(SessionPid)
                     end);
                 {error, Reason} ->
-                    logger:error("Failed to create session: ~p", [Reason]),
+                    ?LOG_ERROR("Failed to create session: ~p", [Reason]),
                     ErrorJson = format_error({session_creation_failed, Reason}),
                     gen_tcp:send(ClientSocket, [ErrorJson, "\n"]),
                     gen_tcp:close(ClientSocket)
             end,
             acceptor_loop(ListenSocket);
         {error, Reason} ->
-            logger:error("Accept error: ~p", [Reason]),
+            ?LOG_ERROR("Accept error: ~p", [Reason]),
             timer:sleep(1000),
             acceptor_loop(ListenSocket)
     end.
@@ -212,7 +213,7 @@ handle_client_loop(Socket, SessionPid) ->
     Result = try handle_client_once(Socket, SessionPid)
              catch
                  Class:Reason:Stack ->
-                     logger:error("REPL client handler crash", #{
+                     ?LOG_ERROR("REPL client handler crash", #{
                          class => Class,
                          reason => Reason,
                          stack => lists:sublist(Stack, 10)
@@ -241,7 +242,7 @@ handle_client_once(Socket, SessionPid) ->
                         ok ->
                             continue;
                         {error, SendError} ->
-                            logger:warning("REPL client send error: ~p", [SendError]),
+                            ?LOG_WARNING("REPL client send error: ~p", [SendError]),
                             gen_tcp:close(Socket),
                             stop
                     end;
@@ -251,7 +252,7 @@ handle_client_once(Socket, SessionPid) ->
                         ok ->
                             continue;
                         {error, SendError} ->
-                            logger:warning("REPL client send error: ~p", [SendError]),
+                            ?LOG_WARNING("REPL client send error: ~p", [SendError]),
                             gen_tcp:close(Socket),
                             stop
                     end
@@ -263,7 +264,7 @@ handle_client_once(Socket, SessionPid) ->
             %% The idle monitor handles truly abandoned sessions.
             continue;
         {error, RecvError} ->
-            logger:warning("REPL client recv error: ~p", [RecvError]),
+            ?LOG_WARNING("REPL client recv error: ~p", [RecvError]),
             gen_tcp:close(Socket),
             stop
     end.
@@ -281,7 +282,7 @@ handle_protocol_request(Msg, SessionPid) ->
         handle_op(Op, Params, Msg, SessionPid)
     catch
         Class:Reason:Stack ->
-            logger:error("REPL protocol handler crash", #{
+            ?LOG_ERROR("REPL protocol handler crash", #{
                 class => Class,
                 reason => Reason,
                 stack => lists:sublist(Stack, 5),
@@ -676,7 +677,7 @@ format_error(Reason) ->
     catch
         Class:FormatError:Stack ->
             %% Log formatting failure for debugging
-            logger:debug("Failed to format error", #{
+            ?LOG_DEBUG("Failed to format error", #{
                 class => Class,
                 reason => FormatError,
                 stack => lists:sublist(Stack, 5),
@@ -718,7 +719,7 @@ format_error_with_warnings(Reason, Warnings) ->
     catch
         Class:FormatError:Stack ->
             %% Log formatting failure for debugging
-            logger:debug("Failed to format error", #{
+            ?LOG_DEBUG("Failed to format error", #{
                 class => Class,
                 reason => FormatError,
                 stack => lists:sublist(Stack, 5),
@@ -806,7 +807,7 @@ parse_json(Data) ->
     catch
         Class:Reason:Stack ->
             %% Log parse failures for debugging REPL protocol issues
-            logger:debug("JSON parse failed", #{
+            ?LOG_DEBUG("JSON parse failed", #{
                 class => Class,
                 reason => Reason,
                 stack => lists:sublist(Stack, 3),

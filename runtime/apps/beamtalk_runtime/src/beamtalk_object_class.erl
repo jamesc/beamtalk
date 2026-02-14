@@ -56,6 +56,7 @@
 -behaviour(gen_server).
 
 -include("beamtalk.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 %% API
 -export([
@@ -854,7 +855,7 @@ handle_call({class_method_call, Selector, Args}, From,
                             gen_server:reply(From, {ok, Result})
                         catch
                             C:E ->
-                                logger:error("Test execution ~p:~p failed: ~p:~p",
+                                ?LOG_ERROR("Test execution ~p:~p failed: ~p:~p",
                                              [ClassName, Selector, C, E]),
                                 gen_server:reply(From, {error, E})
                         end
@@ -874,7 +875,7 @@ handle_call({class_method_call, Selector, Args}, From,
                             {reply, {ok, Result}, State}
                     catch
                         Class:Error ->
-                            logger:error("Class method ~p:~p failed: ~p:~p",
+                            ?LOG_ERROR("Class method ~p:~p failed: ~p:~p",
                                          [ClassName, Selector, Class, Error]),
                             {reply, {error, Error}, State}
                     end
@@ -1314,7 +1315,7 @@ build_flattened_methods(CurrentClass, Superclass, LocalMethods, QueryMsg) ->
                     %% BT-510: Superclass not registered yet (out-of-order loading).
                     %% Return local methods only; invalidate_subclass_flattened_tables
                     %% will trigger a rebuild once the superclass registers.
-                    logger:debug("Superclass unavailable during init, flattened methods incomplete",
+                    ?LOG_DEBUG("Superclass unavailable during init, flattened methods incomplete",
                                  #{class => CurrentClass, superclass => SuperclassName}),
                     LocalFlattened;
                 SuperclassPid ->

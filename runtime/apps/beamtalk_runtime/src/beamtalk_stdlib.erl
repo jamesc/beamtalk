@@ -30,6 +30,7 @@
 %%% Just add a .bt file to lib/ and run `beamtalk build-stdlib`.
 %%% No Erlang code changes needed.
 -module(beamtalk_stdlib).
+-include_lib("kernel/include/logger.hrl").
 
 -export([start_link/0, init/0, init/1]).
 
@@ -71,7 +72,7 @@ init(Parent) ->
 %% Shared initialization logic
 -spec do_init() -> ok.
 do_init() ->
-    logger:info("Loading compiled stdlib modules"),
+    ?LOG_INFO("Loading compiled stdlib modules"),
     %% Load compiled stdlib modules in dependency order.
     %% Each module's on_load → register_class/0 creates its class process
     %% with correct method maps generated from the .bt source.
@@ -112,14 +113,14 @@ load_compiled_stdlib_modules() ->
                         %% Module loaded. If on_load already ran but the class
                         %% process was killed (e.g., test teardown), re-register.
                         ensure_class_registered(Mod, Class),
-                        logger:debug("Loaded stdlib module", #{module => Mod});
+                        ?LOG_DEBUG("Loaded stdlib module", #{module => Mod});
                     {error, Reason} ->
-                        logger:warning("Failed to load stdlib module",
+                        ?LOG_WARNING("Failed to load stdlib module",
                                        #{module => Mod, reason => Reason})
                 end
             end, Sorted);
         undefined ->
-            logger:warning("No stdlib class metadata found, falling back to discovery"),
+            ?LOG_WARNING("No stdlib class metadata found, falling back to discovery"),
             EbinDir = find_stdlib_ebin(),
             discover_and_load_fallback(EbinDir)
     end.
@@ -143,7 +144,7 @@ ensure_class_registered(Mod, ClassName) ->
             try Mod:register_class() of
                 ok -> ok;
                 Other ->
-                    logger:warning("Unexpected return from register_class", #{
+                    ?LOG_WARNING("Unexpected return from register_class", #{
                         module => Mod,
                         class => ClassName,
                         result => Other
@@ -152,13 +153,13 @@ ensure_class_registered(Mod, ClassName) ->
             catch
                 error:undef ->
                     %% Module doesn't export register_class/0
-                    logger:warning("Module missing register_class/0", #{
+                    ?LOG_WARNING("Module missing register_class/0", #{
                         module => Mod,
                         class => ClassName
                     }),
                     ok;
                 Class:Reason ->
-                    logger:error("Failed to register class", #{
+                    ?LOG_ERROR("Failed to register class", #{
                         module => Mod,
                         class => ClassName,
                         error_class => Class,
@@ -189,7 +190,7 @@ topo_sort_waves(Remaining, ClassSet, Emitted, Acc) ->
     case Ready of
         [] ->
             %% Circular dependency or missing superclass — emit remaining as-is
-            logger:warning("Stdlib topo_sort: unresolvable dependencies",
+            ?LOG_WARNING("Stdlib topo_sort: unresolvable dependencies",
                            #{remaining => [C || {_, C, _} <- Deferred]}),
             lists:reverse(Acc) ++ Deferred;
         _ ->
@@ -210,14 +211,14 @@ discover_and_load_fallback(Dir) ->
             lists:foreach(fun(Mod) ->
                 case code:ensure_loaded(Mod) of
                     {module, Mod} ->
-                        logger:debug("Loaded stdlib module (fallback)", #{module => Mod});
+                        ?LOG_DEBUG("Loaded stdlib module (fallback)", #{module => Mod});
                     {error, Reason} ->
-                        logger:warning("Failed to load stdlib module",
+                        ?LOG_WARNING("Failed to load stdlib module",
                                        #{module => Mod, reason => Reason})
                 end
             end, Modules);
         {error, Reason} ->
-            logger:warning("Cannot list stdlib ebin directory",
+            ?LOG_WARNING("Cannot list stdlib ebin directory",
                            #{dir => Dir, reason => Reason})
     end.
 

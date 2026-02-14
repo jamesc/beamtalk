@@ -13,6 +13,7 @@
 
 -module(beamtalk_test_case).
 -include("beamtalk.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 -export([
     assert/1,
@@ -376,7 +377,7 @@ run_test_method(ClassName, Module, MethodName, FlatMethods) ->
             TestClass:TestReason:TestST ->
                 FailMsg = iolist_to_binary(
                     io_lib:format("~p:~p", [TestClass, TestReason])),
-                logger:debug("Test ~p:~p failed with stacktrace: ~p",
+                ?LOG_DEBUG("Test ~p:~p failed with stacktrace: ~p",
                              [ClassName, MethodName, TestST]),
                 {fail, MethodName, FailMsg}
         after

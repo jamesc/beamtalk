@@ -63,6 +63,7 @@
 
 -module(beamtalk_future).
 -include("beamtalk.hrl").
+-include_lib("kernel/include/logger.hrl").
 -export([new/0, resolve/2, reject/2, await/1, await/2, await_forever/1,
          when_resolved/2, when_rejected/2]).
 
@@ -279,7 +280,7 @@ execute_callback(Callback, Value) ->
         catch
             Class:Reason:_Stacktrace ->
                 %% Log error without stack trace to avoid leaking sensitive data
-                logger:error("Error in future callback", #{class => Class, reason => Reason})
+                ?LOG_ERROR("Error in future callback", #{class => Class, reason => Reason})
         end
     end).
 

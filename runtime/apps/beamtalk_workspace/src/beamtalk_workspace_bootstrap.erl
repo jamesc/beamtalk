@@ -21,6 +21,7 @@
 -export([init/1, handle_info/2, handle_call/3, handle_cast/2, terminate/2]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 %% Singleton class ↔ registered process name ↔ binding class name mapping
 %% BindingClassName matches what the original singleton init uses in persistent_term
@@ -67,7 +68,7 @@ handle_info({rebootstrap, ClassName, RegName, BindingClassName, Retries}, State)
             {noreply, NewState}
     end;
 handle_info({rebootstrap, ClassName, RegName, _BindingClassName, _Retries}, State) ->
-    logger:error("Bootstrap: failed to rewire singleton after retries", #{class => ClassName, name => RegName}),
+    ?LOG_ERROR("Bootstrap: failed to rewire singleton after retries", #{class => ClassName, name => RegName}),
     {noreply, State};
 handle_info(_Msg, State) ->
     {noreply, State}.
@@ -100,14 +101,14 @@ bootstrap_all(State) ->
 bootstrap_singleton(ClassName, RegName, BindingClassName, State) ->
     case erlang:whereis(RegName) of
         undefined ->
-            logger:warning("Bootstrap: singleton not registered yet", #{name => RegName}),
+            ?LOG_WARNING("Bootstrap: singleton not registered yet", #{name => RegName}),
             State;
         Pid ->
             Obj = build_object_ref(BindingClassName, Pid),
             set_class_variable(ClassName, Obj),
             set_workspace_binding(RegName, Obj),
             MonRef = erlang:monitor(process, Pid),
-            logger:debug("Bootstrap: wired singleton", #{class => ClassName, pid => Pid}),
+            ?LOG_DEBUG("Bootstrap: wired singleton", #{class => ClassName, pid => Pid}),
             Monitors = maps:put(MonRef, {ClassName, RegName, BindingClassName}, State#state.monitors),
             State#state{monitors = Monitors}
     end.
@@ -128,7 +129,7 @@ set_class_variable(ClassName, Obj) ->
         beamtalk_object_class:set_class_var(ClassName, current, Obj)
     catch
         error:#beamtalk_error{kind = class_not_found} ->
-            logger:warning("Bootstrap: class not loaded yet", #{class => ClassName})
+            ?LOG_WARNING("Bootstrap: class not loaded yet", #{class => ClassName})
     end.
 
 %% @private Set a workspace convenience binding.
