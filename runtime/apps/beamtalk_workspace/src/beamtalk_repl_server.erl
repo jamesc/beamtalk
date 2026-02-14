@@ -272,7 +272,7 @@ handle_client_once(Socket, SessionPid) ->
                     end
             end;
         {error, closed} ->
-            ?LOG_INFO("REPL client TCP closed", #{reason => closed}),
+            ?LOG_DEBUG("REPL client TCP closed", #{reason => closed, session_pid => SessionPid}),
             stop;
         {error, timeout} ->
             %% No data within RECV_TIMEOUT — just retry.
