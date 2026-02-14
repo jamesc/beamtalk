@@ -159,7 +159,8 @@ recent_empty_buffer_test() ->
 clear_empties_buffer_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     gen_server:cast(Pid, {'show:', <<"data">>}),
-    ok = gen_server:call(Pid, clear),
+    SelfRef = gen_server:call(Pid, clear),
+    ?assertMatch({beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, Pid}, SelfRef),
     Result = gen_server:call(Pid, recent),
     ?assertEqual([], Result),
     gen_server:stop(Pid).
@@ -259,7 +260,8 @@ tuple_format_recent_test() ->
 tuple_format_clear_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     gen_server:cast(Pid, {'show:', <<"data">>}),
-    ok = gen_server:call(Pid, {clear, []}),
+    SelfRef = gen_server:call(Pid, {clear, []}),
+    ?assertMatch({beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, Pid}, SelfRef),
     Result = gen_server:call(Pid, recent),
     ?assertEqual([], Result),
     gen_server:stop(Pid).
