@@ -219,6 +219,7 @@ impl BeamtalkMcp {
         }
 
         let text = match response.state {
+            Some(serde_json::Value::String(s)) => s,
             Some(state) => {
                 serde_json::to_string_pretty(&state).unwrap_or_else(|_| state.to_string())
             }
