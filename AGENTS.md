@@ -476,28 +476,38 @@ See full error taxonomy: [docs/internal/design-self-as-object.md](docs/internal/
 
 ## Logging - CRITICAL RULES
 
-**NO io:format for diagnostics EVER!** All logging in the runtime MUST use OTP's `logger` module.
+**NO io:format for diagnostics EVER!** All logging in the runtime MUST use OTP logger **macros** (`?LOG_*`), not function calls.
 
-### Why Logger, Not io:format
+### Why Macros, Not Function Calls
 
-The runtime uses OTP's `logger` module for all diagnostic output:
+The runtime uses OTP logger macros for all diagnostic output. Macros automatically include caller location metadata (module, function, arity, line) which is essential for debugging via file logs.
 
 ```erlang
 %% ❌ WRONG - io:format for diagnostics
 io:format(standard_error, "Error: ~p~n", [Reason])
 
-%% ✅ RIGHT - structured logger
+%% ❌ WRONG - function calls (no MFA metadata in log output)
 logger:error("Error in method", #{selector => Selector, reason => Reason})
+
+%% ✅ RIGHT - logger macros (includes MFA automatically)
+?LOG_ERROR("Error in method", #{selector => Selector, reason => Reason})
 ```
+
+**Every `.erl` file that logs MUST include:**
+```erlang
+-include_lib("kernel/include/logger.hrl").
+```
+
+Place the include after `-behaviour(...)` (if present) or after `-module(...)`.
 
 ### Log Levels
 
-| Level | When | Example |
-|-------|------|---------|
-| `logger:debug/2` | Detailed diagnostics | JSON parse errors, protocol details |
-| `logger:info/2` | Important events | Workspace started, daemon ready |
-| `logger:warning/2` | Recoverable issues | Accept error, failed cleanup |
-| `logger:error/2` | Errors affecting operations | Method exceptions, timeouts |
+| Level | Macro | When | Example |
+|-------|-------|------|---------|
+| `?LOG_DEBUG` | `?LOG_DEBUG(Msg, Meta)` | Detailed diagnostics | JSON parse errors, protocol details |
+| `?LOG_INFO` | `?LOG_INFO(Msg, Meta)` | Important events | Workspace started, daemon ready |
+| `?LOG_WARNING` | `?LOG_WARNING(Msg, Meta)` | Recoverable issues | Accept error, failed cleanup |
+| `?LOG_ERROR` | `?LOG_ERROR(Msg, Meta)` | Errors affecting operations | Method exceptions, timeouts |
 
 ### Structured Metadata
 
@@ -505,22 +515,32 @@ Always use metadata maps, not format strings:
 
 ```erlang
 %% ✅ Good - structured metadata
-logger:error("Error in method", #{
+?LOG_ERROR("Error in method", #{
     selector => Selector,
     class => Class,
     reason => Reason
 })
 
-%% ❌ Bad - format strings
-logger:error("Error in method ~p: ~p:~p", [Selector, Class, Reason])
+%% ❌ Bad - format strings (harder to filter/parse)
+?LOG_ERROR("Error in method ~p: ~p:~p", [Selector, Class, Reason])
 ```
+
+### File Logging (BT-541)
+
+Workspace nodes automatically write logs to `~/.beamtalk/workspaces/{workspace_id}/workspace.log`:
+- **All levels** captured — the file handler sets primary logger level to `debug` at startup so all events reach the file
+- **Log rotation**: 5 files × 1 MB
+- **Format**: `timestamp [level] module:function/arity message`
+- **Disable**: Set `BEAMTALK_NO_FILE_LOG=1` environment variable
 
 ### Benefits
 
-1. **Clean test output** - Configure logger to suppress non-error logs during tests
-2. **Structured data** - Metadata maps are easy to parse and filter
-3. **Standard OTP** - Follows Erlang best practices
-4. **Configurable** - Control via `sys.config` or runtime API
+1. **MFA in logs** - Every log entry shows which module/function/line emitted it
+2. **File logging** - Persistent workspace logs for post-hoc debugging
+3. **Clean test output** - Configure logger to suppress non-error logs during tests
+4. **Structured data** - Metadata maps are easy to parse and filter
+5. **Standard OTP** - Follows Erlang best practices
+6. **Configurable** - Control via `sys.config` or runtime API
 
 ### Test Configuration
 

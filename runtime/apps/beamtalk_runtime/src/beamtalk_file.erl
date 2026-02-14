@@ -42,6 +42,7 @@
 -export([handle_lines/1, has_method/1, handle_has_method/1]).
 
 -include("beamtalk.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 %%% ============================================================================
 %%% Public API (called directly by codegen)
@@ -372,7 +373,7 @@ make_line_gen_no_close(Fd) ->
             eof ->
                 done;
             {error, Reason} ->
-                logger:warning("File stream read error", #{reason => Reason}),
+                ?LOG_WARNING("File stream read error", #{reason => Reason}),
                 done
         end
     end.

@@ -18,6 +18,7 @@
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/file.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 -export([do_eval/2, handle_load/2]).
 
@@ -314,7 +315,7 @@ parse_daemon_response(ResponseLine, ModuleName) ->
         end
     catch
         Class:Error:Stack ->
-            logger:debug("Failed to parse daemon response", #{
+            ?LOG_DEBUG("Failed to parse daemon response", #{
                 class => Class,
                 reason => Error,
                 stack => Stack,
@@ -545,7 +546,7 @@ parse_file_compile_response(ResponseLine) ->
         end
     catch
         Class:Error:Stack ->
-            logger:debug("Failed to parse file compile response", #{
+            ?LOG_DEBUG("Failed to parse file compile response", #{
                 class => Class,
                 reason => Error,
                 stack => Stack,
@@ -719,7 +720,7 @@ stop_io_capture({CapturePid, OldGL}) ->
             receive
                 {captured_output, Output} -> Output
             after ?IO_CAPTURE_TIMEOUT ->
-                logger:warning("IO capture output retrieval timed out", #{}),
+                ?LOG_WARNING("IO capture output retrieval timed out", #{}),
                 <<>>
             end;
         false ->

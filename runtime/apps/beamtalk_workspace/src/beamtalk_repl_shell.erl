@@ -15,6 +15,8 @@
 -module(beamtalk_repl_shell).
 -behaviour(gen_server).
 
+-include_lib("kernel/include/logger.hrl").
+
 %% Public API
 -export([start_link/1, stop/1, eval/2, get_bindings/1, clear_bindings/1, load_file/2,
          get_module_tracker/1]).
@@ -77,7 +79,7 @@ init(SessionId) ->
     %% The registry is registered globally in the workspace
     RegistryPid = case whereis(beamtalk_actor_registry) of
         undefined ->
-            logger:warning("Actor registry not found for session ~p", [SessionId]),
+            ?LOG_WARNING("Actor registry not found for session ~p", [SessionId]),
             undefined;
         Pid ->
             Pid

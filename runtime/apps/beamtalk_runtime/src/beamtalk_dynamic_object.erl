@@ -52,6 +52,7 @@
 -behaviour(gen_server).
 
 -include("beamtalk.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 %% Public API
 -export([start_link/2, start_link/3]).
@@ -167,7 +168,7 @@ dispatch(Selector, Args, Self, State) ->
             catch
                 Class:Reason:_Stacktrace ->
                     %% Method threw an exception - log without stack trace to avoid leaking sensitive data
-                    logger:error("Error in method", #{
+                    ?LOG_ERROR("Error in method", #{
                         selector => Selector,
                         class => Class,
                         reason => Reason
@@ -187,7 +188,7 @@ dispatch(Selector, Args, Self, State) ->
                     catch
                         Class:Reason:_Stacktrace ->
                             %% DNU handler threw an exception - log without stack trace to avoid leaking sensitive data
-                            logger:error("Error in doesNotUnderstand handler", #{
+                            ?LOG_ERROR("Error in doesNotUnderstand handler", #{
                                 selector => Selector,
                                 class => Class,
                                 reason => Reason

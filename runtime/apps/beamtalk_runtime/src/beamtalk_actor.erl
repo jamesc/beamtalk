@@ -144,6 +144,7 @@
 -behaviour(gen_server).
 
 -include("beamtalk.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 %% Public API
 -export([start_link/2, start_link/3, start_link_supervised/3, register_spawned/4]).
@@ -198,7 +199,7 @@ register_spawned(RegistryPid, ActorPid, ClassName, Module) ->
             catch
                 error:undef ->
                     %% Callback module doesn't implement on_actor_spawned/4
-                    logger:warning("Actor spawn callback not implemented", #{
+                    ?LOG_WARNING("Actor spawn callback not implemented", #{
                         callback => CallbackMod,
                         actor_pid => ActorPid,
                         class => ClassName
@@ -206,7 +207,7 @@ register_spawned(RegistryPid, ActorPid, ClassName, Module) ->
                     ok;
                 error:#beamtalk_error{} = BtError ->
                     %% Structured beamtalk error from callback
-                    logger:error("Actor spawn callback failed with beamtalk error", #{
+                    ?LOG_ERROR("Actor spawn callback failed with beamtalk error", #{
                         callback => CallbackMod,
                         error => BtError,
                         actor_pid => ActorPid,
@@ -215,7 +216,7 @@ register_spawned(RegistryPid, ActorPid, ClassName, Module) ->
                     ok;
                 Kind:Reason ->
                     %% Unexpected failure in callback
-                    logger:error("Actor spawn callback failed", #{
+                    ?LOG_ERROR("Actor spawn callback failed", #{
                         callback => CallbackMod,
                         kind => Kind,
                         reason => Reason,
@@ -406,7 +407,7 @@ handle_cast({Selector, Args, FuturePid}, State) ->
     end;
 handle_cast(Msg, State) ->
     %% Unknown cast message format - log and ignore
-    logger:warning("Unknown cast message", #{message => Msg}),
+    ?LOG_WARNING("Unknown cast message", #{message => Msg}),
     {noreply, State}.
 
 %% @doc Handle synchronous messages (call).
@@ -564,7 +565,7 @@ dispatch_user_method(Selector, Args, Self, State) ->
                     {error, BtError, State};
                 Class:Reason:_Stacktrace ->
                     %% Non-beamtalk exception - wrap with context
-                    logger:error("Error in method", #{
+                    ?LOG_ERROR("Error in method", #{
                         selector => Selector,
                         class => Class,
                         reason => Reason
@@ -588,7 +589,7 @@ dispatch_user_method(Selector, Args, Self, State) ->
                     {error, BtError, State};
                 Class:Reason:_Stacktrace ->
                     %% Non-beamtalk exception - wrap with context
-                    logger:error("Error in method", #{
+                    ?LOG_ERROR("Error in method", #{
                         selector => Selector,
                         class => Class,
                         reason => Reason
@@ -630,7 +631,7 @@ handle_dnu(Selector, Args, Self, State) ->
             catch
                 Class:Reason:_Stacktrace ->
                     %% DNU handler threw an exception - log without stack trace to avoid leaking sensitive data
-                    logger:error("Error in doesNotUnderstand handler", #{
+                    ?LOG_ERROR("Error in doesNotUnderstand handler", #{
                         selector => Selector,
                         class => Class,
                         reason => Reason
@@ -647,7 +648,7 @@ handle_dnu(Selector, Args, Self, State) ->
             catch
                 Class:Reason:_Stacktrace ->
                     %% DNU handler threw an exception - log without stack trace to avoid leaking sensitive data
-                    logger:error("Error in doesNotUnderstand handler", #{
+                    ?LOG_ERROR("Error in doesNotUnderstand handler", #{
                         selector => Selector,
                         class => Class,
                         reason => Reason
@@ -683,14 +684,14 @@ handle_dnu(Selector, Args, Self, State) ->
                     object_fallback(Selector, Args, Self, State, ClassName);
                 exit:{timeout, _} ->
                     %% Class process lookup timed out
-                    logger:warning("Class dispatch lookup timed out", #{
+                    ?LOG_WARNING("Class dispatch lookup timed out", #{
                         selector => Selector,
                         class => ClassName
                     }),
                     object_fallback(Selector, Args, Self, State, ClassName);
                 exit:{Reason, _} ->
                     %% Other exit reasons (shutdown, killed, etc.)
-                    logger:warning("Class dispatch lookup failed", #{
+                    ?LOG_WARNING("Class dispatch lookup failed", #{
                         selector => Selector,
                         class => ClassName,
                         reason => Reason

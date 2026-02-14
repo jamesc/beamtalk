@@ -28,6 +28,8 @@
 -module(beamtalk_repl_actors).
 -behaviour(gen_server).
 
+-include_lib("kernel/include/logger.hrl").
+
 %% Public API
 -export([start_link/1, register_actor/4, unregister_actor/2, 
          list_actors/1, kill_actor/2, get_actor/2, count_actors_for_module/2,
@@ -76,7 +78,7 @@ on_actor_spawned(RegistryPid, ActorPid, ClassName, ModuleName) ->
         beamtalk_workspace_meta:update_activity()
     catch
         Kind:Reason ->
-            logger:warning("REPL actor tracking failed", #{
+            ?LOG_WARNING("REPL actor tracking failed", #{
                 kind => Kind,
                 reason => Reason,
                 actor_pid => ActorPid,
