@@ -1,7 +1,7 @@
 # ADR 0022: Embedded Compiler via OTP Port (with NIF option)
 
 ## Status
-Proposed (2026-02-14)
+Accepted (2026-02-14)
 
 ## Context
 
