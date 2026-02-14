@@ -333,21 +333,15 @@ Keep the daemon architecture but replace Unix sockets with TCP, adding named pip
 - Preserves all existing IPC complexity (~100 lines) that embedding eliminates
 - However: this is the **safest short-term option** if NIF/Port work is delayed
 
-### Alternative 2: OTP Port (Supervised External Process)
-Replace the daemon with an OTP port — the Rust compiler runs as a child process managed by an OTP supervisor, communicating via stdin/stdout.
+### Alternative 2: Rustler NIF (Embedded Compiler)
+Embed the Rust compiler directly into the BEAM node as a NIF using Rustler. Lowest possible call overhead (~0.01 ms), native term exchange, single OTP release with no separate binary.
 
-**This is a strong alternative** that solves nearly every problem the NIF solves (no socket files, no manual daemon lifecycle, Windows-compatible, single deployment) while preserving fault isolation. A compiler crash restarts the port automatically; it never takes down the node.
-
-**Trade-offs vs NIF:**
-- ✅ Better fault isolation (port crash ≠ node crash)
-- ✅ Easier to debug (separate process, can attach debugger)
-- ✅ Automatic restart via OTP supervisor
-- ❌ Still requires distributing a separate binary alongside BEAM files
-- ❌ Serialization overhead (~2ms per call, though negligible vs compilation time)
-- ❌ Port startup latency on first call or after crash (~50-100ms)
-- ❌ More complex data exchange (binary protocol over stdin/stdout vs native terms)
-
-**Recommendation:** Implement the `beamtalk_compiler` OTP app with the anti-corruption layer pattern regardless of which backend we start with. If NIF proves too risky in practice, the port backend can be added behind `beamtalk_compiler_backend` with no changes to the workspace or runtime.
+**Deferred to Phase 6 because:**
+- Compiler NIF is large, stateful, and runs for 10–500 ms — different risk profile than typical NIFs (`crypto`, `ssl`)
+- NIF crash kills the entire BEAM node (all actors, state, sessions lost)
+- Port solves the same deployment problems (no socket files, no daemon lifecycle, Windows-compatible) without the crash risk
+- NIF's sub-millisecond advantage is irrelevant when compilation itself takes 10–500 ms
+- May revisit if incremental analysis or keystroke-level compilation demands sub-millisecond overhead
 
 ### Alternative 3: WebAssembly (Compile beamtalk-core to WASM, run in BEAM)
 Compile the Rust compiler to WASM and run it via a WASM runtime (wasmex) inside the BEAM.
