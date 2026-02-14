@@ -407,12 +407,14 @@ handle_op(<<"inspect">>, Params, Msg, _SessionPid) ->
                         %% Get actor state via sys:get_state
                         try
                             State = sys:get_state(Pid, 5000),
-                            StateMap = case State of
-                                M when is_map(M) -> M;
-                                _ -> #{<<"raw">> => State}
+                            InspectStr = case State of
+                                M when is_map(M) ->
+                                    beamtalk_reflection:inspect_string(M);
+                                _ ->
+                                    iolist_to_binary(io_lib:format("~p", [State]))
                             end,
                             beamtalk_repl_protocol:encode_inspect(
-                                StateMap, Msg, fun term_to_json/1)
+                                InspectStr, Msg)
                         catch
                             _:_ ->
                                 beamtalk_repl_protocol:encode_error(

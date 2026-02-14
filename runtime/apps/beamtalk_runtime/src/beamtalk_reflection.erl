@@ -58,7 +58,9 @@ write_field(Name, Value, State) when is_atom(Name), is_map(State) ->
 inspect_string(State) when is_map(State) ->
     ClassName = beamtalk_tagged_map:class_of(State, 'Object'),
     UserFields = field_names(State),
-    FieldStrs = [io_lib:format("~p: ~p", [K, maps:get(K, State)]) || K <- UserFields],
+    FieldStrs = [iolist_to_binary([atom_to_binary(K, utf8), <<": ">>,
+                                   beamtalk_primitive:print_string(maps:get(K, State))])
+                 || K <- UserFields],
     FieldsPart = case FieldStrs of
         [] -> <<"">>;
         _ -> iolist_to_binary([<<" (">>, lists:join(<<", ">>, FieldStrs), <<")">>])

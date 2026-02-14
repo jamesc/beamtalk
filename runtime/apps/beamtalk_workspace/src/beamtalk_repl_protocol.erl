@@ -23,7 +23,7 @@
          encode_error/3, encode_error/4, encode_error/5,
          encode_status/3,
          encode_bindings/3, encode_loaded/3, encode_actors/3,
-         encode_modules/3, encode_sessions/3, encode_inspect/3,
+         encode_modules/3, encode_sessions/3, encode_inspect/2, encode_inspect/3,
          encode_docs/2,
          is_legacy/1, get_op/1, get_id/1, get_session/1, get_params/1,
          base_response/1]).
@@ -243,6 +243,17 @@ encode_sessions(Sessions, Msg, _TermToJson) ->
         false ->
             Base = base_response(Msg),
             jsx:encode(Base#{<<"sessions">> => JsonSessions, <<"status">> => [<<"done">>]})
+    end.
+
+%% @doc Encode an actor inspect response with a pre-formatted string.
+-spec encode_inspect(binary(), protocol_msg()) -> binary().
+encode_inspect(InspectStr, Msg) ->
+    case Msg#protocol_msg.legacy of
+        true ->
+            jsx:encode(#{<<"type">> => <<"inspect">>, <<"state">> => InspectStr});
+        false ->
+            Base = base_response(Msg),
+            jsx:encode(Base#{<<"state">> => InspectStr, <<"status">> => [<<"done">>]})
     end.
 
 %% @doc Encode an actor inspect response.
