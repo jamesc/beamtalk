@@ -1147,6 +1147,8 @@ register_spawned_returns_ok_when_no_callback_configured_test() ->
     exit(FakePid, kill).
 
 register_spawned_returns_error_when_callback_undef_test() ->
+    %% Clear first in case a previous test leaked (assertion failure before cleanup)
+    application:unset_env(beamtalk_runtime, actor_spawn_callback),
     %% Set callback to a module that doesn't implement on_actor_spawned/4
     application:set_env(beamtalk_runtime, actor_spawn_callback, nonexistent_callback_mod),
     
@@ -1158,8 +1160,7 @@ register_spawned_returns_error_when_callback_undef_test() ->
     application:unset_env(beamtalk_runtime, actor_spawn_callback).
 
 register_spawned_returns_error_when_callback_crashes_test() ->
-    %% Use a meck-free approach: set callback to a module we control
-    %% We use the ?MODULE and define a crashing on_actor_spawned locally
+    application:unset_env(beamtalk_runtime, actor_spawn_callback),
     application:set_env(beamtalk_runtime, actor_spawn_callback, beamtalk_actor_tests_crash_callback),
     
     %% Ensure crash callback module exists
@@ -1174,6 +1175,7 @@ register_spawned_returns_error_when_callback_crashes_test() ->
 
 register_spawned_surfaces_callback_error_result_test() ->
     %% Test that {error, _} from on_actor_spawned is returned, not swallowed
+    application:unset_env(beamtalk_runtime, actor_spawn_callback),
     application:set_env(beamtalk_runtime, actor_spawn_callback, beamtalk_actor_tests_error_callback),
     
     ok = ensure_error_callback_module(),
