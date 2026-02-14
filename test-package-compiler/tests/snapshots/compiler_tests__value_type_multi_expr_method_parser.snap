@@ -1,0 +1,345 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "MultiExprTest",
+                span: Span {
+                    start: 460,
+                    end: 473,
+                },
+            },
+            superclass: Some(
+                Identifier {
+                    name: "Object",
+                    span: Span {
+                        start: 443,
+                        end: 449,
+                    },
+                },
+            ),
+            is_abstract: false,
+            is_sealed: false,
+            state: [],
+            methods: [
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "addAndDouble:",
+                                span: Span {
+                                    start: 535,
+                                    end: 548,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        Identifier {
+                            name: "x",
+                            span: Span {
+                                start: 549,
+                                end: 550,
+                            },
+                        },
+                    ],
+                    body: [
+                        MessageSend {
+                            receiver: ClassReference {
+                                name: Identifier {
+                                    name: "Transcript",
+                                    span: Span {
+                                        start: 558,
+                                        end: 568,
+                                    },
+                                },
+                                span: Span {
+                                    start: 558,
+                                    end: 568,
+                                },
+                            },
+                            selector: Keyword(
+                                [
+                                    KeywordPart {
+                                        keyword: "show:",
+                                        span: Span {
+                                            start: 569,
+                                            end: 574,
+                                        },
+                                    },
+                                ],
+                            ),
+                            arguments: [
+                                Identifier(
+                                    Identifier {
+                                        name: "x",
+                                        span: Span {
+                                            start: 575,
+                                            end: 576,
+                                        },
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 558,
+                                end: 576,
+                            },
+                        },
+                        MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "x",
+                                    span: Span {
+                                        start: 581,
+                                        end: 582,
+                                    },
+                                },
+                            ),
+                            selector: Binary(
+                                "*",
+                            ),
+                            arguments: [
+                                Literal(
+                                    Integer(
+                                        2,
+                                    ),
+                                    Span {
+                                        start: 585,
+                                        end: 586,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 581,
+                                end: 586,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    doc_comment: None,
+                    span: Span {
+                        start: 535,
+                        end: 586,
+                    },
+                },
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "tripleStep:",
+                                span: Span {
+                                    start: 654,
+                                    end: 665,
+                                },
+                            },
+                            KeywordPart {
+                                keyword: "with:",
+                                span: Span {
+                                    start: 668,
+                                    end: 673,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        Identifier {
+                            name: "a",
+                            span: Span {
+                                start: 666,
+                                end: 667,
+                            },
+                        },
+                        Identifier {
+                            name: "b",
+                            span: Span {
+                                start: 674,
+                                end: 675,
+                            },
+                        },
+                    ],
+                    body: [
+                        MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "a",
+                                    span: Span {
+                                        start: 683,
+                                        end: 684,
+                                    },
+                                },
+                            ),
+                            selector: Binary(
+                                "+",
+                            ),
+                            arguments: [
+                                Identifier(
+                                    Identifier {
+                                        name: "b",
+                                        span: Span {
+                                            start: 687,
+                                            end: 688,
+                                        },
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 683,
+                                end: 688,
+                            },
+                        },
+                        MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "a",
+                                    span: Span {
+                                        start: 693,
+                                        end: 694,
+                                    },
+                                },
+                            ),
+                            selector: Binary(
+                                "-",
+                            ),
+                            arguments: [
+                                Identifier(
+                                    Identifier {
+                                        name: "b",
+                                        span: Span {
+                                            start: 697,
+                                            end: 698,
+                                        },
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 693,
+                                end: 698,
+                            },
+                        },
+                        MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "a",
+                                    span: Span {
+                                        start: 703,
+                                        end: 704,
+                                    },
+                                },
+                            ),
+                            selector: Binary(
+                                "*",
+                            ),
+                            arguments: [
+                                Identifier(
+                                    Identifier {
+                                        name: "b",
+                                        span: Span {
+                                            start: 707,
+                                            end: 708,
+                                        },
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 703,
+                                end: 708,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    doc_comment: None,
+                    span: Span {
+                        start: 654,
+                        end: 708,
+                    },
+                },
+            ],
+            class_methods: [],
+            class_variables: [],
+            doc_comment: None,
+            span: Span {
+                start: 443,
+                end: 708,
+            },
+        },
+    ],
+    expressions: [],
+    span: Span {
+        start: 443,
+        end: 708,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 443,
+                end: 449,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 443,
+                end: 449,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Compiler snapshot test for BT-367: multi-expression value-type method sequencing",
+            span: Span {
+                start: 443,
+                end: 449,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "//",
+            span: Span {
+                start: 443,
+                end: 449,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Verifies that value-type methods with multiple expressions generate",
+            span: Span {
+                start: 443,
+                end: 449,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// correct Core Erlang using `let ... in` to sequence non-last expressions.",
+            span: Span {
+                start: 443,
+                end: 449,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// The first expression (side-effecting) should be wrapped in a let binding,",
+            span: Span {
+                start: 443,
+                end: 449,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// and only the last expression should be returned directly.",
+            span: Span {
+                start: 443,
+                end: 449,
+            },
+            kind: Line,
+        },
+    ],
+}

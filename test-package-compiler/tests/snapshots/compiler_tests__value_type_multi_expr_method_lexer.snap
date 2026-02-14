@@ -1,0 +1,31 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("Object"), span: Span { start: 443, end: 449 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Compiler snapshot test for BT-367: multi-expression value-type method sequencing"), Whitespace("\n"), LineComment("//"), Whitespace("\n"), LineComment("// Verifies that value-type methods with multiple expressions generate"), Whitespace("\n"), LineComment("// correct Core Erlang using `let ... in` to sequence non-last expressions."), Whitespace("\n"), LineComment("// The first expression (side-effecting) should be wrapped in a let binding,"), Whitespace("\n"), LineComment("// and only the last expression should be returned directly."), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 450, end: 459 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("MultiExprTest"), span: Span { start: 460, end: 473 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("addAndDouble:"), span: Span { start: 535, end: 548 }, leading_trivia: [Whitespace("\n\n  "), LineComment("// Two-expression method: side effect then return value"), Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("x"), span: Span { start: 549, end: 550 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 551, end: 553 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("Transcript"), span: Span { start: 558, end: 568 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("show:"), span: Span { start: 569, end: 574 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("x"), span: Span { start: 575, end: 576 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("x"), span: Span { start: 581, end: 582 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("*"), span: Span { start: 583, end: 584 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("2"), span: Span { start: 585, end: 586 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("tripleStep:"), span: Span { start: 654, end: 665 }, leading_trivia: [Whitespace("\n\n  "), LineComment("// Three-expression method: multiple side effects then return"), Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("a"), span: Span { start: 666, end: 667 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("with:"), span: Span { start: 668, end: 673 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("b"), span: Span { start: 674, end: 675 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 676, end: 678 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("a"), span: Span { start: 683, end: 684 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("+"), span: Span { start: 685, end: 686 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("b"), span: Span { start: 687, end: 688 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("a"), span: Span { start: 693, end: 694 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("-"), span: Span { start: 695, end: 696 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("b"), span: Span { start: 697, end: 698 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("a"), span: Span { start: 703, end: 704 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("*"), span: Span { start: 705, end: 706 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("b"), span: Span { start: 707, end: 708 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 709, end: 709 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

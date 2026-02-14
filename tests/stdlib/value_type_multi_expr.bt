@@ -1,0 +1,41 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-367: Tests for multi-expression value-type method codegen sequencing
+// Verifies that value-type methods with multiple expressions correctly
+// execute all expressions but return only the last expression's value.
+
+// @load tests/e2e/fixtures/multi_expr_calc.bt
+
+// ===========================================================================
+// TWO-EXPRESSION METHOD
+// ===========================================================================
+
+// The first expression (x + 100) executes but its result is discarded.
+// Only the last expression (x * 2) is returned.
+calc := MultiExprCalc new
+// => _
+
+calc doubleAfterAdd: 5
+// => 10
+
+calc doubleAfterAdd: 0
+// => 0
+
+calc doubleAfterAdd: -3
+// => -6
+
+// ===========================================================================
+// THREE-EXPRESSION METHOD
+// ===========================================================================
+
+// First two expressions execute but results are discarded.
+// Only the last expression (a * b) is returned.
+calc compute: 3 with: 4
+// => 12
+
+calc compute: 5 with: 0
+// => 0
+
+calc compute: -2 with: 3
+// => -6
