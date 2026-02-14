@@ -65,13 +65,14 @@ const MAX_CONNECT_RETRIES: u32 = 10;
 const RETRY_DELAY_MS: u64 = 500;
 
 mod client;
-mod completer;
+mod color;
 mod display;
+mod helper;
 mod process;
 
 use client::ReplClient;
-use completer::ReplCompleter;
-use display::{format_value, history_path, print_help};
+use display::{format_error, format_value, history_path, print_help};
+use helper::ReplHelper;
 use process::{
     BeamChildGuard, connect_with_retries, read_port_from_child, resolve_node_name, resolve_port,
     start_beam_node,
@@ -189,7 +190,7 @@ struct SessionInfo {
 fn display_reload_result(response: &ReplResponse, module_name: Option<&str>) {
     if response.is_error() {
         if let Some(msg) = response.error_message() {
-            eprintln!("Error: {msg}");
+            eprintln!("{}", format_error(msg));
         }
         return;
     }
@@ -229,7 +230,11 @@ pub fn run(
     workspace_name: Option<&str>,
     persistent: bool,
     timeout: Option<u64>,
+    no_color: bool,
 ) -> Result<()> {
+    // Initialize color support
+    color::init(no_color);
+
     // Resolve port and node name using priority logic
     let port = resolve_port(port_arg)?;
 
@@ -349,14 +354,13 @@ pub fn run(
 
     println!();
 
-    // Set up rustyline editor with tab completion
+    // Set up rustyline editor with tab completion and syntax highlighting
     let config = Config::builder()
         .completion_type(CompletionType::List)
         .build();
-    let completer = ReplCompleter::new(connect_port);
-    let mut rl: Editor<ReplCompleter, FileHistory> =
-        Editor::with_config(config).into_diagnostic()?;
-    rl.set_helper(Some(completer));
+    let helper = ReplHelper::new(connect_port);
+    let mut rl: Editor<ReplHelper, FileHistory> = Editor::with_config(config).into_diagnostic()?;
+    rl.set_helper(Some(helper));
 
     // Load history
     let history_file = history_path()?;
@@ -714,7 +718,7 @@ pub fn run(
                         }
                         if response.is_error() {
                             if let Some(msg) = response.error_message() {
-                                eprintln!("Error: {msg}");
+                                eprintln!("{}", format_error(msg));
                             }
                         } else if let Some(value) = response.value {
                             println!("{}", format_value(&value));
@@ -765,53 +769,76 @@ mod tests {
     use super::*;
     use process::DEFAULT_REPL_PORT;
     use serial_test::serial;
+    use std::sync::atomic::Ordering;
+
+    /// Disable color for `format_value` tests to get predictable output.
+    fn with_color_disabled<F: FnOnce()>(f: F) {
+        let prev = color::COLOR_ENABLED.load(Ordering::Relaxed);
+        color::COLOR_ENABLED.store(false, Ordering::Relaxed);
+        f();
+        color::COLOR_ENABLED.store(prev, Ordering::Relaxed);
+    }
 
     #[test]
     fn format_value_string() {
-        let value = serde_json::json!("hello");
-        assert_eq!(format_value(&value), "hello");
+        with_color_disabled(|| {
+            let value = serde_json::json!("hello");
+            assert_eq!(format_value(&value), "hello");
+        });
     }
 
     #[test]
     fn format_value_number() {
-        let value = serde_json::json!(42);
-        assert_eq!(format_value(&value), "42");
+        with_color_disabled(|| {
+            let value = serde_json::json!(42);
+            assert_eq!(format_value(&value), "42");
+        });
     }
 
     #[test]
     fn format_value_bool() {
-        let value = serde_json::json!(true);
-        assert_eq!(format_value(&value), "true");
+        with_color_disabled(|| {
+            let value = serde_json::json!(true);
+            assert_eq!(format_value(&value), "true");
+        });
     }
 
     #[test]
     fn format_value_array() {
-        let value = serde_json::json!([1, 2, 3]);
-        assert_eq!(format_value(&value), "[1, 2, 3]");
+        with_color_disabled(|| {
+            let value = serde_json::json!([1, 2, 3]);
+            assert_eq!(format_value(&value), "[1, 2, 3]");
+        });
     }
 
     #[test]
     fn format_value_pid() {
-        // Backend now pre-formats pids as "#Actor<pid>"
-        let value = serde_json::json!("#Actor<0.123.0>");
-        assert_eq!(format_value(&value), "#Actor<0.123.0>");
+        with_color_disabled(|| {
+            // Backend now pre-formats pids as "#Actor<pid>"
+            let value = serde_json::json!("#Actor<0.123.0>");
+            assert_eq!(format_value(&value), "#Actor<0.123.0>");
+        });
     }
 
     #[test]
     fn format_value_block() {
-        // Blocks are formatted as "a Block/N" by the backend
-        let value = serde_json::json!("a Block/1");
-        assert_eq!(format_value(&value), "a Block/1");
+        with_color_disabled(|| {
+            // Blocks are formatted as "a Block/N" by the backend
+            let value = serde_json::json!("a Block/1");
+            assert_eq!(format_value(&value), "a Block/1");
 
-        let value2 = serde_json::json!("a Block/2");
-        assert_eq!(format_value(&value2), "a Block/2");
+            let value2 = serde_json::json!("a Block/2");
+            assert_eq!(format_value(&value2), "a Block/2");
+        });
     }
 
     #[test]
     fn format_value_tuple() {
-        // BT-536: Tuples are pre-formatted as strings by the backend
-        let value = serde_json::json!("{1, hello}");
-        assert_eq!(format_value(&value), "{1, hello}");
+        with_color_disabled(|| {
+            // BT-536: Tuples are pre-formatted as strings by the backend
+            let value = serde_json::json!("{1, hello}");
+            assert_eq!(format_value(&value), "{1, hello}");
+        });
     }
 
     /// Uses `#[serial(env_var)]` because it modifies the `BEAMTALK_RUNTIME_DIR`
