@@ -24,6 +24,10 @@
 
 -define(RECV_TIMEOUT, 30000).
 
+%% Maximum line length for recv_line/2. Prevents unbounded memory growth
+%% if a client sends a very long line. 1 MB is generous for any REPL request.
+-define(MAX_LINE_LENGTH, 1048576).
+
 -record(state, {
     listen_socket :: gen_tcp:socket(),
     port :: inet:port_number(),
@@ -58,8 +62,10 @@ init(Config) ->
     %% restriction is the sole access control, matching the security model of
     %% erl, iex, and other language REPLs. If remote binding is ever added,
     %% authentication must be required. See docs/beamtalk-security.md (BT-184).
+    %% buffer must be large enough for the longest request line to avoid
+    %% {packet, line} splitting multi-byte UTF-8 sequences (BT-388).
     ListenOpts = [binary, {packet, line}, {active, false}, {reuseaddr, true},
-                  {ip, {127, 0, 0, 1}}],
+                  {ip, {127, 0, 0, 1}}, {buffer, 65536}],
     case gen_tcp:listen(Port, ListenOpts) of
         {ok, ListenSocket} ->
             %% Discover actual bound port (important when Port=0 for OS-assigned ephemeral port)
@@ -215,7 +221,7 @@ generate_session_id() ->
 %% Called by: beamtalk_repl_server acceptor_loop
 -spec handle_client(gen_tcp:socket(), pid()) -> ok.
 handle_client(Socket, SessionPid) ->
-    inet:setopts(Socket, [{active, false}, {packet, line}]),
+    inet:setopts(Socket, [{active, false}, {packet, line}, {buffer, 65536}]),
     handle_client_loop(Socket, SessionPid).
 
 %% @private
@@ -241,9 +247,34 @@ handle_client_loop(Socket, SessionPid) ->
     end.
 
 %% @private
+%% Read a complete line from the socket, accumulating partial reads.
+%% With {packet, line}, a complete line includes the trailing \n.
+%% If the line exceeds the buffer, recv returns data without \n
+%% and we must accumulate until we get the newline (BT-388).
+%% Guards against unbounded accumulation and slowloris attacks.
+-spec recv_line(gen_tcp:socket(), binary()) -> {ok, binary()} | {error, term()}.
+recv_line(_Socket, Acc) when byte_size(Acc) > ?MAX_LINE_LENGTH ->
+    {error, line_too_long};
+recv_line(Socket, Acc) ->
+    case gen_tcp:recv(Socket, 0, ?RECV_TIMEOUT) of
+        {ok, Data} ->
+            Combined = <<Acc/binary, Data/binary>>,
+            case binary:last(Data) of
+                $\n -> {ok, Combined};
+                _   -> recv_line(Socket, Combined)
+            end;
+        {error, timeout} when byte_size(Acc) > 0 ->
+            %% Timeout while accumulating a partial line — keep waiting.
+            %% The MAX_LINE_LENGTH guard above bounds total accumulation.
+            recv_line(Socket, Acc);
+        {error, _} = Error ->
+            Error
+    end.
+
+%% @private
 %% Process a single recv/send iteration. Returns 'continue' or 'stop'.
 handle_client_once(Socket, SessionPid) ->
-    case gen_tcp:recv(Socket, 0, ?RECV_TIMEOUT) of
+    case recv_line(Socket, <<>>) of
         {ok, Data} ->
             %% Decode request using protocol module
             case beamtalk_repl_protocol:decode(Data) of
