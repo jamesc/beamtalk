@@ -42,7 +42,7 @@ supervisor_intensity_test() ->
 children_count_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
     
-    %% Should have 10 children: workspace_meta, transcript_stream, system_dictionary, actor_registry, workspace_actor, workspace_bootstrap, repl_server, idle_monitor, actor_sup, session_sup
+    %% Should have 10 children: workspace_meta, transcript_stream, system_dictionary, actor_registry, workspace_environment, workspace_bootstrap, repl_server, idle_monitor, actor_sup, session_sup
     ?assertEqual(10, length(ChildSpecs)).
 
 children_ids_test() ->
@@ -53,7 +53,7 @@ children_ids_test() ->
     ?assert(lists:member(beamtalk_workspace_meta, Ids)),
     ?assert(lists:member(beamtalk_transcript_stream, Ids)),
     ?assert(lists:member(beamtalk_system_dictionary, Ids)),
-    ?assert(lists:member(beamtalk_workspace_actor, Ids)),
+    ?assert(lists:member(beamtalk_workspace_environment, Ids)),
     ?assert(lists:member(beamtalk_actor_registry, Ids)),
     ?assert(lists:member(beamtalk_repl_server, Ids)),
     ?assert(lists:member(beamtalk_idle_monitor, Ids)),
@@ -178,7 +178,7 @@ bootstrap_after_singletons_before_repl_test() ->
     
     Ids = [maps:get(id, S) || S <- ChildSpecs],
     BootstrapIdx = index_of(beamtalk_workspace_bootstrap, Ids),
-    WorkspaceActorIdx = index_of(beamtalk_workspace_actor, Ids),
+    WorkspaceActorIdx = index_of(beamtalk_workspace_environment, Ids),
     ReplServerIdx = index_of(beamtalk_repl_server, Ids),
     %% Bootstrap must come after all singletons but before REPL server
     ?assert(BootstrapIdx > WorkspaceActorIdx),
@@ -220,7 +220,7 @@ all_children_alive_test() ->
         Children = supervisor:which_children(Sup),
 
         %% Expected: 10 children (workspace_meta, transcript_stream, system_dictionary,
-        %% actor_registry, workspace_actor, workspace_bootstrap, repl_server, idle_monitor, actor_sup, session_sup)
+        %% actor_registry, workspace_environment, workspace_bootstrap, repl_server, idle_monitor, actor_sup, session_sup)
         ?assertEqual(10, length(Children)),
 
         %% Verify each child has correct ID and is alive
@@ -229,7 +229,7 @@ all_children_alive_test() ->
             beamtalk_transcript_stream,
             beamtalk_system_dictionary,
             beamtalk_actor_registry,
-            beamtalk_workspace_actor,
+            beamtalk_workspace_environment,
             beamtalk_workspace_bootstrap,
             beamtalk_repl_server,
             beamtalk_idle_monitor,

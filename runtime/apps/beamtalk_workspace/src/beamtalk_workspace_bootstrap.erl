@@ -118,8 +118,8 @@ build_object_ref(BindingClassName, Pid) ->
 %% @private Map binding class name to its Erlang module.
 class_module('TranscriptStream') -> beamtalk_transcript_stream;
 class_module('SystemDictionary') -> beamtalk_system_dictionary;
-class_module('WorkspaceEnvironment') -> beamtalk_workspace_actor;
-class_module('Workspace') -> beamtalk_workspace_actor.
+class_module('WorkspaceEnvironment') -> beamtalk_workspace_environment;
+class_module('Workspace') -> beamtalk_workspace_environment.
 
 %% @private Set the `current` class variable on the class.
 set_class_variable(ClassName, Obj) ->

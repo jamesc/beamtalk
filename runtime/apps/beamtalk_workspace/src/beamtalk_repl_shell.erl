@@ -149,7 +149,7 @@ code_change(_OldVsn, State, _Extra) ->
 -define(BINDING_INFO, [
     {'Transcript',  'TranscriptStream',      beamtalk_transcript_stream},
     {'Beamtalk',    'SystemDictionary',       beamtalk_system_dictionary},
-    {'Workspace',   'WorkspaceEnvironment',   beamtalk_workspace_actor}
+    {'Workspace',   'WorkspaceEnvironment',   beamtalk_workspace_environment}
 ]).
 
 inject_workspace_bindings(Bindings) ->
