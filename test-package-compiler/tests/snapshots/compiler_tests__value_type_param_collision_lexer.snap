@@ -1,0 +1,17 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("Object"), span: Span { start: 445, end: 451 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Compiler snapshot test for BT-369: value-type temp var collision avoidance"), Whitespace("\n"), LineComment("//"), Whitespace("\n"), LineComment("// Verifies that method parameters with underscore-prefixed names (e.g., _seq0)"), Whitespace("\n"), LineComment("// don't collide with codegen-internal temp vars used for expression sequencing."), Whitespace("\n"), LineComment("// Both parameter binding and sequencing temp vars go through the fresh_var"), Whitespace("\n"), LineComment("// counter, ensuring unique Core Erlang variable names."), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 452, end: 461 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("ParamCollisionTest"), span: Span { start: 462, end: 480 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("compute:"), span: Span { start: 758, end: 766 }, leading_trivia: [Whitespace("\n\n  "), LineComment("// Multi-expression method with a parameter named _seq0."), Whitespace("\n  "), LineComment("// Before BT-369, to_core_var kept \"_seq0\" verbatim while fresh_temp_var(\"seq\")"), Whitespace("\n  "), LineComment("// could produce \"_seq1\", \"_seq2\" — a near-miss that could collide if naming"), Whitespace("\n  "), LineComment("// conventions changed. Now both use the counter."), Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("_seq0"), span: Span { start: 767, end: 772 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 773, end: 775 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("_seq0"), span: Span { start: 780, end: 785 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("+"), span: Span { start: 786, end: 787 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("1"), span: Span { start: 788, end: 789 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("_seq0"), span: Span { start: 794, end: 799 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("*"), span: Span { start: 800, end: 801 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("2"), span: Span { start: 802, end: 803 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 804, end: 804 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

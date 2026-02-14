@@ -1,0 +1,200 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "ParamCollisionTest",
+                span: Span {
+                    start: 462,
+                    end: 480,
+                },
+            },
+            superclass: Some(
+                Identifier {
+                    name: "Object",
+                    span: Span {
+                        start: 445,
+                        end: 451,
+                    },
+                },
+            ),
+            is_abstract: false,
+            is_sealed: false,
+            state: [],
+            methods: [
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "compute:",
+                                span: Span {
+                                    start: 758,
+                                    end: 766,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        Identifier {
+                            name: "_seq0",
+                            span: Span {
+                                start: 767,
+                                end: 772,
+                            },
+                        },
+                    ],
+                    body: [
+                        MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "_seq0",
+                                    span: Span {
+                                        start: 780,
+                                        end: 785,
+                                    },
+                                },
+                            ),
+                            selector: Binary(
+                                "+",
+                            ),
+                            arguments: [
+                                Literal(
+                                    Integer(
+                                        1,
+                                    ),
+                                    Span {
+                                        start: 788,
+                                        end: 789,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 780,
+                                end: 789,
+                            },
+                        },
+                        MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "_seq0",
+                                    span: Span {
+                                        start: 794,
+                                        end: 799,
+                                    },
+                                },
+                            ),
+                            selector: Binary(
+                                "*",
+                            ),
+                            arguments: [
+                                Literal(
+                                    Integer(
+                                        2,
+                                    ),
+                                    Span {
+                                        start: 802,
+                                        end: 803,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 794,
+                                end: 803,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    doc_comment: None,
+                    span: Span {
+                        start: 758,
+                        end: 803,
+                    },
+                },
+            ],
+            class_methods: [],
+            class_variables: [],
+            doc_comment: None,
+            span: Span {
+                start: 445,
+                end: 803,
+            },
+        },
+    ],
+    expressions: [],
+    span: Span {
+        start: 445,
+        end: 803,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 445,
+                end: 451,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 445,
+                end: 451,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Compiler snapshot test for BT-369: value-type temp var collision avoidance",
+            span: Span {
+                start: 445,
+                end: 451,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "//",
+            span: Span {
+                start: 445,
+                end: 451,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Verifies that method parameters with underscore-prefixed names (e.g., _seq0)",
+            span: Span {
+                start: 445,
+                end: 451,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// don't collide with codegen-internal temp vars used for expression sequencing.",
+            span: Span {
+                start: 445,
+                end: 451,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Both parameter binding and sequencing temp vars go through the fresh_var",
+            span: Span {
+                start: 445,
+                end: 451,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// counter, ensuring unique Core Erlang variable names.",
+            span: Span {
+                start: 445,
+                end: 451,
+            },
+            kind: Line,
+        },
+    ],
+}
