@@ -130,6 +130,34 @@ fn compile(source: Binary, module_name: Binary) -> NifResult<Term> {
 
 Compilation typically takes 1–50 ms for REPL expressions and up to several seconds for large files — well beyond the 1 ms NIF budget for normal schedulers. The Port backend avoids this concern entirely since compilation runs in a separate OS process.
 
+### Port Wire Format
+
+The Port uses **Erlang External Term Format (ETF)** over length-prefixed frames (`{packet, 4}`):
+
+- **Erlang side:** `term_to_binary/1` and `binary_to_term/1` — zero-copy, no parsing library needed
+- **Rust side:** `eetf` or `erlang-term` crate for ETF encode/decode
+- **Framing:** 4-byte big-endian length header + ETF payload, handled automatically by `open_port/2` with `{packet, 4}`
+
+```erlang
+%% Erlang sends a request to the Port
+Port = open_port({spawn_executable, CompilerBinary}, [{packet, 4}, binary, exit_status]),
+Request = term_to_binary(#{command => compile, source => Source, module => ModuleName}),
+port_command(Port, Request),
+
+%% Erlang receives the response
+receive
+    {Port, {data, Data}} ->
+        Response = binary_to_term(Data)
+        %% #{status => ok, core_erlang => ..., diagnostics => [...]}
+end.
+```
+
+**Why ETF over JSON or protobuf:**
+- No serialization library on the Erlang side (built-in `term_to_binary`)
+- Native support for Erlang maps, binaries, atoms, and lists
+- Eliminates the JSON-RPC overhead that motivated the daemon replacement
+- Protobuf adds a schema dependency and build step with no benefit for this use case
+
 ### REPL Integration
 
 `beamtalk_repl_eval.erl` simplifies from ~200 lines of socket/JSON-RPC code to a direct function call:
