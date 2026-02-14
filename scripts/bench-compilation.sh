@@ -57,9 +57,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Get high-resolution time in nanoseconds (Linux)
+# Get high-resolution time in nanoseconds
 time_ns() {
-    date +%s%N
+    if date +%s%N | grep -q 'N$' 2>/dev/null; then
+        # macOS/BSD: %N not supported, fall back to python3
+        python3 -c 'import time; print(time.time_ns())'
+    else
+        date +%s%N
+    fi
 }
 
 # Calculate elapsed time in milliseconds from two nanosecond timestamps
@@ -207,17 +212,27 @@ if [ "$RUN_FILE" = true ]; then
 
         BUILDDIR="$PROJECT_ROOT/$(dirname "$FILE")/build"
 
-        # Generate .core file once to find its path for BEAM-only measurement
+        # Generate .core file once to verify compilation works
         rm -rf "$BUILDDIR" 2>/dev/null || true
-        "$BEAMTALK" build "$FILEPATH" >/dev/null 2>&1 || true
+        if ! "$BEAMTALK" build "$FILEPATH" >/dev/null 2>&1; then
+            echo "   ❌ beamtalk build failed for $FILE — skipping"
+            continue
+        fi
         CORE_FILE=$(find "$BUILDDIR" -name "*.core" -type f 2>/dev/null | head -1)
+        if [ -z "$CORE_FILE" ]; then
+            echo "   ❌ No .core file generated for $FILE — skipping"
+            continue
+        fi
 
         for i in $(seq 1 "$ITERATIONS"); do
             rm -rf "$BUILDDIR" 2>/dev/null || true
 
             # Measure end-to-end (Rust binary startup + compile + BEAM)
             start=$(time_ns)
-            "$BEAMTALK" build "$FILEPATH" >/dev/null 2>&1 || true
+            if ! "$BEAMTALK" build "$FILEPATH" >/dev/null 2>&1; then
+                echo "   ❌ beamtalk build failed for $FILE"
+                exit 1
+            fi
             end=$(time_ns)
             elapsed_ms "$start" "$end" >> "$TIMES_E2E"
 
@@ -228,9 +243,15 @@ if [ "$RUN_FILE" = true ]; then
                 # Remove .beam so erlc does real work
                 rm -f "$BUILDDIR"/*.beam 2>/dev/null || true
                 start=$(time_ns)
-                erlc +from_core +debug_info -o "$BUILDDIR" "$CORE_FILE" >/dev/null 2>&1 || true
+                if ! erlc +from_core +debug_info -o "$BUILDDIR" "$CORE_FILE" >/dev/null 2>&1; then
+                    echo "   ❌ erlc failed for $CORE_FILE"
+                    exit 1
+                fi
                 end=$(time_ns)
                 elapsed_ms "$start" "$end" >> "$TIMES_BEAM"
+            else
+                echo "   ❌ No .core file generated for $FILE"
+                exit 1
             fi
 
             rm -rf "$BUILDDIR" 2>/dev/null || true
@@ -295,7 +316,7 @@ if [ "$RUN_REPL" = true ]; then
     # Wait for REPL to be ready
     REPL_PORT=""
     for i in $(seq 1 30); do
-        REPL_PORT=$(grep -oP 'Connected to REPL backend on port \K[0-9]+' "$OUTFILE" 2>/dev/null || true)
+        REPL_PORT=$(sed -n 's/.*Connected to REPL backend on port \([0-9][0-9]*\).*/\1/p' "$OUTFILE" 2>/dev/null || true)
         if [ -n "$REPL_PORT" ]; then break; fi
         sleep 1
     done
@@ -315,19 +336,16 @@ if [ "$RUN_REPL" = true ]; then
     repl_eval() {
         local code=$1
         local msg_id=$2
-        local escaped_code
-        escaped_code=$(printf '%s' "$code" | sed "s/'/\\\\'/g")
-        python3 -c "
-import socket, json, time
+        BENCH_CODE="$code" BENCH_MSG_ID="$msg_id" BENCH_PORT="$REPL_PORT" python3 -c "
+import socket, json, os
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 sock.settimeout(30)
-sock.connect(('127.0.0.1', $REPL_PORT))
+sock.connect(('127.0.0.1', int(os.environ['BENCH_PORT'])))
 
-request = json.dumps({'op': 'eval', 'id': '$msg_id', 'code': '$escaped_code'})
+request = json.dumps({'op': 'eval', 'id': os.environ['BENCH_MSG_ID'], 'code': os.environ['BENCH_CODE']})
 sock.sendall((request + '\n').encode())
 
-# Read response (newline-delimited)
 data = b''
 while True:
     chunk = sock.recv(4096)
@@ -385,12 +403,12 @@ print(json.dumps(resp))
     echo "   Loading fixture first..."
 
     # Load the counter fixture once
-    python3 -c "
-import socket, json
+    BENCH_PORT="$REPL_PORT" python3 -c "
+import socket, json, os
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 sock.settimeout(30)
-sock.connect(('127.0.0.1', $REPL_PORT))
+sock.connect(('127.0.0.1', int(os.environ['BENCH_PORT'])))
 
 request = json.dumps({'op': 'load-file', 'id': 'load-1', 'path': 'examples/counter.bt'})
 sock.sendall((request + '\n').encode())
