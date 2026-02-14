@@ -1,0 +1,7 @@
+{application, beamtalk_compiler, [
+    {description, "Beamtalk Compiler - OTP Port to Rust compiler binary (ADR 0022)"},
+    {vsn, "0.1.0"},
+    {modules, []},
+    {registered, []},
+    {applications, [kernel, stdlib]}
+]}.

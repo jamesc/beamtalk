@@ -30,7 +30,8 @@
          ensure_dir_with_mode/2, maybe_await_future/1, should_purge_module/2,
          strip_internal_bindings/1, parse_file_compile_result/1,
          start_io_capture/0, stop_io_capture/1, io_capture_loop/1,
-         is_stdlib_path/1, reset_captured_group_leaders/2]).
+         is_stdlib_path/1, reset_captured_group_leaders/2,
+         inject_output/3, handle_io_request/2]).
 -endif.
 
 -define(RECV_TIMEOUT, 30000).
