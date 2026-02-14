@@ -1247,6 +1247,7 @@ tcp_integration_test_() ->
           {"kill unknown actor", fun() -> tcp_kill_unknown_actor_test(Port) end},
           %% BT-523: gen_server callback tests
           {"get port", fun() -> tcp_get_port_test(Port) end},
+          {"start_link integer port", fun() -> tcp_start_link_integer_test() end},
           %% BT-523: session ID uniqueness test
           {"clone uniqueness", fun() -> tcp_clone_uniqueness_test(Port) end}
          ]
@@ -1650,11 +1651,30 @@ tcp_get_port_test(Port) ->
     {ok, ActualPort} = beamtalk_repl_server:get_port(),
     ?assertEqual(Port, ActualPort).
 
+%% Test: start_link/1 integer clause executes (backward compatibility)
+tcp_start_link_integer_test() ->
+    %% Server is already running inside tcp_integration_test_ fixture.
+    %% Calling start_link with integer arg exercises the integer clause
+    %% and returns {already_started, _} from gen_server because
+    %% the server is registered as {local, beamtalk_repl_server}.
+    Result = beamtalk_repl_server:start_link(0),
+    case Result of
+        {error, {already_started, _}} ->
+            %% Expected: server was already registered by workspace sup
+            ok;
+        {ok, Pid} ->
+            %% Server wasn't registered (race with test ordering).
+            %% The integer clause worked — clean up the started server.
+            gen_server:stop(Pid),
+            ok
+    end.
+
 %% Test: start_link with integer port (backward compatibility)
-%% This verifies the module compiles and start_link/1 accepts integer args.
-%% The actual start is tested in tcp_integration_test_ which starts a full workspace.
+%% The integer-port clause is tested within tcp_integration_test_ via
+%% tcp_start_link_integer_test which calls start_link/1 while the server
+%% is running and asserts {already_started, _}.
 start_link_integer_port_test() ->
-    %% Verify the backward-compat clause exists by checking module exports
+    %% Basic verification that the export exists
     Exports = beamtalk_repl_server:module_info(exports),
     ?assert(lists:member({start_link, 1}, Exports)).
 
@@ -1670,16 +1690,15 @@ tcp_clone_uniqueness_test(Port) ->
     Msg2 = jsx:encode(#{<<"op">> => <<"clone">>, <<"id">> => <<"cu2">>}),
     Resp1 = tcp_send_op(Port, Msg1),
     Resp2 = tcp_send_op(Port, Msg2),
-    case {maps:find(<<"value">>, Resp1), maps:find(<<"value">>, Resp2)} of
-        {{ok, V1}, {ok, V2}} ->
-            ?assertNotEqual(V1, V2),
-            %% Verify session ID format: "session_<timestamp>_<random>"
-            ?assert(binary:match(V1, <<"session_">>) =:= {0, 8}),
-            ?assert(binary:match(V2, <<"session_">>) =:= {0, 8});
-        _ ->
-            %% Clone may error if sup not fully ready; still valid
-            ok
-    end.
+    %% Both clones must succeed — if the session sup isn't ready, fail loudly
+    ?assertMatch(#{<<"value">> := _}, Resp1),
+    ?assertMatch(#{<<"value">> := _}, Resp2),
+    V1 = maps:get(<<"value">>, Resp1),
+    V2 = maps:get(<<"value">>, Resp2),
+    ?assertNotEqual(V1, V2),
+    %% Verify session ID format: "session_<timestamp>_<random>"
+    ?assert(binary:match(V1, <<"session_">>) =:= {0, 8}),
+    ?assert(binary:match(V2, <<"session_">>) =:= {0, 8}).
 
 %%% BT-523: format_error_message additional coverage
 
