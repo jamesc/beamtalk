@@ -476,8 +476,12 @@ handle_op(<<"unload">>, Params, Msg, SessionPid) ->
             case safe_to_existing_atom(ModuleBin) of
                 {error, badarg} ->
                     %% Atom never created — module was never loaded
+                    Err0 = beamtalk_error:new(module_not_found, 'Module'),
+                    Err1 = beamtalk_error:with_message(Err0,
+                        iolist_to_binary([<<"Module not loaded: ">>, ModuleBin])),
+                    Err2 = beamtalk_error:with_hint(Err1, <<"Module was never loaded">>),
                     beamtalk_repl_protocol:encode_error(
-                        {module_not_found, ModuleBin}, Msg, fun format_error_message/1);
+                        Err2, Msg, fun format_error_message/1);
                 {ok, Module} ->
                     %% Resolve class name to BEAM module name if needed
                     ResolvedModule = case code:is_loaded(Module) of
