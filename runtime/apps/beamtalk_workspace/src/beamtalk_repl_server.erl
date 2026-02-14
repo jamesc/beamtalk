@@ -259,9 +259,13 @@ recv_line(Socket, Acc) ->
     case gen_tcp:recv(Socket, 0, ?RECV_TIMEOUT) of
         {ok, Data} ->
             Combined = <<Acc/binary, Data/binary>>,
-            case binary:last(Data) of
-                $\n -> {ok, Combined};
-                _   -> recv_line(Socket, Combined)
+            case byte_size(Combined) >= ?MAX_LINE_LENGTH of
+                true  -> {error, line_too_long};
+                false ->
+                    case binary:last(Data) of
+                        $\n -> {ok, Combined};
+                        _   -> recv_line(Socket, Combined)
+                    end
             end;
         {error, timeout} when byte_size(Acc) > 0 ->
             %% Timeout while accumulating a partial line — keep waiting.
