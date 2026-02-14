@@ -417,6 +417,7 @@ pub fn start_detached_node(
     runtime_beam_dir: &Path,
     repl_beam_dir: &Path,
     jsx_beam_dir: &Path,
+    compiler_beam_dir: &Path,
     stdlib_beam_dir: &Path,
     auto_cleanup: bool,
     max_idle_seconds: Option<u64>,
@@ -462,6 +463,7 @@ pub fn start_detached_node(
         runtime_beam_dir,
         repl_beam_dir,
         jsx_beam_dir,
+        compiler_beam_dir,
         stdlib_beam_dir,
         &eval_cmd,
         &project_path,
@@ -473,7 +475,8 @@ pub fn start_detached_node(
 
     // With -detached, the spawn() returns immediately and the real BEAM node
     // runs independently. We need to wait a bit for it to start up.
-    std::thread::sleep(Duration::from_millis(1500));
+    // The compiler app (ADR 0022) adds ~500ms to startup.
+    std::thread::sleep(Duration::from_millis(2000));
 
     // Find the BEAM process by node name
     let (pid, start_time) = find_beam_pid_by_node(&node_name)?;
@@ -525,6 +528,7 @@ fn build_detached_node_command(
     runtime_beam_dir: &Path,
     repl_beam_dir: &Path,
     jsx_beam_dir: &Path,
+    compiler_beam_dir: &Path,
     stdlib_beam_dir: &Path,
     eval_cmd: &str,
     project_root: &Path,
@@ -548,6 +552,8 @@ fn build_detached_node_command(
         repl_beam_dir.to_str().unwrap_or("").to_string(),
         "-pa".to_string(),
         jsx_beam_dir.to_str().unwrap_or("").to_string(),
+        "-pa".to_string(),
+        compiler_beam_dir.to_str().unwrap_or("").to_string(),
         "-pa".to_string(),
         stdlib_beam_dir.to_str().unwrap_or("").to_string(),
         "-eval".to_string(),
@@ -601,6 +607,7 @@ pub fn get_or_start_workspace(
     runtime_beam_dir: &Path,
     repl_beam_dir: &Path,
     jsx_beam_dir: &Path,
+    compiler_beam_dir: &Path,
     stdlib_beam_dir: &Path,
     auto_cleanup: bool,
     max_idle_seconds: Option<u64>,
@@ -626,6 +633,7 @@ pub fn get_or_start_workspace(
         runtime_beam_dir,
         repl_beam_dir,
         jsx_beam_dir,
+        compiler_beam_dir,
         stdlib_beam_dir,
         auto_cleanup,
         max_idle_seconds,
@@ -1612,6 +1620,7 @@ mod tests {
             Path::new("/tmp/runtime"),
             Path::new("/tmp/repl"),
             Path::new("/tmp/jsx"),
+            Path::new("/tmp/compiler"),
             Path::new("/tmp/stdlib"),
             "ok.",
             Path::new("/tmp/project"),
@@ -1685,7 +1694,7 @@ mod tests {
 
     /// Locate BEAM directories needed to start a workspace node.
     #[cfg(unix)]
-    fn beam_dirs_for_tests() -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+    fn beam_dirs_for_tests() -> (PathBuf, PathBuf, PathBuf, PathBuf, PathBuf) {
         let runtime_dir = beamtalk_cli::repl_startup::find_runtime_dir()
             .expect("Cannot find runtime dir — run from repo root or set BEAMTALK_RUNTIME_DIR");
         let paths = beamtalk_cli::repl_startup::beam_paths(&runtime_dir);
@@ -1698,6 +1707,7 @@ mod tests {
             paths.runtime_ebin,
             paths.workspace_ebin,
             paths.jsx_ebin,
+            paths.compiler_ebin,
             paths.stdlib_ebin,
         )
     }
@@ -1710,13 +1720,14 @@ mod tests {
         let project_path = std::env::current_dir().unwrap();
         let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
 
-        let (runtime, workspace, jsx, stdlib) = beam_dirs_for_tests();
+        let (runtime, workspace, jsx, compiler, stdlib) = beam_dirs_for_tests();
         let node_info = start_detached_node(
             &tw.id,
             0,
             &runtime,
             &workspace,
             &jsx,
+            &compiler,
             &stdlib,
             false,
             Some(60),
@@ -1767,13 +1778,14 @@ mod tests {
         let project_path = std::env::current_dir().unwrap();
         let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
 
-        let (runtime, workspace, jsx, stdlib) = beam_dirs_for_tests();
+        let (runtime, workspace, jsx, compiler, stdlib) = beam_dirs_for_tests();
         let node_info = start_detached_node(
             &tw.id,
             0,
             &runtime,
             &workspace,
             &jsx,
+            &compiler,
             &stdlib,
             false,
             Some(60),
@@ -1808,7 +1820,7 @@ mod tests {
         let tw = TestWorkspace::new("integ_lifecycle");
         let project_path = std::env::current_dir().unwrap();
 
-        let (runtime, workspace, jsx, stdlib) = beam_dirs_for_tests();
+        let (runtime, workspace, jsx, compiler, stdlib) = beam_dirs_for_tests();
 
         // Step 1: First call creates workspace and starts node
         let (info1, started1, id1) = get_or_start_workspace(
@@ -1818,6 +1830,7 @@ mod tests {
             &runtime,
             &workspace,
             &jsx,
+            &compiler,
             &stdlib,
             false,
             Some(60),
@@ -1836,6 +1849,7 @@ mod tests {
             &runtime,
             &workspace,
             &jsx,
+            &compiler,
             &stdlib,
             false,
             Some(60),
@@ -1860,6 +1874,7 @@ mod tests {
             &runtime,
             &workspace,
             &jsx,
+            &compiler,
             &stdlib,
             false,
             Some(60),
@@ -1883,13 +1898,14 @@ mod tests {
         let project_path = std::env::current_dir().unwrap();
         let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
 
-        let (runtime, workspace, jsx, stdlib) = beam_dirs_for_tests();
+        let (runtime, workspace, jsx, compiler, stdlib) = beam_dirs_for_tests();
         let node_info = start_detached_node(
             &tw.id,
             0,
             &runtime,
             &workspace,
             &jsx,
+            &compiler,
             &stdlib,
             false,
             Some(60),
@@ -1925,13 +1941,14 @@ mod tests {
         let project_path = std::env::current_dir().unwrap();
         let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
 
-        let (runtime, workspace, jsx, stdlib) = beam_dirs_for_tests();
+        let (runtime, workspace, jsx, compiler, stdlib) = beam_dirs_for_tests();
         let node_info = start_detached_node(
             &tw.id,
             0,
             &runtime,
             &workspace,
             &jsx,
+            &compiler,
             &stdlib,
             false,
             Some(60),
@@ -1966,13 +1983,14 @@ mod tests {
         let project_path = std::env::current_dir().unwrap();
         let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
 
-        let (runtime, workspace, jsx, stdlib) = beam_dirs_for_tests();
+        let (runtime, workspace, jsx, compiler, stdlib) = beam_dirs_for_tests();
         let node_info = start_detached_node(
             &tw.id,
             0,
             &runtime,
             &workspace,
             &jsx,
+            &compiler,
             &stdlib,
             false,
             Some(60),
@@ -2003,13 +2021,14 @@ mod tests {
         let project_path = std::env::current_dir().unwrap();
         let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
 
-        let (runtime, workspace, jsx, stdlib) = beam_dirs_for_tests();
+        let (runtime, workspace, jsx, compiler, stdlib) = beam_dirs_for_tests();
         let node_info = start_detached_node(
             &tw.id,
             0,
             &runtime,
             &workspace,
             &jsx,
+            &compiler,
             &stdlib,
             false,
             Some(60),
@@ -2045,13 +2064,14 @@ mod tests {
         let project_path = std::env::current_dir().unwrap();
         let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
 
-        let (runtime, workspace, jsx, stdlib) = beam_dirs_for_tests();
+        let (runtime, workspace, jsx, compiler, stdlib) = beam_dirs_for_tests();
         let node_info = start_detached_node(
             &tw.id,
             0,
             &runtime,
             &workspace,
             &jsx,
+            &compiler,
             &stdlib,
             false,
             Some(60),

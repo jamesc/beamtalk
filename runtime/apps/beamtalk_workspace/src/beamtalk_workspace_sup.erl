@@ -67,6 +67,22 @@ init(Config) ->
     %% Set up file logging before children start (they may log during init)
     setup_file_logger(WorkspaceId),
     
+    %% Start the compiler application (ADR 0022, Phase 2)
+    %% This is started dynamically rather than as a static app dependency
+    %% because the compiler port binary may not be available in all environments
+    %% (e.g., unit tests). The BEAMTALK_COMPILER=daemon fallback still works
+    %% without it.
+    case beamtalk_compiler_backend:backend() of
+        port ->
+            case application:ensure_all_started(beamtalk_compiler) of
+                {ok, _} -> ok;
+                {error, Reason} ->
+                    ?LOG_ERROR("Failed to start beamtalk_compiler app", #{reason => Reason})
+            end;
+        daemon ->
+            ok
+    end,
+    
     ChildSpecs = [
         %% Workspace metadata (must start first - others may query it)
         #{
