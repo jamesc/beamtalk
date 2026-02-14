@@ -111,7 +111,7 @@ impl CoreErlangGenerator {
     /// Lists use `erlang:'++'`, strings use `iolist_to_binary`.
     /// When the receiver type is known at compile time (literal), we emit
     /// the optimal path directly. Otherwise, a runtime `is_list` check selects.
-    fn generate_concat_op(
+    pub(in crate::codegen::core_erlang) fn generate_concat_op(
         &mut self,
         left: &Expression,
         right: &Expression,

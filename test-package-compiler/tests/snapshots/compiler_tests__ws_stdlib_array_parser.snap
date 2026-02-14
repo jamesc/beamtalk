@@ -28,20 +28,33 @@ Module {
                 end: 132,
             },
         },
-        Literal(
-            Integer(
-                10,
+        MessageSend {
+            receiver: Literal(
+                Integer(
+                    10,
+                ),
+                Span {
+                    start: 132,
+                    end: 134,
+                },
             ),
-            Span {
-                start: 132,
-                end: 134,
-            },
-        ),
-        Error {
-            message: "Unexpected token: expected expression, found ,",
+            selector: Binary(
+                ",",
+            ),
+            arguments: [
+                Literal(
+                    Integer(
+                        20,
+                    ),
+                    Span {
+                        start: 136,
+                        end: 138,
+                    },
+                ),
+            ],
             span: Span {
-                start: 134,
-                end: 135,
+                start: 132,
+                end: 138,
             },
         },
         Error {
@@ -118,20 +131,33 @@ Module {
                 end: 681,
             },
         },
-        Literal(
-            Integer(
-                3,
+        MessageSend {
+            receiver: Literal(
+                Integer(
+                    3,
+                ),
+                Span {
+                    start: 681,
+                    end: 682,
+                },
             ),
-            Span {
-                start: 681,
-                end: 682,
-            },
-        ),
-        Error {
-            message: "Unexpected token: expected expression, found ,",
+            selector: Binary(
+                ",",
+            ),
+            arguments: [
+                Literal(
+                    Integer(
+                        4,
+                    ),
+                    Span {
+                        start: 684,
+                        end: 685,
+                    },
+                ),
+            ],
             span: Span {
-                start: 682,
-                end: 683,
+                start: 681,
+                end: 685,
             },
         },
         Error {
@@ -184,7 +210,6 @@ Module {
 
 Diagnostics:
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found {", span: Span { start: 131, end: 132 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ,", span: Span { start: 134, end: 135 }, hint: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 138, end: 139 }, hint: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 159, end: 160 }, hint: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 171, end: 172 }, hint: None }
@@ -194,5 +219,4 @@ Diagnostic { severity: Error, message: "Unexpected token: expected expression, f
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 590, end: 591 }, hint: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 675, end: 676 }, hint: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found {", span: Span { start: 680, end: 681 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ,", span: Span { start: 682, end: 683 }, hint: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 685, end: 686 }, hint: None }

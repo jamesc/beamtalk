@@ -2,8 +2,7 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: output
 ---
-Semantic errors (14):
-  - Undefined variable: innerSum
+Semantic errors (13):
   - Undefined variable: self
   - Undefined variable: self
   - Undefined variable: self

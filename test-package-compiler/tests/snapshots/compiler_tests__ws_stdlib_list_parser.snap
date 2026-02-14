@@ -20,126 +20,1018 @@ Module {
                 Block {
                     parameters: [],
                     body: [
-                        Literal(
-                            Integer(
-                                1,
-                            ),
-                            Span {
-                                start: 138,
-                                end: 139,
+                        MessageSend {
+                            receiver: MessageSend {
+                                receiver: MessageSend {
+                                    receiver: MessageSend {
+                                        receiver: Literal(
+                                            Integer(
+                                                1,
+                                            ),
+                                            Span {
+                                                start: 138,
+                                                end: 139,
+                                            },
+                                        ),
+                                        selector: Binary(
+                                            ",",
+                                        ),
+                                        arguments: [
+                                            Literal(
+                                                Integer(
+                                                    2,
+                                                ),
+                                                Span {
+                                                    start: 141,
+                                                    end: 142,
+                                                },
+                                            ),
+                                        ],
+                                        span: Span {
+                                            start: 138,
+                                            end: 142,
+                                        },
+                                    },
+                                    selector: Binary(
+                                        ",",
+                                    ),
+                                    arguments: [
+                                        Literal(
+                                            Integer(
+                                                3,
+                                            ),
+                                            Span {
+                                                start: 144,
+                                                end: 145,
+                                            },
+                                        ),
+                                    ],
+                                    span: Span {
+                                        start: 138,
+                                        end: 145,
+                                    },
+                                },
+                                selector: Binary(
+                                    ",",
+                                ),
+                                arguments: [
+                                    Literal(
+                                        Integer(
+                                            4,
+                                        ),
+                                        Span {
+                                            start: 147,
+                                            end: 148,
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    start: 138,
+                                    end: 148,
+                                },
                             },
-                        ),
+                            selector: Binary(
+                                ",",
+                            ),
+                            arguments: [
+                                Literal(
+                                    Integer(
+                                        5,
+                                    ),
+                                    Span {
+                                        start: 150,
+                                        end: 151,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 138,
+                                end: 151,
+                            },
+                        },
                     ],
                     span: Span {
                         start: 137,
-                        end: 138,
+                        end: 152,
                     },
                 },
             ),
             span: Span {
                 start: 126,
-                end: 138,
-            },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found ,",
-            span: Span {
-                start: 139,
-                end: 140,
-            },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
-            span: Span {
-                start: 151,
                 end: 152,
             },
         },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "empty",
+                    span: Span {
+                        start: 153,
+                        end: 158,
+                    },
+                },
+            ),
+            value: Block(
+                Block {
+                    parameters: [],
+                    body: [],
+                    span: Span {
+                        start: 162,
+                        end: 164,
+                    },
+                },
+            ),
             span: Span {
-                start: 163,
+                start: 153,
                 end: 164,
             },
         },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "first",
+                    span: Span {
+                        start: 190,
+                        end: 195,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "numbers",
+                        span: Span {
+                            start: 199,
+                            end: 206,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "head",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 199,
+                    end: 211,
+                },
+            },
             span: Span {
-                start: 412,
-                end: 413,
+                start: 190,
+                end: 211,
             },
         },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "rest",
+                    span: Span {
+                        start: 212,
+                        end: 216,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "numbers",
+                        span: Span {
+                            start: 220,
+                            end: 227,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "tail",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 220,
+                    end: 232,
+                },
+            },
             span: Span {
-                start: 472,
-                end: 473,
+                start: 212,
+                end: 232,
             },
         },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "extended",
+                    span: Span {
+                        start: 252,
+                        end: 260,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "numbers",
+                        span: Span {
+                            start: 264,
+                            end: 271,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "prepend:",
+                            span: Span {
+                                start: 272,
+                                end: 280,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Integer(
+                            0,
+                        ),
+                        Span {
+                            start: 281,
+                            end: 282,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 264,
+                    end: 282,
+                },
+            },
             span: Span {
-                start: 528,
-                end: 529,
+                start: 252,
+                end: 282,
             },
         },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "third",
+                    span: Span {
+                        start: 307,
+                        end: 312,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "numbers",
+                        span: Span {
+                            start: 316,
+                            end: 323,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "at:",
+                            span: Span {
+                                start: 324,
+                                end: 327,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Integer(
+                            3,
+                        ),
+                        Span {
+                            start: 328,
+                            end: 329,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 316,
+                    end: 329,
+                },
+            },
             span: Span {
-                start: 593,
-                end: 594,
+                start: 307,
+                end: 329,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "size",
+                    span: Span {
+                        start: 339,
+                        end: 343,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "numbers",
+                        span: Span {
+                            start: 347,
+                            end: 354,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "size",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 347,
+                    end: 359,
+                },
+            },
+            span: Span {
+                start: 339,
+                end: 359,
             },
         },
         MessageSend {
-            receiver: Error {
-                message: "Unexpected token: expected expression, found ]",
-                span: Span {
-                    start: 682,
-                    end: 683,
+            receiver: Identifier(
+                Identifier {
+                    name: "numbers",
+                    span: Span {
+                        start: 374,
+                        end: 381,
+                    },
                 },
-            },
-            selector: Binary(
-                "++",
+            ),
+            selector: Keyword(
+                [
+                    KeywordPart {
+                        keyword: "each:",
+                        span: Span {
+                            start: 382,
+                            end: 387,
+                        },
+                    },
+                ],
             ),
             arguments: [
                 Block(
                     Block {
-                        parameters: [],
-                        body: [
-                            Literal(
-                                Integer(
-                                    3,
-                                ),
-                                Span {
-                                    start: 688,
-                                    end: 689,
+                        parameters: [
+                            BlockParameter {
+                                name: "n",
+                                span: Span {
+                                    start: 390,
+                                    end: 391,
                                 },
-                            ),
+                            },
+                        ],
+                        body: [
+                            MessageSend {
+                                receiver: ClassReference {
+                                    name: Identifier {
+                                        name: "Transcript",
+                                        span: Span {
+                                            start: 394,
+                                            end: 404,
+                                        },
+                                    },
+                                    span: Span {
+                                        start: 394,
+                                        end: 404,
+                                    },
+                                },
+                                selector: Keyword(
+                                    [
+                                        KeywordPart {
+                                            keyword: "show:",
+                                            span: Span {
+                                                start: 405,
+                                                end: 410,
+                                            },
+                                        },
+                                    ],
+                                ),
+                                arguments: [
+                                    Identifier(
+                                        Identifier {
+                                            name: "n",
+                                            span: Span {
+                                                start: 411,
+                                                end: 412,
+                                            },
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    start: 394,
+                                    end: 412,
+                                },
+                            },
                         ],
                         span: Span {
-                            start: 687,
-                            end: 688,
+                            start: 388,
+                            end: 413,
                         },
                     },
                 ),
             ],
             span: Span {
-                start: 682,
-                end: 688,
+                start: 374,
+                end: 413,
             },
         },
-        Error {
-            message: "Unexpected token: expected expression, found ,",
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "doubled",
+                    span: Span {
+                        start: 433,
+                        end: 440,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "numbers",
+                        span: Span {
+                            start: 444,
+                            end: 451,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "collect:",
+                            span: Span {
+                                start: 452,
+                                end: 460,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Block(
+                        Block {
+                            parameters: [
+                                BlockParameter {
+                                    name: "n",
+                                    span: Span {
+                                        start: 463,
+                                        end: 464,
+                                    },
+                                },
+                            ],
+                            body: [
+                                MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "n",
+                                            span: Span {
+                                                start: 467,
+                                                end: 468,
+                                            },
+                                        },
+                                    ),
+                                    selector: Binary(
+                                        "*",
+                                    ),
+                                    arguments: [
+                                        Literal(
+                                            Integer(
+                                                2,
+                                            ),
+                                            Span {
+                                                start: 471,
+                                                end: 472,
+                                            },
+                                        ),
+                                    ],
+                                    span: Span {
+                                        start: 467,
+                                        end: 472,
+                                    },
+                                },
+                            ],
+                            span: Span {
+                                start: 461,
+                                end: 473,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 444,
+                    end: 473,
+                },
+            },
             span: Span {
-                start: 689,
-                end: 690,
+                start: 433,
+                end: 473,
             },
         },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "evens",
+                    span: Span {
+                        start: 488,
+                        end: 493,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "numbers",
+                        span: Span {
+                            start: 497,
+                            end: 504,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "select:",
+                            span: Span {
+                                start: 505,
+                                end: 512,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Block(
+                        Block {
+                            parameters: [
+                                BlockParameter {
+                                    name: "n",
+                                    span: Span {
+                                        start: 515,
+                                        end: 516,
+                                    },
+                                },
+                            ],
+                            body: [
+                                MessageSend {
+                                    receiver: MessageSend {
+                                        receiver: Identifier(
+                                            Identifier {
+                                                name: "n",
+                                                span: Span {
+                                                    start: 519,
+                                                    end: 520,
+                                                },
+                                            },
+                                        ),
+                                        selector: Binary(
+                                            "%",
+                                        ),
+                                        arguments: [
+                                            Literal(
+                                                Integer(
+                                                    2,
+                                                ),
+                                                Span {
+                                                    start: 523,
+                                                    end: 524,
+                                                },
+                                            ),
+                                        ],
+                                        span: Span {
+                                            start: 519,
+                                            end: 524,
+                                        },
+                                    },
+                                    selector: Binary(
+                                        "=",
+                                    ),
+                                    arguments: [
+                                        Literal(
+                                            Integer(
+                                                0,
+                                            ),
+                                            Span {
+                                                start: 527,
+                                                end: 528,
+                                            },
+                                        ),
+                                    ],
+                                    span: Span {
+                                        start: 519,
+                                        end: 528,
+                                    },
+                                },
+                            ],
+                            span: Span {
+                                start: 513,
+                                end: 529,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 497,
+                    end: 529,
+                },
+            },
             span: Span {
-                start: 692,
+                start: 488,
+                end: 529,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "sum",
+                    span: Span {
+                        start: 544,
+                        end: 547,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "numbers",
+                        span: Span {
+                            start: 551,
+                            end: 558,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "inject:",
+                            span: Span {
+                                start: 559,
+                                end: 566,
+                            },
+                        },
+                        KeywordPart {
+                            keyword: "into:",
+                            span: Span {
+                                start: 569,
+                                end: 574,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Integer(
+                            0,
+                        ),
+                        Span {
+                            start: 567,
+                            end: 568,
+                        },
+                    ),
+                    Block(
+                        Block {
+                            parameters: [
+                                BlockParameter {
+                                    name: "acc",
+                                    span: Span {
+                                        start: 577,
+                                        end: 580,
+                                    },
+                                },
+                                BlockParameter {
+                                    name: "n",
+                                    span: Span {
+                                        start: 582,
+                                        end: 583,
+                                    },
+                                },
+                            ],
+                            body: [
+                                MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "acc",
+                                            span: Span {
+                                                start: 586,
+                                                end: 589,
+                                            },
+                                        },
+                                    ),
+                                    selector: Binary(
+                                        "+",
+                                    ),
+                                    arguments: [
+                                        Identifier(
+                                            Identifier {
+                                                name: "n",
+                                                span: Span {
+                                                    start: 592,
+                                                    end: 593,
+                                                },
+                                            },
+                                        ),
+                                    ],
+                                    span: Span {
+                                        start: 586,
+                                        end: 593,
+                                    },
+                                },
+                            ],
+                            span: Span {
+                                start: 575,
+                                end: 594,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 551,
+                    end: 594,
+                },
+            },
+            span: Span {
+                start: 544,
+                end: 594,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "hasThree",
+                    span: Span {
+                        start: 615,
+                        end: 623,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "numbers",
+                        span: Span {
+                            start: 627,
+                            end: 634,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "includes:",
+                            span: Span {
+                                start: 635,
+                                end: 644,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Integer(
+                            3,
+                        ),
+                        Span {
+                            start: 645,
+                            end: 646,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 627,
+                    end: 646,
+                },
+            },
+            span: Span {
+                start: 615,
+                end: 646,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "combined",
+                    span: Span {
+                        start: 665,
+                        end: 673,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            MessageSend {
+                                receiver: Literal(
+                                    Integer(
+                                        1,
+                                    ),
+                                    Span {
+                                        start: 678,
+                                        end: 679,
+                                    },
+                                ),
+                                selector: Binary(
+                                    ",",
+                                ),
+                                arguments: [
+                                    Literal(
+                                        Integer(
+                                            2,
+                                        ),
+                                        Span {
+                                            start: 681,
+                                            end: 682,
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    start: 678,
+                                    end: 682,
+                                },
+                            },
+                        ],
+                        span: Span {
+                            start: 677,
+                            end: 683,
+                        },
+                    },
+                ),
+                selector: Binary(
+                    "++",
+                ),
+                arguments: [
+                    Block(
+                        Block {
+                            parameters: [],
+                            body: [
+                                MessageSend {
+                                    receiver: Literal(
+                                        Integer(
+                                            3,
+                                        ),
+                                        Span {
+                                            start: 688,
+                                            end: 689,
+                                        },
+                                    ),
+                                    selector: Binary(
+                                        ",",
+                                    ),
+                                    arguments: [
+                                        Literal(
+                                            Integer(
+                                                4,
+                                            ),
+                                            Span {
+                                                start: 691,
+                                                end: 692,
+                                            },
+                                        ),
+                                    ],
+                                    span: Span {
+                                        start: 688,
+                                        end: 692,
+                                    },
+                                },
+                            ],
+                            span: Span {
+                                start: 687,
+                                end: 693,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 677,
+                    end: 693,
+                },
+            },
+            span: Span {
+                start: 665,
                 end: 693,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "reversed",
+                    span: Span {
+                        start: 706,
+                        end: 714,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "numbers",
+                        span: Span {
+                            start: 718,
+                            end: 725,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "reversed",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 718,
+                    end: 734,
+                },
+            },
+            span: Span {
+                start: 706,
+                end: 734,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "asArray",
+                    span: Span {
+                        start: 759,
+                        end: 766,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "numbers",
+                        span: Span {
+                            start: 770,
+                            end: 777,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "asArray",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 770,
+                    end: 785,
+                },
+            },
+            span: Span {
+                start: 759,
+                end: 785,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "withoutThree",
+                    span: Span {
+                        start: 805,
+                        end: 817,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "numbers",
+                        span: Span {
+                            start: 821,
+                            end: 828,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "remove:",
+                            span: Span {
+                                start: 829,
+                                end: 836,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Integer(
+                            3,
+                        ),
+                        Span {
+                            start: 837,
+                            end: 838,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 821,
+                    end: 838,
+                },
+            },
+            span: Span {
+                start: 805,
+                end: 838,
             },
         },
     ],
@@ -182,17 +1074,3 @@ Module {
         },
     ],
 }
-
-Diagnostics:
-Diagnostic { severity: Error, message: "Expected ']' to close block", span: Span { start: 139, end: 140 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ,", span: Span { start: 139, end: 140 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 151, end: 152 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 163, end: 164 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 412, end: 413 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 472, end: 473 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 528, end: 529 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 593, end: 594 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 682, end: 683 }, hint: None }
-Diagnostic { severity: Error, message: "Expected ']' to close block", span: Span { start: 689, end: 690 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ,", span: Span { start: 689, end: 690 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 692, end: 693 }, hint: None }

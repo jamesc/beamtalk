@@ -139,8 +139,8 @@ pub(super) fn binary_binding_power(op: &str) -> Option<BindingPower> {
         // Comparison
         "<" | ">" | "<=" | ">=" => Some(BindingPower::left_assoc(20)),
 
-        // Additive (includes string concatenation ++)
-        "+" | "-" | "++" => Some(BindingPower::left_assoc(30)),
+        // Additive (includes string concatenation ++ and , alias)
+        "+" | "-" | "++" | "," => Some(BindingPower::left_assoc(30)),
 
         // Multiplicative
         "*" | "/" | "%" => Some(BindingPower::left_assoc(40)),
@@ -338,6 +338,9 @@ pub(super) struct Parser {
     pub(super) diagnostics: Vec<Diagnostic>,
     /// Whether the parser is currently inside a method body.
     pub(super) in_method_body: bool,
+    /// Whether the parser is currently inside a collection literal (list/map).
+    /// When true, `,` acts as a separator, not a binary operator.
+    pub(super) in_collection_literal: bool,
 }
 
 impl Parser {
@@ -348,6 +351,7 @@ impl Parser {
             current: 0,
             diagnostics: Vec::new(),
             in_method_body: false,
+            in_collection_literal: false,
         }
     }
 

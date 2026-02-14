@@ -118,6 +118,11 @@ impl CoreErlangGenerator {
                 ];
                 return Ok(doc);
             }
+            // BT-415: Comma is a String concatenation alias for `++`.
+            // Generate the same code as `++` (via runtime dispatch to String's method).
+            if op.as_str() == "," {
+                return self.generate_concat_op(receiver, &arguments[0]);
+            }
             let doc = self.generate_binary_op(op, receiver, arguments)?;
             return Ok(doc);
         }

@@ -46,73 +46,964 @@ Module {
                         Block {
                             parameters: [],
                             body: [
-                                Literal(
-                                    Symbol(
-                                        "red",
-                                    ),
-                                    Span {
-                                        start: 163,
-                                        end: 167,
+                                MessageSend {
+                                    receiver: MessageSend {
+                                        receiver: Literal(
+                                            Symbol(
+                                                "red",
+                                            ),
+                                            Span {
+                                                start: 163,
+                                                end: 167,
+                                            },
+                                        ),
+                                        selector: Binary(
+                                            ",",
+                                        ),
+                                        arguments: [
+                                            Literal(
+                                                Symbol(
+                                                    "green",
+                                                ),
+                                                Span {
+                                                    start: 169,
+                                                    end: 175,
+                                                },
+                                            ),
+                                        ],
+                                        span: Span {
+                                            start: 163,
+                                            end: 175,
+                                        },
                                     },
-                                ),
+                                    selector: Binary(
+                                        ",",
+                                    ),
+                                    arguments: [
+                                        Literal(
+                                            Symbol(
+                                                "blue",
+                                            ),
+                                            Span {
+                                                start: 177,
+                                                end: 182,
+                                            },
+                                        ),
+                                    ],
+                                    span: Span {
+                                        start: 163,
+                                        end: 182,
+                                    },
+                                },
                             ],
                             span: Span {
                                 start: 162,
-                                end: 163,
+                                end: 183,
                             },
                         },
                     ),
                 ],
                 span: Span {
                     start: 148,
-                    end: 163,
+                    end: 183,
                 },
             },
             span: Span {
                 start: 138,
-                end: 163,
-            },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found ,",
-            span: Span {
-                start: 167,
-                end: 168,
-            },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
-            span: Span {
-                start: 182,
                 end: 183,
             },
         },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "warm",
+                    span: Span {
+                        start: 184,
+                        end: 188,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: ClassReference {
+                    name: Identifier {
+                        name: "Set",
+                        span: Span {
+                            start: 192,
+                            end: 195,
+                        },
+                    },
+                    span: Span {
+                        start: 192,
+                        end: 195,
+                    },
+                },
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "fromList:",
+                            span: Span {
+                                start: 196,
+                                end: 205,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Block(
+                        Block {
+                            parameters: [],
+                            body: [
+                                MessageSend {
+                                    receiver: MessageSend {
+                                        receiver: Literal(
+                                            Symbol(
+                                                "red",
+                                            ),
+                                            Span {
+                                                start: 207,
+                                                end: 211,
+                                            },
+                                        ),
+                                        selector: Binary(
+                                            ",",
+                                        ),
+                                        arguments: [
+                                            Literal(
+                                                Symbol(
+                                                    "orange",
+                                                ),
+                                                Span {
+                                                    start: 213,
+                                                    end: 220,
+                                                },
+                                            ),
+                                        ],
+                                        span: Span {
+                                            start: 207,
+                                            end: 220,
+                                        },
+                                    },
+                                    selector: Binary(
+                                        ",",
+                                    ),
+                                    arguments: [
+                                        Literal(
+                                            Symbol(
+                                                "yellow",
+                                            ),
+                                            Span {
+                                                start: 222,
+                                                end: 229,
+                                            },
+                                        ),
+                                    ],
+                                    span: Span {
+                                        start: 207,
+                                        end: 229,
+                                    },
+                                },
+                            ],
+                            span: Span {
+                                start: 206,
+                                end: 230,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 192,
+                    end: 230,
+                },
+            },
             span: Span {
-                start: 229,
+                start: 184,
                 end: 230,
             },
         },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "extended",
+                    span: Span {
+                        start: 268,
+                        end: 276,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "colors",
+                        span: Span {
+                            start: 280,
+                            end: 286,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "add:",
+                            span: Span {
+                                start: 287,
+                                end: 291,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Symbol(
+                            "purple",
+                        ),
+                        Span {
+                            start: 292,
+                            end: 299,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 280,
+                    end: 299,
+                },
+            },
             span: Span {
-                start: 649,
+                start: 268,
+                end: 299,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "withDupe",
+                    span: Span {
+                        start: 300,
+                        end: 308,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "colors",
+                        span: Span {
+                            start: 312,
+                            end: 318,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "add:",
+                            span: Span {
+                                start: 319,
+                                end: 323,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Symbol(
+                            "red",
+                        ),
+                        Span {
+                            start: 324,
+                            end: 328,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 312,
+                    end: 328,
+                },
+            },
+            span: Span {
+                start: 300,
+                end: 328,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "size",
+                    span: Span {
+                        start: 338,
+                        end: 342,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "colors",
+                        span: Span {
+                            start: 346,
+                            end: 352,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "size",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 346,
+                    end: 357,
+                },
+            },
+            span: Span {
+                start: 338,
+                end: 357,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "hasRed",
+                    span: Span {
+                        start: 378,
+                        end: 384,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "colors",
+                        span: Span {
+                            start: 388,
+                            end: 394,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "includes:",
+                            span: Span {
+                                start: 395,
+                                end: 404,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Symbol(
+                            "red",
+                        ),
+                        Span {
+                            start: 405,
+                            end: 409,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 388,
+                    end: 409,
+                },
+            },
+            span: Span {
+                start: 378,
+                end: 409,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "hasPurple",
+                    span: Span {
+                        start: 410,
+                        end: 419,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "colors",
+                        span: Span {
+                            start: 423,
+                            end: 429,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "includes:",
+                            span: Span {
+                                start: 430,
+                                end: 439,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Symbol(
+                            "purple",
+                        ),
+                        Span {
+                            start: 440,
+                            end: 447,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 423,
+                    end: 447,
+                },
+            },
+            span: Span {
+                start: 410,
+                end: 447,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "union",
+                    span: Span {
+                        start: 467,
+                        end: 472,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "colors",
+                        span: Span {
+                            start: 476,
+                            end: 482,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "union:",
+                            span: Span {
+                                start: 483,
+                                end: 489,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Identifier(
+                        Identifier {
+                            name: "warm",
+                            span: Span {
+                                start: 490,
+                                end: 494,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 476,
+                    end: 494,
+                },
+            },
+            span: Span {
+                start: 467,
+                end: 494,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "intersection",
+                    span: Span {
+                        start: 495,
+                        end: 507,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "colors",
+                        span: Span {
+                            start: 511,
+                            end: 517,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "intersection:",
+                            span: Span {
+                                start: 518,
+                                end: 531,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Identifier(
+                        Identifier {
+                            name: "warm",
+                            span: Span {
+                                start: 532,
+                                end: 536,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 511,
+                    end: 536,
+                },
+            },
+            span: Span {
+                start: 495,
+                end: 536,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "difference",
+                    span: Span {
+                        start: 537,
+                        end: 547,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "colors",
+                        span: Span {
+                            start: 551,
+                            end: 557,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "difference:",
+                            span: Span {
+                                start: 558,
+                                end: 569,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Identifier(
+                        Identifier {
+                            name: "warm",
+                            span: Span {
+                                start: 570,
+                                end: 574,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 551,
+                    end: 574,
+                },
+            },
+            span: Span {
+                start: 537,
+                end: 574,
+            },
+        },
+        MessageSend {
+            receiver: Identifier(
+                Identifier {
+                    name: "colors",
+                    span: Span {
+                        start: 612,
+                        end: 618,
+                    },
+                },
+            ),
+            selector: Keyword(
+                [
+                    KeywordPart {
+                        keyword: "each:",
+                        span: Span {
+                            start: 619,
+                            end: 624,
+                        },
+                    },
+                ],
+            ),
+            arguments: [
+                Block(
+                    Block {
+                        parameters: [
+                            BlockParameter {
+                                name: "c",
+                                span: Span {
+                                    start: 627,
+                                    end: 628,
+                                },
+                            },
+                        ],
+                        body: [
+                            MessageSend {
+                                receiver: ClassReference {
+                                    name: Identifier {
+                                        name: "Transcript",
+                                        span: Span {
+                                            start: 631,
+                                            end: 641,
+                                        },
+                                    },
+                                    span: Span {
+                                        start: 631,
+                                        end: 641,
+                                    },
+                                },
+                                selector: Keyword(
+                                    [
+                                        KeywordPart {
+                                            keyword: "show:",
+                                            span: Span {
+                                                start: 642,
+                                                end: 647,
+                                            },
+                                        },
+                                    ],
+                                ),
+                                arguments: [
+                                    Identifier(
+                                        Identifier {
+                                            name: "c",
+                                            span: Span {
+                                                start: 648,
+                                                end: 649,
+                                            },
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    start: 631,
+                                    end: 649,
+                                },
+                            },
+                        ],
+                        span: Span {
+                            start: 625,
+                            end: 650,
+                        },
+                    },
+                ),
+            ],
+            span: Span {
+                start: 612,
                 end: 650,
             },
         },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "transformed",
+                    span: Span {
+                        start: 670,
+                        end: 681,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "colors",
+                        span: Span {
+                            start: 685,
+                            end: 691,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "collect:",
+                            span: Span {
+                                start: 692,
+                                end: 700,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Block(
+                        Block {
+                            parameters: [
+                                BlockParameter {
+                                    name: "c",
+                                    span: Span {
+                                        start: 703,
+                                        end: 704,
+                                    },
+                                },
+                            ],
+                            body: [
+                                Identifier(
+                                    Identifier {
+                                        name: "c",
+                                        span: Span {
+                                            start: 707,
+                                            end: 708,
+                                        },
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 701,
+                                end: 709,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 685,
+                    end: 709,
+                },
+            },
             span: Span {
-                start: 708,
+                start: 670,
                 end: 709,
             },
         },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "filtered",
+                    span: Span {
+                        start: 724,
+                        end: 732,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "colors",
+                        span: Span {
+                            start: 736,
+                            end: 742,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "select:",
+                            span: Span {
+                                start: 743,
+                                end: 750,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Block(
+                        Block {
+                            parameters: [
+                                BlockParameter {
+                                    name: "c",
+                                    span: Span {
+                                        start: 753,
+                                        end: 754,
+                                    },
+                                },
+                            ],
+                            body: [
+                                MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "c",
+                                            span: Span {
+                                                start: 757,
+                                                end: 758,
+                                            },
+                                        },
+                                    ),
+                                    selector: Binary(
+                                        "=",
+                                    ),
+                                    arguments: [
+                                        Literal(
+                                            Symbol(
+                                                "red",
+                                            ),
+                                            Span {
+                                                start: 761,
+                                                end: 765,
+                                            },
+                                        ),
+                                    ],
+                                    span: Span {
+                                        start: 757,
+                                        end: 765,
+                                    },
+                                },
+                            ],
+                            span: Span {
+                                start: 751,
+                                end: 766,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 736,
+                    end: 766,
+                },
+            },
             span: Span {
-                start: 765,
+                start: 724,
                 end: 766,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "isSubset",
+                    span: Span {
+                        start: 783,
+                        end: 791,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "intersection",
+                        span: Span {
+                            start: 795,
+                            end: 807,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "isSubsetOf:",
+                            span: Span {
+                                start: 808,
+                                end: 819,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Identifier(
+                        Identifier {
+                            name: "colors",
+                            span: Span {
+                                start: 820,
+                                end: 826,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 795,
+                    end: 826,
+                },
+            },
+            span: Span {
+                start: 783,
+                end: 826,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "withoutRed",
+                    span: Span {
+                        start: 846,
+                        end: 856,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "colors",
+                        span: Span {
+                            start: 860,
+                            end: 866,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "remove:",
+                            span: Span {
+                                start: 867,
+                                end: 874,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Symbol(
+                            "red",
+                        ),
+                        Span {
+                            start: 875,
+                            end: 879,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 860,
+                    end: 879,
+                },
+            },
+            span: Span {
+                start: 846,
+                end: 879,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "asList",
+                    span: Span {
+                        start: 895,
+                        end: 901,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "colors",
+                        span: Span {
+                            start: 905,
+                            end: 911,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "asList",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 905,
+                    end: 918,
+                },
+            },
+            span: Span {
+                start: 895,
+                end: 918,
             },
         },
     ],
@@ -155,12 +1046,3 @@ Module {
         },
     ],
 }
-
-Diagnostics:
-Diagnostic { severity: Error, message: "Expected ']' to close block", span: Span { start: 167, end: 168 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ,", span: Span { start: 167, end: 168 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 182, end: 183 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 229, end: 230 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 649, end: 650 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 708, end: 709 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 765, end: 766 }, hint: None }

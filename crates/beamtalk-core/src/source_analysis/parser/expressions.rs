@@ -278,6 +278,11 @@ impl Parser {
                 break;
             }
 
+            // BT-415: Inside collection literals (lists/maps), comma is a separator, not an operator
+            if self.in_collection_literal && op.as_str() == "," {
+                break;
+            }
+
             // Get binding power; unknown operators end the expression
             let Some(bp) = binary_binding_power(&op) else {
                 break;
@@ -843,10 +848,15 @@ impl Parser {
 
         let mut pairs = Vec::new();
 
+        // BT-415: Mark that we're inside a collection literal so comma acts as separator
+        let prev_in_collection = self.in_collection_literal;
+        self.in_collection_literal = true;
+
         // Handle empty map: #{}
         if self.check(&TokenKind::RightBrace) {
             let end_token = self.advance();
             let span = start.merge(end_token.span());
+            self.in_collection_literal = prev_in_collection;
             return Expression::MapLiteral { pairs, span };
         }
 
@@ -936,6 +946,7 @@ impl Parser {
         };
 
         let span = start.merge(end_span);
+        self.in_collection_literal = prev_in_collection;
         Expression::MapLiteral { pairs, span }
     }
 
@@ -950,10 +961,15 @@ impl Parser {
 
         let mut elements = Vec::new();
 
+        // BT-415: Mark that we're inside a collection literal so comma acts as separator
+        let prev_in_collection = self.in_collection_literal;
+        self.in_collection_literal = true;
+
         // Handle empty list: #()
         if self.check(&TokenKind::RightParen) {
             let end_token = self.advance();
             let span = start.merge(end_token.span());
+            self.in_collection_literal = prev_in_collection;
             return Expression::ListLiteral {
                 elements,
                 tail: None,
@@ -982,6 +998,7 @@ impl Parser {
                     self.current_token().span()
                 };
                 let span = start.merge(end_span);
+                self.in_collection_literal = prev_in_collection;
                 return Expression::ListLiteral {
                     elements,
                     tail: Some(Box::new(tail)),
@@ -1023,6 +1040,7 @@ impl Parser {
         };
 
         let span = start.merge(end_span);
+        self.in_collection_literal = prev_in_collection;
         Expression::ListLiteral {
             elements,
             tail: None,

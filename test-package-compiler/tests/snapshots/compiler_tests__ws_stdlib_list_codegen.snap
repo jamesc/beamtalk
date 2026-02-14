@@ -115,7 +115,9 @@ module 'ws_stdlib_list' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call
 'dispatch'/4 = fun (Selector, Args, Self, State) ->
     case Selector of
         <'numbers'> when 'true' ->
-            let _Result = 1 in {'reply', _Result, State}
+            let _Result = let _ConcatLeft1 = let _ConcatLeft3 = let _ConcatLeft5 = let _ConcatLeft7 = 1 in let _ConcatRight8 = 2 in case call 'erlang':'is_list'(_ConcatLeft7) of <'true'> when 'true' -> call 'erlang':'++'(_ConcatLeft7, _ConcatRight8) <'false'> when 'true' -> call 'erlang':'iolist_to_binary'([call 'erlang':'binary_to_list'(_ConcatLeft7), call 'erlang':'binary_to_list'(_ConcatRight8)]) end in let _ConcatRight6 = 3 in case call 'erlang':'is_list'(_ConcatLeft5) of <'true'> when 'true' -> call 'erlang':'++'(_ConcatLeft5, _ConcatRight6) <'false'> when 'true' -> call 'erlang':'iolist_to_binary'([call 'erlang':'binary_to_list'(_ConcatLeft5), call 'erlang':'binary_to_list'(_ConcatRight6)]) end in let _ConcatRight4 = 4 in case call 'erlang':'is_list'(_ConcatLeft3) of <'true'> when 'true' -> call 'erlang':'++'(_ConcatLeft3, _ConcatRight4) <'false'> when 'true' -> call 'erlang':'iolist_to_binary'([call 'erlang':'binary_to_list'(_ConcatLeft3), call 'erlang':'binary_to_list'(_ConcatRight4)]) end in let _ConcatRight2 = 5 in case call 'erlang':'is_list'(_ConcatLeft1) of <'true'> when 'true' -> call 'erlang':'++'(_ConcatLeft1, _ConcatRight2) <'false'> when 'true' -> call 'erlang':'iolist_to_binary'([call 'erlang':'binary_to_list'(_ConcatLeft1), call 'erlang':'binary_to_list'(_ConcatRight2)]) end in {'reply', _Result, State}
+        <'empty'> when 'true' ->
+            {'reply', 'nil', State}
         <OtherSelector> when 'true' ->
             %% BT-229/ADR 0005: Check extension registry before hierarchy walk
             let ExtLookup = try call 'beamtalk_extensions':'lookup'('WsStdlibList', OtherSelector)
@@ -153,10 +155,10 @@ module 'ws_stdlib_list' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call
 
 
 'method_table'/0 = fun () ->
-    ~{'numbers' => 0}~
+    ~{'numbers' => 0, 'empty' => 0}~
 
 
 'has_method'/1 = fun (Selector) ->
-    call 'lists':'member'(Selector, ['numbers'])
+    call 'lists':'member'(Selector, ['numbers', 'empty'])
 
 end
