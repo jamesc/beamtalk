@@ -409,7 +409,10 @@ handle_op(<<"inspect">>, Params, Msg, _SessionPid) ->
                             State = sys:get_state(Pid, 5000),
                             InspectStr = case State of
                                 M when is_map(M) ->
-                                    beamtalk_reflection:inspect_string(M);
+                                    case beamtalk_tagged_map:is_tagged(M) of
+                                        true -> beamtalk_reflection:inspect_string(M);
+                                        false -> beamtalk_primitive:print_string(M)
+                                    end;
                                 _ ->
                                     iolist_to_binary(io_lib:format("~p", [State]))
                             end,
