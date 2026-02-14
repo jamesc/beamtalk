@@ -79,14 +79,6 @@ sealed Object subclass: String
   /// ```
   ++ other => @primitive '++'
 
-  /// Alias for `++`. Concatenate two strings.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// 'hello' , ' world'   // => 'hello world'
-  /// ```
-  , other => self ++ other
-
   /// Number of grapheme clusters in the string.
   ///
   /// ## Examples

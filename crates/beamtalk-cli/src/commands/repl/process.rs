@@ -106,13 +106,27 @@ pub(super) fn start_beam_node(
     args.push(OsString::from("-eval"));
     args.push(OsString::from(eval_cmd));
 
-    let child = Command::new("erl")
-        .arg("-noshell")
+    let mut cmd = Command::new("erl");
+    cmd.arg("-noshell")
         .args(&args)
         .current_dir(project_root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    // Tell the compiler app where to find the compiler port binary.
+    // In installed mode, it lives next to the beamtalk binary in bin/.
+    // In dev mode, it lives in target/{debug,release}/.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(bin_dir) = exe.parent() {
+            let compiler_port = bin_dir.join("beamtalk-compiler-port");
+            if compiler_port.exists() {
+                cmd.env("BEAMTALK_COMPILER_PORT_BIN", &compiler_port);
+            }
+        }
+    }
+
+    let child = cmd
         .spawn()
         .map_err(|e| miette!("Failed to start BEAM node: {e}\nIs Erlang/OTP installed?"))?;
 

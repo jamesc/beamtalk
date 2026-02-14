@@ -50,7 +50,7 @@ use std::time::Duration;
 use miette::{IntoDiagnostic, Result};
 use rustyline::error::ReadlineError;
 use rustyline::history::FileHistory;
-use rustyline::{DefaultEditor, Editor};
+use rustyline::{CompletionType, Config, Editor};
 use serde::Deserialize;
 use tracing::warn;
 
@@ -65,10 +65,12 @@ const MAX_CONNECT_RETRIES: u32 = 10;
 const RETRY_DELAY_MS: u64 = 500;
 
 mod client;
+mod completer;
 mod display;
 mod process;
 
 use client::ReplClient;
+use completer::ReplCompleter;
 use display::{format_value, history_path, print_help};
 use process::{
     BeamChildGuard, connect_with_retries, read_port_from_child, resolve_node_name, resolve_port,
@@ -347,8 +349,14 @@ pub fn run(
 
     println!();
 
-    // Set up rustyline editor
-    let mut rl: Editor<(), FileHistory> = DefaultEditor::new().into_diagnostic()?;
+    // Set up rustyline editor with tab completion
+    let config = Config::builder()
+        .completion_type(CompletionType::List)
+        .build();
+    let completer = ReplCompleter::new(connect_port);
+    let mut rl: Editor<ReplCompleter, FileHistory> =
+        Editor::with_config(config).into_diagnostic()?;
+    rl.set_helper(Some(completer));
 
     // Load history
     let history_file = history_path()?;
