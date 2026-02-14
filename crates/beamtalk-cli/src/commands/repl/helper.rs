@@ -21,7 +21,7 @@ use rustyline::hint::Hinter;
 use rustyline::validate::Validator;
 use rustyline::{Context, Helper};
 
-use beamtalk_core::source_analysis::{Lexer, TokenKind, Trivia};
+use beamtalk_core::source_analysis::{TokenKind, Trivia, lex_with_eof};
 
 use crate::commands::protocol::{self, ProtocolClient};
 
@@ -234,7 +234,9 @@ fn highlight_line(line: &str) -> String {
     let mut result = String::with_capacity(line.len() * 2);
     let mut last_pos = 0usize;
 
-    for token in Lexer::new(line) {
+    // Use lex_with_eof to include the Eof token, which carries trailing
+    // comments/whitespace as leading trivia (e.g., comment-only lines).
+    for token in lex_with_eof(line) {
         // Process leading trivia (comments, whitespace)
         for trivia in token.leading_trivia() {
             let trivia_text = trivia.as_str();
@@ -474,6 +476,13 @@ mod tests {
         let result = highlight_line("x + 1 // note");
         assert!(result.contains(color::GRAY));
         assert!(result.contains("// note"));
+    }
+
+    #[test]
+    fn highlight_comment_only_line() {
+        let result = highlight_line("// just a comment");
+        assert!(result.contains(color::GRAY));
+        assert!(result.contains("// just a comment"));
     }
 
     #[test]

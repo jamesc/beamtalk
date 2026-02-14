@@ -780,6 +780,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(color)]
     fn format_value_string() {
         with_color_disabled(|| {
             let value = serde_json::json!("hello");
@@ -788,6 +789,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(color)]
     fn format_value_number() {
         with_color_disabled(|| {
             let value = serde_json::json!(42);
@@ -796,6 +798,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(color)]
     fn format_value_bool() {
         with_color_disabled(|| {
             let value = serde_json::json!(true);
@@ -804,6 +807,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(color)]
     fn format_value_array() {
         with_color_disabled(|| {
             let value = serde_json::json!([1, 2, 3]);
@@ -812,6 +816,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(color)]
     fn format_value_pid() {
         with_color_disabled(|| {
             // Backend now pre-formats pids as "#Actor<pid>"
@@ -821,6 +826,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(color)]
     fn format_value_block() {
         with_color_disabled(|| {
             // Blocks are formatted as "a Block/N" by the backend
@@ -833,12 +839,32 @@ mod tests {
     }
 
     #[test]
+    #[serial(color)]
     fn format_value_tuple() {
         with_color_disabled(|| {
             // BT-536: Tuples are pre-formatted as strings by the backend
             let value = serde_json::json!("{1, hello}");
             assert_eq!(format_value(&value), "{1, hello}");
         });
+    }
+
+    #[test]
+    #[serial(color)]
+    fn format_error_with_color_disabled() {
+        with_color_disabled(|| {
+            assert_eq!(format_error("test error"), "Error: test error");
+        });
+    }
+
+    #[test]
+    #[serial(color)]
+    fn format_error_with_color_enabled() {
+        color::COLOR_ENABLED.store(true, Ordering::Relaxed);
+        let result = format_error("test error");
+        assert!(result.contains("Error:"));
+        assert!(result.contains("test error"));
+        assert!(result.contains(color::RED));
+        assert!(result.contains(color::RESET));
     }
 
     /// Uses `#[serial(env_var)]` because it modifies the `BEAMTALK_RUNTIME_DIR`
