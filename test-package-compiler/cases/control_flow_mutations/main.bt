@@ -65,7 +65,7 @@ doubled := numbers collect: [:n |
 matchCount := 0.
 evens := numbers select: [:n |
     matchCount := matchCount + 1.
-    n % 2 = 0
+    n % 2 =:= 0
 ].
 // Expected: matchCount = 5, evens = #[2,4]
 

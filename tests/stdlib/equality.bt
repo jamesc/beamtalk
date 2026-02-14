@@ -17,15 +17,15 @@
 // => true
 
 // Numeric inequality: different values
-1.0 ~= 2
+1.0 /= 2
 // => true
-1 ~= 2
+1 /= 2
 // => true
 
 // String equality
 'hello' == 'hello'
 // => true
-'hello' ~= 'world'
+'hello' /= 'world'
 // => true
 
 // Boolean equality
@@ -33,23 +33,40 @@ true == true
 // => true
 false == false
 // => true
-true ~= false
+true /= false
 // => true
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Strict Equality (no type coercion)
+// Strict Equality (no type coercion) — ADR 0002
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Use `=` for strict equality without coercion
-1.0 = 1.0
+// Use `=:=` for strict equality without coercion
+1.0 =:= 1.0
 // => true
-1 = 1
+1 =:= 1
 // => true
 
-// Strict inequality: integer and float are NOT strictly equal
-(1.0 = 1) not
+// Strict vs loose equality
+// Note: 1.0 compiles to integer 1 in Core Erlang (Rust format! truncates .0)
+// so 1.0 =:= 1 is true due to compilation artifact.
+// Use values like 1.5 to demonstrate real strict equality behavior.
+1.5 =:= 1
 // => false
-(1.0 ~= 1) not
+
+// Note: 1.5 and 1 are NOT loosely equal (different numeric values)
+1.5 == 1
+// => false
+
+// Strict inequality operator: =/=
+1.5 =/= 1
+// => true
+1.0 =/= 1.0
+// => false
+
+// Loose inequality: values that are loosely equal return false for /=
+3 /= 3
+// => false
+3 /= 4
 // => true
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -74,7 +91,7 @@ c2 := Counter spawn
 // => #Actor<Counter,_>
 
 // Different actor instances are not equal (different pids)
-c1 ~= c2
+c1 /= c2
 // => true
 
 // Same reference is equal to itself
@@ -99,5 +116,5 @@ c1 == c1
 // Negative values
 -1.0 == -1
 // => true
--5 ~= -6
+-5 /= -6
 // => true

@@ -115,144 +115,144 @@ Token { kind: RightBracket, span: Span { start: 3068, end: 3069 }, leading_trivi
 Token { kind: Identifier("result15"), span: Span { start: 3582, end: 3590 }, leading_trivia: [Whitespace("\n\n"), LineComment("// ═══════════════════════════════════════════════════════════════════════"), Whitespace("\n"), LineComment("// Edge Cases: Equality and Identity"), Whitespace("\n"), LineComment("// ═══════════════════════════════════════════════════════════════════════"), Whitespace("\n\n"), LineComment("// nil equality with itself"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Assign, span: Span { start: 3591, end: 3593 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Identifier("nil"), span: Span { start: 3594, end: 3597 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: BinarySelector("="), span: Span { start: 3598, end: 3599 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("nil"), span: Span { start: 3600, end: 3603 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// => true")] }
-Token { kind: Identifier("result16"), span: Span { start: 3653, end: 3661 }, leading_trivia: [Whitespace("\n\n"), LineComment("// nil inequality with other values"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 3662, end: 3664 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("nil"), span: Span { start: 3665, end: 3668 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: BinarySelector("="), span: Span { start: 3669, end: 3670 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Integer("0"), span: Span { start: 3671, end: 3672 }, leading_trivia: [], trailing_trivia: [Whitespace("    "), LineComment("// => false")] }
-Token { kind: Identifier("result17"), span: Span { start: 3688, end: 3696 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 3697, end: 3699 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("nil"), span: Span { start: 3700, end: 3703 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: BinarySelector("="), span: Span { start: 3704, end: 3705 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: String(""), span: Span { start: 3706, end: 3708 }, leading_trivia: [], trailing_trivia: [Whitespace("   "), LineComment("// => false")] }
-Token { kind: Identifier("result18"), span: Span { start: 3723, end: 3731 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 3732, end: 3734 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("nil"), span: Span { start: 3735, end: 3738 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: BinarySelector("="), span: Span { start: 3739, end: 3740 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("false"), span: Span { start: 3741, end: 3746 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// => false (nil is not false!)")] }
-Token { kind: Identifier("result19"), span: Span { start: 4295, end: 4303 }, leading_trivia: [Whitespace("\n\n"), LineComment("// ═══════════════════════════════════════════════════════════════════════"), Whitespace("\n"), LineComment("// Edge Cases: Boolean Logic Integration"), Whitespace("\n"), LineComment("// ═══════════════════════════════════════════════════════════════════════"), Whitespace("\n\n"), LineComment("// Combining isNil with boolean logic"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 4304, end: 4306 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("nil"), span: Span { start: 4307, end: 4310 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("isNil"), span: Span { start: 4311, end: 4316 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("and:"), span: Span { start: 4317, end: 4321 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: LeftBracket, span: Span { start: 4322, end: 4323 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("true"), span: Span { start: 4323, end: 4327 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: RightBracket, span: Span { start: 4327, end: 4328 }, leading_trivia: [], trailing_trivia: [Whitespace("   "), LineComment("// => true")] }
-Token { kind: Identifier("result20"), span: Span { start: 4342, end: 4350 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 4351, end: 4353 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("nil"), span: Span { start: 4354, end: 4357 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("isNil"), span: Span { start: 4358, end: 4363 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("or:"), span: Span { start: 4364, end: 4367 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: LeftBracket, span: Span { start: 4368, end: 4369 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("false"), span: Span { start: 4369, end: 4374 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: RightBracket, span: Span { start: 4374, end: 4375 }, leading_trivia: [], trailing_trivia: [Whitespace("   "), LineComment("// => true (short-circuits)")] }
-Token { kind: Identifier("result21"), span: Span { start: 4406, end: 4414 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 4415, end: 4417 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("nil"), span: Span { start: 4418, end: 4421 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("notNil"), span: Span { start: 4422, end: 4428 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("and:"), span: Span { start: 4429, end: 4433 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: LeftBracket, span: Span { start: 4434, end: 4435 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("true"), span: Span { start: 4435, end: 4439 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: RightBracket, span: Span { start: 4439, end: 4440 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// => false (short-circuits)")] }
-Token { kind: Identifier("result22"), span: Span { start: 4471, end: 4479 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 4480, end: 4482 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("nil"), span: Span { start: 4483, end: 4486 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("notNil"), span: Span { start: 4487, end: 4493 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("or:"), span: Span { start: 4494, end: 4497 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: LeftBracket, span: Span { start: 4498, end: 4499 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("true"), span: Span { start: 4499, end: 4503 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: RightBracket, span: Span { start: 4503, end: 4504 }, leading_trivia: [], trailing_trivia: [Whitespace("   "), LineComment("// => true")] }
-Token { kind: Identifier("result23"), span: Span { start: 4560, end: 4568 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Using isNil result in ifTrue:ifFalse:"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 4569, end: 4571 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("nil"), span: Span { start: 4572, end: 4575 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("isNil"), span: Span { start: 4576, end: 4581 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("ifTrue:"), span: Span { start: 4582, end: 4589 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: LeftBracket, span: Span { start: 4590, end: 4591 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: String("is nil"), span: Span { start: 4591, end: 4599 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: RightBracket, span: Span { start: 4599, end: 4600 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("ifFalse:"), span: Span { start: 4601, end: 4609 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: LeftBracket, span: Span { start: 4610, end: 4611 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: String("not nil"), span: Span { start: 4611, end: 4620 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: RightBracket, span: Span { start: 4620, end: 4621 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// => 'is nil'")] }
-Token { kind: Identifier("result24"), span: Span { start: 5142, end: 5150 }, leading_trivia: [Whitespace("\n\n"), LineComment("// ═══════════════════════════════════════════════════════════════════════"), Whitespace("\n"), LineComment("// Edge Cases: Block Expressions"), Whitespace("\n"), LineComment("// ═══════════════════════════════════════════════════════════════════════"), Whitespace("\n\n"), LineComment("// ifNil: with arithmetic in block"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 5151, end: 5153 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("nil"), span: Span { start: 5154, end: 5157 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("ifNil:"), span: Span { start: 5158, end: 5164 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: LeftBracket, span: Span { start: 5165, end: 5166 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Integer("1"), span: Span { start: 5166, end: 5167 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: BinarySelector("+"), span: Span { start: 5168, end: 5169 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Integer("2"), span: Span { start: 5170, end: 5171 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: BinarySelector("*"), span: Span { start: 5172, end: 5173 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Integer("3"), span: Span { start: 5174, end: 5175 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: RightBracket, span: Span { start: 5175, end: 5176 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// => 7")] }
-Token { kind: Identifier("result25"), span: Span { start: 5230, end: 5238 }, leading_trivia: [Whitespace("\n\n"), LineComment("// ifNotNil: block should NOT be evaluated"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 5239, end: 5241 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("nil"), span: Span { start: 5242, end: 5245 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("ifNotNil:"), span: Span { start: 5246, end: 5255 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: LeftBracket, span: Span { start: 5256, end: 5257 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Colon, span: Span { start: 5257, end: 5258 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("val"), span: Span { start: 5258, end: 5261 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Pipe, span: Span { start: 5262, end: 5263 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("val"), span: Span { start: 5264, end: 5267 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: BinarySelector("+"), span: Span { start: 5268, end: 5269 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Integer("100"), span: Span { start: 5270, end: 5273 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: BinarySelector("*"), span: Span { start: 5274, end: 5275 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Integer("2"), span: Span { start: 5276, end: 5277 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: RightBracket, span: Span { start: 5277, end: 5278 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// => nil (block not evaluated)")] }
-Token { kind: Identifier("check1"), span: Span { start: 5857, end: 5863 }, leading_trivia: [Whitespace("\n\n"), LineComment("// ═══════════════════════════════════════════════════════════════════════"), Whitespace("\n"), LineComment("// Edge Cases: Multiple Consecutive Checks  "), Whitespace("\n"), LineComment("// ═══════════════════════════════════════════════════════════════════════"), Whitespace("\n\n"), LineComment("// Multiple isNil checks in sequence (should all be consistent)"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 5864, end: 5866 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("nil"), span: Span { start: 5867, end: 5870 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("isNil"), span: Span { start: 5871, end: 5876 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("check2"), span: Span { start: 5877, end: 5883 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 5884, end: 5886 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("nil"), span: Span { start: 5887, end: 5890 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("isNil"), span: Span { start: 5891, end: 5896 }, leading_trivia: [], trailing_trivia: [Whitespace("  ")] }
-Token { kind: Identifier("check3"), span: Span { start: 5899, end: 5905 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 5906, end: 5908 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("nil"), span: Span { start: 5909, end: 5912 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("isNil"), span: Span { start: 5913, end: 5918 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("result26"), span: Span { start: 5919, end: 5927 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 5928, end: 5930 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("check1"), span: Span { start: 5931, end: 5937 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("and:"), span: Span { start: 5938, end: 5942 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: LeftBracket, span: Span { start: 5943, end: 5944 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("check2"), span: Span { start: 5944, end: 5950 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("and:"), span: Span { start: 5951, end: 5955 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: LeftBracket, span: Span { start: 5956, end: 5957 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("check3"), span: Span { start: 5957, end: 5963 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: RightBracket, span: Span { start: 5963, end: 5964 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: RightBracket, span: Span { start: 5964, end: 5965 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// => true")] }
-Token { kind: Identifier("maybeValue"), span: Span { start: 6014, end: 6024 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Assigning nil and then checking"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 6025, end: 6027 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("nil"), span: Span { start: 6028, end: 6031 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("result27"), span: Span { start: 6032, end: 6040 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 6041, end: 6043 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("maybeValue"), span: Span { start: 6044, end: 6054 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("isNil"), span: Span { start: 6055, end: 6060 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// => true")] }
-Token { kind: Identifier("result28"), span: Span { start: 6598, end: 6606 }, leading_trivia: [Whitespace("\n\n"), LineComment("// ═══════════════════════════════════════════════════════════════════════"), Whitespace("\n"), LineComment("// Edge Cases: ifNil: vs ifNotNil: Return Values"), Whitespace("\n"), LineComment("// ═══════════════════════════════════════════════════════════════════════"), Whitespace("\n\n"), LineComment("// ifNil: returns block result, not nil"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 6607, end: 6609 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("nil"), span: Span { start: 6610, end: 6613 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("ifNil:"), span: Span { start: 6614, end: 6620 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: LeftBracket, span: Span { start: 6621, end: 6622 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Integer("42"), span: Span { start: 6622, end: 6624 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: RightBracket, span: Span { start: 6624, end: 6625 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// => 42 (not nil)")] }
-Token { kind: Identifier("result29"), span: Span { start: 6686, end: 6694 }, leading_trivia: [Whitespace("\n\n"), LineComment("// ifNotNil: on nil returns nil itself"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 6695, end: 6697 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("nil"), span: Span { start: 6698, end: 6701 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("ifNotNil:"), span: Span { start: 6702, end: 6711 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: LeftBracket, span: Span { start: 6712, end: 6713 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Integer("42"), span: Span { start: 6713, end: 6715 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: RightBracket, span: Span { start: 6715, end: 6716 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// => nil (block not evaluated)")] }
-Token { kind: Identifier("result30"), span: Span { start: 6820, end: 6828 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Verify ifNotNil: truly doesn't evaluate by checking return is nil"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 6829, end: 6831 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: LeftParen, span: Span { start: 6832, end: 6833 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("nil"), span: Span { start: 6833, end: 6836 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("ifNotNil:"), span: Span { start: 6837, end: 6846 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: LeftBracket, span: Span { start: 6847, end: 6848 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Integer("9999"), span: Span { start: 6848, end: 6852 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: RightBracket, span: Span { start: 6852, end: 6853 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: RightParen, span: Span { start: 6853, end: 6854 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("isNil"), span: Span { start: 6855, end: 6860 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// => true")] }
-Token { kind: Eof, span: Span { start: 6873, end: 6873 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
+Token { kind: BinarySelector("=:="), span: Span { start: 3598, end: 3601 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("nil"), span: Span { start: 3602, end: 3605 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// => true")] }
+Token { kind: Identifier("result16"), span: Span { start: 3655, end: 3663 }, leading_trivia: [Whitespace("\n\n"), LineComment("// nil inequality with other values"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 3664, end: 3666 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("nil"), span: Span { start: 3667, end: 3670 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("=:="), span: Span { start: 3671, end: 3674 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("0"), span: Span { start: 3675, end: 3676 }, leading_trivia: [], trailing_trivia: [Whitespace("    "), LineComment("// => false")] }
+Token { kind: Identifier("result17"), span: Span { start: 3692, end: 3700 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 3701, end: 3703 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("nil"), span: Span { start: 3704, end: 3707 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("=:="), span: Span { start: 3708, end: 3711 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String(""), span: Span { start: 3712, end: 3714 }, leading_trivia: [], trailing_trivia: [Whitespace("   "), LineComment("// => false")] }
+Token { kind: Identifier("result18"), span: Span { start: 3729, end: 3737 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 3738, end: 3740 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("nil"), span: Span { start: 3741, end: 3744 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("=:="), span: Span { start: 3745, end: 3748 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("false"), span: Span { start: 3749, end: 3754 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// => false (nil is not false!)")] }
+Token { kind: Identifier("result19"), span: Span { start: 4303, end: 4311 }, leading_trivia: [Whitespace("\n\n"), LineComment("// ═══════════════════════════════════════════════════════════════════════"), Whitespace("\n"), LineComment("// Edge Cases: Boolean Logic Integration"), Whitespace("\n"), LineComment("// ═══════════════════════════════════════════════════════════════════════"), Whitespace("\n\n"), LineComment("// Combining isNil with boolean logic"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 4312, end: 4314 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("nil"), span: Span { start: 4315, end: 4318 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("isNil"), span: Span { start: 4319, end: 4324 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("and:"), span: Span { start: 4325, end: 4329 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 4330, end: 4331 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("true"), span: Span { start: 4331, end: 4335 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 4335, end: 4336 }, leading_trivia: [], trailing_trivia: [Whitespace("   "), LineComment("// => true")] }
+Token { kind: Identifier("result20"), span: Span { start: 4350, end: 4358 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 4359, end: 4361 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("nil"), span: Span { start: 4362, end: 4365 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("isNil"), span: Span { start: 4366, end: 4371 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("or:"), span: Span { start: 4372, end: 4375 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 4376, end: 4377 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("false"), span: Span { start: 4377, end: 4382 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 4382, end: 4383 }, leading_trivia: [], trailing_trivia: [Whitespace("   "), LineComment("// => true (short-circuits)")] }
+Token { kind: Identifier("result21"), span: Span { start: 4414, end: 4422 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 4423, end: 4425 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("nil"), span: Span { start: 4426, end: 4429 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("notNil"), span: Span { start: 4430, end: 4436 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("and:"), span: Span { start: 4437, end: 4441 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 4442, end: 4443 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("true"), span: Span { start: 4443, end: 4447 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 4447, end: 4448 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// => false (short-circuits)")] }
+Token { kind: Identifier("result22"), span: Span { start: 4479, end: 4487 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 4488, end: 4490 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("nil"), span: Span { start: 4491, end: 4494 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("notNil"), span: Span { start: 4495, end: 4501 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("or:"), span: Span { start: 4502, end: 4505 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 4506, end: 4507 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("true"), span: Span { start: 4507, end: 4511 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 4511, end: 4512 }, leading_trivia: [], trailing_trivia: [Whitespace("   "), LineComment("// => true")] }
+Token { kind: Identifier("result23"), span: Span { start: 4568, end: 4576 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Using isNil result in ifTrue:ifFalse:"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 4577, end: 4579 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("nil"), span: Span { start: 4580, end: 4583 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("isNil"), span: Span { start: 4584, end: 4589 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("ifTrue:"), span: Span { start: 4590, end: 4597 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 4598, end: 4599 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: String("is nil"), span: Span { start: 4599, end: 4607 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 4607, end: 4608 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("ifFalse:"), span: Span { start: 4609, end: 4617 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 4618, end: 4619 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: String("not nil"), span: Span { start: 4619, end: 4628 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 4628, end: 4629 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// => 'is nil'")] }
+Token { kind: Identifier("result24"), span: Span { start: 5150, end: 5158 }, leading_trivia: [Whitespace("\n\n"), LineComment("// ═══════════════════════════════════════════════════════════════════════"), Whitespace("\n"), LineComment("// Edge Cases: Block Expressions"), Whitespace("\n"), LineComment("// ═══════════════════════════════════════════════════════════════════════"), Whitespace("\n\n"), LineComment("// ifNil: with arithmetic in block"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 5159, end: 5161 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("nil"), span: Span { start: 5162, end: 5165 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("ifNil:"), span: Span { start: 5166, end: 5172 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 5173, end: 5174 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Integer("1"), span: Span { start: 5174, end: 5175 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("+"), span: Span { start: 5176, end: 5177 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("2"), span: Span { start: 5178, end: 5179 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("*"), span: Span { start: 5180, end: 5181 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("3"), span: Span { start: 5182, end: 5183 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 5183, end: 5184 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// => 7")] }
+Token { kind: Identifier("result25"), span: Span { start: 5238, end: 5246 }, leading_trivia: [Whitespace("\n\n"), LineComment("// ifNotNil: block should NOT be evaluated"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 5247, end: 5249 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("nil"), span: Span { start: 5250, end: 5253 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("ifNotNil:"), span: Span { start: 5254, end: 5263 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 5264, end: 5265 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Colon, span: Span { start: 5265, end: 5266 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("val"), span: Span { start: 5266, end: 5269 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Pipe, span: Span { start: 5270, end: 5271 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("val"), span: Span { start: 5272, end: 5275 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("+"), span: Span { start: 5276, end: 5277 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("100"), span: Span { start: 5278, end: 5281 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("*"), span: Span { start: 5282, end: 5283 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("2"), span: Span { start: 5284, end: 5285 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 5285, end: 5286 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// => nil (block not evaluated)")] }
+Token { kind: Identifier("check1"), span: Span { start: 5865, end: 5871 }, leading_trivia: [Whitespace("\n\n"), LineComment("// ═══════════════════════════════════════════════════════════════════════"), Whitespace("\n"), LineComment("// Edge Cases: Multiple Consecutive Checks  "), Whitespace("\n"), LineComment("// ═══════════════════════════════════════════════════════════════════════"), Whitespace("\n\n"), LineComment("// Multiple isNil checks in sequence (should all be consistent)"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 5872, end: 5874 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("nil"), span: Span { start: 5875, end: 5878 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("isNil"), span: Span { start: 5879, end: 5884 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("check2"), span: Span { start: 5885, end: 5891 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 5892, end: 5894 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("nil"), span: Span { start: 5895, end: 5898 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("isNil"), span: Span { start: 5899, end: 5904 }, leading_trivia: [], trailing_trivia: [Whitespace("  ")] }
+Token { kind: Identifier("check3"), span: Span { start: 5907, end: 5913 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 5914, end: 5916 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("nil"), span: Span { start: 5917, end: 5920 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("isNil"), span: Span { start: 5921, end: 5926 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("result26"), span: Span { start: 5927, end: 5935 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 5936, end: 5938 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("check1"), span: Span { start: 5939, end: 5945 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("and:"), span: Span { start: 5946, end: 5950 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 5951, end: 5952 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("check2"), span: Span { start: 5952, end: 5958 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("and:"), span: Span { start: 5959, end: 5963 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 5964, end: 5965 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("check3"), span: Span { start: 5965, end: 5971 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 5971, end: 5972 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 5972, end: 5973 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// => true")] }
+Token { kind: Identifier("maybeValue"), span: Span { start: 6022, end: 6032 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Assigning nil and then checking"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 6033, end: 6035 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("nil"), span: Span { start: 6036, end: 6039 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("result27"), span: Span { start: 6040, end: 6048 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 6049, end: 6051 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("maybeValue"), span: Span { start: 6052, end: 6062 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("isNil"), span: Span { start: 6063, end: 6068 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// => true")] }
+Token { kind: Identifier("result28"), span: Span { start: 6606, end: 6614 }, leading_trivia: [Whitespace("\n\n"), LineComment("// ═══════════════════════════════════════════════════════════════════════"), Whitespace("\n"), LineComment("// Edge Cases: ifNil: vs ifNotNil: Return Values"), Whitespace("\n"), LineComment("// ═══════════════════════════════════════════════════════════════════════"), Whitespace("\n\n"), LineComment("// ifNil: returns block result, not nil"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 6615, end: 6617 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("nil"), span: Span { start: 6618, end: 6621 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("ifNil:"), span: Span { start: 6622, end: 6628 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 6629, end: 6630 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Integer("42"), span: Span { start: 6630, end: 6632 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 6632, end: 6633 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// => 42 (not nil)")] }
+Token { kind: Identifier("result29"), span: Span { start: 6694, end: 6702 }, leading_trivia: [Whitespace("\n\n"), LineComment("// ifNotNil: on nil returns nil itself"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 6703, end: 6705 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("nil"), span: Span { start: 6706, end: 6709 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("ifNotNil:"), span: Span { start: 6710, end: 6719 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 6720, end: 6721 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Integer("42"), span: Span { start: 6721, end: 6723 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 6723, end: 6724 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// => nil (block not evaluated)")] }
+Token { kind: Identifier("result30"), span: Span { start: 6828, end: 6836 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Verify ifNotNil: truly doesn't evaluate by checking return is nil"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 6837, end: 6839 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftParen, span: Span { start: 6840, end: 6841 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("nil"), span: Span { start: 6841, end: 6844 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("ifNotNil:"), span: Span { start: 6845, end: 6854 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 6855, end: 6856 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Integer("9999"), span: Span { start: 6856, end: 6860 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 6860, end: 6861 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightParen, span: Span { start: 6861, end: 6862 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("isNil"), span: Span { start: 6863, end: 6868 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// => true")] }
+Token { kind: Eof, span: Span { start: 6881, end: 6881 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

@@ -324,12 +324,30 @@ impl<'src> Lexer<'src> {
             // Colon or assignment
             ':' => self.lex_colon_or_assign(),
 
-            // Fat arrow (=>) for method definitions - must check before binary operators
+            // Fat arrow (=>) for method definitions, or Erlang comparison operators (ADR 0002)
             '=' => {
                 if self.peek_char_second() == Some('>') {
+                    // Check for `=>/=` — should this be `=> /=`? No, `=>` is only at
+                    // method definitions where `/=` wouldn't follow. So `=>` is safe.
                     self.advance(); // =
                     self.advance(); // >
                     TokenKind::FatArrow
+                } else if self.peek_char_second() == Some(':')
+                    && self.peek_char_third() == Some('=')
+                {
+                    // `=:=` — strict equality (ADR 0002)
+                    self.advance(); // =
+                    self.advance(); // :
+                    self.advance(); // =
+                    TokenKind::BinarySelector(EcoString::from("=:="))
+                } else if self.peek_char_second() == Some('/')
+                    && self.peek_char_third() == Some('=')
+                {
+                    // `=/=` — strict inequality (ADR 0002)
+                    self.advance(); // =
+                    self.advance(); // /
+                    self.advance(); // =
+                    TokenKind::BinarySelector(EcoString::from("=/="))
                 } else {
                     self.lex_binary_selector()
                 }
@@ -592,7 +610,7 @@ impl<'src> Lexer<'src> {
                 let name = &full_text[1..];
                 TokenKind::Symbol(EcoString::from(name))
             }
-            // Binary operator symbol: #+, #>=, #~=
+            // Binary operator symbol: #+, #>=, #/=
             Some(c) if Self::is_binary_selector_char(c) => {
                 self.advance_while(Self::is_binary_selector_char);
                 let full_text = self.text_for(self.span_from(start));
@@ -892,12 +910,12 @@ mod tests {
     #[test]
     fn lex_binary_operator_symbols() {
         assert_eq!(
-            lex_kinds("#+ #- #>= #~="),
+            lex_kinds("#+ #- #>= #/="),
             vec![
                 TokenKind::Symbol("+".into()),
                 TokenKind::Symbol("-".into()),
                 TokenKind::Symbol(">=".into()),
-                TokenKind::Symbol("~=".into()),
+                TokenKind::Symbol("/=".into()),
             ]
         );
     }
@@ -963,13 +981,15 @@ mod tests {
     #[test]
     fn lex_compound_binary_selectors() {
         assert_eq!(
-            lex_kinds("<= >= == ~= **"),
+            lex_kinds("<= >= == /= ** =:= =/="),
             vec![
                 TokenKind::BinarySelector("<=".into()),
                 TokenKind::BinarySelector(">=".into()),
                 TokenKind::BinarySelector("==".into()),
-                TokenKind::BinarySelector("~=".into()),
+                TokenKind::BinarySelector("/=".into()),
                 TokenKind::BinarySelector("**".into()),
+                TokenKind::BinarySelector("=:=".into()),
+                TokenKind::BinarySelector("=/=".into()),
             ]
         );
     }

@@ -87,7 +87,7 @@ result25 := [:x | x] isNil   // => false
 // ═══════════════════════════════════════════════════════════════════════
 
 // Verify ifNil: doesn't evaluate by checking return equals receiver
-result26 := (42 ifNil: [9999]) = 42  // => true
+result26 := (42 ifNil: [9999]) =:= 42  // => true
 
 // ifNil: with complex block expression (should not evaluate)
 result27 := 10 ifNil: [1 + 2 * 3]  // => 10 (not 7)
@@ -113,10 +113,10 @@ result31 := 42 ifNil: ['nil case'] ifNotNil: [:v | 'not nil case']   // => 'not 
 // ═══════════════════════════════════════════════════════════════════════
 
 // ifNotNil: returns block result
-result32 := (5 ifNotNil: [:x | x * 10]) = 50  // => true
+result32 := (5 ifNotNil: [:x | x * 10]) =:= 50  // => true
 
 // ifNil: returns self unchanged
-result33 := (100 ifNil: [0]) = 100  // => true
+result33 := (100 ifNil: [0]) =:= 100  // => true
 
 // ═══════════════════════════════════════════════════════════════════════
 // Real-World Usage Patterns

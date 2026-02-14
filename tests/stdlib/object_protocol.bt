@@ -90,10 +90,10 @@ nil yourself
 // => nil
 
 // yourself should return the same object
-42 yourself = 42
+42 yourself =:= 42
 // => true
 
-'test' yourself = 'test'
+'test' yourself =:= 'test'
 // => true
 
 // ===========================================================================
@@ -105,10 +105,10 @@ nil yourself
 // => _
 
 // Same value should produce same hash
-42 hash = 42 hash
+42 hash =:= 42 hash
 // => true
 
-'hello' hash = 'hello' hash
+'hello' hash =:= 'hello' hash
 // => true
 
 // Different values typically produce different hashes (not guaranteed, but

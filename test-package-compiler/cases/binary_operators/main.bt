@@ -15,11 +15,14 @@ exponentiation := 2 ** 10
 // ===== Comparison Operators =====
 equalityCheck := 5 == 5
 
-// Strict equality (=)
-strictEqualCheck := 'hello' = 'hello'
+// Loose inequality (/=)
+looseNotEqualCheck := 42 /= 99
 
-// Strict inequality (~=)
-strictNotEqualCheck := 42 ~= 99
+// Strict equality (=:=)
+strictEqualCheck := 'hello' =:= 'hello'
+
+// Strict inequality (=/=)
+strictNotEqualCheck := 42 =/= 99
 
 // Less than
 lessThan := 3 < 10

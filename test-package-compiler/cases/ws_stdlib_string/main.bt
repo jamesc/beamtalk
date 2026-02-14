@@ -14,7 +14,7 @@ message := greeting ++ ', ' ++ name ++ '!'
 len := greeting length
 
 // String comparison
-isEqual := 'hello' = 'hello'
+isEqual := 'hello' =:= 'hello'
 isLess := 'apple' < 'banana'
 
 // String transformation

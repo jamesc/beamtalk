@@ -125,7 +125,7 @@ count := 0  // inline comment
 2. `*`, `/`, `%` (multiplicative)
 3. `+`, `-`, `++` (additive and string concatenation)
 4. `<`, `>`, `<=`, `>=` (comparison)
-5. `=`, `==`, `~=` (equality - strict and loose)
+5. `=:=`, `==`, `/=`, `=/=` (equality - strict and loose)
 
 **Note:** `&&`, `||`, `and`, `or` are **not** binary operators - they are keyword messages that take blocks for short-circuit evaluation:
 ```
@@ -214,15 +214,16 @@ literal := 'No {interpolation} here'
 - `==` tests identity (pointer equality)
 - `=` tests value equality (overrideable)
 
-**Beamtalk's equality (BT-188):**
+**Beamtalk's equality (BT-188, ADR 0002):**
 - `==` tests structural equality (value-based with type coercion)
-- `=` tests strict equality (no type coercion)
-- `~=` tests inequality (negation of `==`)
+- `=:=` tests strict equality (no type coercion)
+- `/=` tests loose inequality (negation of `==`)
+- `=/=` tests strict inequality (negation of `=:=`)
 
 ```beamtalk
 // Primitives with type coercion
 1.0 == 1           // => true (coercion allowed)
-1.0 = 1            // => false (strict, no coercion)
+1.0 =:= 1          // => false (strict, no coercion)
 
 // Value types (compare map contents)
 p1 := Point new: #{x => 3, y => 4}
@@ -250,8 +251,9 @@ c1 == c2           // => false (different processes)
 
 **BEAM mapping:**
 - `==` → Erlang's `==` (value equality with coercion)
-- `=` → Erlang's `=:=` (strict equality, no coercion)
-- `~=` → Erlang's `/=` (inequality, negation of `==`)
+- `=:=` → Erlang's `=:=` (strict equality, no coercion)
+- `/=` → Erlang's `/=` (loose inequality, negation of `==`)
+- `=/=` → Erlang's `=/=` (strict inequality, negation of `=:=`)
 
 **Decision rationale:** This hybrid approach emerged from BT-213 (value types) — we discovered that Erlang's `==` already provides the correct semantics for both value types and actors without any special handling.
 

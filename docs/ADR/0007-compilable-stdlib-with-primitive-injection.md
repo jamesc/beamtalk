@@ -475,8 +475,8 @@ Object subclass: Integer
   * other => @primitive '*'
   / other => @primitive '/'
   % other => @primitive '%'
-  = other => @primitive '='
-  ~= other => (self = other) not
+  =:= other => @primitive '=:='
+  /= other => (self == other) not
   < other => @primitive '<'
   > other => @primitive '>'
   <= other => @primitive '<='
@@ -485,9 +485,9 @@ Object subclass: Integer
   // ── Pure Beamtalk (compiles today, no changes needed) ──
   negated => 0 - self
   abs => (self < 0) ifTrue: [self negated] ifFalse: [self]
-  isZero => self = 0
-  isEven => (self % 2) = 0
-  isOdd => (self % 2) ~= 0
+  isZero => self =:= 0
+  isEven => (self % 2) =:= 0
+  isOdd => (self % 2) /= 0
   isPositive => self > 0
   isNegative => self < 0
   min: other => (self < other) ifTrue: [self] ifFalse: [other]
@@ -511,8 +511,8 @@ Object subclass: Integer
 | `+ other` | `@primitive '+'` | `beamtalk_integer:dispatch('+', [Other], Self)` |
 | `negated` | `0 - self` | `call 'erlang':'-'(0, Self)` (pure Beamtalk — direct BIF) |
 | `abs` | `(self < 0) ifTrue: [...]` | `case call 'erlang':'<'(Self, 0) of ...` |
-| `isZero` | `self = 0` | `call 'erlang':'=:='(Self, 0)` |
-| `isEven` | `(self % 2) = 0` | `call 'erlang':'=:='(call 'erlang':'rem'(Self, 2), 0)` |
+| `isZero` | `self =:= 0` | `call 'erlang':'=:='(Self, 0)` |
+| `isEven` | `(self % 2) =:= 0` | `call 'erlang':'=:='(call 'erlang':'rem'(Self, 2), 0)` |
 | `min: other` | `(self < other) ifTrue: [...]` | `case call 'erlang':'<'(Self, Other) of ...` |
 
 #### Generative Primitives: `new`, `spawn`, and the Class Hierarchy
@@ -530,7 +530,7 @@ ProtoObject
   == other => @primitive '=='
 
   // Inequality — pure Beamtalk, no pragma needed
-  ~= other => (self == other) not
+  /= other => (self == other) not
 
   // Class identity — structural intrinsic, compiler generates type dispatch
   class => @primitive classOf

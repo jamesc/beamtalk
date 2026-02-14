@@ -50,23 +50,23 @@ sealed Object subclass: Symbol
   /// ```
   describe => @primitive 'printString'
 
-  /// Test equality with another symbol.
+  /// Test strict equality with another symbol.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// #hello = #hello        // => true
-  /// #hello = #world        // => false
+  /// #hello =:= #hello        // => true
+  /// #hello =:= #world        // => false
   /// ```
-  = other => @primitive '='
+  =:= other => @primitive '=:='
 
   /// Test inequality with another symbol.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// #hello ~= #world       // => true
-  /// #hello ~= #hello       // => false
+  /// #hello /= #world       // => true
+  /// #hello /= #hello       // => false
   /// ```
-  ~= other => @primitive '~='
+  /= other => @primitive '/='
 
   /// Return a hash value for the symbol.
   ///

@@ -70,7 +70,7 @@
 // => ["A","B","C"]
 
 // BT-416: select: - filter graphemes (returns string)
-'hello' select: [:ch | ch ~= 'l']
+'hello' select: [:ch | ch /= 'l']
 // => heo
 
 'abcd' select: [:ch | ch < 'c']

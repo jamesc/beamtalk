@@ -193,7 +193,7 @@ Module {
                     },
                 ),
                 selector: Binary(
-                    "=",
+                    "=:=",
                 ),
                 arguments: [
                     Literal(
@@ -201,19 +201,19 @@ Module {
                             "hello",
                         ),
                         Span {
-                            start: 364,
-                            end: 371,
+                            start: 366,
+                            end: 373,
                         },
                     ),
                 ],
                 span: Span {
                     start: 354,
-                    end: 371,
+                    end: 373,
                 },
             },
             span: Span {
                 start: 343,
-                end: 371,
+                end: 373,
             },
         },
         Assignment {
@@ -221,8 +221,8 @@ Module {
                 Identifier {
                     name: "notEqual",
                     span: Span {
-                        start: 372,
-                        end: 380,
+                        start: 374,
+                        end: 382,
                     },
                 },
             ),
@@ -232,12 +232,12 @@ Module {
                         "hello",
                     ),
                     Span {
-                        start: 384,
-                        end: 391,
+                        start: 386,
+                        end: 393,
                     },
                 ),
                 selector: Binary(
-                    "~=",
+                    "/=",
                 ),
                 arguments: [
                     Literal(
@@ -245,19 +245,19 @@ Module {
                             "world",
                         ),
                         Span {
-                            start: 395,
-                            end: 402,
+                            start: 397,
+                            end: 404,
                         },
                     ),
                 ],
                 span: Span {
-                    start: 384,
-                    end: 402,
+                    start: 386,
+                    end: 404,
                 },
             },
             span: Span {
-                start: 372,
-                end: 402,
+                start: 374,
+                end: 404,
             },
         },
         Assignment {
@@ -265,8 +265,8 @@ Module {
                 Identifier {
                     name: "isLess",
                     span: Span {
-                        start: 403,
-                        end: 409,
+                        start: 405,
+                        end: 411,
                     },
                 },
             ),
@@ -276,8 +276,8 @@ Module {
                         "apple",
                     ),
                     Span {
-                        start: 413,
-                        end: 420,
+                        start: 415,
+                        end: 422,
                     },
                 ),
                 selector: Binary(
@@ -289,19 +289,19 @@ Module {
                             "banana",
                         ),
                         Span {
-                            start: 423,
-                            end: 431,
+                            start: 425,
+                            end: 433,
                         },
                     ),
                 ],
                 span: Span {
-                    start: 413,
-                    end: 431,
+                    start: 415,
+                    end: 433,
                 },
             },
             span: Span {
-                start: 403,
-                end: 431,
+                start: 405,
+                end: 433,
             },
         },
         Assignment {
@@ -309,8 +309,8 @@ Module {
                 Identifier {
                     name: "isGreater",
                     span: Span {
-                        start: 432,
-                        end: 441,
+                        start: 434,
+                        end: 443,
                     },
                 },
             ),
@@ -320,8 +320,8 @@ Module {
                         "zebra",
                     ),
                     Span {
-                        start: 445,
-                        end: 452,
+                        start: 447,
+                        end: 454,
                     },
                 ),
                 selector: Binary(
@@ -333,19 +333,19 @@ Module {
                             "apple",
                         ),
                         Span {
-                            start: 455,
-                            end: 462,
+                            start: 457,
+                            end: 464,
                         },
                     ),
                 ],
                 span: Span {
-                    start: 445,
-                    end: 462,
+                    start: 447,
+                    end: 464,
                 },
             },
             span: Span {
-                start: 432,
-                end: 462,
+                start: 434,
+                end: 464,
             },
         },
         Assignment {
@@ -353,8 +353,8 @@ Module {
                 Identifier {
                     name: "upper",
                     span: Span {
-                        start: 506,
-                        end: 511,
+                        start: 508,
+                        end: 513,
                     },
                 },
             ),
@@ -363,8 +363,8 @@ Module {
                     Identifier {
                         name: "greeting",
                         span: Span {
-                            start: 515,
-                            end: 523,
+                            start: 517,
+                            end: 525,
                         },
                     },
                 ),
@@ -373,13 +373,13 @@ Module {
                 ),
                 arguments: [],
                 span: Span {
-                    start: 515,
-                    end: 533,
+                    start: 517,
+                    end: 535,
                 },
             },
             span: Span {
-                start: 506,
-                end: 533,
+                start: 508,
+                end: 535,
             },
         },
         Assignment {
@@ -387,8 +387,8 @@ Module {
                 Identifier {
                     name: "lower",
                     span: Span {
-                        start: 534,
-                        end: 539,
+                        start: 536,
+                        end: 541,
                     },
                 },
             ),
@@ -397,8 +397,8 @@ Module {
                     Identifier {
                         name: "upper",
                         span: Span {
-                            start: 543,
-                            end: 548,
+                            start: 545,
+                            end: 550,
                         },
                     },
                 ),
@@ -407,13 +407,13 @@ Module {
                 ),
                 arguments: [],
                 span: Span {
-                    start: 543,
-                    end: 558,
+                    start: 545,
+                    end: 560,
                 },
             },
             span: Span {
-                start: 534,
-                end: 558,
+                start: 536,
+                end: 560,
             },
         },
         Assignment {
@@ -421,8 +421,8 @@ Module {
                 Identifier {
                     name: "padded",
                     span: Span {
-                        start: 591,
-                        end: 597,
+                        start: 593,
+                        end: 599,
                     },
                 },
             ),
@@ -431,13 +431,13 @@ Module {
                     "  hello  ",
                 ),
                 Span {
-                    start: 601,
-                    end: 612,
+                    start: 603,
+                    end: 614,
                 },
             ),
             span: Span {
-                start: 591,
-                end: 612,
+                start: 593,
+                end: 614,
             },
         },
         Assignment {
@@ -445,8 +445,8 @@ Module {
                 Identifier {
                     name: "trimmed",
                     span: Span {
-                        start: 613,
-                        end: 620,
+                        start: 615,
+                        end: 622,
                     },
                 },
             ),
@@ -455,8 +455,8 @@ Module {
                     Identifier {
                         name: "padded",
                         span: Span {
-                            start: 624,
-                            end: 630,
+                            start: 626,
+                            end: 632,
                         },
                     },
                 ),
@@ -465,13 +465,13 @@ Module {
                 ),
                 arguments: [],
                 span: Span {
-                    start: 624,
-                    end: 635,
+                    start: 626,
+                    end: 637,
                 },
             },
             span: Span {
-                start: 613,
-                end: 635,
+                start: 615,
+                end: 637,
             },
         },
         Assignment {
@@ -479,8 +479,8 @@ Module {
                 Identifier {
                     name: "empty",
                     span: Span {
-                        start: 682,
-                        end: 687,
+                        start: 684,
+                        end: 689,
                     },
                 },
             ),
@@ -489,13 +489,13 @@ Module {
                     "",
                 ),
                 Span {
-                    start: 691,
-                    end: 693,
+                    start: 693,
+                    end: 695,
                 },
             ),
             span: Span {
-                start: 682,
-                end: 693,
+                start: 684,
+                end: 695,
             },
         },
         Assignment {
@@ -503,8 +503,8 @@ Module {
                 Identifier {
                     name: "isEmpty",
                     span: Span {
-                        start: 694,
-                        end: 701,
+                        start: 696,
+                        end: 703,
                     },
                 },
             ),
@@ -513,8 +513,8 @@ Module {
                     Identifier {
                         name: "empty",
                         span: Span {
-                            start: 705,
-                            end: 710,
+                            start: 707,
+                            end: 712,
                         },
                     },
                 ),
@@ -523,13 +523,13 @@ Module {
                 ),
                 arguments: [],
                 span: Span {
-                    start: 705,
-                    end: 718,
+                    start: 707,
+                    end: 720,
                 },
             },
             span: Span {
-                start: 694,
-                end: 718,
+                start: 696,
+                end: 720,
             },
         },
         Assignment {
@@ -537,8 +537,8 @@ Module {
                 Identifier {
                     name: "isNotEmpty",
                     span: Span {
-                        start: 719,
-                        end: 729,
+                        start: 721,
+                        end: 731,
                     },
                 },
             ),
@@ -547,8 +547,8 @@ Module {
                     Identifier {
                         name: "message",
                         span: Span {
-                            start: 733,
-                            end: 740,
+                            start: 735,
+                            end: 742,
                         },
                     },
                 ),
@@ -557,13 +557,13 @@ Module {
                 ),
                 arguments: [],
                 span: Span {
-                    start: 733,
-                    end: 751,
+                    start: 735,
+                    end: 753,
                 },
             },
             span: Span {
-                start: 719,
-                end: 751,
+                start: 721,
+                end: 753,
             },
         },
         Assignment {
@@ -571,8 +571,8 @@ Module {
                 Identifier {
                     name: "firstChar",
                     span: Span {
-                        start: 811,
-                        end: 820,
+                        start: 813,
+                        end: 822,
                     },
                 },
             ),
@@ -582,8 +582,8 @@ Module {
                         "hello",
                     ),
                     Span {
-                        start: 824,
-                        end: 831,
+                        start: 826,
+                        end: 833,
                     },
                 ),
                 selector: Keyword(
@@ -591,8 +591,8 @@ Module {
                         KeywordPart {
                             keyword: "at:",
                             span: Span {
-                                start: 832,
-                                end: 835,
+                                start: 834,
+                                end: 837,
                             },
                         },
                     ],
@@ -603,19 +603,19 @@ Module {
                             1,
                         ),
                         Span {
-                            start: 836,
-                            end: 837,
+                            start: 838,
+                            end: 839,
                         },
                     ),
                 ],
                 span: Span {
-                    start: 824,
-                    end: 837,
+                    start: 826,
+                    end: 839,
                 },
             },
             span: Span {
-                start: 811,
-                end: 837,
+                start: 813,
+                end: 839,
             },
         },
         Assignment {
@@ -623,8 +623,8 @@ Module {
                 Identifier {
                     name: "thirdChar",
                     span: Span {
-                        start: 838,
-                        end: 847,
+                        start: 840,
+                        end: 849,
                     },
                 },
             ),
@@ -634,8 +634,8 @@ Module {
                         "hello",
                     ),
                     Span {
-                        start: 851,
-                        end: 858,
+                        start: 853,
+                        end: 860,
                     },
                 ),
                 selector: Keyword(
@@ -643,8 +643,8 @@ Module {
                         KeywordPart {
                             keyword: "at:",
                             span: Span {
-                                start: 859,
-                                end: 862,
+                                start: 861,
+                                end: 864,
                             },
                         },
                     ],
@@ -655,19 +655,19 @@ Module {
                             3,
                         ),
                         Span {
-                            start: 863,
-                            end: 864,
+                            start: 865,
+                            end: 866,
                         },
                     ),
                 ],
                 span: Span {
-                    start: 851,
-                    end: 864,
+                    start: 853,
+                    end: 866,
                 },
             },
             span: Span {
-                start: 838,
-                end: 864,
+                start: 840,
+                end: 866,
             },
         },
         Assignment {
@@ -675,8 +675,8 @@ Module {
                 Identifier {
                     name: "found",
                     span: Span {
-                        start: 906,
-                        end: 911,
+                        start: 908,
+                        end: 913,
                     },
                 },
             ),
@@ -685,8 +685,8 @@ Module {
                     Identifier {
                         name: "message",
                         span: Span {
-                            start: 915,
-                            end: 922,
+                            start: 917,
+                            end: 924,
                         },
                     },
                 ),
@@ -695,8 +695,8 @@ Module {
                         KeywordPart {
                             keyword: "includes:",
                             span: Span {
-                                start: 923,
-                                end: 932,
+                                start: 925,
+                                end: 934,
                             },
                         },
                     ],
@@ -707,19 +707,19 @@ Module {
                             "World",
                         ),
                         Span {
-                            start: 933,
-                            end: 940,
+                            start: 935,
+                            end: 942,
                         },
                     ),
                 ],
                 span: Span {
-                    start: 915,
-                    end: 940,
+                    start: 917,
+                    end: 942,
                 },
             },
             span: Span {
-                start: 906,
-                end: 940,
+                start: 908,
+                end: 942,
             },
         },
         Assignment {
@@ -727,8 +727,8 @@ Module {
                 Identifier {
                     name: "notFound",
                     span: Span {
-                        start: 941,
-                        end: 949,
+                        start: 943,
+                        end: 951,
                     },
                 },
             ),
@@ -737,8 +737,8 @@ Module {
                     Identifier {
                         name: "message",
                         span: Span {
-                            start: 953,
-                            end: 960,
+                            start: 955,
+                            end: 962,
                         },
                     },
                 ),
@@ -747,8 +747,8 @@ Module {
                         KeywordPart {
                             keyword: "includes:",
                             span: Span {
-                                start: 961,
-                                end: 970,
+                                start: 963,
+                                end: 972,
                             },
                         },
                     ],
@@ -759,19 +759,19 @@ Module {
                             "xyz",
                         ),
                         Span {
-                            start: 971,
-                            end: 976,
+                            start: 973,
+                            end: 978,
                         },
                     ),
                 ],
                 span: Span {
-                    start: 953,
-                    end: 976,
+                    start: 955,
+                    end: 978,
                 },
             },
             span: Span {
-                start: 941,
-                end: 976,
+                start: 943,
+                end: 978,
             },
         },
         Assignment {
@@ -779,8 +779,8 @@ Module {
                 Identifier {
                     name: "starts",
                     span: Span {
-                        start: 1021,
-                        end: 1027,
+                        start: 1023,
+                        end: 1029,
                     },
                 },
             ),
@@ -789,8 +789,8 @@ Module {
                     Identifier {
                         name: "message",
                         span: Span {
-                            start: 1031,
-                            end: 1038,
+                            start: 1033,
+                            end: 1040,
                         },
                     },
                 ),
@@ -799,8 +799,8 @@ Module {
                         KeywordPart {
                             keyword: "startsWith:",
                             span: Span {
-                                start: 1039,
-                                end: 1050,
+                                start: 1041,
+                                end: 1052,
                             },
                         },
                     ],
@@ -811,19 +811,19 @@ Module {
                             "Hello",
                         ),
                         Span {
-                            start: 1051,
-                            end: 1058,
+                            start: 1053,
+                            end: 1060,
                         },
                     ),
                 ],
                 span: Span {
-                    start: 1031,
-                    end: 1058,
+                    start: 1033,
+                    end: 1060,
                 },
             },
             span: Span {
-                start: 1021,
-                end: 1058,
+                start: 1023,
+                end: 1060,
             },
         },
         Assignment {
@@ -831,8 +831,8 @@ Module {
                 Identifier {
                     name: "ends",
                     span: Span {
-                        start: 1059,
-                        end: 1063,
+                        start: 1061,
+                        end: 1065,
                     },
                 },
             ),
@@ -841,8 +841,8 @@ Module {
                     Identifier {
                         name: "message",
                         span: Span {
-                            start: 1067,
-                            end: 1074,
+                            start: 1069,
+                            end: 1076,
                         },
                     },
                 ),
@@ -851,8 +851,8 @@ Module {
                         KeywordPart {
                             keyword: "endsWith:",
                             span: Span {
-                                start: 1075,
-                                end: 1084,
+                                start: 1077,
+                                end: 1086,
                             },
                         },
                     ],
@@ -863,19 +863,19 @@ Module {
                             "!",
                         ),
                         Span {
-                            start: 1085,
-                            end: 1088,
+                            start: 1087,
+                            end: 1090,
                         },
                     ),
                 ],
                 span: Span {
-                    start: 1067,
-                    end: 1088,
+                    start: 1069,
+                    end: 1090,
                 },
             },
             span: Span {
-                start: 1059,
-                end: 1088,
+                start: 1061,
+                end: 1090,
             },
         },
         Assignment {
@@ -883,8 +883,8 @@ Module {
                 Identifier {
                     name: "csv",
                     span: Span {
-                        start: 1122,
-                        end: 1125,
+                        start: 1124,
+                        end: 1127,
                     },
                 },
             ),
@@ -893,13 +893,13 @@ Module {
                     "a,b,c,d",
                 ),
                 Span {
-                    start: 1129,
-                    end: 1138,
+                    start: 1131,
+                    end: 1140,
                 },
             ),
             span: Span {
-                start: 1122,
-                end: 1138,
+                start: 1124,
+                end: 1140,
             },
         },
         Assignment {
@@ -907,8 +907,8 @@ Module {
                 Identifier {
                     name: "parts",
                     span: Span {
-                        start: 1139,
-                        end: 1144,
+                        start: 1141,
+                        end: 1146,
                     },
                 },
             ),
@@ -917,8 +917,8 @@ Module {
                     Identifier {
                         name: "csv",
                         span: Span {
-                            start: 1148,
-                            end: 1151,
+                            start: 1150,
+                            end: 1153,
                         },
                     },
                 ),
@@ -927,8 +927,8 @@ Module {
                         KeywordPart {
                             keyword: "split:",
                             span: Span {
-                                start: 1152,
-                                end: 1158,
+                                start: 1154,
+                                end: 1160,
                             },
                         },
                     ],
@@ -939,19 +939,19 @@ Module {
                             ",",
                         ),
                         Span {
-                            start: 1159,
-                            end: 1162,
+                            start: 1161,
+                            end: 1164,
                         },
                     ),
                 ],
                 span: Span {
-                    start: 1148,
-                    end: 1162,
+                    start: 1150,
+                    end: 1164,
                 },
             },
             span: Span {
-                start: 1139,
-                end: 1162,
+                start: 1141,
+                end: 1164,
             },
         },
         Assignment {
@@ -959,8 +959,8 @@ Module {
                 Identifier {
                     name: "reversed",
                     span: Span {
-                        start: 1194,
-                        end: 1202,
+                        start: 1196,
+                        end: 1204,
                     },
                 },
             ),
@@ -970,8 +970,8 @@ Module {
                         "hello",
                     ),
                     Span {
-                        start: 1206,
-                        end: 1213,
+                        start: 1208,
+                        end: 1215,
                     },
                 ),
                 selector: Unary(
@@ -979,19 +979,19 @@ Module {
                 ),
                 arguments: [],
                 span: Span {
-                    start: 1206,
-                    end: 1221,
+                    start: 1208,
+                    end: 1223,
                 },
             },
             span: Span {
-                start: 1194,
-                end: 1221,
+                start: 1196,
+                end: 1223,
             },
         },
     ],
     span: Span {
         start: 177,
-        end: 1221,
+        end: 1223,
     },
     leading_comments: [
         Comment {

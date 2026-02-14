@@ -205,7 +205,7 @@ protoobject_methods_test_() ->
                      ?assert(lists:member(class, Methods)),
                      ?assert(lists:member('doesNotUnderstand:args:', Methods)),
                      ?assert(lists:member('==', Methods)),
-                     ?assert(lists:member('~=', Methods))
+                     ?assert(lists:member('/=', Methods))
                  end)
           ]
      end}.
