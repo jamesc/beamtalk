@@ -14,6 +14,14 @@
 
 -export([format_class_docs/1, format_method_doc/2]).
 
+%% Exported for testing (only in test builds)
+-ifdef(TEST).
+-export([safe_to_existing_atom/1, get_module_doc/1, get_doc_entries/1,
+         find_doc_entry/2, get_method_signatures/2, get_method_doc/2,
+         group_by_class/1, format_class_output/5, format_superclass/1,
+         format_method_output/4]).
+-endif.
+
 %% @doc Format documentation for a class, including method listing.
 %% Returns `{ok, FormattedBinary}` or `{error, Reason}`.
 -spec format_class_docs(atom()) -> {ok, binary()} | {error, term()}.
