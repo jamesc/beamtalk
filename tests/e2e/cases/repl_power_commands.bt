@@ -52,4 +52,4 @@ c increment
 
 // Unloading a module that isn't loaded should error
 :unload NonExistentModule
-// => ERROR: Module not loaded
+// => ERROR: Invalid module name
