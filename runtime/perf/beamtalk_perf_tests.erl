@@ -26,7 +26,7 @@
 %%====================================================================
 
 setup() ->
-    application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = application:ensure_all_started(beamtalk_runtime),
     case whereis(beamtalk_bootstrap) of
         undefined ->
             case beamtalk_bootstrap:start_link() of
@@ -127,7 +127,9 @@ bench_raw_message_roundtrip() ->
     end),
     Timings = run_benchmark(fun() ->
         Echo ! {self(), ping},
-        receive {reply, ping} -> ok end
+        receive {reply, ping} -> ok
+        after 1000 -> erlang:error({perf_timeout, raw_message_roundtrip})
+        end
     end, ?ITERATIONS, ?WARMUP),
     Echo ! stop,
     S = stats(Timings),
@@ -153,62 +155,69 @@ bench_future_create_resolve_await() ->
 
 bench_actor_sync_call() ->
     {ok, Counter} = test_counter:start_link(0),
-    Timings = run_benchmark(fun() ->
-        gen_server:call(Counter, {getValue, []})
-    end, ?ITERATIONS, ?WARMUP),
-    gen_server:stop(Counter),
-    S = stats(Timings),
-    report("actor_sync_call", S, ?ITERATIONS),
-    %% Sanity: sync call should be under 200us
-    ?assert(maps:get(median, S) < 200).
+    try
+        Timings = run_benchmark(fun() ->
+            gen_server:call(Counter, {getValue, []})
+        end, ?ITERATIONS, ?WARMUP),
+        S = stats(Timings),
+        report("actor_sync_call", S, ?ITERATIONS),
+        %% Sanity: sync call should be under 200us
+        ?assert(maps:get(median, S) < 200)
+    after
+        gen_server:stop(Counter)
+    end.
 
 %% --- 4. Full actor method call (async via cast + future + await) ---
 
 bench_actor_async_call() ->
     {ok, Counter} = test_counter:start_link(0),
-    Timings = run_benchmark(fun() ->
-        Future = beamtalk_future:new(),
-        gen_server:cast(Counter, {increment, [], Future}),
-        beamtalk_future:await(Future)
-    end, ?ITERATIONS, ?WARMUP),
-    gen_server:stop(Counter),
-    S = stats(Timings),
-    report("actor_async_call", S, ?ITERATIONS),
-    %% Sanity: async call should be under 500us
-    ?assert(maps:get(median, S) < 500).
+    try
+        Timings = run_benchmark(fun() ->
+            Future = beamtalk_future:new(),
+            gen_server:cast(Counter, {increment, [], Future}),
+            beamtalk_future:await(Future)
+        end, ?ITERATIONS, ?WARMUP),
+        S = stats(Timings),
+        report("actor_async_call", S, ?ITERATIONS),
+        %% Sanity: async call should be under 500us
+        ?assert(maps:get(median, S) < 500)
+    after
+        gen_server:stop(Counter)
+    end.
 
 %% --- 5. gen_server:call vs cast+future comparison ---
 
 bench_gen_server_call_vs_cast_future() ->
     {ok, Counter} = test_counter:start_link(0),
+    try
+        %% Measure sync (gen_server:call)
+        SyncTimings = run_benchmark(fun() ->
+            gen_server:call(Counter, {getValue, []})
+        end, ?ITERATIONS, ?WARMUP),
 
-    %% Measure sync (gen_server:call)
-    SyncTimings = run_benchmark(fun() ->
-        gen_server:call(Counter, {getValue, []})
-    end, ?ITERATIONS, ?WARMUP),
+        %% Measure async (cast + future) using same selector for fair comparison
+        AsyncTimings = run_benchmark(fun() ->
+            Future = beamtalk_future:new(),
+            gen_server:cast(Counter, {getValue, [], Future}),
+            beamtalk_future:await(Future)
+        end, ?ITERATIONS, ?WARMUP),
 
-    %% Measure async (cast + future)
-    AsyncTimings = run_benchmark(fun() ->
-        Future = beamtalk_future:new(),
-        gen_server:cast(Counter, {increment, [], Future}),
-        beamtalk_future:await(Future)
-    end, ?ITERATIONS, ?WARMUP),
+        SyncStats = stats(SyncTimings),
+        AsyncStats = stats(AsyncTimings),
+        report("comparison_sync_call", SyncStats, ?ITERATIONS),
+        report("comparison_async_cast_future", AsyncStats, ?ITERATIONS),
 
-    gen_server:stop(Counter),
-
-    SyncStats = stats(SyncTimings),
-    AsyncStats = stats(AsyncTimings),
-    report("comparison_sync_call", SyncStats, ?ITERATIONS),
-    report("comparison_async_cast_future", AsyncStats, ?ITERATIONS),
-
-    %% Report the overhead ratio
-    SyncMedian = maps:get(median, SyncStats),
-    AsyncMedian = maps:get(median, AsyncStats),
-    Ratio = case SyncMedian of
-        0 -> 0.0;
-        _ -> AsyncMedian / SyncMedian
-    end,
-    io:format(standard_error, "PERF: future_overhead_ratio ~.2fx~n", [Ratio]).
+        %% Report the overhead ratio
+        SyncMedian = maps:get(median, SyncStats),
+        AsyncMedian = maps:get(median, AsyncStats),
+        Ratio = case SyncMedian of
+            0 -> 0.0;
+            _ -> AsyncMedian / SyncMedian
+        end,
+        io:format(standard_error, "PERF: future_overhead_ratio ~.2fx~n", [Ratio])
+    after
+        gen_server:stop(Counter)
+    end.
 
 %% --- 6. Throughput test (calls/sec under load) ---
 
@@ -250,7 +259,9 @@ bench_concurrent_callers() ->
             end)
         end, lists:seq(1, NumCallers)),
         lists:foreach(fun(Pid) ->
-            receive {done, Pid} -> ok end
+            receive {done, Pid} -> ok
+            after 60000 -> erlang:error({timeout_waiting_for_done, Pid})
+            end
         end, Pids)
     end),
 
@@ -271,8 +282,9 @@ bench_concurrent_callers() ->
 %% --- 8. Dynamic class method calls vs compiled class ---
 
 bench_dynamic_class_call() ->
-    %% Create a dynamic counter class
-    {ok, ClassPid} = beamtalk_object_class:create_subclass('Actor', 'PerfCounter', #{
+    %% Create a dynamic counter class with unique name to avoid collisions
+    ClassName = list_to_atom("PerfCounter_" ++ integer_to_list(erlang:unique_integer([positive]))),
+    {ok, ClassPid} = beamtalk_object_class:create_subclass('Actor', ClassName, #{
         instance_variables => [value],
         instance_methods => #{
             increment => fun(_Self, [], State) ->
