@@ -378,8 +378,8 @@ Compile the Rust compiler to WASM and run it via a WASM runtime (wasmex) inside 
 ### Neutral
 - **`beamtalk` CLI binary still exists** — For `beamtalk build` batch compilation, the CLI can either use the Port backend itself or delegate to a running BEAM node. The CLI remains useful for project management, package management, and tooling.
 - **ADR 0003 unaffected** — Core Erlang remains the codegen target. Only the process boundary changes.
-- **ADR 0009 enhanced** — The workspace/runtime split benefits from embedded compilation. The compiler backend lives in a new `beamtalk_compiler` OTP app (its own bounded context), not in `beamtalk_workspace` or `beamtalk_runtime`. This preserves DDD boundaries: the workspace depends on the compiler app, which encapsulates whether compilation happens via Port, NIF, or external daemon.
-- **DDD Context Map** — The Published Language boundary (Core Erlang IR) between Compilation and Runtime contexts is preserved. The `beamtalk_compiler` app acts as an Anti-Corruption Layer: it exposes a clean Erlang API (`compile/2`, `compile_expression/3`) while hiding the backend implementation detail (Port, NIF, or external daemon).
+- **ADR 0009 enhanced** — The workspace/runtime split benefits from embedded compilation. The compiler backend lives in a new `beamtalk_compiler` OTP app (its own bounded context), as a **peer** of `beamtalk_runtime` — not above or below it. The workspace depends on both, while the compiler and runtime are independent bounded contexts. This preserves DDD boundaries and enables standalone compilation tools.
+- **DDD Context Map** — The Published Language boundary (Core Erlang IR) between Compilation and Runtime contexts is preserved. The `beamtalk_compiler` app acts as an Anti-Corruption Layer: it exposes a clean Erlang API (`compile/2`, `compile_expression/3`) while hiding the backend implementation detail (Port, NIF, or external daemon). Error formatting lives in `beamtalk_workspace`, which combines compiler diagnostics with runtime context.
 
 ## Implementation
 
@@ -405,15 +405,14 @@ Create `beamtalk_compiler` as a new OTP application with OTP Port as the primary
 
 ```text
 beamtalk_workspace  (Live Programming Domain)
-    ↓ depends on
-beamtalk_compiler   (Compilation Context — Port/NIF bridge) ← NEW
-    ↓ depends on (optional, for error formatting only)
-beamtalk_runtime    (Actor System / Object System contexts)
-    ↓ depends on
-beamtalk_stdlib     (Standard Library Context)
+    ↓ depends on both
+beamtalk_compiler   beamtalk_runtime    ← peers (independent bounded contexts)
+(Compilation)       (Actor/Object System)
+                        ↓ depends on
+                    beamtalk_stdlib     (Standard Library Context)
 ```
 
-Note: `beamtalk_compiler` does NOT depend on `beamtalk_runtime` for compilation itself — the Port wraps the Rust `beamtalk-core` binary which has no Erlang dependencies. The optional runtime dependency is only for error formatting integration. In principle, `beamtalk_compiler` could be a peer of `beamtalk_runtime` rather than sitting above it.
+`beamtalk_compiler` and `beamtalk_runtime` are **peers**, not layered. The compiler has no dependency on the runtime — it compiles `Source → Core Erlang` without needing actors, objects, or primitives. Error formatting lives in `beamtalk_workspace`, which depends on both and can combine compiler diagnostics with runtime context. This also enables standalone compilation tools (e.g., `beamtalk check`) that don't load the runtime.
 
 The workspace asks the compiler to compile; it never knows *how* compilation happens (Port vs NIF vs daemon). This preserves the Published Language boundary (Core Erlang IR) from the DDD model.
 
