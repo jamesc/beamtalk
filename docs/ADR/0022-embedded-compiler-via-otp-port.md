@@ -352,6 +352,23 @@ Compile the Rust compiler to WASM and run it via a WASM runtime (wasmex) inside 
 - Compilation is CPU-bound — we want maximum performance, not sandboxing
 - Adds a WASM runtime dependency
 
+### Alternative 4: Rewrite Compiler in Erlang/Elixir
+Rewrite the compiler (lexer, parser, codegen) in Erlang or Elixir so it runs natively inside the BEAM with zero IPC overhead. This is what LFE does — the compiler is just Erlang modules, compilation is a function call.
+
+**Arguments for:**
+- Zero boundary — no Port, no NIF, no serialization, no separate binary. Compilation is a direct function call with native Erlang terms
+- Hot code upgradeable — load a new compiler version without restarting anything
+- Inspectable — Smalltalk developers can browse the compiler in the inspector, matching the Smalltalk philosophy of a transparent, modifiable live system
+- Stepping stone to self-hosting — a Beamtalk compiler written in Erlang is closer to a Beamtalk compiler written in Beamtalk
+- LFE proves the model works at production quality
+
+**Not chosen because:**
+- ~20k lines of working Rust compiler already exist (lexer, parser, semantic analysis, codegen) — rewriting is months of effort with zero new features
+- Rust's type system catches bugs at compile time (exhaustive pattern matching, ownership, no null) that would become runtime crashes in an Erlang compiler
+- Rust is 10–50x faster for CPU-bound parsing/codegen — not critical today but matters for large projects and future incremental compilation
+- The existing Rust test suite (429+ parser tests, 176 compiler tests, 654 stdlib assertions) validates the current implementation
+- The `beamtalk_compiler` anti-corruption layer preserves the option: if we later rewrite the compiler in Beamtalk itself, it becomes another backend behind `beamtalk_compiler_backend` — the workspace never knows
+
 ## Consequences
 
 ### Positive
