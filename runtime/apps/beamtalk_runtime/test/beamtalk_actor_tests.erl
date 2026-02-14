@@ -1133,7 +1133,62 @@ sync_message_to_dead_actor_returns_error_test() ->
     ?assertMatch({error, #beamtalk_error{kind = actor_dead, selector = getValue}}, Result).
 
 %%% ===========================================================================
-%%% register_spawned/4 Callback Integration Tests
+%%% register_spawned callback tests (BT-391)
+%%% ===========================================================================
+
+register_spawned_returns_ok_when_no_callback_configured_test() ->
+    %% Clear any existing callback config
+    application:unset_env(beamtalk_runtime, actor_spawn_callback),
+    
+    FakePid = spawn(fun() -> receive _ -> ok end end),
+    Result = beamtalk_actor:register_spawned(FakePid, FakePid, 'Test', test_mod),
+    ?assertEqual(ok, Result),
+    
+    exit(FakePid, kill).
+
+register_spawned_returns_error_when_callback_undef_test() ->
+    %% Clear first in case a previous test leaked (assertion failure before cleanup)
+    application:unset_env(beamtalk_runtime, actor_spawn_callback),
+    %% Set callback to a module that doesn't implement on_actor_spawned/4
+    application:set_env(beamtalk_runtime, actor_spawn_callback, nonexistent_callback_mod),
+    
+    FakePid = spawn(fun() -> receive _ -> ok end end),
+    Result = beamtalk_actor:register_spawned(FakePid, FakePid, 'Test', test_mod),
+    ?assertMatch({error, {callback_undef, nonexistent_callback_mod}}, Result),
+    
+    exit(FakePid, kill),
+    application:unset_env(beamtalk_runtime, actor_spawn_callback).
+
+register_spawned_returns_error_when_callback_crashes_test() ->
+    application:unset_env(beamtalk_runtime, actor_spawn_callback),
+    application:set_env(beamtalk_runtime, actor_spawn_callback, beamtalk_actor_tests_crash_callback),
+    
+    %% Ensure crash callback module exists
+    ok = ensure_crash_callback_module(),
+    
+    FakePid = spawn(fun() -> receive _ -> ok end end),
+    Result = beamtalk_actor:register_spawned(FakePid, FakePid, 'Test', test_mod),
+    ?assertMatch({error, {error, deliberate_crash}}, Result),
+    
+    exit(FakePid, kill),
+    application:unset_env(beamtalk_runtime, actor_spawn_callback).
+
+register_spawned_surfaces_callback_error_result_test() ->
+    %% Test that {error, _} from on_actor_spawned is returned, not swallowed
+    application:unset_env(beamtalk_runtime, actor_spawn_callback),
+    application:set_env(beamtalk_runtime, actor_spawn_callback, beamtalk_actor_tests_error_callback),
+    
+    ok = ensure_error_callback_module(),
+    
+    FakePid = spawn(fun() -> receive _ -> ok end end),
+    Result = beamtalk_actor:register_spawned(FakePid, FakePid, 'Test', test_mod),
+    ?assertEqual({error, {registry_failed, registry_not_running}}, Result),
+    
+    exit(FakePid, kill),
+    application:unset_env(beamtalk_runtime, actor_spawn_callback).
+
+%%% ===========================================================================
+%%% register_spawned/4 Callback Integration Tests (from main)
 %%% ===========================================================================
 
 register_spawned_invokes_callback_when_env_set_test() ->
@@ -1174,42 +1229,79 @@ register_spawned_noop_when_env_unset_test() ->
         exit(ActorPid, kill)
     end.
 
-register_spawned_survives_undef_callback_test() ->
+register_spawned_returns_error_on_undef_callback_test() ->
     %% Set callback to a module that doesn't export on_actor_spawned/4
-    %% This module exists (it's the test module itself) but doesn't have the function
+    %% beamtalk_actor_tests exists but doesn't have the function
     application:set_env(beamtalk_runtime, actor_spawn_callback, beamtalk_actor_tests),
 
     ActorPid = spawn(fun() -> receive stop -> ok end end),
     try
-        %% Should return ok despite undef error
-        ?assertEqual(ok, beamtalk_actor:register_spawned(self(), ActorPid, 'Counter', test_counter))
+        %% Returns {error, _} since BT-391 surfaces callback failures
+        ?assertMatch({error, {callback_undef, beamtalk_actor_tests}},
+                     beamtalk_actor:register_spawned(self(), ActorPid, 'Counter', test_counter))
     after
         exit(ActorPid, kill),
         application:unset_env(beamtalk_runtime, actor_spawn_callback)
     end.
 
-register_spawned_survives_beamtalk_error_test() ->
+register_spawned_returns_error_on_beamtalk_error_test() ->
     %% Set callback to a module that raises a #beamtalk_error{}
     application:set_env(beamtalk_runtime, actor_spawn_callback, test_spawn_callback_bt_error),
 
     ActorPid = spawn(fun() -> receive stop -> ok end end),
     try
-        %% Should return ok despite beamtalk error
-        ?assertEqual(ok, beamtalk_actor:register_spawned(self(), ActorPid, 'Counter', test_counter))
+        %% Returns {error, _} since BT-391 surfaces callback failures
+        ?assertMatch({error, {beamtalk_error, _}},
+                     beamtalk_actor:register_spawned(self(), ActorPid, 'Counter', test_counter))
     after
         exit(ActorPid, kill),
         application:unset_env(beamtalk_runtime, actor_spawn_callback)
     end.
 
-register_spawned_survives_generic_error_test() ->
+register_spawned_returns_error_on_generic_error_test() ->
     %% Set callback to a module that throws a generic error
     application:set_env(beamtalk_runtime, actor_spawn_callback, test_spawn_callback_generic_error),
 
     ActorPid = spawn(fun() -> receive stop -> ok end end),
     try
-        %% Should return ok despite generic throw
-        ?assertEqual(ok, beamtalk_actor:register_spawned(self(), ActorPid, 'Counter', test_counter))
+        %% Returns {error, _} since BT-391 surfaces callback failures
+        ?assertMatch({error, _},
+                     beamtalk_actor:register_spawned(self(), ActorPid, 'Counter', test_counter))
     after
         exit(ActorPid, kill),
         application:unset_env(beamtalk_runtime, actor_spawn_callback)
     end.
+
+%%% ===========================================================================
+%%% Test helpers for BT-391
+%%% ===========================================================================
+
+%% @private Create a callback module that crashes
+ensure_crash_callback_module() ->
+    Forms = [
+        {attribute, 1, module, beamtalk_actor_tests_crash_callback},
+        {attribute, 2, export, [{on_actor_spawned, 4}]},
+        {function, 3, on_actor_spawned, 4,
+            [{clause, 3, [{var, 3, '_'}, {var, 3, '_'}, {var, 3, '_'}, {var, 3, '_'}],
+                [],
+                [{call, 3, {remote, 3, {atom, 3, erlang}, {atom, 3, error}},
+                    [{atom, 3, deliberate_crash}]}]}]}
+    ],
+    {ok, _, Bin} = compile:forms(Forms),
+    {module, _} = code:load_binary(beamtalk_actor_tests_crash_callback, "test", Bin),
+    ok.
+
+%% @private Create a callback module that returns an error tuple
+ensure_error_callback_module() ->
+    Forms = [
+        {attribute, 1, module, beamtalk_actor_tests_error_callback},
+        {attribute, 2, export, [{on_actor_spawned, 4}]},
+        {function, 3, on_actor_spawned, 4,
+            [{clause, 3, [{var, 3, '_'}, {var, 3, '_'}, {var, 3, '_'}, {var, 3, '_'}],
+                [],
+                [{tuple, 3, [{atom, 3, error},
+                    {tuple, 3, [{atom, 3, registry_failed}, {atom, 3, registry_not_running}]}]}]}]}
+    ],
+    {ok, _, Bin} = compile:forms(Forms),
+    {module, _} = code:load_binary(beamtalk_actor_tests_error_callback, "test", Bin),
+    ok.

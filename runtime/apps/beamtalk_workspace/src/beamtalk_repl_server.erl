@@ -407,12 +407,17 @@ handle_op(<<"inspect">>, Params, Msg, _SessionPid) ->
                         %% Get actor state via sys:get_state
                         try
                             State = sys:get_state(Pid, 5000),
-                            StateMap = case State of
-                                M when is_map(M) -> M;
-                                _ -> #{<<"raw">> => State}
+                            InspectStr = case State of
+                                M when is_map(M) ->
+                                    case beamtalk_tagged_map:is_tagged(M) of
+                                        true -> beamtalk_reflection:inspect_string(M);
+                                        false -> beamtalk_primitive:print_string(M)
+                                    end;
+                                _ ->
+                                    iolist_to_binary(io_lib:format("~p", [State]))
                             end,
                             beamtalk_repl_protocol:encode_inspect(
-                                StateMap, Msg, fun term_to_json/1)
+                                InspectStr, Msg)
                         catch
                             _:_ ->
                                 beamtalk_repl_protocol:encode_error(
@@ -470,9 +475,13 @@ handle_op(<<"unload">>, Params, Msg, SessionPid) ->
         _ ->
             case safe_to_existing_atom(ModuleBin) of
                 {error, badarg} ->
-                    %% Atom doesn't exist, so module was never loaded (BT-358)
+                    %% Atom never created — module was never loaded
+                    Err0 = beamtalk_error:new(module_not_found, 'Module'),
+                    Err1 = beamtalk_error:with_message(Err0,
+                        iolist_to_binary([<<"Module not loaded: ">>, ModuleBin])),
+                    Err2 = beamtalk_error:with_hint(Err1, <<"Module was never loaded">>),
                     beamtalk_repl_protocol:encode_error(
-                        {module_not_found, ModuleBin}, Msg, fun format_error_message/1);
+                        Err2, Msg, fun format_error_message/1);
                 {ok, Module} ->
                     %% Resolve class name to BEAM module name if needed
                     ResolvedModule = case code:is_loaded(Module) of

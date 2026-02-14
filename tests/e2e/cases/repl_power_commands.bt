@@ -21,14 +21,14 @@ c := Counter spawn
 
 // Inspect the Counter actor state — should show the value field
 :inspect Counter
-// => _"value":_
+// => a Counter (value: _)
 
 // Increment and inspect again to verify state is accessible
 c increment
 // => 1
 
 :inspect Counter
-// => _"value":_
+// => a Counter (value: _)
 
 // ===========================================================================
 // :unload — UNLOAD A MODULE
@@ -52,4 +52,4 @@ c increment
 
 // Unloading a module that isn't loaded should error
 :unload NonExistentModule
-// => ERROR: Module not loaded
+// => ERROR: Module not loaded: NonExistentModule
