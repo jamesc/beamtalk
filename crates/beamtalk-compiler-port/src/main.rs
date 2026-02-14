@@ -84,10 +84,7 @@ fn ok_response(core_erlang: &str, warnings: &[String]) -> Term {
     Term::from(Map::from([
         (atom("status"), atom("ok")),
         (atom("core_erlang"), binary(core_erlang)),
-        (
-            atom("warnings"),
-            Term::from(List::from(warning_terms)),
-        ),
+        (atom("warnings"), Term::from(List::from(warning_terms))),
     ]))
 }
 
@@ -96,10 +93,7 @@ fn error_response(diagnostics: &[String]) -> Term {
     let diag_terms: Vec<Term> = diagnostics.iter().map(|d| binary(d)).collect();
     Term::from(Map::from([
         (atom("status"), atom("error")),
-        (
-            atom("diagnostics"),
-            Term::from(List::from(diag_terms)),
-        ),
+        (atom("diagnostics"), Term::from(List::from(diag_terms))),
     ]))
 }
 
@@ -148,7 +142,12 @@ fn handle_compile_expression(request: &Map) -> Term {
 
     let warnings: Vec<String> = all_diagnostics
         .iter()
-        .filter(|d| matches!(d.severity, beamtalk_core::source_analysis::Severity::Warning))
+        .filter(|d| {
+            matches!(
+                d.severity,
+                beamtalk_core::source_analysis::Severity::Warning
+            )
+        })
         .map(|d| d.message.to_string())
         .collect();
 
