@@ -220,6 +220,22 @@ test-runtime: build-stdlib
         exit 1
     fi
 
+# Run performance benchmarks (separate from unit tests, ~30s)
+perf: build-stdlib
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd runtime
+    echo "⏱️  Running performance benchmarks..."
+    if OUTPUT=$(rebar3 eunit --dir=perf 2>&1); then
+        echo "$OUTPUT" | grep -E "^PERF:|Finished in|tests,|FAILED" || true
+        echo "✅ Performance benchmarks complete"
+    else
+        echo "$OUTPUT" | grep -E "^PERF:|Finished in|tests,|FAILED" || true
+        echo "❌ Performance benchmarks failed"
+        echo "$OUTPUT" | tail -20
+        exit 1
+    fi
+
 # Run a specific Rust test by name
 test-one TEST:
     @echo "🧪 Running test: {{TEST}}"
