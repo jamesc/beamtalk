@@ -16,10 +16,11 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %% Public API
 -export([start_link/1, stop/1, eval/2, get_bindings/1, clear_bindings/1, load_file/2,
-         get_module_tracker/1]).
+         unload_module/2, get_module_tracker/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -61,6 +62,11 @@ load_file(SessionPid, Path) ->
 -spec get_module_tracker(pid()) -> {ok, beamtalk_repl_modules:module_tracker()}.
 get_module_tracker(SessionPid) ->
     gen_server:call(SessionPid, get_module_tracker, 5000).
+
+%% @doc Unload a module from this session, purging its code and removing it from the tracker.
+-spec unload_module(pid(), atom()) -> ok | {error, #beamtalk_error{}}.
+unload_module(SessionPid, Module) ->
+    gen_server:call(SessionPid, {unload_module, Module}, 5000).
 
 %%% gen_server callbacks
 
@@ -119,6 +125,31 @@ handle_call({load_file, Path}, _From, {SessionId, State}) ->
 handle_call(get_module_tracker, _From, {SessionId, State}) ->
     Tracker = beamtalk_repl_state:get_module_tracker(State),
     {reply, {ok, Tracker}, {SessionId, State}};
+
+handle_call({unload_module, Module}, _From, {SessionId, State}) ->
+    case code:is_loaded(Module) of
+        {file, _} ->
+            case code:soft_purge(Module) of
+                true ->
+                    _ = code:delete(Module),
+                    Tracker = beamtalk_repl_state:get_module_tracker(State),
+                    NewTracker = beamtalk_repl_modules:remove_module(Module, Tracker),
+                    NewState = beamtalk_repl_state:set_module_tracker(NewTracker, State),
+                    {reply, ok, {SessionId, NewState}};
+                false ->
+                    Err0 = beamtalk_error:new(module_in_use, 'Module'),
+                    Err1 = beamtalk_error:with_selector(Err0, Module),
+                    Err = beamtalk_error:with_hint(Err1,
+                        <<"Stop actors using this module first.">>),
+                    {reply, {error, Err}, {SessionId, State}}
+            end;
+        false ->
+            Err0 = beamtalk_error:new(module_not_loaded, 'Module'),
+            Err1 = beamtalk_error:with_selector(Err0, Module),
+            Err = beamtalk_error:with_hint(Err1,
+                <<"Use :load <path> to load it first.">>),
+            {reply, {error, Err}, {SessionId, State}}
+    end;
 
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.

@@ -86,7 +86,9 @@ pub struct NodeInfo {
 /// Uses SHA256 hash of the absolute path.
 pub fn generate_workspace_id(project_path: &Path) -> Result<String> {
     let absolute = project_path.canonicalize().into_diagnostic()?;
-    let path_str = absolute.to_string_lossy();
+    let path_str = absolute
+        .to_str()
+        .ok_or_else(|| miette!("Project path contains invalid UTF-8: {:?}", absolute))?;
 
     let mut hasher = Sha256::new();
     hasher.update(path_str.as_bytes());
@@ -435,7 +437,9 @@ pub fn start_detached_node(
 
     // Build the eval command to start workspace supervisor and keep running
     let project_path = get_workspace_metadata(workspace_id)?.project_path;
-    let project_path_str = project_path.to_string_lossy();
+    let project_path_str = project_path
+        .to_str()
+        .ok_or_else(|| miette!("Project path contains invalid UTF-8: {:?}", project_path))?;
     let eval_cmd = format!(
         "application:set_env(beamtalk_runtime, workspace_id, <<\"{workspace_id}\">>), \
          application:set_env(beamtalk_runtime, project_path, <<\"{project_path_str}\">>), \
@@ -2096,6 +2100,40 @@ mod tests {
         assert!(
             err.contains("not running"),
             "Error should indicate workspace is not running, got: {err}"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_generate_workspace_id_rejects_non_utf8_path() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        // Include PID in name to avoid collisions in parallel test runs
+        let tmp = std::env::temp_dir();
+        let mut invalid_bytes = b"beamtalk-test-\xff\xfe-".to_vec();
+        invalid_bytes.extend_from_slice(std::process::id().to_string().as_bytes());
+        let invalid_name = OsStr::from_bytes(&invalid_bytes);
+        let non_utf8_path = tmp.join(invalid_name);
+
+        // Create the directory so canonicalize() can succeed.
+        // Skip test if the filesystem rejects non-UTF8 names.
+        if let Err(e) = fs::create_dir(&non_utf8_path) {
+            if e.kind() != std::io::ErrorKind::AlreadyExists {
+                eprintln!("skipping test: failed to create non-UTF8 dir {non_utf8_path:?}: {e}");
+                return;
+            }
+        }
+
+        let result = generate_workspace_id(&non_utf8_path);
+        // Clean up before asserting
+        let _ = fs::remove_dir(&non_utf8_path);
+
+        assert!(result.is_err(), "Non-UTF8 path should produce an error");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("invalid UTF-8"),
+            "Error should mention invalid UTF-8, got: {err}"
         );
     }
 }
