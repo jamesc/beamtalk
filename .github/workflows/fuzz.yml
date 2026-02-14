@@ -61,7 +61,7 @@ jobs:
           path: fuzz/artifacts/parse_arbitrary/
           retention-days: 30
 
-      - name: Check for crashes
+      - name: Check for fuzz failures
         if: steps.fuzz.outcome == 'failure'
         run: |
           FAILED=0
@@ -135,27 +135,28 @@ jobs:
               details += `\n### Timeouts (${timeouts.length})\n${timeouts.map(c => `- \`${c}\``).join('\n')}\nThe parser took too long, indicating an infinite loop or pathological input.\n`;
             }
             
-            const body = `## Parser Fuzzing Failure
-
-            The nightly fuzzer found issues in the parser.
-
-            **Run:** ${context.runId}
-            **Workflow:** ${context.workflow}
-            **Date:** ${new Date().toISOString()}
-            ${details}
-            ### Action Required
-
-            1. Download the \`fuzz-artifacts-${context.runId}\` artifact from the workflow run
-            2. Reproduce: \`cargo +nightly fuzz run parse_arbitrary <artifact-file>\`
-            3. Fix the issue in the parser
-            4. Re-run fuzzer to verify fix
-
-            ### References
-
-            - ADR 0011: Robustness Testing — Layered Fuzzing
-            - Epic: BT-362
-            - Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}
-            `;
+            const body = [
+              `## Parser Fuzzing Failure`,
+              ``,
+              `The nightly fuzzer found issues in the parser.`,
+              ``,
+              `**Run:** ${context.runId}`,
+              `**Workflow:** ${context.workflow}`,
+              `**Date:** ${new Date().toISOString()}`,
+              details,
+              `### Action Required`,
+              ``,
+              `1. Download the \`fuzz-artifacts-${context.runId}\` artifact from the workflow run`,
+              `2. Reproduce: \`cargo +nightly fuzz run parse_arbitrary <artifact-file>\``,
+              `3. Fix the issue in the parser`,
+              `4. Re-run fuzzer to verify fix`,
+              ``,
+              `### References`,
+              ``,
+              `- ADR 0011: Robustness Testing — Layered Fuzzing`,
+              `- Epic: BT-362`,
+              `- Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            ].join('\n');
             
             await github.rest.issues.create({
               owner: context.repo.owner,
