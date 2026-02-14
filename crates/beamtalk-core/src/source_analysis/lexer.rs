@@ -963,12 +963,13 @@ mod tests {
     #[test]
     fn lex_compound_binary_selectors() {
         assert_eq!(
-            lex_kinds("<= >= == ~="),
+            lex_kinds("<= >= == ~= **"),
             vec![
                 TokenKind::BinarySelector("<=".into()),
                 TokenKind::BinarySelector(">=".into()),
                 TokenKind::BinarySelector("==".into()),
                 TokenKind::BinarySelector("~=".into()),
+                TokenKind::BinarySelector("**".into()),
             ]
         );
     }

@@ -256,7 +256,10 @@ Transcript show: 'Hello'; cr; show: 'World'
 
 Binary operators follow standard math precedence (highest to lowest):
 
-#### Multiplicative (highest precedence)
+#### Exponentiation (highest precedence)
+- `**` - Power: `2 ** 10` → `1024` (right-associative)
+
+#### Multiplicative
 - `*` - Multiplication: `3 * 4` → `12`
 - `/` - Division: `10 / 2` → `5`
 - `%` - Modulo/Remainder: `17 % 5` → `2`
