@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Compiler snapshot test for BT-367: multi-expression value-type method sequencing
+//
+// Verifies that value-type methods with multiple expressions generate
+// correct Core Erlang using `let ... in` to sequence non-last expressions.
+// The first expression (side-effecting) should be wrapped in a let binding,
+// and only the last expression should be returned directly.
+
+Object subclass: MultiExprTest
+
+  // Two-expression method: side effect then return value
+  addAndDouble: x =>
+    Transcript show: x
+    x * 2
+
+  // Three-expression method: multiple side effects then return
+  tripleStep: a with: b =>
+    a + b
+    a - b
+    a * b

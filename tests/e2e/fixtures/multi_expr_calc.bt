@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// MultiExprCalc - value type with multi-expression methods for testing BT-367
+// Verifies that non-last expressions in value-type methods are sequenced correctly
+// (side effects execute, but only the last expression's value is returned)
+
+Object subclass: MultiExprCalc
+
+  // Two-expression method: first expression is discarded, second is returned
+  doubleAfterAdd: x =>
+    x + 100
+    x * 2
+
+  // Three-expression method: first two are discarded, third is returned
+  compute: a with: b =>
+    a + b
+    a - b
+    a * b
