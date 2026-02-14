@@ -15,6 +15,8 @@
 -module(beamtalk_workspace_meta).
 -behaviour(gen_server).
 
+-include_lib("kernel/include/logger.hrl").
+
 %% Public API
 -export([start_link/1, get_metadata/0, update_activity/0, get_last_activity/0]).
 -export([register_actor/1, unregister_actor/1, supervised_actors/0]).
@@ -398,7 +400,7 @@ persist_metadata_to_disk(State) ->
         ok ->
             ok;
         {error, Reason} ->
-            logger:warning("Failed to persist workspace metadata to ~s: ~p",
+            ?LOG_WARNING("Failed to persist workspace metadata to ~s: ~p",
                            [Path, Reason]),
             {error, Reason}
     end.

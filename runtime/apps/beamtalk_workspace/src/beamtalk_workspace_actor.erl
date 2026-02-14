@@ -40,6 +40,7 @@
 -behaviour(gen_server).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 %% API
 -export([
@@ -172,13 +173,13 @@ handle_cast({UnknownSelector, _Args, FuturePid}, State) when is_pid(FuturePid), 
     {noreply, State};
 
 handle_cast(Msg, State) ->
-    logger:warning("Workspace received unexpected cast", #{message => Msg}),
+    ?LOG_WARNING("Workspace received unexpected cast", #{message => Msg}),
     {noreply, State}.
 
 %% @doc Handle info messages.
 -spec handle_info(term(), #workspace_actor_state{}) -> {noreply, #workspace_actor_state{}}.
 handle_info(Info, State) ->
-    logger:debug("Workspace received info", #{info => Info}),
+    ?LOG_DEBUG("Workspace received info", #{info => Info}),
     {noreply, State}.
 
 %% @doc Handle process termination.
@@ -288,15 +289,15 @@ register_class() ->
             undefined ->
                 case beamtalk_object_class:start_link('Workspace', ClassInfo) of
                     {ok, _Pid} ->
-                        logger:debug("Registered Workspace class", #{});
+                        ?LOG_DEBUG("Registered Workspace class", #{});
                     {error, RegReason} ->
-                        logger:warning("Failed to register Workspace class", #{reason => RegReason})
+                        ?LOG_WARNING("Failed to register Workspace class", #{reason => RegReason})
                 end;
             _Pid ->
                 ok
         end
     catch
         Kind:CrashReason ->
-            logger:warning("Workspace class registration failed", #{kind => Kind, reason => CrashReason})
+            ?LOG_WARNING("Workspace class registration failed", #{kind => Kind, reason => CrashReason})
     end,
     ok.

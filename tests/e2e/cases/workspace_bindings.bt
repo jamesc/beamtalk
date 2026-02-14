@@ -135,6 +135,7 @@ recentAfterClear isEmpty
 // Transcript unsubscribe dispatches as unary method (BT-530)
 (Transcript unsubscribe) await
 // => #Actor<TranscriptStream,_>
+// => #Actor<TranscriptStream,_>
 
 // ===========================================================================
 // EXPLICIT FORM — SINGLETON CLASS VARIABLE ACCESS (ADR 0019 Phase 4)

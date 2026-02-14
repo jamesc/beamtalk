@@ -115,13 +115,13 @@
 %% ```
 -spec lookup(selector(), args(), bt_self(), state(), class_name()) -> dispatch_result().
 lookup(Selector, Args, Self, State, CurrentClass) ->
-    logger:debug("Dispatching ~p on class ~p", [Selector, CurrentClass]),
+    ?LOG_DEBUG("Dispatching ~p on class ~p", [Selector, CurrentClass]),
     
     %% Step 1: Check extension registry first (guard against missing ETS table)
     case check_extension(CurrentClass, Selector) of
         {ok, Fun} ->
             %% Found extension method - invoke it
-            logger:debug("Found extension method ~p on ~p", [Selector, CurrentClass]),
+            ?LOG_DEBUG("Found extension method ~p on ~p", [Selector, CurrentClass]),
             invoke_extension(Fun, Args, Self, State);
         not_found ->
             %% Step 2: Check class's own method table
@@ -151,7 +151,7 @@ lookup(Selector, Args, Self, State, CurrentClass) ->
 %% ```
 -spec super(selector(), args(), bt_self(), state(), class_name()) -> dispatch_result().
 super(Selector, Args, Self, State, CurrentClass) ->
-    logger:debug("Super dispatch ~p from class ~p", [Selector, CurrentClass]),
+    ?LOG_DEBUG("Super dispatch ~p from class ~p", [Selector, CurrentClass]),
     
     %% Look up the current class to get its superclass
     case beamtalk_object_class:whereis_class(CurrentClass) of
@@ -173,7 +173,7 @@ super(Selector, Args, Self, State, CurrentClass) ->
                     %% Check extension registry on superclass before hierarchy walk
                     case check_extension(SuperclassName, Selector) of
                         {ok, Fun} ->
-                            logger:debug("Found extension method ~p on superclass ~p via super", [Selector, SuperclassName]),
+                            ?LOG_DEBUG("Found extension method ~p on superclass ~p via super", [Selector, SuperclassName]),
                             invoke_extension(Fun, Args, Self, State);
                         not_found ->
                             %% Start lookup at superclass (skip current class)
@@ -210,7 +210,7 @@ super(Selector, Args, Self, State, CurrentClass) ->
 invoke_with_combinations(Selector, Args, Self, State, CurrentClass) ->
     %% TODO: Implement method combinations
     %% For now, just delegate to normal lookup
-    logger:debug("Method combinations not yet implemented, using normal lookup", []),
+    ?LOG_DEBUG("Method combinations not yet implemented, using normal lookup", []),
     lookup(Selector, Args, Self, State, CurrentClass).
 
 %% @doc Check if a class or any of its ancestors responds to a selector.
@@ -291,12 +291,12 @@ lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
             case try_flattened_lookup(ClassPid, Selector) of
                 {ok, DefiningClass, _MethodInfo} ->
                     %% Found in flattened table - invoke from defining class
-                    logger:debug("Found method ~p in flattened table (defined in ~p)", [Selector, DefiningClass]),
+                    ?LOG_DEBUG("Found method ~p in flattened table (defined in ~p)", [Selector, DefiningClass]),
                     case beamtalk_object_class:whereis_class(DefiningClass) of
                         undefined ->
                             %% Defining class no longer exists (hot reload edge case)
                             %% Fall back to hierarchy walk
-                            logger:debug("Defining class ~p not found, falling back to hierarchy walk", [DefiningClass]),
+                            ?LOG_DEBUG("Defining class ~p not found, falling back to hierarchy walk", [DefiningClass]),
                             lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid);
                         DefiningClassPid ->
                             invoke_method(DefiningClass, DefiningClassPid, Selector, Args, Self, State)
@@ -307,7 +307,7 @@ lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
                     %% - Methods added at runtime (not yet in flattened table)
                     %% - Bootstrap ordering (flattened table incomplete)
                     %% - Extension methods (checked by caller before this)
-                    logger:debug("Method ~p not in flattened table, falling back to hierarchy walk", [Selector]),
+                    ?LOG_DEBUG("Method ~p not in flattened table, falling back to hierarchy walk", [Selector]),
                     lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid)
             end
     end.
@@ -323,21 +323,21 @@ lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid) ->
     case beamtalk_object_class:has_method(ClassPid, Selector) of
         true ->
             %% Found the method - invoke it
-            logger:debug("Found method ~p in class ~p (hierarchy walk)", [Selector, ClassName]),
+            ?LOG_DEBUG("Found method ~p in class ~p (hierarchy walk)", [Selector, ClassName]),
             invoke_method(ClassName, ClassPid, Selector, Args, Self, State);
         false ->
             %% Not found in this class - try superclass
             case beamtalk_object_class:superclass(ClassPid) of
                 none ->
                     %% Reached root without finding method
-                    logger:debug("Method ~p not found in hierarchy (root: ~p)", [Selector, ClassName]),
+                    ?LOG_DEBUG("Method ~p not found in hierarchy (root: ~p)", [Selector, ClassName]),
                     Error0 = beamtalk_error:new(does_not_understand, beamtalk_tagged_map:class_of(State, ClassName)),
                     Error1 = beamtalk_error:with_selector(Error0, Selector),
                     Error2 = beamtalk_error:with_hint(Error1, <<"Check spelling or use 'respondsTo:' to verify method exists">>),
                     {error, Error2};
                 SuperclassName ->
                     %% Recurse to superclass
-                    logger:debug("Method ~p not in ~p, trying superclass ~p", [Selector, ClassName, SuperclassName]),
+                    ?LOG_DEBUG("Method ~p not in ~p, trying superclass ~p", [Selector, ClassName, SuperclassName]),
                     case beamtalk_object_class:whereis_class(SuperclassName) of
                         undefined ->
                             Error0 = beamtalk_error:new(class_not_found, SuperclassName),
@@ -378,7 +378,7 @@ invoke_method(_ClassName, ClassPid, Selector, Args, Self, State) ->
                     %% Module exists but lacks dispatch/4 — continue to superclass (BT-427)
                     continue_to_superclass(Selector, Args, Self, State, ClassPid);
                 true ->
-                    logger:debug("Invoking ~p:dispatch(~p, ...)", [ModuleName, Selector]),
+                    ?LOG_DEBUG("Invoking ~p:dispatch(~p, ...)", [ModuleName, Selector]),
                     %% Normalize the return value: dispatch/4 returns either
                     %% {reply, Result, NewState} or {error, Error, State} (3-tuple).
                     %% We normalize {error, Error, State} to {error, Error} to match
@@ -433,7 +433,7 @@ invoke_extension(Fun, Args, _Self, State) ->
         {reply, Result, State}
     catch
         error:Reason:Stacktrace ->
-            logger:error("Extension method threw error: ~p~nStacktrace: ~p",
+            ?LOG_ERROR("Extension method threw error: ~p~nStacktrace: ~p",
                         [Reason, Stacktrace]),
             erlang:raise(error, Reason, Stacktrace)
     end.
@@ -476,7 +476,7 @@ try_flattened_lookup(ClassPid, Selector) ->
             not_found;
         exit:{timeout, _} ->
             %% Class process lookup timed out — log for visibility
-            logger:warning("Flattened lookup timed out", #{
+            ?LOG_WARNING("Flattened lookup timed out", #{
                 class_pid => ClassPid,
                 selector => Selector
             }),

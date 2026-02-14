@@ -48,6 +48,7 @@
 -behaviour(gen_server).
 
 -include("beamtalk.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 %% API
 -export([
@@ -225,13 +226,13 @@ handle_cast({UnknownSelector, _Args, FuturePid}, State) when is_pid(FuturePid), 
     beamtalk_future:reject(FuturePid, Error2),
     {noreply, State};
 handle_cast(Msg, State) ->
-    logger:warning("SystemDictionary received unexpected cast", #{message => Msg}),
+    ?LOG_WARNING("SystemDictionary received unexpected cast", #{message => Msg}),
     {noreply, State}.
 
 %% @doc Handle info messages.
 -spec handle_info(term(), #system_dict_state{}) -> {noreply, #system_dict_state{}}.
 handle_info(Info, State) ->
-    logger:debug("SystemDictionary received info", #{info => Info}),
+    ?LOG_DEBUG("SystemDictionary received info", #{info => Info}),
     {noreply, State}.
 
 %% @doc Handle process termination.
@@ -270,7 +271,7 @@ handle_all_classes() ->
         )
     catch
         exit:{noproc, _} ->
-            logger:warning("pg not started when fetching all classes", #{module => ?MODULE}),
+            ?LOG_WARNING("pg not started when fetching all classes", #{module => ?MODULE}),
             []
     end.
 

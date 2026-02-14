@@ -208,16 +208,25 @@ Or use a helper function in the codegen to generate this automatically.
 
 ## Logging with OTP Logger
 
-**Use OTP's `logger` module for all logging.** Do NOT use `io:format` for diagnostics.
+**Use OTP logger macros (`?LOG_*`) for all logging.** Do NOT use `io:format` for diagnostics or direct `logger:debug/2`, `logger:info/2`, `logger:warning/2`, `logger:error/2`, or `logger:log/3` function calls.
+
+Logger macros automatically include caller location metadata (module, function, arity, line) in every log entry, which is essential for debugging via file logs.
+
+**Every `.erl` file that logs MUST include:**
+```erlang
+-include_lib("kernel/include/logger.hrl").
+```
+
+Place the include after `-behaviour(...)` (if present) or after `-module(...)`.
 
 ### Log Levels
 
-| Level | Function | Use Case | Example |
-|-------|----------|----------|---------|
-| **debug** | `logger:debug/2` | Detailed diagnostics, JSON parse errors, dispatch traces | Protocol parsing failures |
-| **info** | `logger:info/2` | Important events | Workspace started, daemon ready |
-| **warning** | `logger:warning/2` | Recoverable issues | Accept error, failed cleanup |
-| **error** | `logger:error/2` | Errors affecting operations | Method not found, timeout |
+| Level | Macro | Use Case | Example |
+|-------|-------|----------|---------|
+| **debug** | `?LOG_DEBUG(Msg, Meta)` | Detailed diagnostics, JSON parse errors, dispatch traces | Protocol parsing failures |
+| **info** | `?LOG_INFO(Msg, Meta)` | Important events | Workspace started, daemon ready |
+| **warning** | `?LOG_WARNING(Msg, Meta)` | Recoverable issues | Accept error, failed cleanup |
+| **error** | `?LOG_ERROR(Msg, Meta)` | Errors affecting operations | Method not found, timeout |
 
 ### Usage Pattern
 
@@ -227,8 +236,11 @@ Always use structured metadata (maps), not format strings:
 %% ❌ WRONG - old style io:format
 io:format(standard_error, "JSON parse failed: ~p~n", [Reason])
 
-%% ✅ RIGHT - structured logger
-logger:debug("JSON parse failed", #{
+%% ❌ WRONG - function calls (no MFA metadata in log output)
+logger:debug("JSON parse failed", #{reason => Reason})
+
+%% ✅ RIGHT - logger macros (includes MFA automatically)
+?LOG_DEBUG("JSON parse failed", #{
     class => Class,
     reason => Reason,
     stack => lists:sublist(Stack, 3),
@@ -236,13 +248,24 @@ logger:debug("JSON parse failed", #{
 })
 ```
 
+### File Logging (BT-541)
+
+Workspace nodes automatically write logs to `~/.beamtalk/workspaces/{workspace_id}/workspace.log`:
+- **All levels** captured — the file handler sets primary logger level to `debug` at startup so all events reach the file
+- **Log rotation**: 5 files × 1 MB
+- **Format**: `timestamp [level] module:function/arity message`
+- **Disable**: Set `BEAMTALK_NO_FILE_LOG=1` environment variable
+- **Handler**: `logger_std_h` added during workspace supervisor init
+
 ### Benefits
 
-1. **Clean test output** - Configure logger level in test environment
-2. **Structured metadata** - Easy to parse and filter
-3. **Flexible output** - Console, file, or custom handlers
-4. **Standard OTP** - Follows Erlang best practices
-5. **Configurable** - Control via `sys.config` or runtime
+1. **MFA in logs** - Every log entry shows which module/function/line emitted it
+2. **File logging** - Persistent workspace logs for post-hoc debugging
+3. **Clean test output** - Configure logger level in test environment
+4. **Structured metadata** - Easy to parse and filter
+5. **Flexible output** - Console, file, or custom handlers
+6. **Standard OTP** - Follows Erlang best practices
+7. **Configurable** - Control via `sys.config` or runtime
 
 ### Test Configuration
 
@@ -268,7 +291,7 @@ Configure logger in `test/sys.config` to suppress non-error logs:
 
 ### Production Configuration
 
-For production, use info level with structured output:
+For production, use info level with MFA and structured output:
 
 ```erlang
 [
@@ -278,8 +301,8 @@ For production, use info level with structured output:
             {handler, default, logger_std_h, #{
                 level => info,
                 formatter => {logger_formatter, #{
-                    single_line => false,
-                    template => [time, " ", level, " ", msg, "\n"]
+                    single_line => true,
+                    template => [time, " [", level, "] ", mfa, " ", msg, "\n"]
                 }}
             }}
         ]}
