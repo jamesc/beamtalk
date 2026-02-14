@@ -280,7 +280,9 @@ pub(crate) fn eunit_helper_functions() -> &'static str {
 /// where the REPL compares string representations.
 pub(crate) fn expected_to_binary_literal(expected: &str) -> String {
     let escaped = expected.replace('\\', "\\\\").replace('"', "\\\"");
-    format!("<<\"{escaped}\">>")
+    // Use /utf8 type to correctly encode multi-byte Unicode characters (BT-388).
+    // Without /utf8, Erlang truncates codepoints > 255 to a single byte.
+    format!("<<\"{escaped}\"/utf8>>")
 }
 
 /// Extract the variable name from an assignment expression (`x := expr`).
@@ -1039,18 +1041,24 @@ mod tests {
 
     #[test]
     fn test_expected_to_binary_literal() {
-        assert_eq!(expected_to_binary_literal("42"), "<<\"42\">>");
-        assert_eq!(expected_to_binary_literal("-5"), "<<\"-5\">>");
-        assert_eq!(expected_to_binary_literal("0"), "<<\"0\">>");
-        assert_eq!(expected_to_binary_literal("3.14"), "<<\"3.14\">>");
-        assert_eq!(expected_to_binary_literal("-2.5"), "<<\"-2.5\">>");
-        assert_eq!(expected_to_binary_literal("true"), "<<\"true\">>");
-        assert_eq!(expected_to_binary_literal("false"), "<<\"false\">>");
-        assert_eq!(expected_to_binary_literal("nil"), "<<\"nil\">>");
-        assert_eq!(expected_to_binary_literal("hello"), "<<\"hello\">>");
+        assert_eq!(expected_to_binary_literal("42"), "<<\"42\"/utf8>>");
+        assert_eq!(expected_to_binary_literal("-5"), "<<\"-5\"/utf8>>");
+        assert_eq!(expected_to_binary_literal("0"), "<<\"0\"/utf8>>");
+        assert_eq!(expected_to_binary_literal("3.14"), "<<\"3.14\"/utf8>>");
+        assert_eq!(expected_to_binary_literal("-2.5"), "<<\"-2.5\"/utf8>>");
+        assert_eq!(expected_to_binary_literal("true"), "<<\"true\"/utf8>>");
+        assert_eq!(expected_to_binary_literal("false"), "<<\"false\"/utf8>>");
+        assert_eq!(expected_to_binary_literal("nil"), "<<\"nil\"/utf8>>");
+        assert_eq!(expected_to_binary_literal("hello"), "<<\"hello\"/utf8>>");
         assert_eq!(
             expected_to_binary_literal("hello world"),
-            "<<\"hello world\">>"
+            "<<\"hello world\"/utf8>>"
+        );
+        // BT-388: Unicode characters must be encoded correctly
+        assert_eq!(expected_to_binary_literal("世界"), "<<\"世界\"/utf8>>");
+        assert_eq!(
+            expected_to_binary_literal("Hello 🌍"),
+            "<<\"Hello 🌍\"/utf8>>"
         );
     }
 
