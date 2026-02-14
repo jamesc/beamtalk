@@ -13,7 +13,7 @@
 // 1. **ProtoObject.class** - Every object can report its class
 // 2. **ProtoObject.doesNotUnderstand:args:** - Catch unknown messages
 // 3. **ProtoObject.perform:withArguments:** - Dynamic message dispatch
-// 4. **ProtoObject.== and ~=** - Identity comparison
+// 4. **ProtoObject.== and /=** - Identity comparison
 // 5. **Transparent proxy pattern** - Proxy is indistinguishable from target
 //
 // ## How to Run
@@ -171,7 +171,7 @@ Actor subclass: TransparentProxy
 // > 42 == 42
 // => true
 //
-// > 42 ~= 43
+// > 42 /= 43
 // => true
 //
 // > 'hello' == 'hello'

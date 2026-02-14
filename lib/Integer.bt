@@ -72,23 +72,23 @@ sealed Number subclass: Integer
   /// ```
   ** other => @primitive '**'
 
-  /// Test equality with another integer.
+  /// Test strict equality with another integer.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// 42 = 42       // => true
-  /// 1 = 2         // => false
+  /// 42 =:= 42       // => true
+  /// 1 =:= 2         // => false
   /// ```
-  = other => @primitive '='
+  =:= other => @primitive '=:='
 
   /// Test inequality with another integer.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// 1 ~= 2        // => true
-  /// 42 ~= 42      // => false
+  /// 1 /= 2        // => true
+  /// 42 /= 42      // => false
   /// ```
-  ~= other => (self = other) not
+  /= other => @primitive '/='
 
   /// Test if the receiver is less than another integer.
   ///
@@ -151,7 +151,7 @@ sealed Number subclass: Integer
   /// 4 isEven      // => true
   /// 7 isEven      // => false
   /// ```
-  isEven => (self % 2) = 0
+  isEven => (self % 2) =:= 0
 
   /// Test if the receiver is odd.
   ///
@@ -160,7 +160,7 @@ sealed Number subclass: Integer
   /// 7 isOdd       // => true
   /// 4 isOdd       // => false
   /// ```
-  isOdd => (self % 2) ~= 0
+  isOdd => (self % 2) /= 0
 
   /// Return the smaller of the receiver and `other`.
   ///
@@ -284,7 +284,7 @@ sealed Number subclass: Integer
   /// 5 factorial     // => 120
   /// 0 factorial     // => 1
   /// ```
-  factorial => (self < 0) ifTrue: [self error: 'Factorial is undefined for negative integers'] ifFalse: [(self = 0) ifTrue: [1] ifFalse: [self * (self - 1) factorial]]
+  factorial => (self < 0) ifTrue: [self error: 'Factorial is undefined for negative integers'] ifFalse: [(self =:= 0) ifTrue: [1] ifFalse: [self * (self - 1) factorial]]
 
   /// Greatest common divisor of the receiver and `other`.
   ///
@@ -293,7 +293,7 @@ sealed Number subclass: Integer
   /// 12 gcd: 8       // => 4
   /// 7 gcd: 5        // => 1
   /// ```
-  gcd: other => (other = 0) ifTrue: [self abs] ifFalse: [other gcd: (self % other)]
+  gcd: other => (other =:= 0) ifTrue: [self abs] ifFalse: [other gcd: (self % other)]
 
   /// Least common multiple of the receiver and `other`.
   ///
@@ -302,7 +302,7 @@ sealed Number subclass: Integer
   /// 4 lcm: 6        // => 12
   /// 3 lcm: 5        // => 15
   /// ```
-  lcm: other => (self gcd: other) = 0 ifTrue: [0] ifFalse: [(((self abs) / (self gcd: other)) rounded) * (other abs)]
+  lcm: other => (self gcd: other) =:= 0 ifTrue: [0] ifFalse: [(((self abs) / (self gcd: other)) rounded) * (other abs)]
 
   /// Test if the codepoint is a Unicode letter.
   ///

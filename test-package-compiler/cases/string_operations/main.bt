@@ -12,8 +12,8 @@ message := greeting ++ ', ' ++ name ++ '!'
 len := greeting length
 
 // ===== String Comparison =====
-isEqual := 'hello' = 'hello'
-notEqual := 'hello' ~= 'world'
+isEqual := 'hello' =:= 'hello'
+notEqual := 'hello' /= 'world'
 isLess := 'apple' < 'banana'
 isGreater := 'zebra' > 'apple'
 

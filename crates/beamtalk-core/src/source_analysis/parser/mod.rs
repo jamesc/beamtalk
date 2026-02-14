@@ -31,7 +31,7 @@
 //!
 //! | Level | Operators | Associativity |
 //! |-------|-----------|---------------|
-//! | 10 | `=` `~=` | Left |
+//! | 10 | `==` `/=` `=:=` `=/=` | Left |
 //! | 20 | `<` `>` `<=` `>=` | Left |
 //! | 30 | `+` `-` | Left |
 //! | 40 | `*` `/` `%` | Left |
@@ -111,7 +111,7 @@ impl BindingPower {
 /// |-------|-----------|---------------|
 /// | 5  | `>>`                | Left |
 /// | 8  | `->`                | Left |
-/// | 10 | `=` `~=`            | Left |
+/// | 10 | `==` `/=` `=:=` `=/=` | Left |
 /// | 20 | `<` `>` `<=` `>=`   | Left |
 /// | 30 | `+` `-`             | Left |
 /// | 40 | `*` `/` `%`         | Left |
@@ -132,9 +132,10 @@ pub(super) fn binary_binding_power(op: &str) -> Option<BindingPower> {
         // `#name -> 'James'` creates an Association key-value pair
         "->" => Some(BindingPower::left_assoc(8)),
 
-        // Equality
-        // `~=` is the Smalltalk-style not-equal operator
-        "=" | "==" | "~=" => Some(BindingPower::left_assoc(10)),
+        // Equality (ADR 0002: Erlang comparison operators)
+        // `=:=` strict equality, `=/=` strict inequality
+        // `/=` loose inequality, `==` loose equality
+        "==" | "/=" | "=:=" | "=/=" => Some(BindingPower::left_assoc(10)),
 
         // Comparison
         "<" | ">" | "<=" | ">=" => Some(BindingPower::left_assoc(20)),
@@ -1920,9 +1921,9 @@ Actor subclass: Rectangle
     #[test]
     fn pratt_all_operators() {
         // Test all supported operators parse correctly
-        // Using `~=` as the not-equal operator (Smalltalk tradition)
+        // Using Erlang comparison operators (ADR 0002)
         let expressions = vec![
-            "1 = 2", "1 ~= 2", // Smalltalk-style not-equal
+            "1 =:= 2", "1 /= 2", "1 =/= 2", // ADR 0002: Erlang comparison operators
             "1 < 2", "1 > 2", "1 <= 2", "1 >= 2", "1 + 2", "1 - 2", "1 * 2", "1 / 2", "1 % 2",
         ];
 

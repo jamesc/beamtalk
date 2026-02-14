@@ -245,7 +245,7 @@ impl Parser {
     /// Beamtalk binary messages follow standard operator precedence:
     /// - Multiplicative: `* / %` (higher precedence)
     /// - Additive: `+ -` (lower precedence)
-    /// - Comparison: `< > <= >= = ~=` (lowest precedence)
+    /// - Comparison: `< > <= >= == /= =:= =/=` (lowest precedence)
     ///
     /// This implementation uses Pratt parsing (top-down operator precedence)
     /// which makes adding new operators a single-line change in the
