@@ -16,6 +16,7 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %% Public API
 -export([start_link/1, stop/1, eval/2, get_bindings/1, clear_bindings/1, load_file/2,
@@ -63,7 +64,7 @@ get_module_tracker(SessionPid) ->
     gen_server:call(SessionPid, get_module_tracker, 5000).
 
 %% @doc Unload a module from this session, purging its code and removing it from the tracker.
--spec unload_module(pid(), atom()) -> ok | {error, term()}.
+-spec unload_module(pid(), atom()) -> ok | {error, #beamtalk_error{}}.
 unload_module(SessionPid, Module) ->
     gen_server:call(SessionPid, {unload_module, Module}, 5000).
 
@@ -136,11 +137,18 @@ handle_call({unload_module, Module}, _From, {SessionId, State}) ->
                     NewState = beamtalk_repl_state:set_module_tracker(NewTracker, State),
                     {reply, ok, {SessionId, NewState}};
                 false ->
-                    %% Old code still running in active processes — cannot safely purge
-                    {reply, {error, {module_in_use, Module}}, {SessionId, State}}
+                    Err0 = beamtalk_error:new(module_in_use, 'Module'),
+                    Err1 = beamtalk_error:with_selector(Err0, Module),
+                    Err = beamtalk_error:with_hint(Err1,
+                        <<"Stop actors using this module first.">>),
+                    {reply, {error, Err}, {SessionId, State}}
             end;
         false ->
-            {reply, {error, {module_not_loaded, Module}}, {SessionId, State}}
+            Err0 = beamtalk_error:new(module_not_loaded, 'Module'),
+            Err1 = beamtalk_error:with_selector(Err0, Module),
+            Err = beamtalk_error:with_hint(Err1,
+                <<"Use :load <path> to load it first.">>),
+            {reply, {error, Err}, {SessionId, State}}
     end;
 
 handle_call(_Request, _From, State) ->

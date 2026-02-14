@@ -468,21 +468,23 @@ handle_op(<<"unload">>, Params, Msg, SessionPid) ->
             beamtalk_repl_protocol:encode_error(
                 {invalid_module, missing}, Msg, fun format_error_message/1);
         _ ->
-            Module = binary_to_atom(ModuleBin, utf8),
-            %% Resolve class name to BEAM module name if needed
-            ResolvedModule = case code:is_loaded(Module) of
-                {file, _} -> Module;
-                false -> resolve_class_to_module(Module)
-            end,
-            case beamtalk_repl_shell:unload_module(SessionPid, ResolvedModule) of
-                ok ->
-                    beamtalk_repl_protocol:encode_status(ok, Msg, fun term_to_json/1);
-                {error, {module_not_loaded, _}} ->
+            case safe_to_existing_atom(ModuleBin) of
+                {error, badarg} ->
                     beamtalk_repl_protocol:encode_error(
-                        {module_not_loaded, Module}, Msg, fun format_error_message/1);
-                {error, {module_in_use, _}} ->
-                    beamtalk_repl_protocol:encode_error(
-                        {module_in_use, Module}, Msg, fun format_error_message/1)
+                        {invalid_module_name, ModuleBin}, Msg, fun format_error_message/1);
+                {ok, Module} ->
+                    %% Resolve class name to BEAM module name if needed
+                    ResolvedModule = case code:is_loaded(Module) of
+                        {file, _} -> Module;
+                        false -> resolve_class_to_module(Module)
+                    end,
+                    case beamtalk_repl_shell:unload_module(SessionPid, ResolvedModule) of
+                        ok ->
+                            beamtalk_repl_protocol:encode_status(ok, Msg, fun term_to_json/1);
+                        {error, #beamtalk_error{} = Err} ->
+                            beamtalk_repl_protocol:encode_error(
+                                Err, Msg, fun format_error_message/1)
+                    end
             end
     end;
 
@@ -1094,9 +1096,6 @@ format_error_message({no_source_file, Module}) ->
 format_error_message({module_not_loaded, Module}) ->
     iolist_to_binary([<<"Module not loaded: ">>, format_name(Module),
                       <<". Use :load <path> to load it first.">>]);
-format_error_message({module_in_use, Module}) ->
-    iolist_to_binary([<<"Cannot unload ">>, format_name(Module),
-                      <<": module has active processes. Stop actors using this module first.">>]);
 format_error_message({missing_module_name, reload}) ->
     <<"Usage: :reload <ModuleName> or :reload (to reload last file)">>;
 format_error_message({session_creation_failed, Reason}) ->

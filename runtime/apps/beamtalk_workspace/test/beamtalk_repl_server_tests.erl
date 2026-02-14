@@ -1395,19 +1395,21 @@ tcp_unload_in_use_test(Port) ->
     LoopPid = spawn(DummyMod, loop, []),
     %% Load new version so running process uses "old" code
     {module, DummyMod} = code:load_binary(DummyMod, "test.erl", Binary),
-    Msg = jsx:encode(#{<<"op">> => <<"unload">>, <<"id">> => <<"t12b">>,
-                       <<"module">> => atom_to_binary(DummyMod, utf8)}),
-    Resp = tcp_send_op(Port, Msg),
-    ?assertMatch(#{<<"id">> := <<"t12b">>}, Resp),
-    ?assert(maps:is_key(<<"error">>, Resp)),
-    ErrorMsg = maps:get(<<"error">>, Resp),
-    ?assert(binary:match(ErrorMsg, <<"active processes">>) =/= nomatch),
-    %% Cleanup
-    LoopPid ! stop,
-    timer:sleep(50),
-    _ = code:soft_purge(DummyMod),
-    _ = code:delete(DummyMod),
-    _ = code:soft_purge(DummyMod).
+    try
+        Msg = jsx:encode(#{<<"op">> => <<"unload">>, <<"id">> => <<"t12b">>,
+                           <<"module">> => atom_to_binary(DummyMod, utf8)}),
+        Resp = tcp_send_op(Port, Msg),
+        ?assertMatch(#{<<"id">> := <<"t12b">>}, Resp),
+        ?assert(maps:is_key(<<"error">>, Resp)),
+        ErrorMsg = maps:get(<<"error">>, Resp),
+        ?assert(binary:match(ErrorMsg, <<"Stop actors">>) =/= nomatch)
+    after
+        LoopPid ! stop,
+        timer:sleep(50),
+        _ = code:soft_purge(DummyMod),
+        _ = code:delete(DummyMod),
+        _ = code:soft_purge(DummyMod)
+    end.
 
 %% Test: inspect with invalid PID string
 tcp_inspect_invalid_pid_test(Port) ->
