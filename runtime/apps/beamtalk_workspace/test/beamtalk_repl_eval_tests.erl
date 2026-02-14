@@ -219,7 +219,7 @@ handle_load_compile_error_test() ->
         {error, daemon_unavailable, _} -> ok;
         {error, {compile_error, _}, _} -> ok;
         {error, {daemon_error, _}, _} -> ok;
-        Other -> ?assert(false, lists:flatten(io_lib:format("Unexpected result: ~p", [Other])))
+        Other -> error({unexpected_result, Other})
     end.
 
 %%% Secure temp directory tests (BT-56)
@@ -494,4 +494,347 @@ is_stdlib_path_non_lib_test() ->
 
 is_stdlib_path_non_lib_absolute_test() ->
     ?assertNot(beamtalk_repl_eval:is_stdlib_path("/workspace/project/src/MyClass.bt")).
+
+is_stdlib_path_lib_without_trailing_slash_test() ->
+    %% "lib" alone (no trailing slash) is NOT a lib path
+    ?assertNot(beamtalk_repl_eval:is_stdlib_path("lib")).
+
+is_stdlib_path_libs_prefix_test() ->
+    %% "libs/" is NOT the same as "lib/"
+    ?assertNot(beamtalk_repl_eval:is_stdlib_path("libs/Integer.bt")).
+
+is_stdlib_path_embedded_lib_test() ->
+    %% Path with /lib/ deeper in the tree
+    ?assert(beamtalk_repl_eval:is_stdlib_path("/home/user/projects/beamtalk/lib/String.bt")).
+
+is_stdlib_path_empty_test() ->
+    ?assertNot(beamtalk_repl_eval:is_stdlib_path("")).
+
+%%% strip_internal_bindings tests
+
+strip_internal_bindings_removes_registry_test() ->
+    Bindings = #{'__repl_actor_registry__' => self(), x => 42, y => 100},
+    Result = beamtalk_repl_eval:strip_internal_bindings(Bindings),
+    ?assertEqual(false, maps:is_key('__repl_actor_registry__', Result)),
+    ?assertEqual(42, maps:get(x, Result)),
+    ?assertEqual(100, maps:get(y, Result)).
+
+strip_internal_bindings_empty_map_test() ->
+    ?assertEqual(#{}, beamtalk_repl_eval:strip_internal_bindings(#{})).
+
+strip_internal_bindings_no_internal_keys_test() ->
+    Bindings = #{a => 1, b => 2, c => 3},
+    ?assertEqual(Bindings, beamtalk_repl_eval:strip_internal_bindings(Bindings)).
+
+strip_internal_bindings_only_registry_test() ->
+    Bindings = #{'__repl_actor_registry__' => self()},
+    ?assertEqual(#{}, beamtalk_repl_eval:strip_internal_bindings(Bindings)).
+
+%%% should_purge_module tests
+
+should_purge_module_undefined_registry_test() ->
+    %% No registry means always purge
+    ?assertEqual(true, beamtalk_repl_eval:should_purge_module(some_module, undefined)).
+
+should_purge_module_no_actors_test() ->
+    %% Start a registry with no actors — module should be purged
+    {ok, Registry} = beamtalk_repl_actors:start_link(registered),
+    Result = beamtalk_repl_eval:should_purge_module(beamtalk_repl_eval_999, Registry),
+    gen_server:stop(Registry),
+    ?assertEqual(true, Result).
+
+should_purge_module_with_actor_test() ->
+    %% Start a registry, register an actor — module should NOT be purged
+    {ok, Registry} = beamtalk_repl_actors:start_link(registered),
+    %% Create a dummy process to act as the actor
+    ActorPid = spawn(fun() -> receive stop -> ok end end),
+    %% register_actor(Registry, ActorPid, ClassName, ModuleName)
+    beamtalk_repl_actors:register_actor(Registry, ActorPid, 'TestClass', test_module),
+    Result = beamtalk_repl_eval:should_purge_module(test_module, Registry),
+    ActorPid ! stop,
+    gen_server:stop(Registry),
+    ?assertEqual(false, Result).
+
+should_purge_module_different_module_test() ->
+    %% Actor registered for different module — our module should be purged
+    {ok, Registry} = beamtalk_repl_actors:start_link(registered),
+    ActorPid = spawn(fun() -> receive stop -> ok end end),
+    beamtalk_repl_actors:register_actor(Registry, ActorPid, 'OtherClass', other_module),
+    Result = beamtalk_repl_eval:should_purge_module(my_module, Registry),
+    ActorPid ! stop,
+    gen_server:stop(Registry),
+    ?assertEqual(true, Result).
+
+%%% maybe_await_future tests
+
+maybe_await_future_non_pid_integer_test() ->
+    ?assertEqual(42, beamtalk_repl_eval:maybe_await_future(42)).
+
+maybe_await_future_non_pid_binary_test() ->
+    ?assertEqual(<<"hello">>, beamtalk_repl_eval:maybe_await_future(<<"hello">>)).
+
+maybe_await_future_non_pid_atom_test() ->
+    ?assertEqual(nil, beamtalk_repl_eval:maybe_await_future(nil)).
+
+maybe_await_future_non_pid_list_test() ->
+    ?assertEqual([1, 2, 3], beamtalk_repl_eval:maybe_await_future([1, 2, 3])).
+
+maybe_await_future_non_pid_map_test() ->
+    ?assertEqual(#{a => 1}, beamtalk_repl_eval:maybe_await_future(#{a => 1})).
+
+maybe_await_future_non_pid_tuple_test() ->
+    ?assertEqual({ok, value}, beamtalk_repl_eval:maybe_await_future({ok, value})).
+
+maybe_await_future_beamtalk_object_test() ->
+    %% beamtalk_object tuple should be returned as-is
+    Obj = {beamtalk_object, 'Counter', self(), #{}},
+    ?assertEqual(Obj, beamtalk_repl_eval:maybe_await_future(Obj)).
+
+maybe_await_future_resolved_future_test() ->
+    %% Simulate a future that resolves
+    FuturePid = spawn(fun() ->
+        receive
+            {await, Caller, _Timeout} ->
+                Caller ! {future_resolved, self(), 42}
+        end
+    end),
+    Result = beamtalk_repl_eval:maybe_await_future(FuturePid),
+    ?assertEqual(42, Result).
+
+maybe_await_future_rejected_future_test() ->
+    %% Simulate a future that rejects
+    FuturePid = spawn(fun() ->
+        receive
+            {await, Caller, _Timeout} ->
+                Caller ! {future_rejected, self(), some_error}
+        end
+    end),
+    Result = beamtalk_repl_eval:maybe_await_future(FuturePid),
+    ?assertEqual({future_rejected, some_error}, Result).
+
+maybe_await_future_non_future_pid_test() ->
+    %% A PID that doesn't respond to the future protocol
+    %% should be returned as-is after timeout
+    NonFuturePid = spawn(fun() ->
+        receive _ -> ok after 5000 -> ok end
+    end),
+    Result = beamtalk_repl_eval:maybe_await_future(NonFuturePid),
+    ?assertEqual(NonFuturePid, Result).
+
+%%% compile_core_erlang valid test
+
+compile_core_erlang_valid_module_test() ->
+    %% A properly formatted Core Erlang module that erlc should accept
+    CoreErlang = <<"module 'bt_test_valid_core' ['main'/0]\n"
+                   "  attributes []\n"
+                   "'main'/0 = fun () -> 42\n"
+                   "end">>,
+    Result = beamtalk_repl_eval:compile_core_erlang(CoreErlang, bt_test_valid_core),
+    ?assertMatch({ok, _Binary}, Result),
+    {ok, Binary} = Result,
+    ?assert(is_binary(Binary)),
+    ?assert(byte_size(Binary) > 0).
+
+%%% parse_file_compile_result edge cases
+
+parse_file_compile_result_missing_core_erlang_test() ->
+    %% success=true but no core_erlang field
+    Result = #{
+        <<"success">> => true,
+        <<"module_name">> => <<"test">>,
+        <<"classes">> => []
+    },
+    ?assertMatch({error, {daemon_error, <<"No core_erlang in response">>}},
+                 beamtalk_repl_eval:parse_file_compile_result(Result)).
+
+parse_file_compile_result_failure_with_empty_diagnostics_test() ->
+    Result = #{
+        <<"success">> => false
+    },
+    ?assertMatch({error, {compile_error, <<"Compilation failed">>}},
+                 beamtalk_repl_eval:parse_file_compile_result(Result)).
+
+parse_file_compile_result_with_classes_test() ->
+    %% Success path with class metadata
+    CoreErlang = <<"module 'counter' ['__info__'/0]\n  attributes []\n'__info__'/0 = fun () -> 'ok'\nend">>,
+    Result = #{
+        <<"success">> => true,
+        <<"core_erlang">> => CoreErlang,
+        <<"module_name">> => <<"counter">>,
+        <<"classes">> => [
+            #{<<"name">> => <<"Counter">>, <<"superclass">> => <<"Actor">>}
+        ]
+    },
+    case beamtalk_repl_eval:parse_file_compile_result(Result) of
+        {ok, Binary, ClassNames, ModuleName} ->
+            ?assertEqual(counter, ModuleName),
+            ?assert(is_binary(Binary)),
+            ?assertEqual([#{name => "Counter", superclass => "Actor"}], ClassNames);
+        {error, Reason} ->
+            error({unexpected_error, Reason})
+    end.
+
+%%% extract_assignment edge cases
+
+extract_assignment_empty_string_test() ->
+    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("")).
+
+extract_assignment_just_operator_test() ->
+    ?assertEqual(none, beamtalk_repl_eval:extract_assignment(":=")).
+
+extract_assignment_complex_rhs_test() ->
+    %% Assignment with complex RHS expression
+    ?assertEqual({ok, result}, beamtalk_repl_eval:extract_assignment("result := obj doSomething: 42")).
+
+extract_assignment_underscore_prefix_test() ->
+    ?assertEqual({ok, '_temp'}, beamtalk_repl_eval:extract_assignment("_temp := 0")).
+
+%%% extract_class_names edge cases
+
+extract_class_names_missing_name_field_test() ->
+    %% Class with missing name defaults to empty string
+    Result = #{
+        <<"success">> => true,
+        <<"classes">> => [
+            #{<<"superclass">> => <<"Object">>}
+        ]
+    },
+    ?assertEqual([#{name => "", superclass => "Object"}],
+                 beamtalk_repl_eval:extract_class_names(Result)).
+
+extract_class_names_missing_superclass_field_test() ->
+    %% Class with missing superclass defaults to "Object"
+    Result = #{
+        <<"success">> => true,
+        <<"classes">> => [
+            #{<<"name">> => <<"Point">>}
+        ]
+    },
+    ?assertEqual([#{name => "Point", superclass => "Object"}],
+                 beamtalk_repl_eval:extract_class_names(Result)).
+
+extract_class_names_multiple_classes_test() ->
+    Result = #{
+        <<"success">> => true,
+        <<"classes">> => [
+            #{<<"name">> => <<"A">>, <<"superclass">> => <<"Object">>},
+            #{<<"name">> => <<"B">>, <<"superclass">> => <<"A">>},
+            #{<<"name">> => <<"C">>, <<"superclass">> => <<"B">>}
+        ]
+    },
+    Expected = [
+        #{name => "A", superclass => "Object"},
+        #{name => "B", superclass => "A"},
+        #{name => "C", superclass => "B"}
+    ],
+    ?assertEqual(Expected, beamtalk_repl_eval:extract_class_names(Result)).
+
+%%% handle_io_request tests
+
+handle_io_request_put_chars_utf8_test() ->
+    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request(
+        {put_chars, unicode, <<"hello">>}, <<>>),
+    ?assertEqual(ok, Reply),
+    ?assertEqual(<<"hello">>, Buffer).
+
+handle_io_request_put_chars_latin1_test() ->
+    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request(
+        {put_chars, latin1, <<"world">>}, <<>>),
+    ?assertEqual(ok, Reply),
+    ?assertEqual(<<"world">>, Buffer).
+
+handle_io_request_put_chars_legacy_test() ->
+    %% Legacy form without encoding
+    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request(
+        {put_chars, <<"legacy">>}, <<>>),
+    ?assertEqual(ok, Reply),
+    ?assertEqual(<<"legacy">>, Buffer).
+
+handle_io_request_put_chars_mfa_test() ->
+    %% {put_chars, Enc, Mod, Func, Args} form used by io:format
+    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request(
+        {put_chars, unicode, io_lib, format, ["val: ~p", [42]]}, <<>>),
+    ?assertEqual(ok, Reply),
+    ?assertEqual(<<"val: 42">>, Buffer).
+
+handle_io_request_unsupported_test() ->
+    %% Unsupported IO request type
+    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request(
+        {get_chars, unicode, <<"prompt">>, 1}, <<"existing">>),
+    ?assertEqual({error, enotsup}, Reply),
+    ?assertEqual(<<"existing">>, Buffer).
+
+handle_io_request_accumulates_buffer_test() ->
+    %% Buffer should accumulate across calls
+    {ok, Buffer1} = beamtalk_repl_eval:handle_io_request(
+        {put_chars, unicode, <<"one">>}, <<>>),
+    {ok, Buffer2} = beamtalk_repl_eval:handle_io_request(
+        {put_chars, unicode, <<"two">>}, Buffer1),
+    ?assertEqual(<<"onetwo">>, Buffer2).
+
+%%% inject_output tests
+
+inject_output_ok_test() ->
+    State = some_state,
+    Result = beamtalk_repl_eval:inject_output({ok, 42, State}, <<"output">>, [<<"warn">>]),
+    ?assertEqual({ok, 42, <<"output">>, [<<"warn">>], State}, Result).
+
+inject_output_error_test() ->
+    State = some_state,
+    Result = beamtalk_repl_eval:inject_output({error, reason, State}, <<"err_out">>, []),
+    ?assertEqual({error, reason, <<"err_out">>, [], State}, Result).
+
+inject_output_empty_output_test() ->
+    State = some_state,
+    Result = beamtalk_repl_eval:inject_output({ok, nil, State}, <<>>, []),
+    ?assertEqual({ok, nil, <<>>, [], State}, Result).
+
+inject_output_multiple_warnings_test() ->
+    State = some_state,
+    Warnings = [<<"warn1">>, <<"warn2">>, <<"warn3">>],
+    Result = beamtalk_repl_eval:inject_output({ok, 99, State}, <<>>, Warnings),
+    ?assertEqual({ok, 99, <<>>, Warnings, State}, Result).
+
+%%% format_formatted_diagnostics edge cases
+
+format_formatted_diagnostics_single_binary_with_newlines_test() ->
+    FormattedDiagnostics = [<<"Line 1\nLine 2\nLine 3">>],
+    Result = beamtalk_repl_eval:format_formatted_diagnostics(FormattedDiagnostics),
+    ?assertEqual(<<"Line 1\nLine 2\nLine 3">>, Result).
+
+%%% do_eval error edge cases
+
+do_eval_empty_expression_test() ->
+    %% Empty expression should still attempt compilation (and fail without daemon)
+    State = beamtalk_repl_state:new(undefined, 0),
+    Result = beamtalk_repl_eval:do_eval("", State),
+    ?assertMatch({error, {compile_error, _}, _, _, _}, Result).
+
+do_eval_counter_increments_on_each_call_test() ->
+    %% Verify counter increments independently on each call
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    ?assertEqual(0, beamtalk_repl_state:get_eval_counter(State0)),
+    {error, _, _, _, State1} = beamtalk_repl_eval:do_eval("1", State0),
+    ?assertEqual(1, beamtalk_repl_state:get_eval_counter(State1)),
+    {error, _, _, _, State2} = beamtalk_repl_eval:do_eval("2", State1),
+    ?assertEqual(2, beamtalk_repl_state:get_eval_counter(State2)).
+
+%%% handle_load edge cases
+
+handle_load_empty_file_test() ->
+    %% Empty file should attempt compile (and fail without daemon)
+    UniqueId = erlang:unique_integer([positive]),
+    TempFile = filename:join(os:getenv("TMPDIR", "/tmp"),
+                             io_lib:format("test_empty_~p.bt", [UniqueId])),
+    ok = file:write_file(TempFile, <<>>),
+    State = beamtalk_repl_state:new(undefined, 0),
+    Result = beamtalk_repl_eval:handle_load(TempFile, State),
+    file:delete(TempFile),
+    %% Should fail with daemon_unavailable or compile error
+    case Result of
+        {error, daemon_unavailable, _} -> ok;
+        {error, {compile_error, _}, _} -> ok;
+        {error, {daemon_error, _}, _} -> ok;
+        Other -> error({unexpected_result, Other})
+    end.
 
