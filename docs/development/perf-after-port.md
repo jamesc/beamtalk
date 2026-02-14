@@ -58,7 +58,7 @@ Round-trip latency for evaluating expressions in a running REPL workspace.
 
 ### Port Backend (default)
 
-```
+```text
 TCP connect → JSON request → REPL server → Port protocol (ETF) →
 Rust compile → Core Erlang → Port response → BEAM compile:forms →
 execute → format result → JSON response → TCP response
@@ -72,7 +72,7 @@ execute → format result → JSON response → TCP response
 
 ### Daemon Backend (legacy)
 
-```
+```text
 TCP connect → JSON request → REPL server → Unix socket (JSON-RPC) →
 Rust compile → Core Erlang → daemon response → BEAM compile:forms →
 execute → format result → JSON response → TCP response
@@ -113,6 +113,9 @@ execute → format result → JSON response → TCP response
    Under load, it may reach ~2-5ms — still well within the <5ms target.
 
 ## Latency Breakdown (Estimated — Port Backend)
+
+These estimates are derived by subtracting measured phases from the total
+round-trip time, not from direct per-phase instrumentation.
 
 | Phase                          | Estimated (ms) | Notes |
 |--------------------------------|----------------|-------|
