@@ -852,6 +852,11 @@ impl Parser {
 
         // Parse key-value pairs
         loop {
+            // Guard: stop if we've reached EOF (prevents infinite loop on unclosed maps)
+            if self.is_at_end() {
+                break;
+            }
+
             let pair_start = self.current_token().span();
 
             // Parse key expression (unary only - stops at `=>`, `,`, `}`)

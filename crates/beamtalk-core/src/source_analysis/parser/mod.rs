@@ -3096,4 +3096,22 @@ Actor subclass: Counter
         let result = crate::codegen::core_erlang::generate_test_expression(expr, "test_match");
         assert!(result.is_err(), "Empty match should fail codegen");
     }
+
+    /// Regression test: unclosed map literal at EOF must not infinite-loop.
+    ///
+    /// The fuzzer discovered that `#{key` (no `=>`, no `}`) followed by EOF
+    /// caused `parse_map_literal`'s outer loop to spin forever because the
+    /// error-recovery path reached EOF and `continue`d without breaking.
+    #[test]
+    fn unclosed_map_literal_at_eof_terminates() {
+        // Minimal repro: unclosed map literal inside parens, followed by EOF
+        let _diagnostics = parse_err("(#{key value");
+        // Parser must terminate (not infinite-loop). Errors are expected.
+    }
+
+    /// Variant: bare unclosed map literal without surrounding parens.
+    #[test]
+    fn unclosed_map_literal_bare_eof_terminates() {
+        let _diagnostics = parse_err("#{key");
+    }
 }
