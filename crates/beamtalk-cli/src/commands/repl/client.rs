@@ -140,6 +140,20 @@ impl ReplClient {
         }))
     }
 
+    /// Get completions for a prefix.
+    ///
+    /// Currently unused — `ReplCompleter` uses a separate `ProtocolClient`
+    /// with a short timeout to avoid blocking the main REPL connection.
+    /// Kept for API completeness alongside other protocol operations.
+    #[allow(dead_code)]
+    pub(super) fn complete(&mut self, prefix: &str) -> Result<ReplResponse> {
+        self.send_request(&serde_json::json!({
+            "op": "complete",
+            "id": protocol::next_msg_id(),
+            "code": prefix
+        }))
+    }
+
     /// Get documentation for a class or method.
     pub(super) fn get_docs(&mut self, class: &str, selector: Option<&str>) -> Result<ReplResponse> {
         let mut req = serde_json::json!({

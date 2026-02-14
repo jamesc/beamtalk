@@ -92,6 +92,18 @@ handle_response(Other) ->
 %% Looks for the binary in the cargo target directory first (development),
 %% then falls back to PATH.
 find_compiler_binary() ->
+    %% 1. Check explicit env var (set by CLI for installed mode)
+    case os:getenv("BEAMTALK_COMPILER_PORT_BIN") of
+        false -> find_compiler_binary_dev();
+        "" -> find_compiler_binary_dev();
+        EnvPath ->
+            case filelib:is_regular(EnvPath) of
+                true -> EnvPath;
+                false -> find_compiler_binary_dev()
+            end
+    end.
+
+find_compiler_binary_dev() ->
     %% Try cargo target directory (development mode)
     ProjectRoot = find_project_root(),
     DevPath = filename:join([ProjectRoot, "target", "debug", "beamtalk-compiler-port"]),

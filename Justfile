@@ -521,13 +521,18 @@ install PREFIX="/usr/local": build-release build-stdlib
         echo "❌ Release binary not found. Run 'just build-release' first."
         exit 1
     fi
+    if [ ! -f target/release/beamtalk-compiler-port ]; then
+        echo "❌ Compiler port binary not found. Run 'just build-release' first."
+        exit 1
+    fi
 
-    # Binary
+    # Binaries
     install -d "${PREFIX}/bin"
     install -m 755 target/release/beamtalk "${PREFIX}/bin/beamtalk"
+    install -m 755 target/release/beamtalk-compiler-port "${PREFIX}/bin/beamtalk-compiler-port"
 
     # OTP application ebin directories
-    for app in beamtalk_runtime beamtalk_workspace jsx; do
+    for app in beamtalk_runtime beamtalk_workspace beamtalk_compiler jsx; do
         SRC="runtime/_build/default/lib/${app}/ebin"
         if ! ls "${SRC}"/*.beam 1>/dev/null 2>&1; then
             echo "❌ No .beam files found in ${SRC}. Run 'just build-erlang' first."
@@ -563,7 +568,7 @@ uninstall PREFIX="/usr/local":
     set -euo pipefail
     PREFIX="{{PREFIX}}"
     echo "🗑️  Uninstalling beamtalk from ${PREFIX}..."
-    rm -f "${PREFIX}/bin/beamtalk"
+    rm -f "${PREFIX}/bin/beamtalk" "${PREFIX}/bin/beamtalk-compiler-port"
     rm -rf "${PREFIX}/lib/beamtalk"
     echo "✅ Uninstalled beamtalk from ${PREFIX}"
 
