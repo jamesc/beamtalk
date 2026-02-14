@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Compiler snapshot test for BT-369: value-type temp var collision avoidance
+//
+// Verifies that method parameters with underscore-prefixed names (e.g., _seq0)
+// don't collide with codegen-internal temp vars used for expression sequencing.
+// Both parameter binding and sequencing temp vars go through the fresh_var
+// counter, ensuring unique Core Erlang variable names.
+
+Object subclass: ParamCollisionTest
+
+  // Multi-expression method with a parameter named _seq0.
+  // Before BT-369, to_core_var kept "_seq0" verbatim while fresh_temp_var("seq")
+  // could produce "_seq1", "_seq2" — a near-miss that could collide if naming
+  // conventions changed. Now both use the counter.
+  compute: _seq0 =>
+    _seq0 + 1
+    _seq0 * 2
