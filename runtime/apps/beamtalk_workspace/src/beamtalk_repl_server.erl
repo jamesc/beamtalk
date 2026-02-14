@@ -470,8 +470,9 @@ handle_op(<<"unload">>, Params, Msg, SessionPid) ->
         _ ->
             case safe_to_existing_atom(ModuleBin) of
                 {error, badarg} ->
+                    %% Atom doesn't exist, so module was never loaded (BT-358)
                     beamtalk_repl_protocol:encode_error(
-                        {invalid_module_name, ModuleBin}, Msg, fun format_error_message/1);
+                        {module_not_found, ModuleBin}, Msg, fun format_error_message/1);
                 {ok, Module} ->
                     %% Resolve class name to BEAM module name if needed
                     ResolvedModule = case code:is_loaded(Module) of
