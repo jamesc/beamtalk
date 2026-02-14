@@ -903,37 +903,34 @@ Module {
                     },
                 },
             ),
-            value: MessageSend {
-                receiver: Identifier(
-                    Identifier {
-                        name: "nil",
-                        span: Span {
-                            start: 3594,
-                            end: 3597,
-                        },
+            value: Identifier(
+                Identifier {
+                    name: "nil",
+                    span: Span {
+                        start: 3594,
+                        end: 3597,
                     },
-                ),
-                selector: Binary(
-                    "=",
-                ),
-                arguments: [
-                    Identifier(
-                        Identifier {
-                            name: "nil",
-                            span: Span {
-                                start: 3600,
-                                end: 3603,
-                            },
-                        },
-                    ),
-                ],
-                span: Span {
-                    start: 3594,
-                    end: 3603,
                 },
-            },
+            ),
             span: Span {
                 start: 3582,
+                end: 3597,
+            },
+        },
+        MessageSend {
+            receiver: Error {
+                message: "Unexpected token: expected expression, found =",
+                span: Span {
+                    start: 3598,
+                    end: 3599,
+                },
+            },
+            selector: Unary(
+                "nil",
+            ),
+            arguments: [],
+            span: Span {
+                start: 3598,
                 end: 3603,
             },
         },
@@ -947,517 +944,98 @@ Module {
                     },
                 },
             ),
-            value: MessageSend {
-                receiver: Identifier(
-                    Identifier {
-                        name: "nil",
-                        span: Span {
-                            start: 3665,
-                            end: 3668,
-                        },
+            value: Identifier(
+                Identifier {
+                    name: "nil",
+                    span: Span {
+                        start: 3665,
+                        end: 3668,
                     },
-                ),
-                selector: Binary(
-                    "=",
-                ),
-                arguments: [
-                    Literal(
-                        Integer(
-                            0,
-                        ),
-                        Span {
-                            start: 3671,
-                            end: 3672,
-                        },
-                    ),
-                ],
-                span: Span {
-                    start: 3665,
-                    end: 3672,
                 },
-            },
+            ),
             span: Span {
                 start: 3653,
-                end: 3672,
+                end: 3668,
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "result17",
-                    span: Span {
-                        start: 3688,
-                        end: 3696,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Identifier(
-                    Identifier {
-                        name: "nil",
-                        span: Span {
-                            start: 3700,
-                            end: 3703,
-                        },
-                    },
-                ),
-                selector: Binary(
-                    "=",
-                ),
-                arguments: [
-                    Literal(
-                        String(
-                            "",
-                        ),
-                        Span {
-                            start: 3706,
-                            end: 3708,
-                        },
-                    ),
-                ],
-                span: Span {
-                    start: 3700,
-                    end: 3708,
-                },
-            },
+        Error {
+            message: "Unexpected token: expected expression, found =",
             span: Span {
-                start: 3688,
-                end: 3708,
+                start: 3669,
+                end: 3670,
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "result18",
-                    span: Span {
-                        start: 3723,
-                        end: 3731,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Identifier(
-                    Identifier {
-                        name: "nil",
-                        span: Span {
-                            start: 3735,
-                            end: 3738,
-                        },
-                    },
-                ),
-                selector: Binary(
-                    "=",
-                ),
-                arguments: [
-                    Identifier(
-                        Identifier {
-                            name: "false",
-                            span: Span {
-                                start: 3741,
-                                end: 3746,
-                            },
-                        },
-                    ),
-                ],
-                span: Span {
-                    start: 3735,
-                    end: 3746,
-                },
-            },
+        Error {
+            message: "Unexpected token: expected expression, found ]",
             span: Span {
-                start: 3723,
-                end: 3746,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "result19",
-                    span: Span {
-                        start: 4295,
-                        end: 4303,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: MessageSend {
-                    receiver: Identifier(
-                        Identifier {
-                            name: "nil",
-                            span: Span {
-                                start: 4307,
-                                end: 4310,
-                            },
-                        },
-                    ),
-                    selector: Unary(
-                        "isNil",
-                    ),
-                    arguments: [],
-                    span: Span {
-                        start: 4307,
-                        end: 4316,
-                    },
-                },
-                selector: Keyword(
-                    [
-                        KeywordPart {
-                            keyword: "and:",
-                            span: Span {
-                                start: 4317,
-                                end: 4321,
-                            },
-                        },
-                    ],
-                ),
-                arguments: [
-                    Block(
-                        Block {
-                            parameters: [],
-                            body: [
-                                Identifier(
-                                    Identifier {
-                                        name: "true",
-                                        span: Span {
-                                            start: 4323,
-                                            end: 4327,
-                                        },
-                                    },
-                                ),
-                            ],
-                            span: Span {
-                                start: 4322,
-                                end: 4328,
-                            },
-                        },
-                    ),
-                ],
-                span: Span {
-                    start: 4307,
-                    end: 4328,
-                },
-            },
-            span: Span {
-                start: 4295,
+                start: 4327,
                 end: 4328,
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "result20",
-                    span: Span {
-                        start: 4342,
-                        end: 4350,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: MessageSend {
-                    receiver: Identifier(
-                        Identifier {
-                            name: "nil",
-                            span: Span {
-                                start: 4354,
-                                end: 4357,
-                            },
-                        },
-                    ),
-                    selector: Unary(
-                        "isNil",
-                    ),
-                    arguments: [],
-                    span: Span {
-                        start: 4354,
-                        end: 4363,
-                    },
-                },
-                selector: Keyword(
-                    [
-                        KeywordPart {
-                            keyword: "or:",
-                            span: Span {
-                                start: 4364,
-                                end: 4367,
-                            },
-                        },
-                    ],
-                ),
-                arguments: [
-                    Block(
-                        Block {
-                            parameters: [],
-                            body: [
-                                Identifier(
-                                    Identifier {
-                                        name: "false",
-                                        span: Span {
-                                            start: 4369,
-                                            end: 4374,
-                                        },
-                                    },
-                                ),
-                            ],
-                            span: Span {
-                                start: 4368,
-                                end: 4375,
-                            },
-                        },
-                    ),
-                ],
-                span: Span {
-                    start: 4354,
-                    end: 4375,
-                },
-            },
+        Error {
+            message: "Unexpected token: expected expression, found ]",
             span: Span {
-                start: 4342,
+                start: 4374,
                 end: 4375,
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "result21",
-                    span: Span {
-                        start: 4406,
-                        end: 4414,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: MessageSend {
-                    receiver: Identifier(
-                        Identifier {
-                            name: "nil",
-                            span: Span {
-                                start: 4418,
-                                end: 4421,
-                            },
-                        },
-                    ),
-                    selector: Unary(
-                        "notNil",
-                    ),
-                    arguments: [],
-                    span: Span {
-                        start: 4418,
-                        end: 4428,
-                    },
-                },
-                selector: Keyword(
-                    [
-                        KeywordPart {
-                            keyword: "and:",
-                            span: Span {
-                                start: 4429,
-                                end: 4433,
-                            },
-                        },
-                    ],
-                ),
-                arguments: [
-                    Block(
-                        Block {
-                            parameters: [],
-                            body: [
-                                Identifier(
-                                    Identifier {
-                                        name: "true",
-                                        span: Span {
-                                            start: 4435,
-                                            end: 4439,
-                                        },
-                                    },
-                                ),
-                            ],
-                            span: Span {
-                                start: 4434,
-                                end: 4440,
-                            },
-                        },
-                    ),
-                ],
-                span: Span {
-                    start: 4418,
-                    end: 4440,
-                },
-            },
+        Error {
+            message: "Unexpected token: expected expression, found ]",
             span: Span {
-                start: 4406,
+                start: 4439,
                 end: 4440,
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "result22",
-                    span: Span {
-                        start: 4471,
-                        end: 4479,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: MessageSend {
-                    receiver: Identifier(
-                        Identifier {
-                            name: "nil",
-                            span: Span {
-                                start: 4483,
-                                end: 4486,
-                            },
-                        },
-                    ),
-                    selector: Unary(
-                        "notNil",
-                    ),
-                    arguments: [],
-                    span: Span {
-                        start: 4483,
-                        end: 4493,
-                    },
-                },
-                selector: Keyword(
-                    [
-                        KeywordPart {
-                            keyword: "or:",
-                            span: Span {
-                                start: 4494,
-                                end: 4497,
-                            },
-                        },
-                    ],
-                ),
-                arguments: [
-                    Block(
-                        Block {
-                            parameters: [],
-                            body: [
-                                Identifier(
-                                    Identifier {
-                                        name: "true",
-                                        span: Span {
-                                            start: 4499,
-                                            end: 4503,
-                                        },
-                                    },
-                                ),
-                            ],
-                            span: Span {
-                                start: 4498,
-                                end: 4504,
-                            },
-                        },
-                    ),
-                ],
-                span: Span {
-                    start: 4483,
-                    end: 4504,
-                },
-            },
+        Error {
+            message: "Unexpected token: expected expression, found ]",
             span: Span {
-                start: 4471,
+                start: 4503,
                 end: 4504,
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "result23",
-                    span: Span {
-                        start: 4560,
-                        end: 4568,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: MessageSend {
-                    receiver: Identifier(
-                        Identifier {
-                            name: "nil",
-                            span: Span {
-                                start: 4572,
-                                end: 4575,
-                            },
-                        },
-                    ),
-                    selector: Unary(
-                        "isNil",
-                    ),
-                    arguments: [],
-                    span: Span {
-                        start: 4572,
-                        end: 4581,
-                    },
-                },
-                selector: Keyword(
-                    [
-                        KeywordPart {
-                            keyword: "ifTrue:",
-                            span: Span {
-                                start: 4582,
-                                end: 4589,
-                            },
-                        },
-                        KeywordPart {
-                            keyword: "ifFalse:",
-                            span: Span {
-                                start: 4601,
-                                end: 4609,
-                            },
-                        },
-                    ],
-                ),
-                arguments: [
-                    Block(
-                        Block {
-                            parameters: [],
-                            body: [
-                                Literal(
-                                    String(
-                                        "is nil",
-                                    ),
-                                    Span {
-                                        start: 4591,
-                                        end: 4599,
-                                    },
-                                ),
-                            ],
-                            span: Span {
-                                start: 4590,
-                                end: 4600,
-                            },
-                        },
-                    ),
-                    Block(
-                        Block {
-                            parameters: [],
-                            body: [
-                                Literal(
-                                    String(
-                                        "not nil",
-                                    ),
-                                    Span {
-                                        start: 4611,
-                                        end: 4620,
-                                    },
-                                ),
-                            ],
-                            span: Span {
-                                start: 4610,
-                                end: 4621,
-                            },
-                        },
-                    ),
-                ],
+        MessageSend {
+            receiver: Error {
+                message: "Unexpected token: expected expression, found ]",
                 span: Span {
-                    start: 4572,
-                    end: 4621,
+                    start: 4599,
+                    end: 4600,
                 },
             },
+            selector: Keyword(
+                [
+                    KeywordPart {
+                        keyword: "ifFalse:",
+                        span: Span {
+                            start: 4601,
+                            end: 4609,
+                        },
+                    },
+                ],
+            ),
+            arguments: [
+                Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            Literal(
+                                String(
+                                    "not nil",
+                                ),
+                                Span {
+                                    start: 4611,
+                                    end: 4620,
+                                },
+                            ),
+                        ],
+                        span: Span {
+                            start: 4610,
+                            end: 4621,
+                        },
+                    },
+                ),
+            ],
             span: Span {
-                start: 4560,
+                start: 4599,
                 end: 4621,
             },
         },
@@ -2206,3 +1784,12 @@ Module {
         },
     ],
 }
+
+Diagnostics:
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =", span: Span { start: 3598, end: 3599 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =", span: Span { start: 3669, end: 3670 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 4327, end: 4328 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 4374, end: 4375 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 4439, end: 4440 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 4503, end: 4504 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 4599, end: 4600 }, hint: None }

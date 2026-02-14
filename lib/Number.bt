@@ -20,7 +20,7 @@ abstract Object subclass: Number
   /// 0 isZero          // => true
   /// 5 isZero          // => false
   /// ```
-  isZero => self = 0
+  isZero => self =:= 0
 
   /// Test if the receiver is positive (greater than zero).
   ///

@@ -26,10 +26,10 @@ abstract nil subclass: ProtoObject
   ///
   /// ## Examples
   /// ```beamtalk
-  /// 1 ~= 2             // => true
-  /// 42 ~= 42           // => false
+  /// 1 /= 2             // => true
+  /// 42 /= 42           // => false
   /// ```
-  ~= other => @primitive '~='
+  /= other => @primitive '/='
 
   /// Return the class of the receiver.
   ///

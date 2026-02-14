@@ -220,7 +220,7 @@ Beamtalk embraces BEAM's actor model rather than fighting it. We reify what we c
 |1. **ProtoObject** — The absolute root for ALL objects (follows Pharo). Provides only the most essential messages:
 |   - `class` — Returns the object's class (fundamental for reflection)
 |   - `doesNotUnderstand:args:` — Fallback for unknown messages
-|   - `==` / `~=` — Object identity and equality (maps to Erlang operators per [ADR 0002](ADR/0002-use-erlang-comparison-operators.md))
+|   - `==` / `/=` — Object identity and equality (maps to Erlang operators per [ADR 0002](ADR/0002-use-erlang-comparison-operators.md))
 |
 |2. **Object** — Common behavior for all non-minimal objects. Provides:
 |   - `new` — Create a new instance (for value types)

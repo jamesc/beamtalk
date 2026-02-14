@@ -1320,7 +1320,7 @@ mod tests {
         let mut generator = CoreErlangGenerator::new("test");
         let left = Expression::Literal(Literal::Integer(42), Span::new(0, 2));
         let right = vec![Expression::Literal(Literal::Integer(42), Span::new(6, 8))];
-        let doc = generator.generate_binary_op("=", &left, &right).unwrap();
+        let doc = generator.generate_binary_op("=:=", &left, &right).unwrap();
         let output = doc.to_pretty_string();
         assert!(
             output.contains("call 'erlang':'=:='"),
@@ -1333,7 +1333,7 @@ mod tests {
         let mut generator = CoreErlangGenerator::new("test");
         let left = Expression::Literal(Literal::Integer(42), Span::new(0, 2));
         let right = vec![Expression::Literal(Literal::Integer(99), Span::new(7, 9))];
-        let doc = generator.generate_binary_op("~=", &left, &right).unwrap();
+        let doc = generator.generate_binary_op("/=", &left, &right).unwrap();
         let output = doc.to_pretty_string();
         assert!(
             output.contains("call 'erlang':'/='"),

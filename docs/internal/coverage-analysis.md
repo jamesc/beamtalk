@@ -43,9 +43,10 @@
 | * | erlang:'*' | cascade_complex, binary_operators | ✓ |
 | / | erlang:'/' | stdlib_integer, binary_operators | ✓ |
 | % | erlang:'rem' | stdlib_integer, binary_operators | ✓ |
-| = | erlang:'=:=' | stdlib_integer, binary_operators | ✓ |
+| =:= | erlang:'=:=' | stdlib_integer, binary_operators | ✓ |
 | == | erlang:'==' | binary_operators | ✓ |
-| ~= | erlang:'=/=' | binary_operators | ✓ |
+| /= | erlang:'/=' | binary_operators | ✓ |
+| =/= | erlang:'=/=' | binary_operators | ✓ |
 | < | erlang:'<' | blocks_no_args, binary_operators | ✓ |
 | > | erlang:'>' | blocks_no_args, binary_operators | ✓ |
 | <= | erlang:'=<' | binary_operators | ✓ |
@@ -54,7 +55,7 @@
 
 **Coverage**: 13/13 operators (100%)
 - All documented operators are fully implemented and tested
-- Removed: `**` (exponentiation), `!=` (use `~=` instead)
+- Removed: `**` (exponentiation), `!=` (use `/=` instead)
 - Note: `and:` and `or:` are keyword messages, not binary operators
 
 ## Unary Messages/Operators Coverage

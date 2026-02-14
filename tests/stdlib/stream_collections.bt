@@ -86,7 +86,7 @@
 // => ["x"]
 
 // Select on string stream
-(('hello' stream) select: [:ch | ch ~= 'l']) asList
+(('hello' stream) select: [:ch | ch /= 'l']) asList
 // => ["h","e","o"]
 
 // Collect on string stream
@@ -98,7 +98,7 @@
 // => Stream
 
 // reject on string stream
-(('hello' stream) reject: [:ch | ch = 'l']) asList
+(('hello' stream) reject: [:ch | ch =:= 'l']) asList
 // => ["h","e","o"]
 
 // drop on string stream
@@ -114,11 +114,11 @@
 // => abc
 
 // anySatisfy on string stream
-('hello' stream) anySatisfy: [:ch | ch = 'e']
+('hello' stream) anySatisfy: [:ch | ch =:= 'e']
 // => true
 
 // allSatisfy on string stream
-('hello' stream) allSatisfy: [:ch | ch ~= 'z']
+('hello' stream) allSatisfy: [:ch | ch /= 'z']
 // => true
 
 // === Set stream ===
@@ -151,7 +151,7 @@ s := ((Set new add: 3) add: 1) add: 2
 // => Stream
 
 // reject on set stream
-(((((Set new add: 1) add: 2) add: 3) stream) reject: [:n | n = 2]) asList
+(((((Set new add: 1) add: 2) add: 3) stream) reject: [:n | n =:= 2]) asList
 // => [1,3]
 
 // drop on set stream
@@ -225,7 +225,7 @@ a value
 // => 3
 
 // reject on dictionary stream
-((#{#a => 1, #b => 2, #c => 3} stream) reject: [:assoc | assoc value = 2]) asList
+((#{#a => 1, #b => 2, #c => 3} stream) reject: [:assoc | assoc value =:= 2]) asList
 // => _
 
 // drop on dictionary stream

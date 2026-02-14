@@ -6,17 +6,17 @@
 // => Symbol
 
 // Equality
-#foo = #foo
+#foo =:= #foo
 // => true
 
-#foo = #bar
+#foo =:= #bar
 // => false
 
 // Inequality
-#foo ~= #bar
+#foo /= #bar
 // => true
 
-#foo ~= #foo
+#foo /= #foo
 // => false
 
 // asString — returns name without # prefix
@@ -36,7 +36,7 @@
 // => test
 
 // hash — returns consistent integer
-#foo hash = #foo hash
+#foo hash =:= #foo hash
 // => true
 
 // respondsTo:

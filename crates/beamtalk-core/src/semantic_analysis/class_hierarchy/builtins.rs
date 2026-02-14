@@ -53,7 +53,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
             methods: vec![
                 builtin_method("class", 0, "ProtoObject"),
                 builtin_method("==", 1, "ProtoObject"),
-                builtin_method("~=", 1, "ProtoObject"),
+                builtin_method("/=", 1, "ProtoObject"),
                 builtin_method("doesNotUnderstand:args:", 2, "ProtoObject"),
                 builtin_method("perform:withArguments:", 2, "ProtoObject"),
                 builtin_method("error:", 1, "ProtoObject"),

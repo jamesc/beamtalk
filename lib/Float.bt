@@ -48,23 +48,23 @@ sealed Number subclass: Float
   /// ```
   / other => @primitive '/'
 
-  /// Test equality with another number.
+  /// Test strict equality with another number.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// 3.14 = 3.14      // => true
-  /// 1.0 = 2.0        // => false
+  /// 3.14 =:= 3.14      // => true
+  /// 1.0 =:= 2.0        // => false
   /// ```
-  = other => @primitive '='
+  =:= other => @primitive '=:='
 
   /// Test inequality with another number.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// 1.0 ~= 2.0       // => true
-  /// 3.14 ~= 3.14     // => false
+  /// 1.0 /= 2.0       // => true
+  /// 3.14 /= 3.14     // => false
   /// ```
-  ~= other => (self = other) not
+  /= other => (self =:= other) not
 
   /// Test if the receiver is less than another number.
   ///
@@ -192,7 +192,7 @@ sealed Number subclass: Float
   /// 0.0 isZero       // => true
   /// 1.0 isZero       // => false
   /// ```
-  isZero => self = 0.0
+  isZero => self =:= 0.0
 
   /// Convert the receiver to an integer (truncates).
   ///

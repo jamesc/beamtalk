@@ -64,8 +64,10 @@ fn generate_integer_bif(selector: &str, params: &[String]) -> Option<String> {
         "/" => binary_bif("/", params),
         "%" => binary_bif("rem", params),
         "**" => power_bif(params),
-        // Comparison
-        "=" => binary_bif("=:=", params),
+        // Comparison (ADR 0002: Erlang operators)
+        "=:=" => binary_bif("=:=", params),
+        "/=" => binary_bif("/=", params),
+        "=/=" => binary_bif("=/=", params),
         "<" => binary_bif("<", params),
         ">" => binary_bif(">", params),
         "<=" => binary_bif("=<", params),
@@ -105,8 +107,10 @@ fn generate_float_bif(selector: &str, params: &[String]) -> Option<String> {
         "-" => binary_bif("-", params),
         "*" => binary_bif("*", params),
         "/" => binary_bif("/", params),
-        // Comparison
-        "=" => binary_bif("=:=", params),
+        // Comparison (ADR 0002: Erlang operators)
+        "=:=" => binary_bif("=:=", params),
+        "/=" => binary_bif("/=", params),
+        "=/=" => binary_bif("=/=", params),
         "<" => binary_bif("<", params),
         ">" => binary_bif(">", params),
         "<=" => binary_bif("=<", params),
@@ -129,8 +133,10 @@ fn generate_float_bif(selector: &str, params: &[String]) -> Option<String> {
 fn generate_string_bif(selector: &str, params: &[String]) -> Option<String> {
     let p0 = params.first().map_or("_Arg0", String::as_str);
     match selector {
-        // Comparison
-        "=" => binary_bif("=:=", params),
+        // Comparison (ADR 0002: Erlang operators)
+        "=:=" => binary_bif("=:=", params),
+        "/=" => binary_bif("/=", params),
+        "=/=" => binary_bif("=/=", params),
         "<" => binary_bif("<", params),
         ">" => binary_bif(">", params),
         "<=" => binary_bif("=<", params),
@@ -316,9 +322,10 @@ fn generate_exception_bif(selector: &str, params: &[String]) -> Option<String> {
 /// Symbols are Erlang atoms — interned, immutable identifiers.
 fn generate_symbol_bif(selector: &str, params: &[String]) -> Option<String> {
     match selector {
-        // Comparison
-        "=" => binary_bif("=:=", params),
-        "~=" => binary_bif("=/=", params),
+        // Comparison (ADR 0002: Erlang operators)
+        "=:=" => binary_bif("=:=", params),
+        "/=" => binary_bif("/=", params),
+        "=/=" => binary_bif("=/=", params),
         // Conversion
         "asString" => Some("call 'erlang':'atom_to_binary'(Self, 'utf8')".to_string()),
         "asAtom" => {
@@ -340,8 +347,10 @@ fn generate_symbol_bif(selector: &str, params: &[String]) -> Option<String> {
 fn generate_character_bif(selector: &str, params: &[String]) -> Option<String> {
     let p0 = params.first().map_or("_Arg0", String::as_str);
     match selector {
-        // Comparison — direct integer comparison
-        "=" => binary_bif("=:=", params),
+        // Comparison — direct integer comparison (ADR 0002: Erlang operators)
+        "=:=" => binary_bif("=:=", params),
+        "/=" => binary_bif("/=", params),
+        "=/=" => binary_bif("=/=", params),
         "<" => binary_bif("<", params),
         ">" => binary_bif(">", params),
         "<=" => binary_bif("=<", params),
@@ -1128,7 +1137,7 @@ mod tests {
 
     #[test]
     fn test_symbol_equality() {
-        let result = generate_primitive_bif("Symbol", "=", &["Other".to_string()]);
+        let result = generate_primitive_bif("Symbol", "=:=", &["Other".to_string()]);
         assert_eq!(result, Some("call 'erlang':'=:='(Self, Other)".to_string()));
     }
 
@@ -1212,7 +1221,7 @@ mod tests {
 
     #[test]
     fn test_character_equality() {
-        let result = generate_primitive_bif("Character", "=", &["Other".to_string()]);
+        let result = generate_primitive_bif("Character", "=:=", &["Other".to_string()]);
         assert_eq!(result, Some("call 'erlang':'=:='(Self, Other)".to_string()));
     }
 

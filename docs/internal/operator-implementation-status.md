@@ -19,7 +19,7 @@ Binary operators have precedence levels:
 2. `*`, `/`, `%` (multiplicative)
 3. `+`, `-`, `++` (additive and string concatenation)
 4. `<`, `>`, `<=`, `>=` (comparison)
-5. `=`, `==`, `~=` (equality - strict and loose)
+5. `=:=`, `==`, `/=`, `=/=` (equality - strict and loose)
 ```
 
 **Note:** `&&`, `||`, `and`, `or` are **not** binary operators. They are keyword messages that take blocks for short-circuit evaluation.
@@ -43,14 +43,15 @@ Binary operators have precedence levels:
 | `<=` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 20, maps to `=<` |
 | `>=` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 20 |
 | **Equality** |
-| `=` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 10, strict equality `=:=` |
+| `=:=` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 10, strict equality `=:=` |
 | `==` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 10, loose equality `==` |
-| `~=` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 10, strict inequality `=/=` |
+| `/=` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 10, loose inequality `/=` |
+| `=/=` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 10, strict inequality `=/=` |
 | **Logical (Not Operators - Keyword Messages)** |
 | `and:` | Partial | Keyword | Keyword | Partial | N/A | N/A | ✓ | Short-circuit via keyword message with block |
 | `or:` | Partial | Keyword | Keyword | Partial | N/A | N/A | ✓ | Short-circuit via keyword message with block |
 | **Removed** |
-| `!=` | ❌ | ❌ | ❌ | ❌ | N/A | N/A | ❌ | Removed - use `~=` instead |
+| `!=` | ❌ | ❌ | ❌ | ❌ | N/A | N/A | ❌ | Removed - use `/=` instead |
 | `&&` | ❌ | ❌ | ❌ | ❌ | N/A | N/A | ❌ | Not an operator - use `and:` keyword message |
 | `\|\|` | ❌ | ❌ | ❌ | ❌ | N/A | N/A | ❌ | Not an operator - use `or:` keyword message |
 | `==` | - | ✓ | ❌ | ✓ | N/A | N/A | ❌ | Not documented, lexer tokenizes but parser doesn't support |
@@ -60,18 +61,18 @@ Binary operators have precedence levels:
 ### Lexer (crates/beamtalk-core/src/source_analysis/lexer.rs)
 
 **Implemented:**
-- Lines 804-811: Single-char operators: `+`, `-`, `*`, `/`, `<`, `>`, `=`, `~`
-- Lines 821-824: Multi-char operators: `<=`, `>=`, `==`, `~=`, `++`
+- Lines 804-811: Single-char operators: `+`, `-`, `*`, `/`, `<`, `>`, `=`
+- Lines 821-824: Multi-char operators: `<=`, `>=`, `==`, `/=`, `=:=`, `=/=`, `++`
 
 **Not Needed:**
-- `!=` - Removed, use `~=` instead
+- `!=` - Removed, use `/=` instead
 - `&&`, `||` - Not operators, use `and:` and `or:` keyword messages
 - `and`, `or` - Keyword messages, not binary operators
 
 ### Parser (crates/beamtalk-core/src/source_analysis/parser/mod.rs)
 
 **Implemented** (lines 126-143, `binary_binding_power` function):
-- Precedence 10: `=`, `==`, `~=` (equality)
+- Precedence 10: `=:=`, `==`, `/=`, `=/=` (equality)
 - Precedence 20: `<`, `>`, `<=`, `>=` (comparison)
 - Precedence 30: `+`, `-`, `++` (additive and concatenation)
 - Precedence 40: `*`, `/`, `%` (multiplicative)
@@ -84,13 +85,15 @@ Binary operators have precedence levels:
 **Implemented** (lines 2457-2521, `generate_binary_op` function):
 - `+`, `-`, `*`, `/`, `%` → Erlang arithmetic
 - `==` → Erlang loose equality (`==`)
-- `=`, `~=` → Erlang strict equality (`=:=`, `=/=`)
+- `=:=` → Erlang strict equality (`=:=`)
+- `/=` → Erlang loose inequality (`/=`)
+- `=/=` → Erlang strict inequality (`=/=`)
 - `<`, `>`, `<=`, `>=` → Erlang comparison (`<`, `>`, `=<`, `>=`)
 - `++` → String concatenation via `iolist_to_binary`
 - `**` → Exponentiation via `math:pow` + `erlang:round`
 
 **Removed:**
-- `!=` → Removed (use `~=` instead)
+- `!=` → Removed (use `/=` instead)
 
 **Not Operators:**
 - `&&`, `||`, `and:`, `or:` - These are keyword messages with blocks, not binary operators
@@ -108,7 +111,7 @@ REPL uses the same codegen path, so operator support matches codegen.
 **Tested:**
 - `+`, `-`, `*`, `/`, `%` - ✓ Multiple test cases
 - `<`, `>`, `<=`, `>=` - ✓ binary_operators test
-- `=`, `==`, `~=` - ✓ binary_operators test
+- `=:=`, `==`, `/=`, `=/=` - ✓ binary_operators test
 - `++` - ✓ stdlib_string, binary_operators
 - `and:`, `or:` - ✓ Via stdlib_boolean test
 
@@ -120,11 +123,11 @@ All binary operators are now consistently implemented across lexer, parser, code
 - Arithmetic: `+`, `-`, `*`, `/`, `%`
 - String: `++`
 - Comparison: `<`, `>`, `<=`, `>=`
-- Equality: `=`, `==`, `~=`
+- Equality: `=:=`, `==`, `/=`, `=/=`
 
 ### Not Operators (Keyword Messages)
 - `and:`, `or:` - Short-circuit evaluation via keyword messages with blocks
 
 ### Removed
-- `!=` - Use `~=` for strict inequality
+- `!=` - Use `/=` for inequality
 - `&&`, `||` - Use `and:` and `or:` keyword messages

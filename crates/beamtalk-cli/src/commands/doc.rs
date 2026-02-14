@@ -827,7 +827,7 @@ mod tests {
             method_anchor("at: index put: value"),
             "at--index-put--value"
         );
-        assert_eq!(method_anchor("~= other"), "tildeeq-other");
+        assert_eq!(method_anchor("/= other"), "slasheq-other");
         assert_eq!(method_anchor("<= other"), "lteq-other");
     }
 

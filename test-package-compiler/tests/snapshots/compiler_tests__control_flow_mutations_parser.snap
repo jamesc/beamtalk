@@ -168,47 +168,41 @@ Module {
                 end: 497,
             },
         },
-        MessageSend {
-            receiver: Block(
-                Block {
-                    parameters: [],
-                    body: [
-                        MessageSend {
-                            receiver: Identifier(
-                                Identifier {
-                                    name: "count2",
-                                    span: Span {
-                                        start: 500,
-                                        end: 506,
-                                    },
-                                },
-                            ),
-                            selector: Binary(
-                                "=",
-                            ),
-                            arguments: [
-                                Literal(
-                                    Integer(
-                                        0,
-                                    ),
-                                    Span {
-                                        start: 509,
-                                        end: 510,
-                                    },
-                                ),
-                            ],
+        Block(
+            Block {
+                parameters: [],
+                body: [
+                    Identifier(
+                        Identifier {
+                            name: "count2",
                             span: Span {
                                 start: 500,
-                                end: 510,
+                                end: 506,
                             },
                         },
-                    ],
-                    span: Span {
-                        start: 499,
-                        end: 511,
-                    },
+                    ),
+                ],
+                span: Span {
+                    start: 499,
+                    end: 500,
                 },
-            ),
+            },
+        ),
+        Error {
+            message: "Unexpected token: expected expression, found =",
+            span: Span {
+                start: 507,
+                end: 508,
+            },
+        },
+        MessageSend {
+            receiver: Error {
+                message: "Unexpected token: expected expression, found ]",
+                span: Span {
+                    start: 510,
+                    end: 511,
+                },
+            },
             selector: Keyword(
                 [
                     KeywordPart {
@@ -278,7 +272,7 @@ Module {
                 ),
             ],
             span: Span {
-                start: 499,
+                start: 510,
                 end: 546,
             },
         },
@@ -948,58 +942,58 @@ Module {
         Error {
             message: "Unexpected token: expected expression, found ]",
             span: Span {
-                start: 1799,
-                end: 1800,
+                start: 1801,
+                end: 1802,
             },
         },
         Error {
             message: "Unexpected token: expected expression, found .",
             span: Span {
-                start: 1898,
-                end: 1899,
+                start: 1900,
+                end: 1901,
             },
         },
         Error {
             message: "Unexpected token: expected expression, found ]",
             span: Span {
-                start: 1984,
-                end: 1985,
+                start: 1986,
+                end: 1987,
             },
         },
         Error {
             message: "Unexpected token: expected expression, found ]",
             span: Span {
-                start: 1999,
-                end: 2000,
+                start: 2001,
+                end: 2002,
             },
         },
         Error {
             message: "Unexpected token: expected expression, found .",
             span: Span {
-                start: 2208,
-                end: 2209,
+                start: 2210,
+                end: 2211,
             },
         },
         Error {
             message: "Unexpected token: expected expression, found .",
             span: Span {
-                start: 2223,
-                end: 2224,
+                start: 2225,
+                end: 2226,
             },
         },
         Error {
             message: "Unexpected token: expected expression, found .",
             span: Span {
-                start: 2231,
-                end: 2232,
+                start: 2233,
+                end: 2234,
             },
         },
         MessageSend {
             receiver: Error {
                 message: "Unexpected token: expected expression, found ]",
                 span: Span {
-                    start: 2240,
-                    end: 2241,
+                    start: 2242,
+                    end: 2243,
                 },
             },
             selector: Keyword(
@@ -1007,8 +1001,8 @@ Module {
                     KeywordPart {
                         keyword: "whileTrue:",
                         span: Span {
-                            start: 2242,
-                            end: 2252,
+                            start: 2244,
+                            end: 2254,
                         },
                     },
                 ],
@@ -1023,8 +1017,8 @@ Module {
                                     Identifier {
                                         name: "y",
                                         span: Span {
-                                            start: 2259,
-                                            end: 2260,
+                                            start: 2261,
+                                            end: 2262,
                                         },
                                     },
                                 ),
@@ -1033,13 +1027,13 @@ Module {
                                         1,
                                     ),
                                     Span {
-                                        start: 2264,
-                                        end: 2265,
+                                        start: 2266,
+                                        end: 2267,
                                     },
                                 ),
                                 span: Span {
-                                    start: 2259,
-                                    end: 2265,
+                                    start: 2261,
+                                    end: 2267,
                                 },
                             },
                             MessageSend {
@@ -1052,8 +1046,8 @@ Module {
                                                     Identifier {
                                                         name: "y",
                                                         span: Span {
-                                                            start: 2272,
-                                                            end: 2273,
+                                                            start: 2274,
+                                                            end: 2275,
                                                         },
                                                     },
                                                 ),
@@ -1066,20 +1060,20 @@ Module {
                                                             2,
                                                         ),
                                                         Span {
-                                                            start: 2277,
-                                                            end: 2278,
+                                                            start: 2279,
+                                                            end: 2280,
                                                         },
                                                     ),
                                                 ],
                                                 span: Span {
-                                                    start: 2272,
-                                                    end: 2278,
+                                                    start: 2274,
+                                                    end: 2280,
                                                 },
                                             },
                                         ],
                                         span: Span {
-                                            start: 2271,
-                                            end: 2279,
+                                            start: 2273,
+                                            end: 2281,
                                         },
                                     },
                                 ),
@@ -1088,8 +1082,8 @@ Module {
                                         KeywordPart {
                                             keyword: "whileTrue:",
                                             span: Span {
-                                                start: 2280,
-                                                end: 2290,
+                                                start: 2282,
+                                                end: 2292,
                                             },
                                         },
                                     ],
@@ -1104,8 +1098,8 @@ Module {
                                                         Identifier {
                                                             name: "innerSum",
                                                             span: Span {
-                                                                start: 2301,
-                                                                end: 2309,
+                                                                start: 2303,
+                                                                end: 2311,
                                                             },
                                                         },
                                                     ),
@@ -1114,8 +1108,8 @@ Module {
                                                             Identifier {
                                                                 name: "innerSum",
                                                                 span: Span {
-                                                                    start: 2313,
-                                                                    end: 2321,
+                                                                    start: 2315,
+                                                                    end: 2323,
                                                                 },
                                                             },
                                                         ),
@@ -1128,19 +1122,19 @@ Module {
                                                                     1,
                                                                 ),
                                                                 Span {
-                                                                    start: 2324,
-                                                                    end: 2325,
+                                                                    start: 2326,
+                                                                    end: 2327,
                                                                 },
                                                             ),
                                                         ],
                                                         span: Span {
-                                                            start: 2313,
-                                                            end: 2325,
+                                                            start: 2315,
+                                                            end: 2327,
                                                         },
                                                     },
                                                     span: Span {
-                                                        start: 2301,
-                                                        end: 2325,
+                                                        start: 2303,
+                                                        end: 2327,
                                                     },
                                                 },
                                                 Assignment {
@@ -1148,8 +1142,8 @@ Module {
                                                         Identifier {
                                                             name: "y",
                                                             span: Span {
-                                                                start: 2335,
-                                                                end: 2336,
+                                                                start: 2337,
+                                                                end: 2338,
                                                             },
                                                         },
                                                     ),
@@ -1158,8 +1152,8 @@ Module {
                                                             Identifier {
                                                                 name: "y",
                                                                 span: Span {
-                                                                    start: 2340,
-                                                                    end: 2341,
+                                                                    start: 2342,
+                                                                    end: 2343,
                                                                 },
                                                             },
                                                         ),
@@ -1172,32 +1166,32 @@ Module {
                                                                     1,
                                                                 ),
                                                                 Span {
-                                                                    start: 2344,
-                                                                    end: 2345,
+                                                                    start: 2346,
+                                                                    end: 2347,
                                                                 },
                                                             ),
                                                         ],
                                                         span: Span {
-                                                            start: 2340,
-                                                            end: 2345,
+                                                            start: 2342,
+                                                            end: 2347,
                                                         },
                                                     },
                                                     span: Span {
-                                                        start: 2335,
-                                                        end: 2345,
+                                                        start: 2337,
+                                                        end: 2347,
                                                     },
                                                 },
                                             ],
                                             span: Span {
-                                                start: 2291,
-                                                end: 2351,
+                                                start: 2293,
+                                                end: 2353,
                                             },
                                         },
                                     ),
                                 ],
                                 span: Span {
-                                    start: 2271,
-                                    end: 2351,
+                                    start: 2273,
+                                    end: 2353,
                                 },
                             },
                             Assignment {
@@ -1205,8 +1199,8 @@ Module {
                                     Identifier {
                                         name: "outerSum",
                                         span: Span {
-                                            start: 2357,
-                                            end: 2365,
+                                            start: 2359,
+                                            end: 2367,
                                         },
                                     },
                                 ),
@@ -1215,8 +1209,8 @@ Module {
                                         Identifier {
                                             name: "outerSum",
                                             span: Span {
-                                                start: 2369,
-                                                end: 2377,
+                                                start: 2371,
+                                                end: 2379,
                                             },
                                         },
                                     ),
@@ -1228,20 +1222,20 @@ Module {
                                             Identifier {
                                                 name: "innerSum",
                                                 span: Span {
-                                                    start: 2380,
-                                                    end: 2388,
+                                                    start: 2382,
+                                                    end: 2390,
                                                 },
                                             },
                                         ),
                                     ],
                                     span: Span {
-                                        start: 2369,
-                                        end: 2388,
+                                        start: 2371,
+                                        end: 2390,
                                     },
                                 },
                                 span: Span {
-                                    start: 2357,
-                                    end: 2388,
+                                    start: 2359,
+                                    end: 2390,
                                 },
                             },
                             Assignment {
@@ -1249,8 +1243,8 @@ Module {
                                     Identifier {
                                         name: "x",
                                         span: Span {
-                                            start: 2394,
-                                            end: 2395,
+                                            start: 2396,
+                                            end: 2397,
                                         },
                                     },
                                 ),
@@ -1259,8 +1253,8 @@ Module {
                                         Identifier {
                                             name: "x",
                                             span: Span {
-                                                start: 2399,
-                                                end: 2400,
+                                                start: 2401,
+                                                end: 2402,
                                             },
                                         },
                                     ),
@@ -1273,46 +1267,46 @@ Module {
                                                 1,
                                             ),
                                             Span {
-                                                start: 2403,
-                                                end: 2404,
+                                                start: 2405,
+                                                end: 2406,
                                             },
                                         ),
                                     ],
                                     span: Span {
-                                        start: 2399,
-                                        end: 2404,
+                                        start: 2401,
+                                        end: 2406,
                                     },
                                 },
                                 span: Span {
-                                    start: 2394,
-                                    end: 2404,
+                                    start: 2396,
+                                    end: 2406,
                                 },
                             },
                         ],
                         span: Span {
-                            start: 2253,
-                            end: 2406,
+                            start: 2255,
+                            end: 2408,
                         },
                     },
                 ),
             ],
             span: Span {
-                start: 2240,
-                end: 2406,
+                start: 2242,
+                end: 2408,
             },
         },
         Error {
             message: "Invalid assignment target",
             span: Span {
-                start: 2586,
-                end: 2593,
+                start: 2588,
+                end: 2595,
             },
         },
         Error {
             message: "Unexpected token: expected expression, found .",
             span: Span {
-                start: 2634,
-                end: 2635,
+                start: 2636,
+                end: 2637,
             },
         },
         MessageSend {
@@ -1320,8 +1314,8 @@ Module {
                 receiver: Error {
                     message: "Unexpected token: expected expression, found .",
                     span: Span {
-                        start: 2671,
-                        end: 2672,
+                        start: 2673,
+                        end: 2674,
                     },
                 },
                 selector: Unary(
@@ -1329,8 +1323,8 @@ Module {
                 ),
                 arguments: [],
                 span: Span {
-                    start: 2671,
-                    end: 2677,
+                    start: 2673,
+                    end: 2679,
                 },
             },
             selector: Binary(
@@ -1342,22 +1336,22 @@ Module {
                         10,
                     ),
                     Span {
-                        start: 2680,
-                        end: 2682,
+                        start: 2682,
+                        end: 2684,
                     },
                 ),
             ],
             span: Span {
-                start: 2671,
-                end: 2682,
+                start: 2673,
+                end: 2684,
             },
         },
         MessageSend {
             receiver: Error {
                 message: "Unexpected token: expected expression, found ]",
                 span: Span {
-                    start: 2682,
-                    end: 2683,
+                    start: 2684,
+                    end: 2685,
                 },
             },
             selector: Keyword(
@@ -1365,8 +1359,8 @@ Module {
                     KeywordPart {
                         keyword: "whileTrue:",
                         span: Span {
-                            start: 2684,
-                            end: 2694,
+                            start: 2686,
+                            end: 2696,
                         },
                     },
                 ],
@@ -1382,21 +1376,21 @@ Module {
                                         Identifier {
                                             name: "self",
                                             span: Span {
-                                                start: 2709,
-                                                end: 2713,
+                                                start: 2711,
+                                                end: 2715,
                                             },
                                         },
                                     ),
                                     field: Identifier {
                                         name: "value",
                                         span: Span {
-                                            start: 2714,
-                                            end: 2719,
+                                            start: 2716,
+                                            end: 2721,
                                         },
                                     },
                                     span: Span {
-                                        start: 2709,
-                                        end: 2719,
+                                        start: 2711,
+                                        end: 2721,
                                     },
                                 },
                                 value: MessageSend {
@@ -1405,21 +1399,21 @@ Module {
                                             Identifier {
                                                 name: "self",
                                                 span: Span {
-                                                    start: 2723,
-                                                    end: 2727,
+                                                    start: 2725,
+                                                    end: 2729,
                                                 },
                                             },
                                         ),
                                         field: Identifier {
                                             name: "value",
                                             span: Span {
-                                                start: 2728,
-                                                end: 2733,
+                                                start: 2730,
+                                                end: 2735,
                                             },
                                         },
                                         span: Span {
-                                            start: 2723,
-                                            end: 2733,
+                                            start: 2725,
+                                            end: 2735,
                                         },
                                     },
                                     selector: Binary(
@@ -1431,32 +1425,32 @@ Module {
                                                 1,
                                             ),
                                             Span {
-                                                start: 2736,
-                                                end: 2737,
+                                                start: 2738,
+                                                end: 2739,
                                             },
                                         ),
                                     ],
                                     span: Span {
-                                        start: 2723,
-                                        end: 2737,
+                                        start: 2725,
+                                        end: 2739,
                                     },
                                 },
                                 span: Span {
-                                    start: 2709,
-                                    end: 2737,
+                                    start: 2711,
+                                    end: 2739,
                                 },
                             },
                         ],
                         span: Span {
-                            start: 2695,
-                            end: 2747,
+                            start: 2697,
+                            end: 2749,
                         },
                     },
                 ),
             ],
             span: Span {
-                start: 2682,
-                end: 2747,
+                start: 2684,
+                end: 2749,
             },
         },
         Return {
@@ -1465,34 +1459,34 @@ Module {
                     Identifier {
                         name: "self",
                         span: Span {
-                            start: 2758,
-                            end: 2762,
+                            start: 2760,
+                            end: 2764,
                         },
                     },
                 ),
                 field: Identifier {
                     name: "value",
                     span: Span {
-                        start: 2763,
-                        end: 2768,
+                        start: 2765,
+                        end: 2770,
                     },
                 },
                 span: Span {
-                    start: 2758,
-                    end: 2768,
+                    start: 2760,
+                    end: 2770,
                 },
             },
             span: Span {
-                start: 2757,
-                end: 2768,
+                start: 2759,
+                end: 2770,
             },
         },
         MessageSend {
             receiver: Error {
                 message: "Unexpected token: expected expression, found incrementBy:",
                 span: Span {
-                    start: 2779,
-                    end: 2791,
+                    start: 2781,
+                    end: 2793,
                 },
             },
             selector: Unary(
@@ -1500,22 +1494,22 @@ Module {
             ),
             arguments: [],
             span: Span {
-                start: 2779,
-                end: 2798,
+                start: 2781,
+                end: 2800,
             },
         },
         Error {
             message: "Unexpected token: expected expression, found =>",
             span: Span {
-                start: 2799,
-                end: 2801,
+                start: 2801,
+                end: 2803,
             },
         },
         Error {
             message: "Invalid assignment target",
             span: Span {
-                start: 2848,
-                end: 2854,
+                start: 2850,
+                end: 2856,
             },
         },
         MessageSend {
@@ -1523,8 +1517,8 @@ Module {
                 receiver: Error {
                     message: "Unexpected token: expected expression, found .",
                     span: Span {
-                        start: 2862,
-                        end: 2863,
+                        start: 2864,
+                        end: 2865,
                     },
                 },
                 selector: Unary(
@@ -1532,8 +1526,8 @@ Module {
                 ),
                 arguments: [],
                 span: Span {
-                    start: 2862,
-                    end: 2868,
+                    start: 2864,
+                    end: 2870,
                 },
             },
             selector: Binary(
@@ -1545,21 +1539,21 @@ Module {
                         1,
                     ),
                     Span {
-                        start: 2871,
-                        end: 2872,
+                        start: 2873,
+                        end: 2874,
                     },
                 ),
             ],
             span: Span {
-                start: 2862,
-                end: 2872,
+                start: 2864,
+                end: 2874,
             },
         },
         Error {
             message: "Unexpected token: expected expression, found ]",
             span: Span {
-                start: 2881,
-                end: 2882,
+                start: 2883,
+                end: 2884,
             },
         },
         Return {
@@ -1568,49 +1562,49 @@ Module {
                     Identifier {
                         name: "self",
                         span: Span {
-                            start: 2893,
-                            end: 2897,
+                            start: 2895,
+                            end: 2899,
                         },
                     },
                 ),
                 field: Identifier {
                     name: "value",
                     span: Span {
-                        start: 2898,
-                        end: 2903,
+                        start: 2900,
+                        end: 2905,
                     },
                 },
                 span: Span {
-                    start: 2893,
-                    end: 2903,
+                    start: 2895,
+                    end: 2905,
                 },
             },
             span: Span {
-                start: 2892,
-                end: 2903,
+                start: 2894,
+                end: 2905,
             },
         },
         Identifier(
             Identifier {
                 name: "multiplyFieldWithLoop",
                 span: Span {
-                    start: 2914,
-                    end: 2935,
+                    start: 2916,
+                    end: 2937,
                 },
             },
         ),
         Error {
             message: "Unexpected token: expected expression, found =>",
             span: Span {
-                start: 2936,
-                end: 2938,
+                start: 2938,
+                end: 2940,
             },
         },
         Error {
             message: "Unexpected token: expected expression, found .",
             span: Span {
-                start: 2958,
-                end: 2959,
+                start: 2960,
+                end: 2961,
             },
         },
         MessageSend {
@@ -1618,8 +1612,8 @@ Module {
                 receiver: Error {
                     message: "Unexpected token: expected expression, found .",
                     span: Span {
-                        start: 2972,
-                        end: 2973,
+                        start: 2974,
+                        end: 2975,
                     },
                 },
                 selector: Unary(
@@ -1627,8 +1621,8 @@ Module {
                 ),
                 arguments: [],
                 span: Span {
-                    start: 2972,
-                    end: 2978,
+                    start: 2974,
+                    end: 2980,
                 },
             },
             selector: Keyword(
@@ -1636,8 +1630,8 @@ Module {
                     KeywordPart {
                         keyword: "timesRepeat:",
                         span: Span {
-                            start: 2979,
-                            end: 2991,
+                            start: 2981,
+                            end: 2993,
                         },
                     },
                 ],
@@ -1652,8 +1646,8 @@ Module {
                                     Identifier {
                                         name: "result",
                                         span: Span {
-                                            start: 3006,
-                                            end: 3012,
+                                            start: 3008,
+                                            end: 3014,
                                         },
                                     },
                                 ),
@@ -1662,8 +1656,8 @@ Module {
                                         Identifier {
                                             name: "result",
                                             span: Span {
-                                                start: 3016,
-                                                end: 3022,
+                                                start: 3018,
+                                                end: 3024,
                                             },
                                         },
                                     ),
@@ -1676,32 +1670,32 @@ Module {
                                                 2,
                                             ),
                                             Span {
-                                                start: 3025,
-                                                end: 3026,
+                                                start: 3027,
+                                                end: 3028,
                                             },
                                         ),
                                     ],
                                     span: Span {
-                                        start: 3016,
-                                        end: 3026,
+                                        start: 3018,
+                                        end: 3028,
                                     },
                                 },
                                 span: Span {
-                                    start: 3006,
-                                    end: 3026,
+                                    start: 3008,
+                                    end: 3028,
                                 },
                             },
                         ],
                         span: Span {
-                            start: 2992,
-                            end: 3036,
+                            start: 2994,
+                            end: 3038,
                         },
                     },
                 ),
             ],
             span: Span {
-                start: 2972,
-                end: 3036,
+                start: 2974,
+                end: 3038,
             },
         },
         Assignment {
@@ -1710,35 +1704,35 @@ Module {
                     Identifier {
                         name: "self",
                         span: Span {
-                            start: 3046,
-                            end: 3050,
+                            start: 3048,
+                            end: 3052,
                         },
                     },
                 ),
                 field: Identifier {
                     name: "result",
                     span: Span {
-                        start: 3051,
-                        end: 3057,
+                        start: 3053,
+                        end: 3059,
                     },
                 },
                 span: Span {
-                    start: 3046,
-                    end: 3057,
+                    start: 3048,
+                    end: 3059,
                 },
             },
             value: Identifier(
                 Identifier {
                     name: "result",
                     span: Span {
-                        start: 3061,
-                        end: 3067,
+                        start: 3063,
+                        end: 3069,
                     },
                 },
             ),
             span: Span {
-                start: 3046,
-                end: 3067,
+                start: 3048,
+                end: 3069,
             },
         },
         Return {
@@ -1746,37 +1740,37 @@ Module {
                 Identifier {
                     name: "result",
                     span: Span {
-                        start: 3078,
-                        end: 3084,
+                        start: 3080,
+                        end: 3086,
                     },
                 },
             ),
             span: Span {
-                start: 3077,
-                end: 3084,
+                start: 3079,
+                end: 3086,
             },
         },
         Identifier(
             Identifier {
                 name: "complexMutation",
                 span: Span {
-                    start: 3095,
-                    end: 3110,
+                    start: 3097,
+                    end: 3112,
                 },
             },
         ),
         Error {
             message: "Unexpected token: expected expression, found =>",
             span: Span {
-                start: 3111,
-                end: 3113,
+                start: 3113,
+                end: 3115,
             },
         },
         Error {
             message: "Unexpected token: expected expression, found .",
             span: Span {
-                start: 3175,
-                end: 3176,
+                start: 3177,
+                end: 3178,
             },
         },
         MessageSend {
@@ -1784,8 +1778,8 @@ Module {
                 receiver: Error {
                     message: "Unexpected token: expected expression, found .",
                     span: Span {
-                        start: 3190,
-                        end: 3191,
+                        start: 3192,
+                        end: 3193,
                     },
                 },
                 selector: Unary(
@@ -1793,8 +1787,8 @@ Module {
                 ),
                 arguments: [],
                 span: Span {
-                    start: 3190,
-                    end: 3196,
+                    start: 3192,
+                    end: 3198,
                 },
             },
             selector: Binary(
@@ -1806,22 +1800,22 @@ Module {
                         5,
                     ),
                     Span {
-                        start: 3199,
-                        end: 3200,
+                        start: 3201,
+                        end: 3202,
                     },
                 ),
             ],
             span: Span {
-                start: 3190,
-                end: 3200,
+                start: 3192,
+                end: 3202,
             },
         },
         MessageSend {
             receiver: Error {
                 message: "Unexpected token: expected expression, found ]",
                 span: Span {
-                    start: 3200,
-                    end: 3201,
+                    start: 3202,
+                    end: 3203,
                 },
             },
             selector: Keyword(
@@ -1829,8 +1823,8 @@ Module {
                     KeywordPart {
                         keyword: "whileTrue:",
                         span: Span {
-                            start: 3202,
-                            end: 3212,
+                            start: 3204,
+                            end: 3214,
                         },
                     },
                 ],
@@ -1846,21 +1840,21 @@ Module {
                                         Identifier {
                                             name: "self",
                                             span: Span {
-                                                start: 3227,
-                                                end: 3231,
+                                                start: 3229,
+                                                end: 3233,
                                             },
                                         },
                                     ),
                                     field: Identifier {
                                         name: "value",
                                         span: Span {
-                                            start: 3232,
-                                            end: 3237,
+                                            start: 3234,
+                                            end: 3239,
                                         },
                                     },
                                     span: Span {
-                                        start: 3227,
-                                        end: 3237,
+                                        start: 3229,
+                                        end: 3239,
                                     },
                                 },
                                 value: MessageSend {
@@ -1869,21 +1863,21 @@ Module {
                                             Identifier {
                                                 name: "self",
                                                 span: Span {
-                                                    start: 3241,
-                                                    end: 3245,
+                                                    start: 3243,
+                                                    end: 3247,
                                                 },
                                             },
                                         ),
                                         field: Identifier {
                                             name: "value",
                                             span: Span {
-                                                start: 3246,
-                                                end: 3251,
+                                                start: 3248,
+                                                end: 3253,
                                             },
                                         },
                                         span: Span {
-                                            start: 3241,
-                                            end: 3251,
+                                            start: 3243,
+                                            end: 3253,
                                         },
                                     },
                                     selector: Binary(
@@ -1895,19 +1889,19 @@ Module {
                                                 1,
                                             ),
                                             Span {
-                                                start: 3254,
-                                                end: 3255,
+                                                start: 3256,
+                                                end: 3257,
                                             },
                                         ),
                                     ],
                                     span: Span {
-                                        start: 3241,
-                                        end: 3255,
+                                        start: 3243,
+                                        end: 3257,
                                     },
                                 },
                                 span: Span {
-                                    start: 3227,
-                                    end: 3255,
+                                    start: 3229,
+                                    end: 3257,
                                 },
                             },
                             Assignment {
@@ -1915,8 +1909,8 @@ Module {
                                     Identifier {
                                         name: "temp",
                                         span: Span {
-                                            start: 3269,
-                                            end: 3273,
+                                            start: 3271,
+                                            end: 3275,
                                         },
                                     },
                                 ),
@@ -1925,8 +1919,8 @@ Module {
                                         Identifier {
                                             name: "temp",
                                             span: Span {
-                                                start: 3277,
-                                                end: 3281,
+                                                start: 3279,
+                                                end: 3283,
                                             },
                                         },
                                     ),
@@ -1939,45 +1933,45 @@ Module {
                                                 Identifier {
                                                     name: "self",
                                                     span: Span {
-                                                        start: 3284,
-                                                        end: 3288,
+                                                        start: 3286,
+                                                        end: 3290,
                                                     },
                                                 },
                                             ),
                                             field: Identifier {
                                                 name: "value",
                                                 span: Span {
-                                                    start: 3289,
-                                                    end: 3294,
+                                                    start: 3291,
+                                                    end: 3296,
                                                 },
                                             },
                                             span: Span {
-                                                start: 3284,
-                                                end: 3294,
+                                                start: 3286,
+                                                end: 3296,
                                             },
                                         },
                                     ],
                                     span: Span {
-                                        start: 3277,
-                                        end: 3294,
+                                        start: 3279,
+                                        end: 3296,
                                     },
                                 },
                                 span: Span {
-                                    start: 3269,
-                                    end: 3294,
+                                    start: 3271,
+                                    end: 3296,
                                 },
                             },
                         ],
                         span: Span {
-                            start: 3213,
-                            end: 3304,
+                            start: 3215,
+                            end: 3306,
                         },
                     },
                 ),
             ],
             span: Span {
-                start: 3200,
-                end: 3304,
+                start: 3202,
+                end: 3306,
             },
         },
         Return {
@@ -1985,22 +1979,22 @@ Module {
                 Identifier {
                     name: "temp",
                     span: Span {
-                        start: 3315,
-                        end: 3319,
+                        start: 3317,
+                        end: 3321,
                     },
                 },
             ),
             span: Span {
-                start: 3314,
-                end: 3319,
+                start: 3316,
+                end: 3321,
             },
         },
         MessageSend {
             receiver: Error {
                 message: "Unexpected token: expected expression, found state:",
                 span: Span {
-                    start: 3330,
-                    end: 3336,
+                    start: 3332,
+                    end: 3338,
                 },
             },
             selector: Keyword(
@@ -2008,54 +2002,41 @@ Module {
                     KeywordPart {
                         keyword: "result:",
                         span: Span {
-                            start: 3337,
-                            end: 3344,
+                            start: 3339,
+                            end: 3346,
                         },
                     },
                 ],
             ),
             arguments: [
-                MessageSend {
-                    receiver: ClassReference {
-                        name: Identifier {
-                            name: "Integer",
-                            span: Span {
-                                start: 3345,
-                                end: 3352,
-                            },
-                        },
+                ClassReference {
+                    name: Identifier {
+                        name: "Integer",
                         span: Span {
-                            start: 3345,
-                            end: 3352,
+                            start: 3347,
+                            end: 3354,
                         },
                     },
-                    selector: Binary(
-                        "=",
-                    ),
-                    arguments: [
-                        Literal(
-                            Integer(
-                                0,
-                            ),
-                            Span {
-                                start: 3355,
-                                end: 3356,
-                            },
-                        ),
-                    ],
                     span: Span {
-                        start: 3345,
-                        end: 3356,
+                        start: 3347,
+                        end: 3354,
                     },
                 },
             ],
             span: Span {
-                start: 3330,
+                start: 3332,
+                end: 3354,
+            },
+        },
+        Error {
+            message: "Unexpected token: expected expression, found =",
+            span: Span {
+                start: 3355,
                 end: 3356,
             },
         },
         Error {
-            message: "Unexpected token: expected expression, found ]",
+            message: "Unexpected token: expected expression, found .",
             span: Span {
                 start: 3358,
                 end: 3359,
@@ -2064,37 +2045,44 @@ Module {
         Error {
             message: "Unexpected token: expected expression, found .",
             span: Span {
-                start: 3545,
-                end: 3546,
+                start: 3361,
+                end: 3362,
+            },
+        },
+        Error {
+            message: "Unexpected token: expected expression, found .",
+            span: Span {
+                start: 3547,
+                end: 3548,
             },
         },
         Error {
             message: "Unexpected token: expected expression, found ]",
             span: Span {
-                start: 3589,
-                end: 3590,
+                start: 3591,
+                end: 3592,
             },
         },
         Error {
             message: "Unexpected token: expected expression, found .",
             span: Span {
-                start: 3676,
-                end: 3677,
+                start: 3678,
+                end: 3679,
             },
         },
         Error {
             message: "Unexpected token: expected expression, found .",
             span: Span {
-                start: 3684,
-                end: 3685,
+                start: 3686,
+                end: 3687,
             },
         },
         MessageSend {
             receiver: Error {
                 message: "Unexpected token: expected expression, found ]",
                 span: Span {
-                    start: 3692,
-                    end: 3693,
+                    start: 3694,
+                    end: 3695,
                 },
             },
             selector: Keyword(
@@ -2102,8 +2090,8 @@ Module {
                     KeywordPart {
                         keyword: "whileTrue:",
                         span: Span {
-                            start: 3694,
-                            end: 3704,
+                            start: 3696,
+                            end: 3706,
                         },
                     },
                 ],
@@ -2118,8 +2106,8 @@ Module {
                                     Identifier {
                                         name: "a",
                                         span: Span {
-                                            start: 3711,
-                                            end: 3712,
+                                            start: 3713,
+                                            end: 3714,
                                         },
                                     },
                                 ),
@@ -2128,8 +2116,8 @@ Module {
                                         Identifier {
                                             name: "a",
                                             span: Span {
-                                                start: 3716,
-                                                end: 3717,
+                                                start: 3718,
+                                                end: 3719,
                                             },
                                         },
                                     ),
@@ -2142,19 +2130,19 @@ Module {
                                                 1,
                                             ),
                                             Span {
-                                                start: 3720,
-                                                end: 3721,
+                                                start: 3722,
+                                                end: 3723,
                                             },
                                         ),
                                     ],
                                     span: Span {
-                                        start: 3716,
-                                        end: 3721,
+                                        start: 3718,
+                                        end: 3723,
                                     },
                                 },
                                 span: Span {
-                                    start: 3711,
-                                    end: 3721,
+                                    start: 3713,
+                                    end: 3723,
                                 },
                             },
                             Assignment {
@@ -2162,8 +2150,8 @@ Module {
                                     Identifier {
                                         name: "b",
                                         span: Span {
-                                            start: 3727,
-                                            end: 3728,
+                                            start: 3729,
+                                            end: 3730,
                                         },
                                     },
                                 ),
@@ -2172,8 +2160,8 @@ Module {
                                         Identifier {
                                             name: "b",
                                             span: Span {
-                                                start: 3732,
-                                                end: 3733,
+                                                start: 3734,
+                                                end: 3735,
                                             },
                                         },
                                     ),
@@ -2186,38 +2174,38 @@ Module {
                                                 2,
                                             ),
                                             Span {
-                                                start: 3736,
-                                                end: 3737,
+                                                start: 3738,
+                                                end: 3739,
                                             },
                                         ),
                                     ],
                                     span: Span {
-                                        start: 3732,
-                                        end: 3737,
+                                        start: 3734,
+                                        end: 3739,
                                     },
                                 },
                                 span: Span {
-                                    start: 3727,
-                                    end: 3737,
+                                    start: 3729,
+                                    end: 3739,
                                 },
                             },
                         ],
                         span: Span {
-                            start: 3705,
-                            end: 3739,
+                            start: 3707,
+                            end: 3741,
                         },
                     },
                 ),
             ],
             span: Span {
-                start: 3692,
-                end: 3739,
+                start: 3694,
+                end: 3741,
             },
         },
     ],
     span: Span {
         start: 376,
-        end: 3740,
+        end: 3742,
     },
     leading_comments: [
         Comment {
@@ -2288,6 +2276,9 @@ Module {
 }
 
 Diagnostics:
+Diagnostic { severity: Error, message: "Expected ']' to close block", span: Span { start: 507, end: 508 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =", span: Span { start: 507, end: 508 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 510, end: 511 }, hint: None }
 Diagnostic { severity: Error, message: "Unexpected '#': expected '#(' for a list, '#{' for a map, or '#name'/'#\\'quoted\\'' for a symbol", span: Span { start: 1325, end: 1326 }, hint: None }
 Diagnostic { severity: Error, message: "Expected ']' to close block", span: Span { start: 1328, end: 1329 }, hint: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ,", span: Span { start: 1328, end: 1329 }, hint: None }
@@ -2300,35 +2291,37 @@ Diagnostic { severity: Error, message: "Unexpected token: expected expression, f
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1618, end: 1619 }, hint: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 1718, end: 1719 }, hint: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 1783, end: 1784 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1799, end: 1800 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 1898, end: 1899 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1984, end: 1985 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1999, end: 2000 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2208, end: 2209 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2223, end: 2224 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2231, end: 2232 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 2240, end: 2241 }, hint: None }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 2586, end: 2593 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2634, end: 2635 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2671, end: 2672 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 2682, end: 2683 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found incrementBy:", span: Span { start: 2779, end: 2791 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =>", span: Span { start: 2799, end: 2801 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2848, end: 2849 }, hint: None }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 2848, end: 2854 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2862, end: 2863 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 2881, end: 2882 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =>", span: Span { start: 2936, end: 2938 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2958, end: 2959 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2972, end: 2973 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =>", span: Span { start: 3111, end: 3113 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3175, end: 3176 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3190, end: 3191 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 3200, end: 3201 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found state:", span: Span { start: 3330, end: 3336 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 3358, end: 3359 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3545, end: 3546 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 3589, end: 3590 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3676, end: 3677 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3684, end: 3685 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 3692, end: 3693 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1801, end: 1802 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 1900, end: 1901 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1986, end: 1987 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 2001, end: 2002 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2210, end: 2211 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2225, end: 2226 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2233, end: 2234 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 2242, end: 2243 }, hint: None }
+Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 2588, end: 2595 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2636, end: 2637 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2673, end: 2674 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 2684, end: 2685 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found incrementBy:", span: Span { start: 2781, end: 2793 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =>", span: Span { start: 2801, end: 2803 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2850, end: 2851 }, hint: None }
+Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 2850, end: 2856 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2864, end: 2865 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 2883, end: 2884 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =>", span: Span { start: 2938, end: 2940 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2960, end: 2961 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2974, end: 2975 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =>", span: Span { start: 3113, end: 3115 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3177, end: 3178 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3192, end: 3193 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 3202, end: 3203 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found state:", span: Span { start: 3332, end: 3338 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =", span: Span { start: 3355, end: 3356 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3358, end: 3359 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3361, end: 3362 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3547, end: 3548 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 3591, end: 3592 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3678, end: 3679 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3686, end: 3687 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 3694, end: 3695 }, hint: None }

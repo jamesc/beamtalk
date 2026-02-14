@@ -16,23 +16,23 @@
 /// 'hello' ++ ' world'   // => 'hello world'
 /// ```
 sealed Object subclass: String
-  /// Test equality with another string.
+  /// Test strict equality with another string.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// 'abc' = 'abc'      // => true
-  /// 'abc' = 'xyz'      // => false
+  /// 'abc' =:= 'abc'      // => true
+  /// 'abc' =:= 'xyz'      // => false
   /// ```
-  = other => @primitive '='
+  =:= other => @primitive '=:='
 
   /// Test inequality with another string.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// 'abc' ~= 'xyz'     // => true
-  /// 'abc' ~= 'abc'     // => false
+  /// 'abc' /= 'xyz'     // => true
+  /// 'abc' /= 'abc'     // => false
   /// ```
-  ~= other => (self = other) not
+  /= other => (self =:= other) not
 
   /// Test if the receiver sorts before another string.
   ///
@@ -308,7 +308,7 @@ sealed Object subclass: String
   /// '' isEmpty                  // => true
   /// 'hello' isEmpty             // => false
   /// ```
-  isEmpty => self length = 0
+  isEmpty => self length =:= 0
 
   /// Test if the string is not empty.
   ///

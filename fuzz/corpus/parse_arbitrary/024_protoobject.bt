@@ -7,7 +7,7 @@
 // - class (reflection)
 // - doesNotUnderstand:args: (fallback for unknown messages)
 // - == (identity comparison)
-// - ~= (not equal)
+// - /= (not equal)
 //
 // ===========================================================================
 // CLASS METHOD TESTS
@@ -70,38 +70,38 @@ nil == false
 // => false
 
 // ===========================================================================
-// INEQUALITY COMPARISON (~=)
+// INEQUALITY COMPARISON (/=)
 // ===========================================================================
 //
-// `~=` tests object inequality (not identical)
+// `/=` tests object inequality (not identical)
 // Delegates to `==` and negates the result
 
 // Integer inequality
-42 ~= 43
+42 /= 43
 // => true
 
-42 ~= 42
+42 /= 42
 // => false
 
 // String inequality
-'hello' ~= 'world'
+'hello' /= 'world'
 // => true
 
-'hello' ~= 'hello'
+'hello' /= 'hello'
 // => false
 
 // Boolean inequality
-true ~= false
+true /= false
 // => true
 
-true ~= true
+true /= true
 // => false
 
 // Nil inequality
-nil ~= false
+nil /= false
 // => true
 
-nil ~= nil
+nil /= nil
 // => false
 
 // ===========================================================================
@@ -125,7 +125,7 @@ nil ~= nil
 // a == c
 // // => false (different processes)
 //
-// a ~= c
+// a /= c
 // // => true (different processes)
 
 // ===========================================================================
@@ -173,7 +173,7 @@ nil ~= nil
 //
 // ✅ ProtoObject.bt defined in lib/
 // ✅ Compiler support for `class` message
-// ✅ Compiler support for `==` and `~=` operators
+// ✅ Compiler support for `==` and `/=` operators
 // ✅ Compiler support for `doesNotUnderstand:args:`
 // ✅ Runtime dispatch for ProtoObject methods
 // ✅ Method lookup chain terminating at ProtoObject
