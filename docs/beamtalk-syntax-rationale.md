@@ -123,7 +123,7 @@ count := 0  // inline comment
 **Implementation:** Binary operators have precedence levels:
 1. `**` (highest - exponentiation, right-associative)
 2. `*`, `/`, `%` (multiplicative)
-3. `+`, `-`, `++` (additive and string concatenation)
+3. `+`, `-`, `++`, `,` (additive and string concatenation)
 4. `<`, `>`, `<=`, `>=` (comparison)
 5. `=`, `==`, `~=` (equality - strict and loose)
 

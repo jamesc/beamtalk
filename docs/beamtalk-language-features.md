@@ -267,7 +267,8 @@ Binary operators follow standard math precedence (highest to lowest):
 #### Additive
 - `+` - Addition: `3 + 4` → `7`
 - `-` - Subtraction: `10 - 3` → `7`
-- `++` - String concatenation: `'Hello' ++ ' World'` → `'Hello World'`
+- `++` - String/list concatenation: `'Hello' ++ ' World'` → `'Hello World'`
+- `,` - String concatenation (alias for `++`): `'Hello' , ' World'` → `'Hello World'`
 
 #### Comparison
 - `<` - Less than: `3 < 5` → `true`

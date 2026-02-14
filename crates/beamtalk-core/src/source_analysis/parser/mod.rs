@@ -825,6 +825,37 @@ mod tests {
     }
 
     #[test]
+    fn parse_comma_binary_operator() {
+        // BT-415: Comma is a string concatenation alias at precedence 30
+        let module = parse_ok("'hello' , ' world'");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MessageSend {
+                selector: MessageSelector::Binary(op),
+                arguments,
+                ..
+            } => {
+                assert_eq!(op.as_str(), ",");
+                assert_eq!(arguments.len(), 1);
+            }
+            _ => panic!("Expected binary message send with comma operator"),
+        }
+    }
+
+    #[test]
+    fn parse_comma_not_operator_in_list() {
+        // BT-415: Comma inside list literals is a separator, not an operator
+        let module = parse_ok("#('a', 'b', 'c')");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::ListLiteral { elements, .. } => {
+                assert_eq!(elements.len(), 3);
+            }
+            _ => panic!("Expected list literal with 3 elements"),
+        }
+    }
+
+    #[test]
     fn parse_keyword_message() {
         let module = parse_ok("array at: 1 put: 'x'");
         assert_eq!(module.expressions.len(), 1);
