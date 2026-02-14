@@ -1131,3 +1131,90 @@ sync_message_to_dead_actor_returns_error_test() ->
     
     Result = beamtalk_actor:sync_send(Counter, getValue, []),
     ?assertMatch({error, #beamtalk_error{kind = actor_dead, selector = getValue}}, Result).
+
+%%% ===========================================================================
+%%% register_spawned callback tests (BT-391)
+%%% ===========================================================================
+
+register_spawned_returns_ok_when_no_callback_configured_test() ->
+    %% Clear any existing callback config
+    application:unset_env(beamtalk_runtime, actor_spawn_callback),
+    
+    FakePid = spawn(fun() -> receive _ -> ok end end),
+    Result = beamtalk_actor:register_spawned(FakePid, FakePid, 'Test', test_mod),
+    ?assertEqual(ok, Result),
+    
+    exit(FakePid, kill).
+
+register_spawned_returns_error_when_callback_undef_test() ->
+    %% Set callback to a module that doesn't implement on_actor_spawned/4
+    application:set_env(beamtalk_runtime, actor_spawn_callback, nonexistent_callback_mod),
+    
+    FakePid = spawn(fun() -> receive _ -> ok end end),
+    Result = beamtalk_actor:register_spawned(FakePid, FakePid, 'Test', test_mod),
+    ?assertMatch({error, {callback_undef, nonexistent_callback_mod}}, Result),
+    
+    exit(FakePid, kill),
+    application:unset_env(beamtalk_runtime, actor_spawn_callback).
+
+register_spawned_returns_error_when_callback_crashes_test() ->
+    %% Use a meck-free approach: set callback to a module we control
+    %% We use the ?MODULE and define a crashing on_actor_spawned locally
+    application:set_env(beamtalk_runtime, actor_spawn_callback, beamtalk_actor_tests_crash_callback),
+    
+    %% Ensure crash callback module exists
+    ok = ensure_crash_callback_module(),
+    
+    FakePid = spawn(fun() -> receive _ -> ok end end),
+    Result = beamtalk_actor:register_spawned(FakePid, FakePid, 'Test', test_mod),
+    ?assertMatch({error, {error, deliberate_crash}}, Result),
+    
+    exit(FakePid, kill),
+    application:unset_env(beamtalk_runtime, actor_spawn_callback).
+
+register_spawned_surfaces_callback_error_result_test() ->
+    %% Test that {error, _} from on_actor_spawned is returned, not swallowed
+    application:set_env(beamtalk_runtime, actor_spawn_callback, beamtalk_actor_tests_error_callback),
+    
+    ok = ensure_error_callback_module(),
+    
+    FakePid = spawn(fun() -> receive _ -> ok end end),
+    Result = beamtalk_actor:register_spawned(FakePid, FakePid, 'Test', test_mod),
+    ?assertEqual({error, {registry_failed, registry_not_running}}, Result),
+    
+    exit(FakePid, kill),
+    application:unset_env(beamtalk_runtime, actor_spawn_callback).
+
+%%% ===========================================================================
+%%% Test helpers for BT-391
+%%% ===========================================================================
+
+%% @private Create a callback module that crashes
+ensure_crash_callback_module() ->
+    Forms = [
+        {attribute, 1, module, beamtalk_actor_tests_crash_callback},
+        {attribute, 2, export, [{on_actor_spawned, 4}]},
+        {function, 3, on_actor_spawned, 4,
+            [{clause, 3, [{var, 3, '_'}, {var, 3, '_'}, {var, 3, '_'}, {var, 3, '_'}],
+                [],
+                [{call, 3, {remote, 3, {atom, 3, erlang}, {atom, 3, error}},
+                    [{atom, 3, deliberate_crash}]}]}]}
+    ],
+    {ok, _, Bin} = compile:forms(Forms),
+    {module, _} = code:load_binary(beamtalk_actor_tests_crash_callback, "test", Bin),
+    ok.
+
+%% @private Create a callback module that returns an error tuple
+ensure_error_callback_module() ->
+    Forms = [
+        {attribute, 1, module, beamtalk_actor_tests_error_callback},
+        {attribute, 2, export, [{on_actor_spawned, 4}]},
+        {function, 3, on_actor_spawned, 4,
+            [{clause, 3, [{var, 3, '_'}, {var, 3, '_'}, {var, 3, '_'}, {var, 3, '_'}],
+                [],
+                [{tuple, 3, [{atom, 3, error},
+                    {tuple, 3, [{atom, 3, registry_failed}, {atom, 3, registry_not_running}]}]}]}]}
+    ],
+    {ok, _, Bin} = compile:forms(Forms),
+    {module, _} = code:load_binary(beamtalk_actor_tests_error_callback, "test", Bin),
+    ok.

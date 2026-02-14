@@ -184,3 +184,47 @@ registry_termination_kills_all_actors_test() ->
     ?assertNot(is_process_alive(Actor1)),
     ?assertNot(is_process_alive(Actor2)),
     ?assertNot(is_process_alive(Actor3)).
+
+%%% ===========================================================================
+%%% Callback Failure Tests (BT-391)
+%%% ===========================================================================
+
+on_actor_spawned_succeeds_with_running_registry_test() ->
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
+    {ok, ActorPid} = test_counter:start_link(0),
+    
+    Result = beamtalk_repl_actors:on_actor_spawned(RegistryPid, ActorPid, 'Counter', test_counter),
+    ?assertEqual(ok, Result),
+    
+    %% Verify actor was registered
+    {ok, Metadata} = beamtalk_repl_actors:get_actor(RegistryPid, ActorPid),
+    ?assertEqual('Counter', maps:get(class, Metadata)),
+    
+    gen_server:stop(ActorPid),
+    gen_server:stop(RegistryPid).
+
+on_actor_spawned_returns_error_when_registry_down_test() ->
+    %% Start and immediately stop a registry to get a dead pid
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
+    gen_server:stop(RegistryPid),
+    timer:sleep(50),
+    
+    {ok, ActorPid} = test_counter:start_link(0),
+    
+    %% on_actor_spawned should return error, not crash
+    Result = beamtalk_repl_actors:on_actor_spawned(RegistryPid, ActorPid, 'Counter', test_counter),
+    ?assertMatch({error, {registry_failed, _}}, Result),
+    
+    gen_server:stop(ActorPid).
+
+on_actor_spawned_returns_error_when_registry_not_a_process_test() ->
+    %% Use a PID that was never a gen_server
+    FakePid = spawn(fun() -> ok end),
+    timer:sleep(50),
+    
+    {ok, ActorPid} = test_counter:start_link(0),
+    
+    Result = beamtalk_repl_actors:on_actor_spawned(FakePid, ActorPid, 'Counter', test_counter),
+    ?assertMatch({error, {registry_failed, _}}, Result),
+    
+    gen_server:stop(ActorPid).

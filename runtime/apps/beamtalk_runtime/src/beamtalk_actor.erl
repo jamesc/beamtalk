@@ -190,7 +190,7 @@ start_link_supervised(Module, Function, Args) ->
 %% spawned and registered actors. That approach bypassed the module's
 %% initialize protocol, so we now let Module:spawn() handle the actor
 %% lifecycle and only register the resulting pid here.
--spec register_spawned(pid(), pid(), atom(), module()) -> ok.
+-spec register_spawned(pid(), pid(), atom(), module()) -> ok | {error, term()}.
 register_spawned(RegistryPid, ActorPid, ClassName, Module) ->
     case application:get_env(beamtalk_runtime, actor_spawn_callback) of
         {ok, CallbackMod} ->
@@ -201,29 +201,32 @@ register_spawned(RegistryPid, ActorPid, ClassName, Module) ->
                     %% Callback module doesn't implement on_actor_spawned/4
                     ?LOG_WARNING("Actor spawn callback not implemented", #{
                         callback => CallbackMod,
+                        registry_pid => RegistryPid,
                         actor_pid => ActorPid,
                         class => ClassName
                     }),
-                    ok;
+                    {error, {callback_undef, CallbackMod}};
                 error:#beamtalk_error{} = BtError ->
                     %% Structured beamtalk error from callback
                     ?LOG_ERROR("Actor spawn callback failed with beamtalk error", #{
                         callback => CallbackMod,
                         error => BtError,
+                        registry_pid => RegistryPid,
                         actor_pid => ActorPid,
                         class => ClassName
                     }),
-                    ok;
+                    {error, {beamtalk_error, BtError}};
                 Kind:Reason ->
                     %% Unexpected failure in callback
                     ?LOG_ERROR("Actor spawn callback failed", #{
                         callback => CallbackMod,
                         kind => Kind,
                         reason => Reason,
+                        registry_pid => RegistryPid,
                         actor_pid => ActorPid,
                         class => ClassName
                     }),
-                    ok
+                    {error, {Kind, Reason}}
             end;
         undefined ->
             ok
