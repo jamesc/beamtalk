@@ -903,35 +903,38 @@ Module {
                     },
                 },
             ),
-            value: Identifier(
-                Identifier {
-                    name: "nil",
-                    span: Span {
-                        start: 3594,
-                        end: 3597,
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "nil",
+                        span: Span {
+                            start: 3594,
+                            end: 3597,
+                        },
                     },
+                ),
+                selector: Binary(
+                    "=:=",
+                ),
+                arguments: [
+                    Identifier(
+                        Identifier {
+                            name: "nil",
+                            span: Span {
+                                start: 3602,
+                                end: 3605,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 3594,
+                    end: 3605,
                 },
-            ),
+            },
             span: Span {
                 start: 3582,
-                end: 3597,
-            },
-        },
-        MessageSend {
-            receiver: Error {
-                message: "Unexpected token: expected expression, found =",
-                span: Span {
-                    start: 3598,
-                    end: 3599,
-                },
-            },
-            selector: Unary(
-                "nil",
-            ),
-            arguments: [],
-            span: Span {
-                start: 3598,
-                end: 3603,
+                end: 3605,
             },
         },
         Assignment {
@@ -939,113 +942,8 @@ Module {
                 Identifier {
                     name: "result16",
                     span: Span {
-                        start: 3653,
-                        end: 3661,
-                    },
-                },
-            ),
-            value: Identifier(
-                Identifier {
-                    name: "nil",
-                    span: Span {
-                        start: 3665,
-                        end: 3668,
-                    },
-                },
-            ),
-            span: Span {
-                start: 3653,
-                end: 3668,
-            },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found =",
-            span: Span {
-                start: 3669,
-                end: 3670,
-            },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
-            span: Span {
-                start: 4327,
-                end: 4328,
-            },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
-            span: Span {
-                start: 4374,
-                end: 4375,
-            },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
-            span: Span {
-                start: 4439,
-                end: 4440,
-            },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
-            span: Span {
-                start: 4503,
-                end: 4504,
-            },
-        },
-        MessageSend {
-            receiver: Error {
-                message: "Unexpected token: expected expression, found ]",
-                span: Span {
-                    start: 4599,
-                    end: 4600,
-                },
-            },
-            selector: Keyword(
-                [
-                    KeywordPart {
-                        keyword: "ifFalse:",
-                        span: Span {
-                            start: 4601,
-                            end: 4609,
-                        },
-                    },
-                ],
-            ),
-            arguments: [
-                Block(
-                    Block {
-                        parameters: [],
-                        body: [
-                            Literal(
-                                String(
-                                    "not nil",
-                                ),
-                                Span {
-                                    start: 4611,
-                                    end: 4620,
-                                },
-                            ),
-                        ],
-                        span: Span {
-                            start: 4610,
-                            end: 4621,
-                        },
-                    },
-                ),
-            ],
-            span: Span {
-                start: 4599,
-                end: 4621,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "result24",
-                    span: Span {
-                        start: 5142,
-                        end: 5150,
+                        start: 3655,
+                        end: 3663,
                     },
                 },
             ),
@@ -1054,8 +952,532 @@ Module {
                     Identifier {
                         name: "nil",
                         span: Span {
-                            start: 5154,
-                            end: 5157,
+                            start: 3667,
+                            end: 3670,
+                        },
+                    },
+                ),
+                selector: Binary(
+                    "=:=",
+                ),
+                arguments: [
+                    Literal(
+                        Integer(
+                            0,
+                        ),
+                        Span {
+                            start: 3675,
+                            end: 3676,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 3667,
+                    end: 3676,
+                },
+            },
+            span: Span {
+                start: 3655,
+                end: 3676,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "result17",
+                    span: Span {
+                        start: 3692,
+                        end: 3700,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "nil",
+                        span: Span {
+                            start: 3704,
+                            end: 3707,
+                        },
+                    },
+                ),
+                selector: Binary(
+                    "=:=",
+                ),
+                arguments: [
+                    Literal(
+                        String(
+                            "",
+                        ),
+                        Span {
+                            start: 3712,
+                            end: 3714,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 3704,
+                    end: 3714,
+                },
+            },
+            span: Span {
+                start: 3692,
+                end: 3714,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "result18",
+                    span: Span {
+                        start: 3729,
+                        end: 3737,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "nil",
+                        span: Span {
+                            start: 3741,
+                            end: 3744,
+                        },
+                    },
+                ),
+                selector: Binary(
+                    "=:=",
+                ),
+                arguments: [
+                    Identifier(
+                        Identifier {
+                            name: "false",
+                            span: Span {
+                                start: 3749,
+                                end: 3754,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 3741,
+                    end: 3754,
+                },
+            },
+            span: Span {
+                start: 3729,
+                end: 3754,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "result19",
+                    span: Span {
+                        start: 4303,
+                        end: 4311,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "nil",
+                            span: Span {
+                                start: 4315,
+                                end: 4318,
+                            },
+                        },
+                    ),
+                    selector: Unary(
+                        "isNil",
+                    ),
+                    arguments: [],
+                    span: Span {
+                        start: 4315,
+                        end: 4324,
+                    },
+                },
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "and:",
+                            span: Span {
+                                start: 4325,
+                                end: 4329,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Block(
+                        Block {
+                            parameters: [],
+                            body: [
+                                Identifier(
+                                    Identifier {
+                                        name: "true",
+                                        span: Span {
+                                            start: 4331,
+                                            end: 4335,
+                                        },
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 4330,
+                                end: 4336,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 4315,
+                    end: 4336,
+                },
+            },
+            span: Span {
+                start: 4303,
+                end: 4336,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "result20",
+                    span: Span {
+                        start: 4350,
+                        end: 4358,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "nil",
+                            span: Span {
+                                start: 4362,
+                                end: 4365,
+                            },
+                        },
+                    ),
+                    selector: Unary(
+                        "isNil",
+                    ),
+                    arguments: [],
+                    span: Span {
+                        start: 4362,
+                        end: 4371,
+                    },
+                },
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "or:",
+                            span: Span {
+                                start: 4372,
+                                end: 4375,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Block(
+                        Block {
+                            parameters: [],
+                            body: [
+                                Identifier(
+                                    Identifier {
+                                        name: "false",
+                                        span: Span {
+                                            start: 4377,
+                                            end: 4382,
+                                        },
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 4376,
+                                end: 4383,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 4362,
+                    end: 4383,
+                },
+            },
+            span: Span {
+                start: 4350,
+                end: 4383,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "result21",
+                    span: Span {
+                        start: 4414,
+                        end: 4422,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "nil",
+                            span: Span {
+                                start: 4426,
+                                end: 4429,
+                            },
+                        },
+                    ),
+                    selector: Unary(
+                        "notNil",
+                    ),
+                    arguments: [],
+                    span: Span {
+                        start: 4426,
+                        end: 4436,
+                    },
+                },
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "and:",
+                            span: Span {
+                                start: 4437,
+                                end: 4441,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Block(
+                        Block {
+                            parameters: [],
+                            body: [
+                                Identifier(
+                                    Identifier {
+                                        name: "true",
+                                        span: Span {
+                                            start: 4443,
+                                            end: 4447,
+                                        },
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 4442,
+                                end: 4448,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 4426,
+                    end: 4448,
+                },
+            },
+            span: Span {
+                start: 4414,
+                end: 4448,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "result22",
+                    span: Span {
+                        start: 4479,
+                        end: 4487,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "nil",
+                            span: Span {
+                                start: 4491,
+                                end: 4494,
+                            },
+                        },
+                    ),
+                    selector: Unary(
+                        "notNil",
+                    ),
+                    arguments: [],
+                    span: Span {
+                        start: 4491,
+                        end: 4501,
+                    },
+                },
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "or:",
+                            span: Span {
+                                start: 4502,
+                                end: 4505,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Block(
+                        Block {
+                            parameters: [],
+                            body: [
+                                Identifier(
+                                    Identifier {
+                                        name: "true",
+                                        span: Span {
+                                            start: 4507,
+                                            end: 4511,
+                                        },
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 4506,
+                                end: 4512,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 4491,
+                    end: 4512,
+                },
+            },
+            span: Span {
+                start: 4479,
+                end: 4512,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "result23",
+                    span: Span {
+                        start: 4568,
+                        end: 4576,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "nil",
+                            span: Span {
+                                start: 4580,
+                                end: 4583,
+                            },
+                        },
+                    ),
+                    selector: Unary(
+                        "isNil",
+                    ),
+                    arguments: [],
+                    span: Span {
+                        start: 4580,
+                        end: 4589,
+                    },
+                },
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "ifTrue:",
+                            span: Span {
+                                start: 4590,
+                                end: 4597,
+                            },
+                        },
+                        KeywordPart {
+                            keyword: "ifFalse:",
+                            span: Span {
+                                start: 4609,
+                                end: 4617,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Block(
+                        Block {
+                            parameters: [],
+                            body: [
+                                Literal(
+                                    String(
+                                        "is nil",
+                                    ),
+                                    Span {
+                                        start: 4599,
+                                        end: 4607,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 4598,
+                                end: 4608,
+                            },
+                        },
+                    ),
+                    Block(
+                        Block {
+                            parameters: [],
+                            body: [
+                                Literal(
+                                    String(
+                                        "not nil",
+                                    ),
+                                    Span {
+                                        start: 4619,
+                                        end: 4628,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 4618,
+                                end: 4629,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 4580,
+                    end: 4629,
+                },
+            },
+            span: Span {
+                start: 4568,
+                end: 4629,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "result24",
+                    span: Span {
+                        start: 5150,
+                        end: 5158,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "nil",
+                        span: Span {
+                            start: 5162,
+                            end: 5165,
                         },
                     },
                 ),
@@ -1064,8 +1486,8 @@ Module {
                         KeywordPart {
                             keyword: "ifNil:",
                             span: Span {
-                                start: 5158,
-                                end: 5164,
+                                start: 5166,
+                                end: 5172,
                             },
                         },
                     ],
@@ -1081,8 +1503,8 @@ Module {
                                             1,
                                         ),
                                         Span {
-                                            start: 5166,
-                                            end: 5167,
+                                            start: 5174,
+                                            end: 5175,
                                         },
                                     ),
                                     selector: Binary(
@@ -1095,8 +1517,8 @@ Module {
                                                     2,
                                                 ),
                                                 Span {
-                                                    start: 5170,
-                                                    end: 5171,
+                                                    start: 5178,
+                                                    end: 5179,
                                                 },
                                             ),
                                             selector: Binary(
@@ -1108,38 +1530,38 @@ Module {
                                                         3,
                                                     ),
                                                     Span {
-                                                        start: 5174,
-                                                        end: 5175,
+                                                        start: 5182,
+                                                        end: 5183,
                                                     },
                                                 ),
                                             ],
                                             span: Span {
-                                                start: 5170,
-                                                end: 5175,
+                                                start: 5178,
+                                                end: 5183,
                                             },
                                         },
                                     ],
                                     span: Span {
-                                        start: 5166,
-                                        end: 5175,
+                                        start: 5174,
+                                        end: 5183,
                                     },
                                 },
                             ],
                             span: Span {
-                                start: 5165,
-                                end: 5176,
+                                start: 5173,
+                                end: 5184,
                             },
                         },
                     ),
                 ],
                 span: Span {
-                    start: 5154,
-                    end: 5176,
+                    start: 5162,
+                    end: 5184,
                 },
             },
             span: Span {
-                start: 5142,
-                end: 5176,
+                start: 5150,
+                end: 5184,
             },
         },
         Assignment {
@@ -1147,8 +1569,8 @@ Module {
                 Identifier {
                     name: "result25",
                     span: Span {
-                        start: 5230,
-                        end: 5238,
+                        start: 5238,
+                        end: 5246,
                     },
                 },
             ),
@@ -1157,8 +1579,8 @@ Module {
                     Identifier {
                         name: "nil",
                         span: Span {
-                            start: 5242,
-                            end: 5245,
+                            start: 5250,
+                            end: 5253,
                         },
                     },
                 ),
@@ -1167,8 +1589,8 @@ Module {
                         KeywordPart {
                             keyword: "ifNotNil:",
                             span: Span {
-                                start: 5246,
-                                end: 5255,
+                                start: 5254,
+                                end: 5263,
                             },
                         },
                     ],
@@ -1180,8 +1602,8 @@ Module {
                                 BlockParameter {
                                     name: "val",
                                     span: Span {
-                                        start: 5258,
-                                        end: 5261,
+                                        start: 5266,
+                                        end: 5269,
                                     },
                                 },
                             ],
@@ -1191,8 +1613,8 @@ Module {
                                         Identifier {
                                             name: "val",
                                             span: Span {
-                                                start: 5264,
-                                                end: 5267,
+                                                start: 5272,
+                                                end: 5275,
                                             },
                                         },
                                     ),
@@ -1206,8 +1628,8 @@ Module {
                                                     100,
                                                 ),
                                                 Span {
-                                                    start: 5270,
-                                                    end: 5273,
+                                                    start: 5278,
+                                                    end: 5281,
                                                 },
                                             ),
                                             selector: Binary(
@@ -1219,38 +1641,38 @@ Module {
                                                         2,
                                                     ),
                                                     Span {
-                                                        start: 5276,
-                                                        end: 5277,
+                                                        start: 5284,
+                                                        end: 5285,
                                                     },
                                                 ),
                                             ],
                                             span: Span {
-                                                start: 5270,
-                                                end: 5277,
+                                                start: 5278,
+                                                end: 5285,
                                             },
                                         },
                                     ],
                                     span: Span {
-                                        start: 5264,
-                                        end: 5277,
+                                        start: 5272,
+                                        end: 5285,
                                     },
                                 },
                             ],
                             span: Span {
-                                start: 5256,
-                                end: 5278,
+                                start: 5264,
+                                end: 5286,
                             },
                         },
                     ),
                 ],
                 span: Span {
-                    start: 5242,
-                    end: 5278,
+                    start: 5250,
+                    end: 5286,
                 },
             },
             span: Span {
-                start: 5230,
-                end: 5278,
+                start: 5238,
+                end: 5286,
             },
         },
         Assignment {
@@ -1258,8 +1680,8 @@ Module {
                 Identifier {
                     name: "check1",
                     span: Span {
-                        start: 5857,
-                        end: 5863,
+                        start: 5865,
+                        end: 5871,
                     },
                 },
             ),
@@ -1268,8 +1690,8 @@ Module {
                     Identifier {
                         name: "nil",
                         span: Span {
-                            start: 5867,
-                            end: 5870,
+                            start: 5875,
+                            end: 5878,
                         },
                     },
                 ),
@@ -1278,13 +1700,13 @@ Module {
                 ),
                 arguments: [],
                 span: Span {
-                    start: 5867,
-                    end: 5876,
+                    start: 5875,
+                    end: 5884,
                 },
             },
             span: Span {
-                start: 5857,
-                end: 5876,
+                start: 5865,
+                end: 5884,
             },
         },
         Assignment {
@@ -1292,8 +1714,8 @@ Module {
                 Identifier {
                     name: "check2",
                     span: Span {
-                        start: 5877,
-                        end: 5883,
+                        start: 5885,
+                        end: 5891,
                     },
                 },
             ),
@@ -1302,8 +1724,8 @@ Module {
                     Identifier {
                         name: "nil",
                         span: Span {
-                            start: 5887,
-                            end: 5890,
+                            start: 5895,
+                            end: 5898,
                         },
                     },
                 ),
@@ -1312,13 +1734,13 @@ Module {
                 ),
                 arguments: [],
                 span: Span {
-                    start: 5887,
-                    end: 5896,
+                    start: 5895,
+                    end: 5904,
                 },
             },
             span: Span {
-                start: 5877,
-                end: 5896,
+                start: 5885,
+                end: 5904,
             },
         },
         Assignment {
@@ -1326,8 +1748,8 @@ Module {
                 Identifier {
                     name: "check3",
                     span: Span {
-                        start: 5899,
-                        end: 5905,
+                        start: 5907,
+                        end: 5913,
                     },
                 },
             ),
@@ -1336,8 +1758,8 @@ Module {
                     Identifier {
                         name: "nil",
                         span: Span {
-                            start: 5909,
-                            end: 5912,
+                            start: 5917,
+                            end: 5920,
                         },
                     },
                 ),
@@ -1346,13 +1768,13 @@ Module {
                 ),
                 arguments: [],
                 span: Span {
-                    start: 5909,
-                    end: 5918,
+                    start: 5917,
+                    end: 5926,
                 },
             },
             span: Span {
-                start: 5899,
-                end: 5918,
+                start: 5907,
+                end: 5926,
             },
         },
         Assignment {
@@ -1360,8 +1782,8 @@ Module {
                 Identifier {
                     name: "result26",
                     span: Span {
-                        start: 5919,
-                        end: 5927,
+                        start: 5927,
+                        end: 5935,
                     },
                 },
             ),
@@ -1370,8 +1792,8 @@ Module {
                     Identifier {
                         name: "check1",
                         span: Span {
-                            start: 5931,
-                            end: 5937,
+                            start: 5939,
+                            end: 5945,
                         },
                     },
                 ),
@@ -1380,8 +1802,8 @@ Module {
                         KeywordPart {
                             keyword: "and:",
                             span: Span {
-                                start: 5938,
-                                end: 5942,
+                                start: 5946,
+                                end: 5950,
                             },
                         },
                     ],
@@ -1396,8 +1818,8 @@ Module {
                                         Identifier {
                                             name: "check2",
                                             span: Span {
-                                                start: 5944,
-                                                end: 5950,
+                                                start: 5952,
+                                                end: 5958,
                                             },
                                         },
                                     ),
@@ -1406,8 +1828,8 @@ Module {
                                             KeywordPart {
                                                 keyword: "and:",
                                                 span: Span {
-                                                    start: 5951,
-                                                    end: 5955,
+                                                    start: 5959,
+                                                    end: 5963,
                                                 },
                                             },
                                         ],
@@ -1421,40 +1843,40 @@ Module {
                                                         Identifier {
                                                             name: "check3",
                                                             span: Span {
-                                                                start: 5957,
-                                                                end: 5963,
+                                                                start: 5965,
+                                                                end: 5971,
                                                             },
                                                         },
                                                     ),
                                                 ],
                                                 span: Span {
-                                                    start: 5956,
-                                                    end: 5964,
+                                                    start: 5964,
+                                                    end: 5972,
                                                 },
                                             },
                                         ),
                                     ],
                                     span: Span {
-                                        start: 5944,
-                                        end: 5964,
+                                        start: 5952,
+                                        end: 5972,
                                     },
                                 },
                             ],
                             span: Span {
-                                start: 5943,
-                                end: 5965,
+                                start: 5951,
+                                end: 5973,
                             },
                         },
                     ),
                 ],
                 span: Span {
-                    start: 5931,
-                    end: 5965,
+                    start: 5939,
+                    end: 5973,
                 },
             },
             span: Span {
-                start: 5919,
-                end: 5965,
+                start: 5927,
+                end: 5973,
             },
         },
         Assignment {
@@ -1462,8 +1884,8 @@ Module {
                 Identifier {
                     name: "maybeValue",
                     span: Span {
-                        start: 6014,
-                        end: 6024,
+                        start: 6022,
+                        end: 6032,
                     },
                 },
             ),
@@ -1471,14 +1893,14 @@ Module {
                 Identifier {
                     name: "nil",
                     span: Span {
-                        start: 6028,
-                        end: 6031,
+                        start: 6036,
+                        end: 6039,
                     },
                 },
             ),
             span: Span {
-                start: 6014,
-                end: 6031,
+                start: 6022,
+                end: 6039,
             },
         },
         Assignment {
@@ -1486,8 +1908,8 @@ Module {
                 Identifier {
                     name: "result27",
                     span: Span {
-                        start: 6032,
-                        end: 6040,
+                        start: 6040,
+                        end: 6048,
                     },
                 },
             ),
@@ -1496,8 +1918,8 @@ Module {
                     Identifier {
                         name: "maybeValue",
                         span: Span {
-                            start: 6044,
-                            end: 6054,
+                            start: 6052,
+                            end: 6062,
                         },
                     },
                 ),
@@ -1506,13 +1928,13 @@ Module {
                 ),
                 arguments: [],
                 span: Span {
-                    start: 6044,
-                    end: 6060,
+                    start: 6052,
+                    end: 6068,
                 },
             },
             span: Span {
-                start: 6032,
-                end: 6060,
+                start: 6040,
+                end: 6068,
             },
         },
         Assignment {
@@ -1520,8 +1942,8 @@ Module {
                 Identifier {
                     name: "result28",
                     span: Span {
-                        start: 6598,
-                        end: 6606,
+                        start: 6606,
+                        end: 6614,
                     },
                 },
             ),
@@ -1530,8 +1952,8 @@ Module {
                     Identifier {
                         name: "nil",
                         span: Span {
-                            start: 6610,
-                            end: 6613,
+                            start: 6618,
+                            end: 6621,
                         },
                     },
                 ),
@@ -1540,8 +1962,8 @@ Module {
                         KeywordPart {
                             keyword: "ifNil:",
                             span: Span {
-                                start: 6614,
-                                end: 6620,
+                                start: 6622,
+                                end: 6628,
                             },
                         },
                     ],
@@ -1556,26 +1978,26 @@ Module {
                                         42,
                                     ),
                                     Span {
-                                        start: 6622,
-                                        end: 6624,
+                                        start: 6630,
+                                        end: 6632,
                                     },
                                 ),
                             ],
                             span: Span {
-                                start: 6621,
-                                end: 6625,
+                                start: 6629,
+                                end: 6633,
                             },
                         },
                     ),
                 ],
                 span: Span {
-                    start: 6610,
-                    end: 6625,
+                    start: 6618,
+                    end: 6633,
                 },
             },
             span: Span {
-                start: 6598,
-                end: 6625,
+                start: 6606,
+                end: 6633,
             },
         },
         Assignment {
@@ -1583,8 +2005,8 @@ Module {
                 Identifier {
                     name: "result29",
                     span: Span {
-                        start: 6686,
-                        end: 6694,
+                        start: 6694,
+                        end: 6702,
                     },
                 },
             ),
@@ -1593,8 +2015,8 @@ Module {
                     Identifier {
                         name: "nil",
                         span: Span {
-                            start: 6698,
-                            end: 6701,
+                            start: 6706,
+                            end: 6709,
                         },
                     },
                 ),
@@ -1603,8 +2025,8 @@ Module {
                         KeywordPart {
                             keyword: "ifNotNil:",
                             span: Span {
-                                start: 6702,
-                                end: 6711,
+                                start: 6710,
+                                end: 6719,
                             },
                         },
                     ],
@@ -1619,26 +2041,26 @@ Module {
                                         42,
                                     ),
                                     Span {
-                                        start: 6713,
-                                        end: 6715,
+                                        start: 6721,
+                                        end: 6723,
                                     },
                                 ),
                             ],
                             span: Span {
-                                start: 6712,
-                                end: 6716,
+                                start: 6720,
+                                end: 6724,
                             },
                         },
                     ),
                 ],
                 span: Span {
-                    start: 6698,
-                    end: 6716,
+                    start: 6706,
+                    end: 6724,
                 },
             },
             span: Span {
-                start: 6686,
-                end: 6716,
+                start: 6694,
+                end: 6724,
             },
         },
         Assignment {
@@ -1646,8 +2068,8 @@ Module {
                 Identifier {
                     name: "result30",
                     span: Span {
-                        start: 6820,
-                        end: 6828,
+                        start: 6828,
+                        end: 6836,
                     },
                 },
             ),
@@ -1658,8 +2080,8 @@ Module {
                             Identifier {
                                 name: "nil",
                                 span: Span {
-                                    start: 6833,
-                                    end: 6836,
+                                    start: 6841,
+                                    end: 6844,
                                 },
                             },
                         ),
@@ -1668,8 +2090,8 @@ Module {
                                 KeywordPart {
                                     keyword: "ifNotNil:",
                                     span: Span {
-                                        start: 6837,
-                                        end: 6846,
+                                        start: 6845,
+                                        end: 6854,
                                     },
                                 },
                             ],
@@ -1684,26 +2106,26 @@ Module {
                                                 9999,
                                             ),
                                             Span {
-                                                start: 6848,
-                                                end: 6852,
+                                                start: 6856,
+                                                end: 6860,
                                             },
                                         ),
                                     ],
                                     span: Span {
-                                        start: 6847,
-                                        end: 6853,
+                                        start: 6855,
+                                        end: 6861,
                                     },
                                 },
                             ),
                         ],
                         span: Span {
-                            start: 6833,
-                            end: 6853,
+                            start: 6841,
+                            end: 6861,
                         },
                     },
                     span: Span {
-                        start: 6832,
-                        end: 6854,
+                        start: 6840,
+                        end: 6862,
                     },
                 },
                 selector: Unary(
@@ -1711,19 +2133,19 @@ Module {
                 ),
                 arguments: [],
                 span: Span {
-                    start: 6832,
-                    end: 6860,
+                    start: 6840,
+                    end: 6868,
                 },
             },
             span: Span {
-                start: 6820,
-                end: 6860,
+                start: 6828,
+                end: 6868,
             },
         },
     ],
     span: Span {
         start: 600,
-        end: 6860,
+        end: 6868,
     },
     leading_comments: [
         Comment {
@@ -1784,12 +2206,3 @@ Module {
         },
     ],
 }
-
-Diagnostics:
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =", span: Span { start: 3598, end: 3599 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =", span: Span { start: 3669, end: 3670 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 4327, end: 4328 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 4374, end: 4375 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 4439, end: 4440 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 4503, end: 4504 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 4599, end: 4600 }, hint: None }

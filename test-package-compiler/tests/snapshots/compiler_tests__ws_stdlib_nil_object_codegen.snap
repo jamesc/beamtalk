@@ -59,7 +59,11 @@ module 'ws_stdlib_nil_object' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handl
         '$beamtalk_class' => 'WsStdlibNilObject',
         '__class_mod__' => 'ws_stdlib_nil_object',
         '__methods__' => call 'ws_stdlib_nil_object':'method_table'()
+        , 'value' => 42
         , 'value2' => 10
+        , 'userName' => #{#<65>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']])}#
+        , 'userInput' => 42
+        , 'maybeNumber' => 7
     }~
     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
     in {'ok', FinalState}

@@ -60,12 +60,12 @@ result14 := nil ifNil: [nil]  // => nil
 // ═══════════════════════════════════════════════════════════════════════
 
 // nil equality with itself
-result15 := nil = nil  // => true
+result15 := nil =:= nil  // => true
 
 // nil inequality with other values
-result16 := nil = 0    // => false
-result17 := nil = ''   // => false
-result18 := nil = false  // => false (nil is not false!)
+result16 := nil =:= 0    // => false
+result17 := nil =:= ''   // => false
+result18 := nil =:= false  // => false (nil is not false!)
 
 // ═══════════════════════════════════════════════════════════════════════
 // Edge Cases: Boolean Logic Integration

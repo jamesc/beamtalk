@@ -182,31 +182,328 @@ Module {
                     },
                 },
             ),
-            value: Literal(
-                String(
-                    "hello",
+            value: MessageSend {
+                receiver: Literal(
+                    String(
+                        "hello",
+                    ),
+                    Span {
+                        start: 287,
+                        end: 294,
+                    },
                 ),
-                Span {
+                selector: Binary(
+                    "=:=",
+                ),
+                arguments: [
+                    Literal(
+                        String(
+                            "hello",
+                        ),
+                        Span {
+                            start: 299,
+                            end: 306,
+                        },
+                    ),
+                ],
+                span: Span {
                     start: 287,
-                    end: 294,
+                    end: 306,
                 },
-            ),
+            },
             span: Span {
                 start: 276,
-                end: 294,
+                end: 306,
             },
         },
-        Error {
-            message: "Unexpected token: expected expression, found =",
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "isLess",
+                    span: Span {
+                        start: 307,
+                        end: 313,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Literal(
+                    String(
+                        "apple",
+                    ),
+                    Span {
+                        start: 317,
+                        end: 324,
+                    },
+                ),
+                selector: Binary(
+                    "<",
+                ),
+                arguments: [
+                    Literal(
+                        String(
+                            "banana",
+                        ),
+                        Span {
+                            start: 327,
+                            end: 335,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 317,
+                    end: 335,
+                },
+            },
             span: Span {
-                start: 295,
-                end: 296,
+                start: 307,
+                end: 335,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "upper",
+                    span: Span {
+                        start: 362,
+                        end: 367,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "greeting",
+                        span: Span {
+                            start: 371,
+                            end: 379,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "uppercase",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 371,
+                    end: 389,
+                },
+            },
+            span: Span {
+                start: 362,
+                end: 389,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "lower",
+                    span: Span {
+                        start: 390,
+                        end: 395,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "upper",
+                        span: Span {
+                            start: 399,
+                            end: 404,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "lowercase",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 399,
+                    end: 414,
+                },
+            },
+            span: Span {
+                start: 390,
+                end: 414,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "isEmpty",
+                    span: Span {
+                        start: 434,
+                        end: 441,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Literal(
+                    String(
+                        "",
+                    ),
+                    Span {
+                        start: 445,
+                        end: 447,
+                    },
+                ),
+                selector: Unary(
+                    "isEmpty",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 445,
+                    end: 455,
+                },
+            },
+            span: Span {
+                start: 434,
+                end: 455,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "hasContent",
+                    span: Span {
+                        start: 456,
+                        end: 466,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "message",
+                        span: Span {
+                            start: 470,
+                            end: 477,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "isNotEmpty",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 470,
+                    end: 488,
+                },
+            },
+            span: Span {
+                start: 456,
+                end: 488,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "found",
+                    span: Span {
+                        start: 510,
+                        end: 515,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "message",
+                        span: Span {
+                            start: 519,
+                            end: 526,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "includes:",
+                            span: Span {
+                                start: 527,
+                                end: 536,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        String(
+                            "World",
+                        ),
+                        Span {
+                            start: 537,
+                            end: 544,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 519,
+                    end: 544,
+                },
+            },
+            span: Span {
+                start: 510,
+                end: 544,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "starts",
+                    span: Span {
+                        start: 545,
+                        end: 551,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "message",
+                        span: Span {
+                            start: 555,
+                            end: 562,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "startsWith:",
+                            span: Span {
+                                start: 563,
+                                end: 574,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        String(
+                            "Hello",
+                        ),
+                        Span {
+                            start: 575,
+                            end: 582,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 555,
+                    end: 582,
+                },
+            },
+            span: Span {
+                start: 545,
+                end: 582,
             },
         },
     ],
     span: Span {
         start: 116,
-        end: 580,
+        end: 582,
     },
     leading_comments: [
         Comment {
@@ -243,6 +540,3 @@ Module {
         },
     ],
 }
-
-Diagnostics:
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =", span: Span { start: 295, end: 296 }, hint: None }

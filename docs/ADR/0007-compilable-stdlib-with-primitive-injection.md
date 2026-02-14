@@ -475,7 +475,7 @@ Object subclass: Integer
   * other => @primitive '*'
   / other => @primitive '/'
   % other => @primitive '%'
-  =:= other => @primitive '='
+  =:= other => @primitive '=:='
   /= other => (self =:= other) not
   < other => @primitive '<'
   > other => @primitive '>'

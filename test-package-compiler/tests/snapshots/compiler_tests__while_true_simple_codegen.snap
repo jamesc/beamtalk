@@ -121,7 +121,15 @@ module 'while_true_simple' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_c
         <'testBlockParam'> when 'true' ->
             let Result = let _Fun7 = fun (_x8) -> let _x8 = letrec '_Loop9'/0 = fun () -> let _CondFun10 = fun () -> call 'erlang':'<'(_x8, 5) in case apply _CondFun10 () of <'true'> when 'true' -> let _BodyFun11 = fun () -> call 'erlang':'+'(_x8, 1) in let _ = apply _BodyFun11 () in apply '_Loop9'/0 () <'false'> when 'true' -> 'nil' end in apply '_Loop9'/0 () in _x8 in apply _Fun7 (0) in let _Result = Result in {'reply', _Result, State}
         <'testBlockParamWhileFalse'> when 'true' ->
-            let _Result = fun (_n12) -> fun () -> _n12 in {'reply', _Result, State}
+            let Result = let _Fun12 = fun (_n13) -> let _n13 = letrec '_Loop14'/0 = fun () -> let _CondFun15 = fun () -> call 'erlang':'=:='(_n13, 0) in case apply _CondFun15 () of <'false'> when 'true' -> let _BodyFun16 = fun () -> call 'erlang':'-'(_n13, 1) in let _ = apply _BodyFun16 () in apply '_Loop14'/0 () <'true'> when 'true' -> 'nil' end in apply '_Loop14'/0 () in _n13 in apply _Fun12 (5) in let _Result = Result in {'reply', _Result, State}
+        <'testTimesRepeat'> when 'true' ->
+            let Counter = 0 in let Counter = let _temp17 = 5 in letrec 'repeat'/1 = fun (I) -> case call 'erlang':'=<'(I, _temp17) of <'true'> when 'true' -> let _ = fun () -> call 'erlang':'+'(Counter, 1) in apply 'repeat'/1 (call 'erlang':'+'(I, 1)) <'false'> when 'true' -> 'nil' end in apply 'repeat'/1 (1) in let _Result = Counter in {'reply', _Result, State}
+        <'testTimesRepeatBlockParam'> when 'true' ->
+            let Result = let _Fun18 = fun (_n19) -> let _n19 = let _temp20 = 3 in letrec 'repeat'/1 = fun (I) -> case call 'erlang':'=<'(I, _temp20) of <'true'> when 'true' -> let _ = fun () -> call 'erlang':'+'(_n19, 10) in apply 'repeat'/1 (call 'erlang':'+'(I, 1)) <'false'> when 'true' -> 'nil' end in apply 'repeat'/1 (1) in _n19 in apply _Fun18 (5) in let _Result = Result in {'reply', _Result, State}
+        <'testToDo'> when 'true' ->
+            let Total = 0 in let Total = let _temp21 = 1 in let _temp22 = 10 in let _temp23 = fun (_n24) -> call 'erlang':'+'(Total, _n24) in letrec 'loop'/1 = fun (I) -> case call 'erlang':'=<'(I, _temp22) of <'true'> when 'true' -> let _ = apply _temp23 (I) in apply 'loop'/1 (call 'erlang':'+'(I, 1)) <'false'> when 'true' -> 'nil' end in apply 'loop'/1 (_temp21) in let _Result = Total in {'reply', _Result, State}
+        <'testToDoBlockParam'> when 'true' ->
+            let Result = let _Fun25 = fun (_x26) -> let Sum = 0 in let Sum = let _temp27 = _x26 in let _temp28 = 5 in let _temp29 = fun (_i30) -> call 'erlang':'+'(Sum, _i30) in letrec 'loop'/1 = fun (I) -> case call 'erlang':'=<'(I, _temp28) of <'true'> when 'true' -> let _ = apply _temp29 (I) in apply 'loop'/1 (call 'erlang':'+'(I, 1)) <'false'> when 'true' -> 'nil' end in apply 'loop'/1 (_temp27) in Sum in apply _Fun25 (1) in let _Result = Result in {'reply', _Result, State}
         <OtherSelector> when 'true' ->
             %% BT-229/ADR 0005: Check extension registry before hierarchy walk
             let ExtLookup = try call 'beamtalk_extensions':'lookup'('WhileTrueSimple', OtherSelector)
@@ -159,10 +167,10 @@ module 'while_true_simple' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_c
 
 
 'method_table'/0 = fun () ->
-    ~{'test' => 0, 'testLocal' => 0, 'testBlockParam' => 0, 'testBlockParamWhileFalse' => 0}~
+    ~{'test' => 0, 'testLocal' => 0, 'testBlockParam' => 0, 'testBlockParamWhileFalse' => 0, 'testTimesRepeat' => 0, 'testTimesRepeatBlockParam' => 0, 'testToDo' => 0, 'testToDoBlockParam' => 0}~
 
 
 'has_method'/1 = fun (Selector) ->
-    call 'lists':'member'(Selector, ['test', 'testLocal', 'testBlockParam', 'testBlockParamWhileFalse'])
+    call 'lists':'member'(Selector, ['test', 'testLocal', 'testBlockParam', 'testBlockParamWhileFalse', 'testTimesRepeat', 'testTimesRepeatBlockParam', 'testToDo', 'testToDoBlockParam'])
 
 end

@@ -55,7 +55,8 @@
 
 **Coverage**: 13/13 operators (100%)
 - All documented operators are fully implemented and tested
-- Removed: `**` (exponentiation), `!=` (use `/=` instead)
+- Removed: `!=` (use `/=` instead)
+- Note: `**` (exponentiation) is supported and tested in binary_operators
 - Note: `and:` and `or:` are keyword messages, not binary operators
 
 ## Unary Messages/Operators Coverage
