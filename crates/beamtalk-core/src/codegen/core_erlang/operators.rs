@@ -86,6 +86,10 @@ impl CoreErlangGenerator {
     ///
     /// Converts both operands to float for `math:pow`, then rounds the result
     /// back to integer for consistent integer exponentiation behavior.
+    ///
+    /// Note: `math:pow` uses IEEE 754 floats, so very large exponents (e.g.,
+    /// `2 ** 100`) may lose precision. A future improvement could use repeated
+    /// multiplication for exact arbitrary-precision integer results.
     fn generate_power_op(
         &mut self,
         left: &Expression,

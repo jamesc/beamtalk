@@ -121,10 +121,11 @@ count := 0  // inline comment
 - Requiring parentheses for basic math is hostile
 
 **Implementation:** Binary operators have precedence levels:
-1. `*`, `/`, `%` (highest - multiplicative)
-2. `+`, `-`, `++` (additive and string concatenation)
-3. `<`, `>`, `<=`, `>=` (comparison)
-4. `=`, `==`, `~=` (equality - strict and loose)
+1. `**` (highest - exponentiation, right-associative)
+2. `*`, `/`, `%` (multiplicative)
+3. `+`, `-`, `++` (additive and string concatenation)
+4. `<`, `>`, `<=`, `>=` (comparison)
+5. `=`, `==`, `~=` (equality - strict and loose)
 
 **Note:** `&&`, `||`, `and`, `or` are **not** binary operators - they are keyword messages that take blocks for short-circuit evaluation:
 ```
