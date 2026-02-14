@@ -1,0 +1,26 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "beamtalk-compiler-port"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "OTP Port binary for the Beamtalk compiler (ADR 0022)"
+readme = "README.md"
+keywords = ["compiler", "beam", "smalltalk", "erlang"]
+categories = ["compilers", "development-tools"]
+
+[[bin]]
+name = "beamtalk-compiler-port"
+path = "src/main.rs"
+
+[dependencies]
+beamtalk-core = { workspace = true }
+eetf = "0.11"
+
+[lints]
+workspace = true

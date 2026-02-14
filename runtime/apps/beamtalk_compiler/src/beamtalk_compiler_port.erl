@@ -1,0 +1,127 @@
+%% Copyright 2026 James Casey
+%% SPDX-License-Identifier: Apache-2.0
+
+%% @doc OTP Port interface to the Rust compiler binary (ADR 0022, Phase 0).
+%%
+%% DDD Context: Compilation (Anti-Corruption Layer boundary)
+%%
+%% Spawns `beamtalk-compiler-port` as an OTP port with `{packet, 4}' framing
+%% and ETF-encoded requests/responses.
+%%
+%% Phase 0 is a wire check — no supervisor, no backend dispatch. Manual
+%% verification that BEAM can invoke the Rust compiler via a port.
+
+-module(beamtalk_compiler_port).
+
+-export([
+    open/0, open/1,
+    compile_expression/4,
+    close/1
+]).
+
+-include_lib("kernel/include/logger.hrl").
+
+%% @doc Open a port to the compiler binary.
+%% Finds the binary relative to the project root or via PATH.
+-spec open() -> port().
+open() ->
+    open(find_compiler_binary()).
+
+%% @doc Open a port to the compiler binary at the given path.
+-spec open(file:filename_all()) -> port().
+open(BinaryPath) ->
+    ?LOG_INFO("Opening compiler port", #{binary => BinaryPath}),
+    open_port({spawn_executable, BinaryPath}, [
+        {packet, 4},
+        binary,
+        exit_status,
+        use_stdio
+    ]).
+
+%% @doc Compile a REPL expression through the port.
+%%
+%% Sends an ETF-encoded request and receives an ETF-encoded response.
+%% Returns `{ok, CoreErlang, Warnings}' on success or
+%% `{error, Diagnostics}' on failure.
+-spec compile_expression(port(), binary(), binary(), [binary()]) ->
+    {ok, binary(), [binary()]} | {error, [binary()]}.
+compile_expression(Port, Source, ModuleName, KnownVars) ->
+    Request = #{
+        command => compile_expression,
+        source => Source,
+        module => ModuleName,
+        known_vars => KnownVars
+    },
+    RequestBin = term_to_binary(Request),
+    try port_command(Port, RequestBin) of
+        true ->
+            receive
+                {Port, {data, ResponseBin}} ->
+                    Response = binary_to_term(ResponseBin),
+                    handle_response(Response);
+                {Port, {exit_status, Status}} ->
+                    ?LOG_ERROR("Compiler port exited", #{status => Status}),
+                    {error, [<<"Compiler port exited unexpectedly">>]}
+            after 30000 ->
+                ?LOG_ERROR("Compiler port timeout", #{port => Port}),
+                {error, [<<"Compiler port timed out">>]}
+            end
+    catch
+        error:badarg ->
+            ?LOG_ERROR("Compiler port not available", #{port => Port}),
+            {error, [<<"Compiler port is not available">>]}
+    end.
+
+%% @doc Close the compiler port.
+-spec close(port()) -> true.
+close(Port) ->
+    port_close(Port).
+
+%%% Internal functions
+
+%% @private Handle ETF response from the compiler port.
+handle_response(#{status := ok, core_erlang := CoreErlang, warnings := Warnings}) ->
+    {ok, CoreErlang, Warnings};
+handle_response(#{status := error, diagnostics := Diagnostics}) ->
+    {error, Diagnostics};
+handle_response(Other) ->
+    ?LOG_ERROR("Unexpected compiler response", #{response => Other}),
+    {error, [<<"Unexpected compiler response">>]}.
+
+%% @private Find the compiler binary.
+%% Looks for the binary in the cargo target directory first (development),
+%% then falls back to PATH.
+find_compiler_binary() ->
+    %% Try cargo target directory (development mode)
+    ProjectRoot = find_project_root(),
+    DevPath = filename:join([ProjectRoot, "target", "debug", "beamtalk-compiler-port"]),
+    case filelib:is_regular(DevPath) of
+        true -> DevPath;
+        false ->
+            %% Try release build
+            ReleasePath = filename:join([ProjectRoot, "target", "release", "beamtalk-compiler-port"]),
+            case filelib:is_regular(ReleasePath) of
+                true -> ReleasePath;
+                false ->
+                    %% Fall back to PATH
+                    case os:find_executable("beamtalk-compiler-port") of
+                        false ->
+                            error({compiler_not_found, "beamtalk-compiler-port binary not found"});
+                        Path -> Path
+                    end
+            end
+    end.
+
+%% @private Find the project root by looking for Cargo.toml.
+find_project_root() ->
+    Cwd = filename:absname(""),
+    find_project_root(Cwd).
+
+find_project_root("/") ->
+    %% Fallback to cwd
+    filename:absname("");
+find_project_root(Dir) ->
+    case filelib:is_regular(filename:join(Dir, "Cargo.toml")) of
+        true -> Dir;
+        false -> find_project_root(filename:dirname(Dir))
+    end.
