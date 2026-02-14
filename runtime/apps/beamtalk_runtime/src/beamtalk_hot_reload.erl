@@ -87,7 +87,8 @@ trigger_code_change(Module, Pids) ->
 %%
 %% Idempotent: migration may add the new key and/or remove the old key,
 %% but will not change an existing `$beamtalk_class` value.
-%% Only migrates when the legacy value is an atom (actor class names).
+%% Only adds the new key when the legacy value is an atom (actor class names);
+%% when both keys exist, the legacy key is removed regardless to complete cleanup.
 -spec maybe_migrate_class_key(map()) -> map().
 maybe_migrate_class_key(State) ->
     ClassKey = beamtalk_tagged_map:class_key(),
