@@ -61,81 +61,108 @@ jobs:
           path: fuzz/artifacts/parse_arbitrary/
           retention-days: 30
 
-      - name: Check for crashes
+      - name: Check for fuzz failures
         if: steps.fuzz.outcome == 'failure'
         run: |
-          # Check if there are any crash artifacts (not OOM)
+          FAILED=0
+
+          # Check if there are any crash artifacts
           if ls fuzz/artifacts/parse_arbitrary/crash-* 1> /dev/null 2>&1; then
             echo "❌ CRITICAL: Parser crashed during fuzzing!"
             echo "Crash artifacts uploaded. Please investigate immediately."
-            exit 1
+            FAILED=1
           fi
           
           # Check for timeouts
           if ls fuzz/artifacts/parse_arbitrary/timeout-* 1> /dev/null 2>&1; then
             echo "⚠️ WARNING: Parser timeout detected"
             echo "This indicates infinite loop or extremely slow parsing."
+            FAILED=1
           fi
           
           # Check for OOM
           if ls fuzz/artifacts/parse_arbitrary/oom-* 1> /dev/null 2>&1; then
-            echo "⚠️ INFO: Out-of-memory detected on malformed input"
-            echo "This is expected for extremely malformed input."
-            echo "Consider adding resource limits to the parser if this becomes frequent."
+            echo "❌ Parser out-of-memory detected on malformed input"
+            echo "The parser consumed >4GB on crafted input, preventing effective fuzzing."
+            echo "Add resource limits (max AST depth, max token count) to the parser."
+            FAILED=1
           fi
 
-      - name: Create issue on crash
+          # Fail if fuzz step failed but produced no artifacts (infra error, cargo-fuzz crash, etc.)
+          if [ $FAILED -eq 0 ]; then
+            echo "❌ Fuzz step failed but no artifacts were produced; failing to avoid false green."
+            FAILED=1
+          fi
+
+          exit $FAILED
+
+      - name: Create issue on failure
         if: steps.fuzz.outcome == 'failure'
         uses: actions/github-script@v8
         with:
           script: |
             const fs = require('fs');
-            const path = require('path');
             
-            // Check if crash artifacts exist
             const artifactsDir = 'fuzz/artifacts/parse_arbitrary/';
-            let crashes = [];
+            let files = [];
             
             try {
-              const files = fs.readdirSync(artifactsDir);
-              crashes = files.filter(f => f.startsWith('crash-'));
+              files = fs.readdirSync(artifactsDir);
             } catch (e) {
               console.log('No artifacts directory found');
               return;
             }
             
-            if (crashes.length === 0) {
-              console.log('No crash artifacts found, not creating issue');
+            const crashes = files.filter(f => f.startsWith('crash-'));
+            const ooms = files.filter(f => f.startsWith('oom-'));
+            const timeouts = files.filter(f => f.startsWith('timeout-'));
+            
+            if (crashes.length === 0 && ooms.length === 0 && timeouts.length === 0) {
+              console.log('No failure artifacts found, not creating issue');
               return;
             }
             
-            // Create issue for crashes
-            const title = `🔀 Parser crash found by fuzzer (run ${context.runId})`;
-            const body = `## Parser Crash Detected
+            // Build title and body based on artifact types
+            const types = [];
+            if (crashes.length > 0) types.push('crash');
+            if (ooms.length > 0) types.push('OOM');
+            if (timeouts.length > 0) types.push('timeout');
             
-            The nightly fuzzer found ${crashes.length} crash(es) in the parser.
+            const title = `🔀 Parser fuzzing failure: ${types.join(', ')} (run ${context.runId})`;
             
-            **Run:** ${context.runId}
-            **Workflow:** ${context.workflow}
-            **Date:** ${new Date().toISOString()}
+            let details = '';
+            if (crashes.length > 0) {
+              details += `\n### Crashes (${crashes.length})\n${crashes.map(c => `- \`${c}\``).join('\n')}\n`;
+            }
+            if (ooms.length > 0) {
+              details += `\n### Out-of-Memory (${ooms.length})\n${ooms.map(c => `- \`${c}\``).join('\n')}\nThe parser used >4GB on crafted input. Add resource limits (max AST depth, max token count).\n`;
+            }
+            if (timeouts.length > 0) {
+              details += `\n### Timeouts (${timeouts.length})\n${timeouts.map(c => `- \`${c}\``).join('\n')}\nThe parser took too long, indicating an infinite loop or pathological input.\n`;
+            }
             
-            ### Crash Artifacts
-            
-            ${crashes.map(c => `- \`${c}\``).join('\n')}
-            
-            ### Action Required
-            
-            1. Download the \`fuzz-artifacts-${context.runId}\` artifact from the workflow run
-            2. Reproduce the crash: \`cargo +nightly fuzz run parse_arbitrary <artifact-file>\`
-            3. Fix the crash in the parser
-            4. Re-run fuzzer to verify fix
-            
-            ### References
-            
-            - ADR 0011: Robustness Testing — Layered Fuzzing
-            - Epic: BT-362
-            - Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}
-            `;
+            const body = [
+              `## Parser Fuzzing Failure`,
+              ``,
+              `The nightly fuzzer found issues in the parser.`,
+              ``,
+              `**Run:** ${context.runId}`,
+              `**Workflow:** ${context.workflow}`,
+              `**Date:** ${new Date().toISOString()}`,
+              details,
+              `### Action Required`,
+              ``,
+              `1. Download the \`fuzz-artifacts-${context.runId}\` artifact from the workflow run`,
+              `2. Reproduce: \`cargo +nightly fuzz run parse_arbitrary <artifact-file>\``,
+              `3. Fix the issue in the parser`,
+              `4. Re-run fuzzer to verify fix`,
+              ``,
+              `### References`,
+              ``,
+              `- ADR 0011: Robustness Testing — Layered Fuzzing`,
+              `- Epic: BT-362`,
+              `- Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            ].join('\n');
             
             await github.rest.issues.create({
               owner: context.repo.owner,
