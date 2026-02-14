@@ -62,17 +62,23 @@ pub fn paint(color: &str, text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
+    #[serial(color)]
     fn paint_with_color_disabled() {
+        let prev = COLOR_ENABLED.load(Ordering::Relaxed);
         COLOR_ENABLED.store(false, Ordering::Relaxed);
         assert_eq!(paint(RED, "hello"), "hello");
-        COLOR_ENABLED.store(true, Ordering::Relaxed);
+        COLOR_ENABLED.store(prev, Ordering::Relaxed);
     }
 
     #[test]
+    #[serial(color)]
     fn paint_with_color_enabled() {
+        let prev = COLOR_ENABLED.load(Ordering::Relaxed);
         COLOR_ENABLED.store(true, Ordering::Relaxed);
         assert_eq!(paint(RED, "hello"), "\x1b[31mhello\x1b[0m");
+        COLOR_ENABLED.store(prev, Ordering::Relaxed);
     }
 }

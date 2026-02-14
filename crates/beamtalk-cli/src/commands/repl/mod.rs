@@ -771,95 +771,104 @@ mod tests {
     use serial_test::serial;
     use std::sync::atomic::Ordering;
 
-    /// Disable color for `format_value` tests to get predictable output.
-    fn with_color_disabled<F: FnOnce()>(f: F) {
-        let prev = color::COLOR_ENABLED.load(Ordering::Relaxed);
-        color::COLOR_ENABLED.store(false, Ordering::Relaxed);
-        f();
-        color::COLOR_ENABLED.store(prev, Ordering::Relaxed);
+    /// RAII guard that restores `COLOR_ENABLED` on drop (even if test panics).
+    struct ColorGuard {
+        prev: bool,
+    }
+
+    impl ColorGuard {
+        fn disabled() -> Self {
+            let prev = color::COLOR_ENABLED.load(Ordering::Relaxed);
+            color::COLOR_ENABLED.store(false, Ordering::Relaxed);
+            Self { prev }
+        }
+
+        fn enabled() -> Self {
+            let prev = color::COLOR_ENABLED.load(Ordering::Relaxed);
+            color::COLOR_ENABLED.store(true, Ordering::Relaxed);
+            Self { prev }
+        }
+    }
+
+    impl Drop for ColorGuard {
+        fn drop(&mut self) {
+            color::COLOR_ENABLED.store(self.prev, Ordering::Relaxed);
+        }
     }
 
     #[test]
     #[serial(color)]
     fn format_value_string() {
-        with_color_disabled(|| {
-            let value = serde_json::json!("hello");
-            assert_eq!(format_value(&value), "hello");
-        });
+        let _guard = ColorGuard::disabled();
+        let value = serde_json::json!("hello");
+        assert_eq!(format_value(&value), "hello");
     }
 
     #[test]
     #[serial(color)]
     fn format_value_number() {
-        with_color_disabled(|| {
-            let value = serde_json::json!(42);
-            assert_eq!(format_value(&value), "42");
-        });
+        let _guard = ColorGuard::disabled();
+        let value = serde_json::json!(42);
+        assert_eq!(format_value(&value), "42");
     }
 
     #[test]
     #[serial(color)]
     fn format_value_bool() {
-        with_color_disabled(|| {
-            let value = serde_json::json!(true);
-            assert_eq!(format_value(&value), "true");
-        });
+        let _guard = ColorGuard::disabled();
+        let value = serde_json::json!(true);
+        assert_eq!(format_value(&value), "true");
     }
 
     #[test]
     #[serial(color)]
     fn format_value_array() {
-        with_color_disabled(|| {
-            let value = serde_json::json!([1, 2, 3]);
-            assert_eq!(format_value(&value), "[1, 2, 3]");
-        });
+        let _guard = ColorGuard::disabled();
+        let value = serde_json::json!([1, 2, 3]);
+        assert_eq!(format_value(&value), "[1, 2, 3]");
     }
 
     #[test]
     #[serial(color)]
     fn format_value_pid() {
-        with_color_disabled(|| {
-            // Backend now pre-formats pids as "#Actor<pid>"
-            let value = serde_json::json!("#Actor<0.123.0>");
-            assert_eq!(format_value(&value), "#Actor<0.123.0>");
-        });
+        let _guard = ColorGuard::disabled();
+        // Backend now pre-formats pids as "#Actor<pid>"
+        let value = serde_json::json!("#Actor<0.123.0>");
+        assert_eq!(format_value(&value), "#Actor<0.123.0>");
     }
 
     #[test]
     #[serial(color)]
     fn format_value_block() {
-        with_color_disabled(|| {
-            // Blocks are formatted as "a Block/N" by the backend
-            let value = serde_json::json!("a Block/1");
-            assert_eq!(format_value(&value), "a Block/1");
+        let _guard = ColorGuard::disabled();
+        // Blocks are formatted as "a Block/N" by the backend
+        let value = serde_json::json!("a Block/1");
+        assert_eq!(format_value(&value), "a Block/1");
 
-            let value2 = serde_json::json!("a Block/2");
-            assert_eq!(format_value(&value2), "a Block/2");
-        });
+        let value2 = serde_json::json!("a Block/2");
+        assert_eq!(format_value(&value2), "a Block/2");
     }
 
     #[test]
     #[serial(color)]
     fn format_value_tuple() {
-        with_color_disabled(|| {
-            // BT-536: Tuples are pre-formatted as strings by the backend
-            let value = serde_json::json!("{1, hello}");
-            assert_eq!(format_value(&value), "{1, hello}");
-        });
+        let _guard = ColorGuard::disabled();
+        // BT-536: Tuples are pre-formatted as strings by the backend
+        let value = serde_json::json!("{1, hello}");
+        assert_eq!(format_value(&value), "{1, hello}");
     }
 
     #[test]
     #[serial(color)]
     fn format_error_with_color_disabled() {
-        with_color_disabled(|| {
-            assert_eq!(format_error("test error"), "Error: test error");
-        });
+        let _guard = ColorGuard::disabled();
+        assert_eq!(format_error("test error"), "Error: test error");
     }
 
     #[test]
     #[serial(color)]
     fn format_error_with_color_enabled() {
-        color::COLOR_ENABLED.store(true, Ordering::Relaxed);
+        let _guard = ColorGuard::enabled();
         let result = format_error("test error");
         assert!(result.contains("Error:"));
         assert!(result.contains("test error"));
