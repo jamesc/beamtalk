@@ -253,7 +253,7 @@ handle_client_loop(Socket, SessionPid) ->
 %% and we must accumulate until we get the newline (BT-388).
 %% Guards against unbounded accumulation and slowloris attacks.
 -spec recv_line(gen_tcp:socket(), binary()) -> {ok, binary()} | {error, term()}.
-recv_line(_Socket, Acc) when byte_size(Acc) > ?MAX_LINE_LENGTH ->
+recv_line(_Socket, Acc) when byte_size(Acc) >= ?MAX_LINE_LENGTH ->
     {error, line_too_long};
 recv_line(Socket, Acc) ->
     case gen_tcp:recv(Socket, 0, ?RECV_TIMEOUT) of
