@@ -528,7 +528,7 @@ Always use metadata maps, not format strings:
 ### File Logging (BT-541)
 
 Workspace nodes automatically write logs to `~/.beamtalk/workspaces/{workspace_id}/workspace.log`:
-- **All levels** captured (debug and above)
+- **All levels** captured — the file handler sets primary logger level to `debug` at startup so all events reach the file
 - **Log rotation**: 5 files × 1 MB
 - **Format**: `timestamp [level] module:function/arity message`
 - **Disable**: Set `BEAMTALK_NO_FILE_LOG=1` environment variable

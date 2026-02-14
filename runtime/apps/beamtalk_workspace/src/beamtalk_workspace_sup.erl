@@ -201,8 +201,8 @@ setup_file_logger(WorkspaceId) ->
 do_setup_file_logger(WorkspaceId) ->
     case os:getenv("HOME") of
         false ->
-            ?LOG_WARNING("HOME not set; skipping file logger for workspace ~p",
-                           [WorkspaceId]),
+            ?LOG_WARNING("HOME not set; skipping file logger",
+                         #{workspace_id => WorkspaceId}),
             ok;
         Home ->
             LogFile = filename:join([Home, ".beamtalk", "workspaces",
@@ -221,17 +221,25 @@ do_setup_file_logger(WorkspaceId) ->
                             single_line => true
                         }}
                     },
+                    %% Lower primary logger level to debug so file handler captures all events.
+                    %% Console handler keeps its own level filter unchanged.
+                    logger:set_primary_config(level, debug),
                     case logger:add_handler(beamtalk_file_log, logger_std_h, HandlerConfig) of
                         ok ->
                             ?LOG_INFO("Workspace log file: ~s", [LogFile]),
                             ok;
+                        {error, {already_exist, _}} ->
+                            ?LOG_INFO("Reusing existing workspace file logger",
+                                      #{path => LogFile}),
+                            ok;
                         {error, Reason} ->
-                            ?LOG_WARNING("Failed to add file logger: ~p", [Reason]),
+                            ?LOG_WARNING("Failed to add file logger",
+                                         #{reason => Reason, path => LogFile}),
                             ok
                     end;
                 {error, Reason} ->
-                    ?LOG_WARNING("Failed to create log directory for ~s: ~p",
-                                   [LogFile, Reason]),
+                    ?LOG_WARNING("Failed to create log directory",
+                                 #{path => LogFile, reason => Reason}),
                     ok
             end
     end.

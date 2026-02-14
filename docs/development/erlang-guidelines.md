@@ -208,7 +208,7 @@ Or use a helper function in the codegen to generate this automatically.
 
 ## Logging with OTP Logger
 
-**Use OTP logger macros (`?LOG_*`) for all logging.** Do NOT use `io:format` for diagnostics or `logger:level/2` function calls.
+**Use OTP logger macros (`?LOG_*`) for all logging.** Do NOT use `io:format` for diagnostics or direct `logger:debug/2`, `logger:info/2`, `logger:warning/2`, `logger:error/2`, or `logger:log/3` function calls.
 
 Logger macros automatically include caller location metadata (module, function, arity, line) in every log entry, which is essential for debugging via file logs.
 
@@ -251,7 +251,7 @@ logger:debug("JSON parse failed", #{reason => Reason})
 ### File Logging (BT-541)
 
 Workspace nodes automatically write logs to `~/.beamtalk/workspaces/{workspace_id}/workspace.log`:
-- **All levels** captured (debug and above)
+- **All levels** captured — the file handler sets primary logger level to `debug` at startup so all events reach the file
 - **Log rotation**: 5 files × 1 MB
 - **Format**: `timestamp [level] module:function/arity message`
 - **Disable**: Set `BEAMTALK_NO_FILE_LOG=1` environment variable
