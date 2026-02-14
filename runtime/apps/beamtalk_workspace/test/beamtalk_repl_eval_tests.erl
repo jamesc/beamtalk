@@ -72,7 +72,7 @@ do_eval_increments_counter_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
     InitialCounter = beamtalk_repl_state:get_eval_counter(State),
     
-    %% Since we don't have a daemon running, this will fail compilation
+    %% Without compiler server running, compilation will fail
     %% But it should still increment the counter
     {error, _, _, _, NewState} = beamtalk_repl_eval:do_eval("1 + 1", State),
     NewCounter = beamtalk_repl_state:get_eval_counter(NewState),
@@ -80,15 +80,15 @@ do_eval_increments_counter_test() ->
     ?assertEqual(InitialCounter + 1, NewCounter).
 
 do_eval_no_daemon_error_test() ->
-    %% Without a running daemon, should get daemon_unavailable error
+    %% Without a running compiler server, should get compile_error
     State = beamtalk_repl_state:new(undefined, 0),
     Result = beamtalk_repl_eval:do_eval("1 + 1", State),
     ?assertMatch({error, {compile_error, _}, _, _, _}, Result),
     
-    %% Error message should mention daemon (case-insensitive)
+    %% Error message should mention compiler
     {error, {compile_error, Msg}, _, _, _} = Result,
     LowerMsg = string:lowercase(Msg),
-    ?assert(binary:match(LowerMsg, <<"daemon">>) =/= nomatch).
+    ?assert(binary:match(LowerMsg, <<"compiler">>) =/= nomatch).
 
 %%% File loading tests
 
@@ -167,9 +167,7 @@ compile_core_erlang_file_write_error_test() ->
 %%% Additional do_eval tests (with mocked daemon scenarios)
 
 do_eval_load_binary_error_test() ->
-    %% Test case where compilation succeeds but code:load_binary fails
-    %% This is hard to trigger in practice without mocking, but we can
-    %% verify the error path exists by testing with daemon unavailable
+    %% Test case where compilation fails without compiler server
     State = beamtalk_repl_state:new(undefined, 0),
     {error, {compile_error, _}, _, _, NewState} = beamtalk_repl_eval:do_eval("1 + 1", State),
     %% Counter should still increment even on error
@@ -181,7 +179,7 @@ do_eval_preserves_bindings_on_error_test() ->
     InitialBindings = #{x => 42, y => 100},
     StateWithBindings = beamtalk_repl_state:set_bindings(InitialBindings, State),
     
-    %% Eval will fail (no daemon), but bindings should be preserved
+    %% Eval will fail (no compiler server), but bindings should be preserved
     {error, _, _, _, NewState} = beamtalk_repl_eval:do_eval("z := 999", StateWithBindings),
     FinalBindings = beamtalk_repl_state:get_bindings(NewState),
     
@@ -214,11 +212,9 @@ handle_load_compile_error_test() ->
     %% Clean up - ensure it's deleted even if assertion fails
     ok = file:delete(TempFile),
     
-    %% Should get daemon_unavailable or compile error
+    %% Should get a compile error
     case Result of
-        {error, daemon_unavailable, _} -> ok;
         {error, {compile_error, _}, _} -> ok;
-        {error, {daemon_error, _}, _} -> ok;
         Other -> error({unexpected_result, Other})
     end.
 
@@ -839,7 +835,7 @@ format_formatted_diagnostics_single_binary_with_newlines_test() ->
 %%% do_eval error edge cases
 
 do_eval_empty_expression_test() ->
-    %% Empty expression should still attempt compilation (and fail without daemon)
+    %% Empty expression should still attempt compilation (and fail without compiler)
     State = beamtalk_repl_state:new(undefined, 0),
     Result = beamtalk_repl_eval:do_eval("", State),
     ?assertMatch({error, {compile_error, _}, _, _, _}, Result).
@@ -856,7 +852,7 @@ do_eval_counter_increments_on_each_call_test() ->
 %%% handle_load edge cases
 
 handle_load_empty_file_test() ->
-    %% Empty file should attempt compile (and fail without daemon)
+    %% Empty file should attempt compile (and fail without compiler)
     UniqueId = erlang:unique_integer([positive]),
     TempFile = filename:join(os:getenv("TMPDIR", "/tmp"),
                              io_lib:format("test_empty_~p.bt", [UniqueId])),
@@ -864,11 +860,9 @@ handle_load_empty_file_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
     Result = beamtalk_repl_eval:handle_load(TempFile, State),
     file:delete(TempFile),
-    %% Should fail with daemon_unavailable or compile error
+    %% Should fail with compile error
     case Result of
-        {error, daemon_unavailable, _} -> ok;
         {error, {compile_error, _}, _} -> ok;
-        {error, {daemon_error, _}, _} -> ok;
         Other -> error({unexpected_result, Other})
     end.
 

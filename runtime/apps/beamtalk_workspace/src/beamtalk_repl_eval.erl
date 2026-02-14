@@ -4,15 +4,11 @@
 %%% @doc Expression evaluation for Beamtalk REPL
 %%%
 %%% This module handles compilation, bytecode generation, and evaluation
-%%% of Beamtalk expressions via the compiler daemon.
+%%% of Beamtalk expressions via the beamtalk_compiler OTP application
+%%% (ADR 0022, Phase 2).
 %%%
-%%% ## Platform Requirements
-%%%
-%%% The secure temp file handling in this module requires Unix-like systems
-%%% with support for file permissions (chmod). Windows is not currently
-%%% supported due to its different security model (ACLs vs Unix permissions).
-%%% The `ensure_secure_temp_dir/0` and `ensure_dir_with_mode/2` functions
-%%% rely on `file:change_mode/2` which has limited or no effect on Windows.
+%%% The default backend is the OTP Port (`BEAMTALK_COMPILER=port').
+%%% Set `BEAMTALK_COMPILER=daemon' to use the legacy JSON-RPC daemon.
 
 -module(beamtalk_repl_eval).
 
@@ -150,9 +146,8 @@ handle_load(Path, State) ->
                     Source = binary_to_list(SourceBin),
                     %% Detect if file is from the stdlib (lib/ directory)
                     StdlibMode = is_stdlib_path(Path),
-                    %% Compile via daemon — module name is derived from the
-                    %% class name in the AST by the daemon, not the filename.
-                    case compile_file_via_daemon(Source, Path, StdlibMode, State) of
+                    %% Compile file — dispatches to port or daemon backend
+                    case compile_file(Source, Path, StdlibMode, State) of
                         {ok, Binary, ClassNames, ModuleName} ->
                             %% Load the module (persistent, not deleted)
                             case code:load_binary(ModuleName, Path, Binary) of
@@ -199,17 +194,54 @@ is_stdlib_path(Path) ->
         _ -> true
     end.
 
-%% Compile a Beamtalk expression to bytecode via compiler daemon.
+%% Compile a Beamtalk expression to bytecode.
+%% Dispatches to beamtalk_compiler (port) or legacy daemon based on
+%% BEAMTALK_COMPILER env var.
 -spec compile_expression(string(), atom(), map(), beamtalk_repl_state:state()) ->
     {ok, binary(), term(), [binary()]} | {error, term()}.
 compile_expression(Expression, ModuleName, Bindings, State) ->
+    case beamtalk_compiler_backend:backend() of
+        port ->
+            compile_expression_via_port(Expression, ModuleName, Bindings);
+        daemon ->
+            compile_expression_via_daemon(Expression, ModuleName, Bindings, State)
+    end.
+
+%% Compile expression via beamtalk_compiler OTP app (port backend).
+compile_expression_via_port(Expression, ModuleName, Bindings) ->
+    SourceBin = list_to_binary(Expression),
+    ModNameBin = atom_to_binary(ModuleName, utf8),
+    KnownVars = [atom_to_binary(K, utf8)
+                 || K <- maps:keys(Bindings),
+                    is_atom(K),
+                    not is_internal_key(K)],
+    try beamtalk_compiler:compile_expression(SourceBin, ModNameBin, KnownVars) of
+        {ok, CoreErlang, Warnings} ->
+            case beamtalk_compiler:compile_core_erlang(CoreErlang) of
+                {ok, _CompiledMod, Binary} ->
+                    {ok, Binary, {port_compiled}, Warnings};
+                {error, Reason} ->
+                    {error, iolist_to_binary(io_lib:format("Core Erlang compile error: ~p", [Reason]))}
+            end;
+        {error, Diagnostics} ->
+            {error, format_formatted_diagnostics(Diagnostics)}
+    catch
+        exit:{noproc, _} ->
+            {error, <<"Compiler not available. Ensure beamtalk_compiler application is started.">>};
+        exit:{timeout, _} ->
+            {error, <<"Compilation timed out.">>};
+        exit:{Reason, _} ->
+            {error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason]))}
+    end.
+
+%% Compile expression via legacy daemon (BEAMTALK_COMPILER=daemon).
+compile_expression_via_daemon(Expression, ModuleName, Bindings, State) ->
     case compile_via_daemon(Expression, ModuleName, Bindings, State) of
         {ok, Binary, Warnings} ->
             {ok, Binary, {daemon_compiled}, Warnings};
         {error, daemon_unavailable} ->
             {error, <<"Compiler daemon not running. Start with: beamtalk daemon start --foreground">>};
         {error, {compile_error_formatted, FormattedDiagnostics}} ->
-            %% Use pre-formatted miette output
             {error, format_formatted_diagnostics(FormattedDiagnostics)};
         {error, {core_compile_error, Errors}} ->
             {error, iolist_to_binary(io_lib:format("Core Erlang compile error: ~p", [Errors]))};
@@ -219,11 +251,52 @@ compile_expression(Expression, ModuleName, Bindings, State) ->
             {error, iolist_to_binary(io_lib:format("Compilation error: ~p", [Reason]))}
     end.
 
+%% Compile a file and extract class metadata.
+%% Dispatches to beamtalk_compiler (port) or legacy daemon.
+-spec compile_file(string(), string(), boolean(), beamtalk_repl_state:state()) ->
+    {ok, binary(), [string()], atom()} | {error, term()}.
+compile_file(Source, Path, StdlibMode, State) ->
+    case beamtalk_compiler_backend:backend() of
+        port ->
+            compile_file_via_port(Source, Path, StdlibMode);
+        daemon ->
+            compile_file_via_daemon(Source, Path, StdlibMode, State)
+    end.
+
+%% Compile file via beamtalk_compiler OTP app (port backend).
+compile_file_via_port(Source, _Path, StdlibMode) ->
+    SourceBin = list_to_binary(Source),
+    Options = #{stdlib_mode => StdlibMode},
+    try beamtalk_compiler:compile(SourceBin, Options) of
+        {ok, #{core_erlang := CoreErlang, module_name := ModNameBin,
+               classes := Classes}} ->
+            ModuleName = binary_to_atom(ModNameBin, utf8),
+            case beamtalk_compiler:compile_core_erlang(CoreErlang) of
+                {ok, _CompiledMod, Binary} ->
+                    ClassNames = [#{
+                        name => binary_to_list(maps:get(name, C, <<"">>)),
+                        superclass => binary_to_list(maps:get(superclass, C, <<"Object">>))
+                    } || C <- Classes],
+                    {ok, Binary, ClassNames, ModuleName};
+                {error, Reason} ->
+                    {error, {core_compile_error, Reason}}
+            end;
+        {error, Diagnostics} ->
+            {error, {compile_error, format_formatted_diagnostics(Diagnostics)}}
+    catch
+        exit:{noproc, _} ->
+            {error, {compile_error, <<"Compiler not available. Ensure beamtalk_compiler application is started.">>}};
+        exit:{timeout, _} ->
+            {error, {compile_error, <<"Compilation timed out.">>}};
+        exit:{Reason, _} ->
+            {error, {compile_error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason]))}}
+    end.
+
 %% Compile expression via compiler daemon using JSON-RPC over Unix socket.
 -spec compile_via_daemon(string(), atom(), map(), beamtalk_repl_state:state()) ->
     {ok, binary(), [binary()]} | {error, term()}.
-compile_via_daemon(Expression, ModuleName, Bindings, State) ->
-    SocketPath = beamtalk_repl_state:get_daemon_socket_path(State),
+compile_via_daemon(Expression, ModuleName, Bindings, _State) ->
+    SocketPath = daemon_socket_path(),
     %% Try to connect to daemon
     case connect_to_daemon(SocketPath) of
         {ok, Socket} ->
@@ -234,6 +307,26 @@ compile_via_daemon(Expression, ModuleName, Bindings, State) ->
             end;
         {error, _Reason} ->
             {error, daemon_unavailable}
+    end.
+
+%% Resolve daemon socket path from environment.
+%% Used only when BEAMTALK_COMPILER=daemon (legacy fallback).
+-spec daemon_socket_path() -> string().
+daemon_socket_path() ->
+    case os:getenv("BEAMTALK_DAEMON_SOCKET") of
+        false -> daemon_socket_from_home();
+        "" -> daemon_socket_from_home();
+        SocketPath -> SocketPath
+    end.
+
+daemon_socket_from_home() ->
+    case os:getenv("HOME") of
+        false ->
+            Error0 = beamtalk_error:new(internal_error, 'ReplEval'),
+            Error1 = beamtalk_error:with_hint(Error0, <<"HOME must be set to locate daemon socket. Set HOME or BEAMTALK_DAEMON_SOCKET.">>),
+            erlang:error(Error1);
+        Home ->
+            filename:join([Home, ".beamtalk", "daemon.sock"])
     end.
 
 %% Connect to the compiler daemon Unix socket.
@@ -494,8 +587,8 @@ extract_assignment(Expression) ->
 %% and returns it in the response, so we no longer derive from the filename.
 -spec compile_file_via_daemon(string(), string(), boolean(), beamtalk_repl_state:state()) ->
     {ok, binary(), [string()], atom()} | {error, term()}.
-compile_file_via_daemon(Source, Path, StdlibMode, State) ->
-    SocketPath = beamtalk_repl_state:get_daemon_socket_path(State),
+compile_file_via_daemon(Source, Path, StdlibMode, _State) ->
+    SocketPath = daemon_socket_path(),
     case connect_to_daemon(SocketPath) of
         {ok, Socket} ->
             try
