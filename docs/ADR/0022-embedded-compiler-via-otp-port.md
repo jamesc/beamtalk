@@ -21,7 +21,7 @@ The Beamtalk compiler currently runs as a **separate daemon process** written in
 
 ### Current Architecture
 
-```
+```text
 ┌─────────────────────┐         ┌─────────────────────┐
 │   beamtalk CLI      │         │   BEAM Node          │
 │   (Rust binary)     │         │                      │
@@ -58,7 +58,7 @@ The `beamtalk-core` crate (lexer, parser, semantic analysis, codegen) will be co
 
 ### Architecture After
 
-```
+```text
 ┌──────────────────────────────────────────┐
 │              BEAM Node                    │
 │                                           │
@@ -375,7 +375,7 @@ Create `beamtalk_compiler` as a new OTP application with OTP Port as the primary
 
 **DDD Alignment:** The compiler is its own bounded context (Source Analysis + Semantic Analysis + Code Generation). It becomes a fourth OTP application in the umbrella — an **Anti-Corruption Layer** translating between the Compilation Context and the Live Programming Domain.
 
-```
+```text
 beamtalk_workspace  (Live Programming Domain)
     ↓ depends on
 beamtalk_compiler   (Compilation Context — Port/NIF bridge) ← NEW
