@@ -132,7 +132,11 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 %% @private
-terminate(_Reason, _State) ->
+terminate(Reason, {SessionId, _State}) ->
+    ?LOG_INFO("REPL session terminated", #{session => SessionId, reason => Reason}),
+    ok;
+terminate(Reason, _State) ->
+    ?LOG_INFO("REPL session terminated", #{reason => Reason}),
     ok.
 
 %% @private

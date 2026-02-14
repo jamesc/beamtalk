@@ -94,7 +94,8 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 %% @private
-terminate(_Reason, #state{listen_socket = ListenSocket}) ->
+terminate(Reason, #state{listen_socket = ListenSocket, port = Port}) ->
+    ?LOG_INFO("REPL server shutting down", #{reason => Reason, port => Port}),
     gen_tcp:close(ListenSocket),
     ok.
 
@@ -151,11 +152,19 @@ acceptor_loop(ListenSocket) ->
         {ok, ClientSocket} ->
             %% Generate unique session ID
             SessionId = generate_session_id(),
+            Peer = case inet:peername(ClientSocket) of
+                       {ok, {PeerAddr, PeerPort}} -> {PeerAddr, PeerPort};
+                       _ -> unknown
+                   end,
             
             %% Start session under supervisor
             case beamtalk_session_sup:start_session(SessionId) of
                 {ok, SessionPid} ->
-                    ?LOG_INFO("Created session: ~p (pid: ~p)", [SessionId, SessionPid]),
+                    ?LOG_INFO("REPL client connected", #{
+                        session => SessionId,
+                        session_pid => SessionPid,
+                        peer => Peer
+                    }),
                     
                     %% Mark activity - new session connected
                     beamtalk_workspace_meta:update_activity(),
@@ -168,6 +177,11 @@ acceptor_loop(ListenSocket) ->
                         MonRef = erlang:monitor(process, SessionPid),
                         handle_client(ClientSocket, SessionPid),
                         %% Client disconnected — terminate the session
+                        ?LOG_INFO("REPL client disconnected", #{
+                            session => SessionId,
+                            session_pid => SessionPid,
+                            peer => Peer
+                        }),
                         erlang:demonitor(MonRef, [flush]),
                         beamtalk_repl_shell:stop(SessionPid)
                     end);
@@ -258,6 +272,7 @@ handle_client_once(Socket, SessionPid) ->
                     end
             end;
         {error, closed} ->
+            ?LOG_INFO("REPL client TCP closed", #{reason => closed}),
             stop;
         {error, timeout} ->
             %% No data within RECV_TIMEOUT — just retry.
