@@ -178,10 +178,10 @@ bootstrap_after_singletons_before_repl_test() ->
     
     Ids = [maps:get(id, S) || S <- ChildSpecs],
     BootstrapIdx = index_of(beamtalk_workspace_bootstrap, Ids),
-    WorkspaceActorIdx = index_of(beamtalk_workspace_environment, Ids),
+    WorkspaceEnvironmentIdx = index_of(beamtalk_workspace_environment, Ids),
     ReplServerIdx = index_of(beamtalk_repl_server, Ids),
     %% Bootstrap must come after all singletons but before REPL server
-    ?assert(BootstrapIdx > WorkspaceActorIdx),
+    ?assert(BootstrapIdx > WorkspaceEnvironmentIdx),
     ?assert(BootstrapIdx < ReplServerIdx).
 
 %%% Helpers
