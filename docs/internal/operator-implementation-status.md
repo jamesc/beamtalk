@@ -15,10 +15,11 @@ From `../beamtalk-syntax-rationale.md`:
 
 ```
 Binary operators have precedence levels:
-1. `*`, `/`, `%` (highest - multiplicative)
-2. `+`, `-`, `++` (additive and string concatenation)
-3. `<`, `>`, `<=`, `>=` (comparison)
-4. `=`, `==`, `~=` (equality - strict and loose)
+1. `**` (highest - exponentiation, right-associative)
+2. `*`, `/`, `%` (multiplicative)
+3. `+`, `-`, `++` (additive and string concatenation)
+4. `<`, `>`, `<=`, `>=` (comparison)
+5. `=`, `==`, `~=` (equality - strict and loose)
 ```
 
 **Note:** `&&`, `||`, `and`, `or` are **not** binary operators. They are keyword messages that take blocks for short-circuit evaluation.
@@ -126,5 +127,4 @@ All binary operators are now consistently implemented across lexer, parser, code
 
 ### Removed
 - `!=` - Use `~=` for strict inequality
-- `**` - Exponentiation not needed
 - `&&`, `||` - Use `and:` and `or:` keyword messages
