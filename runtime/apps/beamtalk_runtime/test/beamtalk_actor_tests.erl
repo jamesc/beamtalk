@@ -1131,3 +1131,79 @@ sync_message_to_dead_actor_returns_error_test() ->
     
     Result = beamtalk_actor:sync_send(Counter, getValue, []),
     ?assertMatch({error, #beamtalk_error{kind = actor_dead, selector = getValue}}, Result).
+
+%%% ===========================================================================
+%%% register_spawned/4 Callback Integration Tests
+%%% ===========================================================================
+
+register_spawned_invokes_callback_when_env_set_test() ->
+    %% Register test process so test_spawn_callback can find us
+    register(spawn_callback_test, self()),
+    application:set_env(beamtalk_runtime, actor_spawn_callback, test_spawn_callback),
+
+    RegistryPid = self(),
+    ActorPid = spawn(fun() -> receive stop -> ok end end),
+    ok = beamtalk_actor:register_spawned(RegistryPid, ActorPid, 'Counter', test_counter),
+
+    %% Verify callback was invoked with correct args
+    receive
+        {callback_invoked, RegPid, APid, Class, Mod} ->
+            ?assertEqual(RegistryPid, RegPid),
+            ?assertEqual(ActorPid, APid),
+            ?assertEqual('Counter', Class),
+            ?assertEqual(test_counter, Mod)
+    after 1000 ->
+        error("Callback was not invoked")
+    end,
+
+    %% Cleanup
+    exit(ActorPid, kill),
+    application:unset_env(beamtalk_runtime, actor_spawn_callback),
+    unregister(spawn_callback_test).
+
+register_spawned_noop_when_env_unset_test() ->
+    %% Ensure no callback env is set
+    application:unset_env(beamtalk_runtime, actor_spawn_callback),
+
+    ActorPid = spawn(fun() -> receive stop -> ok end end),
+    %% Should return ok without error
+    ?assertEqual(ok, beamtalk_actor:register_spawned(self(), ActorPid, 'Counter', test_counter)),
+
+    exit(ActorPid, kill).
+
+register_spawned_survives_undef_callback_test() ->
+    %% Set callback to a module that doesn't export on_actor_spawned/4
+    %% This module exists (it's the test module itself) but doesn't have the function
+    application:set_env(beamtalk_runtime, actor_spawn_callback, beamtalk_actor_tests),
+
+    ActorPid = spawn(fun() -> receive stop -> ok end end),
+    %% Should return ok despite undef error
+    ?assertEqual(ok, beamtalk_actor:register_spawned(self(), ActorPid, 'Counter', test_counter)),
+
+    %% Cleanup
+    exit(ActorPid, kill),
+    application:unset_env(beamtalk_runtime, actor_spawn_callback).
+
+register_spawned_survives_beamtalk_error_test() ->
+    %% Set callback to a module that raises a #beamtalk_error{}
+    application:set_env(beamtalk_runtime, actor_spawn_callback, test_spawn_callback_bt_error),
+
+    ActorPid = spawn(fun() -> receive stop -> ok end end),
+    %% Should return ok despite beamtalk error
+    ?assertEqual(ok, beamtalk_actor:register_spawned(self(), ActorPid, 'Counter', test_counter)),
+
+    %% Cleanup
+    exit(ActorPid, kill),
+    application:unset_env(beamtalk_runtime, actor_spawn_callback).
+
+register_spawned_survives_generic_error_test() ->
+    %% Set callback to a module that throws a generic error
+    application:set_env(beamtalk_runtime, actor_spawn_callback, test_spawn_callback_generic_error),
+
+    ActorPid = spawn(fun() -> receive stop -> ok end end),
+    %% Should return ok despite generic throw
+    ?assertEqual(ok, beamtalk_actor:register_spawned(self(), ActorPid, 'Counter', test_counter)),
+
+    %% Cleanup
+    exit(ActorPid, kill),
+    application:unset_env(beamtalk_runtime, actor_spawn_callback).
