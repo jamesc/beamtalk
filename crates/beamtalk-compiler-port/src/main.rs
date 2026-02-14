@@ -22,6 +22,13 @@ fn read_packet(stdin: &mut impl Read) -> io::Result<Option<Vec<u8>>> {
         Err(e) => return Err(e),
     }
     let len = u32::from_be_bytes(len_buf) as usize;
+    // Guard against unreasonably large packets (>64 MiB)
+    if len > 64 * 1024 * 1024 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("packet too large: {len} bytes"),
+        ));
+    }
     let mut buf = vec![0u8; len];
     stdin.read_exact(&mut buf)?;
     Ok(Some(buf))
@@ -67,8 +74,6 @@ fn term_to_string_list(term: &Term) -> Option<Vec<String>> {
             }
             Some(result)
         }
-        // Empty list may come as a special case
-        Term::Binary(b) if b.bytes.is_empty() => Some(Vec::new()),
         _ => None,
     }
 }
