@@ -210,7 +210,6 @@ on_actor_spawned_returns_ok_on_registry_failure_test() ->
     %% Use a dead registry PID — register_actor will fail with noproc
     {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
     gen_server:stop(RegistryPid),
-    timer:sleep(10),
 
     ActorPid = spawn(fun() -> receive stop -> ok end end),
 
@@ -245,16 +244,17 @@ workspace_app_start_sets_callback_env_test() ->
     application:unset_env(beamtalk_runtime, actor_spawn_callback),
     ?assertEqual(undefined, application:get_env(beamtalk_runtime, actor_spawn_callback)),
 
-    %% Verify start/2 sets the callback env
-    %% (We can't call start/2 directly because it starts the supervisor tree,
-    %% so we verify the env manipulation logic matches what start/2 does)
-    application:set_env(beamtalk_runtime, actor_spawn_callback, beamtalk_repl_actors),
-
-    ?assertEqual({ok, beamtalk_repl_actors},
-                 application:get_env(beamtalk_runtime, actor_spawn_callback)),
-
-    %% Cleanup
-    application:unset_env(beamtalk_runtime, actor_spawn_callback).
+    %% Call actual start/2 — supervisor has no static children, safe to start
+    {ok, SupPid} = beamtalk_workspace_app:start(normal, []),
+    try
+        ?assertEqual({ok, beamtalk_repl_actors},
+                     application:get_env(beamtalk_runtime, actor_spawn_callback))
+    after
+        process_flag(trap_exit, true),
+        exit(SupPid, shutdown),
+        receive {'EXIT', SupPid, _} -> ok after 1000 -> ok end,
+        application:unset_env(beamtalk_runtime, actor_spawn_callback)
+    end.
 
 workspace_app_stop_unsets_callback_env_test() ->
     %% Set the env first (simulating what start/2 does)
