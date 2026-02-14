@@ -15,23 +15,23 @@
 /// ```
 sealed Object subclass: Character
 
-  /// Test equality with another character.
+  /// Test strict equality with another character.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// $A = $A                  // => true
-  /// $A = $B                  // => false
+  /// $A =:= $A                  // => true
+  /// $A =:= $B                  // => false
   /// ```
-  = other => @primitive '='
+  =:= other => @primitive '=:='
 
   /// Test inequality with another character.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// $A ~= $B                 // => true
-  /// $A ~= $A                 // => false
+  /// $A /= $B                 // => true
+  /// $A /= $A                 // => false
   /// ```
-  ~= other => (self = other) not
+  /= other => @primitive '/='
 
   /// Test if the receiver sorts before another character.
   ///

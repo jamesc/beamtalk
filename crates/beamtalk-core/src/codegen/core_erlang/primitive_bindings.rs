@@ -514,9 +514,9 @@ mod tests {
             Identifier::new("Object", span()),
             vec![],
             vec![make_primitive_method(
-                MessageSelector::Binary("=".into()),
+                MessageSelector::Binary("=:=".into()),
                 vec![Identifier::new("other", span())],
-                "=",
+                "=:=",
                 true,
             )],
             span(),
@@ -527,9 +527,9 @@ mod tests {
             Identifier::new("Object", span()),
             vec![],
             vec![make_primitive_method(
-                MessageSelector::Binary("=".into()),
+                MessageSelector::Binary("=:=".into()),
                 vec![Identifier::new("other", span())],
-                "=",
+                "=:=",
                 true,
             )],
             span(),
@@ -539,9 +539,9 @@ mod tests {
         let mod2 = Module::with_classes(vec![str_class], span());
         let table = build_binding_table([&mod1, &mod2]);
 
-        // Both Integer and String have '=' → ambiguous
+        // Both Integer and String have '=:=' → ambiguous
         assert!(
-            table.find_selector("=").is_none(),
+            table.find_selector("=:=").is_none(),
             "Ambiguous selector should return None"
         );
     }

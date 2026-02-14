@@ -276,9 +276,10 @@ Binary operators follow standard math precedence (highest to lowest):
 - `>=` - Greater than or equal: `5 >= 3` → `true`
 
 #### Equality (lowest precedence)
-- `=` - Strict equality (Erlang `=:=`): `5 = 5` → `true`
+- `=:=` - Strict equality (Erlang `=:=`): `5 =:= 5` → `true`
 - `==` - Loose equality (Erlang `==`): `5 == 5.0` → `true`
-- `~=` - Strict inequality (Erlang `=/=`): `5 ~= 6` → `true`
+- `/=` - Loose inequality (Erlang `/=`): `5 /= 6` → `true`
+- `=/=` - Strict inequality (Erlang `=/=`): `5 =/= 6` → `true`
 
 **Note on `and`/`or`:** These are **not** binary operators. They are keyword messages that take blocks for short-circuit evaluation:
 ```
@@ -638,7 +639,7 @@ temp match: [-1 -> 'minus one'; 0 -> 'zero'; _ -> 'other']
 | Variable | `x` | Binds matched value to name |
 | Tuple | `{a, b}` | Destructure tuple (patterns supported; tuple literals planned) |
 
-**Guard expressions** support: `>`, `<`, `>=`, `<=`, `=`, `~=`, `+`, `-`, `*`, `/`
+**Guard expressions** support: `>`, `<`, `>=`, `<=`, `=:=`, `=/=`, `/=`, `+`, `-`, `*`, `/`
 
 ### In Message Handlers (Future)
 

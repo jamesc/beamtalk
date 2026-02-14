@@ -121,7 +121,7 @@ File open: "tests/stdlib/fixtures/stream_empty.txt" do: [:handle | handle lines 
 // => ["f","g","h"]
 
 // reject: with lazy evaluation
-((File lines: "tests/stdlib/fixtures/stream_large.txt") reject: [:l | l = "e"]) take: 5
+((File lines: "tests/stdlib/fixtures/stream_large.txt") reject: [:l | l =:= "e"]) take: 5
 // => ["a","b","c","d","f"]
 
 // ===========================================================================
@@ -156,7 +156,7 @@ File open: "tests/stdlib/fixtures/stream_empty.txt" do: [:handle | handle lines 
 // => true
 
 // allSatisfy: on file stream with early exit closes handle via finalizer
-(File lines: "tests/stdlib/fixtures/stream_large.txt") allSatisfy: [:l | l = "a"]
+(File lines: "tests/stdlib/fixtures/stream_large.txt") allSatisfy: [:l | l =:= "a"]
 // => false
 
 // Pipeline with finalizer propagation: select + take

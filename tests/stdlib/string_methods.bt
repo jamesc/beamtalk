@@ -48,11 +48,11 @@
 // ===========================================================================
 
 // String equality
-'hello' = 'hello'
+'hello' =:= 'hello'
 // => true
 
 // String inequality
-'hello' ~= 'world'
+'hello' /= 'world'
 // => true
 
 // String less than (lexicographic)

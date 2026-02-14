@@ -39,10 +39,10 @@
 
 // === Equality ===
 
-'世界' = '世界'
+'世界' =:= '世界'
 // => true
 
-'世界' = 'hello'
+'世界' =:= 'hello'
 // => false
 
 // === at: (grapheme access) ===

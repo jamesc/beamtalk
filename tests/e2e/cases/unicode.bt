@@ -49,7 +49,7 @@ File readAll: 'tests/stdlib/fixtures/unicode_test.txt'
 // => 10
 
 // String comparison with Unicode
-'世界' = '世界'
+'世界' =:= '世界'
 // => true
 
 // Large Unicode string that exceeds the default TCP {packet,line} buffer (1460 bytes).

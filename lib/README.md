@@ -142,7 +142,7 @@ Absolute root of the class hierarchy providing only essential messages.
 - `class` - Returns the object's class (fundamental reflection)
 - `doesNotUnderstand:args:` - Fallback for unknown messages (enables proxies)
 - `==` - Object identity test (reference equality)
-- `~=` - Object inequality test (delegates to `==`)
+- `/=` - Object inequality test (delegates to `==`)
 
 **When to use:**
 - Implementing proxy objects with custom message forwarding
@@ -372,7 +372,7 @@ Arbitrary precision integer arithmetic (Erlang integers).
 
 **Key messages:**
 - Arithmetic: `+`, `-`, `*`, `/`, `//`, `%`, `**`
-- Comparison: `=`, `~=`, `<`, `<=`, `>`, `>=`
+- Comparison: `=:=`, `/=`, `<`, `<=`, `>`, `>=`
 - Iteration: `timesRepeat:`, `to:do:`, `to:by:do:`
 - Testing: `isEven`, `isOdd`, `isZero`, `isPositive`, `isNegative`
 

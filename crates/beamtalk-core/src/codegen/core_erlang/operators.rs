@@ -15,7 +15,7 @@ impl CoreErlangGenerator {
     ///
     /// Maps Beamtalk binary operators to Erlang's built-in operators:
     /// - Arithmetic: `+`, `-`, `*`, `/`, `%` (rem), `**` (exponentiation)
-    /// - Comparison: `==`, `=` (strict), `~=` (inequality), `<`, `>`, `<=`, `>=`
+    /// - Comparison: `==`, `=:=` (strict), `/=` (inequality), `=/=` (strict inequality), `<`, `>`, `<=`, `>=`
     /// - Concatenation: `++` (list append via `erlang:'++'`, string via `iolist_to_binary`)
     ///
     /// # Arguments
@@ -56,8 +56,9 @@ impl CoreErlangGenerator {
             "/" => "/",
             "%" => "rem",
             "==" => "==",
-            "=" => "=:=", // Strict equality
-            "~=" => "/=", // Inequality (negation of ==)
+            "=:=" => "=:=", // Strict equality (ADR 0002)
+            "/=" => "/=",   // Loose inequality (ADR 0002)
+            "=/=" => "=/=", // Strict inequality (ADR 0002)
             "<" => "<",
             ">" => ">",
             "<=" => "=<",

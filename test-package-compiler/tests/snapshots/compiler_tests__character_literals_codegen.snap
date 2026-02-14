@@ -62,8 +62,7 @@ module 'character_literals' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_
         , 'letterA' => 65
         , 'letterZ' => 122
         , 'digit' => 48
-        , 'newline' => 10
-        , 'tab' => 9
+        , 'isEqual' => 65
     }~
     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
     in {'ok', FinalState}

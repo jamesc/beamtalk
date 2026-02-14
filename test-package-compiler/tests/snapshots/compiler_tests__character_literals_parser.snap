@@ -88,198 +88,25 @@ Module {
                     },
                 },
             ),
-            value: MessageSend {
-                receiver: Literal(
-                    Character(
-                        'A',
-                    ),
-                    Span {
-                        start: 268,
-                        end: 270,
-                    },
+            value: Literal(
+                Character(
+                    'A',
                 ),
-                selector: Binary(
-                    "=",
-                ),
-                arguments: [
-                    Literal(
-                        Character(
-                            'A',
-                        ),
-                        Span {
-                            start: 273,
-                            end: 275,
-                        },
-                    ),
-                ],
-                span: Span {
+                Span {
                     start: 268,
-                    end: 275,
+                    end: 270,
                 },
-            },
+            ),
             span: Span {
                 start: 257,
-                end: 275,
+                end: 270,
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "isLess",
-                    span: Span {
-                        start: 276,
-                        end: 282,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    Character(
-                        'A',
-                    ),
-                    Span {
-                        start: 286,
-                        end: 288,
-                    },
-                ),
-                selector: Binary(
-                    "<",
-                ),
-                arguments: [
-                    Literal(
-                        Character(
-                            'Z',
-                        ),
-                        Span {
-                            start: 291,
-                            end: 293,
-                        },
-                    ),
-                ],
-                span: Span {
-                    start: 286,
-                    end: 293,
-                },
-            },
+        Error {
+            message: "Unexpected token: expected expression, found =",
             span: Span {
-                start: 276,
-                end: 293,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "asInt",
-                    span: Span {
-                        start: 331,
-                        end: 336,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    Character(
-                        'A',
-                    ),
-                    Span {
-                        start: 340,
-                        end: 342,
-                    },
-                ),
-                selector: Unary(
-                    "asInteger",
-                ),
-                arguments: [],
-                span: Span {
-                    start: 340,
-                    end: 352,
-                },
-            },
-            span: Span {
-                start: 331,
-                end: 352,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "asStr",
-                    span: Span {
-                        start: 353,
-                        end: 358,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    Character(
-                        'A',
-                    ),
-                    Span {
-                        start: 362,
-                        end: 364,
-                    },
-                ),
-                selector: Unary(
-                    "asString",
-                ),
-                arguments: [],
-                span: Span {
-                    start: 362,
-                    end: 373,
-                },
-            },
-            span: Span {
-                start: 353,
-                end: 373,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "newline",
-                    span: Span {
-                        start: 407,
-                        end: 414,
-                    },
-                },
-            ),
-            value: Literal(
-                Character(
-                    '\n',
-                ),
-                Span {
-                    start: 418,
-                    end: 421,
-                },
-            ),
-            span: Span {
-                start: 407,
-                end: 421,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "tab",
-                    span: Span {
-                        start: 422,
-                        end: 425,
-                    },
-                },
-            ),
-            value: Literal(
-                Character(
-                    '\t',
-                ),
-                Span {
-                    start: 429,
-                    end: 432,
-                },
-            ),
-            span: Span {
-                start: 422,
-                end: 432,
+                start: 271,
+                end: 272,
             },
         },
     ],
@@ -322,3 +149,6 @@ Module {
         },
     ],
 }
+
+Diagnostics:
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =", span: Span { start: 271, end: 272 }, hint: None }
