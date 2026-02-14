@@ -407,7 +407,7 @@ SystemDictionary current allClasses
 | `beamtalk_workspace_sup.erl` | Set class variables after child startup (replace persistent_term) |
 | `beamtalk_system_dictionary.erl` | Remove persistent_term singleton logic |
 | `beamtalk_transcript_stream.erl` | Remove persistent_term singleton logic |
-| `beamtalk_workspace_actor.erl` | Remove persistent_term singleton logic; rename to `beamtalk_workspace_environment.erl` |
+| `beamtalk_workspace_environment.erl` | Remove persistent_term singleton logic; renamed from `beamtalk_workspace_actor.erl` (BT-492) |
 | `beamtalk_workspace_binding_tests.erl` | Rewrite for class variable pattern |
 | E2E tests, examples, docs | Minimal changes — `Transcript` and `Beamtalk` still work via workspace bindings |
 
@@ -455,7 +455,7 @@ TranscriptStream does not understand 'show:'
 | 2 | BT-489 | Bootstrap singleton class variables in workspace supervisor | M |
 | 3 | BT-490 | Remove workspace binding codegen path | M |
 | 4 | BT-491 | Remove persistent_term singleton infrastructure from runtime | S |
-| 5 | BT-492 | Rename workspace_actor to workspace_environment + docs | S |
+| 5 | BT-492 | Rename workspace_actor to workspace_environment + docs ✅ | S |
 
 
 ## References

@@ -18,7 +18,7 @@
 %%%   ├─ beamtalk_transcript_stream   % Transcript singleton (ADR 0010)
 %%%   ├─ beamtalk_system_dictionary   % Beamtalk singleton (ADR 0010)
 %%%   ├─ beamtalk_actor_registry      % Workspace-wide actor registry
-%%%   ├─ beamtalk_workspace_actor     % Workspace singleton (BT-423)
+%%%   ├─ beamtalk_workspace_environment % Workspace singleton (BT-423)
 %%%   ├─ beamtalk_workspace_bootstrap % Class var bootstrap (ADR 0019)
 %%%   ├─ beamtalk_repl_server         % TCP server (session-per-connection)
 %%%   ├─ beamtalk_idle_monitor        % Tracks activity, self-terminates if idle
@@ -113,15 +113,15 @@ init(Config) ->
             modules => [beamtalk_repl_actors]
         },
         
-        %% Workspace actor — introspection singleton (BT-423)
+        %% Workspace environment — introspection singleton (BT-423)
         %% Placed after actor_registry since its methods query the registry
         #{
-            id => beamtalk_workspace_actor,
-            start => {beamtalk_workspace_actor, start_link, [{local, 'Workspace'}]},
+            id => beamtalk_workspace_environment,
+            start => {beamtalk_workspace_environment, start_link, [{local, 'Workspace'}]},
             restart => permanent,
             shutdown => 5000,
             type => worker,
-            modules => [beamtalk_workspace_actor]
+            modules => [beamtalk_workspace_environment]
         },
         
         %% Bootstrap worker — sets singleton class variables (ADR 0019 Phase 2)

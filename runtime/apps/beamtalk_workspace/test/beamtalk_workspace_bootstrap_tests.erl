@@ -77,7 +77,7 @@ bootstrap_sets_workspace_class_var_test_() ->
      fun(_) -> cleanup_all() end,
      fun(_) ->
          [?_test(begin
-              {ok, WPid} = beamtalk_workspace_actor:start_link({local, 'Workspace'}),
+              {ok, WPid} = beamtalk_workspace_environment:start_link({local, 'Workspace'}),
               {ok, _} = beamtalk_workspace_bootstrap:start_link(),
               ?assertEqual(WPid, whereis('Workspace'))
           end)]

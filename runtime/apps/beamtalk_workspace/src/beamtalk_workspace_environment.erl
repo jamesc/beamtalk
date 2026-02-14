@@ -1,11 +1,11 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Workspace actor - actor introspection singleton.
+%%% @doc Workspace environment - actor introspection singleton.
 %%%
 %%% **DDD Context:** Workspace
 %%%
-%%% This gen_server implements the Workspace actor that provides
+%%% This gen_server implements the WorkspaceEnvironment that provides
 %%% actor introspection API for the live environment. It exposes
 %%% the actor registry as Beamtalk-level methods:
 %%% - `actors` - List all live actors as usable object references
@@ -36,7 +36,7 @@
 %%% // => [#Actor<Counter,0.132.0>]
 %%% ```
 
--module(beamtalk_workspace_actor).
+-module(beamtalk_workspace_environment).
 -behaviour(gen_server).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -62,19 +62,19 @@
 
 -type selector() :: atom().
 
--record(workspace_actor_state, {
+-record(workspace_environment_state, {
 }).
 
 %%====================================================================
 %% API
 %%====================================================================
 
-%% @doc Start the Workspace actor (non-singleton, for testing).
+%% @doc Start the Workspace environment (non-singleton, for testing).
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
     gen_server:start_link(?MODULE, [false], []).
 
-%% @doc Start a named Workspace actor for workspace use.
+%% @doc Start a named Workspace environment for workspace use.
 %% Registers with the given name via gen_server name registration.
 -spec start_link({local, atom()}) -> {ok, pid()} | {error, term()}.
 start_link(ServerName) ->
@@ -107,19 +107,19 @@ class_info() ->
 %% gen_server callbacks
 %%====================================================================
 
-%% @doc Initialize the Workspace actor state.
--spec init([boolean()]) -> {ok, #workspace_actor_state{}}.
+%% @doc Initialize the Workspace environment state.
+-spec init([boolean()]) -> {ok, #workspace_environment_state{}}.
 init([true]) ->
     %% Named instances self-register class since we're in beamtalk_workspace app
     %% (beamtalk_stdlib in beamtalk_runtime can't reference us)
     register_class(),
-    {ok, #workspace_actor_state{}};
+    {ok, #workspace_environment_state{}};
 init([false]) ->
-    {ok, #workspace_actor_state{}}.
+    {ok, #workspace_environment_state{}}.
 
 %% @doc Handle synchronous method calls.
--spec handle_call(term(), {pid(), term()}, #workspace_actor_state{}) ->
-    {reply, term(), #workspace_actor_state{}}.
+-spec handle_call(term(), {pid(), term()}, #workspace_environment_state{}) ->
+    {reply, term(), #workspace_environment_state{}}.
 
 handle_call({actors, []}, _From, State) ->
     Result = handle_actors(),
@@ -148,7 +148,7 @@ handle_call(Request, _From, State) ->
 %% @doc Handle asynchronous messages.
 %% Workspace binding dispatch uses beamtalk_actor:async_send/4 which
 %% sends {Selector, Args, FuturePid} as a cast.
--spec handle_cast(term(), #workspace_actor_state{}) -> {noreply, #workspace_actor_state{}}.
+-spec handle_cast(term(), #workspace_environment_state{}) -> {noreply, #workspace_environment_state{}}.
 
 handle_cast({actors, [], FuturePid}, State) when is_pid(FuturePid) ->
     Result = handle_actors(),
@@ -177,18 +177,18 @@ handle_cast(Msg, State) ->
     {noreply, State}.
 
 %% @doc Handle info messages.
--spec handle_info(term(), #workspace_actor_state{}) -> {noreply, #workspace_actor_state{}}.
+-spec handle_info(term(), #workspace_environment_state{}) -> {noreply, #workspace_environment_state{}}.
 handle_info(Info, State) ->
     ?LOG_DEBUG("Workspace received info", #{info => Info}),
     {noreply, State}.
 
 %% @doc Handle process termination.
--spec terminate(term(), #workspace_actor_state{}) -> ok.
+-spec terminate(term(), #workspace_environment_state{}) -> ok.
 terminate(_Reason, _State) ->
     ok.
 
 %% @doc Handle code change during hot reload.
--spec code_change(term(), #workspace_actor_state{}, term()) -> {ok, #workspace_actor_state{}}.
+-spec code_change(term(), #workspace_environment_state{}, term()) -> {ok, #workspace_environment_state{}}.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 

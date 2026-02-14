@@ -340,6 +340,28 @@ Stream(from: 1) | select: [...]
 
 **⚠️ Side effects are lazy:** In a pipeline like `stream collect: [:x | Transcript show: x. x * 2]`, the `show:` only runs when a terminal operation pulls elements through — not when the pipeline is defined.
 
+## Workspace Singletons
+
+The REPL provides convenience bindings for workspace singletons. You can use either the short binding name or the explicit class method:
+
+```beamtalk
+// Convenience binding (available in REPL)
+> Transcript show: 'hello'
+hello
+
+// Explicit form (works everywhere, including loaded classes)
+> TranscriptStream current show: 'hello'
+hello
+```
+
+Both forms work in the REPL. In loaded classes (`.bt` files), use the explicit form since convenience bindings are only available in REPL sessions.
+
+| Convenience Binding | Explicit Form | Description |
+|---------------------|---------------|-------------|
+| `Transcript` | `TranscriptStream current` | Output stream for debugging |
+| `Beamtalk` | `SystemDictionary current` | System dictionary |
+| `Workspace` | `WorkspaceEnvironment current` | Actor introspection |
+
 ## Exiting the REPL
 
 ```beamtalk
