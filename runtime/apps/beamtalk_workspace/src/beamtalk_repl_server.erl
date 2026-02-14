@@ -461,27 +461,30 @@ handle_op(<<"modules">>, _Params, Msg, SessionPid) ->
     ),
     beamtalk_repl_protocol:encode_modules(ModulesWithInfo, Msg, fun term_to_json/1);
 
-handle_op(<<"unload">>, Params, Msg, _SessionPid) ->
+handle_op(<<"unload">>, Params, Msg, SessionPid) ->
     ModuleBin = maps:get(<<"module">>, Params, <<>>),
     case ModuleBin of
         <<>> ->
             beamtalk_repl_protocol:encode_error(
                 {invalid_module, missing}, Msg, fun format_error_message/1);
         _ ->
-            Module = binary_to_atom(ModuleBin, utf8),
-            %% Resolve class name to BEAM module name if needed
-            ResolvedModule = case code:is_loaded(Module) of
-                {file, _} -> Module;
-                false -> resolve_class_to_module(Module)
-            end,
-            case code:is_loaded(ResolvedModule) of
-                {file, _} ->
-                    _ = code:soft_purge(ResolvedModule),
-                    _ = code:delete(ResolvedModule),
-                    beamtalk_repl_protocol:encode_status(ok, Msg, fun term_to_json/1);
-                false ->
+            case safe_to_existing_atom(ModuleBin) of
+                {error, badarg} ->
                     beamtalk_repl_protocol:encode_error(
-                        {module_not_loaded, Module}, Msg, fun format_error_message/1)
+                        {invalid_module_name, ModuleBin}, Msg, fun format_error_message/1);
+                {ok, Module} ->
+                    %% Resolve class name to BEAM module name if needed
+                    ResolvedModule = case code:is_loaded(Module) of
+                        {file, _} -> Module;
+                        false -> resolve_class_to_module(Module)
+                    end,
+                    case beamtalk_repl_shell:unload_module(SessionPid, ResolvedModule) of
+                        ok ->
+                            beamtalk_repl_protocol:encode_status(ok, Msg, fun term_to_json/1);
+                        {error, #beamtalk_error{} = Err} ->
+                            beamtalk_repl_protocol:encode_error(
+                                Err, Msg, fun format_error_message/1)
+                    end
             end
     end;
 
