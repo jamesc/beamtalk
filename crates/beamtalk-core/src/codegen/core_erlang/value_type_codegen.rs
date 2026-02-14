@@ -17,8 +17,6 @@ use crate::ast::{
 };
 use crate::docvec;
 
-use super::variable_context;
-
 // Auto-generated from lib/*.bt by build.rs — do not edit manually.
 include!(concat!(env!("OUT_DIR"), "/stdlib_types.rs"));
 
@@ -325,21 +323,16 @@ impl CoreErlangGenerator {
         let mangled = method.selector.to_erlang_atom();
         let arity = method.parameters.len() + 1; // +1 for Self
 
-        // Build parameter list
-        let mut params = vec!["Self".to_string()];
-        for param in &method.parameters {
-            let core_var = variable_context::VariableContext::to_core_var(&param.name);
-            params.push(core_var);
-        }
-
-        // Bind parameters in scope
+        // Bind parameters via fresh_var (not to_core_var) so names go through
+        // the counter and can't collide with sequencing temp vars — BT-369
         self.push_scope();
         // BT-295: Track method params for @primitive codegen
         self.current_method_params.clear();
+        let mut params = vec!["Self".to_string()];
         for param in &method.parameters {
-            let core_var = variable_context::VariableContext::to_core_var(&param.name);
-            self.bind_var(&param.name, &core_var);
-            self.current_method_params.push(core_var);
+            let var_name = self.fresh_var(&param.name);
+            self.current_method_params.push(var_name.clone());
+            params.push(var_name);
         }
 
         // Build method body parts
