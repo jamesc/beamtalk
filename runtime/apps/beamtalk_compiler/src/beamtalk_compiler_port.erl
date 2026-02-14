@@ -53,17 +53,23 @@ compile_expression(Port, Source, ModuleName, KnownVars) ->
         known_vars => KnownVars
     },
     RequestBin = term_to_binary(Request),
-    port_command(Port, RequestBin),
-    receive
-        {Port, {data, ResponseBin}} ->
-            Response = binary_to_term(ResponseBin),
-            handle_response(Response);
-        {Port, {exit_status, Status}} ->
-            ?LOG_ERROR("Compiler port exited", #{status => Status}),
-            {error, [<<"Compiler port exited unexpectedly">>]}
-    after 30000 ->
-        ?LOG_ERROR("Compiler port timeout", #{}),
-        {error, [<<"Compiler port timed out">>]}
+    try port_command(Port, RequestBin) of
+        true ->
+            receive
+                {Port, {data, ResponseBin}} ->
+                    Response = binary_to_term(ResponseBin),
+                    handle_response(Response);
+                {Port, {exit_status, Status}} ->
+                    ?LOG_ERROR("Compiler port exited", #{status => Status}),
+                    {error, [<<"Compiler port exited unexpectedly">>]}
+            after 30000 ->
+                ?LOG_ERROR("Compiler port timeout", #{}),
+                {error, [<<"Compiler port timed out">>]}
+            end
+    catch
+        error:badarg ->
+            ?LOG_ERROR("Compiler port not available", #{}),
+            {error, [<<"Compiler port is not available">>]}
     end.
 
 %% @doc Close the compiler port.

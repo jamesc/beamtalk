@@ -96,3 +96,10 @@ garbage_etf_handled_gracefully_test() ->
         ?assert(false)
     end,
     catch beamtalk_compiler_port:close(Port).
+
+compile_on_closed_port_returns_error_test() ->
+    Port = beamtalk_compiler_port:open(compiler_binary()),
+    beamtalk_compiler_port:close(Port),
+    %% Calling compile on a closed port should return error, not crash BEAM
+    Result = beamtalk_compiler_port:compile_expression(Port, <<"1">>, <<"t">>, []),
+    ?assertMatch({error, _}, Result).
