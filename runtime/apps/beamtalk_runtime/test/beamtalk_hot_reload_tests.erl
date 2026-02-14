@@ -72,6 +72,72 @@ code_change_handles_various_extra_test() ->
     ?assertMatch({ok, State}, beamtalk_hot_reload:code_change(v1, State, {migration, data})).
 
 %%====================================================================
+%% Tests for __class__ → $beamtalk_class migration (BT-399)
+%%====================================================================
+
+%% Old state with __class__ is migrated to $beamtalk_class
+migrate_old_class_key_test() ->
+    OldState = #{'__class__' => 'Counter', value => 0},
+    {ok, NewState} = beamtalk_hot_reload:code_change(v1, OldState, extra),
+    ?assertEqual('Counter', maps:get('$beamtalk_class', NewState)),
+    ?assertNot(maps:is_key('__class__', NewState)),
+    ?assertEqual(0, maps:get(value, NewState)).
+
+%% Already-migrated state (with $beamtalk_class) is unchanged
+migrate_new_state_unchanged_test() ->
+    State = #{'$beamtalk_class' => 'Counter', value => 42},
+    {ok, NewState} = beamtalk_hot_reload:code_change(v1, State, extra),
+    ?assertEqual(State, NewState).
+
+%% Non-map state is unchanged
+migrate_non_map_state_unchanged_test() ->
+    {ok, ListState} = beamtalk_hot_reload:code_change(v1, [1, 2], extra),
+    ?assertEqual([1, 2], ListState),
+    {ok, TupleState} = beamtalk_hot_reload:code_change(v1, {state, 42}, extra),
+    ?assertEqual({state, 42}, TupleState),
+    {ok, AtomState} = beamtalk_hot_reload:code_change(v1, undefined, extra),
+    ?assertEqual(undefined, AtomState).
+
+%% State with BOTH keys leaves $beamtalk_class unchanged (no overwrite)
+migrate_both_keys_no_overwrite_test() ->
+    State = #{'$beamtalk_class' => 'NewClass', '__class__' => 'OldClass', value => 1},
+    {ok, NewState} = beamtalk_hot_reload:code_change(v1, State, extra),
+    ?assertEqual('NewClass', maps:get('$beamtalk_class', NewState)).
+
+%% Empty map is unchanged
+migrate_empty_map_unchanged_test() ->
+    {ok, NewState} = beamtalk_hot_reload:code_change(v1, #{}, extra),
+    ?assertEqual(#{}, NewState).
+
+%% Map without either class key is unchanged
+migrate_plain_map_unchanged_test() ->
+    State = #{foo => bar, count => 0},
+    {ok, NewState} = beamtalk_hot_reload:code_change(v1, State, extra),
+    ?assertEqual(State, NewState).
+
+%% Migration is idempotent (applying twice yields same result)
+migrate_idempotent_test() ->
+    OldState = #{'__class__' => 'Counter', value => 0},
+    {ok, Once} = beamtalk_hot_reload:code_change(v1, OldState, extra),
+    {ok, Twice} = beamtalk_hot_reload:code_change(v1, Once, extra),
+    ?assertEqual(Once, Twice).
+
+%% Old state with methods and fields is fully migrated
+migrate_full_actor_state_test() ->
+    OldState = #{
+        '__class__' => 'Counter',
+        '__methods__' => #{increment => fun() -> ok end},
+        value => 42,
+        name => <<"test">>
+    },
+    {ok, NewState} = beamtalk_hot_reload:code_change(v1, OldState, extra),
+    ?assertEqual('Counter', maps:get('$beamtalk_class', NewState)),
+    ?assertNot(maps:is_key('__class__', NewState)),
+    ?assertEqual(42, maps:get(value, NewState)),
+    ?assertEqual(<<"test">>, maps:get(name, NewState)),
+    ?assert(maps:is_key('__methods__', NewState)).
+
+%%====================================================================
 %% Tests for trigger_code_change/2
 %%====================================================================
 

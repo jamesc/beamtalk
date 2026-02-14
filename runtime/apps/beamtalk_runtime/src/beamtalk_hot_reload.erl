@@ -10,7 +10,9 @@
 %% consistent state migration strategy across all gen_server behaviors in the
 %% runtime.
 %%
-%% **Current Strategy:** Preserve state unchanged ({ok, State}).
+%% **Current Migrations:**
+%% - BT-399: Rewrites `__class__` → `$beamtalk_class` tag key for actors
+%%   with pre-BT-324 state maps.
 %%
 %% **Future:** Can be extended to support:
 %% - Automatic field migration (add defaults, preserve unknowns)
@@ -36,9 +38,9 @@
 %% Called by all gen_server behaviors in the runtime when BEAM loads a new
 %% version of a module.
 %%
-%% **Current Behavior:** Returns state unchanged, supporting the OTP upgrade
-%% protocol without transforming state. This preserves existing behavior while
-%% centralizing the logic for future enhancement.
+%% **Current Migrations:**
+%% - Rewrites `__class__` → `$beamtalk_class` for pre-BT-324 actor state maps.
+%%   Idempotent: already-migrated state is returned unchanged.
 %%
 %% @param OldVsn The old version (either {down, Vsn} or Vsn atom/term)
 %% @param State The current gen_server state
@@ -46,6 +48,8 @@
 %% @returns {ok, NewState} on success, or {error, Reason} on failure
 -spec code_change(OldVsn :: term(), State :: term(), Extra :: term()) ->
     {ok, NewState :: term()} | {error, Reason :: term()}.
+code_change(_OldVsn, State, _Extra) when is_map(State) ->
+    {ok, maybe_migrate_class_key(State)};
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
@@ -77,6 +81,21 @@ trigger_code_change(Module, Pids) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
+
+%% @private
+%% Migrate old `__class__` tag key to `$beamtalk_class` (BT-399).
+%%
+%% Idempotent: if `$beamtalk_class` is already present, state is unchanged.
+%% If both keys are present, `$beamtalk_class` takes precedence (no overwrite).
+-spec maybe_migrate_class_key(map()) -> map().
+maybe_migrate_class_key(State) ->
+    ClassKey = beamtalk_tagged_map:class_key(),
+    case {maps:find(ClassKey, State), maps:find('__class__', State)} of
+        {error, {ok, Class}} ->
+            maps:remove('__class__', State#{ClassKey => Class});
+        _ ->
+            State
+    end.
 
 %% @private
 %% Try to trigger code_change for a single actor.
