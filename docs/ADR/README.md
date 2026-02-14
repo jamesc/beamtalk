@@ -49,6 +49,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0020](0020-connection-security.md) | Connection Security — mTLS, Proxies, and Network Overlays | Proposed | 2026-02-12 |
 | [0021](0021-streams-and-io-design.md) | Stream — Universal Data Interface | Accepted | 2026-02-12 |
 | [0022](0022-embedded-compiler-via-otp-port.md) | Embedded Compiler via OTP Port (with NIF option) | Accepted | 2026-02-14 |
+| [0023](0023-string-interpolation-and-binaries.md) | String Interpolation Syntax and Compilation | Proposed | 2026-02-14 |
 
 ## Creating New ADRs
 
