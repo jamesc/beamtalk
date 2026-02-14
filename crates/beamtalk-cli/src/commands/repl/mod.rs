@@ -15,11 +15,11 @@
 //! │                 │ TCP │    ├─ beamtalk_repl_server        │
 //! │  rustyline      │     │    ├─ beamtalk_session_sup        │
 //! └─────────────────┘     │    │   └─ beamtalk_repl_shell     │
-//!       │                 │    ├─ beamtalk_actor_registry      │
-//!   localhost:9000        │    └─ Compiler Daemon ◀───────────┤
+//!                         │    ├─ beamtalk_actor_registry      │
+//!                         │    └─ beamtalk_compiler_sup        │
+//!                         │         └─ beamtalk_compiler_server│
+//!                         │              └─ OTP Port (Rust)    │
 //!                         └──────────────────────────────────┘
-//!                                        │
-//!                                  Unix socket
 //! ```
 //!
 //! # Usage
@@ -55,7 +55,6 @@ use serde::Deserialize;
 use tracing::warn;
 
 use crate::commands::workspace;
-use crate::paths::is_daemon_running;
 
 use beamtalk_core::source_analysis::is_input_complete;
 
@@ -73,7 +72,7 @@ use client::ReplClient;
 use display::{format_value, history_path, print_help};
 use process::{
     BeamChildGuard, connect_with_retries, read_port_from_child, resolve_node_name, resolve_port,
-    start_beam_node, start_daemon,
+    start_beam_node,
 };
 
 /// JSON response from the REPL backend.
@@ -239,11 +238,6 @@ pub fn run(
     println!("Type :help for available commands, :exit to quit.");
     println!();
 
-    // Ensure compiler daemon is running
-    if is_daemon_running()?.is_none() {
-        start_daemon()?;
-    }
-
     // Discover project root for BEAM working directory
     let current_dir = std::env::current_dir().into_diagnostic()?;
     let project_root = workspace::discovery::discover_project_root(&current_dir);
@@ -284,6 +278,7 @@ pub fn run(
             &paths.runtime_ebin,
             &paths.workspace_ebin,
             &paths.jsx_ebin,
+            &paths.compiler_ebin,
             &paths.stdlib_ebin,
             !persistent, // auto_cleanup is opposite of persistent flag
             timeout,

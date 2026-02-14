@@ -11,7 +11,7 @@
 -export([new/2, new/3, get_bindings/1, set_bindings/2, clear_bindings/1,
          get_eval_counter/1, increment_eval_counter/1,
          get_loaded_modules/1, add_loaded_module/2, set_loaded_modules/2,
-         get_daemon_socket_path/1, get_listen_socket/1, get_port/1,
+         get_listen_socket/1, get_port/1,
          get_actor_registry/1, set_actor_registry/2,
          get_module_tracker/1, set_module_tracker/2]).
 
@@ -21,7 +21,6 @@
     listen_socket :: gen_tcp:socket() | undefined,
     port :: inet:port_number(),
     bindings :: map(),
-    daemon_socket_path :: string(),
     eval_counter :: non_neg_integer(),
     loaded_modules :: [atom()],
     actor_registry :: pid() | undefined,
@@ -36,20 +35,12 @@ new(ListenSocket, Port) ->
     new(ListenSocket, Port, #{}).
 
 %% @doc Create a new REPL state with options.
-%% Options:
-%%   - daemon_socket_path: Unix socket path for compiler daemon
-%%                         (default: ~/.beamtalk/daemon.sock)
 -spec new(gen_tcp:socket() | undefined, inet:port_number(), map()) -> state().
-new(ListenSocket, Port, Options) ->
-    DaemonSocketPath = case maps:get(daemon_socket_path, Options, undefined) of
-        undefined -> default_daemon_socket_path();
-        Path -> Path
-    end,
+new(ListenSocket, Port, _Options) ->
     #state{
         listen_socket = ListenSocket,
         port = Port,
         bindings = #{},
-        daemon_socket_path = DaemonSocketPath,
         eval_counter = 0,
         loaded_modules = [],
         actor_registry = undefined,
@@ -96,11 +87,6 @@ add_loaded_module(Module, State = #state{loaded_modules = Modules}) ->
 set_loaded_modules(Modules, State) ->
     State#state{loaded_modules = Modules}.
 
-%% @doc Get daemon socket path.
--spec get_daemon_socket_path(state()) -> string().
-get_daemon_socket_path(#state{daemon_socket_path = Path}) ->
-    Path.
-
 %% @doc Get listen socket.
 -spec get_listen_socket(state()) -> gen_tcp:socket() | undefined.
 get_listen_socket(#state{listen_socket = Socket}) ->
@@ -130,30 +116,3 @@ get_module_tracker(#state{module_tracker = Tracker}) ->
 -spec set_module_tracker(beamtalk_repl_modules:module_tracker(), state()) -> state().
 set_module_tracker(Tracker, State) ->
     State#state{module_tracker = Tracker}.
-
-%%% Internal functions
-
-%% @private
-%% Determine daemon socket path
-%% Priority:
-%%   1. BEAMTALK_DAEMON_SOCKET environment variable (if set)
-%%   2. Default: ~/.beamtalk/daemon.sock
-%% If HOME is unset, fail explicitly so behavior matches the daemon
-%% (which requires HOME to be set).
-default_daemon_socket_path() ->
-    case os:getenv("BEAMTALK_DAEMON_SOCKET") of
-        false -> default_daemon_socket_from_home();
-        "" -> default_daemon_socket_from_home();
-        SocketPath -> SocketPath
-    end.
-
-%% Get default socket path from HOME directory
-default_daemon_socket_from_home() ->
-    case os:getenv("HOME") of
-        false ->
-            Error0 = beamtalk_error:new(internal_error, 'ReplState'),
-            Error1 = beamtalk_error:with_hint(Error0, <<"Beamtalk REPL requires HOME to be set to locate the compiler daemon socket. Either set HOME, BEAMTALK_DAEMON_SOCKET, or pass daemon_socket_path in Options.">>),
-            erlang:error(Error1);
-        Home ->
-            filename:join([Home, ".beamtalk", "daemon.sock"])
-    end.

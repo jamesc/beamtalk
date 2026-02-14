@@ -31,6 +31,7 @@ pub enum RuntimeLayout {
 pub struct BeamPaths {
     pub runtime_ebin: PathBuf,
     pub workspace_ebin: PathBuf,
+    pub compiler_ebin: PathBuf,
     pub jsx_ebin: PathBuf,
     pub stdlib_ebin: PathBuf,
 }
@@ -51,6 +52,7 @@ pub fn beam_paths_for_layout(runtime_dir: &Path, layout: RuntimeLayout) -> BeamP
             BeamPaths {
                 runtime_ebin: build_lib_dir.join("beamtalk_runtime/ebin"),
                 workspace_ebin: build_lib_dir.join("beamtalk_workspace/ebin"),
+                compiler_ebin: build_lib_dir.join("beamtalk_compiler/ebin"),
                 jsx_ebin: build_lib_dir.join("jsx/ebin"),
                 // Stdlib beams are produced by `beamtalk build-stdlib` under apps/, not _build/
                 stdlib_ebin: runtime_dir.join("apps/beamtalk_stdlib/ebin"),
@@ -61,6 +63,7 @@ pub fn beam_paths_for_layout(runtime_dir: &Path, layout: RuntimeLayout) -> BeamP
             BeamPaths {
                 runtime_ebin: lib_dir.join("beamtalk_runtime/ebin"),
                 workspace_ebin: lib_dir.join("beamtalk_workspace/ebin"),
+                compiler_ebin: lib_dir.join("beamtalk_compiler/ebin"),
                 jsx_ebin: lib_dir.join("jsx/ebin"),
                 stdlib_ebin: lib_dir.join("beamtalk_stdlib/ebin"),
             }
@@ -146,6 +149,7 @@ pub fn beam_pa_args(paths: &BeamPaths) -> Vec<OsString> {
     let dirs = [
         &paths.runtime_ebin,
         &paths.workspace_ebin,
+        &paths.compiler_ebin,
         &paths.jsx_ebin,
         &paths.stdlib_ebin,
     ];
@@ -307,6 +311,10 @@ mod tests {
             PathBuf::from("/rt/_build/default/lib/beamtalk_workspace/ebin")
         );
         assert_eq!(
+            paths.compiler_ebin,
+            PathBuf::from("/rt/_build/default/lib/beamtalk_compiler/ebin")
+        );
+        assert_eq!(
             paths.jsx_ebin,
             PathBuf::from("/rt/_build/default/lib/jsx/ebin")
         );
@@ -320,8 +328,8 @@ mod tests {
     fn beam_pa_args_alternates_flag_and_path() {
         let paths = beam_paths(Path::new("/rt"));
         let args = beam_pa_args(&paths);
-        // Should be 8 elements: 4 dirs × 2 (flag + path)
-        assert_eq!(args.len(), 8);
+        // Should be 10 elements: 5 dirs × 2 (flag + path)
+        assert_eq!(args.len(), 10);
         for i in (0..args.len()).step_by(2) {
             assert_eq!(args[i], "-pa");
         }
@@ -340,6 +348,10 @@ mod tests {
         assert_eq!(
             paths.workspace_ebin,
             PathBuf::from("/usr/local/lib/beamtalk/lib/beamtalk_workspace/ebin")
+        );
+        assert_eq!(
+            paths.compiler_ebin,
+            PathBuf::from("/usr/local/lib/beamtalk/lib/beamtalk_compiler/ebin")
         );
         assert_eq!(
             paths.jsx_ebin,
