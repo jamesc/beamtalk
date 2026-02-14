@@ -141,6 +141,10 @@ impl ReplClient {
     }
 
     /// Get completions for a prefix.
+    ///
+    /// Currently unused — `ReplCompleter` uses a separate `ProtocolClient`
+    /// with a short timeout to avoid blocking the main REPL connection.
+    /// Kept for API completeness alongside other protocol operations.
     #[allow(dead_code)]
     pub(super) fn complete(&mut self, prefix: &str) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({

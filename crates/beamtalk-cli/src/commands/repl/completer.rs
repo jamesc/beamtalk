@@ -133,7 +133,7 @@ impl Completer for ReplCompleter {
         let word_start = line_to_pos
             .char_indices()
             .rev()
-            .find(|&(_, c)| !c.is_alphanumeric() && c != '_')
+            .find(|&(_, c)| !c.is_ascii_alphanumeric() && c != '_')
             .map_or(0, |(i, c)| i + c.len_utf8());
         let prefix = &line_to_pos[word_start..];
 
@@ -166,3 +166,100 @@ impl Hinter for ReplCompleter {
 impl Highlighter for ReplCompleter {}
 impl Validator for ReplCompleter {}
 impl Helper for ReplCompleter {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: extract word start position from a line (same logic as Completer).
+    fn find_word_start(line: &str) -> usize {
+        line.char_indices()
+            .rev()
+            .find(|&(_, c)| !c.is_ascii_alphanumeric() && c != '_')
+            .map_or(0, |(i, c)| i + c.len_utf8())
+    }
+
+    /// Helper: get REPL command completions for a prefix.
+    fn command_completions(prefix: &str) -> Vec<String> {
+        REPL_COMMANDS
+            .iter()
+            .filter(|cmd| cmd.starts_with(prefix))
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    #[test]
+    fn repl_command_completion_matches_prefix() {
+        let candidates = command_completions(":hel");
+        assert!(candidates.contains(&":help".to_string()));
+        assert!(candidates.iter().all(|c| c.starts_with(":hel")));
+    }
+
+    #[test]
+    fn repl_command_completion_multiple_matches() {
+        let candidates = command_completions(":r");
+        assert!(candidates.contains(&":reload".to_string()));
+        assert!(candidates.contains(&":r".to_string()));
+    }
+
+    #[test]
+    fn repl_command_completion_unknown_prefix_is_empty() {
+        let candidates = command_completions(":unknown");
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn repl_command_completion_colon_only() {
+        let candidates = command_completions(":");
+        assert_eq!(candidates.len(), REPL_COMMANDS.len());
+    }
+
+    #[test]
+    fn word_boundary_detects_last_identifier() {
+        let start = find_word_start("obj message");
+        assert_eq!(&"obj message"[start..], "message");
+    }
+
+    #[test]
+    fn word_boundary_single_word() {
+        let start = find_word_start("Counter");
+        assert_eq!(&"Counter"[start..], "Counter");
+    }
+
+    #[test]
+    fn word_boundary_after_space() {
+        let start = find_word_start("obj ");
+        assert_eq!(&"obj "[start..], "");
+    }
+
+    #[test]
+    fn word_boundary_after_dot() {
+        let start = find_word_start("self.val");
+        assert_eq!(&"self.val"[start..], "val");
+    }
+
+    #[test]
+    fn word_boundary_after_colon() {
+        let start = find_word_start("ifTrue:");
+        assert_eq!(&"ifTrue:"[start..], "");
+    }
+
+    #[test]
+    fn word_boundary_unicode_non_ascii_is_boundary() {
+        // Unicode alpha chars are treated as boundaries (lexer only allows ASCII)
+        let start = find_word_start("über foo");
+        assert_eq!(&"über foo"[start..], "foo");
+    }
+
+    #[test]
+    fn word_boundary_empty_input() {
+        let start = find_word_start("");
+        assert_eq!(start, 0);
+    }
+
+    #[test]
+    fn word_boundary_underscore_in_identifier() {
+        let start = find_word_start("my_var");
+        assert_eq!(&"my_var"[start..], "my_var");
+    }
+}
