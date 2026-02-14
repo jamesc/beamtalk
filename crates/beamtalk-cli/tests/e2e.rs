@@ -1009,8 +1009,11 @@ impl ReplClient {
         let state = response
             .get("state")
             .cloned()
-            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
-        Ok(state.to_string())
+            .unwrap_or(serde_json::Value::Null);
+        match state {
+            serde_json::Value::String(s) => Ok(s),
+            other => Ok(other.to_string()),
+        }
     }
 
     /// Kill an actor by PID string.

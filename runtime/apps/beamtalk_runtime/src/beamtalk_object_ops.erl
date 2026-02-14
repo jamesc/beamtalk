@@ -96,14 +96,7 @@ dispatch('printString', [], _Self, State) ->
     {reply, Str, State};
 
 dispatch(inspect, [], _Self, State) ->
-    ClassName = beamtalk_tagged_map:class_of(State, 'Object'),
-    UserFields = beamtalk_reflection:field_names(State),
-    FieldStrs = [io_lib:format("~p: ~p", [K, maps:get(K, State)]) || K <- UserFields],
-    FieldsPart = case FieldStrs of
-        [] -> <<"">>;
-        _ -> iolist_to_binary([<<" (">>, lists:join(<<", ">>, FieldStrs), <<")">>])
-    end,
-    Str = iolist_to_binary([<<"a ">>, atom_to_binary(ClassName, utf8), FieldsPart]),
+    Str = beamtalk_reflection:inspect_string(State),
     {reply, Str, State};
 
 dispatch(describe, [], _Self, State) ->
