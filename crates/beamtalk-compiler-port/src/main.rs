@@ -311,7 +311,7 @@ fn handle_compile(request: &Map) -> Term {
     let options = beamtalk_core::CompilerOptions {
         stdlib_mode,
         allow_primitives: false,
-        workspace_mode: false,
+        workspace_mode,
     };
     let primitive_diags =
         beamtalk_core::semantic_analysis::primitive_validator::validate_primitives(

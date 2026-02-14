@@ -128,13 +128,11 @@ handle_cast(_Msg, State) ->
 
 handle_info({Port, {exit_status, Status}}, #state{port = Port} = State) ->
     ?LOG_ERROR("Compiler port exited unexpectedly", #{status => Status}),
-    NewPort = open_port(),
-    {noreply, State#state{port = NewPort}};
+    {stop, {port_exit_status, Status}, State};
 
 handle_info({'EXIT', Port, Reason}, #state{port = Port} = State) ->
     ?LOG_ERROR("Compiler port EXIT", #{reason => Reason}),
-    NewPort = open_port(),
-    {noreply, State#state{port = NewPort}};
+    {stop, {port_exit, Reason}, State};
 
 handle_info(_Info, State) ->
     {noreply, State}.

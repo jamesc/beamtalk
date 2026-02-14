@@ -148,9 +148,16 @@ compile_core_erlang_invalid() ->
     ?assertMatch({error, _}, Result).
 
 backend_default_port() ->
-    %% With no env var set, default should be port
-    os:unsetenv("BEAMTALK_COMPILER"),
-    ?assertEqual(port, beamtalk_compiler_backend:backend()).
+    Original = os:getenv("BEAMTALK_COMPILER"),
+    try
+        os:unsetenv("BEAMTALK_COMPILER"),
+        ?assertEqual(port, beamtalk_compiler_backend:backend())
+    after
+        case Original of
+            false -> ok;
+            Value -> os:putenv("BEAMTALK_COMPILER", Value)
+        end
+    end.
 
 multiple_compiles() ->
     {ok, _, []} = beamtalk_compiler:compile_expression(<<"1 + 2">>, <<"m1">>, []),
