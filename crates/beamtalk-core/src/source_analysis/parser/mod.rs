@@ -856,6 +856,32 @@ mod tests {
     }
 
     #[test]
+    fn parse_comma_operator_in_block_inside_list() {
+        // BT-415: Comma should work as binary operator inside blocks, even inside lists
+        let module = parse_ok("#([:x | x , 'suffix'], 'b')");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::ListLiteral { elements, .. } => {
+                assert_eq!(elements.len(), 2);
+                // First element should be a block containing a comma binary message
+                match &elements[0] {
+                    Expression::Block(block) => {
+                        assert_eq!(block.body.len(), 1);
+                        assert!(matches!(
+                            &block.body[0],
+                            Expression::MessageSend {
+                                selector: MessageSelector::Binary(op), ..
+                            } if op.as_str() == ","
+                        ));
+                    }
+                    _ => panic!("Expected block as first list element"),
+                }
+            }
+            _ => panic!("Expected list literal"),
+        }
+    }
+
+    #[test]
     fn parse_keyword_message() {
         let module = parse_ok("array at: 1 put: 'x'");
         assert_eq!(module.expressions.len(), 1);

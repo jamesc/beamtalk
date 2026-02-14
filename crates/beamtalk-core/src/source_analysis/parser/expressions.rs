@@ -547,6 +547,9 @@ impl Parser {
         }
 
         // Parse block body — statements separated by periods or newlines (BT-360)
+        // BT-415: Reset in_collection_literal so comma works as binary operator inside blocks
+        let prev_in_collection = self.in_collection_literal;
+        self.in_collection_literal = false;
         let mut body = Vec::new();
         while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
             let expr = self.parse_expression();
@@ -569,6 +572,7 @@ impl Parser {
             .expect(&TokenKind::RightBracket, "Expected ']' to close block")
             .map_or(start, |t: Token| t.span());
 
+        self.in_collection_literal = prev_in_collection;
         let span = start.merge(end);
         let block = Block::new(parameters, body, span);
         Expression::Block(block)
@@ -1055,7 +1059,11 @@ impl Parser {
             .unwrap()
             .span();
 
+        // BT-415: Reset in_collection_literal so comma works as binary operator in parens
+        let prev_in_collection = self.in_collection_literal;
+        self.in_collection_literal = false;
         let inner = self.parse_expression();
+        self.in_collection_literal = prev_in_collection;
 
         let end = self
             .expect(&TokenKind::RightParen, "Expected ')' to close parentheses")
