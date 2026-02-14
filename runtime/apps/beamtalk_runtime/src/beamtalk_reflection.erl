@@ -67,7 +67,6 @@ inspect_string(State) when is_map(State) ->
     end,
     iolist_to_binary([<<"a ">>, atom_to_binary(ClassName, utf8), FieldsPart]).
 
-%% @private Format a field key as binary, handling non-atom keys defensively.
--spec format_key(term()) -> binary().
-format_key(K) when is_atom(K) -> atom_to_binary(K, utf8);
-format_key(K) -> beamtalk_primitive:print_string(K).
+%% @private Format a field key as binary.
+-spec format_key(atom()) -> binary().
+format_key(K) when is_atom(K) -> atom_to_binary(K, utf8).

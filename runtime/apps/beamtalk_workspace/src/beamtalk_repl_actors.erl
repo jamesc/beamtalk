@@ -69,23 +69,60 @@ register_actor(RegistryPid, ActorPid, ClassName, ModuleName) ->
 
 %% @doc Actor spawn callback for beamtalk_runtime integration.
 %% This is registered via application:set_env by beamtalk_workspace_app:start/2.
-%% Best-effort: catches errors so the runtime spawn path never crashes.
--spec on_actor_spawned(pid(), pid(), atom(), atom()) -> ok.
+%% Handles each tracking step individually: if registry registration fails,
+%% we skip workspace_meta registration to avoid inconsistent state.
+%% Returns ok on success, {error, Reason} on failure.
+-spec on_actor_spawned(pid(), pid(), atom(), atom()) -> ok | {error, term()}.
 on_actor_spawned(RegistryPid, ActorPid, ClassName, ModuleName) ->
+    case try_register_actor(RegistryPid, ActorPid, ClassName, ModuleName) of
+        ok ->
+            %% Registry succeeded — now register with workspace_meta.
+            %% workspace_meta uses cast, so failures are limited to noproc.
+            try_register_workspace_meta(ActorPid, ClassName),
+            beamtalk_workspace_meta:update_activity(),
+            ok;
+        {error, Reason} ->
+            ?LOG_ERROR("REPL actor registry registration failed", #{
+                registry_pid => RegistryPid,
+                actor_pid => ActorPid,
+                class => ClassName,
+                module => ModuleName,
+                reason => Reason
+            }),
+            {error, {registry_failed, Reason}}
+    end.
+
+%% @private Register actor with the REPL actor registry (gen_server:call).
+-spec try_register_actor(pid(), pid(), atom(), atom()) -> ok | {error, term()}.
+try_register_actor(RegistryPid, ActorPid, ClassName, ModuleName) ->
     try
-        register_actor(RegistryPid, ActorPid, ClassName, ModuleName),
-        beamtalk_workspace_meta:register_actor(ActorPid),
-        beamtalk_workspace_meta:update_activity()
+        register_actor(RegistryPid, ActorPid, ClassName, ModuleName)
+    catch
+        exit:{noproc, _} ->
+            {error, registry_not_running};
+        exit:Reason ->
+            {error, {registry_exit, Reason}};
+        Kind:Reason ->
+            {error, {Kind, Reason}}
+    end.
+
+%% @private Register actor with workspace_meta (gen_server:cast).
+%% Logs a warning if workspace_meta is not running, but does not fail
+%% since the actor is already tracked by the registry.
+-spec try_register_workspace_meta(pid(), atom()) -> ok.
+try_register_workspace_meta(ActorPid, ClassName) ->
+    try
+        beamtalk_workspace_meta:register_actor(ActorPid)
     catch
         Kind:Reason ->
-            ?LOG_WARNING("REPL actor tracking failed", #{
-                kind => Kind,
-                reason => Reason,
+            ?LOG_WARNING("Workspace meta actor registration failed", #{
                 actor_pid => ActorPid,
-                class => ClassName
-            })
-    end,
-    ok.
+                class => ClassName,
+                kind => Kind,
+                reason => Reason
+            }),
+            ok
+    end.
 
 %% @doc Unregister an actor from the registry.
 -spec unregister_actor(pid(), pid()) -> ok.
