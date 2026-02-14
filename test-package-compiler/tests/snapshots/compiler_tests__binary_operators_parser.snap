@@ -229,10 +229,54 @@ Module {
         Assignment {
             target: Identifier(
                 Identifier {
+                    name: "exponentiation",
+                    span: Span {
+                        start: 341,
+                        end: 355,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Literal(
+                    Integer(
+                        2,
+                    ),
+                    Span {
+                        start: 359,
+                        end: 360,
+                    },
+                ),
+                selector: Binary(
+                    "**",
+                ),
+                arguments: [
+                    Literal(
+                        Integer(
+                            10,
+                        ),
+                        Span {
+                            start: 364,
+                            end: 366,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 359,
+                    end: 366,
+                },
+            },
+            span: Span {
+                start: 341,
+                end: 366,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
                     name: "equalityCheck",
                     span: Span {
-                        start: 378,
-                        end: 391,
+                        start: 404,
+                        end: 417,
                     },
                 },
             ),
@@ -242,8 +286,8 @@ Module {
                         5,
                     ),
                     Span {
-                        start: 395,
-                        end: 396,
+                        start: 421,
+                        end: 422,
                     },
                 ),
                 selector: Binary(
@@ -255,19 +299,19 @@ Module {
                             5,
                         ),
                         Span {
-                            start: 400,
-                            end: 401,
+                            start: 426,
+                            end: 427,
                         },
                     ),
                 ],
                 span: Span {
-                    start: 395,
-                    end: 401,
+                    start: 421,
+                    end: 427,
                 },
             },
             span: Span {
-                start: 378,
-                end: 401,
+                start: 404,
+                end: 427,
             },
         },
         Assignment {
@@ -275,8 +319,8 @@ Module {
                 Identifier {
                     name: "strictEqualCheck",
                     span: Span {
-                        start: 426,
-                        end: 442,
+                        start: 452,
+                        end: 468,
                     },
                 },
             ),
@@ -286,8 +330,8 @@ Module {
                         "hello",
                     ),
                     Span {
-                        start: 446,
-                        end: 453,
+                        start: 472,
+                        end: 479,
                     },
                 ),
                 selector: Binary(
@@ -299,19 +343,19 @@ Module {
                             "hello",
                         ),
                         Span {
-                            start: 456,
-                            end: 463,
+                            start: 482,
+                            end: 489,
                         },
                     ),
                 ],
                 span: Span {
-                    start: 446,
-                    end: 463,
+                    start: 472,
+                    end: 489,
                 },
             },
             span: Span {
-                start: 426,
-                end: 463,
+                start: 452,
+                end: 489,
             },
         },
         Assignment {
@@ -319,8 +363,8 @@ Module {
                 Identifier {
                     name: "strictNotEqualCheck",
                     span: Span {
-                        start: 491,
-                        end: 510,
+                        start: 517,
+                        end: 536,
                     },
                 },
             ),
@@ -330,8 +374,8 @@ Module {
                         42,
                     ),
                     Span {
-                        start: 514,
-                        end: 516,
+                        start: 540,
+                        end: 542,
                     },
                 ),
                 selector: Binary(
@@ -343,19 +387,19 @@ Module {
                             99,
                         ),
                         Span {
-                            start: 520,
-                            end: 522,
+                            start: 546,
+                            end: 548,
                         },
                     ),
                 ],
                 span: Span {
-                    start: 514,
-                    end: 522,
+                    start: 540,
+                    end: 548,
                 },
             },
             span: Span {
-                start: 491,
-                end: 522,
+                start: 517,
+                end: 548,
             },
         },
         Assignment {
@@ -363,8 +407,8 @@ Module {
                 Identifier {
                     name: "lessThan",
                     span: Span {
-                        start: 537,
-                        end: 545,
+                        start: 563,
+                        end: 571,
                     },
                 },
             ),
@@ -374,8 +418,8 @@ Module {
                         3,
                     ),
                     Span {
-                        start: 549,
-                        end: 550,
+                        start: 575,
+                        end: 576,
                     },
                 ),
                 selector: Binary(
@@ -387,19 +431,19 @@ Module {
                             10,
                         ),
                         Span {
-                            start: 553,
-                            end: 555,
+                            start: 579,
+                            end: 581,
                         },
                     ),
                 ],
                 span: Span {
-                    start: 549,
-                    end: 555,
+                    start: 575,
+                    end: 581,
                 },
             },
             span: Span {
-                start: 537,
-                end: 555,
+                start: 563,
+                end: 581,
             },
         },
         Assignment {
@@ -407,8 +451,8 @@ Module {
                 Identifier {
                     name: "greaterThan",
                     span: Span {
-                        start: 573,
-                        end: 584,
+                        start: 599,
+                        end: 610,
                     },
                 },
             ),
@@ -418,8 +462,8 @@ Module {
                         15,
                     ),
                     Span {
-                        start: 588,
-                        end: 590,
+                        start: 614,
+                        end: 616,
                     },
                 ),
                 selector: Binary(
@@ -431,19 +475,19 @@ Module {
                             8,
                         ),
                         Span {
-                            start: 593,
-                            end: 594,
+                            start: 619,
+                            end: 620,
                         },
                     ),
                 ],
                 span: Span {
-                    start: 588,
-                    end: 594,
+                    start: 614,
+                    end: 620,
                 },
             },
             span: Span {
-                start: 573,
-                end: 594,
+                start: 599,
+                end: 620,
             },
         },
         Assignment {
@@ -451,8 +495,8 @@ Module {
                 Identifier {
                     name: "lessOrEqual",
                     span: Span {
-                        start: 618,
-                        end: 629,
+                        start: 644,
+                        end: 655,
                     },
                 },
             ),
@@ -462,8 +506,8 @@ Module {
                         5,
                     ),
                     Span {
-                        start: 633,
-                        end: 634,
+                        start: 659,
+                        end: 660,
                     },
                 ),
                 selector: Binary(
@@ -475,19 +519,19 @@ Module {
                             5,
                         ),
                         Span {
-                            start: 638,
-                            end: 639,
+                            start: 664,
+                            end: 665,
                         },
                     ),
                 ],
                 span: Span {
-                    start: 633,
-                    end: 639,
+                    start: 659,
+                    end: 665,
                 },
             },
             span: Span {
-                start: 618,
-                end: 639,
+                start: 644,
+                end: 665,
             },
         },
         Assignment {
@@ -495,8 +539,8 @@ Module {
                 Identifier {
                     name: "greaterOrEqual",
                     span: Span {
-                        start: 666,
-                        end: 680,
+                        start: 692,
+                        end: 706,
                     },
                 },
             ),
@@ -506,8 +550,8 @@ Module {
                         10,
                     ),
                     Span {
-                        start: 684,
-                        end: 686,
+                        start: 710,
+                        end: 712,
                     },
                 ),
                 selector: Binary(
@@ -519,19 +563,19 @@ Module {
                             10,
                         ),
                         Span {
-                            start: 690,
-                            end: 692,
+                            start: 716,
+                            end: 718,
                         },
                     ),
                 ],
                 span: Span {
-                    start: 684,
-                    end: 692,
+                    start: 710,
+                    end: 718,
                 },
             },
             span: Span {
-                start: 666,
-                end: 692,
+                start: 692,
+                end: 718,
             },
         },
         Assignment {
@@ -539,8 +583,8 @@ Module {
                 Identifier {
                     name: "stringConcat",
                     span: Span {
-                        start: 730,
-                        end: 742,
+                        start: 756,
+                        end: 768,
                     },
                 },
             ),
@@ -550,8 +594,8 @@ Module {
                         "Hello",
                     ),
                     Span {
-                        start: 746,
-                        end: 753,
+                        start: 772,
+                        end: 779,
                     },
                 ),
                 selector: Binary(
@@ -563,19 +607,19 @@ Module {
                             " World",
                         ),
                         Span {
-                            start: 757,
-                            end: 765,
+                            start: 783,
+                            end: 791,
                         },
                     ),
                 ],
                 span: Span {
-                    start: 746,
-                    end: 765,
+                    start: 772,
+                    end: 791,
                 },
             },
             span: Span {
-                start: 730,
-                end: 765,
+                start: 756,
+                end: 791,
             },
         },
         Assignment {
@@ -583,8 +627,8 @@ Module {
                 Identifier {
                     name: "precedence1",
                     span: Span {
-                        start: 884,
-                        end: 895,
+                        start: 910,
+                        end: 921,
                     },
                 },
             ),
@@ -594,8 +638,8 @@ Module {
                         2,
                     ),
                     Span {
-                        start: 899,
-                        end: 900,
+                        start: 925,
+                        end: 926,
                     },
                 ),
                 selector: Binary(
@@ -608,8 +652,8 @@ Module {
                                 3,
                             ),
                             Span {
-                                start: 903,
-                                end: 904,
+                                start: 929,
+                                end: 930,
                             },
                         ),
                         selector: Binary(
@@ -621,25 +665,25 @@ Module {
                                     4,
                                 ),
                                 Span {
-                                    start: 907,
-                                    end: 908,
+                                    start: 933,
+                                    end: 934,
                                 },
                             ),
                         ],
                         span: Span {
-                            start: 903,
-                            end: 908,
+                            start: 929,
+                            end: 934,
                         },
                     },
                 ],
                 span: Span {
-                    start: 899,
-                    end: 908,
+                    start: 925,
+                    end: 934,
                 },
             },
             span: Span {
-                start: 884,
-                end: 908,
+                start: 910,
+                end: 934,
             },
         },
         Assignment {
@@ -647,8 +691,8 @@ Module {
                 Identifier {
                     name: "precedence2",
                     span: Span {
-                        start: 940,
-                        end: 951,
+                        start: 966,
+                        end: 977,
                     },
                 },
             ),
@@ -658,8 +702,8 @@ Module {
                         10,
                     ),
                     Span {
-                        start: 955,
-                        end: 957,
+                        start: 981,
+                        end: 983,
                     },
                 ),
                 selector: Binary(
@@ -672,8 +716,8 @@ Module {
                                 5,
                             ),
                             Span {
-                                start: 960,
-                                end: 961,
+                                start: 986,
+                                end: 987,
                             },
                         ),
                         selector: Binary(
@@ -685,25 +729,25 @@ Module {
                                     2,
                                 ),
                                 Span {
-                                    start: 964,
-                                    end: 965,
+                                    start: 990,
+                                    end: 991,
                                 },
                             ),
                         ],
                         span: Span {
-                            start: 960,
-                            end: 965,
+                            start: 986,
+                            end: 991,
                         },
                     },
                 ],
                 span: Span {
-                    start: 955,
-                    end: 965,
+                    start: 981,
+                    end: 991,
                 },
             },
             span: Span {
-                start: 940,
-                end: 965,
+                start: 966,
+                end: 991,
             },
         },
         Assignment {
@@ -711,8 +755,8 @@ Module {
                 Identifier {
                     name: "nested",
                     span: Span {
-                        start: 1018,
-                        end: 1024,
+                        start: 1044,
+                        end: 1050,
                     },
                 },
             ),
@@ -724,8 +768,8 @@ Module {
                                 3,
                             ),
                             Span {
-                                start: 1029,
-                                end: 1030,
+                                start: 1055,
+                                end: 1056,
                             },
                         ),
                         selector: Binary(
@@ -737,19 +781,19 @@ Module {
                                     4,
                                 ),
                                 Span {
-                                    start: 1033,
-                                    end: 1034,
+                                    start: 1059,
+                                    end: 1060,
                                 },
                             ),
                         ],
                         span: Span {
-                            start: 1029,
-                            end: 1034,
+                            start: 1055,
+                            end: 1060,
                         },
                     },
                     span: Span {
-                        start: 1028,
-                        end: 1035,
+                        start: 1054,
+                        end: 1061,
                     },
                 },
                 selector: Binary(
@@ -763,8 +807,8 @@ Module {
                                     10,
                                 ),
                                 Span {
-                                    start: 1039,
-                                    end: 1041,
+                                    start: 1065,
+                                    end: 1067,
                                 },
                             ),
                             selector: Binary(
@@ -776,30 +820,30 @@ Module {
                                         2,
                                     ),
                                     Span {
-                                        start: 1044,
-                                        end: 1045,
+                                        start: 1070,
+                                        end: 1071,
                                     },
                                 ),
                             ],
                             span: Span {
-                                start: 1039,
-                                end: 1045,
+                                start: 1065,
+                                end: 1071,
                             },
                         },
                         span: Span {
-                            start: 1038,
-                            end: 1046,
+                            start: 1064,
+                            end: 1072,
                         },
                     },
                 ],
                 span: Span {
-                    start: 1028,
-                    end: 1046,
+                    start: 1054,
+                    end: 1072,
                 },
             },
             span: Span {
-                start: 1018,
-                end: 1046,
+                start: 1044,
+                end: 1072,
             },
         },
         Assignment {
@@ -807,8 +851,8 @@ Module {
                 Identifier {
                     name: "blockWithOp",
                     span: Span {
-                        start: 1073,
-                        end: 1084,
+                        start: 1099,
+                        end: 1110,
                     },
                 },
             ),
@@ -818,15 +862,15 @@ Module {
                         BlockParameter {
                             name: "x",
                             span: Span {
-                                start: 1090,
-                                end: 1091,
+                                start: 1116,
+                                end: 1117,
                             },
                         },
                         BlockParameter {
                             name: "y",
                             span: Span {
-                                start: 1093,
-                                end: 1094,
+                                start: 1119,
+                                end: 1120,
                             },
                         },
                     ],
@@ -836,8 +880,8 @@ Module {
                                 Identifier {
                                     name: "x",
                                     span: Span {
-                                        start: 1097,
-                                        end: 1098,
+                                        start: 1123,
+                                        end: 1124,
                                     },
                                 },
                             ),
@@ -850,8 +894,8 @@ Module {
                                         Identifier {
                                             name: "y",
                                             span: Span {
-                                                start: 1101,
-                                                end: 1102,
+                                                start: 1127,
+                                                end: 1128,
                                             },
                                         },
                                     ),
@@ -864,32 +908,32 @@ Module {
                                                 2,
                                             ),
                                             Span {
-                                                start: 1105,
-                                                end: 1106,
+                                                start: 1131,
+                                                end: 1132,
                                             },
                                         ),
                                     ],
                                     span: Span {
-                                        start: 1101,
-                                        end: 1106,
+                                        start: 1127,
+                                        end: 1132,
                                     },
                                 },
                             ],
                             span: Span {
-                                start: 1097,
-                                end: 1106,
+                                start: 1123,
+                                end: 1132,
                             },
                         },
                     ],
                     span: Span {
-                        start: 1088,
-                        end: 1107,
+                        start: 1114,
+                        end: 1133,
                     },
                 },
             ),
             span: Span {
-                start: 1073,
-                end: 1107,
+                start: 1099,
+                end: 1133,
             },
         },
         Assignment {
@@ -897,8 +941,8 @@ Module {
                 Identifier {
                     name: "x",
                     span: Span {
-                        start: 1161,
-                        end: 1162,
+                        start: 1187,
+                        end: 1188,
                     },
                 },
             ),
@@ -907,13 +951,13 @@ Module {
                     10,
                 ),
                 Span {
-                    start: 1166,
-                    end: 1168,
+                    start: 1192,
+                    end: 1194,
                 },
             ),
             span: Span {
-                start: 1161,
-                end: 1168,
+                start: 1187,
+                end: 1194,
             },
         },
         Assignment {
@@ -921,8 +965,8 @@ Module {
                 Identifier {
                     name: "y",
                     span: Span {
-                        start: 1169,
-                        end: 1170,
+                        start: 1195,
+                        end: 1196,
                     },
                 },
             ),
@@ -931,13 +975,13 @@ Module {
                     3,
                 ),
                 Span {
-                    start: 1174,
-                    end: 1175,
+                    start: 1200,
+                    end: 1201,
                 },
             ),
             span: Span {
-                start: 1169,
-                end: 1175,
+                start: 1195,
+                end: 1201,
             },
         },
         Assignment {
@@ -945,8 +989,8 @@ Module {
                 Identifier {
                     name: "condition",
                     span: Span {
-                        start: 1176,
-                        end: 1185,
+                        start: 1202,
+                        end: 1211,
                     },
                 },
             ),
@@ -957,8 +1001,8 @@ Module {
                             Identifier {
                                 name: "x",
                                 span: Span {
-                                    start: 1190,
-                                    end: 1191,
+                                    start: 1216,
+                                    end: 1217,
                                 },
                             },
                         ),
@@ -971,19 +1015,19 @@ Module {
                                     5,
                                 ),
                                 Span {
-                                    start: 1194,
-                                    end: 1195,
+                                    start: 1220,
+                                    end: 1221,
                                 },
                             ),
                         ],
                         span: Span {
-                            start: 1190,
-                            end: 1195,
+                            start: 1216,
+                            end: 1221,
                         },
                     },
                     span: Span {
-                        start: 1189,
-                        end: 1196,
+                        start: 1215,
+                        end: 1222,
                     },
                 },
                 selector: Keyword(
@@ -991,8 +1035,8 @@ Module {
                         KeywordPart {
                             keyword: "and:",
                             span: Span {
-                                start: 1197,
-                                end: 1201,
+                                start: 1223,
+                                end: 1227,
                             },
                         },
                     ],
@@ -1007,8 +1051,8 @@ Module {
                                         Identifier {
                                             name: "y",
                                             span: Span {
-                                                start: 1203,
-                                                end: 1204,
+                                                start: 1229,
+                                                end: 1230,
                                             },
                                         },
                                     ),
@@ -1021,38 +1065,38 @@ Module {
                                                 10,
                                             ),
                                             Span {
-                                                start: 1207,
-                                                end: 1209,
+                                                start: 1233,
+                                                end: 1235,
                                             },
                                         ),
                                     ],
                                     span: Span {
-                                        start: 1203,
-                                        end: 1209,
+                                        start: 1229,
+                                        end: 1235,
                                     },
                                 },
                             ],
                             span: Span {
-                                start: 1202,
-                                end: 1210,
+                                start: 1228,
+                                end: 1236,
                             },
                         },
                     ),
                 ],
                 span: Span {
-                    start: 1189,
-                    end: 1210,
+                    start: 1215,
+                    end: 1236,
                 },
             },
             span: Span {
-                start: 1176,
-                end: 1210,
+                start: 1202,
+                end: 1236,
             },
         },
     ],
     span: Span {
         start: 241,
-        end: 1210,
+        end: 1236,
     },
     leading_comments: [
         Comment {
