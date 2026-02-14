@@ -306,10 +306,9 @@ pub fn generate_with_name_and_source(
 /// pragma-driven dispatch information from the compiled stdlib. The codegen
 /// consults this table before falling back to hardcoded dispatch tables.
 ///
-/// BT-374 / ADR 0010: When `workspace_mode` is true, workspace binding names
-/// (`Transcript`, `Beamtalk`) generate `persistent_term` lookup + async actor
-/// send. Stdlib compilation should set this to true since stdlib classes run
-/// in workspace context.
+/// BT-374 / ADR 0010 / ADR 0019: When `workspace_mode` is true, class references
+/// resolve through session bindings (REPL) or class registry lookup. Stdlib
+/// compilation should set this to true since stdlib classes run in workspace context.
 ///
 /// When `source_text` is provided, method source is captured in class registration
 /// metadata for `CompiledMethod` introspection (BT-101).
@@ -504,10 +503,10 @@ pub(super) struct CoreErlangGenerator {
     /// BT-403: Selectors of sealed methods in the current class.
     /// Used to generate standalone functions and direct call dispatch.
     sealed_method_selectors: std::collections::HashSet<String>,
-    /// BT-374 / ADR 0010: Whether workspace bindings (`Transcript`, `Beamtalk`) are available.
-    /// When true (REPL context), workspace binding class references generate
-    /// `persistent_term:get` + async actor send. When false (batch compile),
-    /// workspace binding names produce a compile error.
+    /// BT-374 / ADR 0010 / ADR 0019: Whether workspace bindings are available.
+    /// When true (REPL/workspace context), class references resolve through
+    /// session bindings or class registry. When false (batch compile),
+    /// class references go directly to the class registry.
     workspace_mode: bool,
     /// BT-426: Whether we're currently generating a class-side method body.
     /// When true, field access/assignment should produce a compile error.
@@ -907,19 +906,14 @@ impl CoreErlangGenerator {
                 "end end",
             ])
         } else if self.workspace_mode {
-            // Actor/ValueType methods in workspace mode: try class lookup first,
-            // fall back to workspace binding for convenience names like Transcript.
+            // Actor/ValueType methods in workspace mode: try class lookup.
+            // ADR 0019 Phase 4: No persistent_term fallback — use class registry only.
             let class_pid_var = self.fresh_var("ClassPid");
             let class_mod_var = self.fresh_var("ClassModName");
-            let binding_var = self.fresh_var("BindingVal");
 
             Ok(docvec![
                 format!("case call 'beamtalk_object_class':'whereis_class'('{class_name}') of "),
-                "<'undefined'> when 'true' -> ",
-                format!(
-                    "let {binding_var} = call 'persistent_term':'get'({{'beamtalk_binding', '{class_name}'}}, 'nil') in "
-                ),
-                format!("{binding_var} "),
+                "<'undefined'> when 'true' -> 'nil' ",
                 format!("<{class_pid_var}> when 'true' -> "),
                 format!(
                     "let {class_mod_var} = call 'beamtalk_object_class':'module_name'({class_pid_var}) in "

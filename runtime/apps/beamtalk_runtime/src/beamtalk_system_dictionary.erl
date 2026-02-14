@@ -53,8 +53,7 @@
 -export([
     start_link/0,
     start_link/1,
-    start_link_singleton/0,
-    start_link_singleton/1,
+    start_link/2,
     has_method/1,
     class_info/0
 ]).
@@ -73,8 +72,7 @@
 
 -record(system_dict_state, {
     version :: binary(),
-    workspace :: atom() | undefined,  % Workspace name for future phases
-    is_singleton :: boolean()
+    workspace :: atom() | undefined  % Workspace name for future phases
 }).
 
 %%====================================================================
@@ -95,16 +93,11 @@ start_link() ->
 start_link(Opts) ->
     gen_server:start_link(?MODULE, Opts, []).
 
-%% @doc Start a named SystemDictionary singleton for workspace use.
-%% Registers as 'Beamtalk' via register/2 and persistent_term binding.
--spec start_link_singleton() -> {ok, pid()} | {error, term()}.
-start_link_singleton() ->
-    start_link_singleton([]).
-
-%% @doc Start a named SystemDictionary singleton with options.
--spec start_link_singleton(proplists:proplist()) -> {ok, pid()} | {error, term()}.
-start_link_singleton(Opts) ->
-    gen_server:start_link({local, 'Beamtalk'}, ?MODULE, [{singleton, true} | Opts], []).
+%% @doc Start a named SystemDictionary for workspace use.
+%% Registers with the given name via gen_server name registration.
+-spec start_link({local, atom()}, proplists:proplist()) -> {ok, pid()} | {error, term()}.
+start_link(ServerName, Opts) ->
+    gen_server:start_link(ServerName, ?MODULE, Opts, []).
 
 %% @doc Check if SystemDictionary supports a given method selector.
 %%
@@ -151,19 +144,10 @@ init(Opts) ->
         end,
     Version = proplists:get_value(version, Opts, VersionDefault),
     Workspace = proplists:get_value(workspace, Opts, undefined),
-    IsSingleton = proplists:get_value(singleton, Opts, false),
-    
-    %% Singleton path: register persistent_term binding for codegen lookup (~13ns)
-    case IsSingleton of
-        true -> persistent_term:put({beamtalk_binding, 'Beamtalk'},
-                    {beamtalk_object, 'SystemDictionary', beamtalk_system_dictionary, self()});
-        false -> ok
-    end,
     
     State = #system_dict_state{
         version = Version,
-        workspace = Workspace,
-        is_singleton = IsSingleton
+        workspace = Workspace
     },
     {ok, State}.
 
@@ -252,10 +236,6 @@ handle_info(Info, State) ->
 
 %% @doc Handle process termination.
 -spec terminate(term(), #system_dict_state{}) -> ok.
-terminate(_Reason, #system_dict_state{is_singleton = true}) ->
-    %% Clean up workspace binding on shutdown
-    persistent_term:erase({beamtalk_binding, 'Beamtalk'}),
-    ok;
 terminate(_Reason, _State) ->
     ok.
 
@@ -333,6 +313,6 @@ handle_class_named(_ClassName) ->
 -spec handle_globals() -> map().
 handle_globals() ->
     %% Phase 1: No workspace bindings yet
-    %% Phase 2: Will query workspace state via persistent_term or workspace process
+    %% Phase 2: Will query workspace state for bindings
     #{}.
 

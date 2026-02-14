@@ -23,7 +23,6 @@
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %% Singleton class ↔ registered process name ↔ binding class name mapping
-%% BindingClassName matches what the original singleton init uses in persistent_term
 -define(SINGLETONS, [
     {'TranscriptStream',    'Transcript',   'TranscriptStream'},
     {'SystemDictionary',    'Beamtalk',     'SystemDictionary'},
@@ -96,7 +95,7 @@ bootstrap_all(State) ->
         ?SINGLETONS
     ).
 
-%% @private Bootstrap a single singleton: set class var, set workspace binding, monitor.
+%% @private Bootstrap a single singleton: set class var and monitor.
 bootstrap_singleton(ClassName, RegName, BindingClassName, State) ->
     case erlang:whereis(RegName) of
         undefined ->
@@ -105,7 +104,6 @@ bootstrap_singleton(ClassName, RegName, BindingClassName, State) ->
         Pid ->
             Obj = build_object_ref(BindingClassName, Pid),
             set_class_variable(ClassName, Obj),
-            set_workspace_binding(RegName, Obj),
             MonRef = erlang:monitor(process, Pid),
             logger:debug("Bootstrap: wired singleton", #{class => ClassName, pid => Pid}),
             Monitors = maps:put(MonRef, {ClassName, RegName, BindingClassName}, State#state.monitors),
@@ -130,7 +128,3 @@ set_class_variable(ClassName, Obj) ->
         error:#beamtalk_error{kind = class_not_found} ->
             logger:warning("Bootstrap: class not loaded yet", #{class => ClassName})
     end.
-
-%% @private Set a workspace convenience binding.
-set_workspace_binding(BindingName, Obj) ->
-    beamtalk_workspace:set_binding(BindingName, Obj).

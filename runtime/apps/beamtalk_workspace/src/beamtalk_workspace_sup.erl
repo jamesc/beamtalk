@@ -78,12 +78,12 @@ init(Config) ->
             modules => [beamtalk_workspace_meta]
         },
         
-        %% Singleton actors — workspace bindings (ADR 0010 Phase 2)
+        %% Singleton actors — workspace singletons (ADR 0010 Phase 2, ADR 0019 Phase 4)
         %% These assume beamtalk_stdlib has already been started elsewhere in the system.
-        %% Each registers itself in init/1: persistent_term + register/2
+        %% Each registers via gen_server name registration ({local, Name}).
         #{
             id => beamtalk_transcript_stream,
-            start => {beamtalk_transcript_stream, start_link_singleton, [1000]},
+            start => {beamtalk_transcript_stream, start_link, [{local, 'Transcript'}, 1000]},
             restart => permanent,
             shutdown => 5000,
             type => worker,
@@ -91,7 +91,7 @@ init(Config) ->
         },
         #{
             id => beamtalk_system_dictionary,
-            start => {beamtalk_system_dictionary, start_link_singleton, []},
+            start => {beamtalk_system_dictionary, start_link, [{local, 'Beamtalk'}, []]},
             restart => permanent,
             shutdown => 5000,
             type => worker,
@@ -112,7 +112,7 @@ init(Config) ->
         %% Placed after actor_registry since its methods query the registry
         #{
             id => beamtalk_workspace_actor,
-            start => {beamtalk_workspace_actor, start_link_singleton, []},
+            start => {beamtalk_workspace_actor, start_link, [{local, 'Workspace'}]},
             restart => permanent,
             shutdown => 5000,
             type => worker,

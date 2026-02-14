@@ -142,7 +142,7 @@ transcript_stream_spec_test() ->
     [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_transcript_stream],
     ?assertEqual(worker, maps:get(type, Spec)),
     ?assertEqual(permanent, maps:get(restart, Spec)),
-    ?assertEqual({beamtalk_transcript_stream, start_link_singleton, [1000]}, maps:get(start, Spec)).
+    ?assertEqual({beamtalk_transcript_stream, start_link, [{local, 'Transcript'}, 1000]}, maps:get(start, Spec)).
 
 system_dictionary_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
@@ -150,7 +150,7 @@ system_dictionary_spec_test() ->
     [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_system_dictionary],
     ?assertEqual(worker, maps:get(type, Spec)),
     ?assertEqual(permanent, maps:get(restart, Spec)),
-    ?assertEqual({beamtalk_system_dictionary, start_link_singleton, []}, maps:get(start, Spec)).
+    ?assertEqual({beamtalk_system_dictionary, start_link, [{local, 'Beamtalk'}, []]}, maps:get(start, Spec)).
 
 singletons_after_metadata_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),

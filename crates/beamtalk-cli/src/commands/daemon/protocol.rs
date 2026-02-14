@@ -398,9 +398,8 @@ fn handle_compile(
             format!("bt@{base_name}")
         };
 
-        // BT-374 / ADR 0010: :load compiles modules for workspace context,
-        // so workspace bindings (Transcript, Beamtalk) generate persistent_term
-        // lookups instead of direct module calls.
+        // BT-374 / ADR 0010 / ADR 0019: :load compiles modules for workspace context,
+        // so class references resolve through session bindings and class registry.
         let core = beamtalk_core::erlang::generate_with_workspace_and_source(
             module,
             &module_name,
