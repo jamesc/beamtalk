@@ -184,3 +184,85 @@ registry_termination_kills_all_actors_test() ->
     ?assertNot(is_process_alive(Actor1)),
     ?assertNot(is_process_alive(Actor2)),
     ?assertNot(is_process_alive(Actor3)).
+
+%%% ===========================================================================
+%%% on_actor_spawned/4 Callback Integration Tests
+%%% ===========================================================================
+
+on_actor_spawned_registers_actor_in_registry_test() ->
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
+    {ok, ActorPid} = test_counter:start_link(0),
+
+    %% Call on_actor_spawned — should register actor in registry
+    ok = beamtalk_repl_actors:on_actor_spawned(RegistryPid, ActorPid, 'Counter', test_counter),
+
+    %% Verify actor appears in registry
+    {ok, Metadata} = beamtalk_repl_actors:get_actor(RegistryPid, ActorPid),
+    ?assertEqual(ActorPid, maps:get(pid, Metadata)),
+    ?assertEqual('Counter', maps:get(class, Metadata)),
+    ?assertEqual(test_counter, maps:get(module, Metadata)),
+
+    %% Cleanup
+    gen_server:stop(ActorPid),
+    gen_server:stop(RegistryPid).
+
+on_actor_spawned_returns_ok_on_registry_failure_test() ->
+    %% Use a dead registry PID — register_actor will fail with noproc
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
+    gen_server:stop(RegistryPid),
+
+    ActorPid = spawn(fun() -> receive stop -> ok end end),
+
+    %% Should return ok despite the registry being dead
+    ?assertEqual(ok, beamtalk_repl_actors:on_actor_spawned(RegistryPid, ActorPid, 'Counter', test_counter)),
+
+    exit(ActorPid, kill).
+
+on_actor_spawned_multiple_actors_test() ->
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
+    {ok, Actor1} = test_counter:start_link(0),
+    {ok, Actor2} = test_counter:start_link(10),
+
+    ok = beamtalk_repl_actors:on_actor_spawned(RegistryPid, Actor1, 'Counter', test_counter),
+    ok = beamtalk_repl_actors:on_actor_spawned(RegistryPid, Actor2, 'Counter', test_counter),
+
+    %% Both should be registered
+    Actors = beamtalk_repl_actors:list_actors(RegistryPid),
+    ?assertEqual(2, length(Actors)),
+
+    %% Cleanup
+    gen_server:stop(Actor1),
+    gen_server:stop(Actor2),
+    gen_server:stop(RegistryPid).
+
+%%% ===========================================================================
+%%% Workspace App Callback Env Tests
+%%% ===========================================================================
+
+workspace_app_start_sets_callback_env_test() ->
+    %% Ensure env is clean
+    application:unset_env(beamtalk_runtime, actor_spawn_callback),
+    ?assertEqual(undefined, application:get_env(beamtalk_runtime, actor_spawn_callback)),
+
+    %% Call actual start/2 — supervisor has no static children, safe to start
+    {ok, SupPid} = beamtalk_workspace_app:start(normal, []),
+    try
+        ?assertEqual({ok, beamtalk_repl_actors},
+                     application:get_env(beamtalk_runtime, actor_spawn_callback))
+    after
+        process_flag(trap_exit, true),
+        exit(SupPid, shutdown),
+        receive {'EXIT', SupPid, _} -> ok after 1000 -> ok end,
+        application:unset_env(beamtalk_runtime, actor_spawn_callback)
+    end.
+
+workspace_app_stop_unsets_callback_env_test() ->
+    %% Set the env first (simulating what start/2 does)
+    application:set_env(beamtalk_runtime, actor_spawn_callback, beamtalk_repl_actors),
+    ?assertEqual({ok, beamtalk_repl_actors},
+                 application:get_env(beamtalk_runtime, actor_spawn_callback)),
+
+    %% Call actual stop/1 function
+    ok = beamtalk_workspace_app:stop(undefined),
+
+    ?assertEqual(undefined, application:get_env(beamtalk_runtime, actor_spawn_callback)).
