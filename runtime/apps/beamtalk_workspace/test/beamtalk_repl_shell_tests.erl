@@ -227,3 +227,67 @@ unload_module_not_loaded_returns_error_test_() ->
               beamtalk_repl_shell:stop(Pid)
           end)]
      end}.
+
+unload_module_not_in_tracker_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-unload-3">>),
+              %% Create and load a module without adding to tracker
+              DummyMod = 'bt519_test_untracked',
+              Forms = [{attribute,1,module,DummyMod},
+                       {attribute,2,export,[{hello,0}]},
+                       {function,3,hello,0,
+                        [{clause,3,[],[],[{atom,3,world}]}]}],
+              {ok, DummyMod, Binary} = compile:forms(Forms),
+              {module, DummyMod} = code:load_binary(DummyMod, "test.erl", Binary),
+              %% Unload succeeds even though module isn't tracked
+              ok = beamtalk_repl_shell:unload_module(Pid, DummyMod),
+              %% Module is purged from code server
+              ?assertEqual(false, code:is_loaded(DummyMod)),
+              %% Tracker is still empty (no crash from removing non-existent entry)
+              {ok, Tracker} = beamtalk_repl_shell:get_module_tracker(Pid),
+              ?assertEqual(#{}, Tracker),
+              beamtalk_repl_shell:stop(Pid)
+          end)]
+     end}.
+
+unload_module_in_use_returns_error_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-unload-4">>),
+              %% Create a module with a long-running function
+              DummyMod = 'bt519_test_in_use',
+              Forms = [{attribute,1,module,DummyMod},
+                       {attribute,2,export,[{loop,0}]},
+                       {function,3,loop,0,
+                        [{clause,3,[],[],
+                          [{call,3,{atom,3,receive_loop},[]}]}]},
+                       {function,4,receive_loop,0,
+                        [{clause,4,[],[],
+                          [{'receive',4,
+                            [{clause,4,[{atom,4,stop}],[],[{atom,4,ok}]}]}]}]}],
+              {ok, DummyMod, Binary} = compile:forms(Forms),
+              {module, DummyMod} = code:load_binary(DummyMod, "test.erl", Binary),
+              %% Spawn a process running old code, then load new version
+              %% so soft_purge will fail (old code still in use)
+              LoopPid = spawn(DummyMod, loop, []),
+              %% Load a new version to make the running process use "old" code
+              {module, DummyMod} = code:load_binary(DummyMod, "test.erl", Binary),
+              %% Now soft_purge should fail because LoopPid runs old code
+              Result = beamtalk_repl_shell:unload_module(Pid, DummyMod),
+              ?assertMatch({error, {module_in_use, DummyMod}}, Result),
+              %% Cleanup: stop the loop process and purge
+              LoopPid ! stop,
+              timer:sleep(50),
+              _ = code:soft_purge(DummyMod),
+              _ = code:delete(DummyMod),
+              _ = code:soft_purge(DummyMod),
+              beamtalk_repl_shell:stop(Pid)
+          end)]
+     end}.

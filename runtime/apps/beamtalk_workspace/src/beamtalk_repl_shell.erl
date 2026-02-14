@@ -128,12 +128,17 @@ handle_call(get_module_tracker, _From, {SessionId, State}) ->
 handle_call({unload_module, Module}, _From, {SessionId, State}) ->
     case code:is_loaded(Module) of
         {file, _} ->
-            _ = code:soft_purge(Module),
-            _ = code:delete(Module),
-            Tracker = beamtalk_repl_state:get_module_tracker(State),
-            NewTracker = beamtalk_repl_modules:remove_module(Module, Tracker),
-            NewState = beamtalk_repl_state:set_module_tracker(NewTracker, State),
-            {reply, ok, {SessionId, NewState}};
+            case code:soft_purge(Module) of
+                true ->
+                    _ = code:delete(Module),
+                    Tracker = beamtalk_repl_state:get_module_tracker(State),
+                    NewTracker = beamtalk_repl_modules:remove_module(Module, Tracker),
+                    NewState = beamtalk_repl_state:set_module_tracker(NewTracker, State),
+                    {reply, ok, {SessionId, NewState}};
+                false ->
+                    %% Old code still running in active processes — cannot safely purge
+                    {reply, {error, {module_in_use, Module}}, {SessionId, State}}
+            end;
         false ->
             {reply, {error, {module_not_loaded, Module}}, {SessionId, State}}
     end;

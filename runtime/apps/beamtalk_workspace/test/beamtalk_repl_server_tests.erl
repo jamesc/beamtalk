@@ -1222,6 +1222,7 @@ tcp_integration_test_() ->
           {"simple eval op", fun() -> tcp_eval_simple_test(Port) end},
           {"unload nonexistent", fun() -> tcp_unload_nonexistent_test(Port) end},
           {"unload empty module", fun() -> tcp_unload_empty_test(Port) end},
+          {"unload in-use module", fun() -> tcp_unload_in_use_test(Port) end},
           {"inspect invalid pid", fun() -> tcp_inspect_invalid_pid_test(Port) end},
           {"kill invalid pid", fun() -> tcp_kill_invalid_pid_test(Port) end},
           {"reload module not loaded", fun() -> tcp_reload_module_not_loaded_test(Port) end},
@@ -1379,6 +1380,34 @@ tcp_unload_empty_test(Port) ->
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t12">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)).
+
+%% Test: unload module that has active processes returns in-use error
+tcp_unload_in_use_test(Port) ->
+    DummyMod = 'bt519_tcp_in_use',
+    Forms = [{attribute,1,module,DummyMod},
+             {attribute,2,export,[{loop,0}]},
+             {function,3,loop,0,
+              [{clause,3,[],[],
+                [{'receive',3,
+                  [{clause,3,[{atom,3,stop}],[],[{atom,3,ok}]}]}]}]}],
+    {ok, DummyMod, Binary} = compile:forms(Forms),
+    {module, DummyMod} = code:load_binary(DummyMod, "test.erl", Binary),
+    LoopPid = spawn(DummyMod, loop, []),
+    %% Load new version so running process uses "old" code
+    {module, DummyMod} = code:load_binary(DummyMod, "test.erl", Binary),
+    Msg = jsx:encode(#{<<"op">> => <<"unload">>, <<"id">> => <<"t12b">>,
+                       <<"module">> => atom_to_binary(DummyMod, utf8)}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"t12b">>}, Resp),
+    ?assert(maps:is_key(<<"error">>, Resp)),
+    ErrorMsg = maps:get(<<"error">>, Resp),
+    ?assert(binary:match(ErrorMsg, <<"active processes">>) =/= nomatch),
+    %% Cleanup
+    LoopPid ! stop,
+    timer:sleep(50),
+    _ = code:soft_purge(DummyMod),
+    _ = code:delete(DummyMod),
+    _ = code:soft_purge(DummyMod).
 
 %% Test: inspect with invalid PID string
 tcp_inspect_invalid_pid_test(Port) ->

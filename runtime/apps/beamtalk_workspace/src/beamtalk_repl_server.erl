@@ -479,7 +479,10 @@ handle_op(<<"unload">>, Params, Msg, SessionPid) ->
                     beamtalk_repl_protocol:encode_status(ok, Msg, fun term_to_json/1);
                 {error, {module_not_loaded, _}} ->
                     beamtalk_repl_protocol:encode_error(
-                        {module_not_loaded, Module}, Msg, fun format_error_message/1)
+                        {module_not_loaded, Module}, Msg, fun format_error_message/1);
+                {error, {module_in_use, _}} ->
+                    beamtalk_repl_protocol:encode_error(
+                        {module_in_use, Module}, Msg, fun format_error_message/1)
             end
     end;
 
@@ -1091,6 +1094,9 @@ format_error_message({no_source_file, Module}) ->
 format_error_message({module_not_loaded, Module}) ->
     iolist_to_binary([<<"Module not loaded: ">>, format_name(Module),
                       <<". Use :load <path> to load it first.">>]);
+format_error_message({module_in_use, Module}) ->
+    iolist_to_binary([<<"Cannot unload ">>, format_name(Module),
+                      <<": module has active processes. Stop actors using this module first.">>]);
 format_error_message({missing_module_name, reload}) ->
     <<"Usage: :reload <ModuleName> or :reload (to reload last file)">>;
 format_error_message({session_creation_failed, Reason}) ->
