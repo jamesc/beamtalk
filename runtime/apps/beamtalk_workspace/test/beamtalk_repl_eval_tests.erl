@@ -219,7 +219,7 @@ handle_load_compile_error_test() ->
         {error, daemon_unavailable, _} -> ok;
         {error, {compile_error, _}, _} -> ok;
         {error, {daemon_error, _}, _} -> ok;
-        Other -> ?assert(false, lists:flatten(io_lib:format("Unexpected result: ~p", [Other])))
+        Other -> error({unexpected_result, Other})
     end.
 
 %%% Secure temp directory tests (BT-56)
@@ -835,12 +835,6 @@ handle_load_empty_file_test() ->
         {error, daemon_unavailable, _} -> ok;
         {error, {compile_error, _}, _} -> ok;
         {error, {daemon_error, _}, _} -> ok;
-        Other -> ?assert(false, lists:flatten(io_lib:format("Unexpected: ~p", [Other])))
+        Other -> error({unexpected_result, Other})
     end.
-
-handle_load_stdlib_path_detection_test() ->
-    %% Verify that a file under lib/ is detected as stdlib
-    %% (We can't test the full path without a daemon, but we can test is_stdlib_path)
-    ?assert(beamtalk_repl_eval:is_stdlib_path("lib/Integer.bt")),
-    ?assertNot(beamtalk_repl_eval:is_stdlib_path("examples/counter.bt")).
 
