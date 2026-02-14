@@ -198,12 +198,14 @@ CI builds these precompiled Port binaries via a GitHub Actions cross-compilation
 
 ### Core Erlang → BEAM Compilation
 
-The `erlc` step (Core Erlang → BEAM bytecode) moves **inside the BEAM node** using OTP's `compile` module directly:
+The `erlc` step (Core Erlang → BEAM bytecode) moves **inside the BEAM node**, fully in-memory — no temp files, no disk I/O. The Port returns Core Erlang as a binary in the ETF response, which is parsed and compiled directly:
 
 ```erlang
-%% Replace escript-based compilation with direct OTP call
-compile_core_to_beam(CoreErlangFile, ModuleName) ->
-    case compile:file(CoreErlangFile, [from_core, binary, return_errors]) of
+%% Fully in-memory: Core Erlang binary → scan → parse → compile → load
+compile_core_to_beam(CoreErlangBin, ModuleName) ->
+    {ok, Tokens, _} = core_scan:string(binary_to_list(CoreErlangBin)),
+    {ok, Forms} = core_parse:parse(Tokens),
+    case compile:forms(Forms, [from_core, binary, return_errors]) of
         {ok, ModuleName, BeamBinary} ->
             code:load_binary(ModuleName, atom_to_list(ModuleName) ++ ".beam", BeamBinary);
         {error, Errors, _Warnings} ->
@@ -211,7 +213,7 @@ compile_core_to_beam(CoreErlangFile, ModuleName) ->
     end.
 ```
 
-This eliminates the `escript` subprocess spawn for Core Erlang → BEAM compilation.
+This eliminates both the `escript` subprocess spawn and temporary `.core` files on disk (ref: BT-48). The entire pipeline is in-memory: `Source → Port/ETF → Core Erlang binary → core_scan → core_parse → compile:forms → code:load_binary`.
 
 ## Prior Art
 
