@@ -11,14 +11,14 @@
 %%%
 %%% ## Instance Methods
 %%%
-%%% | Selector      | Dispatch | Description                          |
-%%% |---------------|----------|--------------------------------------|
-%%% | `show:'       | cast     | Buffer text + push to subscribers    |
-%%% | `cr'          | cast     | Buffer newline + push to subscribers |
-%%% | `subscribe'   | cast     | Add caller to subscriber list        |
-%%% | `unsubscribe' | cast     | Remove caller from subscriber list   |
-%%% | `recent'      | call     | Return buffer contents as list       |
-%%% | `clear'       | call     | Empty the buffer                     |
+%%% | Selector      | Dispatch | Returns | Description                          |
+%%% |---------------|----------|---------|--------------------------------------|
+%%% | `show:'       | cast     | self    | Buffer text + push to subscribers    |
+%%% | `cr'          | cast     | self    | Buffer newline + push to subscribers |
+%%% | `subscribe'   | cast     | self    | Add caller to subscriber list        |
+%%% | `unsubscribe' | cast     | self    | Remove caller from subscriber list   |
+%%% | `recent'      | call     | list    | Return buffer contents as list       |
+%%% | `clear'       | call     | self    | Empty the buffer                     |
 %%%
 %%% ## Design
 %%%
@@ -51,7 +51,8 @@
     buffer_size  :: non_neg_integer(),
     max_buffer   :: max_buffer(),
     subscribers  :: #{pid() => reference()},
-    is_singleton :: boolean()
+    is_singleton :: boolean(),
+    self_ref     :: tuple() | undefined
 }).
 
 -type state() :: #state{}.
@@ -125,24 +126,25 @@ class_info() ->
 %% @private
 -spec init([max_buffer()] | [{singleton, max_buffer()}]) -> {ok, state()} | {stop, term()}.
 init([{singleton, MaxBuffer}]) when is_integer(MaxBuffer), MaxBuffer > 0 ->
-    %% Singleton path: register persistent_term binding for codegen lookup (~13ns)
-    %% Store a full beamtalk_object tuple so intrinsics (class, respondsTo:) work naturally.
-    persistent_term:put({beamtalk_binding, 'Transcript'},
-                        {beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, self()}),
+    SelfRef = {beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, self()},
+    persistent_term:put({beamtalk_binding, 'Transcript'}, SelfRef),
     {ok, #state{
         buffer       = queue:new(),
         buffer_size  = 0,
         max_buffer   = MaxBuffer,
         subscribers  = #{},
-        is_singleton = true
+        is_singleton = true,
+        self_ref     = SelfRef
     }};
 init([MaxBuffer]) when is_integer(MaxBuffer), MaxBuffer > 0 ->
+    SelfRef = {beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, self()},
     {ok, #state{
         buffer       = queue:new(),
         buffer_size  = 0,
         max_buffer   = MaxBuffer,
         subscribers  = #{},
-        is_singleton = false
+        is_singleton = false,
+        self_ref     = SelfRef
     }};
 init([MaxBuffer]) ->
     {stop, {invalid_max_buffer, MaxBuffer}}.
@@ -152,8 +154,8 @@ init([MaxBuffer]) ->
     {reply, term(), state()}.
 handle_call(recent, _From, #state{buffer = Buffer} = State) ->
     {reply, queue:to_list(Buffer), State};
-handle_call(clear, _From, State) ->
-    {reply, ok, State#state{buffer = queue:new(), buffer_size = 0}};
+handle_call(clear, _From, #state{self_ref = SelfRef} = State) ->
+    {reply, SelfRef, State#state{buffer = queue:new(), buffer_size = 0}};
 handle_call({recent, []}, From, State) ->
     handle_call(recent, From, State);
 handle_call({clear, []}, From, State) ->
@@ -166,31 +168,31 @@ handle_call(Request, _From, State) ->
 %% @private
 -spec handle_cast(term(), state()) -> {noreply, state()}.
 %% Actor protocol: {Selector, Args, FuturePid} from beamtalk_actor:async_send/4
-handle_cast({'show:', [Value], FuturePid}, State) when is_pid(FuturePid) ->
+handle_cast({'show:', [Value], FuturePid}, #state{self_ref = SelfRef} = State) when is_pid(FuturePid) ->
     Text = to_string(Value),
     State1 = buffer_text(Text, State),
     push_to_subscribers(Text, State1),
-    beamtalk_future:resolve(FuturePid, nil),
+    beamtalk_future:resolve(FuturePid, SelfRef),
     {noreply, State1};
-handle_cast({cr, [], FuturePid}, State) when is_pid(FuturePid) ->
+handle_cast({cr, [], FuturePid}, #state{self_ref = SelfRef} = State) when is_pid(FuturePid) ->
     Text = <<"\n">>,
     State1 = buffer_text(Text, State),
     push_to_subscribers(Text, State1),
-    beamtalk_future:resolve(FuturePid, nil),
+    beamtalk_future:resolve(FuturePid, SelfRef),
     {noreply, State1};
 handle_cast({recent, [], FuturePid}, State) when is_pid(FuturePid) ->
     beamtalk_future:resolve(FuturePid, queue:to_list(State#state.buffer)),
     {noreply, State};
-handle_cast({clear, [], FuturePid}, State) when is_pid(FuturePid) ->
-    beamtalk_future:resolve(FuturePid, nil),
+handle_cast({clear, [], FuturePid}, #state{self_ref = SelfRef} = State) when is_pid(FuturePid) ->
+    beamtalk_future:resolve(FuturePid, SelfRef),
     {noreply, State#state{buffer = queue:new(), buffer_size = 0}};
-handle_cast({subscribe, [], FuturePid}, State) when is_pid(FuturePid) ->
+handle_cast({subscribe, [], FuturePid}, #state{self_ref = SelfRef} = State) when is_pid(FuturePid) ->
     CallerPid = caller_from_future(FuturePid),
-    beamtalk_future:resolve(FuturePid, nil),
+    beamtalk_future:resolve(FuturePid, SelfRef),
     {noreply, add_subscriber(CallerPid, State)};
-handle_cast({unsubscribe, [], FuturePid}, State) when is_pid(FuturePid) ->
+handle_cast({unsubscribe, [], FuturePid}, #state{self_ref = SelfRef} = State) when is_pid(FuturePid) ->
     CallerPid = caller_from_future(FuturePid),
-    beamtalk_future:resolve(FuturePid, nil),
+    beamtalk_future:resolve(FuturePid, SelfRef),
     {noreply, remove_subscriber(CallerPid, State)};
 %% Legacy format (direct gen_server:cast without Future)
 handle_cast({'show:', Value}, State) ->

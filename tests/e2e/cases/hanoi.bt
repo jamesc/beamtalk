@@ -4,7 +4,7 @@
 // E2E tests for Towers of Hanoi example
 // Tests the classic recursive algorithm that moves n disks between three pegs.
 // Hanoi is an Object subclass (not Actor), so use `new` not `spawn`.
-// BT-374: Transcript show:/cr are async sends, REPL auto-awaits to nil.
+// BT-374: Transcript show:/cr are async sends, return self (BT-540).
 
 // @load examples/hanoi.bt
 

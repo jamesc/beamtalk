@@ -4,20 +4,20 @@
 // E2E tests for Transcript class
 // Transcript is a workspace-bound actor for writing to stdout.
 // show: prints a value, cr prints a newline.
-// BT-374: Workspace bindings dispatch via persistent_term + async send,
-// so all sends return a Future (not nil).
+// BT-374: Workspace bindings dispatch via persistent_term + async send.
+// BT-540: Command methods return self (not nil) per Command-Query Separation.
 
 // ===========================================================================
 // BASIC OUTPUT
 // ===========================================================================
 
-// show: prints a string (async send, REPL auto-awaits to nil)
+// show: prints a string (async send, returns self per Command-Query Separation)
 Transcript show: 'Hello'
-// => nil
+// => #Actor<TranscriptStream,_>
 
-// cr prints a newline (async send, REPL auto-awaits to nil)
+// cr prints a newline (async send, returns self)
 Transcript cr
-// => nil
+// => #Actor<TranscriptStream,_>
 
 // ===========================================================================
 // SHOW: WITH DIFFERENT TYPES
@@ -25,15 +25,15 @@ Transcript cr
 
 // show: with an integer
 Transcript show: 42
-// => nil
+// => #Actor<TranscriptStream,_>
 
 // show: with a boolean
 Transcript show: true
-// => nil
+// => #Actor<TranscriptStream,_>
 
 // show: with nil
 Transcript show: nil
-// => nil
+// => #Actor<TranscriptStream,_>
 
 // ===========================================================================
 // CASCADE (SEMICOLON CHAINING)
@@ -43,6 +43,24 @@ Transcript show: nil
 // requires metaclass dispatch which is not yet implemented.
 // Use separate statements instead:
 Transcript show: 'Hello'
-// => nil
+// => #Actor<TranscriptStream,_>
 Transcript cr
-// => nil
+// => #Actor<TranscriptStream,_>
+
+// ===========================================================================
+// RETURN VALUE IS SELF (BT-540)
+// ===========================================================================
+
+// Command methods return self (the Transcript actor), not nil
+// This follows Smalltalk convention and Command-Query Separation
+t := (Transcript show: 'test') await
+// => #Actor<TranscriptStream,_>
+
+t class
+// => TranscriptStream
+
+t2 := (Transcript cr) await
+// => #Actor<TranscriptStream,_>
+
+t2 class
+// => TranscriptStream
