@@ -29,28 +29,6 @@ new_with_socket_test() ->
     ?assertEqual(MockSocket, beamtalk_repl_state:get_listen_socket(State)),
     ?assertEqual(5678, beamtalk_repl_state:get_port(State)).
 
-new_with_daemon_socket_path_test() ->
-    Options = #{daemon_socket_path => "/custom/path/daemon.sock"},
-    State = beamtalk_repl_state:new(undefined, 0, Options),
-    ?assertEqual("/custom/path/daemon.sock", beamtalk_repl_state:get_daemon_socket_path(State)).
-
-new_default_daemon_socket_path_test() ->
-    %% Default path should be ~/.beamtalk/daemon*.sock
-    %% In worktrees it may be daemon-bt123.sock instead of daemon.sock
-    case os:getenv("HOME") of
-        false ->
-            %% Skip test if HOME not set - the module itself will error
-            %% in this case, which is expected behavior
-            ok;
-        Home ->
-            State = beamtalk_repl_state:new(undefined, 0),
-            Path = beamtalk_repl_state:get_daemon_socket_path(State),
-            %% Path should end with .sock and be in .beamtalk directory
-            ?assert(lists:suffix(".sock", Path)),
-            ?assertMatch("/" ++ _, string:find(Path, "/.beamtalk/")),
-            ?assert(lists:prefix(Home, Path))
-    end.
-
 %%% Bindings tests
 
 get_set_bindings_test() ->
@@ -147,11 +125,6 @@ loaded_modules_order_test() ->
 
 %%% Configuration tests
 
-daemon_socket_path_test() ->
-    Options = #{daemon_socket_path => "/test/socket.sock"},
-    State = beamtalk_repl_state:new(undefined, 0, Options),
-    ?assertEqual("/test/socket.sock", beamtalk_repl_state:get_daemon_socket_path(State)).
-
 listen_socket_test() ->
     MockSocket = self(),
     State = beamtalk_repl_state:new(MockSocket, 1234),
@@ -165,7 +138,7 @@ port_test() ->
 
 complex_state_test() ->
     %% Test a state with all fields set
-    State = beamtalk_repl_state:new(self(), 1234, #{daemon_socket_path => "/tmp/test.sock"}),
+    State = beamtalk_repl_state:new(self(), 1234),
     State2 = beamtalk_repl_state:set_bindings(#{x => 1, y => 2}, State),
     State3 = beamtalk_repl_state:increment_eval_counter(State2),
     State4 = beamtalk_repl_state:increment_eval_counter(State3),
@@ -177,8 +150,7 @@ complex_state_test() ->
     ?assertEqual(1234, beamtalk_repl_state:get_port(State6)),
     ?assertEqual(#{x => 1, y => 2}, beamtalk_repl_state:get_bindings(State6)),
     ?assertEqual(2, beamtalk_repl_state:get_eval_counter(State6)),
-    ?assertEqual([point, counter], beamtalk_repl_state:get_loaded_modules(State6)),
-    ?assertEqual("/tmp/test.sock", beamtalk_repl_state:get_daemon_socket_path(State6)).
+    ?assertEqual([point, counter], beamtalk_repl_state:get_loaded_modules(State6)).
 
 state_independence_test() ->
     %% Test that operations on one state don't affect other states
