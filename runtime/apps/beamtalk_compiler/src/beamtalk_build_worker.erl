@@ -167,7 +167,8 @@ compile_core_erlang(CoreErlangBin) ->
             case core_parse:parse(Tokens) of
                 {ok, CoreModule} ->
                     case compile:forms(CoreModule,
-                            [from_core, binary, return_errors, debug_info]) of
+                            [from_core, binary, return_errors,
+                             report_warnings, debug_info]) of
                         {ok, ModuleName, Binary} ->
                             {ok, ModuleName, Binary};
                         {ok, ModuleName, Binary, _Warnings} ->

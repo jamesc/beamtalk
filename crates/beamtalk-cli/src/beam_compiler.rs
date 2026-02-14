@@ -3,16 +3,20 @@
 
 //! BEAM bytecode compiler integration.
 //!
-//! This module handles compilation of Core Erlang (.core) files to BEAM bytecode (.beam)
-//! by invoking the external `escript` and `erlc` tools. It manages the compilation pipeline
-//! and provides error handling for missing dependencies.
+//! This module handles compilation of Core Erlang (.core) files to BEAM bytecode (.beam).
+//! It supports two backends selected via the `BEAMTALK_COMPILER` environment variable:
+//!
+//! - **Port** (default): Starts a BEAM node with `beamtalk_build_worker` for in-memory
+//!   compilation via `core_scan → core_parse → compile:forms`. No escript needed.
+//! - **Escript** (legacy fallback): Invokes the embedded `compile.escript`. Used when
+//!   the runtime is not compiled, or when `BEAMTALK_COMPILER=escript`.
 //!
 //! # Architecture
 //!
 //! The compilation process:
 //! 1. Generate Core Erlang from AST using `beamtalk_core::erlang`
 //! 2. Write .core files to build directory
-//! 3. Invoke compile.escript to batch compile .core → .beam
+//! 3. Batch compile .core → .beam via the selected backend
 //! 4. Collect results and report success/failure
 //!
 //! # Example
@@ -225,7 +229,7 @@ impl BeamCompiler {
 
         let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
 
-        // Check that the compiler app is compiled
+        // Check that the compiler app is compiled and includes the build worker
         if !repl_startup::has_beam_files(&paths.compiler_ebin) {
             return Err(miette::miette!(
                 "{} compiled compiler at {}.\n\
@@ -233,6 +237,18 @@ impl BeamCompiler {
                  Or use escript backend: BEAMTALK_COMPILER=escript",
                 RUNTIME_UNAVAILABLE_PREFIX,
                 paths.compiler_ebin.display()
+            ));
+        }
+        if !paths
+            .compiler_ebin
+            .join("beamtalk_build_worker.beam")
+            .exists()
+        {
+            return Err(miette::miette!(
+                "{} beamtalk_build_worker module.\n\
+                 Rebuild: cd runtime && rebar3 compile\n\
+                 Or use escript backend: BEAMTALK_COMPILER=escript",
+                RUNTIME_UNAVAILABLE_PREFIX,
             ));
         }
 
