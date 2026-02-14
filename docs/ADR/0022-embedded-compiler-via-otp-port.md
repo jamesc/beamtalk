@@ -54,7 +54,7 @@ The daemon exposes five JSON-RPC methods: `compile`, `compile_expression`, `diag
 
 The `beamtalk-core` crate (lexer, parser, semantic analysis, codegen) will be compiled as a standalone binary invoked via OTP Port, managed by an OTP supervisor. The REPL and build tools will call the compiler through the `beamtalk_compiler` API instead of JSON-RPC over Unix sockets. A NIF backend can be added behind `beamtalk_compiler_backend` if latency requirements change.
 
-**Rationale for Port-first:** The steelman analysis (below) shows that Port solves every stated problem (Windows, daemon lifecycle, deployment) with better fault isolation than NIF. The latency difference (2ms vs 0.01ms) is noise against 10-500ms compilation times. NIF's only advantage — sub-millisecond calls — matters only if compilation becomes a keystroke-level hot path, which isn't on the current roadmap.
+**Rationale for Port-first:** The steelman analysis (below) shows that Port solves every stated problem (Windows, daemon lifecycle, deployment) with better fault isolation than NIF. The latency difference (approximately 2 ms versus 0.01 ms) is negligible compared to 10–500 ms compilation times; NIF's sub-millisecond advantage matters only if compilation becomes a keystroke-level hot path, which is not on the current roadmap.
 
 ### Architecture After
 
@@ -70,10 +70,10 @@ The `beamtalk-core` crate (lexer, parser, semantic analysis, codegen) will be co
 │          │ compile_expression/3            │
 │          ▼                                │
 │  beamtalk_compiler (Anti-Corruption Layer)│
-│  ┌────────────────┐  ┌──────────────┐     │
-│  │ compiler_      │  │ beamtalk-core│     │
-│  │ backend.erl    │─►│ (Rust NIF)   │     │
-│  └────────────────┘  └──────────────┘     │
+│  ┌────────────────┐  ┌──────────────────┐ │
+│  │ compiler_      │  │ beamtalk-core    │ │
+│  │ backend.erl    │─►│ (Rust, OTP Port) │ │
+│  └────────────────┘  └──────────────────┘ │
 │                                           │
 │  beamtalk_runtime  (Actor/Object System)  │
 │  beamtalk_stdlib   (Standard Library)     │
@@ -82,9 +82,9 @@ The `beamtalk-core` crate (lexer, parser, semantic analysis, codegen) will be co
 └───────────────────────────────────────────┘
 ```
 
-### NIF API
+### Compiler API
 
-The `beamtalk_compiler` module will expose:
+The `beamtalk_compiler` module exposes a backend-agnostic API. The implementation dispatches to the configured backend (Port by default, NIF in future Phase 6):
 
 ```erlang
 -module(beamtalk_compiler).
@@ -94,28 +94,32 @@ The `beamtalk_compiler` module will expose:
 -spec compile(Source :: binary(), ModuleName :: binary()) ->
     {ok, #{core_erlang := binary(), diagnostics := [map()]}} |
     {error, #{diagnostics := [map()]}}.
-compile(_Source, _ModuleName) -> erlang:nif_error(not_loaded).
+compile(Source, ModuleName) ->
+    beamtalk_compiler_backend:compile(Source, ModuleName).
 
 %% Compile a REPL expression with known variable bindings
 -spec compile_expression(Source :: binary(), ModuleName :: binary(),
                          KnownVars :: [binary()]) ->
     {ok, #{core_erlang := binary(), diagnostics := [map()]}} |
     {error, #{diagnostics := [map()]}}.
-compile_expression(_Source, _ModuleName, _KnownVars) -> erlang:nif_error(not_loaded).
+compile_expression(Source, ModuleName, KnownVars) ->
+    beamtalk_compiler_backend:compile_expression(Source, ModuleName, KnownVars).
 
 %% Get diagnostics only (no codegen)
 -spec diagnostics(Source :: binary()) ->
     {ok, [map()]}.
-diagnostics(_Source) -> erlang:nif_error(not_loaded).
+diagnostics(Source) ->
+    beamtalk_compiler_backend:diagnostics(Source).
 
 %% Return compiler version
 -spec version() -> binary().
-version() -> erlang:nif_error(not_loaded).
+version() ->
+    beamtalk_compiler_backend:version().
 ```
 
-### Dirty Scheduler Usage
+### Dirty Scheduler Usage (Future NIF Backend — Phase 6)
 
-All compilation NIFs will use `schedule = "DirtyCpu"` to avoid blocking the BEAM scheduler:
+If the NIF backend is added in Phase 6, all compilation NIFs will use `schedule = "DirtyCpu"` to avoid blocking the BEAM scheduler:
 
 ```rust
 #[rustler::nif(schedule = "DirtyCpu")]
@@ -124,7 +128,7 @@ fn compile(source: Binary, module_name: Binary) -> NifResult<Term> {
 }
 ```
 
-Compilation typically takes 1–50ms for REPL expressions and up to several seconds for large files — well beyond the 1ms NIF budget for normal schedulers.
+Compilation typically takes 1–50 ms for REPL expressions and up to several seconds for large files — well beyond the 1 ms NIF budget for normal schedulers. The Port backend avoids this concern entirely since compilation runs in a separate OS process.
 
 ### REPL Integration
 
@@ -143,24 +147,26 @@ compile_via_daemon(Expression, ModuleName, Bindings, State) ->
             {error, {daemon_unavailable, SocketPath}}
     end.
 
-%% After (NIF)
+%% After (beamtalk_compiler — Port backend)
 compile_expression(Expression, ModuleName, Bindings) ->
     KnownVars = [atom_to_binary(V) || V <- maps:keys(Bindings)],
     beamtalk_compiler:compile_expression(Expression, ModuleName, KnownVars).
 ```
 
-### Precompiled Binaries
+### Precompiled Binaries (OTP Port)
 
-Use `rustler_precompiled` to distribute prebuilt NIF shared libraries:
+For the OTP Port backend, we distribute the **compiler as a standalone executable**, not as a NIF shared library. The Erlang node starts this executable via `open_port/2`.
 
-| Platform | Architecture | Library |
-|----------|-------------|---------|
-| Linux (glibc) | x86_64, aarch64 | `libbeamtalk_compiler.so` |
-| Linux (musl) | x86_64, aarch64 | `libbeamtalk_compiler.so` |
-| macOS | x86_64, aarch64 | `libbeamtalk_compiler.dylib` |
-| Windows | x86_64 | `beamtalk_compiler.dll` |
+| Platform | Architecture | Executable artifact |
+|----------|-------------|---------------------|
+| Linux (glibc) | x86_64, aarch64 | `beamtalk_compiler_port` |
+| Linux (musl) | x86_64, aarch64 | `beamtalk_compiler_port` |
+| macOS | x86_64, aarch64 | `beamtalk_compiler_port` |
+| Windows | x86_64 | `beamtalk_compiler_port.exe` |
 
-CI builds precompiled binaries via GitHub Actions cross-compilation matrix. Users without a Rust toolchain get the precompiled binary automatically; fallback to source compilation if the platform isn't covered.
+CI builds these precompiled Port binaries via a GitHub Actions cross-compilation matrix. Users without a Rust toolchain get the appropriate executable downloaded automatically; if the platform is not covered, the Erlang side falls back to compiling the compiler from source at install time.
+
+> **NIF backend note (Phase 6):** If we later introduce a Rustler-based NIF backend, its `.so`/`.dylib`/`.dll` distribution and any `rustler_precompiled` usage will be specified in a separate ADR/phase, not here.
 
 ### Core Erlang → BEAM Compilation
 
@@ -199,7 +205,7 @@ The compiler is embedded in the image — parsing and compilation happen inside 
 ### LFE (Lisp Flavoured Erlang)
 LFE's compiler is written in Erlang and runs inside the BEAM. Compilation is a function call, not an external process. This gives LFE a seamless REPL experience.
 
-**What we learn:** In-process compilation on BEAM is the natural model. Our Rust compiler needs to cross the NIF boundary, but the end result should feel the same.
+**What we learn:** In-process compilation on BEAM is the natural model. Our Rust compiler needs to cross the Port boundary, but the result should feel the same.
 
 ### TypeScript (Mainstream — language server architecture)
 TypeScript's `tsc` is a standalone compiler, but `tsserver` (the language server) embeds the compiler for IDE responsiveness. The language server runs as a separate Node.js process communicating via JSON-RPC — similar to our current daemon. TypeScript considered but rejected in-process embedding for VS Code due to crash isolation concerns.
@@ -212,32 +218,33 @@ TypeScript's `tsc` is a standalone compiler, but `tsserver` (the language server
 - **Positive:** Single install step (Erlang/OTP + beamtalk package). No daemon to manage.
 - **Positive:** Windows support opens the platform to more developers.
 - **Positive:** Faster REPL response (no JSON-RPC overhead).
-- **Concern:** If a NIF crash kills the node, a newcomer loses all REPL state with no explanation. Daemon crash at least leaves the REPL alive with a "compiler unavailable" message.
+- **Positive (Port):** If the compiler crashes, only the port dies — the supervisor restarts it automatically. No REPL state lost.
+- **Concern (NIF, Phase 6):** If a future NIF crash kills the node, a newcomer loses all REPL state with no explanation. This is why Port is the default.
 
 ### Smalltalk Developer
 - **Positive:** Compiler-in-the-image aligns with Smalltalk philosophy.
 - **Neutral:** The compiler is still Rust, not Beamtalk. But the boundary becomes invisible.
-- **Concern:** Smalltalk developers expect the compiler to be introspectable and modifiable. A NIF is a black box — you can't browse its methods in the inspector.
+- **Concern (NIF):** Smalltalk developers expect the compiler to be introspectable and modifiable. A NIF is a black box — you can't browse its methods in the inspector. A Port is similarly opaque but safer.
 
 ### Erlang/BEAM Developer
-- **Positive:** Standard OTP application, standard NIF loading. No foreign process management.
+- **Positive:** Standard OTP application, standard Port supervision. No foreign process management.
 - **Positive:** Can inspect compiler module with standard tools (`observer`, `code:which/1`).
-- **Concern:** NIF crash risk is real. BEAM developers have strong instincts against NIFs for non-trivial code. The anti-corruption layer pattern helps — the NIF can be swapped for a port without changing the rest of the system.
+- **Positive (Port):** Ports are the idiomatic BEAM pattern for native code. The anti-corruption layer pattern means the backend can be swapped without changing the rest of the system.
 
 ### Production Operator
 - **Positive:** One process to monitor, not two. Standard OTP supervision.
 - **Positive:** No socket file management, no daemon health checks.
-- **Concern:** NIF library must match the platform. Precompiled binaries mitigate this.
-- **Concern:** NIF crash in production takes down all running actors. Port backend should be the default for production workspaces.
+- **Positive (Port):** Compiler crash = port restart = automatic recovery. No actors lost.
+- **Concern:** Compiler binary must match the platform. Precompiled binaries mitigate this.
 
 ## Steelman Analysis
 
-### Option A: Embedded Compiler (Rustler NIF) — Recommended
-- 🧑‍💻 **Newcomer**: "One thing to install, it just works. No daemon to understand or debug."
-- 🎩 **Smalltalk purist**: "The compiler belongs inside the live environment. This is closer to the Smalltalk ideal than a separate process. In Pharo, you'd never run the compiler as an external daemon."
-- ⚙️ **BEAM veteran**: "NIFs are well-understood for small, focused operations. Dirty schedulers prevent blocking. The `beamtalk_compiler` app encapsulates the NIF — if we need to swap to a port later, only that app changes."
-- 🏭 **Operator**: "One BEAM node to monitor. Standard OTP release. No IPC failure modes. No stale socket files to clean up."
-- 🎨 **Language designer**: "Eliminates an entire category of errors (daemon unavailable, socket stale, JSON parse failure, version mismatch). Lowest possible latency for REPL interactions."
+### Option A: OTP Port (Supervised External Process) — Recommended
+- 🧑‍💻 **Newcomer**: "Same simplicity as NIF — no daemon management, no socket files. But if the compiler crashes, only the port dies. The supervisor restarts it in milliseconds and I try again."
+- 🎩 **Smalltalk purist**: "The compiler is *accessible* from the live environment (supervised, restartable) without being *embedded* in it. Best of both worlds."
+- ⚙️ **BEAM veteran**: "Ports are *the* BEAM pattern for native code — they exist precisely because NIFs are risky. OTP's `heart` module, `epmd`, and `inet_gethost` all use ports, not NIFs. The compiler is a perfect port use case: infrequent, CPU-intensive, crash-tolerant. The ~2 ms port overhead is invisible in a REPL interaction where the user is typing."
+- 🏭 **Operator**: "Port crash = supervisor restart = automatic recovery. NIF crash = node down = all actors dead = manual recovery. For a production workspace with running actors, this matters enormously."
+- 🎨 **Language designer**: "Ports solve every problem the daemon has (no socket files, no manual lifecycle, Windows-compatible via stdin/stdout) without the NIF risk. The serialization overhead is real but small: approximately 2 ms for port versus 0.01 ms for NIF versus 5–10 ms for daemon. The user perceives none of these — compilation itself takes 10–500 ms."
 
 ### Option B: Keep Separate Daemon (Status Quo)
 - 🧑‍💻 **Newcomer**: "If the compiler crashes, the REPL keeps running with all my actors alive. Restart the daemon and compile again — no state lost."
@@ -246,12 +253,12 @@ TypeScript's `tsc` is a standalone compiler, but `tsserver` (the language server
 - 🏭 **Operator**: "I can run the compiler under `rust-gdb` or `valgrind` independently. I can upgrade the compiler without restarting the runtime. I can rate-limit or load-balance compilation across multiple daemons. None of this works with a NIF."
 - 🎨 **Language designer**: "The daemon boundary *is* the DDD anti-corruption layer — enforced by process isolation, not just convention. A NIF boundary is a function signature; a process boundary is a wall. Also: the daemon could serve multiple workspaces simultaneously."
 
-### Option C: OTP Port (Supervised External Process)
-- 🧑‍💻 **Newcomer**: "Same simplicity as NIF — no daemon management, no socket files. But if the compiler crashes, only the port dies. The supervisor restarts it in milliseconds and I try again."
-- 🎩 **Smalltalk purist**: "The compiler is *accessible* from the live environment (supervised, restartable) without being *embedded* in it. Best of both worlds."
-- ⚙️ **BEAM veteran**: "Ports are *the* BEAM pattern for native code — they exist precisely because NIFs are risky. OTP's `heart` module, `epmd`, and `inet_gethost` all use ports, not NIFs. The compiler is a perfect port use case: infrequent, CPU-intensive, crash-tolerant. The ~2ms port overhead is invisible in a REPL interaction where the user is typing."
-- 🏭 **Operator**: "Port crash = supervisor restart = automatic recovery. NIF crash = node down = all actors dead = manual recovery. For a production workspace with running actors, this matters enormously."
-- 🎨 **Language designer**: "Ports solve every problem the daemon has (no socket files, no manual lifecycle, Windows-compatible via stdin/stdout) without the NIF risk. The serialization overhead is real but small: ~2ms for port vs ~0.01ms for NIF vs ~5-10ms for daemon. The user perceives none of these — compilation itself takes 10-500ms."
+### Option C: Embedded Compiler (Rustler NIF) — Future Option (Phase 6)
+- 🧑‍💻 **Newcomer**: "One thing to install, it just works. No daemon to understand or debug."
+- 🎩 **Smalltalk purist**: "The compiler belongs inside the live environment. This is closer to the Smalltalk ideal than a separate process. In Pharo, you'd never run the compiler as an external daemon."
+- ⚙️ **BEAM veteran**: "NIFs are well-understood for small, focused operations. Dirty schedulers prevent blocking. The `beamtalk_compiler` app encapsulates the NIF — if we need to swap to a port later, only that app changes."
+- 🏭 **Operator**: "One BEAM node to monitor. Standard OTP release. No IPC failure modes. No stale socket files to clean up."
+- 🎨 **Language designer**: "Eliminates an entire category of errors (daemon unavailable, socket stale, JSON parse failure, version mismatch). Lowest possible latency for REPL interactions."
 
 ### Tension Points
 
@@ -269,9 +276,9 @@ TypeScript's `tsc` is a standalone compiler, but `tsserver` (the language server
 | Independent upgrades | No | No | Yes |
 
 **Key observations:**
-1. **Latency doesn't differentiate.** All three options are dominated by compilation time (10-500ms). The call overhead difference (0.01ms vs 2ms vs 10ms) is noise.
+1. **Latency doesn't differentiate.** All three options are dominated by compilation time (10–500 ms). The call overhead difference (0.01 ms vs 2 ms vs 10 ms) is noise.
 2. **Fault isolation is the real differentiator.** In a production workspace with running actors, a NIF crash is catastrophic. A port crash is a hiccup.
-3. **The `crypto`/`ssl` comparison is misleading.** Those NIFs run ~0.1ms stateless operations. A compiler NIF runs ~100ms with complex state. Different risk profile entirely.
+3. **The `crypto`/`ssl` comparison is misleading.** Those NIFs run ~0.1 ms stateless operations. A compiler NIF runs ~100 ms with complex state. Different risk profile entirely.
 4. **Port solves the same deployment problems as NIF** — no socket files, no daemon lifecycle, Windows-compatible — without the crash risk.
 5. **NIF's only real advantage is if compilation becomes a hot path** — e.g., live recompilation on every keystroke for incremental analysis. Today's REPL model (compile on Enter) doesn't need sub-millisecond overhead.
 
@@ -324,16 +331,16 @@ Compile the Rust compiler to WASM and run it via a WASM runtime (wasmex) inside 
 ## Consequences
 
 ### Positive
-- **Windows support** — NIF shared libraries work natively on Windows (`.dll`)
-- **Simpler deployment** — One OTP release, no separate binary
-- **Lower latency** — Direct function call vs JSON-RPC over socket
+- **Windows support** — Port communication via stdin/stdout works natively on Windows (no Unix socket dependency)
+- **Simpler deployment** — One OTP release, no separate daemon process
+- **Lower latency** — Direct IPC (Port) vs JSON-RPC over socket
 - **Eliminated failure modes** — No daemon unavailable, no stale sockets, no JSON parse errors, no protocol version mismatches
-- **Simpler REPL code** — ~100 lines of IPC code replaced by ~10 lines of NIF calls
-- **Aligns with Smalltalk philosophy** — Compiler lives in the environment
+- **Simpler REPL code** — ~100 lines of IPC code replaced by ~10 lines of `beamtalk_compiler` calls
+- **Aligns with Smalltalk philosophy** — Compiler lives in the environment (supervised, restartable)
 
 ### Negative
 - **Build complexity** — CI must cross-compile the compiler binary for 6+ platform targets. Mitigated by: GitHub Actions matrix, same toolchain already used for the CLI binary
-- **Coupled releases** — Compiler and runtime must be released together. This is already effectively true (they share Core Erlang format). However, with a daemon the compiler can be upgraded without restarting the BEAM node; with Port/NIF, a compiler upgrade requires node restart (killing running actors)
+- **Coupled releases** — Compiler and runtime must be released together as part of a unified OTP application and versioned anti-corruption layer. This is already effectively true (they share Core Erlang format). With a daemon, the compiler binary can be upgraded independently without restarting the BEAM node; with the embedded compiler (Port or future NIF backend) we intentionally tie the compiler version to the OTP app, so a compiler upgrade in practice requires node restart (killing running actors), even though the Port backend could technically support independent upgrades
 - **Serialization overhead (Port backend)** — Binary protocol over stdin/stdout adds ~2ms per call, negligible vs compilation time but non-zero
 - **Port startup latency** — First compilation or recovery after crash takes ~50-100ms for port process spawn
 - **Resource opacity** — Compiler memory (allocated in Rust heap via Port/NIF) is invisible to BEAM tooling (`observer`, `instrument`). Memory leaks in the compiler degrade the node gradually without clear attribution
@@ -341,10 +348,10 @@ Compile the Rust compiler to WASM and run it via a WASM runtime (wasmex) inside 
 - **Debugging compiler bugs** — When the compiler crashes in a Port, you get the exit status but limited diagnostics. In a daemon, you can attach `rust-gdb`. Mitigated by: Rust's error handling, crash logs, and the ability to run the compiler binary standalone for reproduction
 
 ### Neutral
-- **`beamtalk` CLI binary still exists** — For `beamtalk build` batch compilation, the CLI can either load the NIF itself or delegate to a running BEAM node. The CLI remains useful for project management, package management, and tooling.
+- **`beamtalk` CLI binary still exists** — For `beamtalk build` batch compilation, the CLI can either use the Port backend itself or delegate to a running BEAM node. The CLI remains useful for project management, package management, and tooling.
 - **ADR 0003 unaffected** — Core Erlang remains the codegen target. Only the process boundary changes.
-- **ADR 0009 enhanced** — The workspace/runtime split benefits from embedded compilation. The NIF lives in a new `beamtalk_compiler` OTP app (its own bounded context), not in `beamtalk_workspace` or `beamtalk_runtime`. This preserves DDD boundaries: the workspace depends on the compiler app, which encapsulates whether compilation happens via NIF or daemon.
-- **DDD Context Map** — The Published Language boundary (Core Erlang IR) between Compilation and Runtime contexts is preserved. The `beamtalk_compiler` app acts as an Anti-Corruption Layer: it exposes a clean Erlang API (`compile/2`, `compile_expression/3`) while hiding the NIF/daemon implementation detail.
+- **ADR 0009 enhanced** — The workspace/runtime split benefits from embedded compilation. The compiler backend lives in a new `beamtalk_compiler` OTP app (its own bounded context), not in `beamtalk_workspace` or `beamtalk_runtime`. This preserves DDD boundaries: the workspace depends on the compiler app, which encapsulates whether compilation happens via Port, NIF, or external daemon.
+- **DDD Context Map** — The Published Language boundary (Core Erlang IR) between Compilation and Runtime contexts is preserved. The `beamtalk_compiler` app acts as an Anti-Corruption Layer: it exposes a clean Erlang API (`compile/2`, `compile_expression/3`) while hiding the backend implementation detail (Port, NIF, or external daemon).
 
 ## Implementation
 
@@ -400,15 +407,15 @@ Replace daemon IPC in `beamtalk_repl_eval.erl` with calls through `beamtalk_comp
 - Modified: `crates/beamtalk-cli/src/commands/repl.rs` (remove daemon auto-start)
 
 **Testing:**
-- All existing E2E tests (`just test-e2e`) must pass with both NIF and daemon backends
-- All stdlib tests (`just test-stdlib`) must pass with NIF backend
-- CI should run tests with `BEAMTALK_COMPILER=nif` and `BEAMTALK_COMPILER=daemon` to verify identical behavior
+- All existing E2E tests (`just test-e2e`) must pass with both Port and daemon backends
+- All stdlib tests (`just test-stdlib`) must pass with the Port backend
+- CI should run tests with `BEAMTALK_COMPILER=port` and `BEAMTALK_COMPILER=daemon` to verify identical behavior
 
 ### Phase 3: Build Integration (M)
-Move `beamtalk build` to use the NIF (via an OTP release or escript).
+Move `beamtalk build` to use the Port-based compiler (via an OTP release or escript).
 
 **Affected components:**
-- Modified: `crates/beamtalk-cli/src/beam_compiler.rs` (option to compile via NIF)
+- Modified: `crates/beamtalk-cli/src/beam_compiler.rs` (option to compile via embedded compiler backend/Port abstraction)
 - Modified: `crates/beamtalk-cli/src/commands/build.rs`
 - Deprecated: `crates/beamtalk-cli/src/commands/daemon/` (entire daemon module)
 
@@ -451,8 +458,8 @@ During the transition (Phases 2–4), the compiler backend is selectable via env
 compiler_backend() ->
     case os:getenv("BEAMTALK_COMPILER") of
         "daemon" -> daemon;
-        "nif"    -> nif;
         "port"   -> port;
+        "nif"    -> nif;     %% Phase 6 only
         false    ->
             %% Default changes over time:
             %% Phase 2: daemon (Port opt-in)
@@ -482,8 +489,8 @@ BEAMTALK_COMPILER=nif beamtalk repl          # opt-in to NIF for low-latency
 ```
 
 The setting lives at the **workspace** level (not per-REPL-session), so all compilation within a workspace uses the same backend. This allows:
-- **Gradual rollout** — test NIF in development before making it default
-- **Quick rollback** — if NIF has issues on a platform, switch back to daemon instantly
+- **Gradual rollout** — test Port in development before making it the default (daemon → Port), and later test NIF as an opt-in backend
+- **Quick rollback** — if Port has issues on a platform, switch back to the daemon during migration; if NIF has issues, switch back to Port
 - **CI comparison** — run tests with both backends to verify identical behavior
 
 ### For users
@@ -493,7 +500,7 @@ The setting lives at the **workspace** level (not per-REPL-session), so all comp
 4. **Phase 6 (future):** NIF available as opt-in via `BEAMTALK_COMPILER=nif` for low-latency workflows.
 
 ### For the codebase
-- New: `beamtalk_compiler_backend` module dispatches to NIF or daemon based on configuration
+- New: `beamtalk_compiler_backend` module dispatches to Port or daemon based on configuration
 - `beamtalk_repl_eval.erl` calls `beamtalk_compiler_backend` instead of daemon directly
 - `beamtalk_repl_state` retains daemon socket path until Phase 5
 - CLI `beamtalk daemon start/stop/status` commands deprecated at Phase 3, removed at Phase 5
