@@ -18,15 +18,15 @@ Beamtalk needs string interpolation — the ability to embed expressions inside 
 - The **lexer** currently uses single quotes (`'...'`) for strings and double quotes (`"..."`) for "interpolated strings" — but this was a preliminary choice inherited from Smalltalk convention, not a deliberate design decision
 - The **parser, AST, and codegen** have no interpolation support
 - `test-package-compiler/cases/future_string_interpolation/main.bt` documents expected behavior
-- ~180+ `.bt` files use single-quoted strings throughout
+- ~90 `.bt` files use single-quoted strings throughout
 
 ### Constraints
 
 - Must produce a **binary** (not charlist, not iolist) — beamtalk strings are binaries everywhere
 - Must work with **UTF-8** content including emoji and CJK characters
 - Must compose with existing **message-send** semantics — expressions inside interpolation should be normal beamtalk expressions
-- Should not conflict with **existing syntax**: `{a, b}` tuples, `#{...}` maps, `$a` character literals, `[...]` blocks
-- Must be **lexer-friendly** — tokenization should be straightforward
+- Should not conflict with **existing syntax**: `#{...}` maps, `$a` character literals, `[...]` blocks. Note: `{a, b}` tuple patterns and planned tuple/array literals use `{` in _expression_ context, but `{` inside `"..."` strings is unambiguously interpolation — the lexer handles strings in a separate mode.
+- Must be **lexer-friendly** — tokenization should be straightforward, using well-understood mode-switching (same technique as Kotlin, Swift, Elixir)
 
 ## Decision
 
@@ -92,8 +92,8 @@ Interpolation compiles to **Erlang binary construction**, producing a flat binar
 ```
 
 ```erlang
-%% Generated Core Erlang
-let _Name_str = call 'beamtalk_string':'printString'(Name) in
+%% Generated Core Erlang (conceptual — actual dispatch uses object system)
+let _Name_str = call 'beamtalk_dispatch':'send'(Name, 'printString', []) in
   #{#<72>(8,1,'integer',['unsigned'|['big']]),
     #<101>(8,1,'integer',['unsigned'|['big']]),
     ...
@@ -149,7 +149,25 @@ ERROR: UndefinedObject does not understand 'printString'
 > "Missing close brace {name"
 ERROR: Unterminated interpolation expression at line 1
   Hint: Add closing '}' to complete the expression
+
+> "Empty: {}"
+ERROR: Empty interpolation expression at line 1
+  Hint: Add an expression between '{' and '}'
 ```
+
+### Edge Cases
+
+- **Empty braces `{}`**: Syntax error — an expression is required between `{` and `}`
+- **Nested braces**: Expressions containing blocks or tuples work naturally — the lexer tracks brace depth to find the matching `}` for the interpolation. Example: `"Result: {[:x | x * 2] value: 3}"` works because `[...]` block braces don't count.
+- **`printString` failure**: If the interpolated value does not understand `printString`, the standard `doesNotUnderstand:` error is raised — no silent fallback or placeholder text
+- **Lexer mode**: Inside `"..."`, the lexer switches to string mode. `{` starts an embedded expression sub-lexer that tracks brace depth. This is the same approach used by Kotlin, Swift, and Elixir — well-understood lexer technique.
+
+### Future Syntax Considerations
+
+This ADR does not constrain future decisions on:
+- **Heredocs / triple-quoted strings** (`"""..."""`): If added, they should use the same `{expr}` interpolation — no new delimiter needed
+- **Raw strings** (e.g., `#r"..."` from ADR 0012): Should NOT interpolate — raw means raw
+- **Binary literals** (`#b<<...>>`): Separate syntax, not affected by string interpolation
 
 ## Prior Art
 
@@ -315,10 +333,10 @@ literal := "Hello, {name}!"          // no prefix = no interpolation
 - Zero overhead for plain strings (no `{expr}` → compiles to plain binary literal)
 - Clean compilation to BEAM binary construction
 - `printString` auto-conversion leverages existing Smalltalk object protocol
-- No ambiguity with existing syntax (`{}` tuples, `#{}` maps, `$a` chars)
+- No ambiguity with existing syntax — `{` inside `"..."` is lexed in string mode (separate from expression-level `{` for tuples/arrays)
 
 ### Negative
-- **Breaking change**: ~180+ `.bt` files must be updated from `'...'` to `"..."` (mechanical find-replace, but large diff)
+- **Breaking change**: ~90 `.bt` files must be updated from `'...'` to `"..."` (mechanical find-replace, but large diff)
 - Departs from Smalltalk's single-quote convention — Smalltalk developers must adjust
 - Documentation overhaul: `beamtalk-syntax-rationale.md`, `beamtalk-language-features.md`, examples, tests, and `lib/*.bt` all reference single-quoted strings
 - `\{` escaping required for literal braces in strings — minor but new escape to learn
@@ -329,41 +347,37 @@ literal := "Hello, {name}!"          // no prefix = no interpolation
 - `test-package-compiler/cases/future_string_interpolation/main.bt` must be updated
 - Iolist optimization remains available as a future concern via StringBuilder/Stream
 - Double-quoted strings in Erlang are charlists — beamtalk's double-quoted strings are binaries. This is a deliberate divergence, consistent with Elixir's convention.
+- This ADR bundles two logically coupled decisions (quote convention + interpolation). They are bundled because the quote change is motivated by interpolation — double quotes are chosen specifically because all strings should interpolate. Implementing one without the other would leave the language in an inconsistent intermediate state.
 
 ## Implementation
 
-### Phase 1: Quote Convention Change
-- Update lexer to use `"..."` as primary string syntax
-- Deprecate/remove `'...'` string support (or keep as alias during transition)
-- Update all ~180+ `.bt` files from `'...'` to `"..."`
-- Update `#'quoted symbols'` to remain valid (single quotes in symbol context only)
-- **Affected**: `lexer.rs`, all `.bt` files, docs
+Since the language is pre-release with no external users, the quote change and interpolation can be implemented together without a deprecation cycle.
 
-### Phase 2: Interpolation — Lexer + Parser
-- Enhance `"..."` lexing to detect `{expr}` segments (currently treats content as opaque)
+### Phase 1: Quote Convention + Lexer/Parser
+- Update lexer: `"..."` becomes the sole string syntax, remove `'...'` string support
+- `#'quoted symbols'` remain valid (single quotes in symbol context only)
+- Mechanical `sed` to update all ~90 `.bt` files from `'...'` to `"..."`
+- Enhance `"..."` lexing to detect `{expr}` segments via lexer mode-switching (track brace depth for nested expressions)
+- Reject empty `{}` as syntax error
 - Parse `{expr}` segments as embedded expressions
 - Add `StringInterpolation` AST node with segments: `[Literal("Hello, "), Expression(name), Literal("!")]`
-- **Affected**: `lexer.rs`, `parser/mod.rs`, `ast.rs`
+- **Affected**: `lexer.rs`, `parser/mod.rs`, `ast.rs`, all `.bt` files
 
-### Phase 3: Interpolation — Codegen
+### Phase 2: Codegen + Runtime
 - Generate binary construction: `<<literal_bytes, (printString_result)/binary, ...>>`
-- Insert `printString` calls for non-literal segments
-- Plain strings (no `{expr}`) compile to simple binary literals as today
-- **Affected**: `codegen/core_erlang/expressions.rs`
+- Insert `printString` dispatch for non-literal segments via object system
+- Plain strings (no `{expr}`) compile to simple binary literals as today — zero overhead
+- Ensure `printString` is implemented on all stdlib classes (already done for 36+ classes)
+- Update `tests/stdlib/string_interpolation.bt` and `test-package-compiler/cases/future_string_interpolation/main.bt`
+- **Affected**: `codegen/core_erlang/expressions.rs`, `lib/*.bt`, `tests/stdlib/`, `test-package-compiler/cases/`
 
-### Phase 4: Runtime + Tests
-- Ensure `printString` is implemented on all stdlib classes (Integer, Float, Boolean, List, etc.)
-- Update `tests/stdlib/string_interpolation.bt` with real interpolation tests
-- Update `test-package-compiler/cases/future_string_interpolation/main.bt`
-- **Affected**: `lib/*.bt`, `tests/stdlib/`, `test-package-compiler/cases/`
-
-### Phase 5: Documentation
+### Phase 3: Documentation
 - Update `docs/beamtalk-language-features.md` — string section, examples
 - Update `docs/beamtalk-syntax-rationale.md` — interpolation and quote sections
 - Update `AGENTS.md` — syntax examples, test format examples
 - Update `examples/*.bt` and `README.md`
 
-### Estimated Size: XL (quote convention change spans entire codebase + interpolation implementation)
+### Estimated Size: L (lexer/parser/codegen changes + mechanical file updates)
 
 ## Migration Path
 
