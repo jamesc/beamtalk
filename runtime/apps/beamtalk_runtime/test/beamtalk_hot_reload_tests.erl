@@ -98,11 +98,12 @@ migrate_non_map_state_unchanged_test() ->
     {ok, AtomState} = beamtalk_hot_reload:code_change(v1, undefined, extra),
     ?assertEqual(undefined, AtomState).
 
-%% State with BOTH keys leaves $beamtalk_class unchanged (no overwrite)
+%% State with BOTH keys leaves $beamtalk_class unchanged and removes old key
 migrate_both_keys_no_overwrite_test() ->
     State = #{'$beamtalk_class' => 'NewClass', '__class__' => 'OldClass', value => 1},
     {ok, NewState} = beamtalk_hot_reload:code_change(v1, State, extra),
-    ?assertEqual('NewClass', maps:get('$beamtalk_class', NewState)).
+    ?assertEqual('NewClass', maps:get('$beamtalk_class', NewState)),
+    ?assertNot(maps:is_key('__class__', NewState)).
 
 %% Empty map is unchanged
 migrate_empty_map_unchanged_test() ->

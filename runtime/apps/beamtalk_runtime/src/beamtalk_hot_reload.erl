@@ -85,14 +85,19 @@ trigger_code_change(Module, Pids) ->
 %% @private
 %% Migrate old `__class__` tag key to `$beamtalk_class` (BT-399).
 %%
-%% Idempotent: if `$beamtalk_class` is already present, state is unchanged.
-%% If both keys are present, `$beamtalk_class` takes precedence (no overwrite).
+%% Idempotent: migration may add the new key and/or remove the old key,
+%% but will not change an existing `$beamtalk_class` value.
+%% Only migrates when the legacy value is an atom (actor class names).
 -spec maybe_migrate_class_key(map()) -> map().
 maybe_migrate_class_key(State) ->
     ClassKey = beamtalk_tagged_map:class_key(),
     case {maps:find(ClassKey, State), maps:find('__class__', State)} of
-        {error, {ok, Class}} ->
+        {error, {ok, Class}} when is_atom(Class) ->
+            %% New key missing, old key present - migrate and remove legacy key
             maps:remove('__class__', State#{ClassKey => Class});
+        {{ok, _}, {ok, _}} ->
+            %% Both keys present - keep new key, remove legacy key
+            maps:remove('__class__', State);
         _ ->
             State
     end.
