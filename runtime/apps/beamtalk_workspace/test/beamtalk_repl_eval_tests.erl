@@ -481,6 +481,41 @@ io_capture_dead_process_test() ->
     Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}),
     ?assertEqual(<<>>, Output).
 
+%% === BT-358: Group leader reset for spawned processes ===
+
+io_capture_resets_spawned_process_group_leader_test() ->
+    %% Verify that processes spawned during IO capture get their
+    %% group_leader reset to the original GL when capture stops.
+    OrigGL = group_leader(),
+    {CapturePid, _OldGL} = beamtalk_repl_eval:start_io_capture(),
+    %% Spawn a process that inherits the capture GL and stays alive
+    SpawnedPid = spawn(fun() -> receive stop -> ok end end),
+    %% Verify it inherited the capture process as GL
+    {group_leader, SpawnedGL} = erlang:process_info(SpawnedPid, group_leader),
+    ?assertEqual(CapturePid, SpawnedGL),
+    %% Stop capture — should reset spawned process's GL
+    _Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OrigGL}),
+    %% Verify spawned process now has the original stable GL
+    {group_leader, RestoredGL} = erlang:process_info(SpawnedPid, group_leader),
+    ?assertEqual(OrigGL, RestoredGL),
+    SpawnedPid ! stop.
+
+io_capture_reset_does_not_affect_unrelated_processes_test() ->
+    %% Verify that processes NOT spawned during capture keep their GL.
+    OrigGL = group_leader(),
+    %% Spawn a process BEFORE capture starts
+    PreExisting = spawn(fun() -> receive stop -> ok end end),
+    {group_leader, PreGL} = erlang:process_info(PreExisting, group_leader),
+    %% Start and stop capture
+    CaptureRef = beamtalk_repl_eval:start_io_capture(),
+    _Output = beamtalk_repl_eval:stop_io_capture(CaptureRef),
+    %% Pre-existing process should keep its original GL
+    {group_leader, PostGL} = erlang:process_info(PreExisting, group_leader),
+    ?assertEqual(PreGL, PostGL),
+    %% Restore and clean up
+    group_leader(OrigGL, self()),
+    PreExisting ! stop.
+
 %% === is_stdlib_path tests ===
 
 is_stdlib_path_relative_lib_test() ->

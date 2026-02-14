@@ -30,7 +30,7 @@
          ensure_dir_with_mode/2, maybe_await_future/1, should_purge_module/2,
          strip_internal_bindings/1, parse_file_compile_result/1,
          start_io_capture/0, stop_io_capture/1, io_capture_loop/1,
-         is_stdlib_path/1]).
+         is_stdlib_path/1, reset_captured_group_leaders/2]).
 -endif.
 
 -define(RECV_TIMEOUT, 30000).
@@ -711,9 +711,16 @@ start_io_capture() ->
 %% @doc Stop capturing IO and return all captured output as a binary.
 %% Restores the original group_leader. Returns <<>> on timeout or if
 %% the capture process has already exited.
+%%
+%% BT-358: After restoring the eval process's group_leader, also resets
+%% the group_leader of any processes that inherited the capture process
+%% as their group_leader during eval (e.g., spawned actors).
 -spec stop_io_capture({pid(), pid()}) -> binary().
 stop_io_capture({CapturePid, OldGL}) ->
     group_leader(OldGL, self()),
+    %% BT-358: Reset group_leader for any processes spawned during eval
+    %% that inherited the capture process as their group_leader.
+    reset_captured_group_leaders(CapturePid, OldGL),
     case is_process_alive(CapturePid) of
         true ->
             CapturePid ! {get_captured, self(), OldGL},
@@ -756,6 +763,28 @@ io_passthrough_loop(OldGL) ->
     after 60000 ->
         ok
     end.
+
+%% @doc Reset group_leader for processes that inherited the capture process.
+%% Scans all processes to find those whose group_leader is the capture
+%% process and resets them to the original group_leader (BT-358).
+-spec reset_captured_group_leaders(pid(), pid()) -> ok.
+reset_captured_group_leaders(CapturePid, OldGL) ->
+    lists:foreach(
+        fun(Pid) ->
+            case Pid =/= self() andalso is_process_alive(Pid) of
+                true ->
+                    case erlang:process_info(Pid, group_leader) of
+                        {group_leader, CapturePid} ->
+                            group_leader(OldGL, Pid);
+                        _ ->
+                            ok
+                    end;
+                false ->
+                    ok
+            end
+        end,
+        erlang:processes()
+    ).
 
 %% @doc Handle a single IO protocol request.
 %% Always replies ok for output requests to avoid changing program behavior.
