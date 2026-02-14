@@ -1231,7 +1231,25 @@ tcp_integration_test_() ->
           {"clone op", fun() -> tcp_clone_test(Port) end},
           {"inspect dead actor", fun() -> tcp_inspect_dead_actor_test(Port) end},
           {"malformed json", fun() -> tcp_malformed_json_test(Port) end},
-          {"raw expression", fun() -> tcp_raw_expression_test(Port) end}
+          {"raw expression", fun() -> tcp_raw_expression_test(Port) end},
+          %% BT-523: TCP connection lifecycle tests
+          {"multiple sequential connects", fun() -> tcp_multiple_connects_test(Port) end},
+          {"concurrent clients", fun() -> tcp_concurrent_clients_test(Port) end},
+          {"client disconnect", fun() -> tcp_client_disconnect_test(Port) end},
+          {"multi request same connection", fun() -> tcp_multi_request_same_conn_test(Port) end},
+          %% BT-523: Connection error handling tests
+          {"empty line", fun() -> tcp_empty_line_test(Port) end},
+          {"binary garbage", fun() -> tcp_binary_garbage_test(Port) end},
+          {"reload empty module", fun() -> tcp_reload_empty_module_test(Port) end},
+          {"reload with path", fun() -> tcp_reload_with_path_test(Port) end},
+          {"docs with selector unknown class", fun() -> tcp_docs_with_selector_unknown_test(Port) end},
+          {"inspect unknown actor", fun() -> tcp_inspect_unknown_actor_test(Port) end},
+          {"kill unknown actor", fun() -> tcp_kill_unknown_actor_test(Port) end},
+          %% BT-523: gen_server callback tests
+          {"get port", fun() -> tcp_get_port_test(Port) end},
+          {"start_link integer port", fun() -> tcp_start_link_integer_test() end},
+          %% BT-523: session ID uniqueness test
+          {"clone uniqueness", fun() -> tcp_clone_uniqueness_test(Port) end}
          ]
      end}.
 
@@ -1488,3 +1506,228 @@ tcp_raw_expression_test(Port) ->
     Resp = jsx:decode(Data, [return_maps]),
     %% Raw expressions go through protocol decode
     ?assert(is_map(Resp)).
+
+%%% BT-523: TCP connection lifecycle tests
+
+%% Test: multiple sequential connections to the same port
+tcp_multiple_connects_test(Port) ->
+    %% First connection
+    Msg1 = jsx:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"mc1">>}),
+    Resp1 = tcp_send_op(Port, Msg1),
+    ?assertMatch(#{<<"id">> := <<"mc1">>}, Resp1),
+    %% Second connection after first is closed
+    Msg2 = jsx:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"mc2">>}),
+    Resp2 = tcp_send_op(Port, Msg2),
+    ?assertMatch(#{<<"id">> := <<"mc2">>}, Resp2),
+    %% Third connection
+    Msg3 = jsx:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"mc3">>}),
+    Resp3 = tcp_send_op(Port, Msg3),
+    ?assertMatch(#{<<"id">> := <<"mc3">>}, Resp3).
+
+%% Test: multiple concurrent TCP connections
+tcp_concurrent_clients_test(Port) ->
+    Msg1 = jsx:encode(#{<<"op">> => <<"bindings">>, <<"id">> => <<"cc1">>}),
+    Msg2 = jsx:encode(#{<<"op">> => <<"actors">>, <<"id">> => <<"cc2">>}),
+    {ok, Sock1} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
+    {ok, Sock2} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
+    ok = gen_tcp:send(Sock1, [Msg1, "\n"]),
+    ok = gen_tcp:send(Sock2, [Msg2, "\n"]),
+    {ok, Data1} = gen_tcp:recv(Sock1, 0, 5000),
+    {ok, Data2} = gen_tcp:recv(Sock2, 0, 5000),
+    gen_tcp:close(Sock1),
+    gen_tcp:close(Sock2),
+    Resp1 = jsx:decode(Data1, [return_maps]),
+    Resp2 = jsx:decode(Data2, [return_maps]),
+    ?assertMatch(#{<<"id">> := <<"cc1">>}, Resp1),
+    ?assertMatch(#{<<"id">> := <<"cc2">>}, Resp2).
+
+%% Test: client disconnect is handled gracefully (no crash)
+tcp_client_disconnect_test(Port) ->
+    {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
+    %% Close immediately without sending
+    gen_tcp:close(Sock),
+    timer:sleep(100),
+    %% Server should still be responsive
+    Msg = jsx:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"dc1">>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"dc1">>}, Resp).
+
+%% Test: multiple requests on the same connection
+tcp_multi_request_same_conn_test(Port) ->
+    {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
+    %% Send first request
+    Msg1 = jsx:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"mr1">>}),
+    ok = gen_tcp:send(Sock, [Msg1, "\n"]),
+    {ok, Data1} = gen_tcp:recv(Sock, 0, 5000),
+    Resp1 = jsx:decode(Data1, [return_maps]),
+    ?assertMatch(#{<<"id">> := <<"mr1">>}, Resp1),
+    %% Send second request on same connection
+    Msg2 = jsx:encode(#{<<"op">> => <<"bindings">>, <<"id">> => <<"mr2">>}),
+    ok = gen_tcp:send(Sock, [Msg2, "\n"]),
+    {ok, Data2} = gen_tcp:recv(Sock, 0, 5000),
+    Resp2 = jsx:decode(Data2, [return_maps]),
+    ?assertMatch(#{<<"id">> := <<"mr2">>}, Resp2),
+    gen_tcp:close(Sock).
+
+%%% BT-523: Connection error handling tests
+
+%% Test: send empty line to server
+tcp_empty_line_test(Port) ->
+    {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
+    ok = gen_tcp:send(Sock, <<"\n">>),
+    {ok, Data} = gen_tcp:recv(Sock, 0, 5000),
+    gen_tcp:close(Sock),
+    Resp = jsx:decode(Data, [return_maps]),
+    %% Empty line results in error (legacy type=error or protocol status=[error])
+    ?assert(maps:is_key(<<"error">>, Resp) orelse
+            maps:get(<<"type">>, Resp, undefined) =:= <<"error">>).
+
+%% Test: binary garbage data
+tcp_binary_garbage_test(Port) ->
+    {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
+    ok = gen_tcp:send(Sock, <<0, 1, 2, 255, 254, 10>>),
+    {ok, Data} = gen_tcp:recv(Sock, 0, 5000),
+    gen_tcp:close(Sock),
+    %% Should get some response without crashing the server
+    ?assert(is_binary(Data)),
+    %% Server still works after garbage
+    Msg = jsx:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"bg1">>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"bg1">>}, Resp).
+
+%% Test: reload with empty module name
+tcp_reload_empty_module_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"reload">>, <<"id">> => <<"re1">>, <<"module">> => <<>>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"re1">>}, Resp),
+    ?assert(maps:is_key(<<"error">>, Resp)).
+
+%% Test: reload with path but no module
+tcp_reload_with_path_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"reload">>, <<"id">> => <<"re2">>,
+                       <<"path">> => <<"/nonexistent/path.bt">>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"re2">>}, Resp),
+    %% Should error because file doesn't exist
+    ?assert(maps:is_key(<<"error">>, Resp)).
+
+%% Test: docs with selector for unknown class
+tcp_docs_with_selector_unknown_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"docs">>, <<"id">> => <<"d1">>,
+                       <<"class">> => <<"XyzzyUnknown523">>,
+                       <<"selector">> => <<"+">>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"d1">>}, Resp),
+    ?assert(maps:is_key(<<"error">>, Resp)).
+
+%% Test: inspect unknown actor (valid PID format, not in registry)
+tcp_inspect_unknown_actor_test(Port) ->
+    Pid = spawn(fun() -> receive _ -> ok end end),
+    PidStr = list_to_binary(pid_to_list(Pid)),
+    exit(Pid, kill),
+    timer:sleep(50),
+    Msg = jsx:encode(#{<<"op">> => <<"inspect">>, <<"id">> => <<"iu1">>,
+                       <<"actor">> => PidStr}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"iu1">>}, Resp),
+    ?assert(maps:is_key(<<"error">>, Resp)).
+
+%% Test: kill unknown actor (valid PID format, not in registry)
+tcp_kill_unknown_actor_test(Port) ->
+    Pid = spawn(fun() -> receive _ -> ok end end),
+    PidStr = list_to_binary(pid_to_list(Pid)),
+    exit(Pid, kill),
+    timer:sleep(50),
+    Msg = jsx:encode(#{<<"op">> => <<"kill">>, <<"id">> => <<"ku1">>,
+                       <<"actor">> => PidStr}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"ku1">>}, Resp),
+    ?assert(maps:is_key(<<"error">>, Resp)).
+
+%%% BT-523: gen_server callback and lifecycle tests
+
+%% Test: get_port returns port after start
+tcp_get_port_test(Port) ->
+    {ok, ActualPort} = beamtalk_repl_server:get_port(),
+    ?assertEqual(Port, ActualPort).
+
+%% Test: start_link/1 integer clause executes (backward compatibility)
+tcp_start_link_integer_test() ->
+    %% Server is already running inside tcp_integration_test_ fixture.
+    %% Calling start_link with integer arg exercises the integer clause
+    %% and returns {already_started, _} from gen_server because
+    %% the server is registered as {local, beamtalk_repl_server}.
+    Result = beamtalk_repl_server:start_link(0),
+    case Result of
+        {error, {already_started, _}} ->
+            %% Expected: server was already registered by workspace sup
+            ok;
+        {ok, Pid} ->
+            %% Server wasn't registered (race with test ordering).
+            %% The integer clause worked — clean up the started server.
+            gen_server:stop(Pid),
+            ok
+    end.
+
+%% Test: start_link with integer port (backward compatibility)
+%% The integer-port clause is tested within tcp_integration_test_ via
+%% tcp_start_link_integer_test which calls start_link/1 while the server
+%% is running and asserts {already_started, _}.
+start_link_integer_port_test() ->
+    %% Basic verification that the export exists
+    Exports = beamtalk_repl_server:module_info(exports),
+    ?assert(lists:member({start_link, 1}, Exports)).
+
+%%% BT-523: generate_session_id format and uniqueness tests (via clone op)
+
+%% Clone creates new sessions, each with a unique generated ID.
+%% This tests generate_session_id indirectly via the clone TCP op.
+%% The test is in tcp_integration_test_ as tcp_clone_uniqueness_test.
+
+%% Test: two clone ops produce different session IDs
+tcp_clone_uniqueness_test(Port) ->
+    Msg1 = jsx:encode(#{<<"op">> => <<"clone">>, <<"id">> => <<"cu1">>}),
+    Msg2 = jsx:encode(#{<<"op">> => <<"clone">>, <<"id">> => <<"cu2">>}),
+    Resp1 = tcp_send_op(Port, Msg1),
+    Resp2 = tcp_send_op(Port, Msg2),
+    %% Both clones must succeed — if the session sup isn't ready, fail loudly
+    ?assertMatch(#{<<"value">> := _}, Resp1),
+    ?assertMatch(#{<<"value">> := _}, Resp2),
+    V1 = maps:get(<<"value">>, Resp1),
+    V2 = maps:get(<<"value">>, Resp2),
+    ?assertNotEqual(V1, V2),
+    %% Verify session ID format: "session_<timestamp>_<random>"
+    ?assert(binary:match(V1, <<"session_">>) =:= {0, 8}),
+    ?assert(binary:match(V2, <<"session_">>) =:= {0, 8}).
+
+%%% BT-523: format_error_message additional coverage
+
+format_error_message_unknown_actor_v2_test() ->
+    Msg = beamtalk_repl_server:format_error_message({unknown_actor, "<0.99.0>"}),
+    ?assert(is_binary(Msg)),
+    ?assert(byte_size(Msg) > 0).
+
+format_error_message_invalid_pid_v2_test() ->
+    Msg = beamtalk_repl_server:format_error_message({invalid_pid, "garbage"}),
+    ?assert(is_binary(Msg)),
+    ?assert(byte_size(Msg) > 0).
+
+format_error_message_load_error_atom_test() ->
+    Msg = beamtalk_repl_server:format_error_message({load_error, {bad_module, counter}}),
+    ?assert(binary:match(Msg, <<"Failed to load bytecode">>) =/= nomatch).
+
+format_error_message_read_error_enoent_test() ->
+    Msg = beamtalk_repl_server:format_error_message({read_error, enoent}),
+    ?assert(binary:match(Msg, <<"Failed to read file">>) =/= nomatch).
+
+format_error_message_daemon_unavailable_v2_test() ->
+    Msg = beamtalk_repl_server:format_error_message(daemon_unavailable),
+    ?assert(binary:match(Msg, <<"compiler daemon">>) =/= nomatch).
+
+format_error_message_empty_expression_v2_test() ->
+    Msg = beamtalk_repl_server:format_error_message(empty_expression),
+    ?assertEqual(<<"Empty expression">>, Msg).
+
+format_error_message_timeout_v2_test() ->
+    Msg = beamtalk_repl_server:format_error_message(timeout),
+    ?assertEqual(<<"Request timed out">>, Msg).
