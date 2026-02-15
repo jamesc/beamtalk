@@ -1,7 +1,7 @@
 # ADR 0025: Gradual Typing and Protocols
 
 ## Status
-Proposed (2026-02-15)
+Accepted (2026-02-15)
 
 ## Context
 
