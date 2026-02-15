@@ -3,8 +3,10 @@
 
 //! Block mutation analysis for control flow constructs.
 //!
-//! This module analyzes blocks to detect which variables and fields are read/written,
-//! enabling proper state threading in tail-recursive loops.
+//! **DDD Context:** Compilation — Code Generation
+//!
+//! This domain service analyzes blocks to detect which variables and fields are
+//! read/written, enabling proper state threading in tail-recursive loops.
 
 use crate::ast::{Block, Expression, MessageSelector};
 use std::collections::HashSet;

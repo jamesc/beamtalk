@@ -3,7 +3,9 @@
 
 //! Expression code generation.
 //!
-//! This module handles code generation for Beamtalk expressions:
+//! **DDD Context:** Compilation — Code Generation
+//!
+//! This domain service handles code generation for Beamtalk expressions:
 //! - Literals (integers, floats, strings, symbols)
 //! - Identifiers and variable references
 //! - Map literals
