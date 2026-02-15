@@ -527,7 +527,7 @@ end
         };
 
         let module = Module::new(vec![value_assignment], Span::new(0, 10));
-        let code = generate_with_name(&module, "counter").expect("codegen should succeed");
+        let code = generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
 
         // Check that spawn/0 and spawn/1 are exported
         assert!(code.contains("'spawn'/0"));
@@ -573,7 +573,7 @@ end
         use crate::ast::*;
 
         let module = Module::new(vec![], Span::new(0, 0));
-        let code = generate_with_name(&module, "test_actor").expect("codegen should succeed");
+        let code = generate_module(&module, CodegenOptions::new("test_actor")).expect("codegen should succeed");
 
         // Check that new/0 and new/1 are exported
         assert!(code.contains("'new'/0"));
@@ -2027,7 +2027,7 @@ end
             leading_comments: vec![],
         };
 
-        let code = generate_with_name(&module, "counter").expect("codegen should succeed");
+        let code = generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
 
         // Check that on_load attribute is present
         assert!(
@@ -2129,7 +2129,7 @@ end
     fn test_no_class_registration_for_empty_module() {
         // BT-218: Modules without class definitions should not have on_load or register_class
         let module = Module::new(vec![], Span::new(0, 0));
-        let code = generate_with_name(&module, "empty_module").expect("codegen should succeed");
+        let code = generate_module(&module, CodegenOptions::new("empty_module")).expect("codegen should succeed");
 
         // Should NOT have on_load attribute
         assert!(
@@ -2193,7 +2193,7 @@ end
             leading_comments: vec![],
         };
 
-        let code = generate_with_name(&module, "multi_actors").expect("codegen should succeed");
+        let code = generate_module(&module, CodegenOptions::new("multi_actors")).expect("codegen should succeed");
 
         // Should have on_load attribute
         assert!(
@@ -2738,7 +2738,10 @@ end
         };
 
         let bindings = primitive_bindings::PrimitiveBindingTable::new();
-        let result = generate_with_bindings(&module, "point", bindings, None, false);
+        let result = generate_module(
+            &module,
+            CodegenOptions::new("point").with_bindings(bindings),
+        );
         assert!(result.is_ok());
         let code = result.unwrap();
         assert!(code.contains("module 'point'"));
@@ -2778,7 +2781,10 @@ end
         let src = "Actor subclass: TestClass\n  state: value = 0\n\n  class broken => self.value";
         let tokens = crate::source_analysis::lex_with_eof(src);
         let (module, _diags) = crate::source_analysis::parse(tokens);
-        let result = generate_with_workspace(&module, "test_class_field", true);
+        let result = generate_module(
+            &module,
+            CodegenOptions::new("test_class_field").with_workspace_mode(true),
+        );
         assert!(
             result.is_err(),
             "Should reject field access in class method"
@@ -2797,7 +2803,10 @@ end
             "Actor subclass: TestClass\n  state: value = 0\n\n  class broken => self.value := 42";
         let tokens = crate::source_analysis::lex_with_eof(src);
         let (module, _diags) = crate::source_analysis::parse(tokens);
-        let result = generate_with_workspace(&module, "test_class_assign", true);
+        let result = generate_module(
+            &module,
+            CodegenOptions::new("test_class_assign").with_workspace_mode(true),
+        );
         assert!(
             result.is_err(),
             "Should reject field assignment in class method"

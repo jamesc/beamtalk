@@ -586,10 +586,13 @@ pub fn write_core_erlang_with_source(
     }
 
     // Generate Core Erlang
-    let core_erlang =
-        beamtalk_core::erlang::generate_with_name_and_source(module, module_name, source_text)
-            .into_diagnostic()
-            .wrap_err("Failed to generate Core Erlang")?;
+    let core_erlang = beamtalk_core::erlang::generate_module(
+        module,
+        beamtalk_core::erlang::CodegenOptions::new(module_name)
+            .with_source_opt(source_text),
+    )
+    .into_diagnostic()
+    .wrap_err("Failed to generate Core Erlang")?;
 
     // Write to file
     std::fs::write(output_path, core_erlang)
@@ -626,12 +629,12 @@ pub fn write_core_erlang_with_bindings(
         );
     }
 
-    let core_erlang = beamtalk_core::erlang::generate_with_bindings(
+    let core_erlang = beamtalk_core::erlang::generate_module(
         module,
-        module_name,
-        bindings.clone(),
-        source_text,
-        workspace_mode,
+        beamtalk_core::erlang::CodegenOptions::new(module_name)
+            .with_bindings(bindings.clone())
+            .with_source_opt(source_text)
+            .with_workspace_mode(workspace_mode),
     )
     .into_diagnostic()
     .wrap_err("Failed to generate Core Erlang")?;
