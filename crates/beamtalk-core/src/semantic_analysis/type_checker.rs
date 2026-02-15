@@ -18,7 +18,7 @@
 //! **References:**
 //! - `docs/ADR/0025-gradual-typing-and-protocols.md` — Phase 1
 
-use crate::ast::{Expression, Literal, MessageSelector, Module};
+use crate::ast::{Expression, Literal, MessageSelector, Module, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, Span};
 use ecow::EcoString;
@@ -81,16 +81,16 @@ impl TypeChecker {
             let is_abstract = class.is_abstract || hierarchy.is_abstract(&class.name.name);
             for method in &class.methods {
                 let mut method_env = TypeEnv::new();
-                // `self` has the type of the class
                 method_env.set("self", InferredType::Known(class.name.name.clone()));
+                Self::set_param_types(&mut method_env, &method.parameters);
                 for expr in &method.body {
                     self.infer_expr(expr, hierarchy, &mut method_env, is_abstract);
                 }
             }
             for method in &class.class_methods {
                 let mut method_env = TypeEnv::new();
-                // `self` in class methods refers to the class itself
                 method_env.set("self", InferredType::Known(class.name.name.clone()));
+                Self::set_param_types(&mut method_env, &method.parameters);
                 for expr in &method.body {
                     self.infer_expr(expr, hierarchy, &mut method_env, is_abstract);
                 }
@@ -102,10 +102,22 @@ impl TypeChecker {
             let class_name = &standalone.class_name.name;
             let is_abstract = hierarchy.is_abstract(class_name);
             let mut method_env = TypeEnv::new();
-            // `self` is the class for class methods, an instance for instance methods
             method_env.set("self", InferredType::Known(class_name.clone()));
+            Self::set_param_types(&mut method_env, &standalone.method.parameters);
             for expr in &standalone.method.body {
                 self.infer_expr(expr, hierarchy, &mut method_env, is_abstract);
+            }
+        }
+    }
+
+    /// Sets parameter types in the type environment from annotations.
+    ///
+    /// Only `Simple` type annotations are wired in. Union types and other complex
+    /// annotations are left as `Dynamic` — full union type support is Phase 3.
+    fn set_param_types(env: &mut TypeEnv, parameters: &[crate::ast::ParameterDefinition]) {
+        for param in parameters {
+            if let Some(TypeAnnotation::Simple(type_id)) = &param.type_annotation {
+                env.set(&param.name.name, InferredType::Known(type_id.name.clone()));
             }
         }
     }

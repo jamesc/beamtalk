@@ -10,9 +10,9 @@
 
 use crate::ast::{
     ClassDefinition, Expression, Identifier, KeywordPart, MessageSelector, MethodDefinition,
-    MethodKind, StandaloneMethodDefinition, StateDeclaration, TypeAnnotation,
+    MethodKind, ParameterDefinition, StandaloneMethodDefinition, StateDeclaration, TypeAnnotation,
 };
-use crate::source_analysis::TokenKind;
+use crate::source_analysis::{Span, TokenKind};
 
 use super::Parser;
 
@@ -238,17 +238,24 @@ impl Parser {
             }
         }
 
-        // Check for method selector pattern followed by =>
+        // Check for method selector pattern followed by => (possibly with -> ReturnType)
         match self.peek_at(offset) {
-            // Unary method: `identifier =>` (fat arrow must be next token)
+            // Unary method: `identifier =>` or `identifier -> Type =>`
             Some(TokenKind::Identifier(_)) => {
                 matches!(self.peek_at(offset + 1), Some(TokenKind::FatArrow))
+                    || self.is_return_type_then_fat_arrow(offset + 1)
             }
-            // Binary method: `+ other =>`
+            // Binary method: `+ other =>` or `+ other -> Type =>` or `+ other: Type =>`
             Some(TokenKind::BinarySelector(_)) => {
-                // Binary selector, then parameter name, then =>
-                matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_)))
-                    && matches!(self.peek_at(offset + 2), Some(TokenKind::FatArrow))
+                // Untyped: `+ other =>` or `+ other -> Type =>`
+                (matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_)))
+                    && (matches!(self.peek_at(offset + 2), Some(TokenKind::FatArrow))
+                        || self.is_return_type_then_fat_arrow(offset + 2)))
+                    // Typed via Keyword: `+ other: Type =>` (lexer makes `other:` a Keyword)
+                    || (matches!(self.peek_at(offset + 1), Some(TokenKind::Keyword(_)))
+                        && matches!(self.peek_at(offset + 2), Some(TokenKind::Identifier(_)))
+                        && (matches!(self.peek_at(offset + 3), Some(TokenKind::FatArrow))
+                            || self.is_return_type_then_fat_arrow(offset + 3)))
             }
             // Keyword method: `at: index =>` or `at: index put: value =>`
             Some(TokenKind::Keyword(_)) => self.is_keyword_method_at(offset),
@@ -256,9 +263,35 @@ impl Parser {
         }
     }
 
+    /// Checks if there's a `-> Type =>` or `-> Type | Type =>` pattern at the given offset.
+    fn is_return_type_then_fat_arrow(&self, offset: usize) -> bool {
+        if !matches!(
+            self.peek_at(offset),
+            Some(TokenKind::BinarySelector(s)) if s.as_str() == "->"
+        ) {
+            return false;
+        }
+        // Skip -> Type (and possible | Type unions)
+        let mut o = offset + 1;
+        // Must have at least one type name
+        if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
+            return false;
+        }
+        o += 1;
+        // Skip union types: `| Type`
+        while matches!(self.peek_at(o), Some(TokenKind::Pipe)) {
+            o += 1;
+            if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
+                return false;
+            }
+            o += 1;
+        }
+        matches!(self.peek_at(o), Some(TokenKind::FatArrow))
+    }
+
     /// Checks if there's a keyword method definition starting at the given offset.
     ///
-    /// Pattern: `keyword: param keyword: param ... =>`
+    /// Pattern: `keyword: param keyword: param ... =>` or with typed params/return type
     fn is_keyword_method_at(&self, start_offset: usize) -> bool {
         let mut offset = start_offset;
 
@@ -270,16 +303,41 @@ impl Parser {
             }
             offset += 1;
 
-            // Expect parameter (identifier)
+            // Check for typed parameter: `keyword: paramName: Type`
+            // where paramName: is a Keyword token followed by Identifier (type)
+            if let Some(TokenKind::Keyword(_)) = self.peek_at(offset) {
+                // Could be typed param: paramName: followed by Type (Identifier)
+                if matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_))) {
+                    // Skip paramName: and Type
+                    offset += 2;
+                    // Check for => or more keywords or return type
+                    match self.peek_at(offset) {
+                        Some(TokenKind::FatArrow) => return true,
+                        Some(TokenKind::Keyword(_)) => continue,
+                        Some(TokenKind::BinarySelector(s)) if s.as_str() == "->" => {
+                            return self.is_return_type_then_fat_arrow(offset);
+                        }
+                        _ => return false,
+                    }
+                }
+                // Not a typed param — could be next keyword selector part
+                // but that would need an identifier first, so this is invalid
+                return false;
+            }
+
+            // Expect parameter (identifier) for untyped case
             if !matches!(self.peek_at(offset), Some(TokenKind::Identifier(_))) {
                 return false;
             }
             offset += 1;
 
-            // Check for => (end of method selector) or another keyword
+            // Check for => (end of method selector), return type, or another keyword
             match self.peek_at(offset) {
                 Some(TokenKind::FatArrow) => return true,
                 Some(TokenKind::Keyword(_)) => {} // More keywords, continue loop
+                Some(TokenKind::BinarySelector(s)) if s.as_str() == "->" => {
+                    return self.is_return_type_then_fat_arrow(offset);
+                }
                 _ => return false,
             }
         }
@@ -425,8 +483,32 @@ impl Parser {
         })
     }
 
-    /// Parses a simple type annotation (identifier).
+    /// Parses a type annotation, including union types (`Integer | String`).
     fn parse_type_annotation(&mut self) -> TypeAnnotation {
+        let first = self.parse_single_type_annotation();
+
+        // Check for union type: `Type | Type | ...`
+        if !matches!(self.current_kind(), TokenKind::Pipe) {
+            return first;
+        }
+
+        let start_span = first.span();
+        let mut types = vec![first];
+
+        while matches!(self.current_kind(), TokenKind::Pipe) {
+            self.advance(); // consume `|`
+            types.push(self.parse_single_type_annotation());
+        }
+
+        let end_span = types.last().map_or(start_span, TypeAnnotation::span);
+        TypeAnnotation::Union {
+            types,
+            span: start_span.merge(end_span),
+        }
+    }
+
+    /// Parses a single type annotation (no unions).
+    fn parse_single_type_annotation(&mut self) -> TypeAnnotation {
         if let TokenKind::Identifier(name) = self.current_kind() {
             let span = self.current_token().span();
             let ident = Identifier::new(name.clone(), span);
@@ -436,6 +518,16 @@ impl Parser {
             let span = self.current_token().span();
             self.error("Expected type name");
             TypeAnnotation::Simple(Identifier::new("Error", span))
+        }
+    }
+
+    /// Parses an optional `-> ReturnType` annotation before `=>`.
+    fn parse_optional_return_type(&mut self) -> Option<TypeAnnotation> {
+        if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == "->") {
+            self.advance(); // consume `->`
+            Some(self.parse_type_annotation())
+        } else {
+            None
         }
     }
 
@@ -491,6 +583,9 @@ impl Parser {
         // Parse method selector and parameters
         let (selector, parameters) = self.parse_method_selector()?;
 
+        // Parse optional return type: `-> Type` before `=>`
+        let return_type = self.parse_optional_return_type();
+
         // Expect fat arrow
         if !self.match_token(&TokenKind::FatArrow) {
             self.error("Expected '=>' after method selector");
@@ -509,7 +604,7 @@ impl Parser {
             selector,
             parameters,
             body,
-            None, // return_type - could add parsing later
+            return_type,
             method_is_sealed,
             method_kind,
             span,
@@ -520,8 +615,8 @@ impl Parser {
 
     /// Parses a method selector and its parameters.
     ///
-    /// Returns the selector and parameter names.
-    fn parse_method_selector(&mut self) -> Option<(MessageSelector, Vec<Identifier>)> {
+    /// Returns the selector and parameter definitions (with optional type annotations).
+    fn parse_method_selector(&mut self) -> Option<(MessageSelector, Vec<ParameterDefinition>)> {
         match self.current_kind() {
             // Unary method: `methodName`
             TokenKind::Identifier(name) => {
@@ -529,16 +624,35 @@ impl Parser {
                 self.advance();
                 Some((selector, Vec::new()))
             }
-            // Binary method: `+ other`
+            // Binary method: `+ other` or `+ other: Type`
             TokenKind::BinarySelector(op) => {
                 let selector = MessageSelector::Binary(op.clone());
                 self.advance();
 
                 // Parse the single parameter
-                let param = self.parse_identifier("Expected parameter name after binary selector");
+                // If `other:` is lexed as Keyword (e.g., `+ other: Number`),
+                // treat it as a typed parameter: name is `other`, type follows
+                if let TokenKind::Keyword(kw) = self.current_kind() {
+                    let param_name_str = kw.trim_end_matches(':');
+                    let full_span = self.current_token().span();
+                    let param_span = Span::new(full_span.start(), full_span.end() - 1);
+                    let param_name = Identifier::new(param_name_str, param_span);
+                    self.advance(); // consume `other:`
+                    let type_ann = self.parse_type_annotation();
+                    let param = ParameterDefinition::with_type(param_name, type_ann);
+                    return Some((selector, vec![param]));
+                }
+
+                let param_name =
+                    self.parse_identifier("Expected parameter name after binary selector");
+                let type_annotation = self.parse_optional_param_type();
+                let param = match type_annotation {
+                    Some(ta) => ParameterDefinition::with_type(param_name, ta),
+                    None => ParameterDefinition::new(param_name),
+                };
                 Some((selector, vec![param]))
             }
-            // Keyword method: `at: index put: value`
+            // Keyword method: `at: index put: value` or `deposit: amount: Integer`
             TokenKind::Keyword(_) => {
                 let mut keywords = Vec::new();
                 let mut parameters = Vec::new();
@@ -548,8 +662,43 @@ impl Parser {
                     keywords.push(KeywordPart::new(keyword.clone(), span));
                     self.advance();
 
-                    // Parse parameter name
-                    let param = self.parse_identifier("Expected parameter name after keyword");
+                    // Check if next token is a Keyword — that means typed parameter
+                    // Pattern: `keyword: paramName: Type`
+                    // Where `paramName:` is lexed as a Keyword token
+                    if let TokenKind::Keyword(param_keyword) = self.current_kind() {
+                        // Check if this is `paramName: Type` (followed by Identifier for type)
+                        // vs `nextKeyword: nextParam` (another keyword selector part)
+                        // Disambiguate: if after `paramName:` there's an Identifier followed by
+                        // `=>`, `->`, or another Keyword, it's a typed parameter.
+                        // If after `paramName:` there's an Identifier followed by something else,
+                        // it could be ambiguous. Use the rule: if the Identifier after `paramName:`
+                        // starts with uppercase, it's a type annotation.
+                        let param_name_str = param_keyword.trim_end_matches(':');
+                        if let Some(TokenKind::Identifier(next_ident)) = self.peek_at(1) {
+                            let first_char = next_ident.chars().next().unwrap_or('a');
+                            if first_char.is_uppercase() {
+                                // Typed parameter: `paramName: Type`
+                                let full_span = self.current_token().span();
+                                // Shrink span to exclude trailing colon
+                                let param_span = Span::new(full_span.start(), full_span.end() - 1);
+                                let param_name = Identifier::new(param_name_str, param_span);
+                                self.advance(); // consume `paramName:`
+
+                                let type_ann = self.parse_type_annotation();
+                                parameters
+                                    .push(ParameterDefinition::with_type(param_name, type_ann));
+                                continue;
+                            }
+                        }
+                    }
+
+                    // Parse untyped parameter name
+                    let param_name = self.parse_identifier("Expected parameter name after keyword");
+                    let type_annotation = self.parse_optional_param_type();
+                    let param = match type_annotation {
+                        Some(ta) => ParameterDefinition::with_type(param_name, ta),
+                        None => ParameterDefinition::new(param_name),
+                    };
                     parameters.push(param);
                 }
 
@@ -560,6 +709,18 @@ impl Parser {
                 self.error("Expected method selector");
                 None
             }
+        }
+    }
+
+    /// Parses an optional `: Type` annotation after a parameter name.
+    ///
+    /// Used for binary method parameters: `+ other: Number`
+    fn parse_optional_param_type(&mut self) -> Option<TypeAnnotation> {
+        if matches!(self.current_kind(), TokenKind::Colon) {
+            self.advance(); // consume `:`
+            Some(self.parse_type_annotation())
+        } else {
+            None
         }
     }
 

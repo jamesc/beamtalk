@@ -39,12 +39,15 @@ Module {
                         ],
                     ),
                     parameters: [
-                        Identifier {
-                            name: "_seq0",
-                            span: Span {
-                                start: 767,
-                                end: 772,
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "_seq0",
+                                span: Span {
+                                    start: 767,
+                                    end: 772,
+                                },
                             },
+                            type_annotation: None,
                         },
                     ],
                     body: [

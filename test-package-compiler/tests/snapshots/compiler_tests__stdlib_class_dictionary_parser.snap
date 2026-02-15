@@ -111,12 +111,15 @@ Module {
                         ],
                     ),
                     parameters: [
-                        Identifier {
-                            name: "key",
-                            span: Span {
-                                start: 389,
-                                end: 392,
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "key",
+                                span: Span {
+                                    start: 389,
+                                    end: 392,
+                                },
                             },
+                            type_annotation: None,
                         },
                     ],
                     body: [
@@ -158,19 +161,25 @@ Module {
                         ],
                     ),
                     parameters: [
-                        Identifier {
-                            name: "key",
-                            span: Span {
-                                start: 419,
-                                end: 422,
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "key",
+                                span: Span {
+                                    start: 419,
+                                    end: 422,
+                                },
                             },
+                            type_annotation: None,
                         },
-                        Identifier {
-                            name: "block",
-                            span: Span {
-                                start: 433,
-                                end: 438,
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "block",
+                                span: Span {
+                                    start: 433,
+                                    end: 438,
+                                },
                             },
+                            type_annotation: None,
                         },
                     ],
                     body: [
@@ -212,19 +221,25 @@ Module {
                         ],
                     ),
                     parameters: [
-                        Identifier {
-                            name: "key",
-                            span: Span {
-                                start: 474,
-                                end: 477,
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "key",
+                                span: Span {
+                                    start: 474,
+                                    end: 477,
+                                },
                             },
+                            type_annotation: None,
                         },
-                        Identifier {
-                            name: "value",
-                            span: Span {
-                                start: 483,
-                                end: 488,
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "value",
+                                span: Span {
+                                    start: 483,
+                                    end: 488,
+                                },
                             },
+                            type_annotation: None,
                         },
                     ],
                     body: [
@@ -259,12 +274,15 @@ Module {
                         ],
                     ),
                     parameters: [
-                        Identifier {
-                            name: "key",
-                            span: Span {
-                                start: 528,
-                                end: 531,
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "key",
+                                span: Span {
+                                    start: 528,
+                                    end: 531,
+                                },
                             },
+                            type_annotation: None,
                         },
                     ],
                     body: [
@@ -299,12 +317,15 @@ Module {
                         ],
                     ),
                     parameters: [
-                        Identifier {
-                            name: "key",
-                            span: Span {
-                                start: 614,
-                                end: 617,
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "key",
+                                span: Span {
+                                    start: 614,
+                                    end: 617,
+                                },
                             },
+                            type_annotation: None,
                         },
                     ],
                     body: [
@@ -339,12 +360,15 @@ Module {
                         ],
                     ),
                     parameters: [
-                        Identifier {
-                            name: "other",
-                            span: Span {
-                                start: 654,
-                                end: 659,
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "other",
+                                span: Span {
+                                    start: 654,
+                                    end: 659,
+                                },
                             },
+                            type_annotation: None,
                         },
                     ],
                     body: [
@@ -379,12 +403,15 @@ Module {
                         ],
                     ),
                     parameters: [
-                        Identifier {
-                            name: "block",
-                            span: Span {
-                                start: 718,
-                                end: 723,
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "block",
+                                span: Span {
+                                    start: 718,
+                                    end: 723,
+                                },
                             },
+                            type_annotation: None,
                         },
                     ],
                     body: [

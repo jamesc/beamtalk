@@ -51,7 +51,7 @@ impl CoreErlangGenerator {
             .parameters
             .iter()
             .map(|p| {
-                let var_name = self.fresh_var(&p.name);
+                let var_name = self.fresh_var(&p.name.name);
                 self.current_method_params.push(var_name.clone());
                 var_name
             })
@@ -758,7 +758,7 @@ impl CoreErlangGenerator {
                 .parameters
                 .iter()
                 .map(|p| {
-                    let var_name = self.fresh_var(&p.name);
+                    let var_name = self.fresh_var(&p.name.name);
                     self.current_method_params.push(var_name.clone());
                     var_name
                 })

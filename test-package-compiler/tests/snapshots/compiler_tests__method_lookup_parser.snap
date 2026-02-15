@@ -88,12 +88,15 @@ Module {
                         ],
                     ),
                     parameters: [
-                        Identifier {
-                            name: "cls",
-                            span: Span {
-                                start: 511,
-                                end: 514,
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "cls",
+                                span: Span {
+                                    start: 511,
+                                    end: 514,
+                                },
                             },
+                            type_annotation: None,
                         },
                     ],
                     body: [

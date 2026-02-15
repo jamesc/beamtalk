@@ -372,6 +372,43 @@ pub enum MethodKind {
     Around,
 }
 
+/// A method parameter definition with optional type annotation.
+///
+/// Example: `amount: Integer` in `deposit: amount: Integer => ...`
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParameterDefinition {
+    /// The parameter name.
+    pub name: Identifier,
+    /// Optional type annotation (e.g., `Integer` in `amount: Integer`).
+    pub type_annotation: Option<TypeAnnotation>,
+}
+
+impl ParameterDefinition {
+    /// Creates an untyped parameter definition.
+    #[must_use]
+    pub fn new(name: Identifier) -> Self {
+        Self {
+            name,
+            type_annotation: None,
+        }
+    }
+
+    /// Creates a typed parameter definition.
+    #[must_use]
+    pub fn with_type(name: Identifier, type_annotation: TypeAnnotation) -> Self {
+        Self {
+            name,
+            type_annotation: Some(type_annotation),
+        }
+    }
+
+    /// Returns the span of the parameter name.
+    #[must_use]
+    pub const fn span(&self) -> Span {
+        self.name.span
+    }
+}
+
 /// A method definition.
 ///
 /// Example: `getValue -> Integer => ^self.value`
@@ -379,8 +416,8 @@ pub enum MethodKind {
 pub struct MethodDefinition {
     /// The method selector (name).
     pub selector: MessageSelector,
-    /// Parameter names (for keyword messages).
-    pub parameters: Vec<Identifier>,
+    /// Method parameters with optional type annotations.
+    pub parameters: Vec<ParameterDefinition>,
     /// The method body expressions.
     pub body: Vec<Expression>,
     /// Optional return type annotation.
@@ -400,7 +437,7 @@ impl MethodDefinition {
     #[must_use]
     pub fn new(
         selector: MessageSelector,
-        parameters: Vec<Identifier>,
+        parameters: Vec<ParameterDefinition>,
         body: Vec<Expression>,
         span: Span,
     ) -> Self {
@@ -420,7 +457,7 @@ impl MethodDefinition {
     #[must_use]
     pub fn with_return_type(
         selector: MessageSelector,
-        parameters: Vec<Identifier>,
+        parameters: Vec<ParameterDefinition>,
         body: Vec<Expression>,
         return_type: TypeAnnotation,
         span: Span,
@@ -441,7 +478,7 @@ impl MethodDefinition {
     #[must_use]
     pub fn with_options(
         selector: MessageSelector,
-        parameters: Vec<Identifier>,
+        parameters: Vec<ParameterDefinition>,
         body: Vec<Expression>,
         return_type: Option<TypeAnnotation>,
         is_sealed: bool,
@@ -1629,7 +1666,10 @@ mod tests {
     #[test]
     fn method_definition_keyword() {
         let selector = MessageSelector::Keyword(vec![KeywordPart::new("at:", Span::new(0, 3))]);
-        let params = vec![Identifier::new("index", Span::new(4, 9))];
+        let params = vec![ParameterDefinition::new(Identifier::new(
+            "index",
+            Span::new(4, 9),
+        ))];
         let body = vec![Expression::Identifier(Identifier::new(
             "result",
             Span::new(13, 19),
@@ -1637,7 +1677,7 @@ mod tests {
         let method = MethodDefinition::new(selector, params, body, Span::new(0, 19));
         assert_eq!(method.selector.name(), "at:");
         assert_eq!(method.parameters.len(), 1);
-        assert_eq!(method.parameters[0].name, "index");
+        assert_eq!(method.parameters[0].name.name, "index");
     }
 
     #[test]
