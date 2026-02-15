@@ -167,6 +167,43 @@ impl SimpleLanguageService {
         self.files.get(file).map(|data| &data.module)
     }
 
+    /// Finds a method selector at a given byte offset in a module.
+    ///
+    /// Searches expressions, class method bodies, and standalone method definitions.
+    fn find_selector_at_offset(module: &Module, offset: u32) -> Option<(ecow::EcoString, Span)> {
+        // Check top-level expressions
+        for expr in &module.expressions {
+            if let Some(result) =
+                crate::queries::definition_provider::find_selector_in_expr(expr, offset)
+            {
+                return Some(result);
+            }
+        }
+        // Check class method bodies
+        for class in &module.classes {
+            for method in class.methods.iter().chain(class.class_methods.iter()) {
+                for expr in &method.body {
+                    if let Some(result) =
+                        crate::queries::definition_provider::find_selector_in_expr(expr, offset)
+                    {
+                        return Some(result);
+                    }
+                }
+            }
+        }
+        // Check standalone method bodies
+        for smd in &module.method_definitions {
+            for expr in &smd.method.body {
+                if let Some(result) =
+                    crate::queries::definition_provider::find_selector_in_expr(expr, offset)
+                {
+                    return Some(result);
+                }
+            }
+        }
+        None
+    }
+
     /// Finds the identifier at a given position.
     fn find_identifier_at_position(
         &self,
@@ -175,8 +212,41 @@ impl SimpleLanguageService {
     ) -> Option<(Identifier, Span)> {
         let file_data = self.get_file(file)?;
         let offset = position.to_byte_offset(&file_data.source)?;
+        let offset_val = offset.get();
 
-        // Walk the AST to find the identifier at this position
+        // Check class definitions (name, superclass, method bodies)
+        for class in &file_data.module.classes {
+            if offset_val >= class.name.span.start() && offset_val < class.name.span.end() {
+                return Some((class.name.clone(), class.name.span));
+            }
+            if let Some(ref superclass) = class.superclass {
+                if offset_val >= superclass.span.start() && offset_val < superclass.span.end() {
+                    return Some((superclass.clone(), superclass.span));
+                }
+            }
+            // Search method bodies
+            for method in class.methods.iter().chain(class.class_methods.iter()) {
+                for expr in &method.body {
+                    if let Some(ident) = Self::find_identifier_in_expr(expr, offset) {
+                        return Some(ident);
+                    }
+                }
+            }
+        }
+
+        // Check standalone method definitions
+        for smd in &file_data.module.method_definitions {
+            if offset_val >= smd.class_name.span.start() && offset_val < smd.class_name.span.end() {
+                return Some((smd.class_name.clone(), smd.class_name.span));
+            }
+            for expr in &smd.method.body {
+                if let Some(ident) = Self::find_identifier_in_expr(expr, offset) {
+                    return Some(ident);
+                }
+            }
+        }
+
+        // Walk the top-level expressions
         for expr in &file_data.module.expressions {
             if let Some(ident) = Self::find_identifier_in_expr(expr, offset) {
                 return Some(ident);
@@ -201,6 +271,13 @@ impl SimpleLanguageService {
             Expression::Identifier(ident) => {
                 if offset_val >= ident.span.start() && offset_val < ident.span.end() {
                     Some((ident.clone(), ident.span))
+                } else {
+                    None
+                }
+            }
+            Expression::ClassReference { name, .. } => {
+                if offset_val >= name.span.start() && offset_val < name.span.end() {
+                    Some((name.clone(), name.span))
                 } else {
                     None
                 }
@@ -267,6 +344,11 @@ impl SimpleLanguageService {
         match expr {
             Expression::Identifier(ident) if ident.name == name => {
                 results.push(ident.span);
+            }
+            Expression::ClassReference {
+                name: class_name, ..
+            } if class_name.name == name => {
+                results.push(class_name.span);
             }
             Expression::Assignment { target, value, .. } => {
                 Self::collect_identifiers(target, name, results);
@@ -402,10 +484,24 @@ impl LanguageService for SimpleLanguageService {
     }
 
     fn goto_definition(&self, file: &Utf8PathBuf, position: Position) -> Option<Location> {
-        let (ident, _span) = self.find_identifier_at_position(file, position)?;
         let file_data = self.get_file(file)?;
+        let offset = position.to_byte_offset(&file_data.source)?;
 
-        // Cross-file definition lookup via definition provider (zero-copy)
+        // 1. Try selector-based go-to-definition (cursor on a method keyword)
+        if let Some((selector_name, _span)) =
+            Self::find_selector_at_offset(&file_data.module, offset.get())
+        {
+            return crate::queries::definition_provider::find_method_definition_cross_file(
+                &selector_name,
+                &self.project_index,
+                self.files.iter().map(|(path, data)| (path, &data.module)),
+            );
+        }
+
+        // 2. Try identifier-based go-to-definition (cursor on a name)
+        let (ident, _span) = self.find_identifier_at_position(file, position)?;
+
+        // Cross-file definition lookup via definition provider
         crate::queries::definition_provider::find_definition_cross_file(
             &ident.name,
             file,
@@ -416,16 +512,57 @@ impl LanguageService for SimpleLanguageService {
     }
 
     fn find_references(&self, file: &Utf8PathBuf, position: Position) -> Vec<Location> {
+        let file_data = self.get_file(file);
+        let Some(file_data) = file_data else {
+            return Vec::new();
+        };
+        let Some(offset) = position.to_byte_offset(&file_data.source) else {
+            return Vec::new();
+        };
+
+        // 1. Try selector-based references (cursor on a method keyword)
+        if let Some((selector_name, _span)) =
+            Self::find_selector_at_offset(&file_data.module, offset.get())
+        {
+            return crate::queries::references_provider::find_selector_references(
+                &selector_name,
+                self.files.iter().map(|(path, data)| (path, &data.module)),
+            );
+        }
+
+        // 2. Try identifier-based references (cursor on a name)
         let Some((ident, _span)) = self.find_identifier_at_position(file, position) else {
             return Vec::new();
         };
 
-        // Search across all indexed files for references
+        // If the identifier is a class name, use class-aware references
+        if self.project_index.hierarchy().has_class(&ident.name) {
+            return crate::queries::references_provider::find_class_references(
+                &ident.name,
+                self.files.iter().map(|(path, data)| (path, &data.module)),
+            );
+        }
+
+        // Fall back to identifier-based references across all files
         let mut results = Vec::new();
-        for (file_path, file_data) in &self.files {
+        for (file_path, fd) in &self.files {
             let mut spans = Vec::new();
-            for expr in &file_data.module.expressions {
+            for expr in &fd.module.expressions {
                 Self::collect_identifiers(expr, &ident.name, &mut spans);
+            }
+            // Also search class method bodies
+            for class in &fd.module.classes {
+                for method in class.methods.iter().chain(class.class_methods.iter()) {
+                    for expr in &method.body {
+                        Self::collect_identifiers(expr, &ident.name, &mut spans);
+                    }
+                }
+            }
+            // And standalone method bodies
+            for smd in &fd.module.method_definitions {
+                for expr in &smd.method.body {
+                    Self::collect_identifiers(expr, &ident.name, &mut spans);
+                }
             }
             results.extend(
                 spans
@@ -547,5 +684,108 @@ mod tests {
         // Find references to 'x'
         let refs = service.find_references(&file, Position::new(0, 0));
         assert_eq!(refs.len(), 2); // Assignment and usage
+    }
+
+    #[test]
+    fn goto_definition_cross_file_class() {
+        let mut service = SimpleLanguageService::new();
+        let file_a = Utf8PathBuf::from("a.bt");
+        let file_b = Utf8PathBuf::from("b.bt");
+
+        service.update_file(
+            file_a.clone(),
+            "Object subclass: Foo\n  bar => 1".to_string(),
+        );
+        service.update_file(file_b.clone(), "x := Foo new".to_string());
+
+        // Go to definition of 'Foo' from file_b should find class in file_a
+        let def = service.goto_definition(&file_b, Position::new(0, 5));
+        assert!(def.is_some());
+        let loc = def.unwrap();
+        assert_eq!(loc.file, file_a);
+    }
+
+    #[test]
+    fn goto_definition_cross_file_method_keyword() {
+        let mut service = SimpleLanguageService::new();
+        let file_a = Utf8PathBuf::from("a.bt");
+        let file_b = Utf8PathBuf::from("b.bt");
+
+        service.update_file(
+            file_a.clone(),
+            "Object subclass: Foo\n  at: i put: v => v".to_string(),
+        );
+        // "x at: 1 put: 2" — cursor on "at:" keyword
+        service.update_file(file_b.clone(), "x at: 1 put: 2".to_string());
+
+        // Position 2 is on "at:" — should navigate to method definition in file_a
+        let def = service.goto_definition(&file_b, Position::new(0, 2));
+        assert!(def.is_some());
+        let loc = def.unwrap();
+        assert_eq!(loc.file, file_a);
+    }
+
+    #[test]
+    fn goto_definition_stdlib_class() {
+        let stdlib = vec![(
+            Utf8PathBuf::from("lib/Counter.bt"),
+            "Object subclass: Counter\n  increment => 1".to_string(),
+        )];
+        let index = ProjectIndex::with_stdlib(&stdlib);
+        let mut service = SimpleLanguageService::with_project_index(index);
+
+        // Add the stdlib file as an open file too so cross-file lookup can find it
+        service.update_file(
+            Utf8PathBuf::from("lib/Counter.bt"),
+            "Object subclass: Counter\n  increment => 1".to_string(),
+        );
+
+        let user_file = Utf8PathBuf::from("user.bt");
+        service.update_file(user_file.clone(), "x := Counter new".to_string());
+
+        // Go to definition of 'Counter' from user.bt should find in lib/Counter.bt
+        let def = service.goto_definition(&user_file, Position::new(0, 5));
+        assert!(def.is_some());
+        let loc = def.unwrap();
+        assert_eq!(loc.file, Utf8PathBuf::from("lib/Counter.bt"));
+    }
+
+    #[test]
+    fn find_references_class_cross_file() {
+        let mut service = SimpleLanguageService::new();
+        let file_a = Utf8PathBuf::from("a.bt");
+        let file_b = Utf8PathBuf::from("b.bt");
+
+        service.update_file(
+            file_a.clone(),
+            "Object subclass: Foo\n  bar => 1".to_string(),
+        );
+        service.update_file(file_b.clone(), "x := Foo new".to_string());
+
+        // Find references to 'Foo' from file_a — should find in both files
+        let refs = service.find_references(&file_a, Position::new(0, 17));
+        assert!(refs.len() >= 2);
+        assert!(refs.iter().any(|r| r.file == file_a));
+        assert!(refs.iter().any(|r| r.file == file_b));
+    }
+
+    #[test]
+    fn find_references_selector_cross_file() {
+        let mut service = SimpleLanguageService::new();
+        let file_a = Utf8PathBuf::from("a.bt");
+        let file_b = Utf8PathBuf::from("b.bt");
+
+        service.update_file(
+            file_a.clone(),
+            "Object subclass: Foo\n  at: i put: v => v".to_string(),
+        );
+        // "x at: 1 put: 2" — cursor on "at:" keyword
+        service.update_file(file_b.clone(), "x at: 1 put: 2".to_string());
+
+        // Find references to 'at:put:' from file_b
+        let refs = service.find_references(&file_b, Position::new(0, 2));
+        assert!(refs.len() >= 2);
+        assert!(refs.iter().any(|r| r.file == file_a));
+        assert!(refs.iter().any(|r| r.file == file_b));
     }
 }

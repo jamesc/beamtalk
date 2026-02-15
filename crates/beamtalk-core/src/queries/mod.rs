@@ -12,6 +12,7 @@
 //! - [`diagnostic_provider`] - Collect errors and warnings
 //! - [`document_symbols_provider`] - Return document outline symbols
 //! - [`hover_provider`] - Show information on hover
+//! - [`references_provider`] - Find all references to a symbol across files
 //!
 //! **DDD Context:** Language Service
 //!
@@ -30,3 +31,4 @@ pub mod definition_provider;
 pub mod diagnostic_provider;
 pub mod document_symbols_provider;
 pub mod hover_provider;
+pub mod references_provider;
