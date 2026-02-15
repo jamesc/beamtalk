@@ -18,7 +18,7 @@ Beamtalk needs string interpolation — the ability to embed expressions inside 
 - The **lexer** currently uses single quotes (`'...'`) for strings and double quotes (`"..."`) for "interpolated strings" — but this was a preliminary choice inherited from Smalltalk convention, not a deliberate design decision
 - The **parser, AST, and codegen** have no interpolation support
 - `test-package-compiler/cases/future_string_interpolation/main.bt` documents expected behavior
-- ~90 `.bt` files use single-quoted strings throughout
+- ~150 `.bt` files use single-quoted strings throughout
 
 ### Constraints
 
@@ -124,8 +124,7 @@ If `printString` is not understood by the receiver, the standard `doesNotUnderst
 
 ### REPL Session
 
-```
-> name := "Alice"
+```text
 Alice
 > "Hello, {name}!"
 Hello, Alice!
@@ -141,7 +140,7 @@ No braces here
 
 ### Error Examples
 
-```
+```text
 > "Hello, {undefined}"
 ERROR: UndefinedObject does not understand 'printString'
   Hint: Variable 'undefined' is not defined in this scope
@@ -336,7 +335,7 @@ literal := "Hello, {name}!"          // no prefix = no interpolation
 - No ambiguity with existing syntax — `{` inside `"..."` is lexed in string mode (separate from expression-level `{` for tuples/arrays)
 
 ### Negative
-- **Breaking change**: ~90 `.bt` files must be updated from `'...'` to `"..."` (mechanical find-replace, but large diff)
+- **Breaking change**: ~150 `.bt` files must be updated from `'...'` to `"..."` (mechanical find-replace, but large diff)
 - Departs from Smalltalk's single-quote convention — Smalltalk developers must adjust
 - Documentation overhaul: `beamtalk-syntax-rationale.md`, `beamtalk-language-features.md`, examples, tests, and `lib/*.bt` all reference single-quoted strings
 - `\{` escaping required for literal braces in strings — minor but new escape to learn
@@ -356,7 +355,7 @@ Since the language is pre-release with no external users, the quote change and i
 ### Phase 1: Quote Convention + Lexer/Parser
 - Update lexer: `"..."` becomes the sole string syntax, remove `'...'` string support
 - `#'quoted symbols'` remain valid (single quotes in symbol context only)
-- Mechanical `sed` to update all ~90 `.bt` files from `'...'` to `"..."`
+- Mechanical `sed` to update all ~150 `.bt` files from `'...'` to `"..."`
 - Enhance `"..."` lexing to detect `{expr}` segments via lexer mode-switching (track brace depth for nested expressions)
 - Reject empty `{}` as syntax error
 - Parse `{expr}` segments as embedded expressions
@@ -367,7 +366,7 @@ Since the language is pre-release with no external users, the quote change and i
 - Generate binary construction: `<<literal_bytes, (printString_result)/binary, ...>>`
 - Insert `printString` dispatch for non-literal segments via object system
 - Plain strings (no `{expr}`) compile to simple binary literals as today — zero overhead
-- Ensure `printString` is implemented on all stdlib classes (already done for 36+ classes)
+- Ensure `printString` is implemented on all stdlib classes (currently implemented on 18 core classes)
 - Update `tests/stdlib/string_interpolation.bt` and `test-package-compiler/cases/future_string_interpolation/main.bt`
 - **Affected**: `codegen/core_erlang/expressions.rs`, `lib/*.bt`, `tests/stdlib/`, `test-package-compiler/cases/`
 
