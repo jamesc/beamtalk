@@ -2432,8 +2432,7 @@ fn test_standalone_class_reference_uses_dynamic_module_name() {
 
 #[test]
 fn test_standalone_class_reference_validates_undefined_classes() {
-    // BT-215: Test that standalone ClassReference handles undefined classes gracefully
-    // Review comment: Should check for 'undefined' and return 'nil', like generate_beamtalk_class_named
+    // BT-215, BT-597: Test that standalone ClassReference raises class_not_found error for undefined classes
     use crate::ast::{Expression, Identifier, Module};
     use crate::source_analysis::Span;
 
@@ -2460,10 +2459,16 @@ fn test_standalone_class_reference_validates_undefined_classes() {
         "Should use case expression to handle whereis_class result. Got:\n{code}"
     );
 
-    // Should return 'nil' when class is undefined
+    // Should raise class_not_found error when class is undefined (BT-597)
     assert!(
-        code.contains("<'undefined'> when 'true' ->") && code.contains("'nil'"),
-        "Should return 'nil' when whereis_class returns 'undefined'. Got:\n{code}"
+        code.contains("beamtalk_error':'new'('class_not_found', 'NonExistentClass')"),
+        "Should raise class_not_found error when whereis_class returns 'undefined'. Got:\n{code}"
+    );
+
+    // Should include actionable hint via with_hint call
+    assert!(
+        code.contains("beamtalk_error':'with_hint'"),
+        "Should include hint via with_hint call. Got:\n{code}"
     );
 
     // Should create beamtalk_object in the success branch
