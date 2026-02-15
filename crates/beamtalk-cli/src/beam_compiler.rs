@@ -259,14 +259,20 @@ impl BeamCompiler {
             .into_diagnostic()
             .wrap_err_with(|| format!("Failed to create output directory '{}'", self.output_dir))?;
 
-        // Build -pa arguments
-        let pa_args = repl_startup::beam_pa_args(&paths);
+        // Build -pa arguments: only compiler ebin needed (contains beamtalk_build_worker)
+        let pa_args = vec!["-pa".to_string(), paths.compiler_ebin.display().to_string()];
 
         // Start BEAM node with beamtalk_build_worker
+        // -mode minimal: only loads kernel+stdlib, skips scanning other -pa dirs at boot
+        // -boot no_dot_erlang: skips .erlang config file
         debug!("Spawning BEAM node with beamtalk_build_worker");
         let temp_dir = std::env::temp_dir();
         let mut child = Command::new("erl")
             .arg("-noshell")
+            .arg("-mode")
+            .arg("minimal")
+            .arg("-boot")
+            .arg("no_dot_erlang")
             .args(&pa_args)
             .arg("-s")
             .arg("beamtalk_build_worker")
