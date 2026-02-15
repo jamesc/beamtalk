@@ -1,0 +1,212 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for string interpolation (ADR 0023 Phase 4a, BT-559)
+//
+// These tests verify string interpolation in the REPL context:
+// - Variable interpolation with workspace bindings
+// - Expression interpolation
+// - Error messages (unterminated, undefined variable, doesNotUnderstand)
+// - REPL display correctness (no extra quotes)
+
+// @load tests/e2e/fixtures/counter.bt
+
+// ===========================================================================
+// BASIC VARIABLE INTERPOLATION (REPL workspace bindings)
+// ===========================================================================
+
+// Assign a variable and interpolate it
+name := "Alice"
+// => Alice
+
+"Hello, {name}!"
+// => Hello, Alice!
+
+// Variable at start of string
+"{name} says hello"
+// => Alice says hello
+
+// Variable at end of string
+"Hi there, {name}"
+// => Hi there, Alice
+
+// Only variable, no literal segments
+"{name}"
+// => Alice
+
+// ===========================================================================
+// VARIABLE PERSISTENCE ACROSS INTERPOLATED EXPRESSIONS
+// ===========================================================================
+
+// Variables assigned in one expression persist for interpolation in later ones
+greeting := "Howdy"
+// => Howdy
+
+"{greeting}, {name}!"
+// => Howdy, Alice!
+
+// Reassign and verify interpolation uses new value
+name := "Bob"
+// => Bob
+
+"Hello, {name}!"
+// => Hello, Bob!
+
+// ===========================================================================
+// EXPRESSION INTERPOLATION
+// ===========================================================================
+
+// Arithmetic in interpolation
+"Sum: {2 + 3}"
+// => Sum: 5
+
+// Complex expression
+"Result: {10 * 3 - 5}"
+// => Result: 25
+
+// Message send in interpolation
+"Length: {"hello" length}"
+// => Length: 5
+
+// ===========================================================================
+// printString CONVERSION
+// ===========================================================================
+
+// Integer printString
+"Age: {30}"
+// => Age: 30
+
+// Boolean printString
+"Flag: {true}"
+// => Flag: true
+
+// Nil printString
+"Value: {nil}"
+// => Value: nil
+
+// Symbol printString
+"Sym: {#hello}"
+// => Sym: #hello
+
+// ===========================================================================
+// MULTIPLE INTERPOLATIONS
+// ===========================================================================
+
+// Two variables in one string
+first := "Alice"
+// => Alice
+
+last := "Smith"
+// => Smith
+
+"Name: {first} {last}"
+// => Name: Alice Smith
+
+// Adjacent interpolations (no literal between)
+"{first}{last}"
+// => AliceSmith
+
+// Mixed literals and expressions
+"a{1}b{2}c"
+// => a1b2c
+
+// ===========================================================================
+// ESCAPED BRACES
+// ===========================================================================
+
+// Escaped braces produce literal backslash-brace (not interpolation)
+"Literal: \{not interpolated\}"
+// => Literal: \{not interpolated\}
+
+// ===========================================================================
+// UNICODE IN INTERPOLATION
+// ===========================================================================
+
+// Unicode in literal segments
+"Hello 🎉"
+// => Hello 🎉
+
+// Unicode variable interpolated
+emoji := "🚀"
+// => 🚀
+
+"Launch: {emoji}"
+// => Launch: 🚀
+
+// CJK with interpolation
+"日本語: {42}"
+// => 日本語: 42
+
+// ===========================================================================
+// ACTOR INTERPOLATION (auto-await printString)
+// ===========================================================================
+
+// Actor printString auto-awaits the future result
+c := Counter spawn
+// => #Actor<Counter,_>
+
+"Actor: {c}"
+// => Actor: a Counter
+
+// ===========================================================================
+// BLOCK EXPRESSION IN INTERPOLATION (nested braces)
+// ===========================================================================
+
+// Block with value: inside interpolation
+"Result: {[:x | x * 2] value: 5}"
+// => Result: 10
+
+// ===========================================================================
+// INTERPOLATION WITH VARIABLES FROM PRIOR EXPRESSIONS
+// ===========================================================================
+
+// Variable interpolation referencing earlier assignments
+x := 100
+// => 100
+
+"x is {x}"
+// => x is 100
+
+// ===========================================================================
+// ERROR: UNDEFINED VARIABLE IN INTERPOLATION
+// ===========================================================================
+
+// Undefined variable in interpolation produces error
+"Value: {undefinedVar}"
+// => ERROR: undefined
+
+// ===========================================================================
+// ERROR: EMPTY INTERPOLATION
+// ===========================================================================
+
+// Empty braces are a lexer error
+"{}"
+// => ERROR: empty interpolation
+
+// ===========================================================================
+// ERROR: UNTERMINATED STRING WITH INTERPOLATION
+// ===========================================================================
+
+// Unterminated string (missing closing quote)
+"Hello {name
+// => ERROR: "Hello {name
+
+// ===========================================================================
+// REPL DISPLAY CORRECTNESS
+// ===========================================================================
+
+// Plain string (no interpolation) displays without extra quotes
+"Hello, world!"
+// => Hello, world!
+
+// Interpolated string result displays without extra quotes
+who := "World"
+// => World
+
+"Hello, {who}!"
+// => Hello, World!
+
+// Empty string
+""
+// => 
+
