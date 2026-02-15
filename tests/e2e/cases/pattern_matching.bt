@@ -10,19 +10,19 @@
 // ===========================================================================
 
 // Wildcard match
-42 match: [_ -> 'matched']
+42 match: [_ -> "matched"]
 // => matched
 
 // Literal integer match
-1 match: [1 -> 'one'; 2 -> 'two'; _ -> 'other']
+1 match: [1 -> "one"; 2 -> "two"; _ -> "other"]
 // => one
 
 // Second arm match
-2 match: [1 -> 'one'; 2 -> 'two'; _ -> 'other']
+2 match: [1 -> "one"; 2 -> "two"; _ -> "other"]
 // => two
 
 // Default arm match
-99 match: [1 -> 'one'; 2 -> 'two'; _ -> 'other']
+99 match: [1 -> "one"; 2 -> "two"; _ -> "other"]
 // => other
 
 // ===========================================================================
@@ -30,10 +30,10 @@
 // ===========================================================================
 
 // Match on symbol
-#ok match: [#ok -> 'success'; #error -> 'failure'; _ -> 'unknown']
+#ok match: [#ok -> "success"; #error -> "failure"; _ -> "unknown"]
 // => success
 
-#error match: [#ok -> 'success'; #error -> 'failure'; _ -> 'unknown']
+#error match: [#ok -> "success"; #error -> "failure"; _ -> "unknown"]
 // => failure
 
 // ===========================================================================
@@ -41,7 +41,7 @@
 // ===========================================================================
 
 // Match on string
-'hello' match: ['hello' -> 'greeting'; _ -> 'other']
+"hello" match: ["hello" -> "greeting"; _ -> "other"]
 // => greeting
 
 // ===========================================================================
@@ -53,7 +53,7 @@
 // => 43
 
 // Variable binding in one arm
-10 match: [0 -> 'zero'; n -> n * 2]
+10 match: [0 -> "zero"; n -> n * 2]
 // => 20
 
 // ===========================================================================
@@ -61,14 +61,14 @@
 // ===========================================================================
 
 // Guard with comparison
-10 match: [x when: [x > 0] -> 'positive'; _ -> 'non-positive']
+10 match: [x when: [x > 0] -> "positive"; _ -> "non-positive"]
 // => positive
 
--5 match: [x when: [x > 0] -> 'positive'; _ -> 'non-positive']
+-5 match: [x when: [x > 0] -> "positive"; _ -> "non-positive"]
 // => non-positive
 
 // Multiple guards
-42 match: [x when: [x > 100] -> 'big'; x when: [x > 10] -> 'medium'; _ -> 'small']
+42 match: [x when: [x > 100] -> "big"; x when: [x > 10] -> "medium"; _ -> "small"]
 // => medium
 
 // ===========================================================================
@@ -76,10 +76,10 @@
 // ===========================================================================
 
 // Match negative literal
--1 match: [-1 -> 'minus one'; 0 -> 'zero'; _ -> 'other']
+-1 match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 // => minus one
 
-0 match: [-1 -> 'minus one'; 0 -> 'zero'; _ -> 'other']
+0 match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 // => zero
 
 // ===========================================================================
@@ -87,7 +87,7 @@
 // ===========================================================================
 
 // Match on computed expression
-(3 + 4) match: [7 -> 'correct'; _ -> 'wrong']
+(3 + 4) match: [7 -> "correct"; _ -> "wrong"]
 // => correct
 
 // ===========================================================================
@@ -96,23 +96,23 @@
 
 // Match expression spanning multiple lines
 42 match: [
-  1 -> 'one';
-  2 -> 'two';
-  _ -> 'other'
+  1 -> "one";
+  2 -> "two";
+  _ -> "other"
 ]
 // => other
 
 // Multi-line with guards
 25 match: [
-  x when: [x > 100] -> 'big';
-  x when: [x > 10] -> 'medium';
-  _ -> 'small'
+  x when: [x > 100] -> "big";
+  x when: [x > 10] -> "medium";
+  _ -> "small"
 ]
 // => medium
 
 // Multi-line with variable binding
 7 match: [
-  0 -> 'zero';
+  0 -> "zero";
   n -> n * n
 ]
 // => 49
@@ -125,5 +125,5 @@
 val := 42
 // => _
 
-val match: [42 -> 'found'; _ -> 'not found']
+val match: [42 -> "found"; _ -> "not found"]
 // => found

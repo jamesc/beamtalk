@@ -21,7 +21,7 @@ h := Hanoi new
 // ===========================================================================
 
 // Solve with 1 disk — single move from A to C
-h solve: 1 from: 'A' to: 'C' via: 'B'
+h solve: 1 from: "A" to: "C" via: "B"
 // => nil
 
 // ===========================================================================
@@ -29,5 +29,5 @@ h solve: 1 from: 'A' to: 'C' via: 'B'
 // ===========================================================================
 
 // Solve with 3 disks — 7 moves (2^3 - 1)
-h solve: 3 from: 'A' to: 'C' via: 'B'
+h solve: 3 from: "A" to: "C" via: "B"
 // => nil

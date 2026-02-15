@@ -10,7 +10,7 @@
 ///
 /// ## Examples
 /// ```beamtalk
-/// Transcript show: 'hello'
+/// Transcript show: "hello"
 /// Transcript cr
 /// Transcript recent
 /// ```
@@ -27,10 +27,10 @@ Actor subclass: TranscriptStream
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Transcript show: 'hello'
+  /// Transcript show: "hello"
   /// Transcript show: 42
   /// ```
-  show: value => @primitive 'show:'
+  show: value => @primitive "show:"
 
   /// Write a newline to the transcript.
   ///
@@ -38,7 +38,7 @@ Actor subclass: TranscriptStream
   /// ```beamtalk
   /// Transcript cr
   /// ```
-  cr => @primitive 'cr'
+  cr => @primitive "cr"
 
   /// Subscribe the calling process to receive transcript output.
   ///
@@ -46,7 +46,7 @@ Actor subclass: TranscriptStream
   /// ```beamtalk
   /// Transcript subscribe
   /// ```
-  subscribe => @primitive 'subscribe'
+  subscribe => @primitive "subscribe"
 
   /// Unsubscribe the calling process from transcript output.
   ///
@@ -54,7 +54,7 @@ Actor subclass: TranscriptStream
   /// ```beamtalk
   /// Transcript unsubscribe
   /// ```
-  unsubscribe => @primitive 'unsubscribe'
+  unsubscribe => @primitive "unsubscribe"
 
   /// Return recent transcript entries as a list.
   ///
@@ -62,7 +62,7 @@ Actor subclass: TranscriptStream
   /// ```beamtalk
   /// Transcript recent
   /// ```
-  recent => @primitive 'recent'
+  recent => @primitive "recent"
 
   /// Clear the transcript buffer.
   ///
@@ -70,4 +70,4 @@ Actor subclass: TranscriptStream
   /// ```beamtalk
   /// Transcript clear
   /// ```
-  clear => @primitive 'clear'
+  clear => @primitive "clear"

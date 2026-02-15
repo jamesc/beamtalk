@@ -1047,7 +1047,7 @@ Domain events represent significant occurrences in the system. They enable loose
 - Accept limitations (`thisContext`, `become:`) for performance
 - Matches Gleam and LFE Flavors' successful approaches
 
-**Status:** Accepted (see docs/beamtalk-object-model.md)
+**Status:** Implemented (see [ADR 0005](ADR/0005-beam-object-model-pragmatic-hybrid.md))
 
 ### ADR-7: Compiler as Language Service
 
@@ -1101,6 +1101,6 @@ This DDD model provides:
 - [Domain-Driven Design](https://www.domainlanguage.com/ddd/) - Eric Evans
 - [Implementing Domain-Driven Design](https://vaughnvernon.com/) - Vaughn Vernon
 - [Beamtalk Architecture](beamtalk-architecture.md) - Technical details
-- [Beamtalk Object Model](beamtalk-object-model.md) - Smalltalk → BEAM mapping
+- [Beamtalk Object Model (ADR 0005)](ADR/0005-beam-object-model-pragmatic-hybrid.md) - Smalltalk → BEAM mapping
 - [Beamtalk Principles](beamtalk-principles.md) - Core design philosophy
 - [LFE Flavors](https://github.com/rvirding/flavors) - OOP on BEAM reference implementation

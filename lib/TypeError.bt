@@ -7,13 +7,13 @@
 ///
 /// ## Examples
 /// ```beamtalk
-/// [1 + 'a'] on: TypeError do: [:e | e message]
+/// [1 + "a"] on: TypeError do: [:e | e message]
 /// ```
 Error subclass: TypeError
   /// Human-readable description of the receiver.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// TypeError describe   // => 'a TypeError'
+  /// TypeError describe   // => "a TypeError"
   /// ```
-  describe => 'a TypeError'
+  describe => "a TypeError"

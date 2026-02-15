@@ -8,39 +8,39 @@
 ///
 /// ## Examples
 /// ```beamtalk
-/// (#name -> 'James') key       // => #name
-/// (#name -> 'James') value     // => 'James'
+/// (#name -> "James") key       // => #name
+/// (#name -> "James") value     // => "James"
 /// ```
 sealed Object subclass: Association
   /// Return the key of the association.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (#name -> 'James') key      // => #name
+  /// (#name -> "James") key      // => #name
   /// ```
-  key => @primitive 'key'
+  key => @primitive "key"
 
   /// Return the value of the association.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (#name -> 'James') value    // => 'James'
+  /// (#name -> "James") value    // => "James"
   /// ```
-  value => @primitive 'value'
+  value => @primitive "value"
 
   /// Convert the association to its string representation.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (#name -> 'James') asString // => '#name -> James'
+  /// (#name -> "James") asString // => "#name -> James"
   /// ```
-  asString => @primitive 'asString'
+  asString => @primitive "asString"
 
   /// Return a developer-readable string representation.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (#name -> 'James') printString
+  /// (#name -> "James") printString
   /// ```
   printString => self asString
 
@@ -48,6 +48,6 @@ sealed Object subclass: Association
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (#name -> 'James') describe
+  /// (#name -> "James") describe
   /// ```
   describe => self asString

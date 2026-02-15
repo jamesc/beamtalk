@@ -43,11 +43,8 @@ pub enum TokenKind {
     /// A floating-point literal: `3.14`, `2.5e10`
     Float(EcoString),
 
-    /// A single-quoted string: `'hello world'`
+    /// A double-quoted string: `"hello world"`
     String(EcoString),
-
-    /// A double-quoted interpolated string: `"Hello, {name}!"`
-    InterpolatedString(EcoString),
 
     /// A symbol literal: `#foo`, `#'hello world'`
     Symbol(EcoString),
@@ -141,7 +138,6 @@ impl TokenKind {
             Self::Integer(_)
                 | Self::Float(_)
                 | Self::String(_)
-                | Self::InterpolatedString(_)
                 | Self::Symbol(_)
                 | Self::Character(_)
         )
@@ -195,7 +191,6 @@ impl TokenKind {
             | Self::Integer(s)
             | Self::Float(s)
             | Self::String(s)
-            | Self::InterpolatedString(s)
             | Self::Symbol(s)
             | Self::Keyword(s)
             | Self::BinarySelector(s)
@@ -234,8 +229,7 @@ impl std::fmt::Display for TokenKind {
             | Self::Keyword(s)
             | Self::BinarySelector(s) => write!(f, "{s}"),
             // Tokens with delimiters around content
-            Self::String(s) => write!(f, "'{s}'"),
-            Self::InterpolatedString(s) => write!(f, "\"{s}\""),
+            Self::String(s) => write!(f, "\"{s}\""),
             Self::Symbol(s) => write!(f, "#{s}"),
             Self::Character(c) => write!(f, "${c}"),
             Self::Error(s) => write!(f, "<error: {s}>"),
@@ -456,7 +450,7 @@ mod tests {
     fn token_kind_display() {
         assert_eq!(TokenKind::Identifier("foo".into()).to_string(), "foo");
         assert_eq!(TokenKind::Integer("42".into()).to_string(), "42");
-        assert_eq!(TokenKind::String("hello".into()).to_string(), "'hello'");
+        assert_eq!(TokenKind::String("hello".into()).to_string(), "\"hello\"");
         assert_eq!(TokenKind::Symbol("sym".into()).to_string(), "#sym");
         assert_eq!(TokenKind::Keyword("at:".into()).to_string(), "at:");
         assert_eq!(TokenKind::BinarySelector("+".into()).to_string(), "+");
@@ -563,7 +557,7 @@ mod tests {
         // Additional display tests for full coverage
         assert_eq!(TokenKind::Float("3.14".into()).to_string(), "3.14");
         assert_eq!(
-            TokenKind::InterpolatedString("Hello, {name}!".into()).to_string(),
+            TokenKind::String("Hello, {name}!".into()).to_string(),
             "\"Hello, {name}!\""
         );
         assert_eq!(TokenKind::Character('a').to_string(), "$a");
@@ -586,10 +580,6 @@ mod tests {
         assert_eq!(TokenKind::Integer("42".into()).as_str(), Some("42"));
         assert_eq!(TokenKind::Float("3.14".into()).as_str(), Some("3.14"));
         assert_eq!(TokenKind::String("hello".into()).as_str(), Some("hello"));
-        assert_eq!(
-            TokenKind::InterpolatedString("hi".into()).as_str(),
-            Some("hi")
-        );
         assert_eq!(TokenKind::Symbol("sym".into()).as_str(), Some("sym"));
         assert_eq!(TokenKind::Keyword("at:".into()).as_str(), Some("at:"));
         assert_eq!(TokenKind::BinarySelector("+".into()).as_str(), Some("+"));

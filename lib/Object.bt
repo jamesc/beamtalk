@@ -19,9 +19,9 @@ ProtoObject subclass: Object
   /// ## Examples
   /// ```beamtalk
   /// 42 class              // => Integer
-  /// 'hello' class         // => String
+  /// "hello" class         // => String
   /// ```
-  class => @primitive 'class'
+  class => @primitive "class"
 
   /// Create a new instance of the receiver class.
   ///
@@ -97,15 +97,15 @@ ProtoObject subclass: Object
   ///
   /// ## Examples
   /// ```beamtalk
-  /// 42 printString         // => '42'
+  /// 42 printString         // => "42"
   /// ```
-  printString => 'a ' ++ self class printString
+  printString => "a " ++ self class printString
 
   /// Inspect the receiver (alias for `describe`).
   ///
   /// ## Examples
   /// ```beamtalk
-  /// 42 inspect             // => '42'
+  /// 42 inspect             // => "42"
   /// ```
   inspect => self describe
 
@@ -113,9 +113,9 @@ ProtoObject subclass: Object
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Object new describe    // => 'an Object'
+  /// Object new describe    // => "an Object"
   /// ```
-  describe => 'an Object'
+  describe => "an Object"
 
   /// Return the receiver itself. Useful for cascading side effects.
   ///
@@ -161,7 +161,7 @@ ProtoObject subclass: Object
   ///
   /// ## Examples
   /// ```beamtalk
-  /// object instVarAt: #name put: 'Alice'
+  /// object instVarAt: #name put: "Alice"
   /// ```
   sealed instVarAt: name put: value => @intrinsic instVarAtPut
 
@@ -185,9 +185,9 @@ ProtoObject subclass: Object
   ///
   /// ## Examples
   /// ```beamtalk
-  /// #name -> 'Alice'
+  /// #name -> "Alice"
   /// ```
-  -> value => @primitive '->'
+  -> value => @primitive "->"
 
   /// Raise an error indicating this method must be overridden by a subclass.
   ///
@@ -195,12 +195,12 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// self subclassResponsibility
   /// ```
-  subclassResponsibility => self error: 'This method is abstract and must be overridden by a subclass'
+  subclassResponsibility => self error: "This method is abstract and must be overridden by a subclass"
 
   /// Raise an error with the given message.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// self error: 'something went wrong'
+  /// self error: "something went wrong"
   /// ```
   error: message => @intrinsic error

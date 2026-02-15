@@ -25,7 +25,7 @@ Welcome to the Beamtalk documentation! This guide will help you navigate the des
 | [Design Principles](beamtalk-principles.md) | Interactive-first, actors, hot reload, async-first — the foundational ideas |
 | [Language Features](beamtalk-language-features.md) | Complete syntax reference: messages, blocks, classes, strings |
 | [Syntax Rationale](beamtalk-syntax-rationale.md) | Why we keep certain Smalltalk conventions and diverge from others |
-| [Object Model](beamtalk-object-model.md) | How "everything is an object" maps to the BEAM |
+| [Object Model](ADR/0005-beam-object-model-pragmatic-hybrid.md) | How "everything is an object" maps to the BEAM (ADR 0005) |
 
 ### Architecture & Implementation
 
@@ -54,7 +54,7 @@ Welcome to the Beamtalk documentation! This guide will help you navigate the des
 ### "I want to understand how it works"
 
 1. [Architecture](beamtalk-architecture.md) — Compiler and runtime overview
-2. [Object Model](beamtalk-object-model.md) — Smalltalk objects on BEAM
+2. [Object Model (ADR 0005)](ADR/0005-beam-object-model-pragmatic-hybrid.md) — Smalltalk objects on BEAM
 3. [Testing Strategy](development/testing-strategy.md) — How we verify correctness
 
 For implementation details, see [internal/](internal/) documentation.

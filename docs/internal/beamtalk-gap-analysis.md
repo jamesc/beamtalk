@@ -735,5 +735,5 @@ P1-5 (Future Codegen)
 - [Beamtalk DDD Model](beamtalk-ddd-model.md) - Domain model this analysis is based on
 - [Beamtalk Architecture](beamtalk-architecture.md) - Intended architecture
 - [Beamtalk Principles](beamtalk-principles.md) - Core design philosophy
-- [Beamtalk Object Model](beamtalk-object-model.md) - Smalltalk → BEAM mapping
+- [Beamtalk Object Model (ADR 0005)](../ADR/0005-beam-object-model-pragmatic-hybrid.md) - Smalltalk → BEAM mapping
 - [LFE Flavors](https://github.com/rvirding/flavors) - Reference implementation for OOP patterns

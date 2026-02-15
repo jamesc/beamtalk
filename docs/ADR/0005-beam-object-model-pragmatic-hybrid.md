@@ -129,7 +129,7 @@ ProtoObject (minimal - identity, DNU)
 
 ## Alternatives Considered
 
-Four approaches were evaluated in detail in [beamtalk-object-model.md](../beamtalk-object-model.md) Part 3:
+Four approaches were evaluated in detail (see Appendix A for the underlying BEAM constraints):
 
 ### Option 1: Pragmatic Hybrid (Selected)
 
@@ -166,7 +166,6 @@ The meta-circular interpreter loses BEAM's core value proposition. Dual-mode is 
 ## References
 
 - **Related documents:**
-  - [docs/beamtalk-object-model.md](../beamtalk-object-model.md) - Full technical analysis and feasibility study (1772 lines)
   - [docs/beamtalk-principles.md](../beamtalk-principles.md) - Core philosophy (actors, async-first, hot reload)
   - [docs/beamtalk-architecture.md](../beamtalk-architecture.md) - Compiler and runtime architecture
   
@@ -197,3 +196,55 @@ The meta-circular interpreter loses BEAM's core value proposition. Dual-mode is 
 8. ~~**Single dispatch**~~ **DECIDED:** Beamtalk uses single dispatch (method lookup based on receiver only). Follows Smalltalk, matches BEAM's gen_server model. Behavior composition across unrelated classes uses mixins/traits (see Q9) — the modern approach (Rust, Swift, Kotlin, Pharo). No plans for multiple dispatch.
 9. **Mixins/traits**: Deferred to a future ADR. We commit to single dispatch + a composition mechanism (traits, mixins, or similar) for sharing behavior across unrelated classes. Design must work well on BEAM — may go beyond Erlang behaviours. Needs its own ADR to explore Pharo traits, Newspeak mixins, and BEAM-specific options. Tracked as BT-274.
 10. ~~**`self` and `super` semantics**~~ **DECIDED:** Follow Smalltalk. `self` always refers to the enclosing object — in actors it's the `#beamtalk_object{}` record, in value types it's the value itself, in blocks it's the enclosing method's `self` (lexical capture). `super` refers to the enclosing class's superclass, never the block. Already implemented via state threading in codegen.
+
+---
+
+## Appendix A: Why the Hard Parts Are Hard
+
+Detailed analysis of Smalltalk features that conflict with BEAM's architecture. Each explains why the feature can't be directly supported and what workarounds exist.
+
+### Stack Frames and `thisContext`
+
+Smalltalk's `thisContext` gives access to the executing stack frame as a first-class object, enabling debugger implementation, non-local returns, exception restart, and continuation capture. BEAM cannot support this because: (1) no reified stack — BEAM uses registers and a non-inspectable call stack, (2) aggressive tail call optimization eliminates frames, (3) per-process isolation means no global stack introspection.
+
+**What we can do:** Post-exception stack traces via `erlang:get_stacktrace()`, current function/module via macros, but no mid-execution stack inspection or continuation capture.
+
+| Use Case | Smalltalk | Beamtalk |
+|----------|-----------|----------|
+| Post-mortem debugging | ✅ | ✅ Stack traces available |
+| Step debugger | ✅ | ⚠️ Via tracing, not stack manipulation |
+| Exception restart | ✅ | ⚠️ Partial via conditions/restarts |
+| Continuation capture | ✅ | ❌ Not possible |
+
+### `become:` (Object Identity Swapping)
+
+Smalltalk's `become:` swaps all references globally — used for object migration, proxy replacement, and persistence. BEAM can't do this: pids are immutable, there's no global heap to scan, and no pointer indirection for transparent swapping.
+
+**Workarounds:** Proxy pattern with `doesNotUnderstand:` delegation, named registry for replaceable references, and BEAM's `code_change/3` for schema evolution. The registry pattern is more explicit than `become:` but arguably cleaner for distributed systems.
+
+### Global Reference Scanning (`pointersTo`, `allInstances`)
+
+Smalltalk can scan the entire heap. BEAM has per-process heaps with no system-wide object graph. **Workaround:** Explicit instance tracking via ETS, which is actually more efficient than heap scanning for large systems. Process monitors provide lifecycle notifications superior to weak references.
+
+### Image Snapshots
+
+Beamtalk follows BEAM's no-image model: code lives in files, state in running processes. For distributed systems this is superior — Mnesia/DETS handle distributed persistence, text source files enable version control, and per-actor persistence gives selective control. The no-image model is a feature, not a limitation.
+
+### Direct Memory Slot Access and Class Changing
+
+Positional slot access (`instVarAt: 1`) is replaced by named field access (safer, more maintainable). Changing an object's class requires process restart with state migration — the explicit restart pattern provides clear upgrade boundaries for distributed systems.
+
+## Appendix B: Lessons from LFE Flavors
+
+[LFE Flavors](https://github.com/rvirding/flavors) by Robert Virding is the closest prior art — a successful OOP implementation on BEAM. Key design patterns and our adoption decisions:
+
+| Flavors Pattern | Beamtalk Adoption | Notes |
+|-----------------|-------------------|-------|
+| gen_server per instance | ✅ Yes | Same approach — each actor is a process |
+| Two modules per class | ❌ No | Single module per class; class process uses `beamtalk_object_class.erl` |
+| Process dictionary for ivars | ❌ No | Use map in gen_server state (more explicit, inspectable) |
+| Error catching at caller | ✅ Yes | Errors caught at instance, re-raised at caller with context |
+| Synchronous by default | ❌ No | Beamtalk is async-first (futures), explicit `await` for sync |
+| Instance handle record | ✅ Yes | `#beamtalk_object{class, module, pid}` wraps actors |
+
+**Key insight:** Flavors validates that OOP semantics work well on BEAM when each object is a process, instance variables are maps, methods dispatch via a method table, and errors are isolated. Beamtalk adds async-first futures, full compile-time Rust codegen, ETS-based instance tracking, and Smalltalk-style reflection.

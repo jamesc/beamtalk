@@ -5,7 +5,7 @@
 // Each expression tests that specific errors are caught correctly
 
 // Division by zero
-// Note: Erlang returns 'badarith' for division by zero
+// Note: Erlang returns "badarith" for division by zero
 1 / 0
 // => ERROR: badarith
 
@@ -38,7 +38,7 @@ undefinedVar + 5
 
 // Incomplete block (missing closing bracket)
 [:x | x + 1
-// => ERROR: Expected ']' to close block
+// => ERROR: Expected "]" to close block
 
 // Invalid message selector (incomplete expression)
 123 + 

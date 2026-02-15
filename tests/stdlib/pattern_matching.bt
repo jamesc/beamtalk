@@ -18,7 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Wildcard matches anything
-42 match: [_ -> 'matched']
+42 match: [_ -> "matched"]
 // => matched
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -26,26 +26,26 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Match integer literal — first arm
-1 match: [1 -> 'one'; 2 -> 'two'; _ -> 'other']
+1 match: [1 -> "one"; 2 -> "two"; _ -> "other"]
 // => one
 
 // Match integer literal — second arm
-2 match: [1 -> 'one'; 2 -> 'two'; _ -> 'other']
+2 match: [1 -> "one"; 2 -> "two"; _ -> "other"]
 // => two
 
 // Match integer literal — fallthrough to wildcard
-3 match: [1 -> 'one'; 2 -> 'two'; _ -> 'other']
+3 match: [1 -> "one"; 2 -> "two"; _ -> "other"]
 // => other
 
 // Match symbol literal
-#ok match: [#ok -> 'success'; #error -> 'failure'; _ -> 'unknown']
+#ok match: [#ok -> "success"; #error -> "failure"; _ -> "unknown"]
 // => success
 
-#error match: [#ok -> 'success'; #error -> 'failure'; _ -> 'unknown']
+#error match: [#ok -> "success"; #error -> "failure"; _ -> "unknown"]
 // => failure
 
 // Match string literal
-'hello' match: ['hello' -> 'greeting'; _ -> 'other']
+"hello" match: ["hello" -> "greeting"; _ -> "other"]
 // => greeting
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -61,15 +61,15 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Match with guard — positive
-10 match: [x when: [x > 0] -> 'positive'; _ -> 'non-positive']
+10 match: [x when: [x > 0] -> "positive"; _ -> "non-positive"]
 // => positive
 
 // Match with guard — non-positive
--5 match: [x when: [x > 0] -> 'positive'; _ -> 'non-positive']
+-5 match: [x when: [x > 0] -> "positive"; _ -> "non-positive"]
 // => non-positive
 
 // Guard with arithmetic comparison
-42 match: [x when: [x > 100] -> 'big'; x when: [x > 10] -> 'medium'; _ -> 'small']
+42 match: [x when: [x > 100] -> "big"; x when: [x > 10] -> "medium"; _ -> "small"]
 // => medium
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -77,7 +77,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Match on expression result
-(3 + 4) match: [7 -> 'correct'; _ -> 'wrong']
+(3 + 4) match: [7 -> "correct"; _ -> "wrong"]
 // => correct
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -85,8 +85,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Match negative integer
--1 match: [-1 -> 'minus one'; 0 -> 'zero'; _ -> 'other']
+-1 match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 // => minus one
 
-0 match: [-1 -> 'minus one'; 0 -> 'zero'; _ -> 'other']
+0 match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 // => zero

@@ -8,7 +8,7 @@
 //   $ beamtalk repl
 //   > :load examples/hanoi.bt
 //   > h := Hanoi new
-//   > h solve: 3 from: 'A' to: 'C' via: 'B'
+//   > h solve: 3 from: "A" to: "C" via: "B"
 //   Move disk from A to C
 //   Move disk from A to B
 //   Move disk from C to B
@@ -23,7 +23,7 @@ Object subclass: Hanoi
   solve: n from: source to: target via: auxiliary =>
     (n > 0) ifTrue: [
       self solve: n - 1 from: source to: auxiliary via: target.
-      TranscriptStream current show: 'Move disk from ' ++ source ++ ' to ' ++ target.
+      TranscriptStream current show: "Move disk from " ++ source ++ " to " ++ target.
       TranscriptStream current cr.
       self solve: n - 1 from: auxiliary to: target via: source
     ] ifFalse: [nil]

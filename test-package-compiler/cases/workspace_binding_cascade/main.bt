@@ -2,4 +2,4 @@
 // Cascade messages to a workspace binding should use persistent_term PID lookup.
 
 Actor subclass: Logger
-  run => Transcript show: 'Hello'; cr; show: 'World'
+  run => Transcript show: "Hello"; cr; show: "World"

@@ -11,23 +11,23 @@
 // ===========================================================================
 
 // Integer error: raises and is catchable
-[42 error: 'too big'] on: Exception do: [:e | e message]
+[42 error: "too big"] on: Exception do: [:e | e message]
 // => too big
 
 // Integer error: has user_error kind
-[42 error: 'too big'] on: Exception do: [:e | e kind]
+[42 error: "too big"] on: Exception do: [:e | e kind]
 // => user_error
 
 // Integer error: has correct class
-[42 error: 'too big'] on: Exception do: [:e | e errorClass]
+[42 error: "too big"] on: Exception do: [:e | e errorClass]
 // => Integer
 
 // String error: works
-['hello' error: 'bad string'] on: Exception do: [:e | e message]
+["hello" error: "bad string"] on: Exception do: [:e | e message]
 // => bad string
 
 // String error: has correct class
-['hello' error: 'bad string'] on: Exception do: [:e | e errorClass]
+["hello" error: "bad string"] on: Exception do: [:e | e errorClass]
 // => String
 
 // ===========================================================================

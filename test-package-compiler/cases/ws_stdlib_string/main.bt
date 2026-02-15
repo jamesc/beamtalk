@@ -4,27 +4,27 @@
 // Test string operations
 
 // String literals
-greeting := 'Hello'
-name := 'World'
+greeting := "Hello"
+name := "World"
 
 // Concatenation
-message := greeting ++ ', ' ++ name ++ '!'
+message := greeting ++ ", " ++ name ++ "!"
 
 // String length
 len := greeting length
 
 // String comparison
-isEqual := 'hello' =:= 'hello'
-isLess := 'apple' < 'banana'
+isEqual := "hello" =:= "hello"
+isLess := "apple" < "banana"
 
 // String transformation
 upper := greeting uppercase
 lower := upper lowercase
 
 // String testing
-isEmpty := '' isEmpty
+isEmpty := "" isEmpty
 hasContent := message isNotEmpty
 
 // String searching
-found := message includes: 'World'
-starts := message startsWith: 'Hello'
+found := message includes: "World"
+starts := message startsWith: "Hello"

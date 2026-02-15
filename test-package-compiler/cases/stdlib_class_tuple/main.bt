@@ -8,17 +8,17 @@
 sealed Object subclass: Tuple
 
   // Size and access
-  size => @primitive 'size'
-  at: index => @primitive 'at:'
+  size => @primitive "size"
+  at: index => @primitive "at:"
 
   // Pattern matching for Erlang result types
-  isOk => @primitive 'isOk'
-  isError => @primitive 'isError'
+  isOk => @primitive "isOk"
+  isError => @primitive "isError"
 
   // Unwrapping
-  unwrap => @primitive 'unwrap'
-  unwrapOr: default => @primitive 'unwrapOr:'
-  unwrapOrElse: block => @primitive 'unwrapOrElse:'
+  unwrap => @primitive "unwrap"
+  unwrapOr: default => @primitive "unwrapOr:"
+  unwrapOrElse: block => @primitive "unwrapOrElse:"
 
   // Conversion
-  asString => @primitive 'asString'
+  asString => @primitive "asString"

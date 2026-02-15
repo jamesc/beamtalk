@@ -7,26 +7,26 @@
 empty := #{}
 
 // Map with atom keys
-person := #{#name => 'Alice', #age => 30}
+person := #{#name => "Alice", #age => 30}
 
 // Map with string keys
-config := #{'host' => 'localhost', 'port' => 8080}
+config := #{"host" => "localhost", "port" => 8080}
 
 // Map with integer keys
-positions := #{1 => 'first', 2 => 'second', 3 => 'third'}
+positions := #{1 => "first", 2 => "second", 3 => "third"}
 
 // Map with mixed key types
-mixed := #{#type => 'mixed', 'count' => 5, 42 => 'answer'}
+mixed := #{#type => "mixed", "count" => 5, 42 => "answer"}
 
 // Nested maps
 data := #{
   #user => #{
-    #name => 'Bob',
-    #email => 'bob@example.com'
+    #name => "Bob",
+    #email => "bob@example.com"
   },
   #settings => #{
-    #theme => 'dark',
-    #language => 'en'
+    #theme => "dark",
+    #language => "en"
   }
 }
 
@@ -34,4 +34,4 @@ data := #{
 withTrailing := #{#a => 1, #b => 2,}
 
 // Single entry map
-single := #{#only => 'value'}
+single := #{#only => "value"}

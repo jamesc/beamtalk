@@ -270,9 +270,7 @@ fn highlight_line(line: &str) -> String {
         };
 
         let col = match token.kind() {
-            TokenKind::String(_) | TokenKind::InterpolatedString(_) | TokenKind::Character(_) => {
-                Some(color::GREEN)
-            }
+            TokenKind::String(_) | TokenKind::Character(_) => Some(color::GREEN),
             TokenKind::Integer(_) | TokenKind::Float(_) => Some(color::YELLOW),
             TokenKind::Symbol(_) | TokenKind::Hash => Some(color::CYAN),
             TokenKind::Identifier(name) => {
@@ -440,9 +438,9 @@ mod tests {
 
     #[test]
     fn highlight_string_literal() {
-        let result = highlight_line("'hello'");
+        let result = highlight_line("\"hello\"");
         assert!(result.contains(color::GREEN));
-        assert!(result.contains("'hello'"));
+        assert!(result.contains("\"hello\""));
     }
 
     #[test]

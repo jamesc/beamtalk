@@ -65,7 +65,7 @@
 // ===========================================================================
 
 // String as keyword argument
-[:s | s] value: 'test'
+[:s | s] value: "test"
 // => test
 
 // Zero as argument

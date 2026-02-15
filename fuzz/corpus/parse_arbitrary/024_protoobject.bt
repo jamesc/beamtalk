@@ -20,7 +20,7 @@
 // => Integer
 
 // String responds to class
-'hello' class
+"hello" class
 // => String
 
 // Boolean responds to class
@@ -49,10 +49,10 @@ nil class
 // => false
 
 // String identity
-'hello' == 'hello'
+"hello" == "hello"
 // => true
 
-'hello' == 'world'
+"hello" == "world"
 // => false
 
 // Boolean identity
@@ -84,10 +84,10 @@ nil == false
 // => false
 
 // String inequality
-'hello' /= 'world'
+"hello" /= "world"
 // => true
 
-'hello' /= 'hello'
+"hello" /= "hello"
 // => false
 
 // Boolean inequality

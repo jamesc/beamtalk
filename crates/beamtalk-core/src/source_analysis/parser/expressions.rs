@@ -341,7 +341,6 @@ impl Parser {
             TokenKind::Integer(_)
             | TokenKind::Float(_)
             | TokenKind::String(_)
-            | TokenKind::InterpolatedString(_)
             | TokenKind::Symbol(_)
             | TokenKind::Character(_) => self.parse_literal(),
 
@@ -432,11 +431,6 @@ impl Parser {
                 }
             }
             TokenKind::String(s) => Literal::String(s),
-            TokenKind::InterpolatedString(s) => {
-                // For now, treat interpolated strings as regular strings
-                // TODO: Implement proper string interpolation in AST
-                Literal::String(s)
-            }
             TokenKind::Symbol(s) => Literal::Symbol(s),
             TokenKind::Character(c) => Literal::Character(c),
             _ => unreachable!(),

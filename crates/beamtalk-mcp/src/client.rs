@@ -305,7 +305,7 @@ mod tests {
     #[ignore = "integration test — requires running REPL (set BEAMTALK_TEST_PORT or default 19876)"]
     async fn test_eval_string() {
         let client = ReplClient::connect(test_port()).await.unwrap();
-        let resp = client.eval("'hello'").await.unwrap();
+        let resp = client.eval("\"hello\"").await.unwrap();
         assert!(!resp.is_error(), "eval should succeed");
         assert_eq!(resp.value_string(), "hello");
     }
@@ -428,7 +428,7 @@ mod tests {
         assert_eq!(resp.value_string(), "42");
 
         // String value
-        let resp = client.eval("'test'").await.unwrap();
+        let resp = client.eval("\"test\"").await.unwrap();
         assert_eq!(resp.value_string(), "test");
 
         // Nil value

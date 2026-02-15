@@ -171,6 +171,31 @@ Include:
 - Reviewers check for correctness, test coverage, and adherence to project conventions
 - Address review comments by pushing new commits (don't force-push during review)
 
+## CI & Release Workflows
+
+We have three GitHub Actions workflows:
+
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| **CI** (`.github/workflows/ci.yml`) | Push to `main`, PRs | Build, lint, test, coverage |
+| **Release** (`.github/workflows/release.yml`) | GitHub Release published, manual | Build distributable tarball, upload as release asset |
+| **Fuzz** (`.github/workflows/fuzz.yml`) | Nightly (2 AM UTC) | Fuzz parser for crash safety |
+
+### Creating a Release
+
+1. Go to **Releases** on the GitHub repository
+2. Click **Draft a new release**
+3. Create a new tag (e.g., `v0.1.0`)
+4. Publish the release
+
+The release workflow will automatically:
+- Build the full distribution (`just dist`)
+- Smoke test the installed layout (`just test-install`)
+- Package as `beamtalk-{version}-linux-x86_64.tar.gz`
+- Attach the tarball to the GitHub release
+
+You can also trigger the workflow manually via **Actions → Release → Run workflow** for testing.
+
 ## Where to Contribute
 
 ### Good First Issues

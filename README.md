@@ -18,10 +18,10 @@ counter increment
 value := counter getValue await  // => 2
 
 // Cascades - multiple messages to same receiver
-Transcript show: 'Hello'; cr; show: 'World'
+Transcript show: "Hello"; cr; show: "World"
 
 // Map literals
-config := #{#host => 'localhost', #port => 8080}
+config := #{#host => "localhost", #port => 8080}
 ```
 
 ---
@@ -226,7 +226,7 @@ The install layout follows the OTP convention (`PREFIX/lib/beamtalk/lib/<app>/eb
 Beamtalk v0.1.0
 Type :help for available commands, :exit to quit.
 
-> message := 'Hello, Beamtalk!'
+> message := "Hello, Beamtalk!"
 "Hello, Beamtalk!"
 
 > 2 + 3 * 4

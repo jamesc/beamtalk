@@ -11,7 +11,7 @@
 3.14 class
 // => Float
 
-'hello' class
+"hello" class
 // => String
 
 true class
@@ -26,11 +26,11 @@ nil class
 #symbol class
 // => Symbol
 
-// Metaclass terminal: class of a class returns 'Metaclass' sentinel
+// Metaclass terminal: class of a class returns "Metaclass" sentinel
 42 class class
 // => Metaclass
 
-'hello' class class
+"hello" class class
 // => Metaclass
 
 true class class

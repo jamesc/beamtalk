@@ -12,7 +12,7 @@
 // ===========================================================================
 
 // show: prints a string (async send, returns self per Command-Query Separation)
-Transcript show: 'Hello'
+Transcript show: "Hello"
 // => #Actor<TranscriptStream,_>
 
 // cr prints a newline (async send, returns self)
@@ -39,10 +39,10 @@ Transcript show: nil
 // CASCADE (SEMICOLON CHAINING)
 // ===========================================================================
 
-// Note: Cascading on class-level methods (Transcript show: 'Hello'; cr)
+// Note: Cascading on class-level methods (Transcript show: "Hello"; cr)
 // requires metaclass dispatch which is not yet implemented.
 // Use separate statements instead:
-Transcript show: 'Hello'
+Transcript show: "Hello"
 // => #Actor<TranscriptStream,_>
 Transcript cr
 // => #Actor<TranscriptStream,_>
@@ -53,7 +53,7 @@ Transcript cr
 
 // Command methods return self (the Transcript actor), not nil
 // This follows Smalltalk convention and Command-Query Separation
-t := (Transcript show: 'test') await
+t := (Transcript show: "test") await
 // => #Actor<TranscriptStream,_>
 
 t class

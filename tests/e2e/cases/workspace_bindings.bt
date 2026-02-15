@@ -13,7 +13,7 @@
 // ===========================================================================
 
 // Transcript show: dispatches through workspace binding (async send, returns self)
-Transcript show: 'Hello'
+Transcript show: "Hello"
 // => #Actor<TranscriptStream,_>
 
 // Transcript cr dispatches through workspace binding (async send, returns self)
@@ -74,7 +74,7 @@ version isEmpty
 // ===========================================================================
 
 // Cascade on workspace binding: all messages dispatched to same actor
-Transcript show: 'Hello'; cr; show: 'World'
+Transcript show: "Hello"; cr; show: "World"
 // => #Actor<TranscriptStream,_>
 
 // ===========================================================================
@@ -102,7 +102,7 @@ intClass := (Beamtalk classNamed: #Integer) await
 // => #Actor<TranscriptStream,_>
 
 // Write something to transcript
-(Transcript show: 'TestOutput') await
+(Transcript show: "TestOutput") await
 // => #Actor<TranscriptStream,_>
 
 // Recent returns buffer contents (list of recent output)
@@ -142,7 +142,7 @@ recentAfterClear isEmpty
 // ===========================================================================
 
 // TranscriptStream current returns the same singleton as Transcript binding
-(TranscriptStream current show: 'hello from explicit form') await
+(TranscriptStream current show: "hello from explicit form") await
 // => #Actor<TranscriptStream,_>
 
 // SystemDictionary current works as explicit form of Beamtalk

@@ -13,7 +13,7 @@
 /// ## Examples
 /// ```beamtalk
 /// #hello class           // => Symbol
-/// #hello asString        // => 'hello'
+/// #hello asString        // => "hello"
 /// #hello = #hello        // => true
 /// ```
 sealed Object subclass: Symbol
@@ -22,9 +22,9 @@ sealed Object subclass: Symbol
   ///
   /// ## Examples
   /// ```beamtalk
-  /// #hello asString        // => 'hello'
+  /// #hello asString        // => "hello"
   /// ```
-  asString => @primitive 'asString'
+  asString => @primitive "asString"
 
   /// Convert the symbol to an atom (returns self).
   ///
@@ -32,23 +32,23 @@ sealed Object subclass: Symbol
   /// ```beamtalk
   /// #hello asAtom          // => #hello
   /// ```
-  asAtom => @primitive 'asAtom'
+  asAtom => @primitive "asAtom"
 
   /// Return a developer-readable string representation (with `#` prefix).
   ///
   /// ## Examples
   /// ```beamtalk
-  /// #hello printString     // => '#hello'
+  /// #hello printString     // => "#hello"
   /// ```
-  printString => @primitive 'printString'
+  printString => @primitive "printString"
 
   /// Human-readable description of the receiver.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// #hello describe        // => '#hello'
+  /// #hello describe        // => "#hello"
   /// ```
-  describe => @primitive 'printString'
+  describe => @primitive "printString"
 
   /// Test strict equality with another symbol.
   ///
@@ -57,7 +57,7 @@ sealed Object subclass: Symbol
   /// #hello =:= #hello        // => true
   /// #hello =:= #world        // => false
   /// ```
-  =:= other => @primitive '=:='
+  =:= other => @primitive "=:="
 
   /// Test inequality with another symbol.
   ///
@@ -66,7 +66,7 @@ sealed Object subclass: Symbol
   /// #hello /= #world       // => true
   /// #hello /= #hello       // => false
   /// ```
-  /= other => @primitive '/='
+  /= other => @primitive "/="
 
   /// Return a hash value for the symbol.
   ///
@@ -74,4 +74,4 @@ sealed Object subclass: Symbol
   /// ```beamtalk
   /// #hello hash
   /// ```
-  hash => @primitive 'hash'
+  hash => @primitive "hash"

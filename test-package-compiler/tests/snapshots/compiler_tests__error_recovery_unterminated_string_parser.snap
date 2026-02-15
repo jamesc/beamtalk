@@ -133,7 +133,7 @@ Module {
             kind: Line,
         },
         Comment {
-            content: "// Unterminated single quote string",
+            content: "// Unterminated double quote string",
             span: Span {
                 start: 188,
                 end: 192,

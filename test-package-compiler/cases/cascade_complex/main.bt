@@ -13,9 +13,9 @@ counter
 
 // Cascade with keyword messages
 object
-    at: 'key1' put: value1;
-    at: 'key2' put: value2;
-    at: 'key3' put: value3
+    at: "key1" put: value1;
+    at: "key2" put: value2;
+    at: "key3" put: value3
 
 // Nested cascade (cascade result used in another message)
 result := (array 

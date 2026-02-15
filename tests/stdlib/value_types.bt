@@ -3,7 +3,7 @@
 
 // E2E tests for value types (Object subclasses)
 // Value types are plain Erlang terms with no process
-// They are created with 'new', not 'spawn'
+// They are created with "new", not "spawn"
 
 // @load tests/e2e/fixtures/point.bt
 
@@ -64,7 +64,7 @@ p class
 // ACTOR INSTANTIATION ERRORS
 // ===========================================================================
 
-// Actors MUST use 'spawn', not 'new'
+// Actors MUST use "spawn", not "new"
 // @load tests/e2e/fixtures/counter.bt
 // Counter new
 // // => Error: Actors must use spawn, not new

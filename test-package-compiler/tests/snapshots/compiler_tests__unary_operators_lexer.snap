@@ -5,7 +5,7 @@ expression: output
 Token { kind: Identifier("negatedNum"), span: Span { start: 268, end: 278 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test all unary operators/messages for compilation verification"), Whitespace("\n"), LineComment("// Comprehensive coverage of unary operations supported in Core Erlang codegen"), Whitespace("\n\n"), LineComment("// ===== Integer Unary Operations ====="), Whitespace("\n"), LineComment("// Negation"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Assign, span: Span { start: 279, end: 281 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Integer("5"), span: Span { start: 282, end: 283 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("negated"), span: Span { start: 284, end: 291 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// Should generate: call 'erlang':'-'(0, 5)")] }
+Token { kind: Identifier("negated"), span: Span { start: 284, end: 291 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// Should generate: call \"erlang\":\"-\"(0, 5)")] }
 Token { kind: Identifier("absValue"), span: Span { start: 356, end: 364 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Absolute value"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Assign, span: Span { start: 365, end: 367 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: LeftParen, span: Span { start: 368, end: 369 }, leading_trivia: [], trailing_trivia: [] }

@@ -2,7 +2,7 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: output
 ---
-Token { kind: Identifier("str1"), span: Span { start: 188, end: 192 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test error recovery: unterminated string"), Whitespace("\n"), LineComment("// Lexer should recover and continue"), Whitespace("\n\n"), LineComment("// Unterminated single quote string"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("str1"), span: Span { start: 188, end: 192 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test error recovery: unterminated string"), Whitespace("\n"), LineComment("// Lexer should recover and continue"), Whitespace("\n\n"), LineComment("// Unterminated double quote string"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Assign, span: Span { start: 193, end: 195 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: String("unterminated string\n\n// Code after error should still parse\nx := 42\n\n// Another unterminated string\nstr2 := "), span: Span { start: 196, end: 306 }, leading_trivia: [], trailing_trivia: [] }
 Token { kind: Identifier("another"), span: Span { start: 306, end: 313 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }

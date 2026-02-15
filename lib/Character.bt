@@ -22,7 +22,7 @@ sealed Object subclass: Character
   /// $A =:= $A                  // => true
   /// $A =:= $B                  // => false
   /// ```
-  =:= other => @primitive '=:='
+  =:= other => @primitive "=:="
 
   /// Test inequality with another character.
   ///
@@ -31,7 +31,7 @@ sealed Object subclass: Character
   /// $A /= $B                 // => true
   /// $A /= $A                 // => false
   /// ```
-  /= other => @primitive '/='
+  /= other => @primitive "/="
 
   /// Test if the receiver sorts before another character.
   ///
@@ -39,7 +39,7 @@ sealed Object subclass: Character
   /// ```beamtalk
   /// $A < $B                  // => true
   /// ```
-  < other => @primitive '<'
+  < other => @primitive "<"
 
   /// Test if the receiver sorts after another character.
   ///
@@ -47,7 +47,7 @@ sealed Object subclass: Character
   /// ```beamtalk
   /// $B > $A                  // => true
   /// ```
-  > other => @primitive '>'
+  > other => @primitive ">"
 
   /// Test if the receiver sorts before or equal to another character.
   ///
@@ -55,7 +55,7 @@ sealed Object subclass: Character
   /// ```beamtalk
   /// $A <= $A                 // => true
   /// ```
-  <= other => @primitive '<='
+  <= other => @primitive "<="
 
   /// Test if the receiver sorts after or equal to another character.
   ///
@@ -63,7 +63,7 @@ sealed Object subclass: Character
   /// ```beamtalk
   /// $A >= $A                 // => true
   /// ```
-  >= other => @primitive '>='
+  >= other => @primitive ">="
 
   /// Return the Unicode codepoint as an integer.
   ///
@@ -71,29 +71,29 @@ sealed Object subclass: Character
   /// ```beamtalk
   /// $A asInteger             // => 65
   /// ```
-  asInteger => @primitive 'asInteger'
+  asInteger => @primitive "asInteger"
 
   /// Convert the character to a single-character string.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// $A asString              // => 'A'
+  /// $A asString              // => "A"
   /// ```
-  asString => @primitive 'asString'
+  asString => @primitive "asString"
 
   /// Return a developer-readable string representation.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// $A printString           // => '$A'
+  /// $A printString           // => "$A"
   /// ```
-  printString => @primitive 'printString'
+  printString => @primitive "printString"
 
   /// Human-readable description of the receiver.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// $A describe              // => '$A'
+  /// $A describe              // => "$A"
   /// ```
   describe => self printString
 
@@ -103,7 +103,7 @@ sealed Object subclass: Character
   /// ```beamtalk
   /// $A hash
   /// ```
-  hash => @primitive 'hash'
+  hash => @primitive "hash"
 
   /// Test if the character is a Unicode letter.
   ///
@@ -112,7 +112,7 @@ sealed Object subclass: Character
   /// $a isLetter              // => true
   /// $1 isLetter              // => false
   /// ```
-  isLetter => @primitive 'isLetter'
+  isLetter => @primitive "isLetter"
 
   /// Test if the character is a Unicode digit.
   ///
@@ -121,7 +121,7 @@ sealed Object subclass: Character
   /// $1 isDigit               // => true
   /// $a isDigit               // => false
   /// ```
-  isDigit => @primitive 'isDigit'
+  isDigit => @primitive "isDigit"
 
   /// Test if the character is uppercase.
   ///
@@ -130,7 +130,7 @@ sealed Object subclass: Character
   /// $A isUppercase           // => true
   /// $a isUppercase           // => false
   /// ```
-  isUppercase => @primitive 'isUppercase'
+  isUppercase => @primitive "isUppercase"
 
   /// Test if the character is lowercase.
   ///
@@ -139,7 +139,7 @@ sealed Object subclass: Character
   /// $a isLowercase           // => true
   /// $A isLowercase           // => false
   /// ```
-  isLowercase => @primitive 'isLowercase'
+  isLowercase => @primitive "isLowercase"
 
   /// Test if the character is whitespace.
   ///
@@ -148,7 +148,7 @@ sealed Object subclass: Character
   /// $  isWhitespace          // => true
   /// $a isWhitespace          // => false
   /// ```
-  isWhitespace => @primitive 'isWhitespace'
+  isWhitespace => @primitive "isWhitespace"
 
   /// Convert to uppercase.
   ///
@@ -156,7 +156,7 @@ sealed Object subclass: Character
   /// ```beamtalk
   /// $a uppercase             // => $A
   /// ```
-  uppercase => @primitive 'uppercase'
+  uppercase => @primitive "uppercase"
 
   /// Convert to lowercase.
   ///
@@ -164,7 +164,7 @@ sealed Object subclass: Character
   /// ```beamtalk
   /// $A lowercase             // => $a
   /// ```
-  lowercase => @primitive 'lowercase'
+  lowercase => @primitive "lowercase"
 
   /// Create a Character from a Unicode codepoint integer (class method).
   ///
@@ -172,4 +172,4 @@ sealed Object subclass: Character
   /// ```beamtalk
   /// Character value: 65      // => $A
   /// ```
-  class sealed value: codepoint => @primitive 'value:'
+  class sealed value: codepoint => @primitive "value:"

@@ -4,14 +4,14 @@
 // Test error recovery: unterminated string
 // Lexer should recover and continue
 
-// Unterminated single quote string
-str1 := 'unterminated string
+// Unterminated double quote string
+str1 := "unterminated string
 
 // Code after error should still parse
 x := 42
 
 // Another unterminated string
-str2 := 'another unclosed
+str2 := "another unclosed
 
 // More code
 y := x + 1

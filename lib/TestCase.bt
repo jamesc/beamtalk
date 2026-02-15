@@ -4,7 +4,7 @@
 // TestCase - Base class for BUnit test cases (ADR 0014 Phase 2)
 //
 // TestCase provides the foundation for SUnit-style testing in Beamtalk.
-// Users subclass TestCase and write test methods (prefixed with 'test').
+// Users subclass TestCase and write test methods (prefixed with "test").
 // Each test method creates a fresh instance, calls setUp, runs the test,
 // and calls tearDown.
 //
@@ -19,12 +19,12 @@ Object subclass: TestCase
   tearDown => nil
 
   // Core assertions — @primitive methods implemented in beamtalk_test_case.erl
-  assert: condition => @primitive 'assert:'
-  assert: actual equals: expected => @primitive 'assert:equals:'
-  deny: condition => @primitive 'deny:'
-  should: block raise: errorKind => @primitive 'should:raise:'
-  fail: message => @primitive 'fail:'
+  assert: condition => @primitive "assert:"
+  assert: actual equals: expected => @primitive "assert:equals:"
+  deny: condition => @primitive "deny:"
+  should: block raise: errorKind => @primitive "should:raise:"
+  fail: message => @primitive "fail:"
 
   // Class-side methods for running tests interactively (BT-440)
-  class runAll => @primitive 'runAll'
-  class run: testName => @primitive 'run:'
+  class runAll => @primitive "runAll"
+  class run: testName => @primitive "run:"

@@ -4,10 +4,10 @@
 // Test boolean control flow with True and False
 
 // Test ifTrue:ifFalse: with true
-true ifTrue: [Transcript show: 'yes'] ifFalse: [Transcript show: 'no']
+true ifTrue: [Transcript show: "yes"] ifFalse: [Transcript show: "no"]
 
 // Test ifTrue:ifFalse: with false
-false ifTrue: [Transcript show: 'yes'] ifFalse: [Transcript show: 'no']
+false ifTrue: [Transcript show: "yes"] ifFalse: [Transcript show: "no"]
 
 // Test logical AND
 result1 := true and: [true]

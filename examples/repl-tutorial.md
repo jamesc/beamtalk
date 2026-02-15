@@ -279,7 +279,7 @@ a Stream
 > ((#(1, 2, 3, 4, 5) stream) select: [:n | n > 2]) asList
 [3,4,5]
 
-> ('hello' stream) take: 3
+> ("hello" stream) take: 3
 ["h","e","l"]
 ```
 
@@ -298,17 +298,17 @@ a Stream
 Read files lazily — constant memory, safe for large files:
 
 ```beamtalk
-> (File lines: 'examples/hello.bt') take: 3
+> (File lines: "examples/hello.bt") take: 3
 ["// Copyright 2026 James Casey","// SPDX-License-Identifier: Apache-2.0",""]
 
-> (File lines: 'examples/hello.bt') inject: 0 into: [:count :line | count + 1]
+> (File lines: "examples/hello.bt") inject: 0 into: [:count :line | count + 1]
 15
 ```
 
 Block-scoped handles close automatically:
 
 ```beamtalk
-> File open: 'examples/hello.bt' do: [:handle | handle lines take: 2]
+> File open: "examples/hello.bt" do: [:handle | handle lines take: 2]
 ["// Copyright 2026 James Casey","// SPDX-License-Identifier: Apache-2.0"]
 ```
 
@@ -346,11 +346,11 @@ The REPL provides convenience bindings for workspace singletons. You can use eit
 
 ```beamtalk
 // Convenience binding (available in REPL)
-> Transcript show: 'hello'
+> Transcript show: "hello"
 hello
 
 // Explicit form (works everywhere, including loaded classes)
-> TranscriptStream current show: 'hello'
+> TranscriptStream current show: "hello"
 hello
 ```
 

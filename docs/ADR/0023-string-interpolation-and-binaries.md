@@ -15,10 +15,10 @@ Beamtalk needs string interpolation — the ability to embed expressions inside 
 ### Current State
 
 - **Strings are UTF-8 binaries** (`<<"...">>` in Erlang) — this is settled
-- The **lexer** currently uses single quotes (`'...'`) for strings and double quotes (`"..."`) for "interpolated strings" — but this was a preliminary choice inherited from Smalltalk convention, not a deliberate design decision
-- The **parser, AST, and codegen** have no interpolation support
+- The **lexer** uses double quotes (`"..."`) for all strings (BT-555, Phase 1 complete). Single-quoted strings are no longer supported — the lexer produces a helpful error message directing users to use double quotes.
+- The **parser, AST, and codegen** have no interpolation support yet
 - `test-package-compiler/cases/future_string_interpolation/main.bt` documents expected behavior
-- ~150 `.bt` files use single-quoted strings throughout
+- `#'quoted symbols'` are unaffected — single quotes are still valid in symbol context
 
 ### Constraints
 
@@ -402,16 +402,16 @@ The language is pre-release — no external user code needs migration.
 
 **Epic:** BT-554 — String Interpolation and Quote Convention (ADR 0023)
 **Issues:** BT-555, BT-556, BT-557, BT-558, BT-559, BT-560
-**Status:** Planned
+**Status:** In Progress
 
-| Phase | Issue | Title | Size | Blocked by |
-|-------|-------|-------|------|------------|
-| 1 | BT-555 | Swap quote convention + migrate .bt files | L | — |
-| 2a | BT-556 | Lexer: parse `{expr}` segments | M | BT-555 |
-| 2b | BT-557 | Parser/AST: StringInterpolation node | S | BT-556 |
-| 3 | BT-558 | Codegen: binary construction + printString | M | BT-557 |
-| 4a | BT-559 | E2E tests and REPL validation | S | BT-558 |
-| 4b | BT-560 | Documentation update | S | BT-558 |
+| Phase | Issue | Title | Size | Blocked by | Status |
+|-------|-------|-------|------|------------|--------|
+| 1 | BT-555 | Swap quote convention + migrate .bt files | L | — | ✅ Done |
+| 2a | BT-556 | Lexer: parse `{expr}` segments | M | BT-555 | Planned |
+| 2b | BT-557 | Parser/AST: StringInterpolation node | S | BT-556 | Planned |
+| 3 | BT-558 | Codegen: binary construction + printString | M | BT-557 | Planned |
+| 4a | BT-559 | E2E tests and REPL validation | S | BT-558 | Planned |
+| 4b | BT-560 | Documentation update | S | BT-558 | Planned |
 
 ## References
 - Related issues: BT-39 (Define string interpolation syntax)

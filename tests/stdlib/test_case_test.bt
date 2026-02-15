@@ -22,7 +22,7 @@ TestCase new assert: true
 TestCase new assert: 3 equals: 3
 // => nil
 
-TestCase new assert: 'hello' equals: 'hello'
+TestCase new assert: "hello" equals: "hello"
 // => nil
 
 TestCase new assert: true equals: true
@@ -86,7 +86,7 @@ TestCase new assert: 3 equals: 4
 // => ERROR: assertion_failed
 
 // Test assert:equals: with different types
-TestCase new assert: 'hello' equals: 42
+TestCase new assert: "hello" equals: 42
 // => ERROR: assertion_failed
 
 // Test deny: with true condition — should raise assertion_failed
@@ -94,7 +94,7 @@ TestCase new deny: true
 // => ERROR: assertion_failed
 
 // Test fail: unconditional failure
-TestCase new fail: 'this test should fail'
+TestCase new fail: "this test should fail"
 // => ERROR: assertion_failed
 
 // ===========================================================================

@@ -17,7 +17,7 @@ use crate::source_analysis::{Diagnostic, Span};
 /// Known structural intrinsic names (ADR 0007).
 ///
 /// These are the unquoted intrinsic names that require custom code generation.
-/// Quoted selectors (e.g., `@primitive '+'`) are always valid — they delegate
+/// Quoted selectors (e.g., `@primitive \"+\"`) are always valid — they delegate
 /// to runtime dispatch modules.
 const STRUCTURAL_INTRINSICS: &[&str] = &[
     // Object lifecycle
@@ -262,7 +262,7 @@ mod tests {
 
     #[test]
     fn primitive_in_stdlib_mode_no_error() {
-        let module = parse_module(&stdlib_method("@primitive '+'"));
+        let module = parse_module(&stdlib_method("@primitive \"+\""));
         let options = CompilerOptions {
             stdlib_mode: true,
             ..Default::default()
@@ -276,7 +276,7 @@ mod tests {
 
     #[test]
     fn primitive_in_user_code_error() {
-        let module = parse_module(&stdlib_method("@primitive '+'"));
+        let module = parse_module(&stdlib_method("@primitive \"+\""));
         let options = CompilerOptions::default();
         let diags = validate_primitives(&module, &options);
         assert_eq!(diags.len(), 1);
@@ -292,7 +292,7 @@ mod tests {
 
     #[test]
     fn primitive_with_allow_primitives_warning() {
-        let module = parse_module(&stdlib_method("@primitive '+'"));
+        let module = parse_module(&stdlib_method("@primitive \"+\""));
         let options = CompilerOptions {
             allow_primitives: true,
             ..Default::default()
@@ -333,7 +333,7 @@ mod tests {
     #[test]
     fn quoted_selector_always_accepted() {
         // Quoted selectors are runtime-dispatch, no intrinsic name validation
-        let module = parse_module(&stdlib_method("@primitive 'anyRandomName'"));
+        let module = parse_module(&stdlib_method("@primitive \"anyRandomName\""));
         let options = CompilerOptions {
             stdlib_mode: true,
             ..Default::default()
@@ -344,7 +344,7 @@ mod tests {
 
     #[test]
     fn primitive_in_class_method_validated() {
-        let source = "Object subclass: MyInt\n  + other => @primitive '+'";
+        let source = "Object subclass: MyInt\n  + other => @primitive \"+\"";
         let module = parse_module(source);
         let options = CompilerOptions::default();
         let diags = validate_primitives(&module, &options);
@@ -354,7 +354,7 @@ mod tests {
 
     #[test]
     fn primitive_in_class_method_stdlib_ok() {
-        let source = "Object subclass: MyInt\n  + other => @primitive '+'";
+        let source = "Object subclass: MyInt\n  + other => @primitive \"+\"";
         let module = parse_module(source);
         let options = CompilerOptions {
             stdlib_mode: true,
@@ -366,7 +366,7 @@ mod tests {
 
     #[test]
     fn multiple_primitives_multiple_errors() {
-        let source = "Object subclass: T\n  m => @primitive '+'. @primitive unknownFoo";
+        let source = "Object subclass: T\n  m => @primitive \"+\". @primitive unknownFoo";
         let module = parse_module(source);
         let options = CompilerOptions::default();
         let diags = validate_primitives(&module, &options);
@@ -381,7 +381,7 @@ mod tests {
     fn primitive_in_state_default_validated() {
         // @primitive in a state default value is caught by the parser (not in method body),
         // so no Expression::Primitive reaches semantic analysis — verify no false positives
-        let source = "Object subclass: MyObj\n  state: x = @primitive 'bad'";
+        let source = "Object subclass: MyObj\n  state: x = @primitive \"bad\"";
         let tokens = lex_with_eof(source);
         let (module, parser_diags) = parse(tokens);
         // Parser should catch this
