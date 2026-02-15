@@ -107,12 +107,15 @@ fn generate_method_doc_entry(method: &MethodDefinition) -> String {
 /// - Unary: `"increment"`
 /// - Binary: `"+ other"`
 /// - Keyword: `"at: index put: value"`
-fn format_signature(selector: &MessageSelector, parameters: &[crate::ast::Identifier]) -> String {
+fn format_signature(
+    selector: &MessageSelector,
+    parameters: &[crate::ast::ParameterDefinition],
+) -> String {
     match selector {
         MessageSelector::Unary(name) => name.to_string(),
         MessageSelector::Binary(op) => {
             if let Some(param) = parameters.first() {
-                format!("{op} {}", param.name)
+                format!("{op} {}", param.name.name)
             } else {
                 op.to_string()
             }
@@ -126,7 +129,7 @@ fn format_signature(selector: &MessageSelector, parameters: &[crate::ast::Identi
                 sig.push_str(&part.keyword);
                 if let Some(param) = parameters.get(i) {
                     sig.push(' ');
-                    sig.push_str(&param.name);
+                    sig.push_str(&param.name.name);
                 }
             }
             sig
@@ -184,6 +187,7 @@ mod tests {
     use super::*;
     use crate::ast::{
         ClassDefinition, Expression, Identifier, KeywordPart, Literal, MethodDefinition,
+        ParameterDefinition,
     };
     use crate::source_analysis::Span;
 
@@ -206,7 +210,12 @@ mod tests {
     ) -> MethodDefinition {
         let parameters = params
             .into_iter()
-            .map(|p| Identifier::new(p, Span::new(0, u32::try_from(p.len()).unwrap_or(0))))
+            .map(|p| {
+                ParameterDefinition::new(Identifier::new(
+                    p,
+                    Span::new(0, u32::try_from(p.len()).unwrap_or(0)),
+                ))
+            })
             .collect();
         let mut method = MethodDefinition::new(
             selector,
@@ -318,7 +327,10 @@ mod tests {
 
     #[test]
     fn format_signature_binary() {
-        let params = vec![Identifier::new("other", Span::new(0, 5))];
+        let params = vec![ParameterDefinition::new(Identifier::new(
+            "other",
+            Span::new(0, 5),
+        ))];
         let sig = format_signature(&MessageSelector::Binary("+".into()), &params);
         assert_eq!(sig, "+ other");
     }
@@ -326,8 +338,8 @@ mod tests {
     #[test]
     fn format_signature_keyword() {
         let params = vec![
-            Identifier::new("index", Span::new(0, 5)),
-            Identifier::new("value", Span::new(0, 5)),
+            ParameterDefinition::new(Identifier::new("index", Span::new(0, 5))),
+            ParameterDefinition::new(Identifier::new("value", Span::new(0, 5))),
         ];
         let sig = format_signature(
             &MessageSelector::Keyword(vec![

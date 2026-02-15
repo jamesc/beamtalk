@@ -63,12 +63,15 @@ Module {
                         ],
                     ),
                     parameters: [
-                        Identifier {
-                            name: "index",
-                            span: Span {
-                                start: 326,
-                                end: 331,
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "index",
+                                span: Span {
+                                    start: 326,
+                                    end: 331,
+                                },
                             },
+                            type_annotation: None,
                         },
                     ],
                     body: [
@@ -175,12 +178,15 @@ Module {
                         ],
                     ),
                     parameters: [
-                        Identifier {
-                            name: "default",
-                            span: Span {
-                                start: 522,
-                                end: 529,
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "default",
+                                span: Span {
+                                    start: 522,
+                                    end: 529,
+                                },
                             },
+                            type_annotation: None,
                         },
                     ],
                     body: [
@@ -215,12 +221,15 @@ Module {
                         ],
                     ),
                     parameters: [
-                        Identifier {
-                            name: "block",
-                            span: Span {
-                                start: 572,
-                                end: 577,
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "block",
+                                span: Span {
+                                    start: 572,
+                                    end: 577,
+                                },
                             },
+                            type_annotation: None,
                         },
                     ],
                     body: [

@@ -328,7 +328,7 @@ impl CoreErlangGenerator {
         self.current_method_params.clear();
         let mut params = vec!["Self".to_string()];
         for param in &method.parameters {
-            let var_name = self.fresh_var(&param.name);
+            let var_name = self.fresh_var(&param.name.name);
             self.current_method_params.push(var_name.clone());
             params.push(var_name);
         }

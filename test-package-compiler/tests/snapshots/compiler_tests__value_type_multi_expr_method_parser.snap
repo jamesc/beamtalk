@@ -39,12 +39,15 @@ Module {
                         ],
                     ),
                     parameters: [
-                        Identifier {
-                            name: "x",
-                            span: Span {
-                                start: 549,
-                                end: 550,
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "x",
+                                span: Span {
+                                    start: 549,
+                                    end: 550,
+                                },
                             },
+                            type_annotation: None,
                         },
                     ],
                     body: [
@@ -148,19 +151,25 @@ Module {
                         ],
                     ),
                     parameters: [
-                        Identifier {
-                            name: "a",
-                            span: Span {
-                                start: 666,
-                                end: 667,
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "a",
+                                span: Span {
+                                    start: 666,
+                                    end: 667,
+                                },
                             },
+                            type_annotation: None,
                         },
-                        Identifier {
-                            name: "b",
-                            span: Span {
-                                start: 674,
-                                end: 675,
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "b",
+                                span: Span {
+                                    start: 674,
+                                    end: 675,
+                                },
                             },
+                            type_annotation: None,
                         },
                     ],
                     body: [

@@ -184,14 +184,14 @@ fn parse_class_info(path: &Utf8Path) -> Result<Option<ClassInfo>> {
 /// Format a method signature for display.
 fn format_signature(
     selector: &beamtalk_core::ast::MessageSelector,
-    parameters: &[beamtalk_core::ast::Identifier],
+    parameters: &[beamtalk_core::ast::ParameterDefinition],
 ) -> String {
     use beamtalk_core::ast::MessageSelector;
     match selector {
         MessageSelector::Unary(name) => name.to_string(),
         MessageSelector::Binary(op) => {
             if let Some(param) = parameters.first() {
-                format!("{op} {}", param.name)
+                format!("{op} {}", param.name.name)
             } else {
                 op.to_string()
             }
@@ -205,7 +205,7 @@ fn format_signature(
                 sig.push_str(&part.keyword);
                 if let Some(param) = parameters.get(i) {
                     sig.push(' ');
-                    sig.push_str(&param.name);
+                    sig.push_str(&param.name.name);
                 }
             }
             sig
