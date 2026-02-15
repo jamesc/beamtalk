@@ -1175,7 +1175,7 @@ impl CoreErlangGenerator {
             if let Some(code) =
                 primitive_implementations::generate_primitive_bif(&class_name, name, &params)
             {
-                return Ok(Document::String(code));
+                return Ok(code);
             }
         }
 
