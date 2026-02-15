@@ -92,48 +92,64 @@ When activated, execute this workflow to complete work and push:
 
 11. **Update Linear state**: Mark the Linear issue as "In Review".
 
-12. **Wait for Copilot code review** (first review only): If a repository ruleset is configured to automatically request Copilot code review, poll for it after **initial PR creation only**. If the PR already existed (step 9), skip polling — Copilot typically only reviews once and subsequent pushes don't trigger a new review.
+12. **Wait for automated code reviews** (first review only): If a repository ruleset is configured to automatically request Copilot and/or CodeRabbit code review, poll for them after **initial PR creation only**. If the PR already existed (step 9), skip polling — these bots typically only review once and subsequent pushes don't trigger a new review.
     
-    ```
-    Poll: check for Copilot review every 60 seconds, up to 10 attempts (10 minutes max)
+    Poll for **both** Copilot and CodeRabbit reviews simultaneously:
+    
+    ```text
+    Poll: check for reviews every 60 seconds, up to 10 attempts (10 minutes max)
+    Stop polling once BOTH reviews have arrived (or timeout)
     ```
     
-    Use `gh api` against the PR reviews endpoint to check for reviews, looking for a review from `copilot-pull-request-reviewer[bot]` by checking `user.login`. For example:
+    Use `gh api` against the PR reviews endpoint to check for reviews by bot identity:
     
     ```bash
+    # Check for Copilot review
     gh api repos/{owner}/{repo}/pulls/{pr}/reviews --paginate --jq '.[] | select(.user.login == "copilot-pull-request-reviewer[bot]")'
+    
+    # Check for CodeRabbit review
+    gh api repos/{owner}/{repo}/pulls/{pr}/reviews --paginate --jq '.[] | select(.user.login == "coderabbitai[bot]")'
     ```
     
-    Also check review threads using `get_review_comments` — Copilot leaves inline code comments as review threads.
+    Also check review threads using `get_review_comments` — both bots leave inline code comments as review threads.
     
-    **Important:** Only gate on verified bot identity (`user.login == "copilot-pull-request-reviewer[bot]"`). Never match on review body content alone, as that can be spoofed by arbitrary reviewers.
+    **Important:** Only gate on verified bot identity (`user.login`). Never match on review body content alone, as that can be spoofed by arbitrary reviewers.
     
-    **If Copilot review already exists** (PR was pre-existing):
-    - Check if there are unresolved review threads from the existing review
-    - If all threads are resolved, report: "Copilot review already completed ✅"
+    **Bot identities:**
+
+    | Bot | `user.login` |
+    |-----|-------------|
+    | Copilot | `copilot-pull-request-reviewer[bot]` |
+    | CodeRabbit | `coderabbitai[bot]` |
+
+    **If reviews already exist** (PR was pre-existing):
+    - Check if there are unresolved review threads from existing reviews
+    - If all threads are resolved, report: "Copilot review already completed ✅" and/or "CodeRabbit review already completed ✅"
     - If unresolved threads exist, execute `/resolve-pr` workflow inline
-    - Do NOT poll for a new review
+    - Do NOT poll for new reviews
     
-    **If Copilot review arrives with comments** (new PR):
-    - Inform the user: "Copilot review received with N comments. Resolving..."
+    **If a review arrives with comments** (new PR):
+    - Inform the user: "{Bot} review received with N comments. Resolving..."
     - Execute the `/resolve-pr` workflow inline (steps 2-11 from resolve-pr skill):
       - Fetch and analyze all unresolved review threads
       - Plan fixes for each comment
       - Run tests, make changes, run tests again
-      - Commit with message: `fix: address Copilot review comments BT-{number}`
+      - Commit with message: `fix: address {Bot} review comments BT-{number}`
       - Push changes
       - Reply to each review comment explaining the fix
       - Report summary of all changes
     - After resolving, report the summary of changes made
+    - If the second bot's review hasn't arrived yet, continue polling for it
     
-    **If Copilot review arrives with no comments (approved):**
-    - Report: "Copilot review passed with no comments ✅"
+    **If a review arrives with no comments (approved):**
+    - Report: "{Bot} review passed with no comments ✅"
     
     **If timeout (no review after 10 minutes):**
-    - Report: "Copilot review not received after 10 minutes. Run `/resolve-pr` later if comments arrive."
+    - Report which reviews were received and which timed out
+    - Example: "Copilot review passed ✅. CodeRabbit review not received after 10 minutes. Run `/resolve-pr` later if comments arrive."
     - Continue to step 13 (do not block completion)
 
-13. **Report success**: Confirm the commit was pushed, PR was created/updated (include PR URL), Linear was updated, and Copilot review status.
+13. **Report success**: Confirm the commit was pushed, PR was created/updated (include PR URL), Linear was updated, and review status for both Copilot and CodeRabbit.
 
 ## When PR is merged
 
