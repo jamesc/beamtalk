@@ -269,6 +269,13 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         .first()
         .ok_or_else(|| miette::miette!("No class definition in '{path}'"))?;
 
+    if module.classes.len() > 1 {
+        miette::bail!(
+            "Expected exactly one class in '{path}', found {}",
+            module.classes.len()
+        );
+    }
+
     let methods = class
         .methods
         .iter()
@@ -473,11 +480,21 @@ fn generate_builtins_rs(class_metadata: &[ClassMeta]) -> Result<()> {
     code.push_str("    classes\n}\n");
 
     let dest = Utf8PathBuf::from(GENERATED_BUILTINS_PATH);
-    fs::write(&dest, &code)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to write '{dest}'"))?;
 
-    debug!("Generated {}", dest);
+    // Only write if content changed to avoid unnecessary recompilation
+    let needs_write = match fs::read_to_string(&dest) {
+        Ok(existing) => existing != code,
+        Err(_) => true,
+    };
+
+    if needs_write {
+        fs::write(&dest, &code)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to write '{dest}'"))?;
+        debug!("Generated {}", dest);
+    } else {
+        debug!("Generated builtins unchanged, skipping write");
+    }
     Ok(())
 }
 
@@ -689,5 +706,133 @@ mod tests {
 
         let result = generate_app_file(&ebin_dir, &source_files, &[]);
         assert!(result.is_err());
+    }
+
+    fn sample_class_meta() -> ClassMeta {
+        ClassMeta {
+            module_name: "bt@stdlib@counter".to_string(),
+            class_name: "Counter".to_string(),
+            superclass_name: "Actor".to_string(),
+            is_sealed: false,
+            is_abstract: false,
+            state: vec!["count".to_string()],
+            methods: vec![
+                MethodMeta {
+                    selector: "increment".to_string(),
+                    arity: 0,
+                    kind: MethodKindMeta::Primary,
+                    is_sealed: false,
+                },
+                MethodMeta {
+                    selector: "add:".to_string(),
+                    arity: 1,
+                    kind: MethodKindMeta::Primary,
+                    is_sealed: true,
+                },
+            ],
+            class_methods: vec![MethodMeta {
+                selector: "default".to_string(),
+                arity: 0,
+                kind: MethodKindMeta::Primary,
+                is_sealed: false,
+            }],
+        }
+    }
+
+    #[test]
+    fn test_generate_class_entry_emits_correct_structure() {
+        let meta = sample_class_meta();
+        let mut code = String::new();
+        generate_class_entry(&mut code, &meta);
+
+        assert!(code.contains("\"Counter\".into()"));
+        assert!(code.contains("Some(\"Actor\".into())"));
+        assert!(code.contains("is_sealed: false"));
+        assert!(code.contains("is_abstract: false"));
+        assert!(code.contains("\"count\".into()"));
+        assert!(code.contains("selector: \"increment\".into()"));
+        assert!(code.contains("selector: \"add:\".into()"));
+        assert!(code.contains("arity: 1"));
+        assert!(code.contains("selector: \"default\".into()"));
+    }
+
+    #[test]
+    fn test_generate_class_entry_sealed_methods() {
+        let meta = sample_class_meta();
+        let mut code = String::new();
+        generate_class_entry(&mut code, &meta);
+
+        // The add: method is sealed
+        assert!(code.contains("is_sealed: true"));
+    }
+
+    #[test]
+    fn test_generate_class_entry_root_class() {
+        let meta = ClassMeta {
+            module_name: "bt@stdlib@proto_object".to_string(),
+            class_name: "ProtoObject".to_string(),
+            superclass_name: "none".to_string(),
+            is_sealed: false,
+            is_abstract: true,
+            state: vec![],
+            methods: vec![],
+            class_methods: vec![],
+        };
+        let mut code = String::new();
+        generate_class_entry(&mut code, &meta);
+
+        assert!(code.contains("superclass: None"));
+        assert!(code.contains("is_abstract: true"));
+        assert!(code.contains("methods: vec![],"));
+    }
+
+    #[test]
+    fn test_generate_method_list_empty() {
+        let mut code = String::new();
+        generate_method_list(&mut code, "methods", &[], "Test");
+        assert!(code.contains("methods: vec![],"));
+    }
+
+    #[test]
+    fn test_generate_builtins_sorted_deterministic() {
+        let meta = [
+            ClassMeta {
+                module_name: "bt@stdlib@zebra".to_string(),
+                class_name: "Zebra".to_string(),
+                superclass_name: "Object".to_string(),
+                is_sealed: false,
+                is_abstract: false,
+                state: vec![],
+                methods: vec![],
+                class_methods: vec![],
+            },
+            ClassMeta {
+                module_name: "bt@stdlib@alpha".to_string(),
+                class_name: "Alpha".to_string(),
+                superclass_name: "Object".to_string(),
+                is_sealed: true,
+                is_abstract: false,
+                state: vec![],
+                methods: vec![],
+                class_methods: vec![],
+            },
+        ];
+
+        let mut code = String::new();
+        // Simulate the sorted generation from generate_builtins_rs
+        let mut sorted: Vec<&ClassMeta> = meta.iter().collect();
+        sorted.sort_by_key(|m| &m.class_name);
+
+        for m in &sorted {
+            generate_class_entry(&mut code, m);
+        }
+
+        // Alpha should appear before Zebra
+        let alpha_pos = code.find("\"Alpha\"").unwrap();
+        let zebra_pos = code.find("\"Zebra\"").unwrap();
+        assert!(
+            alpha_pos < zebra_pos,
+            "Classes should be sorted alphabetically"
+        );
     }
 }
