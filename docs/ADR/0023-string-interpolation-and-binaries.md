@@ -398,6 +398,21 @@ The migration can be done in one batch commit before interpolation is implemente
 
 The language is pre-release — no external user code needs migration.
 
+## Implementation Tracking
+
+**Epic:** BT-554 — String Interpolation and Quote Convention (ADR 0023)
+**Issues:** BT-555, BT-556, BT-557, BT-558, BT-559, BT-560
+**Status:** Planned
+
+| Phase | Issue | Title | Size | Blocked by |
+|-------|-------|-------|------|------------|
+| 1 | BT-555 | Swap quote convention + migrate .bt files | L | — |
+| 2a | BT-556 | Lexer: parse `{expr}` segments | M | BT-555 |
+| 2b | BT-557 | Parser/AST: StringInterpolation node | S | BT-556 |
+| 3 | BT-558 | Codegen: binary construction + printString | M | BT-557 |
+| 4a | BT-559 | E2E tests and REPL validation | S | BT-558 |
+| 4b | BT-560 | Documentation update | S | BT-558 |
+
 ## References
 - Related issues: BT-39 (Define string interpolation syntax)
 - Related ADRs: ADR 0003 (Core Erlang target), ADR 0021 (Streams and IO Design)
