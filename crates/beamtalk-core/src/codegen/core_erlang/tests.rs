@@ -2391,7 +2391,7 @@ fn test_standalone_class_reference_uses_dynamic_module_name() {
 
     // Should call whereis_class to get the class PID
     assert!(
-        code.contains("call 'beamtalk_object_class':'whereis_class'('Point')"),
+        code.contains("call 'beamtalk_class_registry':'whereis_class'('Point')"),
         "Should call whereis_class to get class PID. Got:\n{code}"
     );
 
@@ -2439,7 +2439,7 @@ fn test_standalone_class_reference_validates_undefined_classes() {
 
     // Should use a case expression to check for undefined
     assert!(
-        code.contains("case call 'beamtalk_object_class':'whereis_class'('NonExistentClass')"),
+        code.contains("case call 'beamtalk_class_registry':'whereis_class'('NonExistentClass')"),
         "Should use case expression to handle whereis_class result. Got:\n{code}"
     );
 
