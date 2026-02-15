@@ -158,10 +158,10 @@ c := Counter spawn
 // => Result: 10
 
 // ===========================================================================
-// MULTI-LINE INTERPOLATED STRINGS
+// INTERPOLATION WITH VARIABLES FROM PRIOR EXPRESSIONS
 // ===========================================================================
 
-// Variable interpolation in multi-line context
+// Variable interpolation referencing earlier assignments
 x := 100
 // => 100
 
