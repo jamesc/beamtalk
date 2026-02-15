@@ -669,6 +669,14 @@ impl Analyser {
             Literal(..) | Super(..) | Error { .. } | ClassReference { .. } | Primitive { .. } => {
                 // No analysis needed
             }
+
+            StringInterpolation { segments, .. } => {
+                for segment in segments {
+                    if let crate::ast::StringSegment::Interpolation(expr) = segment {
+                        self.analyse_expression(expr, None);
+                    }
+                }
+            }
         }
     }
 
@@ -910,6 +918,14 @@ impl Analyser {
 
             Literal(..) | Super(..) | Error { .. } | ClassReference { .. } | Primitive { .. } => {
                 // No captures or mutations
+            }
+
+            StringInterpolation { segments, .. } => {
+                for segment in segments {
+                    if let crate::ast::StringSegment::Interpolation(expr) = segment {
+                        self.collect_captures_and_mutations(expr, captures, mutations);
+                    }
+                }
             }
         }
     }

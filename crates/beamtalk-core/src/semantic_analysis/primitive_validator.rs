@@ -203,6 +203,14 @@ fn validate_expr(
         | Expression::ClassReference { .. }
         | Expression::Super(_)
         | Expression::Error { .. } => {}
+
+        Expression::StringInterpolation { segments, .. } => {
+            for segment in segments {
+                if let crate::ast::StringSegment::Interpolation(expr) = segment {
+                    validate_expr(expr, is_stdlib, options, diagnostics);
+                }
+            }
+        }
     }
 }
 
