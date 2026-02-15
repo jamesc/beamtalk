@@ -985,9 +985,10 @@ impl CoreErlangGenerator {
     /// If not found, fall back to `class_send` for actual class names.
     ///
     /// ```erlang
+    /// let ClassPid = call 'beamtalk_class_registry':'whereis_class'('Name') in
     /// case call 'maps':'find'('Name', State) of
     ///   <{'ok', BindingVal}> -> call 'beamtalk_message_dispatch':'send'(BindingVal, Sel, Args)
-    ///   <'error'> -> call 'beamtalk_object_class':'class_send'(beamtalk_class_registry:whereis_class('Name'), Sel, Args)
+    ///   <'error'> -> call 'beamtalk_object_class':'class_send'(ClassPid, Sel, Args)
     /// end
     /// ```
     fn generate_binding_aware_class_send(
