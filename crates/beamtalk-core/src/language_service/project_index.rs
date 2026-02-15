@@ -42,6 +42,8 @@ pub struct ProjectIndex {
     file_hierarchies: HashMap<Utf8PathBuf, ClassHierarchy>,
     /// Class names from stdlib (never removed during file updates).
     stdlib_class_names: HashSet<EcoString>,
+    /// Tracks which files were loaded as stdlib sources.
+    stdlib_files: HashSet<Utf8PathBuf>,
 }
 
 impl ProjectIndex {
@@ -53,6 +55,7 @@ impl ProjectIndex {
             file_classes: HashMap::new(),
             file_hierarchies: HashMap::new(),
             stdlib_class_names: HashSet::new(),
+            stdlib_files: HashSet::new(),
         }
     }
 
@@ -75,6 +78,7 @@ impl ProjectIndex {
                 .filter(|name| !ClassHierarchy::is_builtin_class(name))
                 .collect();
             index.stdlib_class_names.extend(class_names.iter().cloned());
+            index.stdlib_files.insert(path.clone());
             index.file_classes.insert(path.clone(), class_names);
             index
                 .file_hierarchies
@@ -124,16 +128,18 @@ impl ProjectIndex {
     pub fn remove_file(&mut self, file: &Utf8PathBuf) {
         if let Some(old_names) = self.file_classes.remove(file) {
             self.file_hierarchies.remove(file);
-            // Only remove non-stdlib classes
-            let to_remove: Vec<EcoString> = old_names
-                .iter()
-                .filter(|n| !self.stdlib_class_names.contains(n.as_str()))
-                .cloned()
-                .collect();
-            self.merged_hierarchy.remove_classes(&to_remove);
+
+            if self.stdlib_files.contains(file) {
+                // Stdlib files are never truly removed — skip cleanup
+                return;
+            }
+
+            // Remove all classes from this file (including stdlib overrides)
+            self.merged_hierarchy.remove_classes(&old_names);
 
             // Re-merge classes from remaining files that shared a name
-            self.remerge_classes(&to_remove);
+            // (this restores stdlib definitions if they were shadowed)
+            self.remerge_classes(&old_names);
         }
     }
 
@@ -325,5 +331,35 @@ mod tests {
         assert!(index.hierarchy().has_class("Dup"));
         let class = index.hierarchy().get_class("Dup").unwrap();
         assert!(class.methods.iter().any(|m| m.selector == "methodA"));
+    }
+
+    #[test]
+    fn stdlib_restored_after_user_override_removed() {
+        // Stdlib defines Counter with increment.
+        // User file shadows Counter with decrement.
+        // Removing the user file should restore the stdlib Counter.
+        let stdlib = vec![(
+            Utf8PathBuf::from("lib/Counter.bt"),
+            "Object subclass: Counter\n  increment => 1".to_string(),
+        )];
+        let mut index = ProjectIndex::with_stdlib(&stdlib);
+        assert!(index.hierarchy().has_class("Counter"));
+
+        // User file shadows stdlib Counter
+        let user_file = Utf8PathBuf::from("user/counter.bt");
+        let tokens = lex_with_eof("Object subclass: Counter\n  decrement => 1");
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0;
+        index.update_file(user_file.clone(), &hierarchy);
+
+        // User's Counter (with decrement) is now the active definition
+        let class = index.hierarchy().get_class("Counter").unwrap();
+        assert!(class.methods.iter().any(|m| m.selector == "decrement"));
+
+        // Remove the user file — stdlib Counter should be restored
+        index.remove_file(&user_file);
+        assert!(index.hierarchy().has_class("Counter"));
+        let class = index.hierarchy().get_class("Counter").unwrap();
+        assert!(class.methods.iter().any(|m| m.selector == "increment"));
     }
 }
