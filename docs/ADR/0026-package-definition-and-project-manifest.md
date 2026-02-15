@@ -382,11 +382,31 @@ Allow subdirectories within `src/` to be independent packages with their own `be
 - Update `.gitignore` for `_build/`
 - Validate package name at creation time
 
-### Phase 4: Integration
+### Phase 4: Workspace integration
 - Workspace discovery (ADR 0004) uses `beamtalk.toml` as primary marker (already does)
-- REPL loads package modules into workspace with correct naming
+- When `beamtalk repl` finds a `beamtalk.toml`, it auto-compiles the package and adds `_build/dev/ebin/` to the code path — all package classes are available in the REPL immediately
 - `beamtalk test` discovers tests in `test/` relative to package root
 - `beamtalk run` resolves entry point from package
+
+### Phase 5: Application start callback (future)
+OTP applications support a `start/2` callback for initialization code (spawning actors, starting servers, registering handlers). This is how Erlang/Elixir applications bootstrap themselves, and Pharo achieves similar behavior via `#initialize` class-side methods and Metacello `postload:` blocks.
+
+For Beamtalk, this would allow:
+```toml
+# beamtalk.toml
+[package]
+name = "my_web_app"
+start = "app"    # Module containing start callback
+```
+
+```beamtalk
+// src/app.bt — Application start callback
+start =>
+    server := WebServer spawn
+    server listen: 8080
+```
+
+The exact syntax and semantics of the start callback are **deferred** — they depend on how Beamtalk maps to OTP application behaviour callbacks, which is a design decision in its own right. The auto-compile + code-path integration (Phase 4) provides the immediate value: classes are available in the REPL without manual `:load` commands.
 
 **Affected components:** `beamtalk-cli` (build, new, run commands), `beamtalk-core` (module naming in codegen), workspace discovery, REPL module loading.
 
