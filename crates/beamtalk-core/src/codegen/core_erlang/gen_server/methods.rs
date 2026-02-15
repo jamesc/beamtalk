@@ -260,7 +260,9 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         if block.body.is_empty() {
             let final_state = self.current_state_var();
-            return Ok(Document::String(format!("{{'reply', 'nil', {final_state}}}")));
+            return Ok(Document::String(format!(
+                "{{'reply', 'nil', {final_state}}}"
+            )));
         }
 
         let mut docs: Vec<Document<'static>> = Vec::new();
@@ -564,8 +566,10 @@ impl CoreErlangGenerator {
                 }
                 let source_str = self.extract_method_source(method);
                 let binary = Self::binary_string_literal(&source_str);
-                method_source_docs
-                    .push(Document::String(format!("'{}' => {binary}", method.selector.name())));
+                method_source_docs.push(Document::String(format!(
+                    "'{}' => {binary}",
+                    method.selector.name()
+                )));
             }
             let method_source_doc = Document::Vec(method_source_docs);
 

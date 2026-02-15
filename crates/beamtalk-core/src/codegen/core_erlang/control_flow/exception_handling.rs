@@ -220,7 +220,9 @@ impl CoreErlangGenerator {
         if let Some(param) = handler_block.parameters.first() {
             let param_var = Self::to_core_erlang_var(&param.name);
             self.bind_var(&param.name, &param_var);
-            docs.push(Document::String(format!("let {param_var} = {ex_obj_var} in ")));
+            docs.push(Document::String(format!(
+                "let {param_var} = {ex_obj_var} in "
+            )));
         }
 
         // Generate handler body with state threading (from original StateAcc)
@@ -352,8 +354,9 @@ impl CoreErlangGenerator {
 
         // Rename current state to StateAcc
         let current_state = self.current_state_var();
-        let mut docs: Vec<Document<'static>> =
-            vec![Document::String(format!("let StateAcc = {current_state} in try "))];
+        let mut docs: Vec<Document<'static>> = vec![Document::String(format!(
+            "let StateAcc = {current_state} in try "
+        ))];
 
         // Generate try body with state threading
         // BT-483: Now returns (doc, result_var, state_version)
@@ -366,7 +369,9 @@ impl CoreErlangGenerator {
             format!("StateAcc{try_final}")
         };
         // BT-483: Return {Result, State} from try body
-        docs.push(Document::String(format!(" {{{try_result_var}, {try_final_var}}} ")));
+        docs.push(Document::String(format!(
+            " {{{try_result_var}, {try_final_var}}} "
+        )));
 
         // Success: run cleanup starting from try body's state
         // BT-483: Extract Result and State from {Result, State} tuple using element/N

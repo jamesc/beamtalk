@@ -152,7 +152,9 @@ impl CoreErlangGenerator {
 
         // Initial call
         let prev_state = self.current_state_var();
-        docs.push(Document::String(format!("in apply 'while'/1 ({prev_state})")));
+        docs.push(Document::String(format!(
+            "in apply 'while'/1 ({prev_state})"
+        )));
 
         Ok(Document::Vec(docs))
     }
@@ -343,7 +345,9 @@ impl CoreErlangGenerator {
 
         // Initial call
         let prev_state = self.current_state_var();
-        docs.push(Document::String(format!("in apply 'while'/1 ({prev_state})")));
+        docs.push(Document::String(format!(
+            "in apply 'while'/1 ({prev_state})"
+        )));
 
         Ok(Document::Vec(docs))
     }

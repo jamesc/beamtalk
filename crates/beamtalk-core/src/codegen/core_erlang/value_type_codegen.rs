@@ -559,7 +559,9 @@ impl CoreErlangGenerator {
                 "                    let <DnuClass> = call 'beamtalk_primitive':'class_of'(Self) in\n",
                 "                    let <DnuErr0> = call 'beamtalk_error':'new'('does_not_understand', DnuClass) in\n",
                 "                    let <DnuErr1> = call 'beamtalk_error':'with_selector'(DnuErr0, Selector) in\n",
-                format!("                    let <DnuErr2> = call 'beamtalk_error':'with_hint'(DnuErr1, {dnu_hint}) in\n"),
+                format!(
+                    "                    let <DnuErr2> = call 'beamtalk_error':'with_hint'(DnuErr1, {dnu_hint}) in\n"
+                ),
                 "                    call 'beamtalk_error':'raise'(DnuErr2)\n",
             ]
         };
@@ -589,7 +591,9 @@ impl CoreErlangGenerator {
                 "            let <IvaErr0> = call 'beamtalk_error':'new'('immutable_value', '{class_name}') in\n"
             ),
             "            let <IvaErr1> = call 'beamtalk_error':'with_selector'(IvaErr0, 'instVarAt:') in\n",
-            format!("            let <IvaErr2> = call 'beamtalk_error':'with_hint'(IvaErr1, {iva_hint}) in\n"),
+            format!(
+                "            let <IvaErr2> = call 'beamtalk_error':'with_hint'(IvaErr1, {iva_hint}) in\n"
+            ),
             "            call 'beamtalk_error':'raise'(IvaErr2)\n",
             // instVarAt:put:
             "        <'instVarAt:put:'> when 'true' ->\n",
@@ -597,7 +601,9 @@ impl CoreErlangGenerator {
                 "            let <ImmErr0> = call 'beamtalk_error':'new'('immutable_value', '{class_name}') in\n"
             ),
             "            let <ImmErr1> = call 'beamtalk_error':'with_selector'(ImmErr0, 'instVarAt:put:') in\n",
-            format!("            let <ImmErr2> = call 'beamtalk_error':'with_hint'(ImmErr1, {immutable_hint}) in\n"),
+            format!(
+                "            let <ImmErr2> = call 'beamtalk_error':'with_hint'(ImmErr1, {immutable_hint}) in\n"
+            ),
             "            call 'beamtalk_error':'raise'(ImmErr2)\n",
             // perform:
             "        <'perform:'> when 'true' ->\n",
@@ -809,9 +815,15 @@ impl CoreErlangGenerator {
             "Expected {expected_arity} argument(s) for {selector}"
         ));
         docvec![
-            format!("{indent}let <ArErr0> = call 'beamtalk_error':'new'('arity_mismatch', call 'beamtalk_tagged_map':'class_of'(State, 'Object')) in\n"),
-            format!("{indent}let <ArErr1> = call 'beamtalk_error':'with_selector'(ArErr0, {selector}) in\n"),
-            format!("{indent}let <ArErr2> = call 'beamtalk_error':'with_hint'(ArErr1, {hint}) in\n"),
+            format!(
+                "{indent}let <ArErr0> = call 'beamtalk_error':'new'('arity_mismatch', call 'beamtalk_tagged_map':'class_of'(State, 'Object')) in\n"
+            ),
+            format!(
+                "{indent}let <ArErr1> = call 'beamtalk_error':'with_selector'(ArErr0, {selector}) in\n"
+            ),
+            format!(
+                "{indent}let <ArErr2> = call 'beamtalk_error':'with_hint'(ArErr1, {hint}) in\n"
+            ),
             format!("{indent}{{'error', ArErr2, State}}"),
         ]
     }
@@ -826,9 +838,15 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         let hint = Self::core_erlang_binary(hint_msg);
         docvec![
-            format!("{indent}let <TyErr0> = call 'beamtalk_error':'new'('type_error', call 'beamtalk_tagged_map':'class_of'(State, 'Object')) in\n"),
-            format!("{indent}let <TyErr1> = call 'beamtalk_error':'with_selector'(TyErr0, {selector}) in\n"),
-            format!("{indent}let <TyErr2> = call 'beamtalk_error':'with_hint'(TyErr1, {hint}) in\n"),
+            format!(
+                "{indent}let <TyErr0> = call 'beamtalk_error':'new'('type_error', call 'beamtalk_tagged_map':'class_of'(State, 'Object')) in\n"
+            ),
+            format!(
+                "{indent}let <TyErr1> = call 'beamtalk_error':'with_selector'(TyErr0, {selector}) in\n"
+            ),
+            format!(
+                "{indent}let <TyErr2> = call 'beamtalk_error':'with_hint'(TyErr1, {hint}) in\n"
+            ),
             format!("{indent}{{'error', TyErr2, State}}"),
         ]
     }
