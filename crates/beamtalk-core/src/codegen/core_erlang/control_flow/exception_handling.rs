@@ -115,29 +115,40 @@ impl CoreErlangGenerator {
         let ex_class_code = self.expression_doc(ex_class)?;
         let handler_code = self.expression_doc(handler)?;
 
+        let handler_apply = if handler_takes_arg {
+            Document::String(format!("apply {handler_var} ({ex_obj_var})"))
+        } else {
+            Document::String(format!("apply {handler_var} ()"))
+        };
+
         Ok(docvec![
-            format!("let {block_var} = "),
+            Document::String(format!("let {block_var} = ")),
             receiver_code,
-            format!(" in let {ex_class_var} = "),
+            Document::String(format!(" in let {ex_class_var} = ")),
             ex_class_code,
-            format!(" in let {handler_var} = "),
+            Document::String(format!(" in let {handler_var} = ")),
             handler_code,
-            format!(" in try apply {block_var} () "),
-            format!("of {result_var} -> {result_var} "),
-            format!(
-                "catch <{type_var}, {error_var}, {stack_var}> -> \
-                 let {built_stack_var} = primop 'build_stacktrace'({stack_var}) in \
-                 let {ex_obj_var} = call 'beamtalk_exception_handler':'ensure_wrapped'({error_var}, {built_stack_var}) in \
-                 let {match_var} = call 'beamtalk_exception_handler':'matches_class'({ex_class_var}, {error_var}) in \
-                 case {match_var} of \
-                 <'true'> when 'true' -> {handler_apply} \
-                 <'false'> when 'true' -> primop 'raw_raise'({type_var}, {error_var}, {stack_var}) end",
-                handler_apply = if handler_takes_arg {
-                    format!("apply {handler_var} ({ex_obj_var})")
-                } else {
-                    format!("apply {handler_var} ()")
-                },
-            ),
+            Document::String(format!(" in try apply {block_var} () ")),
+            Document::String(format!("of {result_var} -> {result_var} ")),
+            Document::String(format!("catch <{type_var}, {error_var}, {stack_var}> -> ")),
+            Document::String(format!(
+                "let {built_stack_var} = primop 'build_stacktrace'({stack_var}) in "
+            )),
+            Document::String(format!(
+                "let {ex_obj_var} = call 'beamtalk_exception_handler':'ensure_wrapped'\
+                 ({error_var}, {built_stack_var}) in "
+            )),
+            Document::String(format!(
+                "let {match_var} = call 'beamtalk_exception_handler':'matches_class'\
+                 ({ex_class_var}, {error_var}) in "
+            )),
+            Document::String(format!("case {match_var} of ")),
+            Document::Str("<'true'> when 'true' -> "),
+            handler_apply,
+            Document::Str(" "),
+            Document::String(format!(
+                "<'false'> when 'true' -> primop 'raw_raise'({type_var}, {error_var}, {stack_var}) end"
+            )),
         ])
     }
 
@@ -189,9 +200,9 @@ impl CoreErlangGenerator {
         let current_state = self.current_state_var();
 
         let mut docs: Vec<Document<'static>> = vec![docvec![
-            format!("let {ex_class_var} = "),
+            Document::String(format!("let {ex_class_var} = ")),
             ex_class_code,
-            format!(" in let StateAcc = {current_state} in try "),
+            Document::String(format!(" in let StateAcc = {current_state} in try ")),
         ]];
 
         // Generate try body (receiver block) with state threading
@@ -207,20 +218,22 @@ impl CoreErlangGenerator {
         // BT-483: Return {Result, State} from try body
         // Success: pass {Result, State} through + catch clause header
         docs.push(docvec![
-            format!(" {{{try_result_var}, {try_final_var}}} "),
-            format!("of {state_after_try} -> {state_after_try} "),
-            format!("catch <{type_var}, {error_var}, {stack_var}> -> "),
-            format!(
+            Document::String(format!(" {{{try_result_var}, {try_final_var}}} ")),
+            Document::String(format!("of {state_after_try} -> {state_after_try} ")),
+            Document::String(format!("catch <{type_var}, {error_var}, {stack_var}> -> ")),
+            Document::String(format!(
                 "let {built_stack_var} = primop 'build_stacktrace'({stack_var}) in "
-            ),
-            format!(
-                "let {ex_obj_var} = call 'beamtalk_exception_handler':'ensure_wrapped'({error_var}, {built_stack_var}) in "
-            ),
-            format!(
-                "let {match_var} = call 'beamtalk_exception_handler':'matches_class'({ex_class_var}, {error_var}) in "
-            ),
-            format!("case {match_var} of "),
-            "<'true'> when 'true' -> ",
+            )),
+            Document::String(format!(
+                "let {ex_obj_var} = call 'beamtalk_exception_handler':'ensure_wrapped'\
+                 ({error_var}, {built_stack_var}) in "
+            )),
+            Document::String(format!(
+                "let {match_var} = call 'beamtalk_exception_handler':'matches_class'\
+                 ({ex_class_var}, {error_var}) in "
+            )),
+            Document::String(format!("case {match_var} of ")),
+            Document::Str("<'true'> when 'true' -> "),
         ]);
 
         // Bind handler parameter (e.g., [:e | ...] binds e to exception object)
@@ -251,10 +264,10 @@ impl CoreErlangGenerator {
 
         // Re-raise non-matching exceptions
         docs.push(docvec![
-            format!(
+            Document::String(format!(
                 "<'false'> when 'true' -> primop 'raw_raise'({type_var}, {error_var}, {stack_var}) "
-            ),
-            "end",
+            )),
+            Document::Str("end"),
         ]);
 
         Ok(Document::Vec(docs))
@@ -312,17 +325,21 @@ impl CoreErlangGenerator {
         let cleanup_code = self.expression_doc(cleanup)?;
 
         Ok(docvec![
-            format!("let {block_var} = "),
+            Document::String(format!("let {block_var} = ")),
             receiver_code,
-            format!(" in let {cleanup_var} = "),
+            Document::String(format!(" in let {cleanup_var} = ")),
             cleanup_code,
-            format!(" in try let {try_result_var} = apply {block_var} () in {try_result_var} "),
-            format!("of {result_var} -> let _ = apply {cleanup_var} () in {result_var} "),
-            format!(
+            Document::String(format!(
+                " in try let {try_result_var} = apply {block_var} () in {try_result_var} "
+            )),
+            Document::String(format!(
+                "of {result_var} -> let _ = apply {cleanup_var} () in {result_var} "
+            )),
+            Document::String(format!(
                 "catch <{type_var}, {error_var}, {stack_var}> -> \
                  do apply {cleanup_var} () \
                  primop 'raw_raise'({type_var}, {error_var}, {stack_var})"
-            ),
+            )),
         ])
     }
 
@@ -486,7 +503,11 @@ impl CoreErlangGenerator {
                     // Has direct field assignments — last non-assignment expr result is captured
                     let rv = self.fresh_temp_var("ExResult");
                     let expr_doc = self.expression_doc(expr)?;
-                    docs.push(docvec![format!("let {rv} = "), expr_doc, " in"]);
+                    docs.push(docvec![
+                        Document::String(format!("let {rv} = ")),
+                        expr_doc,
+                        Document::Str(" in"),
+                    ]);
                     result_var = rv;
                 } else {
                     // BT-483: Last expression with no direct field assignments.
@@ -500,10 +521,14 @@ impl CoreErlangGenerator {
                         let next_var = format!("StateAcc{next_version}");
                         let expr_doc = self.expression_doc(expr)?;
                         docs.push(docvec![
-                            format!("let {tuple_var} = "),
+                            Document::String(format!("let {tuple_var} = ")),
                             expr_doc,
-                            format!(" in let {rv} = call 'erlang':'element'(1, {tuple_var}) in "),
-                            format!("let {next_var} = call 'erlang':'element'(2, {tuple_var}) in"),
+                            Document::String(format!(
+                                " in let {rv} = call 'erlang':'element'(1, {tuple_var}) in "
+                            )),
+                            Document::String(format!(
+                                "let {next_var} = call 'erlang':'element'(2, {tuple_var}) in"
+                            )),
                         ]);
                         self.set_state_version(next_version);
                         result_var = rv;
@@ -511,7 +536,11 @@ impl CoreErlangGenerator {
                         // Regular expression — capture result, state unchanged
                         let rv = self.fresh_temp_var("ExResult");
                         let expr_doc = self.expression_doc(expr)?;
-                        docs.push(docvec![format!("let {rv} = "), expr_doc, " in"]);
+                        docs.push(docvec![
+                            Document::String(format!("let {rv} = ")),
+                            expr_doc,
+                            Document::Str(" in"),
+                        ]);
                         result_var = rv;
                     }
                 }
