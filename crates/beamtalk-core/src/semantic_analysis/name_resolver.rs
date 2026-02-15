@@ -137,7 +137,7 @@ impl NameResolver {
         // Define method parameters
         for param in &method.parameters {
             self.scope
-                .define(&param.name, param.span, BindingKind::Parameter);
+                .define(&param.name.name, param.name.span, BindingKind::Parameter);
         }
 
         // Resolve method body

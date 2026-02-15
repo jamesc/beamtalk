@@ -1910,7 +1910,7 @@ mod tests {
         let method = &class.methods[0];
         assert_eq!(method.selector.name(), "+");
         assert_eq!(method.parameters.len(), 1);
-        assert_eq!(method.parameters[0].name, "other");
+        assert_eq!(method.parameters[0].name.name, "other");
     }
 
     #[test]
@@ -1927,8 +1927,8 @@ mod tests {
         let method = &class.methods[0];
         assert_eq!(method.selector.name(), "at:put:");
         assert_eq!(method.parameters.len(), 2);
-        assert_eq!(method.parameters[0].name, "index");
-        assert_eq!(method.parameters[1].name, "value");
+        assert_eq!(method.parameters[0].name.name, "index");
+        assert_eq!(method.parameters[1].name.name, "value");
     }
 
     #[test]
@@ -1991,6 +1991,204 @@ mod tests {
 
         let method = &class.methods[0];
         assert_eq!(method.kind, crate::ast::MethodKind::Around);
+    }
+
+    #[test]
+    fn parse_return_type_unary() {
+        let module = parse_ok(
+            "Actor subclass: Counter
+  getBalance -> Integer => self.balance",
+        );
+
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.selector.name(), "getBalance");
+        assert!(method.return_type.is_some());
+        let rt = method.return_type.as_ref().unwrap();
+        match rt {
+            crate::ast::TypeAnnotation::Simple(id) => assert_eq!(id.name, "Integer"),
+            _ => panic!("Expected Simple type annotation"),
+        }
+    }
+
+    #[test]
+    fn parse_return_type_binary() {
+        let module = parse_ok(
+            "Object subclass: Number
+  + other -> Number => self",
+        );
+
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.selector.name(), "+");
+        assert_eq!(method.parameters.len(), 1);
+        assert_eq!(method.parameters[0].name.name, "other");
+        assert!(method.return_type.is_some());
+        match method.return_type.as_ref().unwrap() {
+            crate::ast::TypeAnnotation::Simple(id) => assert_eq!(id.name, "Number"),
+            _ => panic!("Expected Simple type annotation"),
+        }
+    }
+
+    #[test]
+    fn parse_return_type_union() {
+        let module = parse_ok(
+            "Actor subclass: Container
+  find -> Integer | Nil => nil",
+        );
+
+        let method = &module.classes[0].methods[0];
+        assert!(method.return_type.is_some());
+        match method.return_type.as_ref().unwrap() {
+            crate::ast::TypeAnnotation::Union { types, .. } => {
+                assert_eq!(types.len(), 2);
+            }
+            _ => panic!("Expected Union type annotation"),
+        }
+    }
+
+    #[test]
+    fn parse_typed_keyword_param() {
+        let module = parse_ok(
+            "Actor subclass: BankAccount
+  deposit: amount: Integer => self.balance := self.balance + amount",
+        );
+
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.selector.name(), "deposit:");
+        assert_eq!(method.parameters.len(), 1);
+        assert_eq!(method.parameters[0].name.name, "amount");
+        assert!(method.parameters[0].type_annotation.is_some());
+        match method.parameters[0].type_annotation.as_ref().unwrap() {
+            crate::ast::TypeAnnotation::Simple(id) => assert_eq!(id.name, "Integer"),
+            _ => panic!("Expected Simple type annotation"),
+        }
+    }
+
+    #[test]
+    fn parse_typed_keyword_params_multiple() {
+        let module = parse_ok(
+            "Actor subclass: BankAccount
+  transfer: amount: Integer to: target: BankAccount => self",
+        );
+
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.selector.name(), "transfer:to:");
+        assert_eq!(method.parameters.len(), 2);
+        assert_eq!(method.parameters[0].name.name, "amount");
+        assert!(method.parameters[0].type_annotation.is_some());
+        assert_eq!(method.parameters[1].name.name, "target");
+        assert!(method.parameters[1].type_annotation.is_some());
+    }
+
+    #[test]
+    fn parse_typed_param_with_return_type() {
+        let module = parse_ok(
+            "Actor subclass: BankAccount
+  deposit: amount: Integer -> Integer => self.balance := self.balance + amount",
+        );
+
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.selector.name(), "deposit:");
+        assert_eq!(method.parameters[0].name.name, "amount");
+        assert!(method.parameters[0].type_annotation.is_some());
+        assert!(method.return_type.is_some());
+    }
+
+    #[test]
+    fn parse_untyped_keyword_param_unchanged() {
+        // Existing syntax should still work unchanged
+        let module = parse_ok(
+            "Actor subclass: Counter
+  setValue: v => self.value := v",
+        );
+
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.selector.name(), "setValue:");
+        assert_eq!(method.parameters.len(), 1);
+        assert_eq!(method.parameters[0].name.name, "v");
+        assert!(method.parameters[0].type_annotation.is_none());
+        assert!(method.return_type.is_none());
+    }
+
+    #[test]
+    fn parse_binary_typed_param() {
+        let module = parse_ok(
+            "Object subclass: Number
+  + other: Number -> Number => self",
+        );
+
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.selector.name(), "+");
+        assert_eq!(method.parameters.len(), 1);
+        assert_eq!(method.parameters[0].name.name, "other");
+        assert!(method.parameters[0].type_annotation.is_some());
+        assert!(method.return_type.is_some());
+    }
+
+    #[test]
+    fn parse_mixed_typed_untyped_keyword_params() {
+        // First param typed, second untyped
+        let module = parse_ok(
+            "Actor subclass: BankAccount
+  transfer: amount: Integer to: target => self",
+        );
+
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.selector.name(), "transfer:to:");
+        assert_eq!(method.parameters.len(), 2);
+        assert_eq!(method.parameters[0].name.name, "amount");
+        assert!(method.parameters[0].type_annotation.is_some());
+        assert_eq!(method.parameters[1].name.name, "target");
+        assert!(method.parameters[1].type_annotation.is_none());
+    }
+
+    #[test]
+    fn parse_keyword_typed_param_with_space_colon() {
+        // Space around colon: `amount : Integer` instead of `amount: Integer`
+        let module = parse_ok(
+            "Actor subclass: BankAccount
+  deposit: amount : Integer => self",
+        );
+
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.selector.name(), "deposit:");
+        assert_eq!(method.parameters.len(), 1);
+        assert_eq!(method.parameters[0].name.name, "amount");
+        assert!(method.parameters[0].type_annotation.is_some());
+    }
+
+    #[test]
+    fn parse_binary_typed_param_with_space_colon() {
+        // Space around colon: `other : Number` instead of `other: Number`
+        let module = parse_ok(
+            "Actor subclass: Adder
+  + other : Number => self",
+        );
+
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.selector.name(), "+");
+        assert_eq!(method.parameters.len(), 1);
+        assert_eq!(method.parameters[0].name.name, "other");
+        assert!(method.parameters[0].type_annotation.is_some());
+    }
+
+    #[test]
+    fn parse_malformed_return_type_recovers() {
+        // `-> =>` (missing type name) should still detect the method definition
+        // and let parse_type_annotation emit the error, not truncate class parsing
+        let tokens = lex_with_eof(
+            "Actor subclass: Counter
+  increment -> => self",
+        );
+        let (module, diagnostics) = parse(tokens);
+        // Should have an error about missing type name
+        assert!(
+            !diagnostics.is_empty(),
+            "Expected error for missing type name after ->"
+        );
+        // But the method should still be parsed
+        assert_eq!(module.classes.len(), 1);
+        assert_eq!(module.classes[0].methods.len(), 1);
+        assert_eq!(module.classes[0].methods[0].selector.name(), "increment");
     }
 
     #[test]

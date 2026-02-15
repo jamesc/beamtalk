@@ -886,7 +886,7 @@ impl Analyser {
         // Define method parameters
         for param in &method.parameters {
             self.scope
-                .define(&param.name, param.span, BindingKind::Parameter);
+                .define(&param.name.name, param.name.span, BindingKind::Parameter);
         }
 
         // Analyse method body
@@ -949,6 +949,20 @@ impl Analyser {
                     self.result.diagnostics.extend(diagnostics);
                 }
 
+                // Run receiver-based validators
+                if let Some(diag) = method_validators::validate_primitive_instantiation(
+                    receiver,
+                    &selector_str,
+                    *span,
+                ) {
+                    self.result.diagnostics.push(diag);
+                }
+                if let Some(diag) =
+                    method_validators::validate_immutable_mutation(receiver, &selector_str, *span)
+                {
+                    self.result.diagnostics.push(diag);
+                }
+
                 for (i, arg) in arguments.iter().enumerate() {
                     let is_control_flow = block_context::is_control_flow_selector(&selector_str, i);
                     let context = if is_control_flow {
@@ -977,6 +991,22 @@ impl Analyser {
                         let diagnostics =
                             validator.validate(&msg.selector, &msg.arguments, msg.span);
                         self.result.diagnostics.extend(diagnostics);
+                    }
+
+                    // Run receiver-based validators for cascade messages
+                    if let Some(diag) = method_validators::validate_primitive_instantiation(
+                        receiver,
+                        &selector_str,
+                        msg.span,
+                    ) {
+                        self.result.diagnostics.push(diag);
+                    }
+                    if let Some(diag) = method_validators::validate_immutable_mutation(
+                        receiver,
+                        &selector_str,
+                        msg.span,
+                    ) {
+                        self.result.diagnostics.push(diag);
                     }
 
                     for (i, arg) in msg.arguments.iter().enumerate() {

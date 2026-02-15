@@ -221,7 +221,7 @@ mod tests {
     use super::*;
     use crate::ast::{
         ClassDefinition, Expression, Identifier, KeywordPart, MessageSelector, MethodDefinition,
-        Module,
+        Module, ParameterDefinition,
     };
     use crate::source_analysis::Span;
 
@@ -231,7 +231,7 @@ mod tests {
 
     fn make_primitive_method(
         selector: MessageSelector,
-        params: Vec<Identifier>,
+        params: Vec<ParameterDefinition>,
         prim_name: &str,
         is_quoted: bool,
     ) -> MethodDefinition {
@@ -275,7 +275,7 @@ mod tests {
             vec![],
             vec![make_primitive_method(
                 MessageSelector::Binary("+".into()),
-                vec![Identifier::new("other", span())],
+                vec![ParameterDefinition::new(Identifier::new("other", span()))],
                 "+",
                 true,
             )],
@@ -335,8 +335,8 @@ mod tests {
                     KeywordPart::new("do:", span()),
                 ]),
                 vec![
-                    Identifier::new("end", span()),
-                    Identifier::new("block", span()),
+                    ParameterDefinition::new(Identifier::new("end", span())),
+                    ParameterDefinition::new(Identifier::new("block", span())),
                 ],
                 "toDo",
                 false,
@@ -365,7 +365,7 @@ mod tests {
             vec![
                 make_primitive_method(
                     MessageSelector::Binary("+".into()),
-                    vec![Identifier::new("other", span())],
+                    vec![ParameterDefinition::new(Identifier::new("other", span()))],
                     "+",
                     true,
                 ),
@@ -392,7 +392,7 @@ mod tests {
             vec![],
             vec![make_primitive_method(
                 MessageSelector::Binary("+".into()),
-                vec![Identifier::new("other", span())],
+                vec![ParameterDefinition::new(Identifier::new("other", span()))],
                 "+",
                 true,
             )],
@@ -515,7 +515,7 @@ mod tests {
             vec![],
             vec![make_primitive_method(
                 MessageSelector::Binary("=:=".into()),
-                vec![Identifier::new("other", span())],
+                vec![ParameterDefinition::new(Identifier::new("other", span()))],
                 "=:=",
                 true,
             )],
@@ -528,7 +528,7 @@ mod tests {
             vec![],
             vec![make_primitive_method(
                 MessageSelector::Binary("=:=".into()),
-                vec![Identifier::new("other", span())],
+                vec![ParameterDefinition::new(Identifier::new("other", span()))],
                 "=:=",
                 true,
             )],
@@ -558,7 +558,7 @@ mod tests {
         );
         class.class_methods = vec![make_primitive_method(
             MessageSelector::Keyword(vec![KeywordPart::new("exists:", span())]),
-            vec![Identifier::new("path", span())],
+            vec![ParameterDefinition::new(Identifier::new("path", span()))],
             "exists:",
             true,
         )];

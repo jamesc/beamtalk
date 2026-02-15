@@ -505,6 +505,9 @@ check-tools:
     @command -v rustc >/dev/null 2>&1 || (echo "❌ rustc not found" && exit 1)
     @command -v erl >/dev/null 2>&1 || (echo "❌ erl not found" && exit 1)
     @command -v rebar3 >/dev/null 2>&1 || (echo "❌ rebar3 not found" && exit 1)
+    @command -v node >/dev/null 2>&1 || (echo "❌ node not found (needed for VS Code extension)" && exit 1)
+    @command -v npm >/dev/null 2>&1 || (echo "❌ npm not found (needed for VS Code extension)" && exit 1)
+    @command -v npx >/dev/null 2>&1 || (echo "❌ npx not found (needed for VS Code extension)" && exit 1)
     @echo "✅ All required tools found"
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -595,6 +598,11 @@ dist-vscode:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "📦 Building VS Code extension..."
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "❌ npm not found (needed for VS Code extension)"
+        echo "   Install node/npm: https://github.com/nvm-sh/nvm"
+        exit 1
+    fi
     cd editors/vscode
     npm install --quiet
     npm run compile
