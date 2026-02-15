@@ -7,12 +7,9 @@
 %%% starts the singleton actors. Monitors singleton PIDs and re-sets class
 %%% variables when children restart.
 %%%
-%%% **DDD Context:** Workspace
+%%% Singleton mapping derived from beamtalk_workspace_config:singletons/0.
 %%%
-%%% Singleton mapping:
-%%%   TranscriptStream.current  ← registered process 'Transcript'
-%%%   SystemDictionary.current  ← registered process 'Beamtalk'
-%%%   WorkspaceEnvironment.current ← registered process 'Workspace'
+%%% **DDD Context:** Workspace
 
 -module(beamtalk_workspace_bootstrap).
 -behaviour(gen_server).
@@ -22,13 +19,6 @@
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
-
-%% Singleton class ↔ registered process name ↔ binding class name mapping
--define(SINGLETONS, [
-    {'TranscriptStream',    'Transcript',   'TranscriptStream'},
-    {'SystemDictionary',    'Beamtalk',     'SystemDictionary'},
-    {'WorkspaceEnvironment', 'Workspace',   'WorkspaceEnvironment'}
-]).
 
 -record(state, {
     monitors = #{} :: #{reference() => {ClassName :: atom(), RegName :: atom(), BindingClassName :: atom()}}
@@ -89,11 +79,11 @@ terminate(_Reason, _State) ->
 %% @private Bootstrap all singletons.
 bootstrap_all(State) ->
     lists:foldl(
-        fun({ClassName, RegName, BindingClassName}, AccState) ->
-            bootstrap_singleton(ClassName, RegName, BindingClassName, AccState)
+        fun(#{class_name := ClassName, binding_name := RegName}, AccState) ->
+            bootstrap_singleton(ClassName, RegName, ClassName, AccState)
         end,
         State,
-        ?SINGLETONS
+        beamtalk_workspace_config:singletons()
     ).
 
 %% @private Bootstrap a single singleton: set class var and monitor.
@@ -112,14 +102,16 @@ bootstrap_singleton(ClassName, RegName, BindingClassName, State) ->
     end.
 
 %% @private Build the beamtalk_object reference tuple for a singleton.
-build_object_ref(BindingClassName, Pid) ->
-    {beamtalk_object, BindingClassName, class_module(BindingClassName), Pid}.
+build_object_ref(ClassName, Pid) ->
+    {beamtalk_object, ClassName, class_module(ClassName), Pid}.
 
-%% @private Map binding class name to its Erlang module.
-class_module('TranscriptStream') -> beamtalk_transcript_stream;
-class_module('SystemDictionary') -> beamtalk_system_dictionary;
-class_module('WorkspaceEnvironment') -> beamtalk_workspace_environment;
-class_module('Workspace') -> beamtalk_workspace_environment.
+%% @private Map class name to its Erlang module using workspace config.
+class_module(ClassName) ->
+    Singletons = beamtalk_workspace_config:singletons(),
+    case lists:search(fun(#{class_name := C}) -> C =:= ClassName end, Singletons) of
+        {value, #{module := Module}} -> Module;
+        false -> error({unknown_singleton_class, ClassName})
+    end.
 
 %% @private Set the `current` class variable on the class.
 set_class_variable(ClassName, Obj) ->
