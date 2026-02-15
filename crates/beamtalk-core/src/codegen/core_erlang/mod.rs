@@ -216,10 +216,87 @@ pub enum CodeGenError {
 /// Result type for code generation operations.
 pub type Result<T> = std::result::Result<T, CodeGenError>;
 
+/// Options for Core Erlang code generation.
+///
+/// Replaces the combinatorial explosion of `generate_with_*` functions
+/// with a single options struct. Use [`CodegenOptions::new`] to create
+/// default options, then chain builder methods to customize.
+///
+/// # Example
+///
+/// ```no_run
+/// use beamtalk_core::codegen::core_erlang::{CodegenOptions, generate_module};
+/// use beamtalk_core::ast::Module;
+/// # use beamtalk_core::source_analysis::Span;
+///
+/// # let module = Module::new(Vec::new(), Span::new(0, 0));
+/// let code = generate_module(&module, CodegenOptions::new("counter")
+///     .with_source("value := 0")
+///     .with_workspace_mode(true))?;
+/// # Ok::<(), beamtalk_core::codegen::core_erlang::CodeGenError>(())
+/// ```
+#[derive(Debug, Clone)]
+pub struct CodegenOptions {
+    /// The Erlang module name to generate.
+    module_name: String,
+    /// Original source text for `CompiledMethod` introspection (BT-101).
+    source_text: Option<String>,
+    /// Primitive binding table from compiled stdlib (ADR 0007).
+    bindings: Option<PrimitiveBindingTable>,
+    /// Whether workspace bindings are available (REPL/workspace context).
+    workspace_mode: bool,
+}
+
+impl CodegenOptions {
+    /// Creates default options with the given module name.
+    pub fn new(module_name: &str) -> Self {
+        Self {
+            module_name: module_name.to_string(),
+            source_text: None,
+            bindings: None,
+            workspace_mode: false,
+        }
+    }
+
+    /// Sets the source text for `CompiledMethod` introspection (BT-101).
+    #[must_use]
+    pub fn with_source(mut self, source: &str) -> Self {
+        self.source_text = Some(source.to_string());
+        self
+    }
+
+    /// Sets the source text from an optional value.
+    #[must_use]
+    pub fn with_source_opt(mut self, source: Option<&str>) -> Self {
+        self.source_text = source.map(String::from);
+        self
+    }
+
+    /// Sets the primitive binding table (ADR 0007).
+    #[must_use]
+    pub fn with_bindings(mut self, bindings: PrimitiveBindingTable) -> Self {
+        self.bindings = Some(bindings);
+        self
+    }
+
+    /// Enables or disables workspace mode (ADR 0010 / ADR 0019).
+    #[must_use]
+    pub fn with_workspace_mode(mut self, enabled: bool) -> Self {
+        self.workspace_mode = enabled;
+        self
+    }
+}
+
 /// Generates Core Erlang code from a Beamtalk module.
 ///
 /// This is the main entry point for code generation. It transforms
 /// the parsed AST into Core Erlang text that can be compiled by `erlc`.
+///
+/// # BT-213: Value Types vs Actors
+///
+/// Routes to different code generators based on class hierarchy:
+/// - **Actor subclasses** → `generate_actor_module` (`gen_server` with mailbox)
+/// - **Object subclasses** → `generate_value_type_module` (plain Erlang maps)
 ///
 /// # Errors
 ///
@@ -231,101 +308,23 @@ pub type Result<T> = std::result::Result<T, CodeGenError>;
 /// # Example
 ///
 /// ```no_run
-/// use beamtalk_core::codegen::core_erlang::generate;
+/// use beamtalk_core::codegen::core_erlang::{CodegenOptions, generate_module};
 /// use beamtalk_core::ast::Module;
 /// # use beamtalk_core::source_analysis::Span;
 ///
 /// # let module = Module::new(Vec::new(), Span::new(0, 0));
-/// let core_erlang = generate(&module)?;
+/// let core_erlang = generate_module(&module, CodegenOptions::new("counter"))?;
 /// println!("{}", core_erlang);
 /// # Ok::<(), beamtalk_core::codegen::core_erlang::CodeGenError>(())
 /// ```
-pub fn generate(module: &Module) -> Result<String> {
-    let mut generator = CoreErlangGenerator::new("bt_module");
-
-    // Build hierarchy once for the entire generation (ADR 0006)
-    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
-
-    // BT-213: Route based on whether class is actor or value type
-    let doc = if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
-        generator.generate_actor_module(module)?
+pub fn generate_module(module: &Module, options: CodegenOptions) -> Result<String> {
+    let mut generator = if let Some(bindings) = options.bindings {
+        CoreErlangGenerator::with_bindings(&options.module_name, bindings)
     } else {
-        generator.generate_value_type_module(module)?
+        CoreErlangGenerator::new(&options.module_name)
     };
-
-    Ok(doc.to_pretty_string())
-}
-
-/// Generates Core Erlang code with a specified module name.
-///
-/// # BT-213: Value Types vs Actors
-///
-/// Routes to different code generators based on class hierarchy:
-/// - **Actor subclasses** → `generate_actor_module` (`gen_server` with mailbox)
-/// - **Object subclasses** → `generate_value_type_module` (plain Erlang maps)
-///
-/// # Errors
-///
-/// Returns [`CodeGenError`] if code generation fails.
-pub fn generate_with_name(module: &Module, module_name: &str) -> Result<String> {
-    generate_with_name_and_source(module, module_name, None)
-}
-
-/// Generates Core Erlang code with a specified module name and source text.
-///
-/// When `source_text` is provided, method source is captured in class registration
-/// metadata, enabling `CompiledMethod` introspection (BT-101).
-///
-/// # Errors
-///
-/// Returns [`CodeGenError`] if code generation fails.
-pub fn generate_with_name_and_source(
-    module: &Module,
-    module_name: &str,
-    source_text: Option<&str>,
-) -> Result<String> {
-    let mut generator = CoreErlangGenerator::new(module_name);
-    generator.source_text = source_text.map(String::from);
-
-    // Build hierarchy once for the entire generation (ADR 0006)
-    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
-
-    // BT-213: Route based on whether class is actor or value type
-    let doc = if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
-        generator.generate_actor_module(module)?
-    } else {
-        generator.generate_value_type_module(module)?
-    };
-
-    Ok(doc.to_pretty_string())
-}
-
-/// Generates Core Erlang code with a specified module name and primitive bindings.
-///
-/// BT-295 / ADR 0007 Phase 3: Accepts a [`PrimitiveBindingTable`] that provides
-/// pragma-driven dispatch information from the compiled stdlib. The codegen
-/// consults this table before falling back to hardcoded dispatch tables.
-///
-/// BT-374 / ADR 0010 / ADR 0019: When `workspace_mode` is true, class references
-/// resolve through session bindings (REPL) or class registry lookup. Stdlib
-/// compilation should set this to true since stdlib classes run in workspace context.
-///
-/// When `source_text` is provided, method source is captured in class registration
-/// metadata for `CompiledMethod` introspection (BT-101).
-///
-/// # Errors
-///
-/// Returns [`CodeGenError`] if code generation fails.
-pub fn generate_with_bindings(
-    module: &Module,
-    module_name: &str,
-    bindings: PrimitiveBindingTable,
-    source_text: Option<&str>,
-    workspace_mode: bool,
-) -> Result<String> {
-    let mut generator = CoreErlangGenerator::with_bindings(module_name, bindings);
-    generator.source_text = source_text.map(String::from);
-    generator.workspace_mode = workspace_mode;
+    generator.source_text = options.source_text;
+    generator.workspace_mode = options.workspace_mode;
 
     // Build hierarchy once for the entire generation (ADR 0006)
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
@@ -377,48 +376,85 @@ pub fn generate_test_expression(expression: &Expression, module_name: &str) -> R
     Ok(doc.to_pretty_string())
 }
 
+// Convenience wrappers for backward compatibility.
+// New code should use `generate_module` with `CodegenOptions`.
+
+/// Generates Core Erlang code with default module name `bt_module`.
+///
+/// Convenience wrapper around [`generate_module`].
+pub fn generate(module: &Module) -> Result<String> {
+    generate_module(module, CodegenOptions::new("bt_module"))
+}
+
+/// Generates Core Erlang code with a specified module name.
+///
+/// Convenience wrapper around [`generate_module`].
+pub fn generate_with_name(module: &Module, module_name: &str) -> Result<String> {
+    generate_module(module, CodegenOptions::new(module_name))
+}
+
+/// Generates Core Erlang code with a specified module name and source text.
+///
+/// Convenience wrapper around [`generate_module`].
+pub fn generate_with_name_and_source(
+    module: &Module,
+    module_name: &str,
+    source_text: Option<&str>,
+) -> Result<String> {
+    generate_module(
+        module,
+        CodegenOptions::new(module_name).with_source_opt(source_text),
+    )
+}
+
+/// Generates Core Erlang code with primitive bindings and workspace mode.
+///
+/// Convenience wrapper around [`generate_module`].
+pub fn generate_with_bindings(
+    module: &Module,
+    module_name: &str,
+    bindings: PrimitiveBindingTable,
+    source_text: Option<&str>,
+    workspace_mode: bool,
+) -> Result<String> {
+    generate_module(
+        module,
+        CodegenOptions::new(module_name)
+            .with_bindings(bindings)
+            .with_source_opt(source_text)
+            .with_workspace_mode(workspace_mode),
+    )
+}
+
 /// Generates Core Erlang code with workspace mode enabled.
 ///
-/// Generates Core Erlang source code from a parsed module with workspace mode flag.
-///
-/// When `workspace_mode` is true, the generator is in REPL/workspace context.
-///
-/// # Errors
-///
-/// Returns [`CodeGenError`] variants for code generation failures.
+/// Convenience wrapper around [`generate_module`].
 pub fn generate_with_workspace(
     module: &Module,
     module_name: &str,
     workspace_mode: bool,
 ) -> Result<String> {
-    generate_with_workspace_and_source(module, module_name, workspace_mode, None)
+    generate_module(
+        module,
+        CodegenOptions::new(module_name).with_workspace_mode(workspace_mode),
+    )
 }
 
-/// Like [`generate_with_workspace`] but also captures source text for
-/// `CompiledMethod` introspection (BT-101).
+/// Generates Core Erlang code with workspace mode and source text.
 ///
-/// # Errors
-///
-/// Returns [`CodeGenError`] variants for code generation failures.
+/// Convenience wrapper around [`generate_module`].
 pub fn generate_with_workspace_and_source(
     module: &Module,
     module_name: &str,
     workspace_mode: bool,
     source_text: Option<&str>,
 ) -> Result<String> {
-    let mut generator = CoreErlangGenerator::new(module_name);
-    generator.workspace_mode = workspace_mode;
-    generator.source_text = source_text.map(String::from);
-
-    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
-
-    let doc = if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
-        generator.generate_actor_module(module)?
-    } else {
-        generator.generate_value_type_module(module)?
-    };
-
-    Ok(doc.to_pretty_string())
+    generate_module(
+        module,
+        CodegenOptions::new(module_name)
+            .with_workspace_mode(workspace_mode)
+            .with_source_opt(source_text),
+    )
 }
 
 /// Code generation context (BT-213).
