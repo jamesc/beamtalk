@@ -545,23 +545,32 @@ impl<'src> Lexer<'src> {
                     return Err(TokenKind::Error(EcoString::from(text)));
                 }
                 Some('"') => {
-                    // Nested string inside interpolation — skip it entirely
-                    self.advance(); // opening quote
+                    self.skip_nested_string();
+                }
+                Some('{') => {
+                    depth += 1;
+                    self.advance();
+                }
+                Some('/') if self.peek_char_second() == Some('/') => {
+                    // Line comment — skip to newline
+                    while self.peek_char().is_some_and(|c| c != '\n') {
+                        self.advance();
+                    }
+                }
+                Some('/') if self.peek_char_second() == Some('*') => {
+                    // Block comment — skip to closing */
+                    self.advance(); // /
+                    self.advance(); // *
                     loop {
                         match self.peek_char() {
                             None => {
                                 let text = self.text_for(self.span_from(string_start));
                                 return Err(TokenKind::Error(EcoString::from(text)));
                             }
-                            Some('"') => {
-                                self.advance(); // closing quote
+                            Some('*') if self.peek_char_second() == Some('/') => {
+                                self.advance(); // *
+                                self.advance(); // /
                                 break;
-                            }
-                            Some('\\') => {
-                                self.advance();
-                                if self.peek_char().is_some() {
-                                    self.advance();
-                                }
                             }
                             _ => {
                                 self.advance();
@@ -569,9 +578,17 @@ impl<'src> Lexer<'src> {
                         }
                     }
                 }
-                Some('{') => {
-                    depth += 1;
-                    self.advance();
+                Some('$') => {
+                    // Character literal — skip the $ and the next char
+                    self.advance(); // $
+                    if self.peek_char() == Some('\\') {
+                        self.advance(); // backslash
+                        if self.peek_char().is_some() {
+                            self.advance(); // escaped char
+                        }
+                    } else if self.peek_char().is_some() {
+                        self.advance(); // literal char
+                    }
                 }
                 Some('}') => {
                     depth -= 1;
@@ -661,9 +678,32 @@ impl<'src> Lexer<'src> {
         loop {
             let ch = self.source[self.position + offset..].chars().next();
             match ch {
-                Some(' ' | '\t') => offset += 1,
+                Some(' ' | '\t' | '\r' | '\n') => offset += 1,
                 Some('}') => return true,
                 _ => return false,
+            }
+        }
+    }
+
+    /// Skips a nested string literal inside an interpolation expression.
+    fn skip_nested_string(&mut self) {
+        self.advance(); // opening quote
+        loop {
+            match self.peek_char() {
+                None => break,
+                Some('"') => {
+                    self.advance(); // closing quote
+                    break;
+                }
+                Some('\\') => {
+                    self.advance();
+                    if self.peek_char().is_some() {
+                        self.advance();
+                    }
+                }
+                _ => {
+                    self.advance();
+                }
             }
         }
     }
@@ -1328,6 +1368,62 @@ mod tests {
         assert!(matches!(tokens[2].kind(), TokenKind::BinarySelector(_)));
         assert!(matches!(tokens[3].kind(), TokenKind::Identifier(_)));
         assert!(matches!(tokens[4].kind(), TokenKind::StringEnd(_)));
+    }
+
+    #[test]
+    fn lex_string_interpolation_comment_with_brace() {
+        // Comment containing } should not close the interpolation
+        let kinds = lex_kinds("\"result: {x // } comment\n+ y}\"");
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::StringStart("result: ".into()),
+                TokenKind::Identifier("x".into()),
+                TokenKind::BinarySelector("+".into()),
+                TokenKind::Identifier("y".into()),
+                TokenKind::StringEnd("".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_string_interpolation_block_comment_with_brace() {
+        // Block comment containing } should not close the interpolation
+        let kinds = lex_kinds("\"val: {x /* } */ + 1}\"");
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::StringStart("val: ".into()),
+                TokenKind::Identifier("x".into()),
+                TokenKind::BinarySelector("+".into()),
+                TokenKind::Integer("1".into()),
+                TokenKind::StringEnd("".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_string_interpolation_char_literal_brace() {
+        // Character literal $} should not close the interpolation
+        let kinds = lex_kinds("\"char: {$}}\"");
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::StringStart("char: ".into()),
+                TokenKind::Character('}'),
+                TokenKind::StringEnd("".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_string_interpolation_empty_with_newline() {
+        // Empty braces with newline should still be an error
+        let kinds = lex_kinds("\"empty: {\n}\"");
+        assert_eq!(kinds.len(), 3);
+        assert!(matches!(kinds[0], TokenKind::StringStart(_)));
+        assert!(matches!(kinds[1], TokenKind::Error(_)));
+        assert!(matches!(kinds[2], TokenKind::StringEnd(_)));
     }
 
     #[test]
