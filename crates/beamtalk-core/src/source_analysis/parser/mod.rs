@@ -214,6 +214,8 @@ pub fn is_input_complete(source: &str) -> bool {
     let mut paren_depth: i32 = 0; // ( )
     let mut brace_depth: i32 = 0; // { }
     let mut last_meaningful_kind: Option<&TokenKind> = None;
+    let mut has_subclass_keyword = false;
+    let mut has_method_arrow = false;
 
     for token in &tokens {
         let kind = token.kind();
@@ -242,6 +244,10 @@ pub fn is_input_complete(source: &str) -> bool {
             TokenKind::RightBracket => bracket_depth -= 1,
             TokenKind::RightParen => paren_depth -= 1,
             TokenKind::RightBrace => brace_depth -= 1,
+
+            // Track class definition pattern
+            TokenKind::Keyword(k) if k == "subclass:" => has_subclass_keyword = true,
+            TokenKind::FatArrow => has_method_arrow = true,
 
             TokenKind::Eof => break,
             _ => {}
@@ -277,6 +283,16 @@ pub fn is_input_complete(source: &str) -> bool {
         last_meaningful_kind,
         Some(TokenKind::Semicolon | TokenKind::Caret)
     ) {
+        return false;
+    }
+
+    // Class definition: incomplete until at least one method is defined.
+    // "Actor subclass: Counter" alone is incomplete — waiting for state/methods.
+    // "Actor subclass: Counter\n  state: n = 0" is still incomplete — no methods.
+    // "Actor subclass: Counter\n  increment => self.n := self.n + 1" is complete.
+    // In the REPL, user presses Enter on a blank line to submit; in E2E tests,
+    // the assertion line `// =>` follows immediately after the last method.
+    if has_subclass_keyword && !has_method_arrow {
         return false;
     }
 
@@ -3107,6 +3123,35 @@ Actor subclass: Counter
         assert!(!is_input_complete("^"));
     }
 
+    #[test]
+    fn incomplete_class_definition_header_only() {
+        // Just the class header — user hasn't typed methods yet
+        assert!(!is_input_complete("Actor subclass: Counter"));
+    }
+
+    #[test]
+    fn incomplete_class_definition_with_state_no_methods() {
+        // Class with state but no methods — still incomplete
+        assert!(!is_input_complete(
+            "Actor subclass: Counter\n  state: value = 0"
+        ));
+    }
+
+    #[test]
+    fn complete_class_definition_with_method() {
+        // Class with at least one method — complete
+        assert!(is_input_complete(
+            "Actor subclass: Counter\n  state: value = 0\n  increment => self.value := self.value + 1"
+        ));
+    }
+
+    #[test]
+    fn complete_class_definition_with_multiple_methods() {
+        assert!(is_input_complete(
+            "Actor subclass: Counter\n  state: value = 0\n  increment => self.value := self.value + 1\n  getValue => ^self.value"
+        ));
+    }
+
     // === Match expression parsing ===
 
     #[test]
@@ -3300,5 +3345,86 @@ Actor subclass: Counter
             }
             _ => panic!("Expected ** at top level"),
         }
+    }
+
+    // ========================================================================
+    // BT-571: Standalone Method Definition Tests
+    // ========================================================================
+
+    #[test]
+    fn standalone_method_definition_unary() {
+        let module = parse_ok("Counter >> increment => self.value := self.value + 1");
+        assert!(module.classes.is_empty());
+        assert!(module.expressions.is_empty());
+        assert_eq!(module.method_definitions.len(), 1);
+        let method_def = &module.method_definitions[0];
+        assert_eq!(method_def.class_name.name.as_str(), "Counter");
+        assert!(!method_def.is_class_method);
+        assert_eq!(method_def.method.selector.name().as_str(), "increment");
+    }
+
+    #[test]
+    fn standalone_method_definition_keyword() {
+        let module = parse_ok("Counter >> setValue: v => self.value := v");
+        assert_eq!(module.method_definitions.len(), 1);
+        let method_def = &module.method_definitions[0];
+        assert_eq!(method_def.class_name.name.as_str(), "Counter");
+        assert_eq!(method_def.method.selector.name().as_str(), "setValue:");
+        assert_eq!(method_def.method.parameters.len(), 1);
+    }
+
+    #[test]
+    fn standalone_method_definition_binary() {
+        let module = parse_ok("Point >> + other => self x + (other x)");
+        assert_eq!(module.method_definitions.len(), 1);
+        let method_def = &module.method_definitions[0];
+        assert_eq!(method_def.class_name.name.as_str(), "Point");
+        assert_eq!(method_def.method.selector.name().as_str(), "+");
+    }
+
+    #[test]
+    fn standalone_method_definition_class_side() {
+        let module = parse_ok("Counter class >> withInitial: n => self spawnWith: #{value => n}");
+        assert_eq!(module.method_definitions.len(), 1);
+        let method_def = &module.method_definitions[0];
+        assert_eq!(method_def.class_name.name.as_str(), "Counter");
+        assert!(method_def.is_class_method);
+        assert_eq!(method_def.method.selector.name().as_str(), "withInitial:");
+    }
+
+    #[test]
+    fn standalone_method_definition_with_class_def() {
+        let source = "Actor subclass: Counter\n  state: value = 0\n\nCounter >> increment => self.value := self.value + 1";
+        let module = parse_ok(source);
+        assert_eq!(module.classes.len(), 1);
+        assert_eq!(module.method_definitions.len(), 1);
+        assert_eq!(module.classes[0].name.name.as_str(), "Counter");
+        assert_eq!(
+            module.method_definitions[0].class_name.name.as_str(),
+            "Counter"
+        );
+    }
+
+    #[test]
+    fn multiple_standalone_method_definitions() {
+        let source = "Counter >> increment => self.value := self.value + 1\nCounter >> getValue => ^self.value";
+        let module = parse_ok(source);
+        assert_eq!(module.method_definitions.len(), 2);
+        assert_eq!(
+            module.method_definitions[0].method.selector.name().as_str(),
+            "increment"
+        );
+        assert_eq!(
+            module.method_definitions[1].method.selector.name().as_str(),
+            "getValue"
+        );
+    }
+
+    #[test]
+    fn method_lookup_not_confused_with_method_definition() {
+        // Counter >> #increment is method lookup, not method definition
+        let module = parse_ok("Counter >> #increment");
+        assert!(module.method_definitions.is_empty());
+        assert_eq!(module.expressions.len(), 1);
     }
 }

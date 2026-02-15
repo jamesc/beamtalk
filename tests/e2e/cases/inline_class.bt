@@ -1,0 +1,44 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for inline class definitions and standalone method defs (BT-571)
+//
+// Tests defining classes directly at the REPL prompt without needing
+// to write a .bt file and :load it. Also tests Tonel-style method
+// definitions that add/replace methods on existing classes.
+
+// ===========================================================================
+// INLINE CLASS DEFINITION
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Define an actor class inline with methods and spawn it
+// ---------------------------------------------------------------------------
+
+Actor subclass: InlineCounter
+  state: value = 0
+  increment => self.value := self.value + 1
+// => _
+
+// ---------------------------------------------------------------------------
+// Add more methods using Tonel-style standalone method defs
+// ---------------------------------------------------------------------------
+
+InlineCounter >> getValue => ^self.value
+// => _
+
+// ---------------------------------------------------------------------------
+// Spawn and use the class
+// ---------------------------------------------------------------------------
+
+c := InlineCounter spawn
+// => #Actor<InlineCounter,_>
+
+c increment
+// => 1
+
+c increment
+// => 2
+
+c getValue
+// => 2

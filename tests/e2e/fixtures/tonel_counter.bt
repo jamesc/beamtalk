@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tonel-style counter fixture (BT-571)
+// Class declaration is separate from method definitions.
+
+Actor subclass: TonelCounter
+  state: value = 0
+
+TonelCounter >> increment => self.value := self.value + 1
+
+TonelCounter >> getValue => ^self.value
