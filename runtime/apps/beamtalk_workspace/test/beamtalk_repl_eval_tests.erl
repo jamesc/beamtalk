@@ -64,8 +64,8 @@ do_eval_increments_counter_test() ->
     
     ?assertEqual(InitialCounter + 1, NewCounter).
 
-do_eval_no_daemon_error_test() ->
-    %% Without a running compiler server, should get compile_error
+do_eval_no_compiler_error_test() ->
+    %% Without a running compiler server (port backend), should get compile_error
     State = beamtalk_repl_state:new(undefined, 0),
     Result = beamtalk_repl_eval:do_eval("1 + 1", State),
     ?assertMatch({error, {compile_error, _}, _, _, _}, Result),

@@ -1376,7 +1376,7 @@ tcp_eval_simple_test(Port) ->
     Msg = jsx:encode(#{<<"op">> => <<"eval">>, <<"id">> => <<"t10">>, <<"code">> => <<"1 + 2">>}),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t10">>}, Resp),
-    %% Result could be error (daemon not running) or success
+    %% Result could be error (compiler not running) or success
     ?assert(maps:is_key(<<"value">>, Resp) orelse maps:is_key(<<"error">>, Resp)).
 
 %% Test: unload nonexistent module

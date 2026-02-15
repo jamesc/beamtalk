@@ -66,6 +66,10 @@ pub enum CompilerBackend {
 pub fn resolve_backend() -> CompilerBackend {
     match std::env::var("BEAMTALK_COMPILER").as_deref() {
         Ok("escript") => CompilerBackend::Escript,
+        Ok(other) => {
+            eprintln!("Warning: unknown BEAMTALK_COMPILER value '{other}', defaulting to port");
+            CompilerBackend::Port
+        }
         _ => CompilerBackend::Port,
     }
 }
