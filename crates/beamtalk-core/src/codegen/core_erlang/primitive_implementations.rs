@@ -129,7 +129,7 @@ fn generate_float_bif(selector: &str, params: &[String]) -> Option<String> {
 }
 
 /// String primitive implementations.
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines)] // one arm per String primitive method
 fn generate_string_bif(selector: &str, params: &[String]) -> Option<String> {
     let p0 = params.first().map_or("_Arg0", String::as_str);
     match selector {
@@ -426,7 +426,7 @@ fn generate_tuple_bif(selector: &str, params: &[String]) -> Option<String> {
 ///
 /// Lists are Erlang linked lists — fast prepend, sequential access.
 /// Complex operations delegate to `beamtalk_list_ops` helper module.
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines)] // one arm per List primitive method
 fn generate_list_bif(selector: &str, params: &[String]) -> Option<String> {
     match selector {
         // Access
@@ -832,9 +832,11 @@ fn power_bif(params: &[String]) -> Option<String> {
 /// the compiled stdlib module's own dispatch/3.
 fn generate_compiled_method_bif(selector: &str, params: &[String]) -> Option<String> {
     match selector {
-        "selector" | "source" | "argumentCount" | "printString" | "asString" => {
-            ops_dispatch("beamtalk_compiled_method_ops", selector, params)
-        }
+        "selector" | "source" | "argumentCount" | "printString" | "asString" => Some(ops_dispatch(
+            "beamtalk_compiled_method_ops",
+            selector,
+            params,
+        )),
         _ => None,
     }
 }
@@ -965,8 +967,7 @@ fn generate_collection_bif(selector: &str, params: &[String]) -> Option<String> 
 }
 
 /// Generates a call to a `_ops` Erlang module's dispatch/3 function.
-#[allow(clippy::unnecessary_wraps)]
-fn ops_dispatch(module: &str, selector: &str, params: &[String]) -> Option<String> {
+fn ops_dispatch(module: &str, selector: &str, params: &[String]) -> String {
     let mut result = format!("call '{module}':'dispatch'('{selector}', [");
     for (i, param) in params.iter().enumerate() {
         if i > 0 {
@@ -975,7 +976,7 @@ fn ops_dispatch(module: &str, selector: &str, params: &[String]) -> Option<Strin
         result.push_str(param);
     }
     result.push_str("], Self)");
-    Some(result)
+    result
 }
 
 #[cfg(test)]
