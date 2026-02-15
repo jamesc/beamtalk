@@ -1,7 +1,7 @@
 {application, beamtalk_workspace, [
     {description, "Beamtalk workspace and interactive development environment"},
     {vsn, "0.1.0"},
-    {modules, [beamtalk_repl_json]},
+    {modules, []},
     {registered, []},
     {applications, [kernel, stdlib, beamtalk_runtime]},
     {mod, {beamtalk_workspace_app, []}},
