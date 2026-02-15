@@ -228,10 +228,20 @@ pub fn find_selector_in_expr(expr: &Expression, offset: u32) -> Option<(EcoStrin
             find_selector_in_expr(value, offset).or_else(|| find_selector_in_expr(target, offset))
         }
         Expression::Match { value, arms, .. } => {
-            find_selector_in_expr(value, offset).or_else(|| {
-                arms.iter()
-                    .find_map(|arm| find_selector_in_expr(&arm.body, offset))
-            })
+            if let Some(result) = find_selector_in_expr(value, offset) {
+                return Some(result);
+            }
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    if let Some(result) = find_selector_in_expr(guard, offset) {
+                        return Some(result);
+                    }
+                }
+                if let Some(result) = find_selector_in_expr(&arm.body, offset) {
+                    return Some(result);
+                }
+            }
+            None
         }
         Expression::StringInterpolation { segments, .. } => segments.iter().find_map(|seg| {
             if let crate::ast::StringSegment::Interpolation(expr) = seg {
@@ -240,6 +250,28 @@ pub fn find_selector_in_expr(expr: &Expression, offset: u32) -> Option<(EcoStrin
                 None
             }
         }),
+        Expression::ListLiteral { elements, tail, .. } => {
+            for element in elements {
+                if let Some(result) = find_selector_in_expr(element, offset) {
+                    return Some(result);
+                }
+            }
+            if let Some(tail_expr) = tail {
+                return find_selector_in_expr(tail_expr, offset);
+            }
+            None
+        }
+        Expression::MapLiteral { pairs, .. } => {
+            for pair in pairs {
+                if let Some(result) = find_selector_in_expr(&pair.key, offset) {
+                    return Some(result);
+                }
+                if let Some(result) = find_selector_in_expr(&pair.value, offset) {
+                    return Some(result);
+                }
+            }
+            None
+        }
         _ => None,
     }
 }

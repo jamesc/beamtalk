@@ -149,6 +149,9 @@ fn collect_class_refs(
         Expression::Match { value, arms, .. } => {
             collect_class_refs(value, class_name, file_path, results);
             for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    collect_class_refs(guard, class_name, file_path, results);
+                }
                 collect_class_refs(&arm.body, class_name, file_path, results);
             }
         }
@@ -157,6 +160,20 @@ fn collect_class_refs(
                 if let crate::ast::StringSegment::Interpolation(expr) = segment {
                     collect_class_refs(expr, class_name, file_path, results);
                 }
+            }
+        }
+        Expression::ListLiteral { elements, tail, .. } => {
+            for element in elements {
+                collect_class_refs(element, class_name, file_path, results);
+            }
+            if let Some(tail_expr) = tail {
+                collect_class_refs(tail_expr, class_name, file_path, results);
+            }
+        }
+        Expression::MapLiteral { pairs, .. } => {
+            for pair in pairs {
+                collect_class_refs(&pair.key, class_name, file_path, results);
+                collect_class_refs(&pair.value, class_name, file_path, results);
             }
         }
         _ => {}
@@ -291,6 +308,9 @@ fn collect_selector_refs(
         Expression::Match { value, arms, .. } => {
             collect_selector_refs(value, selector_name, file_path, results);
             for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    collect_selector_refs(guard, selector_name, file_path, results);
+                }
                 collect_selector_refs(&arm.body, selector_name, file_path, results);
             }
         }
@@ -299,6 +319,20 @@ fn collect_selector_refs(
                 if let crate::ast::StringSegment::Interpolation(expr) = segment {
                     collect_selector_refs(expr, selector_name, file_path, results);
                 }
+            }
+        }
+        Expression::ListLiteral { elements, tail, .. } => {
+            for element in elements {
+                collect_selector_refs(element, selector_name, file_path, results);
+            }
+            if let Some(tail_expr) = tail {
+                collect_selector_refs(tail_expr, selector_name, file_path, results);
+            }
+        }
+        Expression::MapLiteral { pairs, .. } => {
+            for pair in pairs {
+                collect_selector_refs(&pair.key, selector_name, file_path, results);
+                collect_selector_refs(&pair.value, selector_name, file_path, results);
             }
         }
         _ => {}
