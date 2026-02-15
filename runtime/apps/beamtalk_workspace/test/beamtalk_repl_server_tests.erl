@@ -96,28 +96,28 @@ parse_request_op_unknown_test() ->
 %%% Response formatting tests
 
 format_response_integer_test() ->
-    Response = beamtalk_repl_server:format_response(42),
+    Response = beamtalk_repl_json:format_response(42),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(42, maps:get(<<"value">>, Decoded)).
 
 format_response_string_test() ->
-    Response = beamtalk_repl_server:format_response("hello"),
+    Response = beamtalk_repl_json:format_response("hello"),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"hello">>, maps:get(<<"value">>, Decoded)).
 
 format_response_atom_test() ->
-    Response = beamtalk_repl_server:format_response(ok),
+    Response = beamtalk_repl_json:format_response(ok),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"ok">>, maps:get(<<"value">>, Decoded)).
 
 format_response_list_test() ->
-    Response = beamtalk_repl_server:format_response([1, 2, 3]),
+    Response = beamtalk_repl_json:format_response([1, 2, 3]),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual([1, 2, 3], maps:get(<<"value">>, Decoded)).
 
 format_response_map_test() ->
-    Response = beamtalk_repl_server:format_response(#{x => 1, y => 2}),
+    Response = beamtalk_repl_json:format_response(#{x => 1, y => 2}),
     Decoded = jsx:decode(Response, [return_maps]),
     Value = maps:get(<<"value">>, Decoded),
     %% BT-535: Maps are now pre-formatted as Beamtalk syntax strings
@@ -127,7 +127,7 @@ format_response_map_test() ->
 
 format_response_pid_test() ->
     Pid = self(),
-    Response = beamtalk_repl_server:format_response(Pid),
+    Response = beamtalk_repl_json:format_response(Pid),
     Decoded = jsx:decode(Response, [return_maps]),
     Value = maps:get(<<"value">>, Decoded),
     %% Should be formatted as #Actor<...>
@@ -135,14 +135,14 @@ format_response_pid_test() ->
 
 format_response_function_test() ->
     Fun = fun(X) -> X + 1 end,
-    Response = beamtalk_repl_server:format_response(Fun),
+    Response = beamtalk_repl_json:format_response(Fun),
     Decoded = jsx:decode(Response, [return_maps]),
     Value = maps:get(<<"value">>, Decoded),
     %% Should be formatted as "a Block/N"
     ?assert(binary:match(Value, <<"a Block/">>) =/= nomatch).
 
 format_response_tuple_test() ->
-    Response = beamtalk_repl_server:format_response({ok, value}),
+    Response = beamtalk_repl_json:format_response({ok, value}),
     Decoded = jsx:decode(Response, [return_maps]),
     Value = maps:get(<<"value">>, Decoded),
     %% BT-536: Tuples are formatted as {el1, el2, ...} with symbol notation
@@ -151,29 +151,29 @@ format_response_tuple_test() ->
 %%% Error formatting tests
 
 format_error_empty_expression_test() ->
-    Response = beamtalk_repl_server:format_error(empty_expression),
+    Response = beamtalk_repl_json:format_error(empty_expression),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(<<"Empty expression">>, maps:get(<<"message">>, Decoded)).
 
 format_error_timeout_test() ->
-    Response = beamtalk_repl_server:format_error(timeout),
+    Response = beamtalk_repl_json:format_error(timeout),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"Request timed out">>, maps:get(<<"message">>, Decoded)).
 
 format_error_compile_error_test() ->
-    Response = beamtalk_repl_server:format_error({compile_error, <<"Syntax error">>}),
+    Response = beamtalk_repl_json:format_error({compile_error, <<"Syntax error">>}),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"Syntax error">>, maps:get(<<"message">>, Decoded)).
 
 format_error_undefined_variable_test() ->
-    Response = beamtalk_repl_server:format_error({undefined_variable, x}),
+    Response = beamtalk_repl_json:format_error({undefined_variable, x}),
     Decoded = jsx:decode(Response, [return_maps]),
     Message = maps:get(<<"message">>, Decoded),
     ?assert(binary:match(Message, <<"Undefined variable">>) =/= nomatch).
 
 format_error_eval_error_test() ->
-    Response = beamtalk_repl_server:format_error({eval_error, error, badarg}),
+    Response = beamtalk_repl_json:format_error({eval_error, error, badarg}),
     Decoded = jsx:decode(Response, [return_maps]),
     Message = maps:get(<<"message">>, Decoded),
     ?assert(binary:match(Message, <<"Evaluation error">>) =/= nomatch).
@@ -181,19 +181,19 @@ format_error_eval_error_test() ->
 %%% Bindings formatting tests
 
 format_bindings_empty_test() ->
-    Response = beamtalk_repl_server:format_bindings(#{}),
+    Response = beamtalk_repl_json:format_bindings(#{}),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"bindings">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(#{}, maps:get(<<"bindings">>, Decoded)).
 
 format_bindings_single_test() ->
-    Response = beamtalk_repl_server:format_bindings(#{x => 42}),
+    Response = beamtalk_repl_json:format_bindings(#{x => 42}),
     Decoded = jsx:decode(Response, [return_maps]),
     Bindings = maps:get(<<"bindings">>, Decoded),
     ?assertEqual(42, maps:get(<<"x">>, Bindings)).
 
 format_bindings_multiple_test() ->
-    Response = beamtalk_repl_server:format_bindings(#{x => 1, y => 2, z => 3}),
+    Response = beamtalk_repl_json:format_bindings(#{x => 1, y => 2, z => 3}),
     Decoded = jsx:decode(Response, [return_maps]),
     Bindings = maps:get(<<"bindings">>, Decoded),
     ?assertEqual(1, maps:get(<<"x">>, Bindings)),
@@ -201,7 +201,7 @@ format_bindings_multiple_test() ->
     ?assertEqual(3, maps:get(<<"z">>, Bindings)).
 
 format_bindings_complex_values_test() ->
-    Response = beamtalk_repl_server:format_bindings(#{
+    Response = beamtalk_repl_json:format_bindings(#{
         atom => ok,
         str => "hello",
         list => [1, 2, 3]
@@ -215,18 +215,18 @@ format_bindings_complex_values_test() ->
 %%% Loaded classes formatting tests
 
 format_loaded_empty_test() ->
-    Response = beamtalk_repl_server:format_loaded([]),
+    Response = beamtalk_repl_json:format_loaded([]),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"loaded">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual([], maps:get(<<"classes">>, Decoded)).
 
 format_loaded_single_test() ->
-    Response = beamtalk_repl_server:format_loaded([#{name => "Counter", superclass => "Actor"}]),
+    Response = beamtalk_repl_json:format_loaded([#{name => "Counter", superclass => "Actor"}]),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual([<<"Counter">>], maps:get(<<"classes">>, Decoded)).
 
 format_loaded_multiple_test() ->
-    Response = beamtalk_repl_server:format_loaded([
+    Response = beamtalk_repl_json:format_loaded([
         #{name => "Counter", superclass => "Actor"},
         #{name => "Point", superclass => "Object"},
         #{name => "Actor", superclass => "Object"}
@@ -250,12 +250,12 @@ parse_json_not_json_test() ->
 %%% Response formatting edge cases
 
 format_response_nil_test() ->
-    Response = beamtalk_repl_server:format_response(nil),
+    Response = beamtalk_repl_json:format_response(nil),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"nil">>, maps:get(<<"value">>, Decoded)).
 
 format_response_large_number_test() ->
-    Response = beamtalk_repl_server:format_response(999999999999999),
+    Response = beamtalk_repl_json:format_response(999999999999999),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(999999999999999, maps:get(<<"value">>, Decoded)).
 
@@ -267,7 +267,7 @@ format_response_complex_pid_test() ->
         after 100 -> ok
         end
     end),
-    Response = beamtalk_repl_server:format_response(Pid),
+    Response = beamtalk_repl_json:format_response(Pid),
     Decoded = jsx:decode(Response, [return_maps]),
     Value = maps:get(<<"value">>, Decoded),
     ?assert(binary:match(Value, <<"#Actor<">>) =/= nomatch),
@@ -281,8 +281,8 @@ format_response_multi_arity_function_test() ->
     Fun0 = fun() -> ok end,
     Fun3 = fun(A, B, C) -> {A, B, C} end,
     
-    Response0 = beamtalk_repl_server:format_response(Fun0),
-    Response3 = beamtalk_repl_server:format_response(Fun3),
+    Response0 = beamtalk_repl_json:format_response(Fun0),
+    Response3 = beamtalk_repl_json:format_response(Fun3),
     
     Decoded0 = jsx:decode(Response0, [return_maps]),
     Decoded3 = jsx:decode(Response3, [return_maps]),
@@ -296,33 +296,33 @@ format_response_multi_arity_function_test() ->
 %%% Error formatting edge cases
 
 format_error_load_error_test() ->
-    Response = beamtalk_repl_server:format_error({load_error, badfile}),
+    Response = beamtalk_repl_json:format_error({load_error, badfile}),
     Decoded = jsx:decode(Response, [return_maps]),
     Message = maps:get(<<"message">>, Decoded),
     ?assert(binary:match(Message, <<"Failed to load bytecode">>) =/= nomatch).
 
 format_error_file_not_found_test() ->
-    Response = beamtalk_repl_server:format_error({file_not_found, "/path/to/file.bt"}),
+    Response = beamtalk_repl_json:format_error({file_not_found, "/path/to/file.bt"}),
     Decoded = jsx:decode(Response, [return_maps]),
     Message = maps:get(<<"message">>, Decoded),
     ?assert(binary:match(Message, <<"File not found">>) =/= nomatch),
     ?assert(binary:match(Message, <<"/path/to/file.bt">>) =/= nomatch).
 
 format_error_read_error_test() ->
-    Response = beamtalk_repl_server:format_error({read_error, eacces}),
+    Response = beamtalk_repl_json:format_error({read_error, eacces}),
     Decoded = jsx:decode(Response, [return_maps]),
     Message = maps:get(<<"message">>, Decoded),
     ?assert(binary:match(Message, <<"Failed to read file">>) =/= nomatch).
 
 format_error_generic_tuple_test() ->
-    Response = beamtalk_repl_server:format_error({unknown_error_type, "details"}),
+    Response = beamtalk_repl_json:format_error({unknown_error_type, "details"}),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
     Message = maps:get(<<"message">>, Decoded),
     ?assert(is_binary(Message)).
 
 format_error_generic_atom_test() ->
-    Response = beamtalk_repl_server:format_error(some_unknown_error),
+    Response = beamtalk_repl_json:format_error(some_unknown_error),
     Decoded = jsx:decode(Response, [return_maps]),
     Message = maps:get(<<"message">>, Decoded),
     %% Generic errors are formatted with ~p, so should contain the atom name
@@ -333,7 +333,7 @@ format_error_generic_atom_test() ->
 
 format_bindings_with_special_characters_test() ->
     %% Test bindings with special characters in keys
-    Response = beamtalk_repl_server:format_bindings(#{'_privateVar' => 42, 'CamelCase' => "test"}),
+    Response = beamtalk_repl_json:format_bindings(#{'_privateVar' => 42, 'CamelCase' => "test"}),
     Decoded = jsx:decode(Response, [return_maps]),
     Bindings = maps:get(<<"bindings">>, Decoded),
     ?assertEqual(42, maps:get(<<"_privateVar">>, Bindings)),
@@ -346,7 +346,7 @@ format_loaded_preserves_order_test() ->
         #{name => "Alpha", superclass => "Object"},
         #{name => "Middle", superclass => "Object"}
     ],
-    Response = beamtalk_repl_server:format_loaded(Classes),
+    Response = beamtalk_repl_json:format_loaded(Classes),
     Decoded = jsx:decode(Response, [return_maps]),
     Result = maps:get(<<"classes">>, Decoded),
     ?assertEqual([<<"Zebra">>, <<"Alpha">>, <<"Middle">>], Result).
@@ -391,7 +391,7 @@ parse_request_unicode_test() ->
 format_error_beamtalk_error_test() ->
     Error = beamtalk_error:new(does_not_understand, 'Counter'),
     ErrorWithSelector = beamtalk_error:with_selector(Error, super),
-    Response = beamtalk_repl_server:format_error(ErrorWithSelector),
+    Response = beamtalk_repl_json:format_error(ErrorWithSelector),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
     Message = maps:get(<<"message">>, Decoded),
@@ -404,7 +404,7 @@ format_error_beamtalk_error_with_hint_test() ->
     Error0 = beamtalk_error:new(does_not_understand, 'Integer'),
     Error1 = beamtalk_error:with_selector(Error0, foo),
     Error = beamtalk_error:with_hint(Error1, <<"Check spelling">>),
-    Response = beamtalk_repl_server:format_error(Error),
+    Response = beamtalk_repl_json:format_error(Error),
     Decoded = jsx:decode(Response, [return_maps]),
     Message = maps:get(<<"message">>, Decoded),
     ?assert(binary:match(Message, <<"Integer">>) =/= nomatch),
@@ -415,7 +415,7 @@ format_error_beamtalk_error_with_hint_test() ->
 format_response_beamtalk_error_test() ->
     Error0 = beamtalk_error:new(does_not_understand, 'String'),
     Error = beamtalk_error:with_selector(Error0, typo),
-    Response = beamtalk_repl_server:format_response(Error),
+    Response = beamtalk_repl_json:format_response(Error),
     Decoded = jsx:decode(Response, [return_maps]),
     Value = maps:get(<<"value">>, Decoded),
     ?assert(binary:match(Value, <<"String">>) =/= nomatch),
@@ -426,7 +426,7 @@ format_response_beamtalk_error_test() ->
 format_response_future_rejected_beamtalk_error_test() ->
     Error0 = beamtalk_error:new(does_not_understand, 'Actor'),
     Error = beamtalk_error:with_selector(Error0, badMethod),
-    Response = beamtalk_repl_server:format_response({future_rejected, Error}),
+    Response = beamtalk_repl_json:format_response({future_rejected, Error}),
     Decoded = jsx:decode(Response, [return_maps]),
     Value = maps:get(<<"value">>, Decoded),
     ?assert(binary:match(Value, <<"#Future<rejected:">>) =/= nomatch),
@@ -437,7 +437,7 @@ format_response_future_rejected_beamtalk_error_test() ->
 %% Test format_rejection_reason fallback with arbitrary term
 format_rejection_reason_fallback_test() ->
     %% Test that the fallback can handle arbitrary terms without crashing
-    Result = beamtalk_repl_server:format_response({future_rejected, {custom_error, some, data}}),
+    Result = beamtalk_repl_json:format_response({future_rejected, {custom_error, some, data}}),
     Decoded = jsx:decode(Result, [return_maps]),
     Value = maps:get(<<"value">>, Decoded),
     %% Should format the tuple with ~p
@@ -447,183 +447,183 @@ format_rejection_reason_fallback_test() ->
 %%% BT-342: Additional term_to_json edge case tests
 
 term_to_json_integer_test() ->
-    ?assertEqual(42, beamtalk_repl_server:term_to_json(42)).
+    ?assertEqual(42, beamtalk_repl_json:term_to_json(42)).
 
 term_to_json_float_test() ->
-    ?assertEqual(3.14, beamtalk_repl_server:term_to_json(3.14)).
+    ?assertEqual(3.14, beamtalk_repl_json:term_to_json(3.14)).
 
 term_to_json_boolean_test() ->
-    ?assertEqual(true, beamtalk_repl_server:term_to_json(true)),
-    ?assertEqual(false, beamtalk_repl_server:term_to_json(false)).
+    ?assertEqual(true, beamtalk_repl_json:term_to_json(true)),
+    ?assertEqual(false, beamtalk_repl_json:term_to_json(false)).
 
 term_to_json_atom_test() ->
-    ?assertEqual(<<"hello">>, beamtalk_repl_server:term_to_json(hello)),
-    ?assertEqual(<<"nil">>, beamtalk_repl_server:term_to_json(nil)).
+    ?assertEqual(<<"hello">>, beamtalk_repl_json:term_to_json(hello)),
+    ?assertEqual(<<"nil">>, beamtalk_repl_json:term_to_json(nil)).
 
 term_to_json_binary_test() ->
-    ?assertEqual(<<"foo">>, beamtalk_repl_server:term_to_json(<<"foo">>)).
+    ?assertEqual(<<"foo">>, beamtalk_repl_json:term_to_json(<<"foo">>)).
 
 term_to_json_invalid_utf8_binary_test() ->
-    Result = beamtalk_repl_server:term_to_json(<<255, 254>>),
+    Result = beamtalk_repl_json:term_to_json(<<255, 254>>),
     ?assert(is_binary(Result)),
     ?assertNotEqual(<<255, 254>>, Result).
 
 term_to_json_printable_list_test() ->
-    ?assertEqual(<<"hello">>, beamtalk_repl_server:term_to_json("hello")).
+    ?assertEqual(<<"hello">>, beamtalk_repl_json:term_to_json("hello")).
 
 term_to_json_printable_list_unicode_test() ->
     %% Use explicit codepoints for encoding independence
-    ?assertEqual(<<"café"/utf8>>, beamtalk_repl_server:term_to_json("caf" ++ [16#00E9])).
+    ?assertEqual(<<"café"/utf8>>, beamtalk_repl_json:term_to_json("caf" ++ [16#00E9])).
 
 term_to_json_non_printable_list_test() ->
-    Result = beamtalk_repl_server:term_to_json([1, 2, 3]),
+    Result = beamtalk_repl_json:term_to_json([1, 2, 3]),
     ?assertEqual([1, 2, 3], Result).
 
 term_to_json_nested_list_test() ->
-    Result = beamtalk_repl_server:term_to_json([<<"a">>, 1, true]),
+    Result = beamtalk_repl_json:term_to_json([<<"a">>, 1, true]),
     ?assertEqual([<<"a">>, 1, true], Result).
 
 term_to_json_empty_list_test() ->
     %% Empty list should serialize as empty JSON array, not empty string
-    ?assertEqual([], beamtalk_repl_server:term_to_json([])).
+    ?assertEqual([], beamtalk_repl_json:term_to_json([])).
 
 term_to_json_map_with_atom_keys_test() ->
     %% BT-535: Maps are pre-formatted as Beamtalk syntax strings
-    Result = beamtalk_repl_server:term_to_json(#{name => <<"test">>, count => 5}),
+    Result = beamtalk_repl_json:term_to_json(#{name => <<"test">>, count => 5}),
     ?assert(is_binary(Result)),
     ?assert(binary:match(Result, <<"#count => 5">>) =/= nomatch),
     ?assert(binary:match(Result, <<"#name => test">>) =/= nomatch).
 
 term_to_json_map_with_binary_keys_test() ->
-    Result = beamtalk_repl_server:term_to_json(#{<<"key">> => <<"val">>}),
+    Result = beamtalk_repl_json:term_to_json(#{<<"key">> => <<"val">>}),
     ?assertEqual(<<"#{key => val}">>, Result).
 
 term_to_json_map_with_list_keys_test() ->
     %% BT-535: List keys are printed using print_string format
-    Result = beamtalk_repl_server:term_to_json(#{"stringkey" => 42}),
+    Result = beamtalk_repl_json:term_to_json(#{"stringkey" => 42}),
     ?assert(is_binary(Result)),
     ?assert(binary:match(Result, <<"42">>) =/= nomatch).
 
 term_to_json_map_with_non_printable_list_key_test() ->
-    Result = beamtalk_repl_server:term_to_json(#{[1,2,3] => <<"val">>}),
+    Result = beamtalk_repl_json:term_to_json(#{[1,2,3] => <<"val">>}),
     ?assert(is_binary(Result)).
 
 term_to_json_map_with_integer_key_test() ->
-    Result = beamtalk_repl_server:term_to_json(#{99 => <<"val">>}),
+    Result = beamtalk_repl_json:term_to_json(#{99 => <<"val">>}),
     ?assert(is_binary(Result)).
 
 term_to_json_dead_pid_test() ->
     Pid = spawn(fun() -> ok end),
     timer:sleep(50),
     ?assertNot(is_process_alive(Pid)),
-    Result = beamtalk_repl_server:term_to_json(Pid),
+    Result = beamtalk_repl_json:term_to_json(Pid),
     ?assert(binary:match(Result, <<"#Dead<">>) =/= nomatch).
 
 term_to_json_alive_pid_test() ->
     Parent = self(),
     Pid = spawn(fun() -> receive stop -> Parent ! done end end),
-    Result = beamtalk_repl_server:term_to_json(Pid),
+    Result = beamtalk_repl_json:term_to_json(Pid),
     ?assert(binary:match(Result, <<"#Actor<">>) =/= nomatch),
     Pid ! stop,
     receive done -> ok after 200 -> ok end.
 
 term_to_json_function_arity_0_test() ->
-    Result = beamtalk_repl_server:term_to_json(fun() -> ok end),
+    Result = beamtalk_repl_json:term_to_json(fun() -> ok end),
     ?assertEqual(<<"a Block/0">>, Result).
 
 term_to_json_function_arity_2_test() ->
-    Result = beamtalk_repl_server:term_to_json(fun(A, B) -> {A, B} end),
+    Result = beamtalk_repl_json:term_to_json(fun(A, B) -> {A, B} end),
     ?assertEqual(<<"a Block/2">>, Result).
 
 term_to_json_beamtalk_object_tuple_test() ->
     Pid = spawn(fun() -> receive _ -> ok end end),
-    Result = beamtalk_repl_server:term_to_json({beamtalk_object, 'Counter', counter, Pid}),
+    Result = beamtalk_repl_json:term_to_json({beamtalk_object, 'Counter', counter, Pid}),
     ?assert(binary:match(Result, <<"#Actor<">>) =/= nomatch),
     ?assert(binary:match(Result, <<"Counter">>) =/= nomatch),
     exit(Pid, kill).
 
 term_to_json_future_timeout_test() ->
     Pid = spawn(fun() -> receive _ -> ok end end),
-    Result = beamtalk_repl_server:term_to_json({future_timeout, Pid}),
+    Result = beamtalk_repl_json:term_to_json({future_timeout, Pid}),
     ?assert(binary:match(Result, <<"#Future<timeout,">>) =/= nomatch),
     exit(Pid, kill).
 
 term_to_json_future_rejected_test() ->
-    Result = beamtalk_repl_server:term_to_json({future_rejected, some_reason}),
+    Result = beamtalk_repl_json:term_to_json({future_rejected, some_reason}),
     ?assert(binary:match(Result, <<"#Future<rejected:">>) =/= nomatch).
 
 term_to_json_generic_tuple_test() ->
-    Result = beamtalk_repl_server:term_to_json({a, b, c}),
+    Result = beamtalk_repl_json:term_to_json({a, b, c}),
     %% BT-536: Tuples formatted with symbol notation for atoms
     ?assertEqual(<<"{#a, #b, #c}">>, Result).
 
 term_to_json_fallback_reference_test() ->
     Ref = make_ref(),
-    Result = beamtalk_repl_server:term_to_json(Ref),
+    Result = beamtalk_repl_json:term_to_json(Ref),
     ?assert(is_binary(Result)).
 
 %%% BT-342: Additional format_error_message tests
 
 format_error_message_module_not_found_test() ->
-    Msg = beamtalk_repl_server:format_error_message({module_not_found, <<"counter">>}),
+    Msg = beamtalk_repl_json:format_error_message({module_not_found, <<"counter">>}),
     ?assert(binary:match(Msg, <<"Module not loaded">>) =/= nomatch).
 
 format_error_message_invalid_module_name_test() ->
-    Msg = beamtalk_repl_server:format_error_message({invalid_module_name, <<"123bad">>}),
+    Msg = beamtalk_repl_json:format_error_message({invalid_module_name, <<"123bad">>}),
     ?assert(binary:match(Msg, <<"Invalid module name">>) =/= nomatch).
 
 format_error_message_actors_exist_singular_test() ->
-    Msg = beamtalk_repl_server:format_error_message({actors_exist, counter, 1}),
+    Msg = beamtalk_repl_json:format_error_message({actors_exist, counter, 1}),
     ?assert(binary:match(Msg, <<"1 actor still running">>) =/= nomatch),
     ?assert(binary:match(Msg, <<":kill">>) =/= nomatch).
 
 format_error_message_actors_exist_plural_test() ->
-    Msg = beamtalk_repl_server:format_error_message({actors_exist, counter, 3}),
+    Msg = beamtalk_repl_json:format_error_message({actors_exist, counter, 3}),
     ?assert(binary:match(Msg, <<"3 actors still running">>) =/= nomatch).
 
 format_error_message_unknown_op_test() ->
-    Msg = beamtalk_repl_server:format_error_message({unknown_op, <<"badop">>}),
+    Msg = beamtalk_repl_json:format_error_message({unknown_op, <<"badop">>}),
     ?assert(binary:match(Msg, <<"Unknown operation">>) =/= nomatch),
     ?assert(binary:match(Msg, <<"badop">>) =/= nomatch).
 
 format_error_message_inspect_failed_test() ->
-    Msg = beamtalk_repl_server:format_error_message({inspect_failed, "<0.1.0>"}),
+    Msg = beamtalk_repl_json:format_error_message({inspect_failed, "<0.1.0>"}),
     ?assert(binary:match(Msg, <<"Failed to inspect actor">>) =/= nomatch).
 
 format_error_message_actor_not_alive_test() ->
-    Msg = beamtalk_repl_server:format_error_message({actor_not_alive, "<0.1.0>"}),
+    Msg = beamtalk_repl_json:format_error_message({actor_not_alive, "<0.1.0>"}),
     ?assert(binary:match(Msg, <<"Actor is not alive">>) =/= nomatch).
 
 format_error_message_reload_module_not_loaded_test() ->
-    Msg = beamtalk_repl_server:format_error_message({module_not_loaded, "counter"}),
+    Msg = beamtalk_repl_json:format_error_message({module_not_loaded, "counter"}),
     ?assert(binary:match(Msg, <<"Module not loaded">>) =/= nomatch).
 
 format_error_message_no_source_file_test() ->
-    Msg = beamtalk_repl_server:format_error_message({no_source_file, "Counter"}),
+    Msg = beamtalk_repl_json:format_error_message({no_source_file, "Counter"}),
     ?assert(binary:match(Msg, <<"No source file recorded">>) =/= nomatch).
 
 format_error_message_missing_module_name_test() ->
-    Msg = beamtalk_repl_server:format_error_message({missing_module_name, reload}),
+    Msg = beamtalk_repl_json:format_error_message({missing_module_name, reload}),
     ?assert(binary:match(Msg, <<"Usage">>) =/= nomatch).
 
 format_error_message_session_creation_failed_test() ->
-    Msg = beamtalk_repl_server:format_error_message({session_creation_failed, max_children}),
+    Msg = beamtalk_repl_json:format_error_message({session_creation_failed, max_children}),
     ?assert(binary:match(Msg, <<"Failed to create session">>) =/= nomatch).
 
 format_error_message_invalid_request_test() ->
-    Msg = beamtalk_repl_server:format_error_message({invalid_request, bad_format}),
+    Msg = beamtalk_repl_json:format_error_message({invalid_request, bad_format}),
     ?assert(binary:match(Msg, <<"Invalid request">>) =/= nomatch).
 
 format_error_message_parse_error_test() ->
-    Msg = beamtalk_repl_server:format_error_message({parse_error, syntax}),
+    Msg = beamtalk_repl_json:format_error_message({parse_error, syntax}),
     ?assert(binary:match(Msg, <<"Parse error">>) =/= nomatch).
 
 format_error_message_compile_error_list_test() ->
-    Msg = beamtalk_repl_server:format_error_message({compile_error, "something wrong"}),
+    Msg = beamtalk_repl_json:format_error_message({compile_error, "something wrong"}),
     ?assertEqual(<<"something wrong">>, Msg).
 
 format_error_message_fallback_test() ->
-    Msg = beamtalk_repl_server:format_error_message({completely_unknown, stuff}),
+    Msg = beamtalk_repl_json:format_error_message({completely_unknown, stuff}),
     ?assert(is_binary(Msg)),
     ?assert(byte_size(Msg) > 0).
 
@@ -632,21 +632,21 @@ format_error_message_fallback_test() ->
 format_error_message_eval_error_beamtalk_error_test() ->
     Error = beamtalk_error:with_selector(
         beamtalk_error:new(does_not_understand, 'Integer'), nonExistentMethod),
-    Msg = beamtalk_repl_server:format_error_message({eval_error, error, Error}),
+    Msg = beamtalk_repl_json:format_error_message({eval_error, error, Error}),
     ?assertEqual(<<"Integer does not understand 'nonExistentMethod'">>, Msg).
 
 format_error_message_eval_error_beamtalk_error_with_hint_test() ->
     Error0 = beamtalk_error:new(instantiation_error, 'Actor'),
     Error1 = beamtalk_error:with_selector(Error0, new),
     Error = beamtalk_error:with_hint(Error1, <<"Use spawn instead">>),
-    Msg = beamtalk_repl_server:format_error_message({eval_error, error, Error}),
+    Msg = beamtalk_repl_json:format_error_message({eval_error, error, Error}),
     ?assert(binary:match(Msg, <<"Actor">>) =/= nomatch),
     ?assert(binary:match(Msg, <<"Hint: Use spawn instead">>) =/= nomatch).
 
 %%% BT-342: format_actors tests
 
 format_actors_empty_test() ->
-    Response = beamtalk_repl_server:format_actors([]),
+    Response = beamtalk_repl_json:format_actors([]),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"actors">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual([], maps:get(<<"actors">>, Decoded)).
@@ -654,7 +654,7 @@ format_actors_empty_test() ->
 format_actors_single_test() ->
     Pid = self(),
     Actors = [#{pid => Pid, class => 'Counter', module => counter, spawned_at => 1234567890}],
-    Response = beamtalk_repl_server:format_actors(Actors),
+    Response = beamtalk_repl_json:format_actors(Actors),
     Decoded = jsx:decode(Response, [return_maps]),
     ActorList = maps:get(<<"actors">>, Decoded),
     ?assertEqual(1, length(ActorList)),
@@ -669,7 +669,7 @@ format_actors_multiple_test() ->
         #{pid => Pid, class => 'Counter', module => counter, spawned_at => 100},
         #{pid => Pid, class => 'Timer', module => timer_actor, spawned_at => 200}
     ],
-    Response = beamtalk_repl_server:format_actors(Actors),
+    Response = beamtalk_repl_json:format_actors(Actors),
     Decoded = jsx:decode(Response, [return_maps]),
     ActorList = maps:get(<<"actors">>, Decoded),
     ?assertEqual(2, length(ActorList)).
@@ -677,7 +677,7 @@ format_actors_multiple_test() ->
 %%% BT-342: format_modules tests
 
 format_modules_empty_test() ->
-    Response = beamtalk_repl_server:format_modules([]),
+    Response = beamtalk_repl_json:format_modules([]),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"modules">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual([], maps:get(<<"modules">>, Decoded)).
@@ -690,7 +690,7 @@ format_modules_single_test() ->
         load_time => 1234567890,
         time_ago => "2 minutes ago"
     }},
-    Response = beamtalk_repl_server:format_modules([Info]),
+    Response = beamtalk_repl_json:format_modules([Info]),
     Decoded = jsx:decode(Response, [return_maps]),
     Modules = maps:get(<<"modules">>, Decoded),
     ?assertEqual(1, length(Modules)),
@@ -702,13 +702,13 @@ format_modules_single_test() ->
 %%% BT-342: format_response edge cases
 
 format_response_empty_map_test() ->
-    Response = beamtalk_repl_server:format_response(#{}),
+    Response = beamtalk_repl_json:format_response(#{}),
     Decoded = jsx:decode(Response, [return_maps]),
     %% BT-535: Empty map is pre-formatted as "#{}"
     ?assertEqual(<<"#{}">>, maps:get(<<"value">>, Decoded)).
 
 format_response_nested_map_test() ->
-    Response = beamtalk_repl_server:format_response(#{a => #{b => 1}}),
+    Response = beamtalk_repl_json:format_response(#{a => #{b => 1}}),
     Decoded = jsx:decode(Response, [return_maps]),
     Value = maps:get(<<"value">>, Decoded),
     %% BT-535: Nested maps are pre-formatted as Beamtalk syntax
@@ -716,24 +716,24 @@ format_response_nested_map_test() ->
     ?assertEqual(<<"#{#a => #{#b => 1}}">>, Value).
 
 format_response_true_false_test() ->
-    ResponseT = beamtalk_repl_server:format_response(true),
+    ResponseT = beamtalk_repl_json:format_response(true),
     DecodedT = jsx:decode(ResponseT, [return_maps]),
     ?assertEqual(true, maps:get(<<"value">>, DecodedT)),
-    ResponseF = beamtalk_repl_server:format_response(false),
+    ResponseF = beamtalk_repl_json:format_response(false),
     DecodedF = jsx:decode(ResponseF, [return_maps]),
     ?assertEqual(false, maps:get(<<"value">>, DecodedF)).
 
 %%% BT-520: format_response_with_warnings tests
 
 format_response_with_warnings_no_warnings_test() ->
-    Response = beamtalk_repl_server:format_response_with_warnings(42, []),
+    Response = beamtalk_repl_json:format_response_with_warnings(42, []),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(42, maps:get(<<"value">>, Decoded)),
     ?assertEqual(error, maps:find(<<"warnings">>, Decoded)).
 
 format_response_with_warnings_single_warning_test() ->
-    Response = beamtalk_repl_server:format_response_with_warnings(42, [<<"watch out">>]),
+    Response = beamtalk_repl_json:format_response_with_warnings(42, [<<"watch out">>]),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(42, maps:get(<<"value">>, Decoded)),
@@ -741,14 +741,14 @@ format_response_with_warnings_single_warning_test() ->
 
 format_response_with_warnings_multiple_warnings_test() ->
     Warnings = [<<"warn1">>, <<"warn2">>, <<"warn3">>],
-    Response = beamtalk_repl_server:format_response_with_warnings("hello", Warnings),
+    Response = beamtalk_repl_json:format_response_with_warnings("hello", Warnings),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(<<"hello">>, maps:get(<<"value">>, Decoded)),
     ?assertEqual(Warnings, maps:get(<<"warnings">>, Decoded)).
 
 format_response_with_warnings_complex_value_test() ->
-    Response = beamtalk_repl_server:format_response_with_warnings(
+    Response = beamtalk_repl_json:format_response_with_warnings(
         #{x => 1, y => 2}, [<<"shadow">>]),
     Decoded = jsx:decode(Response, [return_maps]),
     Value = maps:get(<<"value">>, Decoded),
@@ -760,14 +760,14 @@ format_response_with_warnings_complex_value_test() ->
 %%% BT-520: format_error_with_warnings tests
 
 format_error_with_warnings_no_warnings_test() ->
-    Response = beamtalk_repl_server:format_error_with_warnings(timeout, []),
+    Response = beamtalk_repl_json:format_error_with_warnings(timeout, []),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(<<"Request timed out">>, maps:get(<<"message">>, Decoded)),
     ?assertEqual(error, maps:find(<<"warnings">>, Decoded)).
 
 format_error_with_warnings_single_warning_test() ->
-    Response = beamtalk_repl_server:format_error_with_warnings(
+    Response = beamtalk_repl_json:format_error_with_warnings(
         empty_expression, [<<"deprecated syntax">>]),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
@@ -776,7 +776,7 @@ format_error_with_warnings_single_warning_test() ->
 
 format_error_with_warnings_multiple_warnings_test() ->
     Warnings = [<<"w1">>, <<"w2">>],
-    Response = beamtalk_repl_server:format_error_with_warnings(empty_expression, Warnings),
+    Response = beamtalk_repl_json:format_error_with_warnings(empty_expression, Warnings),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(<<"Empty expression">>, maps:get(<<"message">>, Decoded)),
@@ -785,7 +785,7 @@ format_error_with_warnings_multiple_warnings_test() ->
 format_error_with_warnings_beamtalk_error_test() ->
     Error = beamtalk_error:new(does_not_understand, 'Integer'),
     ErrorWithSel = beamtalk_error:with_selector(Error, foo),
-    Response = beamtalk_repl_server:format_error_with_warnings(ErrorWithSel, [<<"hint">>]),
+    Response = beamtalk_repl_json:format_error_with_warnings(ErrorWithSel, [<<"hint">>]),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
     Message = maps:get(<<"message">>, Decoded),
@@ -795,20 +795,20 @@ format_error_with_warnings_beamtalk_error_test() ->
 %%% BT-520: format_docs tests
 
 format_docs_simple_test() ->
-    Response = beamtalk_repl_server:format_docs(<<"Counter is a class">>),
+    Response = beamtalk_repl_json:format_docs(<<"Counter is a class">>),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"docs">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(<<"Counter is a class">>, maps:get(<<"docs">>, Decoded)).
 
 format_docs_empty_test() ->
-    Response = beamtalk_repl_server:format_docs(<<>>),
+    Response = beamtalk_repl_json:format_docs(<<>>),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"docs">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(<<>>, maps:get(<<"docs">>, Decoded)).
 
 format_docs_multiline_test() ->
     Doc = <<"Counter\n\nA simple counter class.\nMethods: increment, decrement">>,
-    Response = beamtalk_repl_server:format_docs(Doc),
+    Response = beamtalk_repl_json:format_docs(Doc),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(Doc, maps:get(<<"docs">>, Decoded)).
 
@@ -894,38 +894,38 @@ parse_request_op_docs_with_selector_test() ->
 %%% BT-520: Additional format_error_message edge cases
 
 format_error_message_module_not_loaded_test() ->
-    Msg = beamtalk_repl_server:format_error_message({module_not_found, <<"Counter">>}),
+    Msg = beamtalk_repl_json:format_error_message({module_not_found, <<"Counter">>}),
     ?assert(binary:match(Msg, <<"Module not loaded">>) =/= nomatch).
 
 format_error_message_invalid_module_test() ->
-    Msg = beamtalk_repl_server:format_error_message({invalid_module, missing}),
+    Msg = beamtalk_repl_json:format_error_message({invalid_module, missing}),
     %% Falls through to generic formatter
     ?assert(is_binary(Msg)),
     ?assert(byte_size(Msg) > 0).
 
 format_error_message_unknown_actor_test() ->
-    Msg = beamtalk_repl_server:format_error_message({unknown_actor, "<0.1.0>"}),
+    Msg = beamtalk_repl_json:format_error_message({unknown_actor, "<0.1.0>"}),
     ?assert(is_binary(Msg)),
     ?assert(byte_size(Msg) > 0).
 
 format_error_message_invalid_pid_test() ->
-    Msg = beamtalk_repl_server:format_error_message({invalid_pid, "not-a-pid"}),
+    Msg = beamtalk_repl_json:format_error_message({invalid_pid, "not-a-pid"}),
     ?assert(is_binary(Msg)),
     ?assert(byte_size(Msg) > 0).
 
 format_error_message_class_not_found_test() ->
     %% Ensure the atom exists first
     _ = 'NonExistentClass',
-    Msg = beamtalk_repl_server:format_error_message({class_not_found, 'NonExistentClass'}),
+    Msg = beamtalk_repl_json:format_error_message({class_not_found, 'NonExistentClass'}),
     ?assert(binary:match(Msg, <<"Unknown class">>) =/= nomatch),
     ?assert(binary:match(Msg, <<":modules">>) =/= nomatch).
 
 format_error_message_class_not_found_binary_test() ->
-    Msg = beamtalk_repl_server:format_error_message({class_not_found, <<"Foo">>}),
+    Msg = beamtalk_repl_json:format_error_message({class_not_found, <<"Foo">>}),
     ?assert(binary:match(Msg, <<"Unknown class">>) =/= nomatch).
 
 format_error_message_method_not_found_test() ->
-    Msg = beamtalk_repl_server:format_error_message({method_not_found, 'Integer', <<"+:">>}),
+    Msg = beamtalk_repl_json:format_error_message({method_not_found, 'Integer', <<"+:">>}),
     ?assert(binary:match(Msg, <<"Integer">>) =/= nomatch),
     ?assert(binary:match(Msg, <<"does not understand">>) =/= nomatch).
 
@@ -933,14 +933,14 @@ format_error_message_wrapped_exception_test() ->
     Error = beamtalk_error:new(does_not_understand, 'Counter'),
     ErrorWithSel = beamtalk_error:with_selector(Error, badMethod),
     Wrapped = #{'$beamtalk_class' => 'Exception', error => ErrorWithSel},
-    Msg = beamtalk_repl_server:format_error_message(Wrapped),
+    Msg = beamtalk_repl_json:format_error_message(Wrapped),
     ?assert(binary:match(Msg, <<"Exception">>) =/= nomatch),
     ?assert(binary:match(Msg, <<"Counter">>) =/= nomatch).
 
 format_error_message_eval_error_wrapped_exception_test() ->
     Error = beamtalk_error:new(type_error, 'String'),
     Wrapped = #{'$beamtalk_class' => 'TypeError', error => Error},
-    Msg = beamtalk_repl_server:format_error_message({eval_error, error, Wrapped}),
+    Msg = beamtalk_repl_json:format_error_message({eval_error, error, Wrapped}),
     ?assert(binary:match(Msg, <<"TypeError">>) =/= nomatch).
 
 %%% BT-520: term_to_json additional edge cases
@@ -949,49 +949,49 @@ term_to_json_future_pending_test() ->
     %% Simulate a future by spawning a process in beamtalk_future:pending/1
     Pid = beamtalk_future:new(),
     timer:sleep(50),
-    Result = beamtalk_repl_server:term_to_json(Pid),
+    Result = beamtalk_repl_json:term_to_json(Pid),
     ?assertEqual(<<"#Future<pending>">>, Result),
     beamtalk_future:resolve(Pid, ok),
     exit(Pid, kill).
 
 term_to_json_nested_map_test() ->
     %% BT-535: Nested maps are pre-formatted as Beamtalk syntax
-    Result = beamtalk_repl_server:term_to_json(#{a => #{b => #{c => 42}}}),
+    Result = beamtalk_repl_json:term_to_json(#{a => #{b => #{c => 42}}}),
     ?assertEqual(<<"#{#a => #{#b => #{#c => 42}}}">>, Result).
 
 term_to_json_empty_map_test() ->
-    ?assertEqual(<<"#{}">>, beamtalk_repl_server:term_to_json(#{})).
+    ?assertEqual(<<"#{}">>, beamtalk_repl_json:term_to_json(#{})).
 
 term_to_json_map_with_mixed_keys_test() ->
     %% BT-535: Mixed keys are formatted as Beamtalk syntax
-    Result = beamtalk_repl_server:term_to_json(#{atom_key => 1, <<"bin_key">> => 2}),
+    Result = beamtalk_repl_json:term_to_json(#{atom_key => 1, <<"bin_key">> => 2}),
     ?assert(is_binary(Result)),
     ?assert(binary:match(Result, <<"#atom_key => 1">>) =/= nomatch),
     ?assert(binary:match(Result, <<"bin_key => 2">>) =/= nomatch).
 
 term_to_json_single_element_tuple_test() ->
-    Result = beamtalk_repl_server:term_to_json({only}),
+    Result = beamtalk_repl_json:term_to_json({only}),
     %% BT-536: Tuples formatted with symbol notation for atoms
     ?assertEqual(<<"{#only}">>, Result).
 
 term_to_json_large_tuple_test() ->
-    Result = beamtalk_repl_server:term_to_json({a, b, c, d, e}),
+    Result = beamtalk_repl_json:term_to_json({a, b, c, d, e}),
     %% BT-536: Tuples formatted with symbol notation for atoms
     ?assertEqual(<<"{#a, #b, #c, #d, #e}">>, Result).
 
 term_to_json_mixed_tuple_test() ->
     %% BT-536: Tuple with mixed types: integer, atom, string
-    Result = beamtalk_repl_server:term_to_json({ok, 42, <<"hello">>}),
+    Result = beamtalk_repl_json:term_to_json({ok, 42, <<"hello">>}),
     ?assertEqual(<<"{#ok, 42, hello}">>, Result).
 
 term_to_json_empty_tuple_test() ->
     %% BT-536: Empty tuple
-    Result = beamtalk_repl_server:term_to_json({}),
+    Result = beamtalk_repl_json:term_to_json({}),
     ?assertEqual(<<"{}">>, Result).
 
 term_to_json_nested_list_with_maps_test() ->
     %% BT-535: Maps in lists are pre-formatted as strings
-    Result = beamtalk_repl_server:term_to_json([#{a => 1}, #{b => 2}]),
+    Result = beamtalk_repl_json:term_to_json([#{a => 1}, #{b => 2}]),
     ?assertEqual(2, length(Result)),
     [First, Second] = Result,
     ?assertEqual(<<"#{#a => 1}">>, First),
@@ -1000,7 +1000,7 @@ term_to_json_nested_list_with_maps_test() ->
 term_to_json_list_with_pids_test() ->
     Parent = self(),
     Pid = spawn(fun() -> receive stop -> Parent ! done end end),
-    Result = beamtalk_repl_server:term_to_json([Pid, 42]),
+    Result = beamtalk_repl_json:term_to_json([Pid, 42]),
     ?assertEqual(2, length(Result)),
     [PidJson, NumJson] = Result,
     ?assert(binary:match(PidJson, <<"#Actor<">>) =/= nomatch),
@@ -1010,27 +1010,27 @@ term_to_json_list_with_pids_test() ->
 
 term_to_json_reference_test() ->
     Ref = make_ref(),
-    Result = beamtalk_repl_server:term_to_json(Ref),
+    Result = beamtalk_repl_json:term_to_json(Ref),
     ?assert(is_binary(Result)),
     ?assert(byte_size(Result) > 0).
 
 term_to_json_port_test() ->
     %% Create a port deterministically so the test doesn't depend on environment state
     Port = open_port({spawn, "true"}, []),
-    Result = beamtalk_repl_server:term_to_json(Port),
+    Result = beamtalk_repl_json:term_to_json(Port),
     ?assert(is_binary(Result)),
     catch port_close(Port).
 
 %%% BT-520: format_response fallback/crash safety tests
 
 format_response_deeply_nested_test() ->
-    Response = beamtalk_repl_server:format_response([1, [2, [3, [4]]]]),
+    Response = beamtalk_repl_json:format_response([1, [2, [3, [4]]]]),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)).
 
 format_response_with_warnings_error_fallback_test() ->
     %% Even bad values should produce valid JSON via fallback
-    Response = beamtalk_repl_server:format_response_with_warnings(42, []),
+    Response = beamtalk_repl_json:format_response_with_warnings(42, []),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)).
 
@@ -1038,7 +1038,7 @@ format_response_with_warnings_error_fallback_test() ->
 
 format_error_with_warnings_fallback_test() ->
     %% Generic atom errors should still produce valid JSON with warnings
-    Response = beamtalk_repl_server:format_error_with_warnings(
+    Response = beamtalk_repl_json:format_error_with_warnings(
         some_bizarre_error, [<<"w1">>]),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
@@ -1064,7 +1064,7 @@ format_modules_multiple_test() ->
             time_ago => "10 seconds ago"
         }}
     ],
-    Response = beamtalk_repl_server:format_modules(Modules),
+    Response = beamtalk_repl_json:format_modules(Modules),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"modules">>, maps:get(<<"type">>, Decoded)),
     ModList = maps:get(<<"modules">>, Decoded),
@@ -1123,19 +1123,19 @@ parse_request_type_kill_test() ->
 %%% BT-520: format_bindings with non-atom key types (covering lines 640-642)
 
 format_bindings_list_key_test() ->
-    Response = beamtalk_repl_server:format_bindings(#{"myVar" => 42}),
+    Response = beamtalk_repl_json:format_bindings(#{"myVar" => 42}),
     Decoded = jsx:decode(Response, [return_maps]),
     Bindings = maps:get(<<"bindings">>, Decoded),
     ?assertEqual(42, maps:get(<<"myVar">>, Bindings)).
 
 format_bindings_binary_key_test() ->
-    Response = beamtalk_repl_server:format_bindings(#{<<"binKey">> => "hello"}),
+    Response = beamtalk_repl_json:format_bindings(#{<<"binKey">> => "hello"}),
     Decoded = jsx:decode(Response, [return_maps]),
     Bindings = maps:get(<<"bindings">>, Decoded),
     ?assertEqual(<<"hello">>, maps:get(<<"binKey">>, Bindings)).
 
 format_bindings_integer_key_test() ->
-    Response = beamtalk_repl_server:format_bindings(#{99 => true}),
+    Response = beamtalk_repl_json:format_bindings(#{99 => true}),
     Decoded = jsx:decode(Response, [return_maps]),
     Bindings = maps:get(<<"bindings">>, Decoded),
     ?assertEqual(true, maps:get(<<"99">>, Bindings)).
@@ -1145,7 +1145,7 @@ format_bindings_integer_key_test() ->
 term_to_json_list_with_bad_unicode_test() ->
     %% A list with high codepoints that fail characters_to_binary
     %% This should fall back to io_lib:format
-    Result = beamtalk_repl_server:term_to_json([16#FFFF, 16#FFFE]),
+    Result = beamtalk_repl_json:term_to_json([16#FFFF, 16#FFFE]),
     ?assert(is_list(Result) orelse is_binary(Result)).
 
 %%% BT-520: term_to_json with class object display (covering line 817)
@@ -1154,7 +1154,7 @@ term_to_json_beamtalk_class_object_test() ->
     %% A class object has Class that is a class name
     %% We need beamtalk_object_class to be accessible; test the tuple pattern
     Pid = spawn(fun() -> receive _ -> ok end end),
-    Result = beamtalk_repl_server:term_to_json({beamtalk_object, 'TestClassName', some_module, Pid}),
+    Result = beamtalk_repl_json:term_to_json({beamtalk_object, 'TestClassName', some_module, Pid}),
     %% Should either be a class display name or #Actor<...> format
     ?assert(is_binary(Result)),
     exit(Pid, kill).
@@ -1162,13 +1162,13 @@ term_to_json_beamtalk_class_object_test() ->
 %%% BT-520: format_name edge cases (covering lines 1041, 1045)
 
 format_error_message_with_list_name_test() ->
-    Msg = beamtalk_repl_server:format_error_message({file_not_found, "test/file.bt"}),
+    Msg = beamtalk_repl_json:format_error_message({file_not_found, "test/file.bt"}),
     ?assert(binary:match(Msg, <<"File not found">>) =/= nomatch),
     ?assert(binary:match(Msg, <<"test/file.bt">>) =/= nomatch).
 
 format_error_message_with_complex_reason_test() ->
     %% Triggers format_name fallback with non-atom/binary/list
-    Msg = beamtalk_repl_server:format_error_message({read_error, {posix, enoent}}),
+    Msg = beamtalk_repl_json:format_error_message({read_error, {posix, enoent}}),
     ?assert(binary:match(Msg, <<"Failed to read file">>) =/= nomatch).
 
 %%% BT-520: format_response with port value test
@@ -1176,7 +1176,7 @@ format_error_message_with_complex_reason_test() ->
 format_response_with_unserializable_test() ->
     %% Port references are handled by term_to_json's fallback via io_lib:format
     Port = open_port({spawn, "true"}, []),
-    Response = beamtalk_repl_server:format_response(Port),
+    Response = beamtalk_repl_json:format_response(Port),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
     catch port_close(Port).
@@ -1697,27 +1697,27 @@ tcp_clone_uniqueness_test(Port) ->
 %%% BT-523: format_error_message additional coverage
 
 format_error_message_unknown_actor_v2_test() ->
-    Msg = beamtalk_repl_server:format_error_message({unknown_actor, "<0.99.0>"}),
+    Msg = beamtalk_repl_json:format_error_message({unknown_actor, "<0.99.0>"}),
     ?assert(is_binary(Msg)),
     ?assert(byte_size(Msg) > 0).
 
 format_error_message_invalid_pid_v2_test() ->
-    Msg = beamtalk_repl_server:format_error_message({invalid_pid, "garbage"}),
+    Msg = beamtalk_repl_json:format_error_message({invalid_pid, "garbage"}),
     ?assert(is_binary(Msg)),
     ?assert(byte_size(Msg) > 0).
 
 format_error_message_load_error_atom_test() ->
-    Msg = beamtalk_repl_server:format_error_message({load_error, {bad_module, counter}}),
+    Msg = beamtalk_repl_json:format_error_message({load_error, {bad_module, counter}}),
     ?assert(binary:match(Msg, <<"Failed to load bytecode">>) =/= nomatch).
 
 format_error_message_read_error_enoent_test() ->
-    Msg = beamtalk_repl_server:format_error_message({read_error, enoent}),
+    Msg = beamtalk_repl_json:format_error_message({read_error, enoent}),
     ?assert(binary:match(Msg, <<"Failed to read file">>) =/= nomatch).
 
 format_error_message_empty_expression_v2_test() ->
-    Msg = beamtalk_repl_server:format_error_message(empty_expression),
+    Msg = beamtalk_repl_json:format_error_message(empty_expression),
     ?assertEqual(<<"Empty expression">>, Msg).
 
 format_error_message_timeout_v2_test() ->
-    Msg = beamtalk_repl_server:format_error_message(timeout),
+    Msg = beamtalk_repl_json:format_error_message(timeout),
     ?assertEqual(<<"Request timed out">>, Msg).
