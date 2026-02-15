@@ -86,7 +86,7 @@ fn generate_integer_bif(selector: &str, params: &[String]) -> Option<Document<'s
         "bitXor:" => binary_bif("bxor", params),
         "bitShift:" => {
             // Positive N shifts left, negative shifts right
-            let p0 = params.first()?;
+            let p0 = params.first()?.clone();
             Some(docvec![
                 "case call 'erlang':'>='(",
                 p0.clone(),
@@ -95,7 +95,7 @@ fn generate_integer_bif(selector: &str, params: &[String]) -> Option<Document<'s
                 p0.clone(),
                 ") \
                  'false' when 'true' -> call 'erlang':'bsr'(Self, call 'erlang':'-'(0, ",
-                p0.clone(),
+                p0,
                 ")) end",
             ])
         }
@@ -1142,11 +1142,11 @@ fn core_erlang_binary_string(s: &str) -> Document<'static> {
 }
 
 /// Returns a binary BIF call: `call 'erlang':'op'(Self, Param0)`
-fn binary_bif(erlang_op: &str, params: &[String]) -> Option<Document<'static>> {
+fn binary_bif(erlang_op: &'static str, params: &[String]) -> Option<Document<'static>> {
     let p0 = params.first()?;
     Some(docvec![
         "call 'erlang':'",
-        erlang_op.to_string(),
+        erlang_op,
         "'(Self, ",
         p0.clone(),
         ")",
