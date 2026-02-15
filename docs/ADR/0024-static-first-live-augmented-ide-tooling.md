@@ -150,6 +150,8 @@ Static analysis is the primary source of truth. It works without any running sys
 - Go-to-definition via first-assignment heuristic
 - Cached per file in `SimpleLanguageService`
 
+**Known issue: semantic analysis divergence.** Principle 13 states "the compiler IS the language service," and lexing, parsing, and codegen are genuinely shared. However, semantic analysis has diverged: `beamtalk build` calls `semantic_analysis::analyse()`, while `SimpleLanguageService` calls `ClassHierarchy::build()` separately and routes diagnostics through a different path. Primitive validation is also duplicated in the daemon. This means a diagnostic that fires in `beamtalk build` may not appear in the IDE, and vice versa. Phase 1 should unify semantic analysis — make `analyse()` the single path that both build and language service consume, with `ClassHierarchy` as an output of analysis rather than a parallel computation.
+
 **Tier 2 (cross-file, to be built):**
 - Project-wide symbol index (class names, method selectors, globals)
 - Cross-file `ClassHierarchy` merging (class defined in A, used in B)
