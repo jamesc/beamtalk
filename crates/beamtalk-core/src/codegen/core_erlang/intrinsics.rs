@@ -421,7 +421,7 @@ impl CoreErlangGenerator {
     /// let _ = call 'beamtalk_actor':'async_send'(Pid, Selector, Arguments, Future) in
     /// Future
     /// ```
-    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::too_many_lines)] // one arm per ProtoObject intrinsic message
     pub(in crate::codegen::core_erlang) fn try_generate_protoobject_message(
         &mut self,
         receiver: &Expression,
@@ -985,6 +985,7 @@ mod tests {
         let params: Vec<BlockParameter> = (0..arity)
             .map(|i| {
                 #[allow(clippy::cast_possible_truncation)]
+                // synthetic span positions for generated block params
                 let span = Span::new((i * 2 + 1) as u32, (i * 2 + 2) as u32);
                 BlockParameter::new(format!("p{i}"), span)
             })
