@@ -1177,7 +1177,7 @@ impl CoreErlangGenerator {
             if let Some(code) =
                 primitive_implementations::generate_primitive_bif(&class_name, name, &params)
             {
-                return Ok(Document::String(code));
+                return Ok(code);
             }
         }
 
@@ -1188,9 +1188,9 @@ impl CoreErlangGenerator {
         let runtime_module = PrimitiveBindingTable::runtime_module_for_class(&class_name);
 
         let params_str = self.current_method_params.join(", ");
-        Ok(docvec![format!(
+        Ok(Document::String(format!(
             "call '{runtime_module}':'dispatch'('{name}', [{params_str}], Self)"
-        )])
+        )))
     }
 }
 

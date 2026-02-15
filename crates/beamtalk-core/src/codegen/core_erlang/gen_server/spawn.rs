@@ -74,9 +74,9 @@ impl CoreErlangGenerator {
         let ok_body = if has_initialize {
             Self::spawn_initialize_block_doc(&class_name, &module_name)
         } else {
-            docvec![format!(
+            Document::String(format!(
                 "{{'beamtalk_object', '{class_name}', '{module_name}', Pid}}"
-            )]
+            ))
         };
 
         let doc = docvec![
@@ -197,9 +197,9 @@ impl CoreErlangGenerator {
         let ok_body = if has_initialize {
             Self::spawn_initialize_block_doc(&class_name, &module_name)
         } else {
-            docvec![format!(
+            Document::String(format!(
                 "{{'beamtalk_object', '{class_name}', '{module_name}', Pid}}"
-            )]
+            ))
         };
 
         // BT-473: Validate InitArgs is a map before passing to gen_server
