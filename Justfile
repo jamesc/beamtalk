@@ -45,6 +45,12 @@ build-rust-release:
     @cargo build --all-targets --release --quiet
     @echo "✅ Rust release build complete"
 
+# Build the LSP server
+build-lsp:
+    @echo "🔨 Building LSP server..."
+    @cargo build -p beamtalk-lsp --quiet
+    @echo "✅ LSP server built: target/debug/beamtalk-lsp"
+
 # Build Erlang runtime
 build-erlang:
     @echo "🔨 Building Erlang runtime..."
