@@ -75,8 +75,10 @@ pub struct ClassInfo {
     pub is_abstract: bool,
     /// State (instance variable) names.
     pub state: Vec<EcoString>,
-    /// Methods defined directly on this class.
+    /// Methods defined directly on this class (instance-side).
     pub methods: Vec<MethodInfo>,
+    /// Class-side methods defined on this class.
+    pub class_methods: Vec<MethodInfo>,
 }
 
 impl ClassInfo {
@@ -125,6 +127,11 @@ impl ClassHierarchy {
     #[must_use]
     pub fn has_class(&self, name: &str) -> bool {
         self.classes.contains_key(name)
+    }
+
+    /// Returns an iterator over all class names in the hierarchy.
+    pub fn class_names(&self) -> impl Iterator<Item = &EcoString> {
+        self.classes.keys()
     }
 
     /// Returns true if the named class is abstract (cannot be instantiated).
@@ -190,6 +197,45 @@ impl ClassHierarchy {
                         }
                     } else {
                         // Before/After/Around methods are always collected
+                        methods.push(method.clone());
+                    }
+                }
+                current = info
+                    .superclass
+                    .as_ref()
+                    .map(std::string::ToString::to_string);
+            } else {
+                break;
+            }
+        }
+
+        methods
+    }
+
+    /// Returns all class-side methods for a class, walking the MRO.
+    ///
+    /// Class-side methods are defined with the `class` prefix in Beamtalk
+    /// (e.g., `class spawn => ...`). They are methods on the class object itself,
+    /// not on instances.
+    #[must_use]
+    pub fn all_class_methods(&self, class_name: &str) -> Vec<MethodInfo> {
+        let mut seen_selectors: HashMap<EcoString, usize> = HashMap::new();
+        let mut methods = Vec::new();
+        let mut visited = HashSet::new();
+
+        let mut current = Some(class_name.to_string());
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break;
+            }
+            if let Some(info) = self.classes.get(name.as_str()) {
+                for method in &info.class_methods {
+                    if method.kind == MethodKind::Primary {
+                        if !seen_selectors.contains_key(&method.selector) {
+                            seen_selectors.insert(method.selector.clone(), methods.len());
+                            methods.push(method.clone());
+                        }
+                    } else {
                         methods.push(method.clone());
                     }
                 }
@@ -311,6 +357,17 @@ impl ClassHierarchy {
                 state: class.state.iter().map(|s| s.name.name.clone()).collect(),
                 methods: class
                     .methods
+                    .iter()
+                    .map(|m| MethodInfo {
+                        selector: m.selector.name(),
+                        arity: m.selector.arity(),
+                        kind: m.kind,
+                        defined_in: class.name.name.clone(),
+                        is_sealed: m.is_sealed,
+                    })
+                    .collect(),
+                class_methods: class
+                    .class_methods
                     .iter()
                     .map(|m| MethodInfo {
                         selector: m.selector.name(),
@@ -906,6 +963,7 @@ mod tests {
                 is_abstract: false,
                 state: vec![],
                 methods: vec![builtin_method("methodA", 0, "A")],
+                class_methods: vec![],
             },
         );
         h.classes.insert(
@@ -917,6 +975,7 @@ mod tests {
                 is_abstract: false,
                 state: vec![],
                 methods: vec![builtin_method("methodB", 0, "B")],
+                class_methods: vec![],
             },
         );
 

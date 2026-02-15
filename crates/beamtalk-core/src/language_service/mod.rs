@@ -51,7 +51,8 @@ mod value_objects;
 
 // Re-export value objects at the module level
 pub use value_objects::{
-    ByteOffset, Completion, CompletionKind, Diagnostic, HoverInfo, Location, Position,
+    ByteOffset, Completion, CompletionKind, Diagnostic, DocumentSymbol, DocumentSymbolKind,
+    HoverInfo, Location, Position,
 };
 
 use crate::ast::{Expression, Identifier, Module};
@@ -97,6 +98,11 @@ pub trait LanguageService {
     ///
     /// Should respond in <500ms for project-wide search.
     fn find_references(&self, file: &Utf8PathBuf, position: Position) -> Vec<Location>;
+
+    /// Returns document symbols (outline) for a file.
+    ///
+    /// Should respond in <50ms for typical file sizes.
+    fn document_symbols(&self, file: &Utf8PathBuf) -> Vec<DocumentSymbol>;
 }
 
 /// A simple in-memory language service implementation.
@@ -363,6 +369,7 @@ impl LanguageService for SimpleLanguageService {
             &file_data.module,
             &file_data.source,
             position,
+            &file_data.class_hierarchy,
         )
     }
 
@@ -398,6 +405,14 @@ impl LanguageService for SimpleLanguageService {
             .into_iter()
             .map(|span| Location::new(file.clone(), span))
             .collect()
+    }
+
+    fn document_symbols(&self, file: &Utf8PathBuf) -> Vec<DocumentSymbol> {
+        let Some(file_data) = self.get_file(file) else {
+            return Vec::new();
+        };
+
+        crate::queries::document_symbols_provider::compute_document_symbols(&file_data.module)
     }
 }
 

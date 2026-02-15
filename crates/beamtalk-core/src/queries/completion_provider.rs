@@ -27,11 +27,22 @@
 //! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
 //! - LSP specification: Language Server Protocol completion requests
 
-use crate::ast::{Expression, Module};
+use crate::ast::{ClassDefinition, Expression, Module};
 use crate::language_service::{Completion, CompletionKind, Position};
 use crate::semantic_analysis::ClassHierarchy;
 use ecow::EcoString;
 use std::collections::HashSet;
+
+/// The class context at the cursor position.
+#[derive(Debug, Clone)]
+enum ClassContext<'a> {
+    /// Cursor is inside an instance method of the named class.
+    InstanceMethod(&'a ClassDefinition),
+    /// Cursor is inside a class-side method of the named class.
+    ClassMethod(&'a ClassDefinition),
+    /// Cursor is at top level (not inside any class).
+    TopLevel,
+}
 
 /// Computes code completions at a given position in a module.
 ///
@@ -71,11 +82,20 @@ pub fn compute_completions(
     hierarchy: &ClassHierarchy,
 ) -> Vec<Completion> {
     // Validate position is within bounds
-    if position.to_offset(source).is_none() {
-        return Vec::new();
-    }
+    let offset = match position.to_offset(source) {
+        Some(o) => {
+            // Source files won't exceed u32::MAX bytes
+            #[expect(clippy::cast_possible_truncation, reason = "source files < 4GB")]
+            let offset = o as u32;
+            offset
+        }
+        None => return Vec::new(),
+    };
 
     let mut completions = Vec::new();
+
+    // Determine class context at cursor position
+    let context = find_class_context(module, offset);
 
     // Add keyword completions
     add_keyword_completions(&mut completions);
@@ -83,8 +103,11 @@ pub fn compute_completions(
     // Add identifiers from the current scope
     add_identifier_completions(module, &mut completions);
 
-    // Add message completions from class hierarchy (includes inherited methods)
-    add_hierarchy_completions(module, hierarchy, &mut completions);
+    // Add class names as completions
+    add_class_name_completions(module, hierarchy, &mut completions);
+
+    // Add message completions from class hierarchy (context-aware)
+    add_hierarchy_completions(module, hierarchy, &context, &mut completions);
 
     // Remove duplicates
     deduplicate_completions(&mut completions);
@@ -122,6 +145,69 @@ fn add_identifier_completions(module: &Module, completions: &mut Vec<Completion>
     // Add them as completions
     for ident in identifiers {
         completions.push(Completion::new(ident, CompletionKind::Variable));
+    }
+}
+
+/// Determines the class context at a given byte offset.
+///
+/// Walks the module's class definitions to find if the offset is inside
+/// an instance method or a class-side method.
+fn find_class_context(module: &Module, offset: u32) -> ClassContext<'_> {
+    for class in &module.classes {
+        // Check instance methods
+        for method in &class.methods {
+            let span = method.span;
+            if offset >= span.start() && offset < span.end() {
+                return ClassContext::InstanceMethod(class);
+            }
+        }
+        // Check class-side methods
+        for method in &class.class_methods {
+            let span = method.span;
+            if offset >= span.start() && offset < span.end() {
+                return ClassContext::ClassMethod(class);
+            }
+        }
+    }
+    ClassContext::TopLevel
+}
+
+/// Adds class names as completions (from module + hierarchy builtins).
+fn add_class_name_completions(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    completions: &mut Vec<Completion>,
+) {
+    let mut seen = HashSet::new();
+
+    // Add user-defined classes from the module (with richer documentation)
+    for class in &module.classes {
+        let name = &class.name.name;
+        if seen.insert(name.clone()) {
+            let doc = class.superclass.as_ref().map_or_else(
+                || format!("Class: {name}"),
+                |s| format!("Class: {name} (extends {})", s.name),
+            );
+            completions.push(
+                Completion::new(name.as_str(), CompletionKind::Class).with_documentation(doc),
+            );
+        }
+    }
+
+    // Add all known classes from the hierarchy (builtins + any others)
+    for class_name in hierarchy.class_names() {
+        if seen.insert(class_name.clone()) {
+            let doc = hierarchy
+                .get_class(class_name.as_str())
+                .and_then(|info| info.superclass.as_ref())
+                .map_or_else(
+                    || format!("Class: {class_name}"),
+                    |s| format!("Class: {class_name} (extends {s})"),
+                );
+            completions.push(
+                Completion::new(class_name.as_str(), CompletionKind::Class).with_documentation(doc),
+            );
+        }
     }
 }
 
@@ -191,37 +277,96 @@ fn collect_identifiers_from_expr(expr: &Expression, identifiers: &mut HashSet<Ec
 
 /// Adds method completions from the class hierarchy.
 ///
-/// Uses the provided `ClassHierarchy` to include all available methods
-/// (local + inherited) for classes defined in the module, plus common
-/// Object/ProtoObject methods for general use.
+/// Uses the cursor's class context to provide relevant completions:
+/// - In an instance method: instance methods of the enclosing class
+/// - In a class method: class-side methods of the enclosing class
+/// - At top level: all methods from all module classes + Object methods
 fn add_hierarchy_completions(
     module: &Module,
     hierarchy: &ClassHierarchy,
+    context: &ClassContext<'_>,
     completions: &mut Vec<Completion>,
 ) {
     let mut seen = HashSet::new();
 
-    // Add methods from classes defined in this module (local + inherited)
-    for class in &module.classes {
-        for method in hierarchy.all_methods(class.name.name.as_str()) {
-            if seen.insert(method.selector.clone()) {
-                let doc = format!("{}#{}", method.defined_in, method.selector);
+    match context {
+        ClassContext::InstanceMethod(class) => {
+            // Add instance methods for the enclosing class (including inherited)
+            let class_name = class.name.name.as_str();
+            for method in hierarchy.all_methods(class_name) {
+                if seen.insert(method.selector.clone()) {
+                    let doc = format!("{}#{}", method.defined_in, method.selector);
+                    completions.push(
+                        Completion::new(method.selector.as_str(), CompletionKind::Function)
+                            .with_documentation(doc),
+                    );
+                }
+            }
+            // Add state variable names as field completions
+            for state_var in &class.state {
                 completions.push(
-                    Completion::new(method.selector.as_str(), CompletionKind::Function)
-                        .with_documentation(doc),
+                    Completion::new(state_var.name.name.as_str(), CompletionKind::Field)
+                        .with_documentation(format!("Field: {}", state_var.name.name)),
                 );
             }
         }
-    }
+        ClassContext::ClassMethod(class) => {
+            // Add class-side methods for the enclosing class (including inherited)
+            let class_name = class.name.name.as_str();
+            for method in hierarchy.all_class_methods(class_name) {
+                if seen.insert(method.selector.clone()) {
+                    let doc = format!("class {}#{}", method.defined_in, method.selector);
+                    completions.push(
+                        Completion::new(method.selector.as_str(), CompletionKind::Function)
+                            .with_documentation(doc),
+                    );
+                }
+            }
+            // Also include instance methods (class methods can access them via instances)
+            for method in hierarchy.all_methods(class_name) {
+                if seen.insert(method.selector.clone()) {
+                    let doc = format!("{}#{}", method.defined_in, method.selector);
+                    completions.push(
+                        Completion::new(method.selector.as_str(), CompletionKind::Function)
+                            .with_documentation(doc),
+                    );
+                }
+            }
+        }
+        ClassContext::TopLevel => {
+            // Add methods from all classes defined in the module
+            for class in &module.classes {
+                for method in hierarchy.all_methods(class.name.name.as_str()) {
+                    if seen.insert(method.selector.clone()) {
+                        let doc = format!("{}#{}", method.defined_in, method.selector);
+                        completions.push(
+                            Completion::new(method.selector.as_str(), CompletionKind::Function)
+                                .with_documentation(doc),
+                        );
+                    }
+                }
+                // Also add class-side methods for top-level completions
+                for method in hierarchy.all_class_methods(class.name.name.as_str()) {
+                    if seen.insert(method.selector.clone()) {
+                        let doc = format!("class {}#{}", method.defined_in, method.selector);
+                        completions.push(
+                            Completion::new(method.selector.as_str(), CompletionKind::Function)
+                                .with_documentation(doc),
+                        );
+                    }
+                }
+            }
 
-    // Always include common Object/ProtoObject methods for general completions
-    for method in hierarchy.all_methods("Object") {
-        if seen.insert(method.selector.clone()) {
-            let doc = format!("{}#{}", method.defined_in, method.selector);
-            completions.push(
-                Completion::new(method.selector.as_str(), CompletionKind::Function)
-                    .with_documentation(doc),
-            );
+            // Always include common Object/ProtoObject methods for general completions
+            for method in hierarchy.all_methods("Object") {
+                if seen.insert(method.selector.clone()) {
+                    let doc = format!("{}#{}", method.defined_in, method.selector);
+                    completions.push(
+                        Completion::new(method.selector.as_str(), CompletionKind::Function)
+                            .with_documentation(doc),
+                    );
+                }
+            }
         }
     }
 }
@@ -391,6 +536,115 @@ mod tests {
         assert!(
             completions.iter().any(|c| c.label == "class"),
             "Should include inherited 'class' from ProtoObject"
+        );
+    }
+
+    #[test]
+    fn completions_in_instance_method_include_instance_methods() {
+        // Position inside the `increment` method body
+        let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0;
+
+        // Position at the method body (after "=> ")
+        let completions = compute_completions(&module, source, Position::new(3, 17), &hierarchy);
+
+        // Should include the class's own method
+        assert!(
+            completions.iter().any(|c| c.label == "increment"),
+            "Should include own method 'increment'"
+        );
+        // Should include inherited methods
+        assert!(
+            completions.iter().any(|c| c.label == "isNil"),
+            "Should include inherited 'isNil' from Object"
+        );
+    }
+
+    #[test]
+    fn completions_in_instance_method_include_state_fields() {
+        let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0;
+
+        // Position inside the method body
+        let completions = compute_completions(&module, source, Position::new(3, 17), &hierarchy);
+
+        // Should include state variable as field completion
+        assert!(
+            completions
+                .iter()
+                .any(|c| c.label == "count" && c.kind == CompletionKind::Field),
+            "Should include state variable 'count' as Field"
+        );
+    }
+
+    #[test]
+    fn completions_include_class_names() {
+        let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0;
+
+        let completions = compute_completions(&module, source, Position::new(0, 0), &hierarchy);
+
+        // Should include user-defined class
+        assert!(
+            completions
+                .iter()
+                .any(|c| c.label == "Counter" && c.kind == CompletionKind::Class),
+            "Should include class name 'Counter'"
+        );
+        // Should include builtin classes
+        assert!(
+            completions
+                .iter()
+                .any(|c| c.label == "Integer" && c.kind == CompletionKind::Class),
+            "Should include builtin class 'Integer'"
+        );
+    }
+
+    #[test]
+    fn completions_in_class_method_include_class_methods() {
+        let source = "Actor subclass: Counter\n  state: count = 0\n\n  class withInitial: n => self new: #{count => n}\n\n  increment => self.count := self.count + 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0;
+
+        // Position inside the class method body (line 3, after "=> ")
+        let completions = compute_completions(&module, source, Position::new(3, 22), &hierarchy);
+
+        // Should include the class method itself
+        assert!(
+            completions.iter().any(|c| c.label == "withInitial:"),
+            "Should include class method 'withInitial:'"
+        );
+    }
+
+    #[test]
+    fn top_level_completions_include_class_side_methods() {
+        // When a class has class-side methods, top-level completions should include them
+        let source = "Actor subclass: Counter\n  state: count = 0\n\n  class withInitial: n => self new: #{count => n}\n\n  increment => self.count := self.count + 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0;
+
+        // Position at top level (line 0 is part of class definition,
+        // but completions at any position include all module methods)
+        // Use Position(0, 0) which is before class keyword
+        let completions = compute_completions(&module, source, Position::new(0, 0), &hierarchy);
+
+        // Should include class-side methods from module classes
+        assert!(
+            completions.iter().any(|c| c.label == "withInitial:"),
+            "Should include class-side method 'withInitial:'"
+        );
+        // Should also include instance methods
+        assert!(
+            completions.iter().any(|c| c.label == "increment"),
+            "Should include instance method 'increment'"
         );
     }
 }
