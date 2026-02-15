@@ -11,7 +11,7 @@ array with: [:x | x + 1] and: [:y | y * 2]
 calculator compute: 2 + 3 * 4 with: 10 - 5 / 2
 
 // Mixed complexity
-server connect: 'localhost' port: 8080 + offset timeout: maxTime * 2
+server connect: "localhost" port: 8080 + offset timeout: maxTime * 2
 
 // Nested blocks and operators
 processor transform: [:x | x * factor] range: start to: start + count step: increment + 1

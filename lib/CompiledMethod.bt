@@ -20,7 +20,7 @@ sealed Object subclass: CompiledMethod
   /// ```beamtalk
   /// (Integer >> #+) selector       // => #+
   /// ```
-  selector => @primitive 'selector'
+  selector => @primitive "selector"
 
   /// Return the method source code as a string.
   ///
@@ -28,7 +28,7 @@ sealed Object subclass: CompiledMethod
   /// ```beamtalk
   /// (Integer >> #+) source
   /// ```
-  source => @primitive 'source'
+  source => @primitive "source"
 
   /// Return the number of arguments the method expects.
   ///
@@ -37,7 +37,7 @@ sealed Object subclass: CompiledMethod
   /// (Integer >> #+) argumentCount  // => 1
   /// (Integer >> #abs) argumentCount // => 0
   /// ```
-  argumentCount => @primitive 'argumentCount'
+  argumentCount => @primitive "argumentCount"
 
   /// Return a developer-readable string representation.
   ///
@@ -45,7 +45,7 @@ sealed Object subclass: CompiledMethod
   /// ```beamtalk
   /// (Integer >> #+) printString
   /// ```
-  printString => @primitive 'printString'
+  printString => @primitive "printString"
 
   /// Convert the compiled method to a string.
   ///
@@ -53,4 +53,4 @@ sealed Object subclass: CompiledMethod
   /// ```beamtalk
   /// (Integer >> #+) asString
   /// ```
-  asString => @primitive 'asString'
+  asString => @primitive "asString"

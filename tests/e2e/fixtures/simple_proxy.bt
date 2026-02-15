@@ -8,7 +8,7 @@ Actor subclass: SimpleProxy
   state: target = nil
   
   // Override class to return our class name
-  class => 'SimpleProxy'
+  class => "SimpleProxy"
   
   // Set the target for message forwarding
   setTarget: newTarget =>

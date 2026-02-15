@@ -21,7 +21,7 @@
 // => 99
 
 // nil as ExClass — catch all (backwards compat)
-[1 / 0] on: nil do: [:e | 'nil catches all']
+[1 / 0] on: nil do: [:e | "nil catches all"]
 // => nil catches all
 
 // ===========================================================================
@@ -78,7 +78,7 @@
 // => 42
 
 // Handler can return any type
-[1 / 0] on: Exception do: [:e | 'caught an error']
+[1 / 0] on: Exception do: [:e | "caught an error"]
 // => caught an error
 
 // ===========================================================================
@@ -90,50 +90,50 @@
 // => RuntimeError
 
 // TypeError for type errors (Tuple at: with non-integer argument)
-[#(1, 2, 3) at: 'hello'] on: Exception do: [:e | e class]
+[#(1, 2, 3) at: "hello"] on: Exception do: [:e | e class]
 // => TypeError
 
 // on: Error do: catches all Error subclasses (RuntimeError, TypeError, etc.)
-[42 noSuchMethod] on: Error do: [:e | 'caught by Error']
+[42 noSuchMethod] on: Error do: [:e | "caught by Error"]
 // => caught by Error
 
-[#(1, 2, 3) at: 'hello'] on: Error do: [:e | 'type caught by Error']
+[#(1, 2, 3) at: "hello"] on: Error do: [:e | "type caught by Error"]
 // => type caught by Error
 
 // on: RuntimeError do: catches only RuntimeError kinds
-[42 noSuchMethod] on: RuntimeError do: [:e | 'caught by RuntimeError']
+[42 noSuchMethod] on: RuntimeError do: [:e | "caught by RuntimeError"]
 // => caught by RuntimeError
 
 // on: TypeError do: catches only TypeError kinds
-[#(1, 2, 3) at: 'hello'] on: TypeError do: [:e | 'caught by TypeError']
+[#(1, 2, 3) at: "hello"] on: TypeError do: [:e | "caught by TypeError"]
 // => caught by TypeError
 
 // on: RuntimeError do: does NOT catch TypeError — falls through to outer handler
-[[#(1, 2, 3) at: 'hello'] on: RuntimeError do: [:e | 'wrong']] on: Exception do: [:e | 'correct']
+[[#(1, 2, 3) at: "hello"] on: RuntimeError do: [:e | "wrong"]] on: Exception do: [:e | "correct"]
 // => correct
 
 // on: TypeError do: does NOT catch RuntimeError — falls through to outer handler
-[[42 noSuchMethod] on: TypeError do: [:e | 'wrong']] on: Exception do: [:e | 'correct']
+[[42 noSuchMethod] on: TypeError do: [:e | "wrong"]] on: Exception do: [:e | "correct"]
 // => correct
 
 // on: Exception do: still catches everything
-[42 noSuchMethod] on: Exception do: [:e | 'exception catches all']
+[42 noSuchMethod] on: Exception do: [:e | "exception catches all"]
 // => exception catches all
 
-[#(1, 2, 3) at: 'hello'] on: Exception do: [:e | 'exception catches type too']
+[#(1, 2, 3) at: "hello"] on: Exception do: [:e | "exception catches type too"]
 // => exception catches type too
 
 // Exception hierarchy field access — kind preserved through hierarchy
 [42 noSuchMethod] on: RuntimeError do: [:e | e kind]
 // => does_not_understand
 
-[#(1, 2, 3) at: 'hello'] on: TypeError do: [:e | e kind]
+[#(1, 2, 3) at: "hello"] on: TypeError do: [:e | e kind]
 // => type_error
 
 // on: InstantiationError do: catches instantiation_error kinds
-[Integer new] on: InstantiationError do: [:e | 'caught instantiation']
+[Integer new] on: InstantiationError do: [:e | "caught instantiation"]
 // => caught instantiation
 
 // InstantiationError does NOT catch does_not_understand
-[[42 noSuchMethod] on: InstantiationError do: [:e | 'wrong']] on: Exception do: [:e | 'correct']
+[[42 noSuchMethod] on: InstantiationError do: [:e | "wrong"]] on: Exception do: [:e | "correct"]
 // => correct

@@ -5,7 +5,7 @@
 // Demonstrates subclassResponsibility pattern
 
 abstract Actor subclass: Shape
-  state: name = 'shape'
+  state: name = "shape"
 
   // Abstract method — subclasses must override
   area => self subclassResponsibility

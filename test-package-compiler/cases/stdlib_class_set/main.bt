@@ -8,30 +8,30 @@ sealed Object subclass: Set
   state: elements = #()
 
   // Size
-  size => @primitive 'size'
-  isEmpty => @primitive 'isEmpty'
+  size => @primitive "size"
+  isEmpty => @primitive "isEmpty"
 
   // Membership
-  includes: element => @primitive 'includes:'
+  includes: element => @primitive "includes:"
 
   // Modification (returns new Set)
-  add: element => @primitive 'add:'
-  remove: element => @primitive 'remove:'
+  add: element => @primitive "add:"
+  remove: element => @primitive "remove:"
 
   // Set operations (returns new Set)
-  union: other => @primitive 'union:'
-  intersection: other => @primitive 'intersection:'
-  difference: other => @primitive 'difference:'
+  union: other => @primitive "union:"
+  intersection: other => @primitive "intersection:"
+  difference: other => @primitive "difference:"
 
   // Predicates
-  isSubsetOf: other => @primitive 'isSubsetOf:'
+  isSubsetOf: other => @primitive "isSubsetOf:"
 
   // Conversion
-  asList => @primitive 'asList'
-  fromList: list => @primitive 'fromList:'
+  asList => @primitive "asList"
+  fromList: list => @primitive "fromList:"
 
   // Iteration
-  do: block => @primitive 'do:'
+  do: block => @primitive "do:"
 
   // Reflection
-  describe => 'a Set'
+  describe => "a Set"

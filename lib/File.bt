@@ -9,36 +9,36 @@
 ///
 /// ## Examples
 /// ```beamtalk
-/// File exists: 'test.txt'
-/// File readAll: 'test.txt'
-/// File writeAll: 'output.txt' contents: 'hello'
-/// (File lines: 'data.csv') do: [:line | Transcript show: line]
-/// File open: 'data.csv' do: [:handle | handle lines take: 10]
+/// File exists: "test.txt"
+/// File readAll: "test.txt"
+/// File writeAll: "output.txt" contents: "hello"
+/// (File lines: "data.csv") do: [:line | Transcript show: line]
+/// File open: "data.csv" do: [:handle | handle lines take: 10]
 /// ```
 Object subclass: File
   /// Test if a file exists at the given path (class method).
   ///
   /// ## Examples
   /// ```beamtalk
-  /// File exists: 'test.txt'   // => true or false
+  /// File exists: "test.txt"   // => true or false
   /// ```
-  class sealed exists: path => @primitive 'exists:'
+  class sealed exists: path => @primitive "exists:"
 
   /// Read the entire contents of a file as a string (class method).
   ///
   /// ## Examples
   /// ```beamtalk
-  /// File readAll: 'test.txt'  // => 'file contents...'
+  /// File readAll: "test.txt"  // => "file contents..."
   /// ```
-  class sealed readAll: path => @primitive 'readAll:'
+  class sealed readAll: path => @primitive "readAll:"
 
   /// Write text to a file, creating or overwriting it (class method).
   ///
   /// ## Examples
   /// ```beamtalk
-  /// File writeAll: 'output.txt' contents: 'hello'
+  /// File writeAll: "output.txt" contents: "hello"
   /// ```
-  class sealed writeAll: path contents: text => @primitive 'writeAll:contents:'
+  class sealed writeAll: path contents: text => @primitive "writeAll:contents:"
 
   /// Return a lazy Stream of lines from a file (class method).
   ///
@@ -51,10 +51,10 @@ Object subclass: File
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (File lines: 'data.csv') take: 5
-  /// (File lines: 'log.txt') select: [:l | l includes: 'ERROR']
+  /// (File lines: "data.csv") take: 5
+  /// (File lines: "log.txt") select: [:l | l includes: "ERROR"]
   /// ```
-  class sealed lines: path => @primitive 'lines:'
+  class sealed lines: path => @primitive "lines:"
 
   /// Block-scoped file handle with automatic cleanup (class method).
   ///
@@ -69,8 +69,8 @@ Object subclass: File
   ///
   /// ## Examples
   /// ```beamtalk
-  /// File open: 'data.csv' do: [:handle |
+  /// File open: "data.csv" do: [:handle |
   ///   handle lines take: 10
   /// ]
   /// ```
-  class sealed open: path do: block => @primitive 'open:do:'
+  class sealed open: path do: block => @primitive "open:do:"

@@ -66,5 +66,5 @@ c getValue await
 // => ERROR: immutable_value
 
 // BT-359: instVarAt:put: on string also errors
-'hello' instVarAt: #x put: 'world'
+"hello" instVarAt: #x put: "world"
 // => ERROR: immutable_value

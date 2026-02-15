@@ -7,7 +7,7 @@
 42 class
 // => Integer
 
-'hello' class
+"hello" class
 // => String
 
 // Test 2: Identity comparisons work immediately (not futures)

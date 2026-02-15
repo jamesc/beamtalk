@@ -2,4 +2,4 @@
 // Transcript is a workspace binding — generates persistent_term lookup + actor send.
 
 Actor subclass: Greeter
-  greet => Transcript show: 'Hello, World!'
+  greet => Transcript show: "Hello, World!"

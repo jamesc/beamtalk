@@ -6,7 +6,7 @@
 
 // ===== Integer Unary Operations =====
 // Negation
-negatedNum := 5 negated  // Should generate: call 'erlang':'-'(0, 5)
+negatedNum := 5 negated  // Should generate: call "erlang":"-"(0, 5)
 
 // Absolute value
 absValue := (-10) abs  // Should generate case expression for abs

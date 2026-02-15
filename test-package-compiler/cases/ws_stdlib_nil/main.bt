@@ -16,16 +16,16 @@ result2 := nil notNil      // => false
 // ═══════════════════════════════════════════════════════════════════════
 
 // Test ifNil: evaluates the block
-result3 := nil ifNil: ['default']
+result3 := nil ifNil: ["default"]
 
 // Test ifNotNil: returns nil (block not evaluated)
 result4 := nil ifNotNil: [:val | val + 1]
 
 // Test ifNil:ifNotNil: evaluates nilBlock
-result5 := nil ifNil: ['was nil'] ifNotNil: [:val | 'was not nil']
+result5 := nil ifNil: ["was nil"] ifNotNil: [:val | "was not nil"]
 
 // Test ifNotNil:ifNil: (reversed order) evaluates nilBlock
-result6 := nil ifNotNil: [:val | 'was not nil'] ifNil: ['was nil']
+result6 := nil ifNotNil: [:val | "was not nil"] ifNil: ["was nil"]
 
 // ═══════════════════════════════════════════════════════════════════════
 // Copy Operations (Singleton)
@@ -37,7 +37,7 @@ result8 := nil deepCopy
 result9 := nil shallowCopy
 
 // Test describe
-result10 := nil describe   // => 'nil'
+result10 := nil describe   // => "nil"
 
 // ═══════════════════════════════════════════════════════════════════════
 // Edge Cases: Chaining and Composition
@@ -47,10 +47,10 @@ result10 := nil describe   // => 'nil'
 result11 := (nil ifNil: [10]) + 5  // => 15
 
 // Chaining: ifNil: with message send on result
-result12 := (nil ifNil: ['hello']) uppercase  // => 'HELLO'
+result12 := (nil ifNil: ["hello"]) uppercase  // => "HELLO"
 
 // Nested ifNil: - outer nil, inner returns value from block
-result13 := nil ifNil: [nil ifNil: ['nested default']]  // => 'nested default'
+result13 := nil ifNil: [nil ifNil: ["nested default"]]  // => "nested default"
 
 // Block that itself returns nil
 result14 := nil ifNil: [nil]  // => nil
@@ -64,7 +64,7 @@ result15 := nil =:= nil  // => true
 
 // nil inequality with other values
 result16 := nil =:= 0    // => false
-result17 := nil =:= ''   // => false
+result17 := nil =:= ""   // => false
 result18 := nil =:= false  // => false (nil is not false!)
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -78,7 +78,7 @@ result21 := nil notNil and: [true]  // => false (short-circuits)
 result22 := nil notNil or: [true]   // => true
 
 // Using isNil result in ifTrue:ifFalse:
-result23 := nil isNil ifTrue: ['is nil'] ifFalse: ['not nil']  // => 'is nil'
+result23 := nil isNil ifTrue: ["is nil"] ifFalse: ["not nil"]  // => "is nil"
 
 // ═══════════════════════════════════════════════════════════════════════
 // Edge Cases: Block Expressions

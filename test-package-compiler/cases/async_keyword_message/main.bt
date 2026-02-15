@@ -3,4 +3,4 @@
 
 // Test async keyword message send within a method
 // Uses a non-Dictionary selector to test async message protocol
-update := [ ^object foo: 1 bar: 'hello' ]
+update := [ ^object foo: 1 bar: "hello" ]

@@ -25,7 +25,7 @@ Smalltalk's message-passing syntax is its core innovation — code reads like En
 ### Keyword Messages
 
 ```
-array at: 1 put: 'hello'
+array at: 1 put: "hello"
 agent query: question context: history
 ```
 
@@ -49,7 +49,7 @@ Throwing this away gives you "another Ruby" with no differentiation.
 ### Cascades
 
 ```
-Transcript show: 'Hello'; cr; show: 'World'
+Transcript show: "Hello"; cr; show: "World"
 builder add: item1; add: item2; add: item3; build
 ```
 
@@ -198,15 +198,11 @@ self getValue       // unary message
 **Smalltalk has no string interpolation.** We add it:
 
 ```
-name := 'Alice'
-greeting := "Hello, {name}!"  // => "Hello, Alice!"
-
-// Double quotes for interpolated strings
-// Single quotes for literal strings
-literal := 'No {interpolation} here'
+name := "Alice"
+greeting := "Hello, {name}!"  // => "Hello, Alice!" (planned)
 ```
 
-**Why:** String interpolation is table stakes in 2026. Using `{expr}` inside double-quoted strings is clean and unambiguous.
+**Why:** String interpolation is table stakes in 2026. Using `{expr}` inside double-quoted strings is clean and unambiguous. All strings use double quotes (ADR 0023). Single quotes are reserved for `#'quoted symbols'` only.
 
 ### Equality Semantics: Identity → Structural (Hybrid)
 
@@ -367,10 +363,9 @@ In Beamtalk, `Object subclass: Counter` is **parsed as syntax**, not a message s
 | Cascade | `;` | `obj foo; bar; baz` |
 | Block (no args) | `[body]` | `[self doIt]` |
 | Block (with args) | `[:args \| body]` | `[:x :y \| x + y]` |
-| String (literal) | `'...'` | `'hello'` |
-| String (interpolated) | `"..."` | `"Hello, {name}!"` |
+| String | `"..."` | `"hello"`, `"Hello, {name}!"` |
 | Symbol | `#name` | `#ok`, `#error` |
-| Tuple | `{a, b, c}` | `{1, 'two', 3}` |
+| Tuple | `{a, b, c}` | `{1, "two", 3}` |
 | List | `#(a, b, c)` | `#(1, 2, 3)` |
 | Statement separator | newline or `;` | implicit |
 
@@ -475,7 +470,7 @@ data
 
 ### Ruby-style `object.method(args)`
 
-Considered, but it abandons keyword messages entirely. You get `array.put(1, 'hello')` instead of `array at: 1 put: 'hello'`. The named parameters are the point.
+Considered, but it abandons keyword messages entirely. You get `array.put(1, "hello")` instead of `array at: 1 put: "hello"`. The named parameters are the point.
 
 ### Python-style Significant Whitespace
 

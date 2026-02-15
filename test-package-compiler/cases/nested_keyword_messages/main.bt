@@ -5,13 +5,13 @@
 // Keyword messages nested inside other keyword messages
 
 // Nested in argument position
-dict at: (list at: 0) put: (string concat: 'value')
+dict at: (list at: 0) put: (string concat: "value")
 
 // Multiple levels of nesting
 object process: (transformer apply: (filter check: value) with: options)
 
 // Nested in receiver position
-(object at: 'key') update: newValue
+(object at: "key") update: newValue
 
 // Complex nesting with multiple keywords
 logger log: (formatter format: message with: (timestamp now))

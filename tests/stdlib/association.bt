@@ -9,22 +9,22 @@
 // ===========================================================================
 
 // Symbol key with String value
-#name -> 'James'
+#name -> "James"
 // => #name -> James
 
 // Integer key with Integer value
-42 -> 'answer'
+42 -> "answer"
 // => 42 -> answer
 
 // String key
-'city' -> 'London'
+"city" -> "London"
 // => city -> London
 
 // ===========================================================================
 // ACCESSORS: key and value
 // ===========================================================================
 
-a := #name -> 'James'
+a := #name -> "James"
 // => #name -> James
 
 a key
@@ -46,30 +46,30 @@ b value
 // DISPLAY: asString / printString
 // ===========================================================================
 
-(#name -> 'James') asString
+(#name -> "James") asString
 // => #name -> James
 
-(42 -> 'answer') asString
+(42 -> "answer") asString
 // => 42 -> answer
 
-('count' -> 5) asString
+("count" -> 5) asString
 // => count -> 5
 
 // printString delegates to asString (Association.bt)
-(#name -> 'James') printString
+(#name -> "James") printString
 // => #name -> James
 
 // ===========================================================================
 // REFLECTION
 // ===========================================================================
 
-(#name -> 'James') class
+(#name -> "James") class
 // => Association
 
-(#name -> 'James') respondsTo: #key
+(#name -> "James") respondsTo: #key
 // => true
 
-(#name -> 'James') respondsTo: #value
+(#name -> "James") respondsTo: #value
 // => true
 
 // ===========================================================================

@@ -14,7 +14,7 @@
 /// ## Examples
 /// ```beamtalk
 /// WorkspaceEnvironment current actors
-/// WorkspaceEnvironment current actorAt: '<0.132.0>'
+/// WorkspaceEnvironment current actorAt: "<0.132.0>"
 /// WorkspaceEnvironment current actorsOf: Counter
 /// ```
 Actor subclass: WorkspaceEnvironment
@@ -32,15 +32,15 @@ Actor subclass: WorkspaceEnvironment
   /// ```beamtalk
   /// Workspace actors
   /// ```
-  actors => @primitive 'actors'
+  actors => @primitive "actors"
 
   /// Look up a specific actor by pid string.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Workspace actorAt: '<0.132.0>'
+  /// Workspace actorAt: "<0.132.0>"
   /// ```
-  actorAt: pidString => @primitive 'actorAt:'
+  actorAt: pidString => @primitive "actorAt:"
 
   /// Return all actors of a given class.
   ///
@@ -48,4 +48,4 @@ Actor subclass: WorkspaceEnvironment
   /// ```beamtalk
   /// Workspace actorsOf: Counter
   /// ```
-  actorsOf: className => @primitive 'actorsOf:'
+  actorsOf: className => @primitive "actorsOf:"

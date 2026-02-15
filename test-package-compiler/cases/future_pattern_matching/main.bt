@@ -7,21 +7,21 @@
 
 // Simple value matching
 result := match value with
-  | 0 => 'zero'
-  | 1 => 'one'
-  | _ => 'other'
+  | 0 => "zero"
+  | 1 => "one"
+  | _ => "other"
 end
 
 // Matching with guards
 classify := match number with
-  | n when n < 0 => 'negative'
-  | 0 => 'zero'
-  | n when n > 0 => 'positive'
+  | n when n < 0 => "negative"
+  | 0 => "zero"
+  | n when n > 0 => "positive"
 end
 
 // Tuple/Array pattern matching
 point := match coordinates with
-  | [0, 0] => 'origin'
+  | [0, 0] => "origin"
   | [x, 0] => "on x-axis at {x}"
   | [0, y] => "on y-axis at {y}"
   | [x, y] => "at ({x}, {y})"
@@ -29,18 +29,18 @@ end
 
 // Dictionary pattern matching
 user := match userData with
-  | { name: 'Admin', role: 'admin' } => createAdmin
-  | { name: userName, role: 'user' } => createUser: userName
+  | { name: "Admin", role: "admin" } => createAdmin
+  | { name: userName, role: "user" } => createUser: userName
   | { name: userName } => createGuest: userName
   | _ => defaultUser
 end
 
 // Nested pattern matching
 shape := match figure with
-  | Circle(radius: r) when r > 10 => 'large circle'
+  | Circle(radius: r) when r > 10 => "large circle"
   | Circle(radius: r) => "small circle {r}"
   | Rectangle(width: w, height: h) => "rectangle {w}x{h}"
-  | _ => 'unknown shape'
+  | _ => "unknown shape"
 end
 
 // Matching on types (if type system supports it)
@@ -48,7 +48,7 @@ process := match input with
   | String(s) => processString: s
   | Integer(n) => processNumber: n
   | Array(items) => processArray: items
-  | _ => error: 'unknown type'
+  | _ => error: "unknown type"
 end
 
 // Match as expression in assignment
@@ -60,16 +60,16 @@ end
 // Match in block
 handler := [:value |
   match value with
-    | 'start' => startProcess
-    | 'stop' => stopProcess
+    | "start" => startProcess
+    | "stop" => stopProcess
     | _ => unknownCommand: value
   end
 ]
 
 // Exhaustive matching (compiler should warn if non-exhaustive)
 bool := match flag with
-  | true => 'yes'
-  | false => 'no'
+  | true => "yes"
+  | false => "no"
 end
 
 // Complex nested destructuring
@@ -79,7 +79,7 @@ result := match data with
   | { users: [single], count: 1 } => 
       "Only user: {single}"
   | { users: [], count: 0 } => 
-      'No users'
+      "No users"
   | _ => 
-      'Invalid data'
+      "Invalid data"
 end

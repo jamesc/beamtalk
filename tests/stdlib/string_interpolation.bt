@@ -17,15 +17,15 @@
 // For now, this file contains basic string tests.
 //
 // ===========================================================================
-// BASIC STRING TESTS (single-quoted)
+// BASIC STRING TESTS
 // ===========================================================================
 
 // Simple string assignment
-name := 'World'
+name := "World"
 // => World
 
 // String literal
-'Hello'
+"Hello"
 // => Hello
 
 // Number for testing

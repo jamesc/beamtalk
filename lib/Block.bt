@@ -13,7 +13,7 @@
 /// ```beamtalk
 /// [2 + 3] value                // => 5
 /// [:x | x * 2] value: 3       // => 6
-/// [true] whileTrue: [Transcript show: 'loop']
+/// [true] whileTrue: [Transcript show: "loop"]
 /// ```
 sealed Object subclass: Block
   /// Evaluate a zero-argument block.
@@ -84,7 +84,7 @@ sealed Object subclass: Block
   ///
   /// ## Examples
   /// ```beamtalk
-  /// [File readAll: 'data.txt'] ensure: [Transcript show: 'done']
+  /// [File readAll: "data.txt"] ensure: [Transcript show: "done"]
   /// ```
   ensure: cleanupBlock => @intrinsic ensure
 
@@ -95,7 +95,7 @@ sealed Object subclass: Block
   /// [:x :y | x + y] arity     // => 2
   /// [42] arity                 // => 0
   /// ```
-  arity => @primitive 'arity'
+  arity => @primitive "arity"
 
   /// Evaluate the block with arguments from a list.
   ///
@@ -103,12 +103,12 @@ sealed Object subclass: Block
   /// ```beamtalk
   /// [:x :y | x + y] valueWithArguments: #(3, 4)   // => 7
   /// ```
-  valueWithArguments: args => @primitive 'valueWithArguments:'
+  valueWithArguments: args => @primitive "valueWithArguments:"
 
   /// Human-readable description of the receiver.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// [42] describe              // => 'a Block'
+  /// [42] describe              // => "a Block"
   /// ```
-  describe => 'a Block'
+  describe => "a Block"

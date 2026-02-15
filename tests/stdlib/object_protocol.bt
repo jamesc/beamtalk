@@ -21,10 +21,10 @@
 // => -7
 
 // --- Strings ---
-'hello' printString
+"hello" printString
 // => hello
 
-'' printString
+"" printString
 // => 
 
 // --- Booleans ---
@@ -64,7 +64,7 @@ nil printString
 42 class printString
 // => Integer
 
-'hello' class printString
+"hello" class printString
 // => String
 
 true class printString
@@ -80,7 +80,7 @@ nil class printString
 42 yourself
 // => 42
 
-'hello' yourself
+"hello" yourself
 // => hello
 
 true yourself
@@ -93,7 +93,7 @@ nil yourself
 42 yourself =:= 42
 // => true
 
-'test' yourself =:= 'test'
+"test" yourself =:= "test"
 // => true
 
 // ===========================================================================
@@ -108,11 +108,11 @@ nil yourself
 42 hash =:= 42 hash
 // => true
 
-'hello' hash =:= 'hello' hash
+"hello" hash =:= "hello" hash
 // => true
 
 // Different values typically produce different hashes (not guaranteed, but
 // verifying hash returns a usable integer for all types)
 // Hash values are non-deterministic, keep wildcard
-'hello' hash
+"hello" hash
 // => _

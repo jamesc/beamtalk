@@ -16,6 +16,6 @@ Error subclass: RuntimeError
   ///
   /// ## Examples
   /// ```beamtalk
-  /// RuntimeError describe   // => 'a RuntimeError'
+  /// RuntimeError describe   // => "a RuntimeError"
   /// ```
-  describe => 'a RuntimeError'
+  describe => "a RuntimeError"

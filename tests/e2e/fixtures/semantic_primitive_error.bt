@@ -5,4 +5,4 @@
 // Primitives can only be declared in the standard library
 
 Object subclass: BadPrimitive
-  badOp => @primitive '+'
+  badOp => @primitive "+"

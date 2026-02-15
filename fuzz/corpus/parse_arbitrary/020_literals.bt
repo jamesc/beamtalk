@@ -28,20 +28,20 @@
 // STRING LITERALS
 // ===========================================================================
 
-// Simple string (single-quoted)
-'hello'
+// Simple string
+"hello"
 // => hello
 
 // String with spaces
-'hello world'
+"hello world"
 // => hello world
 
 // Empty string
-''
+""
 // => 
 
 // String with punctuation
-'Hello, World!'
+"Hello, World!"
 // => Hello, World!
 
 // ===========================================================================
@@ -65,15 +65,15 @@
 // ===========================================================================
 
 // String with numbers
-'test123'
+"test123"
 // => test123
 
 // String with special characters
-'a-b_c'
+"a-b_c"
 // => a-b_c
 
 // String with multiple words
-'The quick brown fox'
+"The quick brown fox"
 // => The quick brown fox
 
 // ===========================================================================

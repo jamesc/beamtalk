@@ -31,10 +31,10 @@
 42 notNil
 // => true
 
-'hello' isNil
+"hello" isNil
 // => false
 
-'hello' notNil
+"hello" notNil
 // => true
 
 true isNil
@@ -60,7 +60,7 @@ nil notNil
 42 ifNil: [99]
 // => 42
 
-'hello' ifNil: ['default']
+"hello" ifNil: ["default"]
 // => hello
 
 // ---------------------------------------------------------------------------
@@ -70,7 +70,7 @@ nil notNil
 nil ifNil: [99]
 // => 99
 
-nil ifNil: ['default']
+nil ifNil: ["default"]
 // => default
 
 // ---------------------------------------------------------------------------
@@ -80,14 +80,14 @@ nil ifNil: ['default']
 42 ifNotNil: [:v | v + 1]
 // => 43
 
-'hello' ifNotNil: [:s | s ++ ' world']
+"hello" ifNotNil: [:s | s ++ " world"]
 // => hello world
 
 // Zero-arg block (no receiver passed)
 42 ifNotNil: [ 99 ]
 // => 99
 
-'hello' ifNotNil: [ 'yes' ]
+"hello" ifNotNil: [ "yes" ]
 // => yes
 
 // ---------------------------------------------------------------------------
@@ -107,7 +107,7 @@ nil ifNotNil: [ 99 ]
 42 ifNil: [0] ifNotNil: [:v | v * 2]
 // => 84
 
-'hello' ifNil: [''] ifNotNil: [:s | s ++ '!']
+"hello" ifNil: [""] ifNotNil: [:s | s ++ "!"]
 // => hello!
 
 // Zero-arg notNil block
@@ -121,7 +121,7 @@ nil ifNotNil: [ 99 ]
 nil ifNil: [0] ifNotNil: [:v | v * 2]
 // => 0
 
-nil ifNil: ['empty'] ifNotNil: [:s | s ++ '!']
+nil ifNil: ["empty"] ifNotNil: [:s | s ++ "!"]
 // => empty
 
 // ---------------------------------------------------------------------------
