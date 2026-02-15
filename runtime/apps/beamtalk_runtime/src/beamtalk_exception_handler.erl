@@ -38,6 +38,7 @@
 -export([
     wrap/1,
     ensure_wrapped/1,
+    ensure_wrapped/2,
     matches_class/2,
     dispatch/3,
     has_method/1,
@@ -202,6 +203,17 @@ ensure_wrapped(#{'$beamtalk_class' := _} = Already) ->
 ensure_wrapped(Other) ->
     wrap(Other).
 
+%% @doc Idempotent exception wrapper with stacktrace capture (BT-107).
+%%
+%% Like ensure_wrapped/1 but also stores the Erlang stacktrace as a list
+%% of StackFrame objects on the exception tagged map.
+-spec ensure_wrapped(term(), list()) -> map().
+ensure_wrapped(#{'$beamtalk_class' := _} = Already, Stacktrace) ->
+    Already#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)};
+ensure_wrapped(Other, Stacktrace) ->
+    Wrapped = wrap(Other),
+    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)}.
+
 %% @doc Dispatch a message to an Exception object.
 %%
 %% Exception objects expose the underlying `#beamtalk_error{}` fields.
@@ -227,6 +239,11 @@ dispatch('printString', [], #{error := Error}) ->
     beamtalk_error:format(Error);
 dispatch('describe', [], Self) ->
     dispatch('printString', [], Self);
+dispatch('stackTrace', [], #{stacktrace := Frames}) ->
+    Frames;
+dispatch('stackTrace', [], _) ->
+    %% No stacktrace captured (e.g., signal-time error without catch)
+    [];
 dispatch('class', [], #{'$beamtalk_class' := Class}) ->
     Class;
 dispatch('signal', [], #{error := Error}) ->
@@ -251,6 +268,7 @@ has_method('selector') -> true;
 has_method('errorClass') -> true;
 has_method('printString') -> true;
 has_method('describe') -> true;
+has_method('stackTrace') -> true;
 has_method('class') -> true;
 has_method('signal') -> true;
 has_method('signal:') -> true;

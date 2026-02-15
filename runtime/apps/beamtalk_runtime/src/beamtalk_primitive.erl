@@ -296,6 +296,9 @@ send(X, Selector, Args) when is_map(X) ->
         'TestCase' ->
             %% BT-438: TestCase value type - dispatch to compiled stdlib
             'bt@stdlib@test_case':dispatch(Selector, Args, X);
+        'StackFrame' ->
+            %% BT-107: StackFrame value type - dispatch to runtime
+            beamtalk_stack_frame:dispatch(Selector, Args, X);
         undefined ->
             %% Plain map (Dictionary) — BT-418: compiled stdlib dispatch
             'bt@stdlib@dictionary':dispatch(Selector, Args, X);
@@ -378,6 +381,9 @@ responds_to(X, Selector) when is_map(X) ->
         'Stream' ->
             %% BT-511: Stream value type
             'bt@stdlib@stream':has_method(Selector);
+        'StackFrame' ->
+            %% BT-107: StackFrame value type
+            beamtalk_stack_frame:has_method(Selector);
         'FileHandle' ->
             %% BT-513: FileHandle value type
             beamtalk_file:handle_has_method(Selector) orelse
