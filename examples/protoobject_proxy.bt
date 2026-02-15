@@ -91,7 +91,7 @@ Actor subclass: TransparentProxy
 //    ```
 //
 // 3. Runtime Dispatch:
-//    - TransparentProxy"s gen_server receives {"increment', [], Future}
+//    - TransparentProxy's gen_server receives {"increment", [], Future}
 //    - Looks for "increment" in method table → NOT FOUND
 //    - Checks for "doesNotUnderstand:args:" → FOUND!
 //    - Calls: doesNotUnderstand("increment", [])
@@ -110,7 +110,7 @@ Actor subclass: TransparentProxy
 //    ```
 //
 // 6. Counter Receives Message:
-//    - Counter"s "increment' method executes
+//    - Counter's "increment" method executes
 //    - Counter's value increments: 1 → 2
 //    - Counter resolves Future2 with result (2)
 //
@@ -182,12 +182,12 @@ Actor subclass: TransparentProxy
 //
 // ```erlang
 // case Receiver of
-//   <I> when is_integer(I) -> "Integer"
-//   <S> when is_binary(S) -> "String"
-//   <"true"> when "true" -> "True"
-//   <"false"> when "true" -> "False"
-//   <"nil"> when "true" -> "Nil"
-//   <Obj> when "true" -> element(2, Obj)  % Extract class from actor record
+//   <I> when is_integer(I) -> 'Integer'
+//   <S> when is_binary(S) -> 'String'
+//   <'true'> when 'true' -> 'True'
+//   <'false'> when 'true' -> 'False'
+//   <'nil'> when 'true' -> 'Nil'
+//   <Obj> when 'true' -> element(2, Obj)  % Extract class from actor record
 // end
 // ```
 //

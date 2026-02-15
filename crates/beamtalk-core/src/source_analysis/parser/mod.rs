@@ -973,7 +973,7 @@ mod tests {
             Expression::Cascade {
                 receiver, messages, ..
             } => {
-                // Receiver is the first message: Transcript show: 'Hello'
+                // Receiver is the first message: Transcript show: "Hello"
                 assert!(matches!(**receiver, Expression::MessageSend { .. }));
                 assert_eq!(messages.len(), 2);
                 // First message: cr (unary)
@@ -982,7 +982,7 @@ mod tests {
                     MessageSelector::Unary(name) if name == "cr"
                 ));
                 assert!(messages[0].arguments.is_empty());
-                // Second message: show: 'World' (keyword)
+                // Second message: show: "World" (keyword)
                 assert!(matches!(&messages[1].selector, MessageSelector::Keyword(_)));
                 assert_eq!(messages[1].arguments.len(), 1);
             }
@@ -1332,7 +1332,7 @@ mod tests {
         match &module.expressions[0] {
             Expression::MapLiteral { pairs, .. } => {
                 assert_eq!(pairs.len(), 2);
-                // First pair: #name => 'Alice'
+                // First pair: #name => "Alice"
                 assert!(
                     matches!(&pairs[0].key, Expression::Literal(Literal::Symbol(s), _) if s == "name")
                 );
@@ -1502,7 +1502,7 @@ mod tests {
             other => panic!("Expected Assignment for first expr, got {other:?}"),
         }
 
-        // Second: person := #{#name => 'Alice', #age => 30}
+        // Second: person := #{#name => "Alice", #age => 30}
         match &module.expressions[1] {
             Expression::Assignment { target, value, .. } => {
                 assert!(

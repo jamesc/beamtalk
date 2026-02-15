@@ -361,12 +361,7 @@ impl<'src> Lexer<'src> {
             }
 
             // Single quote — no longer valid string syntax (ADR 0023)
-            '\'' => {
-                self.advance();
-                TokenKind::Error(EcoString::from(
-                    "single-quoted strings are no longer supported, use double quotes: \"...\"",
-                ))
-            }
+            '\'' => self.lex_single_quoted_string_error(),
 
             // Unknown character - error recovery
             _ => {
@@ -477,6 +472,32 @@ impl<'src> Lexer<'src> {
         let full_text = self.text_for(self.span_from(start));
         let content = &full_text[1..full_text.len() - 1];
         TokenKind::String(EcoString::from(content))
+    }
+
+    /// Consumes a single-quoted string and produces a helpful error (ADR 0023).
+    fn lex_single_quoted_string_error(&mut self) -> TokenKind {
+        self.advance(); // opening quote
+        loop {
+            match self.peek_char() {
+                None => break,
+                Some('\'') => {
+                    self.advance(); // closing quote
+                    break;
+                }
+                Some('\\') => {
+                    self.advance(); // backslash
+                    if self.peek_char().is_some() {
+                        self.advance(); // escaped char
+                    }
+                }
+                _ => {
+                    self.advance();
+                }
+            }
+        }
+        TokenKind::Error(EcoString::from(
+            "single-quoted strings are no longer supported, use double quotes: \"...\"",
+        ))
     }
 
     /// Lexes a character literal: `$a`, `$\n`
@@ -838,7 +859,7 @@ mod tests {
     #[test]
     fn lex_single_quote_produces_helpful_error() {
         let tokens = lex_kinds("'hello'");
-        assert_eq!(tokens.len(), 3); // error + identifier + error
+        assert_eq!(tokens.len(), 1); // single error token consuming entire literal
         assert_eq!(
             tokens[0],
             TokenKind::Error(

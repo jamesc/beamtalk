@@ -28,7 +28,7 @@
 // STRING LITERALS
 // ===========================================================================
 
-// Simple string (single-quoted)
+// Simple string
 "hello"
 // => hello
 
