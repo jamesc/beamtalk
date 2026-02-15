@@ -2148,45 +2148,38 @@ fn test_multiple_classes_registration() {
     use crate::ast::{ClassDefinition, Identifier, StateDeclaration};
     use crate::source_analysis::Span;
 
-    let class1 = ClassDefinition {
-        name: Identifier::new("Counter", Span::new(0, 7)),
-        superclass: Some(Identifier::new("Actor", Span::new(0, 5))),
-        is_abstract: false,
-        is_sealed: false,
-        state: vec![StateDeclaration {
-            name: Identifier::new("value", Span::new(0, 5)),
-            default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 1))),
-            type_annotation: None,
-            span: Span::new(0, 10),
-        }],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        doc_comment: None,
-        span: Span::new(0, 20),
-    };
-
-    let class2 = ClassDefinition {
-        name: Identifier::new("Logger", Span::new(0, 6)),
-        superclass: Some(Identifier::new("Actor", Span::new(0, 5))),
-        is_abstract: false,
-        is_sealed: false,
-        state: vec![StateDeclaration {
-            name: Identifier::new("messages", Span::new(0, 8)),
-            default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 1))),
-            type_annotation: None,
-            span: Span::new(0, 10),
-        }],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        doc_comment: None,
-        span: Span::new(0, 30),
-    };
+    fn make_actor_class(
+        name: &str,
+        name_len: u32,
+        field: &str,
+        field_len: u32,
+        span_end: u32,
+    ) -> ClassDefinition {
+        ClassDefinition {
+            name: Identifier::new(name, Span::new(0, name_len)),
+            superclass: Some(Identifier::new("Actor", Span::new(0, 5))),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![StateDeclaration {
+                name: Identifier::new(field, Span::new(0, field_len)),
+                default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 1))),
+                type_annotation: None,
+                span: Span::new(0, 10),
+            }],
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: Span::new(0, span_end),
+        }
+    }
 
     let module = Module {
         expressions: vec![],
-        classes: vec![class1, class2],
+        classes: vec![
+            make_actor_class("Counter", 7, "value", 5, 20),
+            make_actor_class("Logger", 6, "messages", 8, 30),
+        ],
         method_definitions: Vec::new(),
         span: Span::new(0, 50),
         leading_comments: vec![],
@@ -2231,12 +2224,30 @@ fn test_multiple_classes_registration() {
 
     // Should use let-binding chain to sequence registrations
     assert!(
+        code.contains("let ClassInfo0 = ~{"),
+        "Should have first ClassInfo binding. Got:\n{code}"
+    );
+    assert!(
         code.contains("let _Reg0 = case"),
         "Should have first registration with _Reg0. Got:\n{code}"
     );
     assert!(
-        code.contains("in let _Reg1 = case"),
-        "Should chain second registration with let. Got:\n{code}"
+        code.contains("in let ClassInfo1 = ~{"),
+        "Should chain second ClassInfo binding with let. Got:\n{code}"
+    );
+    assert!(
+        code.contains("let _Reg1 = case"),
+        "Should chain second registration with _Reg1. Got:\n{code}"
+    );
+
+    // BT-589: Should call update_class on already_started
+    assert!(
+        code.contains("call 'beamtalk_object_class':'update_class'('Counter', ClassInfo0)"),
+        "Should call update_class for Counter on already_started. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_object_class':'update_class'('Logger', ClassInfo1)"),
+        "Should call update_class for Logger on already_started. Got:\n{code}"
     );
 
     // Function should return ok
