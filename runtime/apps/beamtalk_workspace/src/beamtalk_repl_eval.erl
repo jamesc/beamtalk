@@ -51,6 +51,12 @@ do_eval(Expression, State) ->
     
     %% Compile expression
     case compile_expression(Expression, ModuleName, Bindings) of
+        %% BT-571: Inline class definition — load module, register class
+        {ok, class_definition, ClassInfo, Warnings} ->
+            handle_class_definition(ClassInfo, Warnings, Expression, NewState);
+        %% BT-571: Standalone method definition — add/replace method on existing class
+        {ok, method_definition, MethodInfo, Warnings} ->
+            handle_method_definition(MethodInfo, Warnings, Expression, NewState);
         {ok, Binary, _ResultExpr, Warnings} ->
             %% Load the compiled module
             case code:load_binary(ModuleName, "", Binary) of
@@ -164,7 +170,16 @@ handle_load(Path, State) ->
                                     %% Mark activity - code hot reloaded
                                     beamtalk_workspace_meta:update_activity(),
                                     
-                                    {ok, ClassNames, NewState2};
+                                    %% BT-571: Store class source for method patching
+                                    NewState3 = lists:foldl(
+                                        fun(#{name := Name}, AccState) ->
+                                            NameBin = list_to_binary(Name),
+                                            beamtalk_repl_state:set_class_source(
+                                                NameBin, Source, AccState)
+                                        end,
+                                        NewState2, ClassNames),
+                                    
+                                    {ok, ClassNames, NewState3};
                                 {error, Reason} ->
                                     {error, {load_error, Reason}, State}
                             end;
@@ -175,6 +190,83 @@ handle_load(Path, State) ->
     end.
 
 %%% Internal functions
+
+%% BT-571: Handle inline class definition result.
+%% Loads the compiled class module, registers its classes, and stores source.
+handle_class_definition(ClassInfo, Warnings, Expression, State) ->
+    #{binary := Binary, module_name := ClassModName, classes := Classes} = ClassInfo,
+    case code:load_binary(ClassModName, "", Binary) of
+        {module, ClassModName} ->
+            %% Register classes with beamtalk_object_class
+            register_classes(Classes, ClassModName),
+            %% Track loaded module
+            LoadedModules = beamtalk_repl_state:get_loaded_modules(State),
+            NewState1 = case lists:member(ClassModName, LoadedModules) of
+                true -> State;
+                false -> beamtalk_repl_state:add_loaded_module(ClassModName, State)
+            end,
+            %% Register module with workspace metadata
+            beamtalk_workspace_meta:register_module(ClassModName),
+            beamtalk_workspace_meta:update_activity(),
+            %% Store class source for later method patching
+            ClassName = case Classes of
+                [#{name := Name} | _] -> Name;
+                _ -> atom_to_binary(ClassModName, utf8)
+            end,
+            NewState2 = beamtalk_repl_state:set_class_source(ClassName, Expression, NewState1),
+            {ok, ClassName, <<>>, Warnings, NewState2};
+        {error, Reason} ->
+            {error, {load_error, Reason}, <<>>, Warnings, State}
+    end.
+
+%% BT-571: Handle standalone method definition result.
+%% Recompiles the target class with the new/updated method.
+handle_method_definition(MethodInfo, Warnings, Expression, State) ->
+    #{class_name := ClassNameBin, selector := SelectorBin} = MethodInfo,
+    %% Get existing class source from state
+    ExistingSource = beamtalk_repl_state:get_class_source(ClassNameBin, State),
+    case ExistingSource of
+        undefined ->
+            ErrorMsg = <<"Class not found: ", ClassNameBin/binary,
+                         ". Define the class first before adding methods.">>,
+            {error, {compile_error, ErrorMsg}, <<>>, Warnings, State};
+        ClassSource ->
+            %% Combine class source with new method definition
+            CombinedSource = ClassSource ++ "\n" ++ Expression,
+            SourceBin = list_to_binary(CombinedSource),
+            Options = #{stdlib_mode => false, workspace_mode => true},
+            case beamtalk_compiler:compile(SourceBin, Options) of
+                {ok, #{core_erlang := CoreErlang, module_name := ModNameBin,
+                       classes := Classes}} ->
+                    ModName = binary_to_atom(ModNameBin, utf8),
+                    case beamtalk_compiler:compile_core_erlang(CoreErlang) of
+                        {ok, _CompiledMod, Binary} ->
+                            case code:load_binary(ModName, "", Binary) of
+                                {module, ModName} ->
+                                    register_classes(Classes, ModName),
+                                    beamtalk_workspace_meta:register_module(ModName),
+                                    beamtalk_workspace_meta:update_activity(),
+                                    %% Update stored class source with the combined version
+                                    NewState = beamtalk_repl_state:set_class_source(
+                                        ClassNameBin, CombinedSource, State),
+                                    Result = <<ClassNameBin/binary, ">>",
+                                               SelectorBin/binary>>,
+                                    {ok, Result, <<>>, Warnings, NewState};
+                                {error, Reason} ->
+                                    {error, {load_error, Reason}, <<>>, Warnings, State}
+                            end;
+                        {error, Reason} ->
+                            ErrorMsg = iolist_to_binary(
+                                io_lib:format("Core compile error: ~p", [Reason])),
+                            {error, {compile_error, ErrorMsg}, <<>>, Warnings, State}
+                    end;
+                {error, Diagnostics} ->
+                    ErrorMsg = iolist_to_binary(
+                        io_lib:format("Compile error: ~p", [Diagnostics])),
+                    {error, {compile_error, ErrorMsg}, <<>>, Warnings, State}
+            end
+    end.
+
 
 %% Check if a file path refers to a stdlib file (under lib/ directory).
 %% Matches both relative paths (lib/Integer.bt) and absolute paths
@@ -202,6 +294,28 @@ compile_expression_via_port(Expression, ModuleName, Bindings) ->
                     is_atom(K),
                     not is_internal_key(K)],
     try beamtalk_compiler:compile_expression(SourceBin, ModNameBin, KnownVars) of
+        %% BT-571: Inline class definition
+        {ok, class_definition, ClassInfo} ->
+            #{core_erlang := CoreErlang, module_name := ClassModNameBin,
+              classes := Classes, warnings := Warnings} = ClassInfo,
+            ClassModName = binary_to_atom(ClassModNameBin, utf8),
+            case beamtalk_compiler:compile_core_erlang(CoreErlang) of
+                {ok, _CompiledMod, Binary} ->
+                    {ok, class_definition, #{binary => Binary, module_name => ClassModName,
+                                             classes => Classes}, Warnings};
+                {error, Reason} ->
+                    {error, iolist_to_binary(io_lib:format("Core Erlang compile error: ~p", [Reason]))}
+            end;
+        %% BT-571: Standalone method definition
+        {ok, method_definition, MethodInfo} ->
+            #{class_name := ClassName, selector := Selector,
+              is_class_method := IsClassMethod,
+              method_source := MethodSource} = MethodInfo,
+            Warnings = maps:get(warnings, MethodInfo, []),
+            {ok, method_definition, #{class_name => ClassName, selector => Selector,
+                                      is_class_method => IsClassMethod,
+                                      method_source => MethodSource}, Warnings};
+        %% Standard expression
         {ok, CoreErlang, Warnings} ->
             case beamtalk_compiler:compile_core_erlang(CoreErlang) of
                 {ok, _CompiledMod, Binary} ->
