@@ -269,3 +269,53 @@ mod unmute: "Bob"
 
 mod isMuted: "Bob"
 // => false
+
+// ===========================================================================
+// MODERATOR KICK (Actor-to-actor method calls)
+// ===========================================================================
+
+// Re-add bob to the room for kick test
+room join: bob
+// => Set(_)
+
+membersBefore := room online
+// => Set(_)
+
+membersBefore includes: bob
+// => true
+
+// Moderator kicks bob from the room
+(mod kick: bob) await
+// => _
+
+membersAfter := room online
+// => Set(_)
+
+membersAfter includes: bob
+// => false
+
+// ===========================================================================
+// MODERATOR SAY: SUPER CALL (inheritance + prefix)
+// ===========================================================================
+
+// Re-add bob to receive the moderator message
+room join: bob
+// => Set(_)
+
+// Moderator say: prefixes with "[MOD] " then calls super (ChatMember say:)
+(mod say: "Welcome!") await
+// => nil
+
+// Room history should contain the prefixed message
+modHistory := room getHistory
+// => _
+
+modHistory last
+// => Admin: [MOD] Welcome!
+
+// Bob should have received the prefixed message
+bobInboxMod := bob getInbox
+// => _
+
+bobInboxMod last
+// => Admin: [MOD] Welcome!
