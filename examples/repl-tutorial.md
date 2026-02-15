@@ -49,6 +49,31 @@ Assign values to variables:
 
 **Note:** In Beamtalk, `:=` is used for assignment (not `=`).
 
+## String Interpolation
+
+Beamtalk strings support interpolation with `{expr}` — embed any expression inside a string:
+
+```beamtalk
+> name := "Alice"
+"Alice"
+
+> "Hello, {name}!"
+"Hello, Alice!"
+
+> "2 + 2 = {2 + 2}"
+"2 + 2 = 4"
+
+> "{name length} characters"
+"5 characters"
+```
+
+Non-string values are automatically converted via `printString`. To include literal braces, escape them with `\`:
+
+```beamtalk
+> "Set: \{1, 2, 3\}"
+"Set: {1, 2, 3}"
+```
+
 ## Viewing Bindings
 
 See all your current variable bindings:
