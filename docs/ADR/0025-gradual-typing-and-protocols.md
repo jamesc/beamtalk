@@ -66,11 +66,11 @@ c decrement              // ⚠️ Warning: Counter does not respond to 'decreme
 **Inference rules:**
 - `x := Counter spawn` → `x` has type `Counter`
 - `x := 42` → `x` has type `Integer`
-- `x := 'hello'` → `x` has type `String`
+- `x := "hello"` → `x` has type `String`
 - `x := true` → `x` has type `Boolean`
 - `x := someUnknownThing` → `x` has type `Dynamic` (no checking)
 - Method calls on known types check against ClassHierarchy method tables
-- `doesNotUnderstand:` remains valid — if a class defines it, any message is accepted
+- `doesNotUnderstand:` semantics — the type checker only relaxes unknown-message warnings for classes that **override** `doesNotUnderstand:` (not merely inherit it from `ProtoObject`). Explicit dynamic sends (`perform:`) also bypass checking.
 
 **Ambiguous control flow defaults to Dynamic:**
 
@@ -138,7 +138,7 @@ Actor subclass: BankAccount
     target deposit: amount
 ```
 
-**Parameter type syntax:** Type follows the parameter name with `:` separator, matching state declaration syntax.
+**Parameter type syntax:** Type follows the parameter name with `:` separator, matching state declaration syntax. Note: this requires a parser change — currently `amount:` tokenizes as a keyword selector part. The parser must distinguish `keyword: paramName: Type` (three-part pattern) from `keyword: paramName` (two-part). This is a Phase 2 parser change, not yet implemented.
 
 ```beamtalk
 // Keyword message with typed parameters
@@ -154,12 +154,14 @@ getBalance -> Integer => ...
 + other: Number -> Number => ...
 ```
 
-**Return type syntax:** `-> Type` before the `=>` body separator.
+**AST change required:** `MethodDefinition.parameters` currently uses `Vec<Identifier>` (names only). Phase 2 must change this to `Vec<ParameterDefinition>` with both name and optional `TypeAnnotation`, mirroring how `StateDeclaration` already stores `type_annotation: Option<TypeAnnotation>`.
 
-**Codegen:** Annotations generate Erlang `-spec` attributes in Core Erlang module attributes:
+**Return type syntax:** `-> Type` before the `=>` body separator. The AST field (`MethodDefinition.return_type: Option<TypeAnnotation>`) already exists but the parser does not yet populate it.
+
+**Codegen:** Annotations generate Erlang `-spec` entries in Core Erlang module `attributes`. The spec is encoded as an abstract type representation in the module attributes list — the same format Dialyzer reads from `.beam` debug info:
 
 ```erlang
-% Generated Core Erlang attributes
+% Generated Core Erlang module attributes (abstract spec representation)
 attributes ['spec' = [{'deposit', {type, fun, [{type, product, [{type, integer, []}]}, 
                                                 {type, integer, []}]}}],
             'behaviour' = ['gen_server']]
@@ -223,18 +225,18 @@ This parallels how `sealed` is inherited — if the base class makes a contract,
 
 **Escape hatch for false positives:**
 
-When the type checker is wrong — and it will be — developers need a way to say "trust me." The `as:` message casts a value to a known type:
+When the type checker is wrong — and it will be — developers need a way to say "trust me." The `asType:` message casts a value to a known type:
 
 ```beamtalk
 typed Actor subclass: MessageRouter
   state: handlers: Dictionary = Dictionary new
 
   dispatch: message =>
-    handler := (self.handlers at: message class) as: Handler  // "I know this is a Handler"
-    handler handle: message                                    // No warning — handler is Handler
+    handler := (self.handlers at: message class) asType: Handler  // "I know this is a Handler"
+    handler handle: message                                        // No warning — handler is Handler
 ```
 
-`as:` is a compile-time type assertion — it tells the type checker to treat the value as the given type. It generates no runtime code (type erasure). If the assertion is wrong, the runtime error is the same as today.
+`asType:` is a compile-time type assertion — it tells the type checker to treat the value as the given type. It generates no runtime code (type erasure). If the assertion is wrong, the runtime error is the same as today. (Note: `as:` was considered but conflicts with the proposed workspace registration API in ADR 0004.)
 
 For inline suppression of specific warnings, a comment directive works:
 
@@ -266,15 +268,22 @@ Protocol define: Collection
   requiring: [size, do:, collect:, select:]
 ```
 
+**Note on naming convention:** This ADR uses bare identifiers for protocol names and required methods (`Printable`, `asString`). The existing language spec (`beamtalk-language-features.md`) uses symbol syntax (`#Stringable`, `#asString`). The final surface syntax for protocol definitions will be resolved during Phase 3 implementation — bare identifiers are used here for readability.
+
+**Protocol type syntax:** Protocol types use angle brackets (`<ProtocolName>`) to distinguish them from concrete class types. Plain identifiers (`Integer`, `Counter`) denote specific classes; angle brackets (`<Printable>`) denote "any object conforming to this protocol." This makes the structural vs. nominal distinction visible at the call site.
+
 **Conformance is structural and automatic:**
 
 ```beamtalk
 // Counter has 'asString' (inherited from Object) → conforms to Printable
 // No "implements" declaration needed
 
-// Use protocols as type constraints
+// Use protocol type constraint (angle brackets = structural type)
 printAll: items: <Printable> =>
   items do: [:each | Transcript show: each asString]
+
+// Concrete type constraint (no brackets = nominal type)
+deposit: amount: Integer => ...
 
 // Error when shape doesn't match
 printAll: #(1, 2, 3)          // ✅ Integer conforms to Printable
@@ -287,7 +296,7 @@ printAll: someOpaqueValue      // ⚠️ Warning: cannot verify Printable confor
 > Counter conformsTo: Printable
 => true
 > Counter protocols
-=> #(Printable, Comparable)
+=> #(Printable)
 > Printable requiredMethods
 => #(asString)
 ```
@@ -517,8 +526,8 @@ A `--strict` compiler flag that promotes type warnings to errors, like TypeScrip
 
 **Components:**
 - `semantic_analysis/type_checker.rs` — Fill in the stub with inference rules
-- `semantic_analysis/class_hierarchy/mod.rs` — Extend `MethodInfo` with return type tracking
-- `source_analysis/diagnostic.rs` — Add type-related warning diagnostics
+- `semantic_analysis/class_hierarchy/mod.rs` — Extend `MethodInfo` with return type tracking and expected block parameter types for context-sensitive block inference
+- `source_analysis/parser/mod.rs` — Add type-related warning diagnostics (extends existing `Diagnostic` struct)
 - `queries/completion_provider.rs` — Use inferred types for better completions
 - `queries/hover_provider.rs` — Show inferred types on hover
 
@@ -527,13 +536,14 @@ A `--strict` compiler flag that promotes type warnings to errors, like TypeScrip
 2. Track variable types in scope (extend existing `Scope`)
 3. On message send: look up receiver type in ClassHierarchy, check method exists
 4. On binary op: check operand types against known operator signatures
-5. Emit warnings for mismatches, not errors
+5. For literal blocks at message-send sites: look up callee method signature to infer block parameter/return types from context; stored blocks assigned to variables become `Dynamic`
+6. Emit warnings for mismatches, not errors
 
 ### Phase 2: Optional Annotations (M effort)
 
 **Components:**
-- `source_analysis/parser/declarations.rs` — Parse `-> ReturnType` in method definitions
-- `ast.rs` — Wire `return_type` field, add parameter type support
+- `source_analysis/parser/declarations.rs` — Parse `-> ReturnType` in method definitions; disambiguate keyword parameter type syntax
+- `ast.rs` — Wire `return_type` field; replace `parameters: Vec<Identifier>` with `Vec<ParameterDefinition>` containing name + optional type annotation
 - `codegen/core_erlang/` — Generate `-spec` attributes in Core Erlang module attributes
 - `semantic_analysis/type_checker.rs` — Check annotated types against inferred types
 
@@ -554,7 +564,7 @@ Union types, generic types, singleton types, type narrowing. Deferred to future 
 
 | Phase | Issue | Description | Size | Status |
 |-------|-------|-------------|------|--------|
-| 1 | TBD | Type inference from class definitions | L | Planned |
+| 1 | TBD | Type inference from class definitions | M-L | Planned |
 | 2 | TBD | Optional type annotations + Dialyzer spec generation | M | Planned |
 | 3 | TBD | Protocol definitions and structural conformance | L | Planned |
 | 4 | TBD | Advanced types (union, generic, singleton, narrowing) | XL | Future |
@@ -578,7 +588,7 @@ No migration needed. This is purely additive — all existing code compiles and 
   - [ADR 0018: Document Tree Codegen](0018-document-tree-codegen.md) — `-spec` generation should use Document API
   - [ADR 0023: String Interpolation](0023-string-interpolation-and-binaries.md) — Type inference applies within interpolation expressions
   - [ADR 0024: Static-First IDE Tooling](0024-static-first-live-augmented-ide-tooling.md) — Types serve the tooling story
-- Language spec: `docs/beamtalk-language-features.md` — Optional Type Annotations, Protocols sections
+- Language spec: `docs/beamtalk-language-features.md` — General language overview. Note: its "Optional Type Annotations" and "Protocols" sections describe an earlier design (explicit `implements:` and symbol-named protocols); ADR 0025 supersedes those details with the structural, automatic-conformance approach described here.
 - Existing infrastructure:
   - `crates/beamtalk-core/src/semantic_analysis/type_checker.rs` — Stub TypeChecker
   - `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/` — ClassHierarchy with method tables
