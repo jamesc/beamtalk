@@ -499,7 +499,8 @@ No migration needed. `beamtalk build file.bt` continues to work as before — no
 The stdlib (`lib/*.bt`) and test suites (`tests/stdlib/`, `tests/e2e/`) are **not packages** — they are compiled by dedicated build commands (`just build-stdlib`, `just test-stdlib`, `just test-e2e`) that use their own module naming conventions. Package-mode compilation only activates when a `beamtalk.toml` is found, so these existing workflows are unaffected.
 
 ## References
-- Related ADRs: ADR 0004 (workspaces), ADR 0007 (compilable stdlib), ADR 0009 (OTP app structure), ADR 0016 (module naming)
+- Related ADRs: ADR 0004 (workspaces), ADR 0007 (compilable stdlib), ADR 0009 (OTP app structure), ADR 0016 (module naming), ADR 0022 (embedded compiler)
 - Prior art: [Gleam `gleam.toml`](https://gleam.run/writing-gleam/gleam-toml/), [Cargo manifest](https://doc.rust-lang.org/cargo/reference/manifest.html), [Elixir Mix](https://hexdocs.pm/mix/Mix.html)
 - Future work: Dependency resolution and Hex.pm publishing (separate ADR)
+- Future exploration: [Khepri](https://github.com/rabbitmq/khepri) (Raft-based replicated tree database) as a persistence layer for workspaces — could enable Smalltalk-style live images that survive restarts, backed by durable on-disk state with replication. Would extend ADR 0004's workspace model with real persistence (actor state, loaded classes, REPL bindings) without the tooling cost of monolithic image files.
 - Documentation: `docs/beamtalk-architecture.md` §Directory Structure
