@@ -75,7 +75,9 @@ A **package** is a directory containing a `beamtalk.toml` manifest. It is:
 
 There is no separate "project" concept. Following Gleam and Cargo, the term **package** covers both local development and distribution.
 
-**Relationship to workspaces (ADR 0004):** Your package *is* the workspace — it's the running application you develop interactively. Dependency packages are libraries loaded into your workspace. When you `beamtalk repl` in a package directory, you create (or reconnect to) a workspace that owns that package's actors and state. Dependencies provide classes but don't own the workspace. The lifecycle is: **author** (source files) → **develop** (workspace = your running package) → **deploy** (OTP release). Future work on durable workspaces (e.g., Khepri-backed persistence) would make the workspace survive restarts, with your package's actors maintaining state across reboots.
+**Relationship to workspaces (ADR 0004):** Your package *is* the workspace — it's the running application you develop interactively. Dependency packages are libraries loaded into your workspace. When you `beamtalk repl` in a package directory, you create (or reconnect to) a workspace that owns that package's actors and state. Dependencies provide classes but don't own the workspace. The lifecycle is: **author** (source files) → **develop** (workspace = your running package) → **deploy** (OTP release).
+
+**Long-term vision: hybrid workspace-as-package.** This ADR establishes the file-based foundation (Option A), but the architecture is designed to evolve toward a hybrid model where the workspace is the primary artifact and source files are a synced view (see [Future Direction](#future-direction-toward-workspace-as-package-option-c)). Each phase of this ADR — manifest parsing, workspace auto-compile, application start — is a stepping stone toward that goal. Option A is not the destination; it's the pragmatic starting point that lets us ship today while building toward the bold choice incrementally.
 
 ### 2. `beamtalk.toml` manifest format
 
@@ -348,9 +350,9 @@ OTP application structure means standard release tooling works: `relx`, `mix rel
 
 ### Tension Points
 
-1. **The Workspace Paradox** — ADR 0004 already creates persistent workspaces with running actors that survive disconnection. This *is* an image model, just not called that. If workspaces are essentially long-running BEAM nodes with state, why not embrace that and make the workspace exportable as the package format (Option C)? The tension is between "workspaces are development tools" vs "workspaces are deployment artifacts."
+1. **The Workspace Paradox** — ADR 0004 already creates persistent workspaces with running actors that survive disconnection. This *is* an image model, just not called that. If workspaces are essentially long-running BEAM nodes with state, why not embrace that and make the workspace exportable as the package format (Option C)? **Resolution:** We will — but incrementally. Option A builds the foundation (manifest, OTP mapping, build output) that Option C needs anyway. The hybrid destination is workspace-primary with source files as a synced view, giving image benefits with file-based tooling compatibility. See [Future Direction](#future-direction-toward-workspace-as-package-option-c).
 
-2. **Interop vs Purity** — The strongest argument for A is BEAM interop: OTP applications, Hex.pm, rebar3/Mix compatibility. The strongest argument for C is internal consistency: the running system is the truth. These are genuinely different philosophies. Option A chooses ecosystem integration over semantic purity — reasonable, but a real trade-off.
+2. **Interop vs Purity** — The strongest argument for A is BEAM interop: OTP applications, Hex.pm, rebar3/Mix compatibility. The strongest argument for C is internal consistency: the running system is the truth. The hybrid approach resolves this: the workspace is the truth at development time, but it exports standard OTP releases and generates `.app` files for ecosystem interop. Both sides get what they need.
 
 3. **The Go Counter-Example** — Option B has a real case study: Go thrived for years with convention-only (GOPATH). Modules (`go.mod`) were controversial when introduced. But Go's convention-only also created problems: vendoring complexity, GOPATH friction, version pinning hacks. The question is whether Beamtalk should learn from Go's eventual destination (manifests) or its successful journey (start convention-only, add manifests when the pain is clear).
 
@@ -505,9 +507,44 @@ No migration needed. `beamtalk build file.bt` continues to work as before — no
 
 The stdlib (`lib/*.bt`) and test suites (`tests/stdlib/`, `tests/e2e/`) are **not packages** — they are compiled by dedicated build commands (`just build-stdlib`, `just test-stdlib`, `just test-e2e`) that use their own module naming conventions. Package-mode compilation only activates when a `beamtalk.toml` is found, so these existing workflows are unaffected.
 
+## Future Direction: Toward Workspace-as-Package (Option C)
+
+This ADR chooses Option A (manifest + source files) as the pragmatic foundation, but the long-term destination is Option C — workspaces as the primary artifact, with source files as a derived view. Option A is a stepping stone, not the end state.
+
+The path from A to C has natural milestones, each independently valuable:
+
+### Step 1: Package foundation (this ADR)
+`beamtalk.toml` + `src/` + OTP application. Standard file-based workflow. Git, CI, code review all work out of the box.
+
+### Step 2: Workspace auto-compile (this ADR, Phase 4)
+`beamtalk repl` in a package directory compiles source and boots the workspace. The workspace *is* the running package. This is already halfway to an image — the workspace has running actors, loaded classes, and live state.
+
+### Step 3: Durable workspaces
+[Khepri](https://github.com/rabbitmq/khepri)-backed persistence for workspace state — actor state, loaded classes, REPL bindings survive restarts. The workspace becomes a real live image, not just a development session. Separate ADR required.
+
+### Step 4: Workspace → source sync
+Bidirectional sync between workspace state and `.bt` source files (inspired by Pharo's Tonel format). Define a class in the REPL → `.bt` file appears. Edit a `.bt` file → workspace hot-reloads. Source files become a *view* of the workspace, not the sole source of truth. This is the key enabler — it preserves Git/review/CI workflows while making the workspace primary.
+
+### Step 5: Workspace export as release
+`beamtalk release` exports the running workspace as a deployable OTP release. No separate build step — the workspace *is* the built artifact. Dependencies are other workspace exports (or standard OTP applications). Hex.pm publishing generates metadata from workspace introspection.
+
+### Why not start at C?
+
+Each step requires the previous one, and each delivers value independently:
+- Step 1 gives a working package system today with existing tools
+- Step 2 gives REPL-first development
+- Step 3 gives persistence (no more "restart and lose everything")
+- Step 4 gives the hybrid model (image-primary, files for tooling)
+- Step 5 gives image-based deployment
+
+Starting at C would require building all five simultaneously — workspace sync, Khepri integration, release export, *and* the manifest parsing from Option A anyway (for interop). Option A lets us ship a useful package system now while building toward the bold vision incrementally.
+
+**The BEAM makes this path uniquely viable.** OTP's native hot code loading, two-version module support, release handlers, and `code_change` callbacks mean "workspace as deployable image" isn't a novel runtime — it's leveraging infrastructure that already exists. Beamtalk just needs to expose it with the right abstractions.
+
 ## References
 - Related ADRs: ADR 0004 (workspaces), ADR 0007 (compilable stdlib), ADR 0009 (OTP app structure), ADR 0016 (module naming), ADR 0022 (embedded compiler)
 - Prior art: [Gleam `gleam.toml`](https://gleam.run/writing-gleam/gleam-toml/), [Cargo manifest](https://doc.rust-lang.org/cargo/reference/manifest.html), [Elixir Mix](https://hexdocs.pm/mix/Mix.html)
 - Future work: Dependency resolution and Hex.pm publishing (separate ADR)
-- Future exploration: [Khepri](https://github.com/rabbitmq/khepri) (Raft-based replicated tree database) as a persistence layer for workspaces — could enable Smalltalk-style live images that survive restarts, backed by durable on-disk state with replication. Would extend ADR 0004's workspace model with real persistence (actor state, loaded classes, REPL bindings) without the tooling cost of monolithic image files.
+- Future exploration: [Khepri](https://github.com/rabbitmq/khepri) (Raft-based replicated tree database) as workspace persistence layer (Step 3 above)
+- Tooling inspiration: [Pharo Tonel format](https://github.com/pharo-vcs/tonel) — source file format enabling round-trip between image and file-based workflows (Step 4 above)
 - Documentation: `docs/beamtalk-architecture.md` §Directory Structure
