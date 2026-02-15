@@ -8,6 +8,7 @@
 //! service capability:
 //!
 //! - [`completion_provider`] - Suggest completions at cursor position
+//! - [`definition_provider`] - Go-to-definition (single-file and cross-file)
 //! - [`diagnostic_provider`] - Collect errors and warnings
 //! - [`hover_provider`] - Show information on hover
 //!
@@ -24,5 +25,6 @@
 //! - LSP specification: Language Server Protocol
 
 pub mod completion_provider;
+pub mod definition_provider;
 pub mod diagnostic_provider;
 pub mod hover_provider;
