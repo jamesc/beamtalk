@@ -389,7 +389,7 @@ x class = Integer ifTrue: [
 ### Erlang/Elixir Developer
 - **Phase 2:** "It generates Dialyzer specs — I get BEAM-level checking!" — huge win
 - **Phase 3:** "Protocols are like Elixir protocols" — familiar concept
-- **Risk:** Beamtalk type warnings and Dialyzer warnings may overlap or contradict. Mitigation: Phase 2 must define deduplication strategy (see Consequences/Negative).
+- **Risk:** Beamtalk type-checking warnings and Dialyzer warnings may overlap or contradict. Mitigation: Phase 2 must define deduplication strategy (see Consequences/Negative).
 
 ### Production Operator
 - **All phases:** Zero runtime cost, same BEAM bytecode, same observability
@@ -512,7 +512,7 @@ A `--strict` compiler flag that promotes type warnings to errors, like TypeScrip
 - Protocol conformance checking on large hierarchies has performance implications for compilation
 - Two-layer checking (Beamtalk + Dialyzer) could produce duplicate or contradictory warnings — Phase 2 must define a deduplication strategy (e.g., suppress Beamtalk warnings for methods with `-spec`)
 - Warning fatigue risk: if warnings are never errors, codebases may accumulate permanent warning debt. `typed` classes mitigate this by making annotation completeness visible.
-- REPL type cache invalidation adds complexity to the workspace model — re-defining a class must propagate type changes to all dependents
+- REPL invalidation of the type cache adds complexity to the workspace model — re-defining a class must propagate type changes to all dependents
 
 ### Neutral
 - Generated BEAM bytecode is unchanged — types are erased at compile time
