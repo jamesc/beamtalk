@@ -97,9 +97,13 @@ module_to_class(Module) when is_atom(Module) ->
             %% Could be a user class compiled as snake_case module
             %% Try to look it up in the class registry
             ClassName = snake_to_class(ModStr),
-            case beamtalk_class_registry:is_class_name(ClassName) of
-                true -> ClassName;
-                false -> nil
+            case ClassName of
+                nil -> nil;
+                _ ->
+                    case beamtalk_class_registry:whereis_class(ClassName) of
+                        undefined -> nil;
+                        _ -> ClassName
+                    end
             end
     end;
 module_to_class(_) ->

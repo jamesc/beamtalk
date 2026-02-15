@@ -458,9 +458,11 @@ fn generate_exception_bif(selector: &str, params: &[String]) -> Option<Document<
 fn generate_stack_frame_bif(selector: &str, _params: &[String]) -> Option<Document<'static>> {
     match selector {
         "method" | "receiverClass" | "arguments" | "sourceLocation" | "moduleName" | "line"
-        | "file" | "printString" => Some(Document::String(format!(
-            "call 'beamtalk_stack_frame':'dispatch'('{selector}', [], Self)"
-        ))),
+        | "file" | "printString" => Some(docvec![
+            "call 'beamtalk_stack_frame':'dispatch'('",
+            Document::String(selector.to_owned()),
+            "', [], Self)",
+        ]),
         _ => None,
     }
 }
