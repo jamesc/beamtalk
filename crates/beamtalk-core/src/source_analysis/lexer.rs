@@ -270,8 +270,7 @@ impl<'src> Lexer<'src> {
             '0'..='9' => self.lex_number(),
 
             // Strings
-            '\'' => self.lex_string(),
-            '"' => self.lex_interpolated_string(),
+            '"' => self.lex_string(),
 
             // Character literals
             '$' => self.lex_character(),
@@ -361,6 +360,14 @@ impl<'src> Lexer<'src> {
                 self.lex_binary_selector()
             }
 
+            // Single quote — no longer valid string syntax (ADR 0023)
+            '\'' => {
+                self.advance();
+                TokenKind::Error(EcoString::from(
+                    "single-quoted strings are no longer supported, use double quotes: \"...\"",
+                ))
+            }
+
             // Unknown character - error recovery
             _ => {
                 self.advance();
@@ -431,44 +438,8 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    /// Lexes a single-quoted string literal.
+    /// Lexes a double-quoted string literal.
     fn lex_string(&mut self) -> TokenKind {
-        let start = self.current_position();
-        self.advance(); // opening quote
-
-        loop {
-            match self.peek_char() {
-                None => {
-                    // Unterminated string - error recovery
-                    let text = self.text_for(self.span_from(start));
-                    return TokenKind::Error(EcoString::from(text));
-                }
-                Some('\'') => {
-                    // Check for escaped quote ('')
-                    if self.peek_char_second() == Some('\'') {
-                        self.advance();
-                        self.advance();
-                    } else {
-                        self.advance(); // closing quote
-                        break;
-                    }
-                }
-                _ => {
-                    self.advance();
-                }
-            }
-        }
-
-        // Extract content without quotes
-        let full_text = self.text_for(self.span_from(start));
-        let content = &full_text[1..full_text.len() - 1];
-        // Unescape doubled quotes
-        let content = content.replace("''", "'");
-        TokenKind::String(EcoString::from(content))
-    }
-
-    /// Lexes a double-quoted interpolated string.
-    fn lex_interpolated_string(&mut self) -> TokenKind {
         let start = self.current_position();
         self.advance(); // opening quote
 
@@ -505,7 +476,7 @@ impl<'src> Lexer<'src> {
         // Extract content without quotes
         let full_text = self.text_for(self.span_from(start));
         let content = &full_text[1..full_text.len() - 1];
-        TokenKind::InterpolatedString(EcoString::from(content))
+        TokenKind::String(EcoString::from(content))
     }
 
     /// Lexes a character literal: `$a`, `$\n`
@@ -836,7 +807,7 @@ mod tests {
     #[test]
     fn lex_strings() {
         assert_eq!(
-            lex_kinds("'hello' 'world' ''"),
+            lex_kinds(r#""hello" "world" """#),
             vec![
                 TokenKind::String("hello".into()),
                 TokenKind::String("world".into()),
@@ -847,17 +818,32 @@ mod tests {
 
     #[test]
     fn lex_string_with_escaped_quote() {
-        assert_eq!(lex_kinds("'it''s'"), vec![TokenKind::String("it's".into())]);
+        assert_eq!(
+            lex_kinds(r#""it\"s""#),
+            vec![TokenKind::String("it\\\"s".into())]
+        );
     }
 
     #[test]
-    fn lex_interpolated_strings() {
+    fn lex_string_with_backslash_escapes() {
         assert_eq!(
             lex_kinds(r#""hello" "Hello, {name}!""#),
             vec![
-                TokenKind::InterpolatedString("hello".into()),
-                TokenKind::InterpolatedString("Hello, {name}!".into()),
+                TokenKind::String("hello".into()),
+                TokenKind::String("Hello, {name}!".into()),
             ]
+        );
+    }
+
+    #[test]
+    fn lex_single_quote_produces_helpful_error() {
+        let tokens = lex_kinds("'hello'");
+        assert_eq!(tokens.len(), 3); // error + identifier + error
+        assert_eq!(
+            tokens[0],
+            TokenKind::Error(
+                "single-quoted strings are no longer supported, use double quotes: \"...\"".into()
+            )
         );
     }
 
@@ -1080,7 +1066,7 @@ mod tests {
 
     #[test]
     fn lex_error_recovery_unterminated_string() {
-        let kinds = lex_kinds("'unterminated");
+        let kinds = lex_kinds("\"unterminated");
         assert_eq!(kinds.len(), 1);
         assert!(matches!(kinds[0], TokenKind::Error(_)));
     }
@@ -1093,7 +1079,7 @@ mod tests {
     #[test]
     fn lex_at_primitive_followed_by_string() {
         assert_eq!(
-            lex_kinds("@primitive 'add'"),
+            lex_kinds("@primitive \"add\""),
             vec![TokenKind::AtPrimitive, TokenKind::String("add".into())]
         );
     }
@@ -1125,7 +1111,7 @@ mod tests {
     #[test]
     fn lex_at_intrinsic_followed_by_string() {
         assert_eq!(
-            lex_kinds("@intrinsic 'size'"),
+            lex_kinds("@intrinsic \"size\""),
             vec![TokenKind::AtIntrinsic, TokenKind::String("size".into())]
         );
     }

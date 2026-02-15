@@ -19,7 +19,7 @@ equalityCheck := 5 == 5
 looseNotEqualCheck := 42 /= 99
 
 // Strict equality (=:=)
-strictEqualCheck := 'hello' =:= 'hello'
+strictEqualCheck := "hello" =:= "hello"
 
 // Strict inequality (=/=)
 strictNotEqualCheck := 42 =/= 99
@@ -37,7 +37,7 @@ lessOrEqual := 5 <= 5
 greaterOrEqual := 10 >= 10
 
 // ===== String Concatenation =====
-stringConcat := 'Hello' ++ ' World'
+stringConcat := "Hello" ++ " World"
 
 // ===== Complex Operator Expressions =====
 // Operator precedence (binary operators are left-to-right in Smalltalk)

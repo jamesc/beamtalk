@@ -6,4 +6,4 @@
 
 Object subclass: Foo
   blockValue => @intrinsic blockValue
-  size => @intrinsic 'size'
+  size => @intrinsic "size"

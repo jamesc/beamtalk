@@ -12,7 +12,7 @@
 // ===========================================================================
 
 // signal: on custom error raises with correct class
-[MyCustomError new signal: 'oops'] on: Exception do: [:e | e class]
+[MyCustomError new signal: "oops"] on: Exception do: [:e | e class]
 // => MyCustomError
 
 // signal (no args) on custom error raises with class name as message
@@ -24,11 +24,11 @@
 // => MyCustomError
 
 // signal: preserves the message
-[MyCustomError new signal: 'custom message'] on: Exception do: [:e | e message]
+[MyCustomError new signal: "custom message"] on: Exception do: [:e | e message]
 // => custom message
 
-// signal preserves kind as 'signal'
-[MyCustomError new signal: 'test'] on: Exception do: [:e | e kind]
+// signal preserves kind as "signal"
+[MyCustomError new signal: "test"] on: Exception do: [:e | e kind]
 // => signal
 
 // ===========================================================================
@@ -36,7 +36,7 @@
 // ===========================================================================
 
 // on: MyCustomError do: catches MyCustomError
-[MyCustomError new signal: 'caught'] on: MyCustomError do: [:e | e message]
+[MyCustomError new signal: "caught"] on: MyCustomError do: [:e | e message]
 // => caught
 
 // ===========================================================================
@@ -44,11 +44,11 @@
 // ===========================================================================
 
 // on: Error do: catches MyCustomError (Error is superclass)
-[MyCustomError new signal: 'err'] on: Error do: [:e | 'caught by Error']
+[MyCustomError new signal: "err"] on: Error do: [:e | "caught by Error"]
 // => caught by Error
 
 // on: Exception do: catches MyCustomError (Exception is root)
-[MyCustomError new signal: 'exc'] on: Exception do: [:e | 'caught by Exception']
+[MyCustomError new signal: "exc"] on: Exception do: [:e | "caught by Exception"]
 // => caught by Exception
 
 // ===========================================================================
@@ -56,11 +56,11 @@
 // ===========================================================================
 
 // on: TypeError do: does NOT catch MyCustomError
-[[MyCustomError new signal: 'no'] on: TypeError do: [:e | 'wrong']] on: Exception do: [:e | 'correct']
+[[MyCustomError new signal: "no"] on: TypeError do: [:e | "wrong"]] on: Exception do: [:e | "correct"]
 // => correct
 
 // on: RuntimeError do: does NOT catch MyCustomError
-[[MyCustomError new signal: 'no'] on: RuntimeError do: [:e | 'wrong']] on: Exception do: [:e | 'correct']
+[[MyCustomError new signal: "no"] on: RuntimeError do: [:e | "wrong"]] on: Exception do: [:e | "correct"]
 // => correct
 
 // ===========================================================================
@@ -72,11 +72,11 @@
 // => RuntimeError
 
 // Built-in type_error still maps to TypeError
-[#(1, 2, 3) at: 'hello'] on: TypeError do: [:e | e class]
+[#(1, 2, 3) at: "hello"] on: TypeError do: [:e | e class]
 // => TypeError
 
 // MyCustomError does NOT catch built-in RuntimeError
-[[42 noSuchMethod] on: MyCustomError do: [:e | 'wrong']] on: Exception do: [:e | 'correct']
+[[42 noSuchMethod] on: MyCustomError do: [:e | "wrong"]] on: Exception do: [:e | "correct"]
 // => correct
 
 // ===========================================================================
@@ -84,5 +84,5 @@
 // ===========================================================================
 
 // Re-signaling a caught custom exception preserves its class
-[[MyCustomError new signal: 're-test'] on: MyCustomError do: [:e | e signal: 'forwarded']] on: MyCustomError do: [:e | e message]
+[[MyCustomError new signal: "re-test"] on: MyCustomError do: [:e | e signal: "forwarded"]] on: MyCustomError do: [:e | e message]
 // => forwarded

@@ -685,7 +685,7 @@ mod tests {
 
     #[test]
     fn parse_string_literal() {
-        let module = parse_ok("'hello'");
+        let module = parse_ok("\"hello\"");
         assert_eq!(module.expressions.len(), 1);
         match &module.expressions[0] {
             Expression::Literal(Literal::String(s), _) if s == "hello" => {}
@@ -823,7 +823,7 @@ mod tests {
 
     #[test]
     fn parse_keyword_message() {
-        let module = parse_ok("array at: 1 put: 'x'");
+        let module = parse_ok("array at: 1 put: \"x\"");
         assert_eq!(module.expressions.len(), 1);
         match &module.expressions[0] {
             Expression::MessageSend {
@@ -967,7 +967,7 @@ mod tests {
 
     #[test]
     fn parse_cascade() {
-        let module = parse_ok("Transcript show: 'Hello'; cr; show: 'World'");
+        let module = parse_ok("Transcript show: \"Hello\"; cr; show: \"World\"");
         assert_eq!(module.expressions.len(), 1);
         match &module.expressions[0] {
             Expression::Cascade {
@@ -1095,7 +1095,7 @@ mod tests {
     #[test]
     fn parse_block_newline_separated_statements() {
         // BT-360: newlines act as implicit statement separators
-        let module = parse_ok("[\n  Transcript show: 'a'\n  Transcript show: 'b'\n  42\n]");
+        let module = parse_ok("[\n  Transcript show: \"a\"\n  Transcript show: \"b\"\n  42\n]");
         match &module.expressions[0] {
             Expression::Block(block) => {
                 assert_eq!(
@@ -1167,7 +1167,7 @@ mod tests {
     fn parse_method_body_newline_separated() {
         // BT-360: method bodies parse multiple newline-separated statements
         let module = parse_ok(
-            "Object subclass: Chatty\n\n  greet =>\n    Transcript show: 'Hello'\n    Transcript show: 'World'\n    42",
+            "Object subclass: Chatty\n\n  greet =>\n    Transcript show: \"Hello\"\n    Transcript show: \"World\"\n    42",
         );
         assert_eq!(module.classes.len(), 1);
         let method = &module.classes[0].methods[0];
@@ -1327,7 +1327,7 @@ mod tests {
 
     #[test]
     fn parse_map_with_atom_keys() {
-        let module = parse_ok("#{#name => 'Alice', #age => 30}");
+        let module = parse_ok("#{#name => \"Alice\", #age => 30}");
         assert_eq!(module.expressions.len(), 1);
         match &module.expressions[0] {
             Expression::MapLiteral { pairs, .. } => {
@@ -1369,7 +1369,7 @@ mod tests {
 
     #[test]
     fn parse_map_with_string_keys() {
-        let module = parse_ok("#{'host' => 'localhost', 'port' => 8080}");
+        let module = parse_ok("#{\"host\" => \"localhost\", \"port\" => 8080}");
         assert_eq!(module.expressions.len(), 1);
         match &module.expressions[0] {
             Expression::MapLiteral { pairs, .. } => {
@@ -1405,7 +1405,7 @@ mod tests {
 
     #[test]
     fn parse_map_with_integer_keys() {
-        let module = parse_ok("#{1 => 'first', 2 => 'second'}");
+        let module = parse_ok("#{1 => \"first\", 2 => \"second\"}");
         assert_eq!(module.expressions.len(), 1);
         match &module.expressions[0] {
             Expression::MapLiteral { pairs, .. } => {
@@ -1436,7 +1436,7 @@ mod tests {
 
     #[test]
     fn parse_nested_maps() {
-        let module = parse_ok("#{#outer => #{#inner => 'value'}}");
+        let module = parse_ok("#{#outer => #{#inner => \"value\"}}");
         assert_eq!(module.expressions.len(), 1);
         match &module.expressions[0] {
             Expression::MapLiteral { pairs, .. } => {
@@ -1467,7 +1467,7 @@ mod tests {
 
     #[test]
     fn parse_map_assignment() {
-        let module = parse_ok("person := #{#name => 'Alice'}");
+        let module = parse_ok("person := #{#name => \"Alice\"}");
         assert_eq!(module.expressions.len(), 1);
         match &module.expressions[0] {
             Expression::Assignment { target, value, .. } => {
@@ -1484,7 +1484,7 @@ mod tests {
 
     #[test]
     fn parse_multiple_map_assignments() {
-        let source = "empty := #{}\nperson := #{#name => 'Alice', #age => 30}\n";
+        let source = "empty := #{}\nperson := #{#name => \"Alice\", #age => 30}\n";
         let module = parse_ok(source);
 
         assert_eq!(module.expressions.len(), 2, "Expected 2 expressions");
@@ -1597,7 +1597,7 @@ mod tests {
     fn parse_state_with_type_annotation() {
         let module = parse_ok(
             "Actor subclass: Person
-  state: name: String = 'unnamed'",
+  state: name: String = \"unnamed\"",
         );
 
         assert_eq!(module.classes.len(), 1);
@@ -1665,7 +1665,7 @@ mod tests {
     fn parse_before_method() {
         let module = parse_ok(
             "Actor subclass: Agent
-  before processMessage => Telemetry log: 'processing'",
+  before processMessage => Telemetry log: \"processing\"",
         );
 
         assert_eq!(module.classes.len(), 1);
@@ -1717,7 +1717,7 @@ mod tests {
   increment => self.value := self.value + 1
   decrement => self.value := self.value - 1
 
-  before increment => Telemetry log: 'incrementing'
+  before increment => Telemetry log: \"incrementing\"
   after increment => self notifyObservers",
         );
 
@@ -2163,7 +2163,7 @@ Actor subclass: Rectangle
 
     #[test]
     fn parse_primitive_quoted_selector() {
-        let source = "Object subclass: Foo\n  + other => @primitive '+'";
+        let source = "Object subclass: Foo\n  + other => @primitive \"+\"";
         let module = parse_ok(source);
         assert_eq!(module.classes.len(), 1);
         let method = &module.classes[0].methods[0];
@@ -2200,7 +2200,7 @@ Actor subclass: Rectangle
     #[test]
     fn parse_primitive_in_method_body() {
         // @primitive as first expression in a method body
-        let source = "Object subclass: MyInt\n  + other => @primitive '+'";
+        let source = "Object subclass: MyInt\n  + other => @primitive \"+\"";
         let module = parse_ok(source);
         assert_eq!(module.classes.len(), 1);
         let method = &module.classes[0].methods[0];
@@ -2217,7 +2217,7 @@ Actor subclass: Rectangle
     #[test]
     fn parse_primitive_with_fallback() {
         // @primitive followed by fallback code in method body
-        let source = "Object subclass: MyInt\n  abs => @primitive 'abs'. self negated";
+        let source = "Object subclass: MyInt\n  abs => @primitive \"abs\". self negated";
         let module = parse_ok(source);
         let method = &module.classes[0].methods[0];
         assert_eq!(method.body.len(), 2);
@@ -2260,7 +2260,7 @@ Actor subclass: Rectangle
     #[test]
     fn parse_primitive_outside_method_body_error() {
         // @primitive at top level (outside method body) should produce an error
-        let diagnostics = parse_err("@primitive '+'");
+        let diagnostics = parse_err("@primitive \"+\"");
         assert!(
             !diagnostics.is_empty(),
             "Expected error for @primitive outside method body"
@@ -2277,7 +2277,7 @@ Actor subclass: Rectangle
     #[test]
     fn parse_primitive_inside_block_in_method_body() {
         // @primitive inside a block within a method body should still be accepted
-        let source = "Object subclass: Foo\n  m => [@primitive '+']";
+        let source = "Object subclass: Foo\n  m => [@primitive \"+\"]";
         let module = parse_ok(source);
         let method = &module.classes[0].methods[0];
         assert_eq!(method.body.len(), 1);
@@ -2318,7 +2318,7 @@ Actor subclass: Rectangle
     #[test]
     fn parse_intrinsic_quoted_selector() {
         // @intrinsic with quoted selector produces same AST as @primitive
-        let source = "Object subclass: Foo\n  size => @intrinsic 'size'";
+        let source = "Object subclass: Foo\n  size => @intrinsic \"size\"";
         let module = parse_ok(source);
         let method = &module.classes[0].methods[0];
         assert_eq!(method.body.len(), 1);
@@ -2352,7 +2352,7 @@ Actor subclass: Rectangle
     // BT-285: Consecutive binary method definitions
     #[test]
     fn parse_consecutive_binary_methods() {
-        let source = "Object subclass: Foo\n  + other => @primitive '+'\n  - other => @primitive '-'\n  * other => @primitive '*'";
+        let source = "Object subclass: Foo\n  + other => @primitive \"+\"\n  - other => @primitive \"-\"\n  * other => @primitive \"*\"";
         let module = parse_ok(source);
         assert_eq!(module.classes[0].methods.len(), 3);
         assert_eq!(module.classes[0].methods[0].selector.name(), "+");
@@ -2362,7 +2362,7 @@ Actor subclass: Rectangle
 
     #[test]
     fn parse_binary_methods_followed_by_unary() {
-        let source = "Object subclass: Foo\n  + other => @primitive '+'\n  - other => @primitive '-'\n  negated => 0";
+        let source = "Object subclass: Foo\n  + other => @primitive \"+\"\n  - other => @primitive \"-\"\n  negated => 0";
         let module = parse_ok(source);
         assert_eq!(module.classes[0].methods.len(), 3);
         assert_eq!(module.classes[0].methods[0].selector.name(), "+");
@@ -2477,7 +2477,7 @@ Actor subclass: Rectangle
 
     #[test]
     fn parse_list_with_mixed_types() {
-        let module = parse_ok("#(1, 'hello', #ok)");
+        let module = parse_ok("#(1, \"hello\", #ok)");
         assert_eq!(module.expressions.len(), 1);
         match &module.expressions[0] {
             Expression::ListLiteral { elements, tail, .. } => {
@@ -2702,7 +2702,7 @@ sealed Object subclass: Point
   state: value = 0
 
   /// Logging before increment.
-  before increment => Transcript show: 'incrementing'",
+  before increment => Transcript show: \"incrementing\"",
         );
 
         assert_eq!(module.classes.len(), 1);
@@ -2721,7 +2721,7 @@ sealed Object subclass: Point
   state: value = 0
 
   /// Logging after increment.
-  after increment => Transcript show: 'done'",
+  after increment => Transcript show: \"done\"",
         );
 
         assert_eq!(module.classes.len(), 1);
@@ -2858,7 +2858,7 @@ Actor subclass: Counter
 
     #[test]
     fn complete_keyword_message() {
-        assert!(is_input_complete("array at: 1 put: 'hello'"));
+        assert!(is_input_complete("array at: 1 put: \"hello\""));
     }
 
     #[test]
@@ -2878,7 +2878,7 @@ Actor subclass: Counter
 
     #[test]
     fn complete_map_literal() {
-        assert!(is_input_complete("#{name => 'Alice', age => 30}"));
+        assert!(is_input_complete("#{name => \"Alice\", age => 30}"));
     }
 
     #[test]
@@ -2893,7 +2893,7 @@ Actor subclass: Counter
 
     #[test]
     fn complete_string() {
-        assert!(is_input_complete("'hello world'"));
+        assert!(is_input_complete("\"hello world\""));
     }
 
     #[test]
@@ -2933,7 +2933,7 @@ Actor subclass: Counter
     #[test]
     fn incomplete_unclosed_map() {
         assert!(!is_input_complete("#{"));
-        assert!(!is_input_complete("#{name => 'Alice'"));
+        assert!(!is_input_complete("#{name => \"Alice\""));
     }
 
     #[test]
@@ -2944,7 +2944,7 @@ Actor subclass: Counter
 
     #[test]
     fn incomplete_unterminated_string() {
-        assert!(!is_input_complete("'hello"));
+        assert!(!is_input_complete("\"hello"));
     }
 
     #[test]
@@ -2977,7 +2977,9 @@ Actor subclass: Counter
 
     #[test]
     fn complete_multiline_map() {
-        assert!(is_input_complete("#{\n  name => 'Alice',\n  age => 30\n}"));
+        assert!(is_input_complete(
+            "#{\n  name => \"Alice\",\n  age => 30\n}"
+        ));
     }
 
     #[test]
@@ -3039,7 +3041,7 @@ Actor subclass: Counter
 
     #[test]
     fn parse_match_with_semicolons() {
-        let module = parse_ok("x match: [1 -> 'one'; 2 -> 'two'; _ -> 'other']");
+        let module = parse_ok("x match: [1 -> \"one\"; 2 -> \"two\"; _ -> \"other\"]");
         assert_eq!(module.expressions.len(), 1);
         assert!(
             matches!(&module.expressions[0], Expression::Match { arms, .. } if arms.len() == 3)
@@ -3081,7 +3083,7 @@ Actor subclass: Counter
 
     #[test]
     fn codegen_match_with_arms() {
-        let module = parse_ok("1 match: [1 -> 'one'; 2 -> 'two'; _ -> 'other']");
+        let module = parse_ok("1 match: [1 -> \"one\"; 2 -> \"two\"; _ -> \"other\"]");
         let expr = &module.expressions[0];
         let result = crate::codegen::core_erlang::generate_test_expression(expr, "test_match");
         assert!(result.is_ok(), "Codegen failed: {:?}", result.err());

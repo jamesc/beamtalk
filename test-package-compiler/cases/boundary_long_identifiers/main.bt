@@ -8,7 +8,7 @@
 thisIsAVeryLongIdentifierNameThatTestsTheParserAbilityToHandleExtremelyLongVariableNamesWithoutIssues := 42
 
 // Very long string literal (200+ characters)
-longString := 'This is an extremely long string literal that contains a lot of text to test the lexer and parser ability to handle very long string tokens without issues or buffer overflows and to ensure proper memory allocation'
+longString := "This is an extremely long string literal that contains a lot of text to test the lexer and parser ability to handle very long string tokens without issues or buffer overflows and to ensure proper memory allocation"
 
 // Long keyword message selector (multiple long keywords)
 result := veryLongObjectWithManyMethods 

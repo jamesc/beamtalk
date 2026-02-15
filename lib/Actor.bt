@@ -38,7 +38,7 @@ Object subclass: Actor
   /// ```beamtalk
   /// Counter new   // => ERROR: instantiation_error
   /// ```
-  sealed new => self error: 'Actors must use spawn, not new'
+  sealed new => self error: "Actors must use spawn, not new"
 
   /// Raises an error — actors must use `spawnWith:`, not `new:`.
   ///
@@ -46,12 +46,12 @@ Object subclass: Actor
   /// ```beamtalk
   /// Counter new: #{}   // => ERROR: instantiation_error
   /// ```
-  sealed new: initArgs => self error: 'Actors must use spawnWith:, not new:'
+  sealed new: initArgs => self error: "Actors must use spawnWith:, not new:"
 
   /// Human-readable description of the receiver.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Actor describe   // => 'an Actor'
+  /// Actor describe   // => "an Actor"
   /// ```
-  describe => 'an Actor'
+  describe => "an Actor"

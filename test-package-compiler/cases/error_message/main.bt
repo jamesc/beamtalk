@@ -5,8 +5,8 @@
 // The error: message should compile to erlang:error({beamtalk_error, Message})
 
 Actor subclass: TestActor
-  doError => self error: 'This is a test error'
+  doError => self error: "This is a test error"
   
   errorWithVariable => 
-    msg := 'Dynamic error message'.
+    msg := "Dynamic error message".
     self error: msg

@@ -10,7 +10,7 @@
 /// ```beamtalk
 /// nil class                    // => UndefinedObject
 /// nil isNil                    // => true
-/// nil ifNil: ['nothing']       // => 'nothing'
+/// nil ifNil: ["nothing"]       // => "nothing"
 /// ```
 sealed Object subclass: UndefinedObject
   /// Returns true. nil is nil.
@@ -33,7 +33,7 @@ sealed Object subclass: UndefinedObject
   ///
   /// ## Examples
   /// ```beamtalk
-  /// nil ifNil: ['nothing']      // => 'nothing'
+  /// nil ifNil: ["nothing"]      // => "nothing"
   /// ```
   ifNil: nilBlock => nilBlock value
 
@@ -89,14 +89,14 @@ sealed Object subclass: UndefinedObject
   ///
   /// ## Examples
   /// ```beamtalk
-  /// nil describe                // => 'nil'
+  /// nil describe                // => "nil"
   /// ```
-  describe => 'nil'
+  describe => "nil"
 
   /// Return a developer-readable string representation.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// nil printString             // => 'nil'
+  /// nil printString             // => "nil"
   /// ```
-  printString => 'nil'
+  printString => "nil"

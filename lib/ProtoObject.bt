@@ -18,9 +18,9 @@ abstract nil subclass: ProtoObject
   /// ## Examples
   /// ```beamtalk
   /// 42 == 42           // => true
-  /// 'abc' == 'abc'     // => true
+  /// "abc" == "abc"     // => true
   /// ```
-  == other => @primitive '=='
+  == other => @primitive "=="
 
   /// Test value inequality (negation of `==`).
   ///
@@ -29,16 +29,16 @@ abstract nil subclass: ProtoObject
   /// 1 /= 2             // => true
   /// 42 /= 42           // => false
   /// ```
-  /= other => @primitive '/='
+  /= other => @primitive "/="
 
   /// Return the class of the receiver.
   ///
   /// ## Examples
   /// ```beamtalk
   /// 42 class            // => Integer
-  /// 'hello' class       // => String
+  /// "hello" class       // => String
   /// ```
-  class => @primitive 'class'
+  class => @primitive "class"
 
   /// Handle messages the receiver does not understand. Override for custom dispatch.
   ///
@@ -46,7 +46,7 @@ abstract nil subclass: ProtoObject
   /// ```beamtalk
   /// 42 unknownMessage   // => ERROR: does_not_understand
   /// ```
-  doesNotUnderstand: selector args: arguments => @primitive 'doesNotUnderstand:args:'
+  doesNotUnderstand: selector args: arguments => @primitive "doesNotUnderstand:args:"
 
   /// Send a message dynamically with an arguments list.
   ///
@@ -54,4 +54,4 @@ abstract nil subclass: ProtoObject
   /// ```beamtalk
   /// 42 perform: #abs withArguments: #()   // => 42
   /// ```
-  perform: selector withArguments: arguments => @primitive 'perform:withArguments:'
+  perform: selector withArguments: arguments => @primitive "perform:withArguments:"

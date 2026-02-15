@@ -9,7 +9,7 @@
 /// ## Examples
 /// ```beamtalk
 /// [1 / 0] on: Exception do: [:e | e message]
-/// Exception signal: 'something went wrong'
+/// Exception signal: "something went wrong"
 /// ```
 Object subclass: Exception
   /// Return the error message string.
@@ -18,7 +18,7 @@ Object subclass: Exception
   /// ```beamtalk
   /// [1 / 0] on: Exception do: [:e | e message]
   /// ```
-  message => @primitive 'message'
+  message => @primitive "message"
 
   /// Return the actionable hint string, or nil if none.
   ///
@@ -26,7 +26,7 @@ Object subclass: Exception
   /// ```beamtalk
   /// [1 / 0] on: Exception do: [:e | e hint]
   /// ```
-  hint => @primitive 'hint'
+  hint => @primitive "hint"
 
   /// Return the error kind as a symbol.
   ///
@@ -34,7 +34,7 @@ Object subclass: Exception
   /// ```beamtalk
   /// [1 / 0] on: Exception do: [:e | e kind]
   /// ```
-  kind => @primitive 'kind'
+  kind => @primitive "kind"
 
   /// Return the message selector that triggered the error, or nil.
   ///
@@ -42,7 +42,7 @@ Object subclass: Exception
   /// ```beamtalk
   /// [42 unknownMsg] on: Exception do: [:e | e selector]
   /// ```
-  selector => @primitive 'selector'
+  selector => @primitive "selector"
 
   /// Return the class name where the error occurred.
   ///
@@ -50,7 +50,7 @@ Object subclass: Exception
   /// ```beamtalk
   /// [42 unknownMsg] on: Exception do: [:e | e errorClass]
   /// ```
-  errorClass => @primitive 'errorClass'
+  errorClass => @primitive "errorClass"
 
   /// Return a developer-readable string representation of the error.
   ///
@@ -58,7 +58,7 @@ Object subclass: Exception
   /// ```beamtalk
   /// [42 unknownMsg] on: Exception do: [:e | e printString]
   /// ```
-  printString => @primitive 'printString'
+  printString => @primitive "printString"
 
   /// Human-readable description of the receiver.
   ///
@@ -74,12 +74,12 @@ Object subclass: Exception
   /// ```beamtalk
   /// (Exception new) signal
   /// ```
-  signal => @primitive 'signal'
+  signal => @primitive "signal"
 
   /// Create and raise a new exception with the given message.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Exception signal: 'something went wrong'
+  /// Exception signal: "something went wrong"
   /// ```
-  signal: msg => @primitive 'signal:'
+  signal: msg => @primitive "signal:"

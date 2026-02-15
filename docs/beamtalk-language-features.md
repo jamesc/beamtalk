@@ -38,11 +38,11 @@ Planned language features for beamtalk. See [beamtalk-principles.md](beamtalk-pr
 ### String Types
 
 ```
-// Single-quoted strings - UTF-8 binaries (recommended)
-name := 'Alice'
-greeting := 'Hello, 世界! 🌍'
+// Double-quoted strings - UTF-8 binaries
+name := "Alice"
+greeting := "Hello, 世界! 🌍"
 
-// Double-quoted strings - UTF-8 with interpolation
+// String interpolation (planned)
 message := "Welcome, {name}!"
 emoji := "Status: {status} ✓"
 
@@ -53,9 +53,9 @@ emoji := "Status: {status} ✓"
 
 | Beamtalk | Erlang/BEAM | Notes |
 |----------|-------------|-------|
-| `'hello'` | `<<"hello">>` | UTF-8 binary |
-| `"Hi, {name}"` | `<<"Hi, ", Name/binary>>` | Interpolated UTF-8 |
-| Grapheme cluster | Via `:string` module | `'👨‍👩‍👧‍👦'` is one grapheme, multiple codepoints |
+| `"hello"` | `<<"hello">>` | UTF-8 binary |
+| `"Hi, {name}"` | `<<"Hi, ", Name/binary>>` | Interpolated UTF-8 (planned) |
+| Grapheme cluster | Via `:string` module | `"👨‍👩‍👧‍👦"` is one grapheme, multiple codepoints |
 | `$a` | `97` (codepoint) | Character literal = Unicode codepoint |
 
 ### String Operations (Grapheme-Aware)
@@ -64,20 +64,20 @@ String operations respect Unicode grapheme clusters (user-perceived characters):
 
 ```
 // Length in graphemes, not bytes
-'Hello' length        // => 5
-'世界' length          // => 2 (not 6 bytes)
-'👨‍👩‍👧‍👦' length        // => 1 (family emoji is 1 grapheme, 7 codepoints)
+"Hello" length        // => 5
+"世界" length          // => 2 (not 6 bytes)
+"👨‍👩‍👧‍👦" length        // => 1 (family emoji is 1 grapheme, 7 codepoints)
 
 // Slicing by grapheme
-'Hello' at: 1         // => 'H'
-'世界' at: 1           // => '世'
+"Hello" at: 1         // => "H"
+"世界" at: 1           // => "世"
 
 // Iteration over graphemes
-'Hello' each: [:char | Transcript show: char]
+"Hello" each: [:char | Transcript show: char]
 
 // Case conversion (locale-aware)
-'HELLO' lowercase     // => 'hello'
-'straße' uppercase    // => 'STRASSE' (German ß → SS)
+"HELLO" lowercase     // => "hello"
+"straße" uppercase    // => "STRASSE" (German ß → SS)
 ```
 
 ### Binary Pattern Matching for Bytes
@@ -106,8 +106,8 @@ packet := <<1, messageBytes/utf8>>
 
 | Beamtalk | Erlang | Notes |
 |----------|--------|-------|
-| `'string'` | `<<"string">>` | Binary, not charlist |
-| `'世界'` | `<<228,184,150,231,149,140>>` | UTF-8 encoded bytes |
+| `"string"` | `<<"string">>` | Binary, not charlist |
+| `"世界"` | `<<228,184,150,231,149,140>>` | UTF-8 encoded bytes |
 | String operations | `:string` module | Grapheme-aware (`:string.length/1`) |
 | `$x` | Integer codepoint | `$a` = 97, `$世` = 19990 |
 | Charlist (legacy) | `[104,101,108,108,111]` | Use `String toCharlist:` if needed |
@@ -126,13 +126,13 @@ For Erlang modules that require charlists:
 
 ```
 // Convert to charlist when needed
-charlist := 'hello' toCharlist  // => [104, 101, 108, 108, 111]
+charlist := "hello" toCharlist  // => [104, 101, 108, 108, 111]
 
 // Call Erlang with charlist
 Erlang.io format: charlist arguments: []
 
 // Convert back from charlist
-str := String fromCharlist: [72, 101, 108, 108, 111]  // => 'Hello'
+str := String fromCharlist: [72, 101, 108, 108, 111]  // => "Hello"
 ```
 
 ### Implementation Status
@@ -193,7 +193,7 @@ Object subclass: Point
   
   // Methods return new instances (immutable)
   plus: other => Point new: #{x => self.x + other.x, y => self.y + other.y}
-  describe => 'Point({self.x}, {self.y})'
+  describe => "Point({self.x}, {self.y})"
 
 // Actor - process with mailbox
 Actor subclass: Counter
@@ -241,10 +241,10 @@ counter increment
 3 + 4
 
 // Keyword message
-array at: 1 put: 'hello'
+array at: 1 put: "hello"
 
 // Cascade - multiple messages to same receiver
-Transcript show: 'Hello'; cr; show: 'World'
+Transcript show: "Hello"; cr; show: "World"
 ```
 
 ### Message Precedence (high to low)
@@ -267,7 +267,7 @@ Binary operators follow standard math precedence (highest to lowest):
 #### Additive
 - `+` - Addition: `3 + 4` → `7`
 - `-` - Subtraction: `10 - 3` → `7`
-- `++` - String concatenation: `'Hello' ++ ' World'` → `'Hello World'`
+- `++` - String concatenation: `"Hello" ++ " World"` → `"Hello World"`
 
 #### Comparison
 - `<` - Less than: `3 < 5` → `true`
@@ -599,30 +599,30 @@ The `match:` keyword message takes a block of pattern arms separated by `;`:
 
 ```beamtalk
 // Basic match with literals
-x match: [1 -> 'one'; 2 -> 'two'; _ -> 'other']
+x match: [1 -> "one"; 2 -> "two"; _ -> "other"]
 
 // Variable binding in patterns
 42 match: [n -> n + 1]
 // => 43
 
 // Symbol matching
-status match: [#ok -> 'success'; #error -> 'failure'; _ -> 'unknown']
+status match: [#ok -> "success"; #error -> "failure"; _ -> "unknown"]
 
 // String matching
-greeting match: ['hello' -> 'hi'; _ -> 'huh?']
+greeting match: ["hello" -> "hi"; _ -> "huh?"]
 
 // Guard clauses with when:
 x match: [
-  n when: [n > 100] -> 'big';
-  n when: [n > 10] -> 'medium';
-  _ -> 'small'
+  n when: [n > 100] -> "big";
+  n when: [n > 10] -> "medium";
+  _ -> "small"
 ]
 
 // Negative number patterns
-temp match: [-1 -> 'minus one'; 0 -> 'zero'; _ -> 'other']
+temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 
 // Match on computed expression
-(3 + 4) match: [7 -> 'correct'; _ -> 'wrong']
+(3 + 4) match: [7 -> "correct"; _ -> "wrong"]
 ```
 
 **Supported pattern types:**
@@ -632,7 +632,7 @@ temp match: [-1 -> 'minus one'; 0 -> 'zero'; _ -> 'other']
 | Wildcard | `_` | Matches anything |
 | Literal integer | `42` | Exact integer match |
 | Literal float | `3.14` | Exact float match |
-| Literal string | `'hello'` | Exact string match |
+| Literal string | `"hello"` | Exact string match |
 | Literal symbol | `#ok` | Exact symbol match |
 | Literal character | `$a` | Exact character match |
 | Negative number | `-1` | Negative integer/float match |
@@ -812,7 +812,7 @@ Hot code reload with dedicated syntax.
 ```
 // Patch a method on running actors
 patch Counter >> #increment {
-  Telemetry log: 'incrementing'
+  Telemetry log: "incrementing"
   self.value += 1
 }
 
@@ -1047,13 +1047,13 @@ Stream on: #(1, 2, 3)             // wraps collection lazily
 
 // Collection shorthand — any collection responds to `stream`
 #(1, 2, 3) stream                  // same as Stream on: #(1, 2, 3)
-'hello' stream                     // Stream over characters
+"hello" stream                     // Stream over characters
 #{#a => 1} stream                  // Stream over Associations
 (Set new add: 1) stream            // Stream over set elements
 
 // File streaming — lazy, constant memory
-File lines: 'data.csv'            // Stream of lines
-File open: 'data.csv' do: [:handle |
+File lines: "data.csv"            // Stream of lines
+File open: "data.csv" do: [:handle |
   handle lines take: 10           // block-scoped handle
 ]
 ```
@@ -1137,19 +1137,19 @@ The receiver makes the boundary visible: you always know whether you're working 
 
 ```beamtalk
 // Read lines lazily
-(File lines: 'data.csv') do: [:line | Transcript show: line]
+(File lines: "data.csv") do: [:line | Transcript show: line]
 
 // Pipeline composition
-(File lines: 'app.log') select: [:l | l includes: 'ERROR']
+(File lines: "app.log") select: [:l | l includes: "ERROR"]
 
 // Block-scoped handle for explicit lifecycle control
-File open: 'data.csv' do: [:handle |
+File open: "data.csv" do: [:handle |
   handle lines take: 10
 ]
 // handle closed automatically when block exits
 ```
 
-**Cross-process constraint:** File-backed Streams must be consumed by the same process that created them (BEAM file handles are process-local). To pass file data to an actor, materialize first: `(File lines: 'data.csv') take: 100` returns a List that can be sent safely. Collection-backed Streams have no such restriction.
+**Cross-process constraint:** File-backed Streams must be consumed by the same process that created them (BEAM file handles are process-local). To pass file data to an actor, materialize first: `(File lines: "data.csv") take: 100` returns a List that can be sent safely. Collection-backed Streams have no such restriction.
 
 #### Side-Effect Timing ⚠️
 
@@ -1274,7 +1274,7 @@ counter mailbox peek    // => []
 
 // Hot patch
 patch Counter >> #increment {
-  Transcript log: 'incrementing'
+  Transcript log: "incrementing"
   self.value := self.value + 1
 }
 
@@ -1296,10 +1296,10 @@ The simplest way to test — expressions with expected results:
 1 + 2
 // => 3
 
-'hello' size
+"hello" size
 // => 5
 
-'hello' , ' world'
+"hello" , " world"
 // => hello world
 ```
 
@@ -1337,7 +1337,7 @@ Each test method gets a fresh instance with `setUp` → test → `tearDown` life
 | `assert:equals:` | Assert two values are equal | `self assert: result equals: 42` |
 | `deny:` | Assert condition is false | `self deny: list isEmpty` |
 | `should:raise:` | Assert block raises error | `self should: [1 / 0] raise: #badarith` |
-| `fail:` | Unconditional failure | `self fail: 'not implemented'` |
+| `fail:` | Unconditional failure | `self fail: "not implemented"` |
 
 #### Running Tests
 

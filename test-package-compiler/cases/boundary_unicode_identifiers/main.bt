@@ -7,16 +7,16 @@
 // Unicode characters in identifiers (if supported)
 // Note: This tests whether the lexer/parser gracefully handles or rejects Unicode
 café := 42
-résumé := 'document'
-日本語 := 'Japanese'
+résumé := "document"
+日本語 := "Japanese"
 
 // Unicode in string literals (should always work)
-greeting := 'Hello, 世界! 🌍'
-emoji := '🚀 Beamtalk to the moon! 🌙'
-mathematical := 'π ≈ 3.14159, √2 ≈ 1.414'
+greeting := "Hello, 世界! 🌍"
+emoji := "🚀 Beamtalk to the moon! 🌙"
+mathematical := "π ≈ 3.14159, √2 ≈ 1.414"
 
 // Mixed ASCII and Unicode
-message := 'Beamtalk supports émojis 😀 and 中文'
+message := "Beamtalk supports émojis 😀 and 中文"
 
 // Unicode in keyword message (if identifiers support it)
 object café: value résumé: data

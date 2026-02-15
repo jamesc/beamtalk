@@ -9,7 +9,7 @@
 /// ## Examples
 /// ```beamtalk
 /// false class                  // => False
-/// false ifFalse: ['no']        // => 'no'
+/// false ifFalse: ["no"]        // => "no"
 /// false not                    // => true
 /// ```
 
@@ -18,7 +18,7 @@ sealed Boolean subclass: False
   ///
   /// ## Examples
   /// ```beamtalk
-  /// false ifTrue: ['yes'] ifFalse: ['no']   // => 'no'
+  /// false ifTrue: ["yes"] ifFalse: ["no"]   // => "no"
   /// ```
   ifTrue: trueBlock ifFalse: falseBlock => falseBlock value
 
@@ -26,7 +26,7 @@ sealed Boolean subclass: False
   ///
   /// ## Examples
   /// ```beamtalk
-  /// false ifTrue: ['yes']      // => false
+  /// false ifTrue: ["yes"]      // => false
   /// ```
   ifTrue: trueBlock => self
 
@@ -34,7 +34,7 @@ sealed Boolean subclass: False
   ///
   /// ## Examples
   /// ```beamtalk
-  /// false ifFalse: ['no']      // => 'no'
+  /// false ifFalse: ["no"]      // => "no"
   /// ```
   ifFalse: falseBlock => falseBlock value
 
@@ -66,14 +66,14 @@ sealed Boolean subclass: False
   ///
   /// ## Examples
   /// ```beamtalk
-  /// false describe             // => 'false'
+  /// false describe             // => "false"
   /// ```
-  describe => 'false'
+  describe => "false"
 
   /// Return a developer-readable string representation.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// false printString          // => 'false'
+  /// false printString          // => "false"
   /// ```
-  printString => 'false'
+  printString => "false"

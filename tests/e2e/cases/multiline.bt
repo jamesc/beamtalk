@@ -36,7 +36,7 @@
 
 // Map literal spanning multiple lines
 #{
-  #name => 'Alice',
+  #name => "Alice",
   #age => 30
 } at: #name
 // => Alice

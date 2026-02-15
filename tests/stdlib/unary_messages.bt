@@ -97,27 +97,27 @@
 // ===========================================================================
 
 // length - count graphemes in string
-'hello' length
+"hello" length
 // => 5
 
 // length - empty string
-'' length
+"" length
 // => 0
 
 // length - single character
-'a' length
+"a" length
 // => 1
 
 // isEmpty - true for empty string
-'' isEmpty
+"" isEmpty
 // => true
 
 // isEmpty - false for non-empty string
-'hello' isEmpty
+"hello" isEmpty
 // => false
 
 // isEmpty - false for single character
-'x' isEmpty
+"x" isEmpty
 // => false
 
 // ===========================================================================

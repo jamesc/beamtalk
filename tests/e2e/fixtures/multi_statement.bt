@@ -7,10 +7,10 @@
 Object subclass: MultiStatement
 
   sideEffectThenReturn =>
-    Transcript show: 'side effect'
+    Transcript show: "side effect"
     42
 
   twoSideEffects =>
-    Transcript show: 'first'
-    Transcript show: 'second'
+    Transcript show: "first"
+    Transcript show: "second"
     99

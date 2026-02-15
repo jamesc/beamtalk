@@ -8,20 +8,20 @@
 sealed Object subclass: Dictionary
 
   // Access
-  size => @primitive 'size'
-  keys => @primitive 'keys'
-  values => @primitive 'values'
-  at: key => @primitive 'at:'
-  at: key ifAbsent: block => @primitive 'at:ifAbsent:'
-  at: key put: value => @primitive 'at:put:'
-  includesKey: key => @primitive 'includesKey:'
+  size => @primitive "size"
+  keys => @primitive "keys"
+  values => @primitive "values"
+  at: key => @primitive "at:"
+  at: key ifAbsent: block => @primitive "at:ifAbsent:"
+  at: key put: value => @primitive "at:put:"
+  includesKey: key => @primitive "includesKey:"
 
   // Mutation (returns new dictionary)
-  removeKey: key => @primitive 'removeKey:'
-  merge: other => @primitive 'merge:'
+  removeKey: key => @primitive "removeKey:"
+  merge: other => @primitive "merge:"
 
   // Iteration
-  keysAndValuesDo: block => @primitive 'keysAndValuesDo:'
+  keysAndValuesDo: block => @primitive "keysAndValuesDo:"
 
   // Reflection
-  describe => 'a Dictionary'
+  describe => "a Dictionary"

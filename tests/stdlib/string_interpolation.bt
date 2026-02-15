@@ -21,11 +21,11 @@
 // ===========================================================================
 
 // Simple string assignment
-name := 'World'
+name := "World"
 // => World
 
 // String literal
-'Hello'
+"Hello"
 // => Hello
 
 // Number for testing

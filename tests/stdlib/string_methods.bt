@@ -8,11 +8,11 @@
 // ===========================================================================
 
 // uppercase
-'hello' uppercase
+"hello" uppercase
 // => HELLO
 
 // lowercase
-'HELLO' lowercase
+"HELLO" lowercase
 // => hello
 
 // ===========================================================================
@@ -20,19 +20,19 @@
 // ===========================================================================
 
 // trim both sides
-'  hello  ' trim
+"  hello  " trim
 // => hello
 
 // trimLeft
-'  hello' trimLeft
+"  hello" trimLeft
 // => hello
 
 // trimRight
-'hello  ' trimRight
+"hello  " trimRight
 // => hello
 
 // trim with no whitespace (no-op)
-'hello' trim
+"hello" trim
 // => hello
 
 // ===========================================================================
@@ -40,7 +40,7 @@
 // ===========================================================================
 
 // ++ operator
-'hello' ++ ' world'
+"hello" ++ " world"
 // => hello world
 
 // ===========================================================================
@@ -48,27 +48,27 @@
 // ===========================================================================
 
 // String equality
-'hello' =:= 'hello'
+"hello" =:= "hello"
 // => true
 
 // String inequality
-'hello' /= 'world'
+"hello" /= "world"
 // => true
 
 // String less than (lexicographic)
-'abc' < 'def'
+"abc" < "def"
 // => true
 
 // String greater than
-'def' > 'abc'
+"def" > "abc"
 // => true
 
 // String less than or equal
-'abc' <= 'abc'
+"abc" <= "abc"
 // => true
 
 // String greater than or equal
-'def' >= 'abc'
+"def" >= "abc"
 // => true
 
 // ===========================================================================
@@ -76,7 +76,7 @@
 // ===========================================================================
 
 // split:
-'a,b,c' split: ','
+"a,b,c" split: ","
 // => ["a","b","c"]
 
 // ===========================================================================
@@ -84,11 +84,11 @@
 // ===========================================================================
 
 // asInteger
-'42' asInteger
+"42" asInteger
 // => 42
 
 // asFloat
-'3.14' asFloat
+"3.14" asFloat
 // => 3.14
 
 // ===========================================================================
@@ -96,17 +96,17 @@
 // ===========================================================================
 
 // isEmpty (true)
-'' isEmpty
+"" isEmpty
 // => true
 
 // isEmpty (false)
-'hello' isEmpty
+"hello" isEmpty
 // => false
 
 // isNotEmpty
-'hello' isNotEmpty
+"hello" isNotEmpty
 // => true
 
 // size (alias for length)
-'hello' size
+"hello" size
 // => 5

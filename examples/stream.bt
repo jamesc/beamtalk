@@ -58,11 +58,11 @@ s take: 5
 // => [3,4,5]
 
 // String characters as a stream
-('hello' stream) collect: [:ch | ch uppercase]
+("hello" stream) collect: [:ch | ch uppercase]
 // => a Stream — call asList to see: ["H","E","L","L","O"]
 
 // Dictionary stream yields Associations
-((#{#name => 'Alice', #age => 30} stream) collect: [:a | a value]) asList
+((#{#name => "Alice", #age => 30} stream) collect: [:a | a value]) asList
 
 // Set streaming
 s := ((Set new add: 3) add: 1) add: 2
@@ -85,16 +85,16 @@ s := ((Set new add: 3) add: 1) add: 2
 // ============================================================
 
 // Read file lines lazily — constant memory, safe for large files
-// (File lines: 'data.csv') take: 5
+// (File lines: "data.csv") take: 5
 
 // Filter lines matching a pattern
-// (File lines: 'app.log') select: [:l | l includes: 'ERROR']
+// (File lines: "app.log") select: [:l | l includes: "ERROR"]
 
 // Count lines in a file
-// (File lines: 'data.csv') inject: 0 into: [:count :line | count + 1]
+// (File lines: "data.csv") inject: 0 into: [:count :line | count + 1]
 
 // Block-scoped handle — auto-closes when block exits
-// File open: 'data.csv' do: [:handle |
+// File open: "data.csv" do: [:handle |
 //   handle lines take: 10
 // ]
 

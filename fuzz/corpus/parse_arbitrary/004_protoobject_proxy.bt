@@ -86,31 +86,31 @@ Actor subclass: TransparentProxy
 //    ```erlang
 //    let Pid = element(4, Proxy) in  % Extract pid from proxy object
 //    let Future = beamtalk_future:new() in
-//    gen_server:cast(Pid, {'increment', [], Future})
+//    gen_server:cast(Pid, {"increment", [], Future})
 //    Future  % Returns future
 //    ```
 //
 // 3. Runtime Dispatch:
-//    - TransparentProxy's gen_server receives {'increment', [], Future}
-//    - Looks for 'increment' in method table → NOT FOUND
-//    - Checks for 'doesNotUnderstand:args:' → FOUND!
-//    - Calls: doesNotUnderstand('increment', [])
+//    - TransparentProxy"s gen_server receives {"increment', [], Future}
+//    - Looks for "increment" in method table → NOT FOUND
+//    - Checks for "doesNotUnderstand:args:" → FOUND!
+//    - Calls: doesNotUnderstand("increment", [])
 //
 // 4. doesNotUnderstand Executes:
 //    ```beamtalk
-//    self.target perform: 'increment' withArguments: []
+//    self.target perform: "increment" withArguments: []
 //    ```
 //
 // 5. perform:withArguments: Generates:
 //    ```erlang
 //    let TargetPid = element(4, Target) in  % Extract counter's pid
 //    let Future2 = beamtalk_future:new() in
-//    gen_server:cast(TargetPid, {'increment', [], Future2})
+//    gen_server:cast(TargetPid, {"increment", [], Future2})
 //    Future2  % Returns NEW future
 //    ```
 //
 // 6. Counter Receives Message:
-//    - Counter's 'increment' method executes
+//    - Counter"s "increment' method executes
 //    - Counter's value increments: 1 → 2
 //    - Counter resolves Future2 with result (2)
 //
@@ -161,7 +161,7 @@ Actor subclass: TransparentProxy
 // > 42 class
 // => Integer
 //
-// > 'hello' class
+// > "hello" class
 // => String
 //
 // > true class
@@ -174,7 +174,7 @@ Actor subclass: TransparentProxy
 // > 42 /= 43
 // => true
 //
-// > 'hello' == 'hello'
+// > "hello" == "hello"
 // => true
 // ```
 //
@@ -182,12 +182,12 @@ Actor subclass: TransparentProxy
 //
 // ```erlang
 // case Receiver of
-//   <I> when is_integer(I) -> 'Integer'
-//   <S> when is_binary(S) -> 'String'
-//   <'true'> when 'true' -> 'True'
-//   <'false'> when 'true' -> 'False'
-//   <'nil'> when 'true' -> 'Nil'
-//   <Obj> when 'true' -> element(2, Obj)  % Extract class from actor record
+//   <I> when is_integer(I) -> "Integer"
+//   <S> when is_binary(S) -> "String"
+//   <"true"> when "true" -> "True"
+//   <"false"> when "true" -> "False"
+//   <"nil"> when "true" -> "Nil"
+//   <Obj> when "true" -> element(2, Obj)  % Extract class from actor record
 // end
 // ```
 //

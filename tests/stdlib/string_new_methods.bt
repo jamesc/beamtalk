@@ -5,14 +5,14 @@
 // ===========================================================================
 
 // replaceAll:with:
-'hello world' replaceAll: 'o' with: '0'
+"hello world" replaceAll: "o" with: "0"
 // => hell0 w0rld
 
-'aaa' replaceAll: 'a' with: 'bb'
+"aaa" replaceAll: "a" with: "bb"
 // => bbbbbb
 
 // replaceFirst:with:
-'hello world' replaceFirst: 'o' with: '0'
+"hello world" replaceFirst: "o" with: "0"
 // => hell0 world
 
 // ===========================================================================
@@ -20,11 +20,11 @@
 // ===========================================================================
 
 // words
-'hello world foo' words
+"hello world foo" words
 // => ["hello","world","foo"]
 
 // words with extra spaces
-'  hello   world  ' words
+"  hello   world  " words
 // => ["hello","world"]
 
 // ===========================================================================
@@ -32,23 +32,23 @@
 // ===========================================================================
 
 // take:
-'hello' take: 3
+"hello" take: 3
 // => hel
 
-'hello' take: 10
+"hello" take: 10
 // => hello
 
-'hello' take: 0
+"hello" take: 0
 // => 
 
 // drop:
-'hello' drop: 2
+"hello" drop: 2
 // => llo
 
-'hello' drop: 0
+"hello" drop: 0
 // => hello
 
-'hello' drop: 10
+"hello" drop: 10
 // => 
 
 // ===========================================================================
@@ -56,15 +56,15 @@
 // ===========================================================================
 
 // padLeft: (leading spaces significant, cannot assert exact value)
-'hi' padLeft: 5
+"hi" padLeft: 5
 // => _
 
 // padRight: (trailing spaces significant, cannot assert exact value)
-'hi' padRight: 5
+"hi" padRight: 5
 // => _
 
 // padLeft:with: - pad with specific character
-'42' padLeft: 5 with: '0'
+"42" padLeft: 5 with: "0"
 // => 00042
 
 // ===========================================================================
@@ -72,31 +72,31 @@
 // ===========================================================================
 
 // isBlank
-'' isBlank
+"" isBlank
 // => true
 
-'   ' isBlank
+"   " isBlank
 // => true
 
-'hello' isBlank
+"hello" isBlank
 // => false
 
 // isDigit
-'123' isDigit
+"123" isDigit
 // => true
 
-'12a' isDigit
+"12a" isDigit
 // => false
 
-'' isDigit
+"" isDigit
 // => false
 
 // isAlpha
-'hello' isAlpha
+"hello" isAlpha
 // => true
 
-'hello1' isAlpha
+"hello1" isAlpha
 // => false
 
-'' isAlpha
+"" isAlpha
 // => false

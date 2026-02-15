@@ -4,7 +4,7 @@
 // Test Dictionary (key-value map) operations
 
 // Dictionary creation
-person := #{#name => 'Alice', #age => 30, #city => 'NYC'}
+person := #{#name => "Alice", #age => 30, #city => "NYC"}
 empty := #{}
 
 // Key access
@@ -12,13 +12,13 @@ name := person at: #name
 age := person at: #age
 
 // Safe access with default
-title := person at: #title ifAbsent: ['Unknown']
+title := person at: #title ifAbsent: ["Unknown"]
 
 // Update (returns new dictionary)
 older := person at: #age put: 31
 
 // Add new key
-withJob := person at: #job put: 'Engineer'
+withJob := person at: #job put: "Engineer"
 
 // Size
 size := person size

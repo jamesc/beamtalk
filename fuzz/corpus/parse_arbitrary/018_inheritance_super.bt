@@ -5,7 +5,7 @@
 // SUPER SENDS - Inheritance and Method Dispatch
 // ===========================================================================
 //
-// Tests the 'super' keyword for calling parent class implementations.
+// Tests the "super" keyword for calling parent class implementations.
 // This is a critical feature for object-oriented programming.
 //
 // Related: BT-95 (beamtalk_object_class:super_dispatch/3), BT-203 (class hierarchy)
@@ -16,7 +16,7 @@
 // ===========================================================================
 // @LOAD VERIFICATION - FIXED IN BT-195
 // ===========================================================================
-// BT-195 fixed: @load now works with actor classes that use 'self'
+// BT-195 fixed: @load now works with actor classes that use "self"
 // The above @load directives successfully compile counter.bt and logging_counter.bt
 // without "Undefined variable: self" errors.
 
@@ -63,7 +63,7 @@ c getValue
 // ===========================================================================
 //
 // Super dispatch flow (BT-203):
-// 1. Compiler generates: call 'beamtalk_class':'super_dispatch'(State, Selector, Args)
+// 1. Compiler generates: call "beamtalk_class":"super_dispatch"(State, Selector, Args)
 // 2. Runtime looks up current class from State.__class__
 // 3. Queries class process for superclass via beamtalk_object_class:superclass/1
 // 4. Walks inheritance chain until method found

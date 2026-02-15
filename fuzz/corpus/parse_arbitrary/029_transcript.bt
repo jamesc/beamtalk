@@ -10,7 +10,7 @@
 // ===========================================================================
 
 // show: prints a string and returns nil
-Transcript show: 'Hello'
+Transcript show: "Hello"
 // => nil
 
 // cr prints a newline and returns nil
@@ -37,10 +37,10 @@ Transcript show: nil
 // CASCADE (SEMICOLON CHAINING)
 // ===========================================================================
 
-// Note: Cascading on class-level methods (Transcript show: 'Hello'; cr)
+// Note: Cascading on class-level methods (Transcript show: "Hello"; cr)
 // requires metaclass dispatch which is not yet implemented.
 // Use separate statements instead:
-Transcript show: 'Hello'
+Transcript show: "Hello"
 // => nil
 Transcript cr
 // => nil

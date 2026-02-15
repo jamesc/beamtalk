@@ -8,7 +8,7 @@
 x := := + := 42
 
 // Unterminated string followed by valid code
-str := 'unterminated
+str := "unterminated
 y := 10
 
 // Invalid assignment with missing operand
@@ -22,7 +22,7 @@ array add: remove:
 outer := (inner at: missing: broken)
 
 // Mixed errors: unterminated string + invalid syntax + malformed message
-broken := 'unclosed + := at: 42
+broken := "unclosed + := at: 42
 
 // Valid code after multiple errors should still parse
 validAfterErrors := 100 + 200

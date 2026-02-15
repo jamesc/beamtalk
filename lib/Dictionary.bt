@@ -11,8 +11,8 @@
 ///
 /// ## Examples
 /// ```beamtalk
-/// #{#name => 'Alice'} class                   // => Dictionary
-/// #{#name => 'Alice'} at: #name               // => 'Alice'
+/// #{#name => "Alice"} class                   // => Dictionary
+/// #{#name => "Alice"} at: #name               // => "Alice"
 /// #{#a => 1} at: #b put: 2                    // => #{#a => 1, #b => 2}
 /// ```
 sealed Collection subclass: Dictionary
@@ -23,7 +23,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1, #b => 2} size                   // => 2
   /// ```
-  size => @primitive 'size'
+  size => @primitive "size"
 
   /// Return a list of all keys.
   ///
@@ -31,7 +31,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1, #b => 2} keys
   /// ```
-  keys => @primitive 'keys'
+  keys => @primitive "keys"
 
   /// Return a list of all values.
   ///
@@ -39,15 +39,15 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1, #b => 2} values
   /// ```
-  values => @primitive 'values'
+  values => @primitive "values"
 
   /// Return the value associated with `key`. Raises an error if not found.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// #{#name => 'Alice'} at: #name              // => 'Alice'
+  /// #{#name => "Alice"} at: #name              // => "Alice"
   /// ```
-  at: key => @primitive 'at:'
+  at: key => @primitive "at:"
 
   /// Return the value for `key`, or evaluate `block` if absent.
   ///
@@ -55,7 +55,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1} at: #b ifAbsent: [0]            // => 0
   /// ```
-  at: key ifAbsent: block => @primitive 'at:ifAbsent:'
+  at: key ifAbsent: block => @primitive "at:ifAbsent:"
 
   /// Return a new dictionary with `key` mapped to `value`.
   ///
@@ -63,7 +63,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1} at: #b put: 2                   // => #{#a => 1, #b => 2}
   /// ```
-  at: key put: value => @primitive 'at:put:'
+  at: key put: value => @primitive "at:put:"
 
   /// Test if the dictionary contains the given key.
   ///
@@ -72,7 +72,7 @@ sealed Collection subclass: Dictionary
   /// #{#a => 1} includesKey: #a                 // => true
   /// #{#a => 1} includesKey: #b                 // => false
   /// ```
-  includesKey: key => @primitive 'includesKey:'
+  includesKey: key => @primitive "includesKey:"
 
   /// Return a new dictionary without the given key.
   ///
@@ -80,7 +80,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1, #b => 2} removeKey: #a          // => #{#b => 2}
   /// ```
-  removeKey: key => @primitive 'removeKey:'
+  removeKey: key => @primitive "removeKey:"
 
   /// Merge another dictionary into the receiver (other's values win on conflict).
   ///
@@ -88,7 +88,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1} merge: #{#b => 2}               // => #{#a => 1, #b => 2}
   /// ```
-  merge: other => @primitive 'merge:'
+  merge: other => @primitive "merge:"
 
   /// Test if the dictionary contains the given value.
   ///
@@ -97,7 +97,7 @@ sealed Collection subclass: Dictionary
   /// #{#a => 1, #b => 2} includes: 1     // => true
   /// #{#a => 1} includes: 3              // => false
   /// ```
-  includes: value => @primitive 'includes:'
+  includes: value => @primitive "includes:"
 
   /// Iterate over each value, evaluating `block` with each one.
   ///
@@ -105,7 +105,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1, #b => 2} do: [:v | Transcript show: v]
   /// ```
-  do: block => @primitive 'do:'
+  do: block => @primitive "do:"
 
   /// Iterate over each key-value pair, evaluating `block` with key and value.
   ///
@@ -113,15 +113,15 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1} keysAndValuesDo: [:k :v | Transcript show: k]
   /// ```
-  keysAndValuesDo: block => @primitive 'keysAndValuesDo:'
+  keysAndValuesDo: block => @primitive "keysAndValuesDo:"
 
   /// Return a string representation using Beamtalk syntax.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// #{#a => 1} printString                     // => '#{#a => 1}'
+  /// #{#a => 1} printString                     // => "#{#a => 1}"
   /// ```
-  printString => @primitive 'printString'
+  printString => @primitive "printString"
 
   /// Return a lazy Stream over the dictionary entries as Associations.
   ///
@@ -129,12 +129,12 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// (#{#a => 1} stream) asList
   /// ```
-  stream => @primitive 'stream'
+  stream => @primitive "stream"
 
   /// Human-readable description of the receiver.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// #{#a => 1} describe                        // => 'a Dictionary'
+  /// #{#a => 1} describe                        // => "a Dictionary"
   /// ```
-  describe => 'a Dictionary'
+  describe => "a Dictionary"

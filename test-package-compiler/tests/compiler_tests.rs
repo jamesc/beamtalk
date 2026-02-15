@@ -181,7 +181,7 @@ include!(concat!(env!("OUT_DIR"), "/generated_tests.rs"));
 /// standard class dispatch (class_send) like any other class.
 #[test]
 fn test_workspace_binding_compiles_as_normal_class() {
-    let source = "Actor subclass: Greeter\n  greet => Transcript show: 'Hello'";
+    let source = "Actor subclass: Greeter\n  greet => Transcript show: \"Hello\"";
     let tokens = lex_with_eof(source);
     let (module, _) = parse(tokens);
 

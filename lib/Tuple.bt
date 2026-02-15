@@ -21,7 +21,7 @@ sealed Collection subclass: Tuple
   /// ```beamtalk
   /// (Tuple new: #(1, 2, 3)) size   // => 3
   /// ```
-  size => @primitive 'size'
+  size => @primitive "size"
 
   /// Return the element at the given 1-based index.
   ///
@@ -29,7 +29,7 @@ sealed Collection subclass: Tuple
   /// ```beamtalk
   /// (Tuple new: #(10, 20, 30)) at: 2   // => 20
   /// ```
-  at: index => @primitive 'at:'
+  at: index => @primitive "at:"
 
   /// Test if the tuple represents an `{ok, _}` result.
   ///
@@ -37,15 +37,15 @@ sealed Collection subclass: Tuple
   /// ```beamtalk
   /// (Tuple new: #(#ok, 42)) isOk       // => true
   /// ```
-  isOk => @primitive 'isOk'
+  isOk => @primitive "isOk"
 
   /// Test if the tuple represents an `{error, _}` result.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (Tuple new: #(#error, 'oops')) isError   // => true
+  /// (Tuple new: #(#error, "oops")) isError   // => true
   /// ```
-  isError => @primitive 'isError'
+  isError => @primitive "isError"
 
   /// Extract the value from an `{ok, Value}` tuple, or raise on `{error, Reason}`.
   ///
@@ -53,23 +53,23 @@ sealed Collection subclass: Tuple
   /// ```beamtalk
   /// (Tuple new: #(#ok, 42)) unwrap     // => 42
   /// ```
-  unwrap => @primitive 'unwrap'
+  unwrap => @primitive "unwrap"
 
   /// Extract the value from an `{ok, Value}` tuple, or return `default` on error.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (Tuple new: #(#error, 'oops')) unwrapOr: 0   // => 0
+  /// (Tuple new: #(#error, "oops")) unwrapOr: 0   // => 0
   /// ```
-  unwrapOr: default => @primitive 'unwrapOr:'
+  unwrapOr: default => @primitive "unwrapOr:"
 
   /// Extract the value from an `{ok, Value}` tuple, or evaluate `block` on error.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (Tuple new: #(#error, 'oops')) unwrapOrElse: [0]   // => 0
+  /// (Tuple new: #(#error, "oops")) unwrapOrElse: [0]   // => 0
   /// ```
-  unwrapOrElse: block => @primitive 'unwrapOrElse:'
+  unwrapOrElse: block => @primitive "unwrapOrElse:"
 
   /// Convert the tuple to its string representation.
   ///
@@ -77,13 +77,13 @@ sealed Collection subclass: Tuple
   /// ```beamtalk
   /// (Tuple new: #(1, 2)) asString
   /// ```
-  asString => @primitive 'asString'
+  asString => @primitive "asString"
 
   /// Return the human-readable representation of the tuple.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (Tuple new) printString   // => '{}'
+  /// (Tuple new) printString   // => "{}"
   /// ```
   printString => self asString
 
@@ -93,4 +93,4 @@ sealed Collection subclass: Tuple
   /// ```beamtalk
   /// (Tuple new: #(1, 2, 3)) do: [:x | Transcript show: x]
   /// ```
-  do: block => @primitive 'do:'
+  do: block => @primitive "do:"

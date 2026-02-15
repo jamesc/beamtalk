@@ -19,7 +19,7 @@
 // ===========================================================================
 
 // ---------------------------------------------------------------------------
-// Store class in variable and send 'new' dynamically
+// Store class in variable and send "new" dynamically
 // ---------------------------------------------------------------------------
 
 cls := (Beamtalk classNamed: #Point) await
@@ -87,7 +87,7 @@ cls class_name
 // ===========================================================================
 
 // ---------------------------------------------------------------------------
-// Store actor class in variable and send 'spawn' dynamically
+// Store actor class in variable and send "spawn" dynamically
 // ---------------------------------------------------------------------------
 
 actorCls := (Beamtalk classNamed: #Counter) await

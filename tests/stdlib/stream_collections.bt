@@ -58,7 +58,7 @@
 #(1, 2, 3) respondsTo: #stream
 // => true
 
-'hello' respondsTo: #stream
+"hello" respondsTo: #stream
 // => true
 
 (Set new) respondsTo: #stream
@@ -70,55 +70,55 @@
 // === String stream ===
 
 // Basic string stream — characters as graphemes
-('hello' stream) take: 3
+("hello" stream) take: 3
 // => ["h","e","l"]
 
 // Full string stream
-('abc' stream) asList
+("abc" stream) asList
 // => ["a","b","c"]
 
 // Empty string stream
-('' stream) asList
+("" stream) asList
 // => []
 
 // Single character
-('x' stream) asList
+("x" stream) asList
 // => ["x"]
 
 // Select on string stream
-(('hello' stream) select: [:ch | ch /= 'l']) asList
+(("hello" stream) select: [:ch | ch /= "l"]) asList
 // => ["h","e","o"]
 
 // Collect on string stream
-(('abc' stream) collect: [:ch | ch uppercase]) asList
+(("abc" stream) collect: [:ch | ch uppercase]) asList
 // => ["A","B","C"]
 
 // String stream returns Stream
-('hello' stream) class
+("hello" stream) class
 // => Stream
 
 // reject on string stream
-(('hello' stream) reject: [:ch | ch =:= 'l']) asList
+(("hello" stream) reject: [:ch | ch =:= "l"]) asList
 // => ["h","e","o"]
 
 // drop on string stream
-(('hello' stream) drop: 3) asList
+(("hello" stream) drop: 3) asList
 // => ["l","o"]
 
 // do: on string stream (side effect, returns nil)
-('abc' stream) do: [:ch | ch]
+("abc" stream) do: [:ch | ch]
 // => nil
 
 // inject:into: on string stream
-('abc' stream) inject: '' into: [:acc :ch | acc ++ ch]
+("abc" stream) inject: "" into: [:acc :ch | acc ++ ch]
 // => abc
 
 // anySatisfy on string stream
-('hello' stream) anySatisfy: [:ch | ch =:= 'e']
+("hello" stream) anySatisfy: [:ch | ch =:= "e"]
 // => true
 
 // allSatisfy on string stream
-('hello' stream) allSatisfy: [:ch | ch /= 'z']
+("hello" stream) allSatisfy: [:ch | ch /= "z"]
 // => true
 
 // === Set stream ===
@@ -255,7 +255,7 @@ a value
 // === Stream on: constructor extended ===
 
 // Stream on: with string
-(Stream on: 'abc') asList
+(Stream on: "abc") asList
 // => ["a","b","c"]
 
 // Stream on: with set

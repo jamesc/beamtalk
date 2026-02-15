@@ -23,9 +23,9 @@
 // => true
 
 // String equality
-'hello' == 'hello'
+"hello" == "hello"
 // => true
-'hello' /= 'world'
+"hello" /= "world"
 // => true
 
 // Boolean equality
