@@ -63,6 +63,7 @@ pub enum BindingKind {
 /// - `depth`: Scope depth (0 = module, 1 = class, 2 = method, 3+ = blocks)
 /// - `kind`: The kind of binding (local, parameter, field, etc.)
 /// - `type_annotation`: Optional type annotation for gradual typing
+/// - `used`: Whether this binding has been referenced (for unused variable detection)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Binding {
     pub name: String,
@@ -70,6 +71,7 @@ pub struct Binding {
     pub depth: usize,
     pub kind: BindingKind,
     pub type_annotation: Option<TypeAnnotation>,
+    pub used: bool,
 }
 
 impl Scope {
@@ -124,6 +126,7 @@ impl Scope {
             depth,
             kind,
             type_annotation: None,
+            used: false,
         };
 
         // INVARIANT: levels always contains at least the module-level scope
@@ -136,8 +139,21 @@ impl Scope {
 
     /// Looks up a variable by name, searching from innermost to outermost scope.
     ///
+    /// Returns the variable information if found. Also marks the binding as used.
+    pub fn lookup(&mut self, name: &str) -> Option<&Binding> {
+        for level in self.levels.iter_mut().rev() {
+            if let Some(var_info) = level.variables.get_mut(name) {
+                var_info.used = true;
+                return Some(var_info);
+            }
+        }
+        None
+    }
+
+    /// Looks up a variable by name without marking it as used.
+    ///
     /// Returns the variable information if found.
-    pub fn lookup(&self, name: &str) -> Option<&Binding> {
+    pub fn lookup_immut(&self, name: &str) -> Option<&Binding> {
         for level in self.levels.iter().rev() {
             if let Some(var_info) = level.variables.get(name) {
                 return Some(var_info);
@@ -156,7 +172,7 @@ impl Scope {
     /// A variable is considered captured if it was defined at a lower depth
     /// than the current scope.
     pub fn is_captured(&self, name: &str) -> bool {
-        self.lookup(name)
+        self.lookup_immut(name)
             .is_some_and(|v| v.depth < self.current_depth())
     }
 
@@ -175,6 +191,32 @@ impl Scope {
             .variables
             .iter()
             .map(|(name, info)| (name.as_str(), info))
+    }
+
+    /// Returns unused local variable bindings from the current scope level.
+    ///
+    /// Returns bindings that are:
+    /// - `BindingKind::Local` (not parameters or fields)
+    /// - Not marked as used
+    /// - Not prefixed with `_` (Rust/Erlang convention for intentionally unused)
+    /// - Not named `self` (implicitly defined in methods)
+    ///
+    /// # Panics
+    /// Never panics. The `expect` is for internal invariant checking only.
+    /// The `levels` vec is guaranteed to have at least one element (module scope).
+    pub fn unused_locals(&self) -> Vec<&Binding> {
+        self.levels
+            .last()
+            .expect("levels should never be empty")
+            .variables
+            .values()
+            .filter(|b| {
+                b.kind == BindingKind::Local
+                    && !b.used
+                    && !b.name.starts_with('_')
+                    && b.name != "self"
+            })
+            .collect()
     }
 }
 

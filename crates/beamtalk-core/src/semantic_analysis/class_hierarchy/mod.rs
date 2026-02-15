@@ -492,6 +492,40 @@ impl ClassHierarchy {
         }
     }
 
+    /// Check for duplicate method selectors within a list of methods.
+    fn check_duplicate_methods(
+        methods: &[crate::ast::MethodDefinition],
+        class_name: &EcoString,
+        is_class_method: bool,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        let mut seen: HashMap<EcoString, crate::source_analysis::Span> = HashMap::new();
+        let label = if is_class_method {
+            "class method"
+        } else {
+            "method"
+        };
+        for method in methods {
+            let selector = method.selector.name();
+            if let Some(&first_span) = seen.get(&selector) {
+                let mut diag = Diagnostic::error(
+                    format!("Duplicate {label} `{selector}` in class `{class_name}`"),
+                    method.span,
+                );
+                diag.hint = Some(
+                    format!(
+                        "A {label} with this selector is already defined at offset {}",
+                        first_span.start()
+                    )
+                    .into(),
+                );
+                diagnostics.push(diag);
+            } else {
+                seen.insert(selector, method.span);
+            }
+        }
+    }
+
     /// Add classes from a parsed module. Returns diagnostics for errors.
     fn add_module_classes(&mut self, module: &Module) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
@@ -530,6 +564,20 @@ impl ClassHierarchy {
                     }
                 }
             }
+
+            // Check for duplicate method selectors
+            Self::check_duplicate_methods(
+                &class.methods,
+                &class.name.name,
+                false,
+                &mut diagnostics,
+            );
+            Self::check_duplicate_methods(
+                &class.class_methods,
+                &class.name.name,
+                true,
+                &mut diagnostics,
+            );
 
             let class_info = ClassInfo {
                 name: class.name.name.clone(),
@@ -1276,5 +1324,158 @@ mod tests {
         // Chain stops at unknown superclass
         let chain = h.superclass_chain("Orphan");
         assert_eq!(chain, vec![EcoString::from("NonExistent")]);
+    }
+
+    // --- Duplicate method detection tests ---
+
+    #[test]
+    fn duplicate_instance_method_detected() {
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![
+                MethodDefinition {
+                    selector: crate::ast::MessageSelector::Unary("increment".into()),
+                    parameters: vec![],
+                    body: vec![],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: MethodKind::Primary,
+                    doc_comment: None,
+                    span: Span::new(10, 20),
+                },
+                MethodDefinition {
+                    selector: crate::ast::MessageSelector::Unary("increment".into()),
+                    parameters: vec![],
+                    body: vec![],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: MethodKind::Primary,
+                    doc_comment: None,
+                    span: Span::new(30, 40),
+                },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (_, diags) = ClassHierarchy::build(&module);
+
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("Duplicate method"));
+        assert!(diags[0].message.contains("`increment`"));
+        assert!(diags[0].message.contains("`Counter`"));
+        assert!(diags[0].hint.is_some());
+        assert!(diags[0].hint.as_ref().unwrap().contains("already defined"));
+    }
+
+    #[test]
+    fn duplicate_class_method_detected() {
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![],
+            class_methods: vec![
+                MethodDefinition {
+                    selector: crate::ast::MessageSelector::Unary("create".into()),
+                    parameters: vec![],
+                    body: vec![],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: MethodKind::Primary,
+                    doc_comment: None,
+                    span: Span::new(10, 20),
+                },
+                MethodDefinition {
+                    selector: crate::ast::MessageSelector::Unary("create".into()),
+                    parameters: vec![],
+                    body: vec![],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: MethodKind::Primary,
+                    doc_comment: None,
+                    span: Span::new(30, 40),
+                },
+            ],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (_, diags) = ClassHierarchy::build(&module);
+
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("Duplicate class method"));
+        assert!(diags[0].message.contains("`create`"));
+    }
+
+    #[test]
+    fn no_duplicate_for_different_selectors() {
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![
+                MethodDefinition {
+                    selector: crate::ast::MessageSelector::Unary("increment".into()),
+                    parameters: vec![],
+                    body: vec![],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: MethodKind::Primary,
+                    doc_comment: None,
+                    span: test_span(),
+                },
+                MethodDefinition {
+                    selector: crate::ast::MessageSelector::Unary("decrement".into()),
+                    parameters: vec![],
+                    body: vec![],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: MethodKind::Primary,
+                    doc_comment: None,
+                    span: test_span(),
+                },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (_, diags) = ClassHierarchy::build(&module);
+
+        assert!(diags.is_empty());
     }
 }

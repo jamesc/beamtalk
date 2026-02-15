@@ -4,16 +4,16 @@ expression: output
 ---
 Semantic errors (14):
   - Undefined variable: innerSum
-  - Undefined variable: self
-  - Undefined variable: self
-  - Undefined variable: self
-  - Undefined variable: self
+  - self can only be used inside a method body
+  - self can only be used inside a method body
+  - self can only be used inside a method body
+  - self can only be used inside a method body
   - Undefined variable: multiplyFieldWithLoop
-  - Undefined variable: self
+  - self can only be used inside a method body
   - Undefined variable: result
   - Undefined variable: result
   - Undefined variable: complexMutation
-  - Undefined variable: self
-  - Undefined variable: self
-  - Undefined variable: self
+  - self can only be used inside a method body
+  - self can only be used inside a method body
+  - self can only be used inside a method body
   - Undefined variable: temp
