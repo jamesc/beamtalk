@@ -167,6 +167,12 @@ impl SimpleLanguageService {
         self.files.get(file).map(|data| &data.module)
     }
 
+    /// Returns the cached source text for a file, if available.
+    #[must_use]
+    pub fn file_source(&self, file: &Utf8PathBuf) -> Option<String> {
+        self.files.get(file).map(|data| data.source.clone())
+    }
+
     /// Finds a method selector at a given byte offset in a module.
     ///
     /// Searches expressions, class method bodies, and standalone method definitions.

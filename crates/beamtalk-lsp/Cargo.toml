@@ -1,0 +1,30 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "beamtalk-lsp"
+description = "Language Server Protocol server for the Beamtalk programming language"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["lsp", "beam", "smalltalk", "erlang"]
+categories = ["development-tools"]
+readme = "README.md"
+
+[[bin]]
+name = "beamtalk-lsp"
+path = "src/main.rs"
+
+[dependencies]
+beamtalk-core = { workspace = true }
+tower-lsp = { workspace = true }
+tokio = { workspace = true }
+camino = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[lints]
+workspace = true
