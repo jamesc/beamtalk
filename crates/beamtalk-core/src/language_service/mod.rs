@@ -382,19 +382,13 @@ impl LanguageService for SimpleLanguageService {
         let (ident, _span) = self.find_identifier_at_position(file, position)?;
         let file_data = self.get_file(file)?;
 
-        // Cross-file definition lookup via definition provider
-        let all_files: Vec<(Utf8PathBuf, crate::ast::Module)> = self
-            .files
-            .iter()
-            .map(|(path, data)| (path.clone(), data.module.clone()))
-            .collect();
-
+        // Cross-file definition lookup via definition provider (zero-copy)
         crate::queries::definition_provider::find_definition_cross_file(
             &ident.name,
             file,
             &file_data.module,
             &self.project_index,
-            &all_files,
+            self.files.iter().map(|(path, data)| (path, &data.module)),
         )
     }
 

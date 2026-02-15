@@ -52,12 +52,12 @@ pub fn find_definition_in_module(module: &Module, name: &str) -> Option<Span> {
 ///
 /// The `files` parameter provides access to parsed modules for all indexed files.
 #[must_use]
-pub fn find_definition_cross_file(
+pub fn find_definition_cross_file<'a>(
     name: &str,
     current_file: &Utf8PathBuf,
     current_module: &Module,
     project_index: &ProjectIndex,
-    files: &[(Utf8PathBuf, Module)],
+    files: impl IntoIterator<Item = (&'a Utf8PathBuf, &'a Module)>,
 ) -> Option<Location> {
     // 1. Local variable definition in current file
     if let Some(span) = find_definition_in_module(current_module, name) {
@@ -136,9 +136,9 @@ mod tests {
         let file_a = Utf8PathBuf::from("a.bt");
         let module_a = parse_source("x := 42\ny := x");
         let index = ProjectIndex::new();
-        let files: Vec<(Utf8PathBuf, Module)> = vec![(file_a.clone(), module_a.clone())];
 
-        let loc = find_definition_cross_file("x", &file_a, &module_a, &index, &files);
+        let loc =
+            find_definition_cross_file("x", &file_a, &module_a, &index, [(&file_a, &module_a)]);
         assert!(loc.is_some());
         let loc = loc.unwrap();
         assert_eq!(loc.file, file_a);
@@ -156,12 +156,13 @@ mod tests {
         let mut index = ProjectIndex::new();
         index.update_file(file_a.clone(), &hierarchy_a);
 
-        let files = vec![
-            (file_a.clone(), module_a.clone()),
-            (file_b.clone(), module_b.clone()),
-        ];
-
-        let loc = find_definition_cross_file("Foo", &file_b, &module_b, &index, &files);
+        let loc = find_definition_cross_file(
+            "Foo",
+            &file_b,
+            &module_b,
+            &index,
+            [(&file_a, &module_a), (&file_b, &module_b)],
+        );
         assert!(loc.is_some());
         let loc = loc.unwrap();
         assert_eq!(loc.file, file_a);
@@ -172,10 +173,9 @@ mod tests {
         let file = Utf8PathBuf::from("test.bt");
         let module = parse_source("x := Integer new");
         let index = ProjectIndex::new();
-        let files = vec![(file.clone(), module.clone())];
 
         // Integer is a built-in, not defined in any file — so no location
-        let loc = find_definition_cross_file("Integer", &file, &module, &index, &files);
+        let loc = find_definition_cross_file("Integer", &file, &module, &index, [(&file, &module)]);
         assert!(loc.is_none());
     }
 }

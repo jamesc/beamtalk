@@ -517,11 +517,28 @@ impl CoreErlangGenerator {
 - `FileCache`: Map of path → CachedFile
 - `QueryCache`: Memoized query results (Salsa-style)
 
+#### 2. ProjectIndex (Aggregate Root)
+
+**Purpose:** Cross-file class hierarchy and symbol index (ADR 0024, Phase 1)
+
+**Invariants:**
+- Merged hierarchy always reflects the current set of indexed files
+- Stdlib classes are pre-indexed and never removed during file updates
+- Built-in classes are never overwritten or removed
+
+**Value Objects:**
+- Per-file class name tracking (which classes came from which file)
+
+**Key Operations:**
+- `update_file`: Add/replace a file's class contributions
+- `remove_file`: Remove a file's classes (preserving stdlib)
+- `with_stdlib`: Pre-index stdlib class definitions from `lib/*.bt`
+
 **Domain Services:**
 - `CompletionProvider`: Suggest completions at cursor
 - `DiagnosticProvider`: Collect errors/warnings
 - `HoverProvider`: Show info on hover
-- `DefinitionProvider`: Go-to-definition support
+- `DefinitionProvider`: Go-to-definition support (single-file and cross-file)
 
 **Key Patterns:**
 - **Incremental Parsing:** Only re-parse changed files
