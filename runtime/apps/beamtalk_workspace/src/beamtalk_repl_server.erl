@@ -1107,8 +1107,6 @@ format_error_message({file_not_found, Path}) ->
     iolist_to_binary([<<"File not found: ">>, format_name(Path)]);
 format_error_message({read_error, Reason}) ->
     iolist_to_binary([<<"Failed to read file: ">>, format_name(Reason)]);
-format_error_message(daemon_unavailable) ->
-    <<"Unable to connect to compiler daemon. Start with: beamtalk daemon start --foreground">>;
 format_error_message({module_not_found, ModuleName}) ->
     iolist_to_binary([<<"Module not loaded: ">>, ModuleName]);
 format_error_message({invalid_module_name, ModuleName}) ->

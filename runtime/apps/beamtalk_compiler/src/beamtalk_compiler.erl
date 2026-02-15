@@ -1,12 +1,11 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Public API for the Beamtalk compiler (ADR 0022, Phase 1).
+%% @doc Public API for the Beamtalk compiler (ADR 0022).
 %%
 %% DDD Context: Compilation (Anti-Corruption Layer boundary)
 %%
-%% This module is the single entry point for all compilation. It hides
-%% whether the backend is an OTP Port (default) or the legacy daemon.
+%% This module is the single entry point for all compilation via OTP Port.
 %%
 %% All functions delegate to `beamtalk_compiler_server' (port backend).
 %%

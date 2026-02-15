@@ -105,12 +105,6 @@ enum Command {
         recent: Option<usize>,
     },
 
-    /// Manage the compiler daemon
-    Daemon {
-        #[command(subcommand)]
-        action: commands::daemon::DaemonAction,
-    },
-
     /// Manage workspaces (list, stop, status, create)
     Workspace {
         #[command(subcommand)]
@@ -145,7 +139,7 @@ enum Command {
 
 fn main() -> Result<()> {
     // Initialize tracing subscriber only if RUST_LOG is explicitly set
-    // This avoids stderr interference with E2E tests and daemon communication
+    // This avoids stderr interference with E2E tests
     if std::env::var("RUST_LOG").is_ok() {
         let _ = tracing_subscriber::fmt()
             .with_env_filter(
@@ -209,7 +203,6 @@ fn main() -> Result<()> {
             println!("(Not yet implemented)");
             Ok(())
         }
-        Command::Daemon { action } => commands::daemon::run(&action),
         Command::Workspace { action } => commands::workspace::cli::run(action),
         Command::TestStdlib { path } => commands::test_stdlib::run_tests(&path),
         Command::Test { path } => commands::test::run_tests(&path),

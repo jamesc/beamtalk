@@ -505,7 +505,7 @@ Place the include after `-behaviour(...)` (if present) or after `-module(...)`.
 | Level | Macro | When | Example |
 |-------|-------|------|---------|
 | `?LOG_DEBUG` | `?LOG_DEBUG(Msg, Meta)` | Detailed diagnostics | JSON parse errors, protocol details |
-| `?LOG_INFO` | `?LOG_INFO(Msg, Meta)` | Important events | Workspace started, daemon ready |
+| `?LOG_INFO` | `?LOG_INFO(Msg, Meta)` | Important events | Workspace started, REPL ready |
 | `?LOG_WARNING` | `?LOG_WARNING(Msg, Meta)` | Recoverable issues | Accept error, failed cleanup |
 | `?LOG_ERROR` | `?LOG_ERROR(Msg, Meta)` | Errors affecting operations | Method exceptions, timeouts |
 

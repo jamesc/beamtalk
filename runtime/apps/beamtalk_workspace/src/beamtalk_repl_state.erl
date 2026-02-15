@@ -29,7 +29,7 @@
 
 -opaque state() :: #state{}.
 
-%% @doc Create a new REPL state with default daemon socket path.
+%% @doc Create a new REPL state.
 -spec new(gen_tcp:socket() | undefined, inet:port_number()) -> state().
 new(ListenSocket, Port) ->
     new(ListenSocket, Port, #{}).

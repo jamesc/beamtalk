@@ -178,12 +178,6 @@ format_error_eval_error_test() ->
     Message = maps:get(<<"message">>, Decoded),
     ?assert(binary:match(Message, <<"Evaluation error">>) =/= nomatch).
 
-format_error_daemon_unavailable_test() ->
-    Response = beamtalk_repl_server:format_error(daemon_unavailable),
-    Decoded = jsx:decode(Response, [return_maps]),
-    Message = maps:get(<<"message">>, Decoded),
-    ?assert(binary:match(Message, <<"daemon">>) =/= nomatch).
-
 %%% Bindings formatting tests
 
 format_bindings_empty_test() ->
@@ -782,10 +776,10 @@ format_error_with_warnings_single_warning_test() ->
 
 format_error_with_warnings_multiple_warnings_test() ->
     Warnings = [<<"w1">>, <<"w2">>],
-    Response = beamtalk_repl_server:format_error_with_warnings(daemon_unavailable, Warnings),
+    Response = beamtalk_repl_server:format_error_with_warnings(empty_expression, Warnings),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
-    ?assert(binary:match(maps:get(<<"message">>, Decoded), <<"daemon">>) =/= nomatch),
+    ?assertEqual(<<"Empty expression">>, maps:get(<<"message">>, Decoded)),
     ?assertEqual(Warnings, maps:get(<<"warnings">>, Decoded)).
 
 format_error_with_warnings_beamtalk_error_test() ->
@@ -1719,10 +1713,6 @@ format_error_message_load_error_atom_test() ->
 format_error_message_read_error_enoent_test() ->
     Msg = beamtalk_repl_server:format_error_message({read_error, enoent}),
     ?assert(binary:match(Msg, <<"Failed to read file">>) =/= nomatch).
-
-format_error_message_daemon_unavailable_v2_test() ->
-    Msg = beamtalk_repl_server:format_error_message(daemon_unavailable),
-    ?assert(binary:match(Msg, <<"compiler daemon">>) =/= nomatch).
 
 format_error_message_empty_expression_v2_test() ->
     Msg = beamtalk_repl_server:format_error_message(empty_expression),

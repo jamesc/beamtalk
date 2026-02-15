@@ -5,7 +5,6 @@
 
 pub mod build;
 pub mod build_stdlib;
-pub mod daemon;
 pub mod doc;
 pub(crate) mod doc_tests;
 pub mod new;
