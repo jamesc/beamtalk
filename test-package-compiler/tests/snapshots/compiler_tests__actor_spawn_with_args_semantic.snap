@@ -3,8 +3,8 @@ source: test-package-compiler/tests/compiler_tests.rs
 expression: output
 ---
 Semantic errors (3):
-  - Undefined variable: self
-  - Undefined variable: self
+  - self can only be used inside a method body
+  - self can only be used inside a method body
   - cannot assign to field 'value' inside a stored closure
 
 = help: field assignments require immediate execution context

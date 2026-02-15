@@ -85,6 +85,10 @@ impl NameResolver {
         for class in &module.classes {
             self.resolve_class(class);
         }
+
+        // Note: No unused variable warnings at module scope (depth 0).
+        // Module-level variables include built-in identifiers (true, false, nil)
+        // and REPL known vars, which would produce false positives.
     }
 
     /// Pre-defines known variables (for REPL context).
@@ -107,8 +111,13 @@ impl NameResolver {
                 .define(&state.name.name, state.span, BindingKind::InstanceField);
         }
 
-        // Resolve methods
+        // Resolve instance methods
         for method in &class.methods {
+            self.resolve_method(method);
+        }
+
+        // Resolve class methods
+        for method in &class.class_methods {
             self.resolve_method(method);
         }
 
@@ -145,6 +154,9 @@ impl NameResolver {
             self.resolve_expression(expr);
         }
 
+        // Collect unused variable warnings before exiting scope
+        self.collect_unused_warnings();
+
         self.scope.pop(); // Exit method scope
     }
 
@@ -157,10 +169,17 @@ impl NameResolver {
             Identifier(id) => {
                 // Check if variable is defined in scope
                 if self.scope.lookup(&id.name).is_none() {
-                    self.diagnostics.push(Diagnostic::error(
-                        format!("Undefined variable: {}", id.name),
-                        id.span,
-                    ));
+                    if id.name == "self" {
+                        self.diagnostics.push(Diagnostic::error(
+                            "self can only be used inside a method body",
+                            id.span,
+                        ));
+                    } else {
+                        self.diagnostics.push(Diagnostic::error(
+                            format!("Undefined variable: {}", id.name),
+                            id.span,
+                        ));
+                    }
                 }
             }
 
@@ -169,7 +188,8 @@ impl NameResolver {
                 match target.as_ref() {
                     Identifier(id) => {
                         // Only define if not already in an outer scope
-                        if self.scope.lookup(&id.name).is_none() {
+                        // Use lookup_immut: assigning to a variable is not a "read"
+                        if self.scope.lookup_immut(&id.name).is_none() {
                             self.scope.define(&id.name, id.span, BindingKind::Local);
                         }
                     }
@@ -277,6 +297,9 @@ impl NameResolver {
             self.resolve_expression(expr);
         }
 
+        // Collect unused variable warnings before exiting scope
+        self.collect_unused_warnings();
+
         self.scope.pop(); // Exit block scope
     }
 
@@ -291,8 +314,10 @@ impl NameResolver {
         self.diagnostics.extend(pattern_diagnostics);
 
         for binding in bindings {
+            // Pattern variables use Parameter kind — they're introduced by syntax,
+            // not by explicit assignment (:=), so they're exempt from unused warnings.
             self.scope
-                .define(&binding.name, binding.span, BindingKind::Local);
+                .define(&binding.name, binding.span, BindingKind::Parameter);
         }
 
         // Resolve guard expression (if present) - can see pattern variables
@@ -303,8 +328,33 @@ impl NameResolver {
         // Resolve body expression - can see pattern variables
         self.resolve_expression(&arm.body);
 
+        // Collect unused variable warnings before exiting scope
+        self.collect_unused_warnings();
+
         // Exit match arm scope
         self.scope.pop();
+    }
+
+    /// Collects warnings for unused local variables in the current scope.
+    ///
+    /// A variable is considered unused if:
+    /// - It is a `Local` binding (not a parameter or field)
+    /// - It was never looked up (referenced) after definition
+    /// - Its name does not start with `_` (underscore prefix suppresses the warning)
+    /// - It is not the implicit `self` binding
+    fn collect_unused_warnings(&mut self) {
+        let unused: Vec<_> = self
+            .scope
+            .unused_locals()
+            .iter()
+            .map(|b| (b.name.clone(), b.defined_at))
+            .collect();
+        for (name, span) in unused {
+            let mut diag = Diagnostic::warning(format!("Unused variable `{name}`"), span);
+            diag.hint =
+                Some(format!("If this is intentional, prefix with underscore: _{name}").into());
+            self.diagnostics.push(diag);
+        }
     }
 }
 
