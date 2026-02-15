@@ -475,7 +475,7 @@ impl CoreErlangGenerator {
     ///         end
     ///     catch <_,_,_> -> 'ok'
     /// ```
-    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::too_many_lines)] // builds class metadata map with methods, fields, and source
     pub(in crate::codegen::core_erlang) fn generate_register_class(
         &mut self,
         module: &Module,

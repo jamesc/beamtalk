@@ -421,7 +421,7 @@ impl CoreErlangGenerator {
     /// let _ = call 'beamtalk_actor':'async_send'(Pid, Selector, Arguments, Future) in
     /// Future
     /// ```
-    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::too_many_lines)] // one arm per ProtoObject intrinsic message
     pub(in crate::codegen::core_erlang) fn try_generate_protoobject_message(
         &mut self,
         receiver: &Expression,

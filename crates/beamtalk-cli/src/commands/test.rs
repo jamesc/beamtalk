@@ -668,7 +668,7 @@ struct CompiledDocTest {
 /// Discovers `TestCase` subclasses in `.bt` files, compiles them, generates
 /// `EUnit` wrappers, and runs all tests in a single BEAM process.
 #[instrument(skip_all)]
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines)] // test orchestration pipeline: discover, compile, run, report
 pub fn run_tests(path: &str) -> Result<()> {
     info!("Starting BUnit test run");
     let start_time = Instant::now();

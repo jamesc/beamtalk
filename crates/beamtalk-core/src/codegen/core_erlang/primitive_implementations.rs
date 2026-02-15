@@ -129,7 +129,7 @@ fn generate_float_bif(selector: &str, params: &[String]) -> Option<String> {
 }
 
 /// String primitive implementations.
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines)] // one arm per String primitive method
 fn generate_string_bif(selector: &str, params: &[String]) -> Option<String> {
     let p0 = params.first().map_or("_Arg0", String::as_str);
     match selector {
@@ -426,7 +426,7 @@ fn generate_tuple_bif(selector: &str, params: &[String]) -> Option<String> {
 ///
 /// Lists are Erlang linked lists — fast prepend, sequential access.
 /// Complex operations delegate to `beamtalk_list_ops` helper module.
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines)] // one arm per List primitive method
 fn generate_list_bif(selector: &str, params: &[String]) -> Option<String> {
     match selector {
         // Access

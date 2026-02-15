@@ -918,7 +918,7 @@ impl CoreErlangGenerator {
     ///
     /// Check if an expression is a control flow construct (whileTrue:, whileFalse:, timesRepeat:, etc.)
     /// with literal blocks that has threaded mutations. Returns the threaded variable names if so.
-    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::too_many_lines)] // one branch per control flow construct (whileTrue:, timesRepeat:, etc.)
     fn get_control_flow_threaded_vars(expr: &Expression) -> Option<Vec<String>> {
         use crate::codegen::core_erlang::block_analysis::analyze_block;
 

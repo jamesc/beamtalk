@@ -82,7 +82,7 @@ pub(super) fn is_builtin_class(name: &str) -> bool {
 }
 
 /// Returns all built-in class definitions.
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines)] // one entry per builtin class with methods list
 pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
     let mut classes = HashMap::new();
 

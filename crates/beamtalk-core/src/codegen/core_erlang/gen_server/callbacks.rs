@@ -59,7 +59,7 @@ impl CoreErlangGenerator {
     ///     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
     ///        in {'ok', FinalState}
     /// ```
-    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::too_many_lines)] // inheritance-aware init with parent state merge
     pub(in crate::codegen::core_erlang) fn generate_init_function(
         &mut self,
         module: &Module,

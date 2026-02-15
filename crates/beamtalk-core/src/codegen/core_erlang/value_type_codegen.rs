@@ -463,7 +463,7 @@ impl CoreErlangGenerator {
     /// BT-447: For classes with zero instance methods (e.g., File), generates a
     /// minimal stub that handles only `class` and `respondsTo:`, delegating
     /// everything else to the superclass.
-    #[allow(clippy::too_many_lines, clippy::format_push_string)]
+    #[allow(clippy::too_many_lines, clippy::format_push_string)] // one arm per primitive selector
     fn generate_primitive_dispatch(
         &mut self,
         class: &ClassDefinition,
@@ -662,7 +662,7 @@ impl CoreErlangGenerator {
     /// Actor instances inherit Object methods via the hierarchy walk. These
     /// methods need access to the actor's State map for proper reflection
     /// (field access, class name, etc.).
-    #[allow(clippy::too_many_lines, clippy::unnecessary_wraps)]
+    #[allow(clippy::too_many_lines)] // Object dispatch with reflection primitives
     fn generate_object_dispatch_4(&self, mod_name: &str) -> Document<'static> {
         let a_space_binary = Self::core_erlang_binary("a ");
 
