@@ -251,6 +251,14 @@ impl NameResolver {
             Literal(..) | Super(..) | Error { .. } | ClassReference { .. } | Primitive { .. } => {
                 // No name resolution needed
             }
+
+            StringInterpolation { segments, .. } => {
+                for segment in segments {
+                    if let crate::ast::StringSegment::Interpolation(expr) = segment {
+                        self.resolve_expression(expr);
+                    }
+                }
+            }
         }
     }
 

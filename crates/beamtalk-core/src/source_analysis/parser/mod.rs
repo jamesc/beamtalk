@@ -1045,9 +1045,7 @@ mod tests {
 
     #[test]
     fn parse_interpolated_string() {
-        // Interpolated strings now produce StringStart/StringEnd tokens from the lexer.
-        // The parser doesn't handle these yet (BT-557), so they produce diagnostics.
-        // Plain strings without interpolation still parse correctly.
+        // Plain strings without interpolation still parse as Literal::String
         let module = parse_ok("\"Hello, world!\"");
         assert_eq!(module.expressions.len(), 1);
         match &module.expressions[0] {
@@ -1055,13 +1053,123 @@ mod tests {
             _ => panic!("Expected plain string literal"),
         }
 
-        // Interpolated string produces parse errors (parser support in BT-557)
+        // Interpolated string produces StringInterpolation node
         let tokens = lex_with_eof("\"Hello, {name}!\"");
-        let (_, diagnostics) = parse(tokens);
+        let (module, diagnostics) = parse(tokens);
         assert!(
-            !diagnostics.is_empty(),
-            "Expected diagnostics for interpolated string (parser support in BT-557)"
+            diagnostics.is_empty(),
+            "Expected no diagnostics, got: {diagnostics:?}"
         );
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::StringInterpolation { segments, .. } => {
+                assert_eq!(segments.len(), 3);
+                match &segments[0] {
+                    crate::ast::StringSegment::Literal(s) => assert_eq!(s, "Hello, "),
+                    crate::ast::StringSegment::Interpolation(_) => {
+                        panic!("Expected literal segment")
+                    }
+                }
+                match &segments[1] {
+                    crate::ast::StringSegment::Interpolation(Expression::Identifier(id)) => {
+                        assert_eq!(id.name, "name");
+                    }
+                    crate::ast::StringSegment::Interpolation(_)
+                    | crate::ast::StringSegment::Literal(_) => {
+                        panic!("Expected interpolation segment with identifier")
+                    }
+                }
+                match &segments[2] {
+                    crate::ast::StringSegment::Literal(s) => assert_eq!(s, "!"),
+                    crate::ast::StringSegment::Interpolation(_) => {
+                        panic!("Expected literal segment")
+                    }
+                }
+            }
+            other => panic!("Expected StringInterpolation, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_interpolated_string_multiple_segments() {
+        // "Name: {firstName} {lastName}"
+        let tokens = lex_with_eof("\"Name: {firstName} {lastName}\"");
+        let (module, diagnostics) = parse(tokens);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::StringInterpolation { segments, .. } => {
+                assert_eq!(segments.len(), 4); // "Name: ", firstName, " ", lastName
+            }
+            other => panic!("Expected StringInterpolation, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_interpolated_string_with_binary_message() {
+        // "Result: {x + 1}"
+        let tokens = lex_with_eof("\"Result: {x + 1}\"");
+        let (module, diagnostics) = parse(tokens);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::StringInterpolation { segments, .. } => {
+                assert_eq!(segments.len(), 2); // "Result: ", (x + 1)
+                assert!(matches!(
+                    &segments[1],
+                    crate::ast::StringSegment::Interpolation(Expression::MessageSend { .. })
+                ));
+            }
+            other => panic!("Expected StringInterpolation, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_interpolated_string_with_keyword_message() {
+        // "Value: {dict at: key}"
+        let tokens = lex_with_eof("\"Value: {dict at: key}\"");
+        let (module, diagnostics) = parse(tokens);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::StringInterpolation { segments, .. } => {
+                assert_eq!(segments.len(), 2); // "Value: ", (dict at: key)
+                assert!(matches!(
+                    &segments[1],
+                    crate::ast::StringSegment::Interpolation(Expression::MessageSend { .. })
+                ));
+            }
+            other => panic!("Expected StringInterpolation, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_interpolated_string_no_trailing_literal() {
+        // "{name}" — interpolation with no literal segments at start or end
+        let tokens = lex_with_eof("\"{name}\"");
+        let (module, diagnostics) = parse(tokens);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::StringInterpolation { segments, .. } => {
+                // Only the interpolation expression, empty start/end omitted
+                assert_eq!(segments.len(), 1);
+                assert!(matches!(
+                    &segments[0],
+                    crate::ast::StringSegment::Interpolation(Expression::Identifier(_))
+                ));
+            }
+            other => panic!("Expected StringInterpolation, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_interpolated_string_empty_braces_error() {
+        // "{}" produces lexer Error token — parser should include it as error segment
+        let tokens = lex_with_eof("\"before {} after\"");
+        let (_, diagnostics) = parse(tokens);
+        // Empty interpolation produces diagnostics from the lexer error
+        assert!(!diagnostics.is_empty());
     }
 
     #[test]

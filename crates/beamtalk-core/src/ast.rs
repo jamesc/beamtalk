@@ -700,6 +700,20 @@ pub enum Expression {
         span: Span,
     },
 
+    /// A string interpolation expression (ADR 0023).
+    ///
+    /// Produced when a string contains `{expr}` interpolation segments.
+    /// Plain strings without interpolation remain as `Literal(String(...))`.
+    ///
+    /// Example: `"Hello, {name}!"` produces segments:
+    /// `[Literal("Hello, "), Expression(name), Literal("!")]`
+    StringInterpolation {
+        /// The segments of the interpolated string.
+        segments: Vec<StringSegment>,
+        /// Source location of the entire interpolated string.
+        span: Span,
+    },
+
     /// An error node for unparseable code.
     ///
     /// This allows the parser to recover from errors and continue.
@@ -730,6 +744,7 @@ impl Expression {
             | Self::MapLiteral { span, .. }
             | Self::ListLiteral { span, .. }
             | Self::Primitive { span, .. }
+            | Self::StringInterpolation { span, .. }
             | Self::Error { span, .. } => *span,
             Self::Identifier(id) => id.span,
             Self::Block(block) => block.span,
@@ -796,6 +811,20 @@ pub enum Literal {
     ///
     /// Example: `$a`, `$\n`
     Character(char),
+}
+
+/// A segment of an interpolated string (ADR 0023).
+///
+/// String interpolation breaks a string into alternating literal text
+/// and embedded expressions. For example, `"Hello, {name}!"` becomes:
+/// `[Literal("Hello, "), Interpolation(name_expr), Literal("!")]`
+#[derive(Debug, Clone, PartialEq)]
+pub enum StringSegment {
+    /// A literal text segment.
+    Literal(EcoString),
+
+    /// An interpolated expression segment (`{expr}`).
+    Interpolation(Expression),
 }
 
 /// An identifier (variable or class name).
