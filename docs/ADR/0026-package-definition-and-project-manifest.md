@@ -170,6 +170,10 @@ my_counter/
 │       │   ├── bt@my_counter@main.beam
 │       │   └── bt@my_counter@counter.beam
 │       └── core/           # Intermediate .core files
+├── AGENTS.md               # AI agent guide (generated)
+├── .github/
+│   └── copilot-instructions.md  # Copilot custom instructions (generated)
+├── .mcp.json               # MCP server config (generated)
 ├── README.md               # Documentation (optional)
 └── .gitignore
 ```
@@ -199,7 +203,9 @@ The build system:
 2. Discovers `.bt` files in `src/` (not the root — prevents compiling test files)
 3. Compiles each with `bt@{name}@` prefix
 4. Generates `.app` file with module list and class metadata
-5. Outputs to `_build/dev/ebin/`
+5. Outputs to `_build/dev/ebin/` **relative to the package root** (where `beamtalk.toml` lives), regardless of the current working directory
+
+**Note:** This fixes a current bug where `beamtalk build` creates `build/` relative to the CWD. In package mode, `_build/` is always anchored to the manifest location.
 
 **File mode** (no manifest):
 ```bash
@@ -228,6 +234,9 @@ The scaffold creates the directory structure from §5 with:
 - `test/` directory (empty)
 - `.gitignore` including `_build/`
 - `README.md`
+- `AGENTS.md` — AI agent guide (build commands, project structure, Beamtalk syntax basics, links to language docs)
+- `.github/copilot-instructions.md` — GitHub Copilot custom instructions for the package
+- `.mcp.json` — MCP server configuration (if applicable tooling exists)
 
 ### 8. Package name validation
 
@@ -235,13 +244,23 @@ Package names must be:
 - Lowercase ASCII letters, digits, and underscores
 - Start with a letter
 - 1–64 characters
-- Not a reserved name (`beamtalk`, `stdlib`, `kernel`, `runtime`)
+- Not a reserved name: `beamtalk`, `stdlib`, `kernel`, `runtime`, `workspace`, `compiler`
+- Not an Erlang standard application name: `crypto`, `ssl`, `inets`, `mnesia`, `observer`, etc.
 - Valid as an Erlang atom (for OTP application name)
 - Valid as a Hex.pm package name (for future publishing)
 
 ```
 ✅ my_counter, json_parser, web_utils
-❌ MyCounter, 123app, beamtalk, -dashes-, CamelCase
+❌ MyCounter, 123app, beamtalk, -dashes-, CamelCase, stdlib, kernel
+```
+
+**Error on invalid name:**
+```bash
+$ beamtalk new stdlib
+Error: 'stdlib' is a reserved package name (conflicts with Beamtalk standard library)
+
+$ beamtalk new MyApp
+Error: Package name 'MyApp' is invalid — must be lowercase (try 'my_app')
 ```
 
 ## Prior Art
@@ -355,6 +374,7 @@ Allow subdirectories within `src/` to be independent packages with their own `be
 - Existing projects created with `beamtalk new` need to add a `src/` directory (mild migration)
 - Single-file scripting requires detecting "no manifest" mode (added complexity in build command)
 - TOML parsing dependency needed in the compiler
+- **Package rename breaks actor identity** — actors hold module references; renaming a package changes all module names, breaking running actors in persistent workspaces (ADR 0004). Mitigation: document as limitation, recommend stopping workspace before rename.
 
 ### Neutral
 - Package name validation rules may reject some creative names (but prevents Hex.pm conflicts later)
@@ -430,6 +450,30 @@ The `start` method is imperative — it spawns actors and they're auto-supervise
 **Affected components:** `beamtalk-cli` (build, new, run commands), `beamtalk-core` (module naming in codegen), workspace discovery, REPL module loading.
 
 **Estimated size:** L (manifest parsing + build restructure + scaffold + integration)
+
+## Migration Path
+
+### Existing projects created with `beamtalk new`
+
+Projects scaffolded before this ADR already have:
+- ✅ `beamtalk.toml` with `[package]` section — no change needed
+- ✅ `src/` directory with `main.bt` — no change needed
+- ❌ Build output in `build/` — will move to `_build/dev/ebin/`
+- ❌ No `.app` file — will be generated automatically
+- ❌ Missing `AGENTS.md`, `.github/copilot-instructions.md`, `.mcp.json` — can be generated with a future `beamtalk init` command
+
+**Migration steps:**
+1. Delete old `build/` directory
+2. Update `.gitignore` to include `_build/` instead of `/build/`
+3. Run `beamtalk build` — output now goes to `_build/dev/ebin/`
+
+### Single-file scripts
+
+No migration needed. `beamtalk build file.bt` continues to work as before — no package prefix, output to `build/`.
+
+### Stdlib and test suites
+
+The stdlib (`lib/*.bt`) and test suites (`tests/stdlib/`, `tests/e2e/`) are **not packages** — they are compiled by dedicated build commands (`just build-stdlib`, `just test-stdlib`, `just test-e2e`) that use their own module naming conventions. Package-mode compilation only activates when a `beamtalk.toml` is found, so these existing workflows are unaffected.
 
 ## References
 - Related ADRs: ADR 0004 (workspaces), ADR 0007 (compilable stdlib), ADR 0009 (OTP app structure), ADR 0016 (module naming)
