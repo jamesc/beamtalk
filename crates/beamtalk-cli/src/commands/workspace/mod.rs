@@ -408,7 +408,7 @@ pub fn create_workspace(
 
 /// Start a detached BEAM node for a workspace.
 /// Returns the `NodeInfo` for the started node.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // BEAM node requires separate beam dirs per OTP app
 pub fn start_detached_node(
     workspace_id: &str,
     port: u16,
@@ -519,7 +519,7 @@ pub fn start_detached_node(
 ///
 /// Extracted from `start_detached_node` so the command configuration
 /// (args, env vars) can be inspected in tests without spawning a process.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // mirrors start_detached_node params for testability
 fn build_detached_node_command(
     node_name: &str,
     cookie: &str,
@@ -596,7 +596,7 @@ fn find_beam_pid_by_node(node_name: &str) -> Result<(u32, Option<u64>)> {
 
 /// Get or start a workspace node for the current directory.
 /// Returns (`NodeInfo`, bool) where bool indicates if a new node was started.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // delegates to start_detached_node with same params
 pub fn get_or_start_workspace(
     project_path: &Path,
     workspace_name: Option<&str>,

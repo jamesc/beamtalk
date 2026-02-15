@@ -3,9 +3,10 @@
 
 //! State threading for mutable actor fields.
 //!
-//! In Beamtalk, actor fields are conceptually mutable, but Core Erlang is
-//! purely functional. We simulate mutation by threading state variables
-//! through field assignments:
+//! **DDD Context:** Compilation — Code Generation
+//!
+//! This domain service bridges Beamtalk's mutable actor fields with Core Erlang's
+//! purely functional model by threading state variables through field assignments:
 //!
 //! ```beamtalk
 //! self.counter := 0.
