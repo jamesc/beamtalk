@@ -401,7 +401,7 @@ fn find_hover_in_expr(
                 // Check interpolated expressions for hover targets
                 for segment in segments {
                     if let crate::ast::StringSegment::Interpolation(expr) = segment {
-                        if let Some(info) = find_hover_in_expr(expr, offset) {
+                        if let Some(info) = find_hover_in_expr(expr, offset, context, hierarchy) {
                             return Some(info);
                         }
                     }
