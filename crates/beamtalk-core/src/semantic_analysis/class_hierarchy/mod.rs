@@ -190,13 +190,27 @@ impl ClassHierarchy {
             .any(|s| s.as_str() == "Actor")
     }
 
-    /// Returns all class variable names for a class (local only, not inherited).
+    /// Returns all class variable names for a class, including inherited ones.
     #[must_use]
     pub fn class_variable_names(&self, class_name: &str) -> Vec<EcoString> {
-        self.classes
-            .get(class_name)
-            .map(|info| info.class_variables.clone())
-            .unwrap_or_default()
+        let mut vars = Vec::new();
+        let mut visited = HashSet::new();
+        let mut current = Some(class_name.to_string());
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break;
+            }
+            if let Some(info) = self.classes.get(name.as_str()) {
+                vars.extend(info.class_variables.iter().cloned());
+                current = info
+                    .superclass
+                    .as_ref()
+                    .map(std::string::ToString::to_string);
+            } else {
+                break;
+            }
+        }
+        vars
     }
 
     /// Returns all state (instance variable) names for a class,

@@ -657,6 +657,30 @@ fn visit_new_field_names(
             }
         }
     }
+    // Also check cascade messages
+    if let Expression::Cascade {
+        receiver, messages, ..
+    } = expr
+    {
+        if let Some(class_name) = receiver_class_name(receiver) {
+            for msg in messages {
+                let sel = msg.selector.name();
+                if sel == "new:" || sel == "spawn:" {
+                    if let Some(Expression::MapLiteral { pairs, .. }) = msg.arguments.first() {
+                        let declared_state = hierarchy.all_state(class_name);
+                        if !declared_state.is_empty() {
+                            validate_map_field_names(
+                                pairs,
+                                class_name,
+                                &declared_state,
+                                diagnostics,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Checks that symbol keys in a map literal match declared state fields.
@@ -730,6 +754,48 @@ fn visit_classvar_access(
                             );
                         }
                         diagnostics.push(diag);
+                    }
+                }
+            }
+        }
+    }
+    // Also check cascade messages
+    if let Expression::Cascade {
+        receiver, messages, ..
+    } = expr
+    {
+        if let Some(class_name) = receiver_class_name(receiver) {
+            for msg in messages {
+                let sel = msg.selector.name();
+                if sel == "classVar:" {
+                    if let Some(Expression::Literal(crate::ast::Literal::Symbol(var_name), _)) =
+                        msg.arguments.first()
+                    {
+                        let class_vars = hierarchy.class_variable_names(class_name);
+                        if hierarchy.has_class(class_name)
+                            && !class_vars.iter().any(|cv| cv.as_str() == var_name.as_str())
+                        {
+                            let mut diag = Diagnostic::warning(
+                                format!(
+                                    "Undefined class variable `{var_name}` on class `{class_name}`"
+                                ),
+                                msg.span,
+                            );
+                            if class_vars.is_empty() {
+                                diag.hint = Some(
+                                    format!("`{class_name}` has no declared class variables")
+                                        .into(),
+                                );
+                            } else {
+                                let vars: Vec<&str> =
+                                    class_vars.iter().map(EcoString::as_str).collect();
+                                diag.hint = Some(
+                                    format!("Declared class variables: {}", vars.join(", "))
+                                        .into(),
+                                );
+                            }
+                            diagnostics.push(diag);
+                        }
                     }
                 }
             }

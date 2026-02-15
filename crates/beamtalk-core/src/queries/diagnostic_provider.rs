@@ -259,9 +259,10 @@ mod tests {
         let (module, parse_diags) = parse(tokens);
         let diagnostics = compute_diagnostics(&module, parse_diags);
 
-        let has_warning = diagnostics
-            .iter()
-            .any(|d| d.message.contains("Actor subclass") && d.message.contains("spawn instead"));
+        let has_warning = diagnostics.iter().any(|d| {
+            d.message.contains("Actor subclass")
+                && d.severity == crate::source_analysis::Severity::Warning
+        });
         assert!(
             !has_warning,
             "Should not warn on spawn, got: {diagnostics:?}"
