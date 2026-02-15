@@ -62,3 +62,15 @@ c3 increment
 
 c3 doubleValue
 // => 20
+
+// ===========================================================================
+// VERIFY SOURCE UPDATED AFTER PATCHING (BT-589)
+// ===========================================================================
+
+// Source for patched method should return the NEW implementation
+(Counter >> #increment) source
+// => increment => self.value := self.value + 10
+
+// Source for newly added method should return its source
+(Counter >> #doubleValue) source
+// => doubleValue => ^self.value * 2

@@ -21,6 +21,7 @@ pub mod block_context;
 pub mod class_hierarchy;
 pub mod error;
 pub(crate) mod method_validators;
+pub mod module_validator;
 pub mod name_resolver;
 pub mod primitive_validator;
 pub mod scope;
@@ -30,7 +31,7 @@ pub use class_hierarchy::ClassHierarchy;
 pub use error::{SemanticError, SemanticErrorKind};
 pub use name_resolver::NameResolver;
 pub use scope::BindingKind;
-pub use type_checker::TypeChecker;
+pub use type_checker::{InferredType, TypeChecker};
 
 /// Result of semantic analysis.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -287,9 +288,9 @@ pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> Analysis
     // - All variable bindings from name resolution
     let scope = name_resolver.into_scope();
 
-    // Phase 2: Type Checking (stub - currently does nothing)
+    // Phase 2: Type Checking (ADR 0025 Phase 1 — zero-syntax inference)
     let mut type_checker = TypeChecker::new();
-    type_checker.check_module(module);
+    type_checker.check_module(module, &result.class_hierarchy);
     result.diagnostics.extend(type_checker.take_diagnostics());
 
     // Phase 3: Block Context Analysis (captures, mutations, context determination)
@@ -307,6 +308,10 @@ pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> Analysis
     check_actor_new_usage(module, &result.class_hierarchy, &mut result.diagnostics);
     check_new_field_names(module, &result.class_hierarchy, &mut result.diagnostics);
     check_class_variable_access(module, &result.class_hierarchy, &mut result.diagnostics);
+
+    // Phase 6: Module-level validation (BT-349)
+    let module_diags = module_validator::validate_single_class(module);
+    result.diagnostics.extend(module_diags);
 
     result
 }

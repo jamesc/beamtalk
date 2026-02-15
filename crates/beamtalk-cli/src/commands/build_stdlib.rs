@@ -584,7 +584,7 @@ fn generate_method_list(
         let _ = writeln!(
             code,
             "                MethodInfo {{ selector: \"{selector}\".into(), arity: {arity}, \
-             kind: {kind}, defined_in: \"{class}\".into(), is_sealed: {sealed} }},",
+             kind: {kind}, defined_in: \"{class}\".into(), is_sealed: {sealed}, return_type: None }},",
             arity = m.arity,
             class = class_name,
             sealed = m.is_sealed,

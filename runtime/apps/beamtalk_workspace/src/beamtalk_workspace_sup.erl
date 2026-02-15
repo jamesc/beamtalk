@@ -91,48 +91,16 @@ init(Config) ->
             shutdown => 5000,
             type => worker,
             modules => [beamtalk_workspace_meta]
-        },
+        }
         
         %% Singleton actors — workspace singletons (ADR 0010 Phase 2, ADR 0019 Phase 4)
         %% These assume beamtalk_stdlib has already been started elsewhere in the system.
         %% Each registers via gen_server name registration ({local, Name}).
-        #{
-            id => beamtalk_transcript_stream,
-            start => {beamtalk_transcript_stream, start_link, [{local, 'Transcript'}, 1000]},
-            restart => permanent,
-            shutdown => 5000,
-            type => worker,
-            modules => [beamtalk_transcript_stream]
-        },
-        #{
-            id => beamtalk_system_dictionary,
-            start => {beamtalk_system_dictionary, start_link, [{local, 'Beamtalk'}, []]},
-            restart => permanent,
-            shutdown => 5000,
-            type => worker,
-            modules => [beamtalk_system_dictionary]
-        },
-        
-        %% Actor registry (workspace-wide, shared across sessions)
-        #{
-            id => beamtalk_actor_registry,
-            start => {beamtalk_repl_actors, start_link, [registered]},
-            restart => permanent,
-            shutdown => 5000,
-            type => worker,
-            modules => [beamtalk_repl_actors]
-        },
-        
-        %% Workspace environment — introspection singleton (BT-423)
-        %% Placed after actor_registry since its methods query the registry
-        #{
-            id => beamtalk_workspace_environment,
-            start => {beamtalk_workspace_environment, start_link, [{local, 'Workspace'}]},
-            restart => permanent,
-            shutdown => 5000,
-            type => worker,
-            modules => [beamtalk_workspace_environment]
-        },
+        %% Specs derived from beamtalk_workspace_config:singletons/0.
+        %%
+        %% Note: actor registry is interleaved between singletons because
+        %% WorkspaceEnvironment's methods query the registry.
+        ] ++ singleton_child_specs() ++ [
         
         %% Bootstrap worker — sets singleton class variables (ADR 0019 Phase 2)
         %% Must start after all singletons but before REPL server accepts connections.
@@ -191,6 +159,39 @@ init(Config) ->
     ],
     
     {ok, {SupFlags, ChildSpecs}}.
+
+%%% Singleton Child Specs
+
+%% @private Generate supervisor child specs for workspace singletons.
+%% Interleaves the actor registry before WorkspaceEnvironment, which
+%% depends on it.
+singleton_child_specs() ->
+    Singletons = beamtalk_workspace_config:singletons(),
+    {Before, After} = lists:partition(
+        fun(#{module := M}) -> M =/= beamtalk_workspace_environment end,
+        Singletons
+    ),
+    lists:map(fun singleton_to_child_spec/1, Before) ++
+    [#{
+        id => beamtalk_actor_registry,
+        start => {beamtalk_repl_actors, start_link, [registered]},
+        restart => permanent,
+        shutdown => 5000,
+        type => worker,
+        modules => [beamtalk_repl_actors]
+    }] ++
+    lists:map(fun singleton_to_child_spec/1, After).
+
+%% @private Convert a singleton config to a supervisor child spec.
+singleton_to_child_spec(#{binding_name := BindingName, module := Module, start_args := Args}) ->
+    #{
+        id => Module,
+        start => {Module, start_link, [{local, BindingName} | Args]},
+        restart => permanent,
+        shutdown => 5000,
+        type => worker,
+        modules => [Module]
+    }.
 
 %%% File Logging
 
