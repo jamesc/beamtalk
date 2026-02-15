@@ -308,7 +308,7 @@ Token { kind: Identifier("first"), span: Span { start: 1961, end: 1966 }, leadin
 Token { kind: StringSegment(", "), span: Span { start: 1967, end: 1969 }, leading_trivia: [], trailing_trivia: [] }
 Token { kind: Identifier("second"), span: Span { start: 1970, end: 1976 }, leading_trivia: [], trailing_trivia: [] }
 Token { kind: StringSegment(", and "), span: Span { start: 1977, end: 1983 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("rest"), span: Span { start: 1984, end: 1988 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("rest"), span: Span { start: 1984, end: 1988 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Identifier("size"), span: Span { start: 1989, end: 1993 }, leading_trivia: [], trailing_trivia: [] }
 Token { kind: StringEnd(" more"), span: Span { start: 1994, end: 2000 }, leading_trivia: [], trailing_trivia: [] }
 Token { kind: Pipe, span: Span { start: 2003, end: 2004 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }

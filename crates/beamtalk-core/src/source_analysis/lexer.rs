@@ -524,15 +524,19 @@ impl<'src> Lexer<'src> {
     /// Scans the body of a `{...}` interpolation, tracking brace depth.
     /// Returns `Ok((start, end))` of the expression range, or `Err` on unterminated input.
     fn lex_interpolation_body(&mut self, string_start: u32) -> Result<(u32, u32), TokenKind> {
-        // Check for empty braces
-        self.skip_interpolation_whitespace();
-        if self.peek_char() == Some('}') {
-            self.advance();
+        let interp_start = self.current_position();
+
+        // Check for empty braces (only whitespace between { and })
+        if self.is_empty_interpolation() {
+            // Skip to closing `}`
+            while self.peek_char() != Some('}') {
+                self.advance();
+            }
+            self.advance(); // consume `}`
             let pos = self.current_position();
             return Ok((pos, pos)); // empty range signals error token
         }
 
-        let interp_start = self.current_position();
         let mut depth: u32 = 1;
         while depth > 0 {
             match self.peek_char() {
@@ -611,11 +615,14 @@ impl<'src> Lexer<'src> {
             }
 
             if interp.0 == interp.1 {
+                // Empty interpolation — span covers the `{}` delimiters.
+                // segments[i].2 is the position of `{`, interp.0 is after `}`.
+                let brace_start = segments[i].2;
                 tokens.push(Token::new(
                     TokenKind::Error(EcoString::from(
                         "empty interpolation {} is not allowed, use \\{ for literal brace",
                     )),
-                    Span::new(interp.0, interp.1),
+                    Span::new(brace_start, interp.0),
                 ));
             } else {
                 let expr_source = self.text_for(Span::new(interp.0, interp.1));
@@ -625,7 +632,14 @@ impl<'src> Lexer<'src> {
                         sub_token.span().start() + interp.0,
                         sub_token.span().end() + interp.0,
                     );
-                    tokens.push(Token::new(sub_token.into_kind(), adjusted_span));
+                    let leading = sub_token.leading_trivia().to_vec();
+                    let trailing = sub_token.trailing_trivia().to_vec();
+                    tokens.push(Token::with_trivia(
+                        sub_token.into_kind(),
+                        adjusted_span,
+                        leading,
+                        trailing,
+                    ));
                 }
             }
         }
@@ -640,11 +654,19 @@ impl<'src> Lexer<'src> {
         self.pending_tokens = tokens;
     }
 
-    /// Skips whitespace inside interpolation (for empty brace detection).
-    fn skip_interpolation_whitespace(&mut self) {
-        // Only skip spaces/tabs, not newlines (to keep position accurate)
-        while self.peek_char().is_some_and(|c| matches!(c, ' ' | '\t')) {
-            self.advance();
+    /// Checks if the current interpolation is empty (only whitespace before `}`).
+    /// Does not consume any characters.
+    fn is_empty_interpolation(&self) -> bool {
+        let mut offset = 0;
+        loop {
+            let ch = self.source[self.position + offset..]
+                .chars()
+                .next();
+            match ch {
+                Some(' ' | '\t') => offset += 1,
+                Some('}') => return true,
+                _ => return false,
+            }
         }
     }
 
@@ -1112,11 +1134,14 @@ mod tests {
 
     #[test]
     fn lex_string_interpolation_empty_braces_error() {
-        let kinds = lex_kinds(r#""empty: {}""#);
-        assert_eq!(kinds.len(), 3); // StringStart, Error, StringEnd
-        assert!(matches!(kinds[0], TokenKind::StringStart(_)));
-        assert!(matches!(kinds[1], TokenKind::Error(_)));
-        assert!(matches!(kinds[2], TokenKind::StringEnd(_)));
+        let tokens = lex(r#""empty: {}""#);
+        assert_eq!(tokens.len(), 3); // StringStart, Error, StringEnd
+        assert!(matches!(tokens[0].kind(), TokenKind::StringStart(_)));
+        assert!(matches!(tokens[1].kind(), TokenKind::Error(_)));
+        // Error span covers the `{}` delimiters (positions 8-10)
+        assert_eq!(tokens[1].span().start(), 8);
+        assert_eq!(tokens[1].span().end(), 10);
+        assert!(matches!(tokens[2].kind(), TokenKind::StringEnd(_)));
     }
 
     #[test]
@@ -1290,6 +1315,21 @@ mod tests {
         assert!(matches!(tokens[2].kind(), TokenKind::StringEnd(_)));
         assert_eq!(tokens[2].span().start(), 14); // '!' after }
         assert_eq!(tokens[2].span().end(), 16); // after closing "
+    }
+
+    #[test]
+    fn lex_string_interpolation_preserves_trivia() {
+        // "{ x + y }" — whitespace around expression should be trivia
+        let tokens = lex(r#""{ x + y }""#);
+        assert_eq!(tokens.len(), 5);
+        // StringStart, Identifier(x), BinarySelector(+), Identifier(y), StringEnd
+        assert!(matches!(tokens[0].kind(), TokenKind::StringStart(_)));
+        assert!(matches!(tokens[1].kind(), TokenKind::Identifier(_)));
+        // x should have leading whitespace trivia from the space after {
+        assert!(!tokens[1].leading_trivia().is_empty());
+        assert!(matches!(tokens[2].kind(), TokenKind::BinarySelector(_)));
+        assert!(matches!(tokens[3].kind(), TokenKind::Identifier(_)));
+        assert!(matches!(tokens[4].kind(), TokenKind::StringEnd(_)));
     }
 
     #[test]
