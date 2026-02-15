@@ -8,9 +8,11 @@ Object subclass: Transaction
   state: amount = 0
   state: from = ""
   state: to = ""
+  state: timestamp = nil
   state: status = "pending"
 
   getAmount => ^self.amount
   getFrom => ^self.from
   getTo => ^self.to
+  getTimestamp => ^self.timestamp
   getStatus => ^self.status

@@ -9,10 +9,16 @@ Actor subclass: Account
   state: owner = ""
 
   deposit: amount =>
+    amount < 0 ifTrue: [
+      self error: "Amount must be non-negative"
+    ].
     self.balance := self.balance + amount.
     ^self.balance
 
   withdraw: amount =>
+    amount < 0 ifTrue: [
+      self error: "Amount must be non-negative"
+    ].
     self.balance < amount ifTrue: [
       self error: "Insufficient funds (balance: " ++ self.balance printString ++ ", requested: " ++ amount printString ++ ")"
     ].

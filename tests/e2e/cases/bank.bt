@@ -57,6 +57,14 @@ acct getOwner
 acct withdraw: 9999
 // => ERROR: Insufficient funds
 
+// Negative deposit rejected
+acct deposit: -100
+// => ERROR: Amount must be non-negative
+
+// Negative withdrawal rejected
+acct withdraw: -50
+// => ERROR: Amount must be non-negative
+
 // Balance unchanged after failed withdrawal
 acct balance
 // => 300
