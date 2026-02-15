@@ -75,6 +75,8 @@ A **package** is a directory containing a `beamtalk.toml` manifest. It is:
 
 There is no separate "project" concept. Following Gleam and Cargo, the term **package** covers both local development and distribution.
 
+**Relationship to workspaces (ADR 0004):** Persistent workspaces are the *runtime development environment* — a running BEAM node where you interactively develop and test your package. The package (source files + manifest) is the *authoring format* — what you check into git, review in PRs, and publish to Hex.pm. A workspace loads a package's compiled code; it doesn't replace or compete with it. For deployment, the package compiles to an OTP release (a self-contained BEAM node). The lifecycle is: **author** (source files) → **develop** (workspace) → **deploy** (OTP release).
+
 ### 2. `beamtalk.toml` manifest format
 
 ```toml
@@ -313,30 +315,47 @@ OTP application structure means standard release tooling works: `relx`, `mix rel
 ## Steelman Analysis
 
 ### Option A: Manifest-driven packages (this decision)
-- 🧑‍💻 **Newcomer**: "This is what I expect — `cargo new`, `npm init`, `gleam new` all work this way. I know how to read TOML."
-- 🎩 **Smalltalk purist**: "At least the REPL still gives me live coding. The package is just persistence — I can still `fileIn:` code interactively."
-- ⚙️ **BEAM veteran**: "Finally, proper OTP applications! I can add this as a dependency in my Elixir project."
-- 🏭 **Operator**: "OTP releases, proper `.app` files, standard deployment tooling. This is production-ready."
-- 🎨 **Language designer**: "Clean separation: manifest declares, build system executes, runtime loads. Each concern has one place."
+
+- 🧑‍💻 **Newcomer**: "TOML manifests are universal now — `beamtalk.toml` is immediately familiar from Cargo, Gleam, and every modern language. I can edit metadata without learning Beamtalk syntax first, use existing TOML tooling, and onboard in minutes."
+- 🎩 **Smalltalk developer**: "I'm losing something real here. In Pharo, the code *is* the package — there's no separate manifest to keep in sync. Now I have truth in two places: `beamtalk.toml` says version 0.2.0, but what if I forget to bump it? Manifest-driven systems introduce 'metadata drift' bugs that simply don't exist in image-based systems. But I can live with this because the REPL and workspace still give me live coding, and the manifest is small."
+- ⚙️ **BEAM veteran**: "This is exactly right for interop. I can depend on a Beamtalk package from rebar3 or Mix because it produces a proper `.app` file. The module naming (`bt@package@module`) is clean and callable from Erlang."
+- 🏭 **Operator**: "OTP applications mean standard release tooling: `relx`, `mix release`, systemd. Explicit version numbers and metadata for compliance and audit trails. This is production-ready."
+- 🎨 **Language designer**: "Clean separation: manifest declares, build system executes, runtime loads. But TOML is static data — I can't do `version = git_describe()`. This pushes computed metadata into the build tool. Still, TOML's simplicity is its strength — harder to have security issues or confusing evaluation order in static data."
 
 ### Option B: Convention-only (no manifest, directory structure implies package)
-- 🧑‍💻 **Newcomer**: "Zero config is nice — just put files in a directory and build."
-- 🎩 **Smalltalk purist**: "Closer to image-based — the code is the truth, not a config file."
-- ⚙️ **BEAM veteran**: "But how do I set the application name? Version? I need `.app` files."
-- 🏭 **Operator**: "How do I control what gets deployed? I need explicit metadata."
-- 🎨 **Language designer**: "Convention over configuration is elegant, but you always end up needing a manifest anyway (for publishing, versioning, dependencies)."
+
+- 🧑‍💻 **Newcomer**: "Zero config is compelling — I just write code. Go did this for a decade before `go.mod`. No manifest means no manifest to mess up, no TOML syntax errors, no 'forgot to bump version' bugs. The BEAM itself uses conventions: `apps/`, `src/`, `ebin/` are structural, not declared in a file."
+- 🎩 **Smalltalk developer**: "Convention-only is closer to the Smalltalk philosophy — the code is the truth. In Pharo, there's no 'project manifest' — the package is defined by its contents. Directory structure as convention means the code organization *is* the metadata."
+- ⚙️ **BEAM veteran**: "rebar3 and Mix already infer a lot from directory structure. OTP's `.app` files can be generated from directory scans. I've shipped Erlang apps where the only 'manifest' was the directory name."
+- 🏭 **Operator**: "Convention-only can work if the conventions are strong enough — Git tags for versions, directory name for package name, LICENSE file for licence. But I'd need robust tooling to extract metadata for compliance."
+- 🎨 **Language designer**: "Convention over configuration is a legitimate design principle. Go ran convention-only for 8+ years before adding `go.mod` — they only needed manifests when dependency resolution got complex. Starting with manifests is more conservative but may be premature."
 
 ### Option C: Smalltalk-style image packages (Monticello-like)
-- 🧑‍💻 **Newcomer**: "I don't know what an image is. I want files on disk and git."
-- 🎩 **Smalltalk purist**: "This is the real way! Code lives in the system, not in files."
-- ⚙️ **BEAM veteran**: "This is completely alien to the BEAM ecosystem. I can't use Hex.pm."
-- 🏭 **Operator**: "How do I deploy this? How do I roll back? I need reproducible builds."
-- 🎨 **Language designer**: "Elegant in a Smalltalk context, but forces every tool (CI, editor, debugger) to understand images."
+
+- 🧑‍💻 **Newcomer**: "I'd need to learn a new paradigm, but there's real value. Pharo's image means the running system *is* the source of truth — no 'it works on my machine', no compile step, no stale builds. The barrier is tooling: can I use VS Code? Git? If those are solved, images are compelling."
+- 🎩 **Smalltalk developer**: "Beamtalk already has persistent workspaces (ADR 0004) where actors survive disconnection — that's already halfway to an image. The workspace *is* a running system with state. Why not lean into that fully? Package a workspace as the unit of distribution. The BEAM's hot code loading makes this *more* viable than in standard Smalltalk."
+- ⚙️ **BEAM veteran**: "The difference between 'image' and 'BEAM node with hot code loading' is smaller than it looks. Releases are essentially images — a self-contained BEAM node with all code. If Beamtalk workspaces exported as releases, that's functionally an image. The question is interop: can Erlang/Elixir code import a Beamtalk 'image package'?"
+- 🏭 **Operator**: "Images solve reproducibility differently: instead of 'here's source, build it identically', images say 'here's the exact running system, deploy it'. Docker popularized this for good reason. But I'd need rollback, multi-instance, and inspection tooling that Pharo doesn't have."
+- 🎨 **Language designer**: "The image model is internally consistent. The workspace (ADR 0004) already maintains running actors — the gap to 'export workspace as deployable unit' is smaller than it seems. But I'd be building a new ecosystem: image diff/merge, image-based CI. Git and text files have 50 years of tooling."
+
+### Option D: Beamtalk-as-config (manifest written in Beamtalk, like mix.exs)
+
+- 🎩 **Smalltalk developer**: "Configuration is code, code is configuration. In Pharo, configuration happens through method execution. A Beamtalk manifest could be expressive and consistent with the language philosophy."
+- ⚙️ **BEAM veteran**: "Elixir does this with `mix.exs` and it works. But BEAM tooling (rebar3, relx, Hex.pm) expects data-format configs — interop gets harder."
+- 🏭 **Operator**: "Executable configs are a security concern. TOML is data — I can inspect it safely. Beamtalk code could do anything. How do I audit it?"
+- 🎨 **Language designer**: "Manifests are *just metadata*, and metadata should be data, not code. TOML is readable by any language. A Beamtalk manifest requires a Beamtalk evaluator — bootstrapping problem."
 
 ### Tension Points
-- **Smalltalk purists prefer C** but every other cohort strongly prefers A
-- **Newcomers could live with B** but would miss version/metadata when publishing
-- **All cohorts except Smalltalk purists agree** that OTP application mapping (A) is essential for BEAM interop
+
+1. **The Workspace Paradox** — ADR 0004 already creates persistent workspaces with running actors that survive disconnection. This *is* an image model, just not called that. If workspaces are essentially long-running BEAM nodes with state, why not embrace that and make the workspace exportable as the package format (Option C)? The tension is between "workspaces are development tools" vs "workspaces are deployment artifacts."
+
+2. **Interop vs Purity** — The strongest argument for A is BEAM interop: OTP applications, Hex.pm, rebar3/Mix compatibility. The strongest argument for C is internal consistency: the running system is the truth. These are genuinely different philosophies. Option A chooses ecosystem integration over semantic purity — reasonable, but a real trade-off.
+
+3. **The Go Counter-Example** — Option B has a real case study: Go thrived for years with convention-only (GOPATH). Modules (`go.mod`) were controversial when introduced. But Go's convention-only also created problems: vendoring complexity, GOPATH friction, version pinning hacks. The question is whether Beamtalk should learn from Go's eventual destination (manifests) or its successful journey (start convention-only, add manifests when the pain is clear).
+
+4. **Metadata Drift** — Option A introduces a class of bugs that B and C don't have: the manifest says one thing, the code says another. Version numbers not bumped, descriptions stale, module lists out of sync. Auto-generation mitigates this (we generate `.app` from source scanning) but doesn't eliminate it (version must be manually maintained).
+
+5. **Convention vs Explicit** — Options B and E argue conventions can replace manifests. True for some metadata (directory name → package name) but problematic for others (version numbers, licences). The tension is "derive what you can" (less boilerplate) vs "declare what you mean" (less magic). Reasonable engineers disagree here.
 
 ## Alternatives Considered
 
