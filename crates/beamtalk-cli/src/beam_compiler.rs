@@ -180,7 +180,6 @@ impl BeamCompiler {
     /// let beam_files = compiler.compile_batch(&core_files)?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    #[allow(clippy::too_many_lines)]
     #[instrument(skip_all, fields(file_count = core_files.len(), output_dir = %self.output_dir))]
     pub fn compile_batch(&self, core_files: &[Utf8PathBuf]) -> Result<Vec<Utf8PathBuf>> {
         let backend = resolve_backend();
@@ -366,7 +365,7 @@ impl BeamCompiler {
     ///   INPUT:  Erlang term: `{OutputDir, [CoreFile1, CoreFile2, ...]}`
     ///   OUTPUT: `beamtalk-compile-module:<name>` per module, then
     ///           `beamtalk-compile-result-ok` or `beamtalk-compile-result-error`
-    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::too_many_lines)] // protocol state machine with stdio/stderr handling
     fn drive_compilation_protocol(
         &self,
         child: &mut std::process::Child,
