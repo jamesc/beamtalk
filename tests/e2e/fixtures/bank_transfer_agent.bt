@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// TransferAgent fixture for E2E tests (BT-569)
+// Coordinates transfers between two Account actors
+//
+// Note: Actor-to-actor messaging is asynchronous. The TransferAgent
+// orchestrates the debit and credit as fire-and-forget messages.
+// Each Account handles its own overdraft protection independently.
+
+Actor subclass: TransferAgent
+  state: lastAmount = 0
+
+  transfer: amount from: source to: destination =>
+    source withdraw: amount.
+    destination deposit: amount.
+    self.lastAmount := amount
+
+  getLastAmount => ^self.lastAmount

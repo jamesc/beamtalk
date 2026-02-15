@@ -31,7 +31,7 @@ pub use class_hierarchy::ClassHierarchy;
 pub use error::{SemanticError, SemanticErrorKind};
 pub use name_resolver::NameResolver;
 pub use scope::BindingKind;
-pub use type_checker::{InferredType, TypeChecker};
+pub use type_checker::{InferredType, TypeChecker, TypeMap, infer_types};
 
 /// Result of semantic analysis.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -44,6 +44,50 @@ impl InferredType {
     }
 }
 
+/// Map of expression spans to their inferred types.
+///
+/// Used by LSP providers (hover, completions) to query types at cursor positions.
+/// Keyed by full span (start + end) to avoid collisions between nested expressions
+/// that share the same start offset (e.g., a message send and its receiver).
+#[derive(Debug, Clone, Default)]
+pub struct TypeMap {
+    types: HashMap<Span, InferredType>,
+}
+
+impl TypeMap {
+    /// Creates an empty type map.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            types: HashMap::new(),
+        }
+    }
+
+    /// Looks up the inferred type for an expression span.
+    ///
+    /// Returns `None` if no type is recorded at that span.
+    #[must_use]
+    pub fn get(&self, span: Span) -> Option<&InferredType> {
+        self.types.get(&span)
+    }
+
+    /// Records an inferred type for an expression span.
+    fn insert(&mut self, span: Span, ty: InferredType) {
+        self.types.insert(span, ty);
+    }
+}
+
+/// Runs type inference on a module and returns the type map.
+///
+/// This is the main entry point for LSP providers that need type information
+/// at specific positions (hover, completions).
+#[must_use]
+pub fn infer_types(module: &Module, hierarchy: &ClassHierarchy) -> TypeMap {
+    let mut checker = TypeChecker::new();
+    checker.check_module(module, hierarchy);
+    checker.take_type_map()
+}
+
 /// Type checking domain service.
 ///
 /// **DDD Context:** Semantic Analysis - Domain Service
@@ -56,6 +100,7 @@ impl InferredType {
 #[derive(Debug)]
 pub struct TypeChecker {
     diagnostics: Vec<Diagnostic>,
+    type_map: TypeMap,
 }
 
 impl TypeChecker {
@@ -64,6 +109,7 @@ impl TypeChecker {
     pub fn new() -> Self {
         Self {
             diagnostics: Vec::new(),
+            type_map: TypeMap::new(),
         }
     }
 
@@ -134,7 +180,7 @@ impl TypeChecker {
         env: &mut TypeEnv,
         in_abstract_method: bool,
     ) -> InferredType {
-        match expr {
+        let ty = match expr {
             // Literals have known types
             Expression::Literal(lit, _span) => Self::infer_literal(lit),
 
@@ -289,7 +335,11 @@ impl TypeChecker {
             Expression::Super(_) | Expression::Primitive { .. } | Expression::Error { .. } => {
                 InferredType::Dynamic
             }
-        }
+        };
+
+        // Record inferred type for the expression's full span for LSP queries
+        self.type_map.insert(expr.span(), ty.clone());
+        ty
     }
 
     /// Infer the type of a message send and validate the selector.
@@ -474,6 +524,17 @@ impl TypeChecker {
     /// Takes ownership of diagnostics, leaving an empty vec.
     pub fn take_diagnostics(&mut self) -> Vec<Diagnostic> {
         std::mem::take(&mut self.diagnostics)
+    }
+
+    /// Returns a reference to the type map built during checking.
+    #[must_use]
+    pub fn type_map(&self) -> &TypeMap {
+        &self.type_map
+    }
+
+    /// Takes ownership of the type map, leaving an empty map.
+    pub fn take_type_map(&mut self) -> TypeMap {
+        std::mem::take(&mut self.type_map)
     }
 }
 
@@ -1046,5 +1107,55 @@ mod tests {
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         assert!(checker.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn type_map_records_literal_types() {
+        let module = make_module(vec![int_lit(42)]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let type_map = infer_types(&module, &hierarchy);
+
+        // The integer literal should be recorded as Integer
+        let ty = type_map.get(module.expressions[0].span());
+        assert!(ty.is_some(), "TypeMap should record literal type");
+        assert_eq!(
+            ty.unwrap(),
+            &InferredType::Known("Integer".into()),
+            "Integer literal should infer as Integer"
+        );
+    }
+
+    #[test]
+    fn type_map_records_variable_types_after_assignment() {
+        // x := 42 → x should be Integer
+        let module = make_module(vec![assign("x", int_lit(42)), var("x")]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let type_map = infer_types(&module, &hierarchy);
+
+        // The second expression (var "x") should be recorded as Integer
+        let x_expr = &module.expressions[1];
+        let ty = type_map.get(x_expr.span());
+        assert!(
+            ty.is_some(),
+            "TypeMap should record variable type after assignment"
+        );
+        assert_eq!(
+            ty.unwrap(),
+            &InferredType::Known("Integer".into()),
+            "Variable assigned integer should infer as Integer"
+        );
+    }
+
+    #[test]
+    fn infer_types_convenience_function() {
+        let module = make_module(vec![str_lit("hello")]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let type_map = infer_types(&module, &hierarchy);
+        let ty = type_map.get(module.expressions[0].span());
+        assert_eq!(
+            ty,
+            Some(&InferredType::Known("String".into())),
+            "infer_types should return correct type map"
+        );
     }
 }

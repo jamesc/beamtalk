@@ -39,6 +39,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "ProtoObject"
             | "RuntimeError"
             | "Set"
+            | "StackFrame"
             | "Stream"
             | "String"
             | "Symbol"
@@ -291,6 +292,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "selector".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Exception".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "errorClass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Exception".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Exception".into(), is_sealed: false, return_type: None },
+                MethodInfo { selector: "stackTrace".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Exception".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Exception".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "signal".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Exception".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "signal:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Exception".into(), is_sealed: false, return_type: None },
@@ -624,6 +626,29 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "stream".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, return_type: None },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "StackFrame".into(),
+        ClassInfo {
+            name: "StackFrame".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: false,
+            state: vec![],
+            methods: vec![
+                MethodInfo { selector: "method".into(), arity: 0, kind: MethodKind::Primary, defined_in: "StackFrame".into(), is_sealed: false, return_type: None },
+                MethodInfo { selector: "receiverClass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "StackFrame".into(), is_sealed: false, return_type: None },
+                MethodInfo { selector: "arguments".into(), arity: 0, kind: MethodKind::Primary, defined_in: "StackFrame".into(), is_sealed: false, return_type: None },
+                MethodInfo { selector: "sourceLocation".into(), arity: 0, kind: MethodKind::Primary, defined_in: "StackFrame".into(), is_sealed: false, return_type: None },
+                MethodInfo { selector: "moduleName".into(), arity: 0, kind: MethodKind::Primary, defined_in: "StackFrame".into(), is_sealed: false, return_type: None },
+                MethodInfo { selector: "line".into(), arity: 0, kind: MethodKind::Primary, defined_in: "StackFrame".into(), is_sealed: false, return_type: None },
+                MethodInfo { selector: "file".into(), arity: 0, kind: MethodKind::Primary, defined_in: "StackFrame".into(), is_sealed: false, return_type: None },
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "StackFrame".into(), is_sealed: false, return_type: None },
             ],
             class_methods: vec![],
             class_variables: vec![],
