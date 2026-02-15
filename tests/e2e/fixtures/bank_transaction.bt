@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Transaction fixture for E2E tests (BT-569)
+// Immutable value type recording a completed transfer
+
+Object subclass: Transaction
+  state: amount = 0
+  state: from = ""
+  state: to = ""
+  state: timestamp = nil
+  state: status = "pending"
+
+  getAmount => ^self.amount
+  getFrom => ^self.from
+  getTo => ^self.to
+  getTimestamp => ^self.timestamp
+  getStatus => ^self.status
