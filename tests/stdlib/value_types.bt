@@ -15,10 +15,29 @@
 Point new
 // => a Point
 
-// TODO(BT-213): Enable once keyword message with map literal works
-// Create a Point with explicit values
-// Point new: #{x => 3, y => 4}
-// // => #{$beamtalk_class => Point, x => 3, y => 4}
+// Create a Point with explicit values (BT-591: bare identifier map keys)
+Point new: #{x => 3, y => 4}
+// => a Point
+
+// Verify bare identifier keys actually set field values
+p2 := Point new: #{x => 10, y => 20}
+// => a Point
+
+p2 getX
+// => 10
+
+p2 getY
+// => 20
+
+// Mixed keys: bare identifier and explicit symbol
+p3 := Point new: #{x => 5, #y => 15}
+// => a Point
+
+p3 getX
+// => 5
+
+p3 getY
+// => 15
 
 // ===========================================================================
 // ACCESSING FIELDS
@@ -47,11 +66,14 @@ p class
 // ===========================================================================
 
 // Value types are immutable - methods return new instances
-// @load tests/e2e/fixtures/point.bt
-// p1 := Point new: #{x => 1, y => 2}
-// p2 := p1  // p2 references same map
-// p1 == p2
-// // => true
+p4 := Point new: #{x => 1, y => 2}
+// => a Point
+
+p5 := p4
+// => a Point
+
+p4 == p5
+// => true
 
 // ===========================================================================
 // COPYING SEMANTICS
