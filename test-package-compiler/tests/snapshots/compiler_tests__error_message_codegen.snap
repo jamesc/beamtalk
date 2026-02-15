@@ -12,6 +12,10 @@ module 'error_message' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('error_message', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
+            let _InstReg = try call 'beamtalk_object_instances':'register'('TestActor', Pid)
+                of _RegOk -> _RegOk
+                catch <_RegT, _RegE, _RegS> -> 'ok'
+            in
             {'beamtalk_object', 'TestActor', 'error_message', Pid}
         <{'error', Reason}> when 'true' ->
             let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'TestActor') in
@@ -30,6 +34,10 @@ module 'error_message' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'
         <'true'> when 'true' ->
             case call 'gen_server':'start_link'('error_message', InitArgs, []) of
                 <{'ok', Pid}> when 'true' ->
+                    let _InstReg = try call 'beamtalk_object_instances':'register'('TestActor', Pid)
+                        of _RegOk -> _RegOk
+                        catch <_RegT, _RegE, _RegS> -> 'ok'
+                    in
                     {'beamtalk_object', 'TestActor', 'error_message', Pid}
                 <{'error', Reason}> when 'true' ->
                     let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'TestActor') in
@@ -90,9 +98,8 @@ module 'error_message' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'
     end
 
 
-'code_change'/3 = fun (_OldVsn, State, _Extra) ->
-    %% TODO: Add state migration logic
-    {'ok', State}
+'code_change'/3 = fun (OldVsn, State, Extra) ->
+    call 'beamtalk_hot_reload':'code_change'(OldVsn, State, Extra)
 
 
 'terminate'/2 = fun (Reason, State) ->
@@ -164,7 +171,7 @@ module 'error_message' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'
 
 'register_class'/0 = fun () ->
     try
-        let _Reg0 = case call 'beamtalk_object_class':'start'('TestActor', ~{
+        let ClassInfo0 = ~{
             'name' => 'TestActor',
             'module' => 'error_message',
             'superclass' => 'Actor',
@@ -179,9 +186,11 @@ module 'error_message' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'
             }~,
             'method_source' => ~{'doError' => #{#<100>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<69>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']])}#, 'errorWithVariable' => #{#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<87>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<86>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']])}#}~,
             'class_variables' => ~{}~
-        }~) of
+        }~
+        in let _Reg0 = case call 'beamtalk_object_class':'start'('TestActor', ClassInfo0) of
             <{'ok', _Pid0}> when 'true' -> 'ok'
-            <{'error', {'already_started', _Existing0}}> when 'true' -> 'ok'
+            <{'error', {'already_started', _Existing0}}> when 'true' ->
+                call 'beamtalk_object_class':'update_class'('TestActor', ClassInfo0)
             <{'error', _Reason0}> when 'true' -> 'ok'
         end
 

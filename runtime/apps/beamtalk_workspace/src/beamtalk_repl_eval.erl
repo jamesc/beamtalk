@@ -153,6 +153,8 @@ handle_load(Path, State) ->
                                 {module, ModuleName} ->
                                     %% Register classes with beamtalk_object_class
                                     register_classes(ClassNames, ModuleName),
+                                    %% BT-572: Trigger hot reload for affected actors
+                                    trigger_hot_reload(ModuleName, ClassNames),
                                     %% Track loaded module (avoid duplicates on reload)
                                     LoadedModules = beamtalk_repl_state:get_loaded_modules(State),
                                     NewState1 = case lists:member(ModuleName, LoadedModules) of
@@ -198,6 +200,8 @@ handle_class_definition(ClassInfo, Warnings, Expression, State) ->
         {module, ClassModName} ->
             %% Register classes with beamtalk_object_class
             register_classes(Classes, ClassModName),
+            %% BT-572: Trigger hot reload for affected actors
+            trigger_hot_reload(ClassModName, Classes),
             %% Track loaded module
             LoadedModules = beamtalk_repl_state:get_loaded_modules(State),
             NewState1 = case lists:member(ClassModName, LoadedModules) of
@@ -254,6 +258,8 @@ handle_method_definition(MethodInfo, Warnings, Expression, State) ->
                             case code:load_binary(ModName, "", Binary) of
                                 {module, ModName} ->
                                     register_classes(Classes, ModName),
+                                    %% BT-572: Trigger hot reload for affected actors
+                                    trigger_hot_reload(ModName, Classes),
                                     beamtalk_workspace_meta:register_module(ModName),
                                     beamtalk_workspace_meta:update_activity(),
                                     %% Update stored class source with the combined version
@@ -429,6 +435,43 @@ register_classes(_ClassInfoList, ModuleName) ->
         false ->
             ok
     end.
+
+%% BT-572: Trigger hot reload for existing actors after module reload.
+%% Finds actors using the module via the instance registry and triggers
+%% code_change with field migration data.
+-spec trigger_hot_reload(atom(), [map()]) -> ok.
+trigger_hot_reload(ModuleName, Classes) ->
+    lists:foreach(
+        fun(ClassMap) ->
+            ClassName = case maps:get(name, ClassMap, undefined) of
+                N when is_binary(N) -> binary_to_atom(N, utf8);
+                N when is_atom(N) -> N;
+                N when is_list(N) -> list_to_atom(N);
+                _ -> undefined
+            end,
+            case ClassName of
+                undefined -> ok;
+                _ ->
+                    Pids = beamtalk_object_instances:all(ClassName),
+                    case Pids of
+                        [] -> ok;
+                        _ ->
+                            %% Get new instance vars from class process for migration
+                            IVars = case beamtalk_class_registry:whereis_class(ClassName) of
+                                undefined -> [];
+                                ClassPid ->
+                                    try gen_server:call(ClassPid, instance_variables)
+                                    catch _:_ -> []
+                                    end
+                            end,
+                            Extra = {IVars, ModuleName},
+                            beamtalk_hot_reload:trigger_code_change(ModuleName, Pids, Extra)
+                    end
+            end
+        end,
+        Classes
+    ),
+    ok.
 
 %% Auto-await a Future if the result is a Future PID.
 %% This provides a synchronous REPL experience for async message sends.

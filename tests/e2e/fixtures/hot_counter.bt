@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Hot reload counter - initial version with increment method
+// Used by hot_reload.bt E2E test to verify hot code reloading
+
+Actor subclass: HotCounter
+  state: value = 0
+
+  increment => self.value := self.value + 1
+  getValue => ^self.value

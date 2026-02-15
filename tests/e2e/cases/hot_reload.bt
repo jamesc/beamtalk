@@ -1,0 +1,89 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for hot reload of existing actors (BT-572)
+//
+// When a class is redefined (via :load), existing actor instances should
+// use the new code on their next message. State is preserved across reload.
+
+// ===========================================================================
+// HOT RELOAD VIA :LOAD
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Load initial version of HotCounter and spawn an actor
+// ---------------------------------------------------------------------------
+
+:load tests/e2e/fixtures/hot_counter.bt
+// => Loaded: HotCounter
+
+hc := HotCounter spawn
+// => #Actor<HotCounter,_>
+
+// Use the initial increment (adds 1)
+hc increment
+// => 1
+
+hc increment
+// => 2
+
+hc getValue
+// => 2
+
+// ---------------------------------------------------------------------------
+// Reload with v2: increment now adds 10, new field 'step' added
+// ---------------------------------------------------------------------------
+
+:load tests/e2e/fixtures/hot_counter_v2.bt
+// => Loaded: HotCounter
+
+// Existing actor should use new increment method (adds 10)
+// Value preserved at 2 from before reload
+hc increment
+// => 12
+
+hc getValue
+// => 12
+
+// New field 'step' should have default value from v2 definition
+hc getStep
+// => 5
+
+// ===========================================================================
+// HOT RELOAD VIA INLINE REDEFINITION
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Define a class inline, spawn, then redefine the class
+// ---------------------------------------------------------------------------
+
+Actor subclass: LiveActor
+  state: count = 0
+  bump => self.count := self.count + 1
+// => _
+
+LiveActor >> getCount => ^self.count
+// => _
+
+la := LiveActor spawn
+// => #Actor<LiveActor,_>
+
+la bump
+// => 1
+
+la bump
+// => 2
+
+la getCount
+// => 2
+
+// Redefine bump to add 100 instead of 1
+LiveActor >> bump => self.count := self.count + 100
+// => _
+
+// Existing actor uses new method
+la bump
+// => 102
+
+la getCount
+// => 102

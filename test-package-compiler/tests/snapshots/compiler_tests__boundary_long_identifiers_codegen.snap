@@ -12,6 +12,10 @@ module 'boundary_long_identifiers' ['start_link'/1, 'init'/1, 'handle_cast'/2, '
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('boundary_long_identifiers', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
+            let _InstReg = try call 'beamtalk_object_instances':'register'('BoundaryLongIdentifiers', Pid)
+                of _RegOk -> _RegOk
+                catch <_RegT, _RegE, _RegS> -> 'ok'
+            in
             {'beamtalk_object', 'BoundaryLongIdentifiers', 'boundary_long_identifiers', Pid}
         <{'error', Reason}> when 'true' ->
             let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'BoundaryLongIdentifiers') in
@@ -30,6 +34,10 @@ module 'boundary_long_identifiers' ['start_link'/1, 'init'/1, 'handle_cast'/2, '
         <'true'> when 'true' ->
             case call 'gen_server':'start_link'('boundary_long_identifiers', InitArgs, []) of
                 <{'ok', Pid}> when 'true' ->
+                    let _InstReg = try call 'beamtalk_object_instances':'register'('BoundaryLongIdentifiers', Pid)
+                        of _RegOk -> _RegOk
+                        catch <_RegT, _RegE, _RegS> -> 'ok'
+                    in
                     {'beamtalk_object', 'BoundaryLongIdentifiers', 'boundary_long_identifiers', Pid}
                 <{'error', Reason}> when 'true' ->
                     let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'BoundaryLongIdentifiers') in
@@ -92,9 +100,8 @@ module 'boundary_long_identifiers' ['start_link'/1, 'init'/1, 'handle_cast'/2, '
     end
 
 
-'code_change'/3 = fun (_OldVsn, State, _Extra) ->
-    %% TODO: Add state migration logic
-    {'ok', State}
+'code_change'/3 = fun (OldVsn, State, Extra) ->
+    call 'beamtalk_hot_reload':'code_change'(OldVsn, State, Extra)
 
 
 'terminate'/2 = fun (Reason, State) ->

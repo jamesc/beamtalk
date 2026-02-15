@@ -12,6 +12,10 @@ module 'boundary_deeply_nested' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'han
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('boundary_deeply_nested', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
+            let _InstReg = try call 'beamtalk_object_instances':'register'('BoundaryDeeplyNested', Pid)
+                of _RegOk -> _RegOk
+                catch <_RegT, _RegE, _RegS> -> 'ok'
+            in
             {'beamtalk_object', 'BoundaryDeeplyNested', 'boundary_deeply_nested', Pid}
         <{'error', Reason}> when 'true' ->
             let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'BoundaryDeeplyNested') in
@@ -30,6 +34,10 @@ module 'boundary_deeply_nested' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'han
         <'true'> when 'true' ->
             case call 'gen_server':'start_link'('boundary_deeply_nested', InitArgs, []) of
                 <{'ok', Pid}> when 'true' ->
+                    let _InstReg = try call 'beamtalk_object_instances':'register'('BoundaryDeeplyNested', Pid)
+                        of _RegOk -> _RegOk
+                        catch <_RegT, _RegE, _RegS> -> 'ok'
+                    in
                     {'beamtalk_object', 'BoundaryDeeplyNested', 'boundary_deeply_nested', Pid}
                 <{'error', Reason}> when 'true' ->
                     let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'BoundaryDeeplyNested') in
@@ -90,9 +98,8 @@ module 'boundary_deeply_nested' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'han
     end
 
 
-'code_change'/3 = fun (_OldVsn, State, _Extra) ->
-    %% TODO: Add state migration logic
-    {'ok', State}
+'code_change'/3 = fun (OldVsn, State, Extra) ->
+    call 'beamtalk_hot_reload':'code_change'(OldVsn, State, Extra)
 
 
 'terminate'/2 = fun (Reason, State) ->

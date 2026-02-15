@@ -14,6 +14,28 @@ use crate::ast::Module;
 use crate::docvec;
 
 impl CoreErlangGenerator {
+    /// Generates a Document for registering an actor instance with the hot reload
+    /// tracking registry. Uses try-catch to handle cases where the registry isn't
+    /// running (e.g., stdlib tests).
+    fn instance_registration_doc(class_name: &str) -> Document<'static> {
+        docvec![
+            format!(
+                "let _InstReg = try call 'beamtalk_object_instances':'register'('{class_name}', Pid)"
+            ),
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "of _RegOk -> _RegOk",
+                    line(),
+                    "catch <_RegT, _RegE, _RegS> -> 'ok'",
+                ]
+            ),
+            line(),
+            "in",
+        ]
+    }
+
     /// Generates the `spawn/0` class method for creating actor instances.
     ///
     /// This is a class-level method (not an instance method) that instantiates
@@ -69,7 +91,16 @@ impl CoreErlangGenerator {
                         docvec![
                             line(),
                             "<{'ok', Pid}> when 'true' ->",
-                            nest(INDENT, docvec![line(), ok_body,]),
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    // BT-572: Register instance for hot reload tracking
+                                    Self::instance_registration_doc(&class_name),
+                                    line(),
+                                    ok_body,
+                                ]
+                            ),
                             line(),
                             "<{'error', Reason}> when 'true' ->",
                             nest(
@@ -219,7 +250,16 @@ impl CoreErlangGenerator {
                                         docvec![
                                             line(),
                                             "<{'ok', Pid}> when 'true' ->",
-                                            nest(INDENT, docvec![line(), ok_body,]),
+                                            nest(
+                                                INDENT,
+                                                docvec![
+                                                    line(),
+                                                    // BT-572: Register instance for hot reload tracking
+                                                    Self::instance_registration_doc(&class_name),
+                                                    line(),
+                                                    ok_body,
+                                                ]
+                                            ),
                                             line(),
                                             "<{'error', Reason}> when 'true' ->",
                                             nest(
