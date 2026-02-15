@@ -213,6 +213,7 @@ struct ClassMeta {
     state: Vec<String>,
     methods: Vec<MethodMeta>,
     class_methods: Vec<MethodMeta>,
+    class_variables: Vec<String>,
 }
 
 /// Metadata for a single method, extracted from the AST.
@@ -304,6 +305,12 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         .map(|s| s.name.name.to_string())
         .collect();
 
+    let class_variables = class
+        .class_variables
+        .iter()
+        .map(|cv| cv.name.name.to_string())
+        .collect();
+
     Ok(ClassMeta {
         module_name: module_name.to_string(),
         class_name: class.name.name.to_string(),
@@ -313,6 +320,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         state,
         methods,
         class_methods,
+        class_variables,
     })
 }
 
@@ -539,6 +547,20 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
     // Class methods
     generate_method_list(code, "class_methods", &meta.class_methods, &meta.class_name);
 
+    // Class variables
+    if meta.class_variables.is_empty() {
+        code.push_str("            class_variables: vec![],\n");
+    } else {
+        code.push_str("            class_variables: vec![");
+        for (i, cv) in meta.class_variables.iter().enumerate() {
+            if i > 0 {
+                code.push_str(", ");
+            }
+            let _ = write!(code, "\"{cv}\".into()");
+        }
+        code.push_str("],\n");
+    }
+
     code.push_str("        },\n    );\n\n");
 }
 
@@ -736,6 +758,7 @@ mod tests {
                 kind: MethodKindMeta::Primary,
                 is_sealed: false,
             }],
+            class_variables: vec![],
         }
     }
 
@@ -777,6 +800,7 @@ mod tests {
             state: vec![],
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
         };
         let mut code = String::new();
         generate_class_entry(&mut code, &meta);
@@ -805,6 +829,7 @@ mod tests {
                 state: vec![],
                 methods: vec![],
                 class_methods: vec![],
+                class_variables: vec![],
             },
             ClassMeta {
                 module_name: "bt@stdlib@alpha".to_string(),
@@ -815,6 +840,7 @@ mod tests {
                 state: vec![],
                 methods: vec![],
                 class_methods: vec![],
+                class_variables: vec![],
             },
         ];
 

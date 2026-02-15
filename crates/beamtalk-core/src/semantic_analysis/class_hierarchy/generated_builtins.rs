@@ -77,6 +77,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -96,6 +97,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Association".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -122,6 +124,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Block".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -140,6 +143,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "xor:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Boolean".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -174,6 +178,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![
                 MethodInfo { selector: "value:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Character".into(), is_sealed: true },
             ],
+            class_variables: vec![],
         },
     );
 
@@ -201,6 +206,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "do:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Collection".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -220,6 +226,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "CompiledMethod".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -249,6 +256,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -264,6 +272,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Error".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -287,6 +296,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "signal:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Exception".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -309,6 +319,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "False".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -328,6 +339,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "lines:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "File".into(), is_sealed: true },
                 MethodInfo { selector: "open:do:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "File".into(), is_sealed: true },
             ],
+            class_variables: vec![],
         },
     );
 
@@ -367,6 +379,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -382,6 +395,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "InstantiationError".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -434,6 +448,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "isWhitespace".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -487,6 +502,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -506,6 +522,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "between:and:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Number".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -543,6 +560,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "error:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -562,6 +580,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "perform:withArguments:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "ProtoObject".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -577,6 +596,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "RuntimeError".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -606,6 +626,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -637,6 +658,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "from:by:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Stream".into(), is_sealed: true },
                 MethodInfo { selector: "on:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Stream".into(), is_sealed: true },
             ],
+            class_variables: vec![],
         },
     );
 
@@ -699,6 +721,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -720,6 +743,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "hash".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Symbol".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -741,6 +765,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SystemDictionary".into(), is_sealed: false },
                 MethodInfo { selector: "current:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SystemDictionary".into(), is_sealed: false },
             ],
+            class_variables: vec!["current".into()],
         },
     );
 
@@ -765,6 +790,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "runAll".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestCase".into(), is_sealed: false },
                 MethodInfo { selector: "run:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "TestCase".into(), is_sealed: false },
             ],
+            class_variables: vec![],
         },
     );
 
@@ -788,6 +814,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TranscriptStream".into(), is_sealed: false },
                 MethodInfo { selector: "current:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "TranscriptStream".into(), is_sealed: false },
             ],
+            class_variables: vec!["current".into()],
         },
     );
 
@@ -810,6 +837,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "True".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -834,6 +862,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "do:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Tuple".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -849,6 +878,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TypeError".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -874,6 +904,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "UndefinedObject".into(), is_sealed: false },
             ],
             class_methods: vec![],
+            class_variables: vec![],
         },
     );
 
@@ -894,6 +925,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceEnvironment".into(), is_sealed: false },
                 MethodInfo { selector: "current:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceEnvironment".into(), is_sealed: false },
             ],
+            class_variables: vec!["current".into()],
         },
     );
 
