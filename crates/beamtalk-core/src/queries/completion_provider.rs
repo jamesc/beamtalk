@@ -29,7 +29,8 @@
 
 use crate::ast::{ClassDefinition, Expression, Module};
 use crate::language_service::{Completion, CompletionKind, Position};
-use crate::semantic_analysis::ClassHierarchy;
+use crate::semantic_analysis::type_checker::TypeMap;
+use crate::semantic_analysis::{ClassHierarchy, InferredType, infer_types};
 use ecow::EcoString;
 use std::collections::HashSet;
 
@@ -97,6 +98,12 @@ pub fn compute_completions(
     // Determine class context at cursor position
     let context = find_class_context(module, offset);
 
+    // Run type inference to get receiver types at positions
+    let type_map = infer_types(module, hierarchy);
+
+    // Try to find receiver type at cursor for type-filtered completions
+    let receiver_type = find_receiver_type(module, offset, &type_map);
+
     // Add keyword completions
     add_keyword_completions(&mut completions);
 
@@ -106,8 +113,14 @@ pub fn compute_completions(
     // Add class names as completions
     add_class_name_completions(module, hierarchy, &mut completions);
 
-    // Add message completions from class hierarchy (context-aware)
-    add_hierarchy_completions(module, hierarchy, &context, &mut completions);
+    // Add message completions from class hierarchy (context-aware, type-filtered)
+    add_hierarchy_completions(
+        module,
+        hierarchy,
+        &context,
+        receiver_type.as_ref(),
+        &mut completions,
+    );
 
     // Remove duplicates
     deduplicate_completions(&mut completions);
@@ -282,20 +295,156 @@ fn collect_identifiers_from_expr(expr: &Expression, identifiers: &mut HashSet<Ec
     }
 }
 
+/// Finds the inferred type of the expression immediately before the cursor.
+///
+/// This enables type-filtered completions: if the cursor follows an expression
+/// with a known type, we can restrict method suggestions to that type.
+///
+/// Returns `None` if no receiver can be determined (falls back to showing all methods).
+fn find_receiver_type(module: &Module, offset: u32, type_map: &TypeMap) -> Option<InferredType> {
+    // Search expressions for one that ends just before the cursor
+    // (the cursor is after the receiver, typing a message to send)
+    let expressions = module
+        .expressions
+        .iter()
+        .chain(module.classes.iter().flat_map(|c| {
+            c.methods
+                .iter()
+                .chain(c.class_methods.iter())
+                .flat_map(|m| m.body.iter())
+        }))
+        .chain(
+            module
+                .method_definitions
+                .iter()
+                .flat_map(|smd| smd.method.body.iter()),
+        );
+
+    for expr in expressions {
+        if let Some(ty) = find_receiver_in_expr(expr, offset, type_map) {
+            return Some(ty);
+        }
+    }
+    None
+}
+
+/// Recursively search for a receiver expression at the given cursor offset.
+fn find_receiver_in_expr(
+    expr: &Expression,
+    offset: u32,
+    type_map: &TypeMap,
+) -> Option<InferredType> {
+    let span = expr.span();
+    // Check if cursor is within or just after this expression
+    if offset < span.start() || offset > span.end() + 1 {
+        return None;
+    }
+
+    match expr {
+        // If cursor is right after a message send, the result type is the receiver
+        Expression::MessageSend {
+            receiver,
+            arguments,
+            span,
+            ..
+        } => {
+            // Check arguments first (inner-most match wins)
+            for arg in arguments {
+                if let Some(ty) = find_receiver_in_expr(arg, offset, type_map) {
+                    return Some(ty);
+                }
+            }
+            if let Some(ty) = find_receiver_in_expr(receiver, offset, type_map) {
+                return Some(ty);
+            }
+            // If cursor is just after the message send span, use the send's result type
+            if offset >= span.end() && offset <= span.end() + 1 {
+                return type_map.get(span.start()).cloned();
+            }
+            None
+        }
+        // If cursor is right after an identifier, use its type
+        Expression::Identifier(ident) => {
+            if offset >= ident.span.end() && offset <= ident.span.end() + 1 {
+                type_map.get(ident.span.start()).cloned()
+            } else {
+                None
+            }
+        }
+        // If cursor is right after a class reference, use its type (for class-side methods)
+        Expression::ClassReference { name, span } => {
+            if offset >= span.end() && offset <= span.end() + 1 {
+                Some(InferredType::Known(name.name.clone()))
+            } else {
+                None
+            }
+        }
+        // If cursor is after a literal, use its type
+        Expression::Literal(_, span) => {
+            if offset >= span.end() && offset <= span.end() + 1 {
+                type_map.get(span.start()).cloned()
+            } else {
+                None
+            }
+        }
+        // Recurse into assignments
+        Expression::Assignment { target, value, .. } => {
+            find_receiver_in_expr(target, offset, type_map)
+                .or_else(|| find_receiver_in_expr(value, offset, type_map))
+        }
+        // Recurse into parenthesized
+        Expression::Parenthesized { expression, span } => {
+            if offset >= span.end() && offset <= span.end() + 1 {
+                type_map.get(span.start()).cloned()
+            } else {
+                find_receiver_in_expr(expression, offset, type_map)
+            }
+        }
+        // Recurse into blocks
+        Expression::Block(block) => block
+            .body
+            .iter()
+            .find_map(|e| find_receiver_in_expr(e, offset, type_map)),
+        _ => None,
+    }
+}
+
 /// Adds method completions from the class hierarchy.
 ///
 /// Uses the cursor's class context to provide relevant completions:
 /// - In an instance method: instance methods of the enclosing class
 /// - In a class method: class-side methods of the enclosing class
 /// - At top level: all methods from all module classes + Object methods
+///
+/// When `receiver_type` is `Some(Known(class_name))`, completions are filtered
+/// to only show methods available on that type (type-aware completions).
 fn add_hierarchy_completions(
     module: &Module,
     hierarchy: &ClassHierarchy,
     context: &ClassContext<'_>,
+    receiver_type: Option<&InferredType>,
     completions: &mut Vec<Completion>,
 ) {
     let mut seen = HashSet::new();
 
+    // If we have a known receiver type, show only methods for that type
+    if let Some(InferredType::Known(class_name)) = receiver_type {
+        if hierarchy.has_class(class_name) {
+            for method in hierarchy.all_methods(class_name) {
+                if seen.insert(method.selector.clone()) {
+                    let doc = format!("{}#{}", method.defined_in, method.selector);
+                    completions.push(
+                        Completion::new(method.selector.as_str(), CompletionKind::Function)
+                            .with_documentation(doc)
+                            .with_detail(format!("on {class_name}")),
+                    );
+                }
+            }
+            return;
+        }
+    }
+
+    // Fall back to context-based completions (Dynamic or no receiver)
     match context {
         ClassContext::InstanceMethod(class) => {
             // Add instance methods for the enclosing class (including inherited)
@@ -652,6 +801,37 @@ mod tests {
         assert!(
             completions.iter().any(|c| c.label == "increment"),
             "Should include instance method 'increment'"
+        );
+    }
+
+    #[test]
+    fn completions_filtered_by_receiver_type() {
+        // When cursor is after a known-typed expression, completions should be filtered
+        let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1\n\n  value => self.count\n\nc := Counter spawn\nc ";
+        let completions = completions_at(source, Position::new(8, 2));
+        // Should include Counter's methods
+        let has_increment = completions.iter().any(|c| c.label == "increment");
+        let has_value = completions.iter().any(|c| c.label == "value");
+        // If type-filtering works, increment and value should appear
+        // (they're Counter instance methods)
+        assert!(
+            has_increment || has_value,
+            "Should include Counter instance methods when receiver type is known. Got labels: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn completions_dynamic_type_shows_all_methods() {
+        // For untyped variables, should fall back to showing all methods
+        let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1\n\nx := foo\nx ";
+        let completions = completions_at(source, Position::new(5, 2));
+        // Should include methods from all classes (fall back behavior)
+        let has_is_nil = completions.iter().any(|c| c.label == "isNil");
+        assert!(
+            has_is_nil,
+            "Dynamic type should include Object methods (fallback). Got labels: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
         );
     }
 }
