@@ -81,7 +81,7 @@ use process::{
 /// JSON response from the REPL backend.
 /// Supports both legacy format (type field) and new protocol format (status field).
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
+#[allow(dead_code)] // fields populated by serde deserialization from REPL JSON protocol
 struct ReplResponse {
     /// Legacy response type (result, error, bindings, loaded, actors, modules)
     #[serde(rename = "type")]
@@ -149,15 +149,6 @@ impl ReplResponse {
         None
     }
 
-    /// Check if this response has a specific legacy type.
-    #[allow(dead_code)]
-    fn has_type(&self, expected: &str) -> bool {
-        if let Some(ref t) = self.response_type {
-            return t == expected;
-        }
-        // New protocol doesn't have type field - infer from status + fields
-        false
-    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -165,7 +156,7 @@ struct ActorInfo {
     pid: String,
     class: String,
     module: String,
-    #[allow(dead_code)]
+    #[allow(dead_code)] // deserialized from JSON, available for future use
     spawned_at: i64,
 }
 
@@ -174,7 +165,7 @@ struct ModuleInfo {
     name: String,
     source_file: String,
     actor_count: u32,
-    #[allow(dead_code)]
+    #[allow(dead_code)] // deserialized from JSON, available for future use
     load_time: i64,
     time_ago: String,
 }
@@ -182,7 +173,7 @@ struct ModuleInfo {
 #[derive(Debug, Deserialize)]
 struct SessionInfo {
     id: String,
-    #[allow(dead_code)]
+    #[allow(dead_code)] // deserialized from JSON, available for future use
     created_at: Option<i64>,
 }
 

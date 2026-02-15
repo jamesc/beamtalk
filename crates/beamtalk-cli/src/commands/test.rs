@@ -33,7 +33,7 @@ struct TestCaseClass {
     /// Class name (e.g., `CounterTest`).
     class_name: String,
     /// Superclass name (e.g., `TestCase`).
-    #[allow(dead_code)]
+    #[allow(dead_code)] // populated during discovery for future diagnostic use
     superclass_name: String,
     /// Module name for the compiled BEAM module (e.g., `bt@counter_test`).
     module_name: String,

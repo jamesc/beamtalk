@@ -457,8 +457,7 @@ pub(super) struct CoreErlangGenerator {
     source_text: Option<String>,
     /// BT-295: Primitive binding table from compiled stdlib (ADR 0007).
     /// Used by `generate_primitive()` for method body compilation via static methods.
-    /// The field is stored for future call-site optimization with static typing.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // stored for future call-site optimization with static typing
     primitive_bindings: PrimitiveBindingTable,
     /// Identity of the class currently being compiled (if any).
     /// Set from the AST class definition at the start of module generation.
