@@ -432,29 +432,38 @@ impl MethodValidator for IntegerArgumentValidator {
             return vec![];
         }
 
-        let first_arg = &arguments[0];
-        match first_arg {
-            // Integer literal — correct
-            Expression::Literal(Literal::Integer(_), _) => vec![],
+        let selector_name = selector.name();
+        // from:to: has two integer bounds; other methods have one
+        let indices: &[usize] = if selector_name == "from:to:" {
+            &[0, 1]
+        } else {
+            &[0]
+        };
+        let mut diags = Vec::new();
 
-            // Other literal types — definitely wrong
-            Expression::Literal(lit, lit_span) => {
-                let type_name = literal_type_name(lit);
-                let selector_name = selector.name();
-                vec![Diagnostic {
-                    severity: crate::source_analysis::Severity::Error,
-                    message: format!(
-                        "{selector_name} expects an integer argument, got {type_name}"
-                    )
-                    .into(),
-                    span: *lit_span,
-                    hint: Some(integer_arg_hint(&selector_name).into()),
-                }]
+        for &idx in indices {
+            let Some(arg) = arguments.get(idx) else {
+                continue;
+            };
+            match arg {
+                Expression::Literal(Literal::Integer(_), _) => {}
+                Expression::Literal(lit, lit_span) => {
+                    let type_name = literal_type_name(lit);
+                    diags.push(Diagnostic {
+                        severity: crate::source_analysis::Severity::Error,
+                        message: format!(
+                            "{selector_name} expects an integer argument, got {type_name}"
+                        )
+                        .into(),
+                        span: *lit_span,
+                        hint: Some(integer_arg_hint(&selector_name).into()),
+                    });
+                }
+                _ => {}
             }
-
-            // Non-literal — skip (runtime handles)
-            _ => vec![],
         }
+
+        diags
     }
 }
 
@@ -1306,6 +1315,60 @@ mod tests {
     fn test_integer_arg_empty_args_skipped() {
         let validator = IntegerArgumentValidator;
         let diags = validator.validate(&keyword_selector("take:"), &[], None, test_span());
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn test_integer_arg_from_to_both_valid() {
+        let validator = IntegerArgumentValidator;
+        let selector = multi_keyword_selector(&["from:", "to:"]);
+        let args = vec![
+            Expression::Literal(Literal::Integer(1), test_span()),
+            Expression::Literal(Literal::Integer(3), test_span()),
+        ];
+        let diags = validator.validate(&selector, &args, None, test_span());
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn test_integer_arg_from_to_second_arg_error() {
+        let validator = IntegerArgumentValidator;
+        let selector = multi_keyword_selector(&["from:", "to:"]);
+        let args = vec![
+            Expression::Literal(Literal::Integer(1), test_span()),
+            Expression::Literal(Literal::String("end".into()), Span::new(20, 25)),
+        ];
+        let diags = validator.validate(&selector, &args, None, test_span());
+        assert_eq!(diags.len(), 1);
+        assert!(
+            diags[0]
+                .message
+                .contains("expects an integer argument, got a string")
+        );
+        assert_eq!(diags[0].span, Span::new(20, 25));
+    }
+
+    #[test]
+    fn test_integer_arg_from_to_both_args_error() {
+        let validator = IntegerArgumentValidator;
+        let selector = multi_keyword_selector(&["from:", "to:"]);
+        let args = vec![
+            Expression::Literal(Literal::String("start".into()), test_span()),
+            Expression::Literal(Literal::String("end".into()), test_span()),
+        ];
+        let diags = validator.validate(&selector, &args, None, test_span());
+        assert_eq!(diags.len(), 2);
+    }
+
+    #[test]
+    fn test_integer_arg_from_to_second_arg_variable_skipped() {
+        let validator = IntegerArgumentValidator;
+        let selector = multi_keyword_selector(&["from:", "to:"]);
+        let args = vec![
+            Expression::Literal(Literal::Integer(1), test_span()),
+            Expression::Identifier(Identifier::new("n", test_span())),
+        ];
+        let diags = validator.validate(&selector, &args, None, test_span());
         assert!(diags.is_empty());
     }
 
