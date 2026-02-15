@@ -74,7 +74,5 @@
 // Re-export the actual implementation from codegen::core_erlang
 pub use crate::codegen::core_erlang::{
     CodeGenError, CodegenOptions, Result, generate, generate_module, generate_repl_expression,
-    generate_test_expression, generate_with_bindings, generate_with_name,
-    generate_with_name_and_source, generate_with_workspace, generate_with_workspace_and_source,
-    primitive_bindings, to_module_name,
+    generate_test_expression, primitive_bindings, to_module_name,
 };

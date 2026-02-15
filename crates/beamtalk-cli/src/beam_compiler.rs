@@ -588,8 +588,7 @@ pub fn write_core_erlang_with_source(
     // Generate Core Erlang
     let core_erlang = beamtalk_core::erlang::generate_module(
         module,
-        beamtalk_core::erlang::CodegenOptions::new(module_name)
-            .with_source_opt(source_text),
+        beamtalk_core::erlang::CodegenOptions::new(module_name).with_source_opt(source_text),
     )
     .into_diagnostic()
     .wrap_err("Failed to generate Core Erlang")?;

@@ -376,85 +376,15 @@ pub fn generate_test_expression(expression: &Expression, module_name: &str) -> R
     Ok(doc.to_pretty_string())
 }
 
-// Convenience wrappers for backward compatibility.
-// New code should use `generate_module` with `CodegenOptions`.
-
 /// Generates Core Erlang code with default module name `bt_module`.
 ///
-/// Convenience wrapper around [`generate_module`].
+/// Convenience wrapper around [`generate_module`] for simple use cases.
+///
+/// # Errors
+///
+/// Returns [`CodeGenError`] if code generation fails.
 pub fn generate(module: &Module) -> Result<String> {
     generate_module(module, CodegenOptions::new("bt_module"))
-}
-
-/// Generates Core Erlang code with a specified module name.
-///
-/// Convenience wrapper around [`generate_module`].
-pub fn generate_with_name(module: &Module, module_name: &str) -> Result<String> {
-    generate_module(module, CodegenOptions::new(module_name))
-}
-
-/// Generates Core Erlang code with a specified module name and source text.
-///
-/// Convenience wrapper around [`generate_module`].
-pub fn generate_with_name_and_source(
-    module: &Module,
-    module_name: &str,
-    source_text: Option<&str>,
-) -> Result<String> {
-    generate_module(
-        module,
-        CodegenOptions::new(module_name).with_source_opt(source_text),
-    )
-}
-
-/// Generates Core Erlang code with primitive bindings and workspace mode.
-///
-/// Convenience wrapper around [`generate_module`].
-pub fn generate_with_bindings(
-    module: &Module,
-    module_name: &str,
-    bindings: PrimitiveBindingTable,
-    source_text: Option<&str>,
-    workspace_mode: bool,
-) -> Result<String> {
-    generate_module(
-        module,
-        CodegenOptions::new(module_name)
-            .with_bindings(bindings)
-            .with_source_opt(source_text)
-            .with_workspace_mode(workspace_mode),
-    )
-}
-
-/// Generates Core Erlang code with workspace mode enabled.
-///
-/// Convenience wrapper around [`generate_module`].
-pub fn generate_with_workspace(
-    module: &Module,
-    module_name: &str,
-    workspace_mode: bool,
-) -> Result<String> {
-    generate_module(
-        module,
-        CodegenOptions::new(module_name).with_workspace_mode(workspace_mode),
-    )
-}
-
-/// Generates Core Erlang code with workspace mode and source text.
-///
-/// Convenience wrapper around [`generate_module`].
-pub fn generate_with_workspace_and_source(
-    module: &Module,
-    module_name: &str,
-    workspace_mode: bool,
-    source_text: Option<&str>,
-) -> Result<String> {
-    generate_module(
-        module,
-        CodegenOptions::new(module_name)
-            .with_workspace_mode(workspace_mode)
-            .with_source_opt(source_text),
-    )
 }
 
 /// Code generation context (BT-213).
