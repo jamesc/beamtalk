@@ -86,6 +86,11 @@ close(Port) ->
 
 %% @private Handle ETF response from the compiler port.
 %% BT-571: Extended to handle class_definition and method_definition responses
+-spec handle_response(map()) ->
+    {ok, binary(), [binary()]} |
+    {ok, class_definition, map()} |
+    {ok, method_definition, map()} |
+    {error, [binary()]}.
 handle_response(#{status := ok, kind := class_definition, core_erlang := CoreErlang,
                   module_name := ModuleName, classes := Classes, warnings := Warnings}) ->
     {ok, class_definition, #{core_erlang => CoreErlang, module_name => ModuleName,

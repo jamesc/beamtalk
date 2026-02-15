@@ -267,7 +267,6 @@ handle_method_definition(MethodInfo, Warnings, Expression, State) ->
             end
     end.
 
-
 %% Check if a file path refers to a stdlib file (under lib/ directory).
 %% Matches both relative paths (lib/Integer.bt) and absolute paths
 %% containing /lib/ as a path component.

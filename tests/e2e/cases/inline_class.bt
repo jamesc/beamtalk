@@ -42,3 +42,19 @@ c increment
 
 c getValue
 // => 2
+
+// ---------------------------------------------------------------------------
+// Replace an existing method (increment now adds 10)
+// ---------------------------------------------------------------------------
+
+InlineCounter >> increment => self.value := self.value + 10
+// => _
+
+c2 := InlineCounter spawn
+// => #Actor<InlineCounter,_>
+
+c2 increment
+// => 10
+
+c2 getValue
+// => 10

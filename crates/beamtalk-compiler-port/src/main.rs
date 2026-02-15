@@ -97,6 +97,19 @@ fn term_to_bool(term: &Term) -> Option<bool> {
     }
 }
 
+/// Merge a method into a method list, replacing any existing method with the same selector.
+fn merge_method(
+    methods: &mut Vec<beamtalk_core::ast::MethodDefinition>,
+    method: beamtalk_core::ast::MethodDefinition,
+) {
+    let selector = method.selector.name();
+    if let Some(existing) = methods.iter_mut().find(|m| m.selector.name() == selector) {
+        *existing = method;
+    } else {
+        methods.push(method);
+    }
+}
+
 /// Build a response map for a successful `compile_expression`.
 fn ok_response(core_erlang: &str, warnings: &[String]) -> Term {
     let warning_terms: Vec<Term> = warnings.iter().map(|w| binary(w)).collect();
@@ -325,33 +338,7 @@ fn handle_compile_expression(request: &Map) -> Term {
 
     // BT-571: If the parsed module contains class definitions, use compile path
     if !module.classes.is_empty() {
-        let base_name = beamtalk_core::erlang::to_module_name(&module.classes[0].name.name);
-        let class_module_name = format!("bt@{base_name}");
-
-        let classes: Vec<(String, String)> = module
-            .classes
-            .iter()
-            .map(|c| (c.name.name.to_string(), c.superclass_name().to_string()))
-            .collect();
-
-        match beamtalk_core::erlang::generate_with_workspace_and_source(
-            &module,
-            &class_module_name,
-            true, // workspace_mode
-            Some(&source),
-        ) {
-            Ok(code) => {
-                return class_definition_ok_response(
-                    &code,
-                    &class_module_name,
-                    &classes,
-                    &warnings,
-                );
-            }
-            Err(e) => {
-                return error_response(&[format!("Code generation failed: {e}")]);
-            }
-        }
+        return handle_inline_class_definition(module, &source, &warnings);
     }
 
     // BT-571: If the parsed module contains standalone method definitions, return method info
@@ -376,6 +363,54 @@ fn handle_compile_expression(request: &Map) -> Term {
     let expression = &module.expressions[0];
     match beamtalk_core::erlang::generate_repl_expression(expression, &module_name) {
         Ok(code) => ok_response(&code, &warnings),
+        Err(e) => error_response(&[format!("Code generation failed: {e}")]),
+    }
+}
+
+/// BT-571: Handle inline class definition in REPL expression context.
+/// Merges any standalone method definitions into the class, generates code,
+/// and returns a `class_definition` response.
+fn handle_inline_class_definition(
+    module: beamtalk_core::ast::Module,
+    source: &str,
+    warnings: &[String],
+) -> Term {
+    let mut module = module;
+    if !module.method_definitions.is_empty() {
+        let method_defs = std::mem::take(&mut module.method_definitions);
+        for method_def in method_defs {
+            let target_class = method_def.class_name.name.as_str();
+            if let Some(class) = module
+                .classes
+                .iter_mut()
+                .find(|c| c.name.name == target_class)
+            {
+                let methods = if method_def.is_class_method {
+                    &mut class.class_methods
+                } else {
+                    &mut class.methods
+                };
+                merge_method(methods, method_def.method);
+            }
+        }
+    }
+
+    let base_name = beamtalk_core::erlang::to_module_name(&module.classes[0].name.name);
+    let class_module_name = format!("bt@{base_name}");
+
+    let classes: Vec<(String, String)> = module
+        .classes
+        .iter()
+        .map(|c| (c.name.name.to_string(), c.superclass_name().to_string()))
+        .collect();
+
+    match beamtalk_core::erlang::generate_with_workspace_and_source(
+        &module,
+        &class_module_name,
+        true,
+        Some(source),
+    ) {
+        Ok(code) => class_definition_ok_response(&code, &class_module_name, &classes, warnings),
         Err(e) => error_response(&[format!("Code generation failed: {e}")]),
     }
 }
@@ -436,11 +471,12 @@ fn handle_compile(request: &Map) -> Term {
                 .iter_mut()
                 .find(|c| c.name.name == target_class)
             {
-                if method_def.is_class_method {
-                    class.class_methods.push(method_def.method);
+                let methods = if method_def.is_class_method {
+                    &mut class.class_methods
                 } else {
-                    class.methods.push(method_def.method);
-                }
+                    &mut class.methods
+                };
+                merge_method(methods, method_def.method);
             }
             // If class not found, silently ignore (the method target may be
             // in a different file — runtime will handle the error)
