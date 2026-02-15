@@ -1,7 +1,7 @@
 # ADR 0024: Static-First, Live-Augmented IDE Tooling
 
 ## Status
-Proposed (2026-02-15)
+Accepted (2026-02-15)
 
 ## Context
 
