@@ -444,9 +444,15 @@ trigger_hot_reload(ModuleName, Classes) ->
     lists:foreach(
         fun(ClassMap) ->
             ClassName = case maps:get(name, ClassMap, undefined) of
-                N when is_binary(N) -> binary_to_atom(N, utf8);
+                N when is_binary(N) ->
+                    try binary_to_existing_atom(N, utf8)
+                    catch error:badarg -> undefined
+                    end;
                 N when is_atom(N) -> N;
-                N when is_list(N) -> list_to_atom(N);
+                N when is_list(N) ->
+                    try list_to_existing_atom(N)
+                    catch error:badarg -> undefined
+                    end;
                 _ -> undefined
             end,
             case ClassName of

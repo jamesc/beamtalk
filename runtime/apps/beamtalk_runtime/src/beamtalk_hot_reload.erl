@@ -14,7 +14,7 @@
 %% - BT-399: Rewrites `__class__` → `$beamtalk_class` tag key for actors
 %%   with pre-BT-324 state maps.
 %% - BT-572: Field migration — adds new fields with defaults, drops removed
-%%   fields (with log warning) when Extra contains `{new_instance_vars, Module}`.
+%%   fields (with log warning) when Extra contains `{NewInstanceVars, Module}`.
 %%
 %% **References:**
 %% - docs/beamtalk-ddd-model.md (Hot Reload Context, StateMigrator)
@@ -49,9 +49,8 @@
 %% @returns {ok, NewState} on success, or {error, Reason} on failure
 -spec code_change(OldVsn :: term(), State :: term(), Extra :: term()) ->
     {ok, NewState :: term()} | {error, Reason :: term()}.
-code_change(_OldVsn, State, {NewInstanceVars, Module}) when is_map(State), is_list(NewInstanceVars), NewInstanceVars =/= [], is_atom(Module) ->
+code_change(_OldVsn, State, {NewInstanceVars, Module}) when is_map(State), is_list(NewInstanceVars), is_atom(Module) ->
     %% BT-572: Field migration during hot reload
-    %% Only migrate when we have the new instance vars list (non-empty)
     MigratedState = maybe_migrate_class_key(State),
     NewState = migrate_fields(MigratedState, NewInstanceVars, Module),
     {ok, NewState};
@@ -133,7 +132,7 @@ migrate_fields(OldState, NewInstanceVars, Module) ->
     case catch Module:init(#{}) of
         {ok, NewDefaults} when is_map(NewDefaults) ->
             %% Internal keys to always preserve from new defaults
-            InternalKeys = ['$beamtalk_class', '__methods__', '__class_mod__'],
+            InternalKeys = beamtalk_tagged_map:internal_fields(),
             %% Start with internal keys from new defaults (updated method table etc.)
             BaseState = lists:foldl(
                 fun(Key, Acc) ->
