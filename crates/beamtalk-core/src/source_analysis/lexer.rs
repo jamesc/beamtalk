@@ -48,6 +48,8 @@ pub struct Lexer<'src> {
     pending_trivia: Vec<Trivia>,
     /// Buffered tokens from string interpolation (drained before lexing more).
     pending_tokens: Vec<Token>,
+    /// Override span for the current token (used for `StringStart`).
+    override_span: Option<Span>,
 }
 
 impl std::fmt::Debug for Lexer<'_> {
@@ -69,6 +71,7 @@ impl<'src> Lexer<'src> {
             position: 0,
             pending_trivia: Vec::new(),
             pending_tokens: Vec::new(),
+            override_span: None,
         }
     }
 
@@ -231,7 +234,10 @@ impl<'src> Lexer<'src> {
             Some(c) => self.lex_token_kind(c, start),
         };
 
-        let span = self.span_from(start);
+        let span = self
+            .override_span
+            .take()
+            .unwrap_or_else(|| self.span_from(start));
 
         // Collect trailing trivia (whitespace on same line, up to newline)
         self.collect_trailing_trivia();
@@ -507,8 +513,12 @@ impl<'src> Lexer<'src> {
             return TokenKind::String(segments[0].0.clone());
         }
 
+        // Set the span override for StringStart to cover opening `"` through first `{`
+        let first_seg = &segments[0];
+        self.override_span = Some(Span::new(string_start, first_seg.2));
+
         self.build_interpolation_tokens(&segments, &interp_ranges);
-        TokenKind::StringStart(segments[0].0.clone())
+        TokenKind::StringStart(first_seg.0.clone())
     }
 
     /// Scans the body of a `{...}` interpolation, tracking brace depth.
@@ -526,9 +536,34 @@ impl<'src> Lexer<'src> {
         let mut depth: u32 = 1;
         while depth > 0 {
             match self.peek_char() {
-                None | Some('"') => {
+                None => {
                     let text = self.text_for(self.span_from(string_start));
                     return Err(TokenKind::Error(EcoString::from(text)));
+                }
+                Some('"') => {
+                    // Nested string inside interpolation — skip it entirely
+                    self.advance(); // opening quote
+                    loop {
+                        match self.peek_char() {
+                            None => {
+                                let text = self.text_for(self.span_from(string_start));
+                                return Err(TokenKind::Error(EcoString::from(text)));
+                            }
+                            Some('"') => {
+                                self.advance(); // closing quote
+                                break;
+                            }
+                            Some('\\') => {
+                                self.advance();
+                                if self.peek_char().is_some() {
+                                    self.advance();
+                                }
+                            }
+                            _ => {
+                                self.advance();
+                            }
+                        }
+                    }
                 }
                 Some('{') => {
                     depth += 1;
@@ -1183,6 +1218,78 @@ mod tests {
                 TokenKind::Identifier("printString".into()),
             ]
         );
+    }
+
+    #[test]
+    fn lex_string_interpolation_nested_string() {
+        // String literal inside interpolation expression
+        assert_eq!(
+            lex_kinds(r#""msg: {"hello"}""#),
+            vec![
+                TokenKind::StringStart("msg: ".into()),
+                TokenKind::String("hello".into()),
+                TokenKind::StringEnd("".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_string_interpolation_nested_string_with_braces() {
+        // String containing braces inside interpolation
+        assert_eq!(
+            lex_kinds(r#""msg: {"a{b}c"}""#),
+            vec![
+                TokenKind::StringStart("msg: ".into()),
+                TokenKind::StringStart("a".into()),
+                TokenKind::Identifier("b".into()),
+                TokenKind::StringEnd("c".into()),
+                TokenKind::StringEnd("".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_string_interpolation_block_in_expr() {
+        // Block expression inside interpolation
+        assert_eq!(
+            lex_kinds(r#""result: {[:x | x + 1] value: 5}""#),
+            vec![
+                TokenKind::StringStart("result: ".into()),
+                TokenKind::LeftBracket,
+                TokenKind::Colon,
+                TokenKind::Identifier("x".into()),
+                TokenKind::Pipe,
+                TokenKind::Identifier("x".into()),
+                TokenKind::BinarySelector("+".into()),
+                TokenKind::Integer("1".into()),
+                TokenKind::RightBracket,
+                TokenKind::Keyword("value:".into()),
+                TokenKind::Integer("5".into()),
+                TokenKind::StringEnd("".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_string_interpolation_spans_are_correct() {
+        // "Hello, {name}!" — verify each token has correct span
+        let tokens = lex(r#""Hello, {name}!""#);
+        assert_eq!(tokens.len(), 3);
+
+        // StringStart: "Hello,  — spans from opening " to {
+        assert!(matches!(tokens[0].kind(), TokenKind::StringStart(_)));
+        assert_eq!(tokens[0].span().start(), 0);
+        assert_eq!(tokens[0].span().end(), 8); // "Hello, {
+
+        // Identifier: name — spans the variable name (inside {})
+        assert!(matches!(tokens[1].kind(), TokenKind::Identifier(_)));
+        assert_eq!(tokens[1].span().start(), 9); // 'n' of name
+        assert_eq!(tokens[1].span().end(), 13); // after 'e'
+
+        // StringEnd: ! — spans from after } to closing "
+        assert!(matches!(tokens[2].kind(), TokenKind::StringEnd(_)));
+        assert_eq!(tokens[2].span().start(), 14); // '!' after }
+        assert_eq!(tokens[2].span().end(), 16); // after closing "
     }
 
     #[test]

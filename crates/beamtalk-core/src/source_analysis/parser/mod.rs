@@ -2909,7 +2909,10 @@ Actor subclass: Counter
 
     #[test]
     fn complete_interpolated_string() {
-        assert!(is_input_complete("\"hello world\""));
+        // Complete interpolated string
+        assert!(is_input_complete("\"Hello, {name}!\""));
+        // Unterminated interpolation
+        assert!(!is_input_complete("\"Hello, {name"));
     }
 
     #[test]

@@ -45,7 +45,7 @@ Module {
                     message: "Unexpected token: expected expression, found \"Hello, {",
                     span: Span {
                         start: 328,
-                        end: 344,
+                        end: 336,
                     },
                 },
                 selector: Unary(
@@ -54,12 +54,12 @@ Module {
                 arguments: [],
                 span: Span {
                     start: 328,
-                    end: 344,
+                    end: 341,
                 },
             },
             span: Span {
                 start: 316,
-                end: 344,
+                end: 341,
             },
         },
         Error {
@@ -176,7 +176,7 @@ Module {
 }
 
 Diagnostics:
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found \"Hello, {", span: Span { start: 328, end: 344 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found \"Hello, {", span: Span { start: 328, end: 336 }, hint: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }!\"", span: Span { start: 342, end: 344 }, hint: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 787, end: 788 }, hint: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }\"", span: Span { start: 802, end: 803 }, hint: None }
