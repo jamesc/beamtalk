@@ -141,7 +141,7 @@ direct_subclasses(ClassName) ->
 
 %% @doc Return sorted list of all subclass names recursively.
 %%
-%% BT-573: Walks the hierarchy tree breadth-first, collecting all transitive
+%% BT-573: Walks the hierarchy tree depth-first, collecting all transitive
 %% subclasses. Returns sorted atom list for deterministic output.
 -spec all_subclasses(class_name()) -> [class_name()].
 all_subclasses(ClassName) ->
