@@ -383,7 +383,7 @@ impl LanguageService for SimpleLanguageService {
             &file_data.module,
             &file_data.source,
             position,
-            &file_data.class_hierarchy,
+            self.project_index.hierarchy(),
         )
     }
 
@@ -422,12 +422,6 @@ impl LanguageService for SimpleLanguageService {
 
         results
     }
-}
-
-impl Default for SimpleLanguageService {
-    fn default() -> Self {
-        Self::new()
-    }
 
     fn document_symbols(&self, file: &Utf8PathBuf) -> Vec<DocumentSymbol> {
         let Some(file_data) = self.get_file(file) else {
@@ -435,6 +429,12 @@ impl Default for SimpleLanguageService {
         };
 
         crate::queries::document_symbols_provider::compute_document_symbols(&file_data.module)
+    }
+}
+
+impl Default for SimpleLanguageService {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

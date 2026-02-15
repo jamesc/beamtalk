@@ -74,8 +74,8 @@ impl ProjectIndex {
             // Track which classes came from this stdlib file
             let class_names: Vec<EcoString> = file_hierarchy
                 .class_names()
-                .into_iter()
                 .filter(|name| !ClassHierarchy::is_builtin_class(name))
+                .cloned()
                 .collect();
             index.stdlib_class_names.extend(class_names.iter().cloned());
             index.stdlib_files.insert(path.clone());
@@ -112,8 +112,8 @@ impl ProjectIndex {
         // Track new class names from this file
         let new_names: Vec<EcoString> = hierarchy
             .class_names()
-            .into_iter()
             .filter(|name| !ClassHierarchy::is_builtin_class(name))
+            .cloned()
             .collect();
 
         self.file_classes.insert(file.clone(), new_names);

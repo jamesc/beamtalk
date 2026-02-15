@@ -318,12 +318,6 @@ impl ClassHierarchy {
         None
     }
 
-    /// Returns all class names in the hierarchy.
-    #[must_use]
-    pub fn class_names(&self) -> Vec<EcoString> {
-        self.classes.keys().cloned().collect()
-    }
-
     /// Returns a reference to the underlying class map.
     #[must_use]
     pub fn classes(&self) -> &HashMap<EcoString, ClassInfo> {
