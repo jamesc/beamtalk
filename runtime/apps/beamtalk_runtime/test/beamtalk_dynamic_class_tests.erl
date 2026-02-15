@@ -37,7 +37,7 @@ setup() ->
 teardown(DynamicClasses) ->
     %% Stop and unregister any dynamically created classes
     lists:foreach(fun(ClassName) ->
-        case beamtalk_object_class:whereis_class(ClassName) of
+        case beamtalk_class_registry:whereis_class(ClassName) of
             undefined ->
                 ok;
             Pid when is_pid(Pid) ->
@@ -51,7 +51,7 @@ teardown(DynamicClasses) ->
 wait_for_actor_class(0) ->
     error(actor_class_not_registered_after_timeout);
 wait_for_actor_class(N) ->
-    case beamtalk_object_class:whereis_class('Actor') of
+    case beamtalk_class_registry:whereis_class('Actor') of
         undefined ->
             timer:sleep(50),
             wait_for_actor_class(N - 1);
@@ -86,7 +86,7 @@ create_dynamic_class_test_() ->
              {ok, ClassPid} = Result,
              
              %% Verify class is registered
-             ?assertEqual(ClassPid, beamtalk_object_class:whereis_class('TestDynamicClass')),
+             ?assertEqual(ClassPid, beamtalk_class_registry:whereis_class('TestDynamicClass')),
              
              %% Verify class metadata
              ?assertEqual('TestDynamicClass', beamtalk_object_class:class_name(ClassPid)),
@@ -320,7 +320,7 @@ class_introspection_test() ->
     }),
     
     %% Test class lookup
-    ?assertEqual(ClassPid, beamtalk_object_class:whereis_class('TestClass')),
+    ?assertEqual(ClassPid, beamtalk_class_registry:whereis_class('TestClass')),
     
     %% Test class introspection
     ?assertEqual('TestClass', beamtalk_object_class:class_name(ClassPid)),
