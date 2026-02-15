@@ -64,7 +64,7 @@ init_registers_all_classes_test() ->
     ok = beamtalk_stdlib:init(),
     
     %% After init, should have bootstrap + stdlib classes
-    ClassesAfter = [beamtalk_object_class:class_name(Pid) || Pid <- beamtalk_object_class:all_classes()],
+    ClassesAfter = [beamtalk_object_class:class_name(Pid) || Pid <- beamtalk_class_registry:all_classes()],
     %% At least 15 expected (3 bootstrap + 10 primitives + 2 workspace globals).
     %% May be more if test fixtures have registered additional classes via on_load.
     ?assert(length(ClassesAfter) >= 15),
@@ -90,72 +90,72 @@ init_idempotent_test() ->
     ok = beamtalk_stdlib:init(),
     
     %% Should still have same number of classes (no duplicates)
-    Classes = [beamtalk_object_class:class_name(Pid) || Pid <- beamtalk_object_class:all_classes()],
+    Classes = [beamtalk_object_class:class_name(Pid) || Pid <- beamtalk_class_registry:all_classes()],
     ?assert(length(Classes) >= 15).
 
 integer_class_registered_test() ->
     ok = beamtalk_stdlib:init(),
-    Pid = beamtalk_object_class:whereis_class('Integer'),
+    Pid = beamtalk_class_registry:whereis_class('Integer'),
     ?assertNotEqual(undefined, Pid),
     ?assertEqual('Integer', beamtalk_object_class:class_name(Pid)).
 
 string_class_registered_test() ->
     ok = beamtalk_stdlib:init(),
-    Pid = beamtalk_object_class:whereis_class('String'),
+    Pid = beamtalk_class_registry:whereis_class('String'),
     ?assertNotEqual(undefined, Pid),
     ?assertEqual('String', beamtalk_object_class:class_name(Pid)).
 
 true_class_registered_test() ->
     ok = beamtalk_stdlib:init(),
-    Pid = beamtalk_object_class:whereis_class('True'),
+    Pid = beamtalk_class_registry:whereis_class('True'),
     ?assertNotEqual(undefined, Pid),
     ?assertEqual('True', beamtalk_object_class:class_name(Pid)).
 
 false_class_registered_test() ->
     ok = beamtalk_stdlib:init(),
-    Pid = beamtalk_object_class:whereis_class('False'),
+    Pid = beamtalk_class_registry:whereis_class('False'),
     ?assertNotEqual(undefined, Pid),
     ?assertEqual('False', beamtalk_object_class:class_name(Pid)).
 
 nil_class_registered_test() ->
     ok = beamtalk_stdlib:init(),
-    Pid = beamtalk_object_class:whereis_class('UndefinedObject'),
+    Pid = beamtalk_class_registry:whereis_class('UndefinedObject'),
     ?assertNotEqual(undefined, Pid),
     ?assertEqual('UndefinedObject', beamtalk_object_class:class_name(Pid)).
 
 block_class_registered_test() ->
     ok = beamtalk_stdlib:init(),
-    Pid = beamtalk_object_class:whereis_class('Block'),
+    Pid = beamtalk_class_registry:whereis_class('Block'),
     ?assertNotEqual(undefined, Pid),
     ?assertEqual('Block', beamtalk_object_class:class_name(Pid)).
 
 tuple_class_registered_test() ->
     ok = beamtalk_stdlib:init(),
-    Pid = beamtalk_object_class:whereis_class('Tuple'),
+    Pid = beamtalk_class_registry:whereis_class('Tuple'),
     ?assertNotEqual(undefined, Pid),
     ?assertEqual('Tuple', beamtalk_object_class:class_name(Pid)).
 
 system_dictionary_class_registered_test() ->
     ok = beamtalk_stdlib:init(),
-    Pid = beamtalk_object_class:whereis_class('SystemDictionary'),
+    Pid = beamtalk_class_registry:whereis_class('SystemDictionary'),
     ?assertNotEqual(undefined, Pid),
     ?assertEqual('SystemDictionary', beamtalk_object_class:class_name(Pid)).
 
 transcript_stream_class_registered_test() ->
     ok = beamtalk_stdlib:init(),
-    Pid = beamtalk_object_class:whereis_class('TranscriptStream'),
+    Pid = beamtalk_class_registry:whereis_class('TranscriptStream'),
     ?assertNotEqual(undefined, Pid),
     ?assertEqual('TranscriptStream', beamtalk_object_class:class_name(Pid)).
 
 integer_superclass_test() ->
     ok = beamtalk_stdlib:init(),
-    Pid = beamtalk_object_class:whereis_class('Integer'),
+    Pid = beamtalk_class_registry:whereis_class('Integer'),
     Superclass = beamtalk_object_class:superclass(Pid),
     ?assertEqual('Number', Superclass).
 
 integer_methods_test() ->
     ok = beamtalk_stdlib:init(),
-    Pid = beamtalk_object_class:whereis_class('Integer'),
+    Pid = beamtalk_class_registry:whereis_class('Integer'),
     Methods = beamtalk_object_class:methods(Pid),
     
     %% Check some expected methods

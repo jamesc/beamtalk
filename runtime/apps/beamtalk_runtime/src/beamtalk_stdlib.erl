@@ -138,7 +138,7 @@ find_stdlib_ebin() ->
 %% test teardown), call register_class/0 again to recreate it.
 -spec ensure_class_registered(module(), atom()) -> ok.
 ensure_class_registered(Mod, ClassName) ->
-    case beamtalk_object_class:whereis_class(ClassName) of
+    case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
             %% Class process doesn't exist — re-register
             try Mod:register_class() of
@@ -236,12 +236,12 @@ discover_and_load_fallback(Dir) ->
 -spec dispatch(atom(), list(), term()) -> term().
 dispatch(allClasses, [], _Receiver) ->
     %% Return list of all registered class names
-    Pids = beamtalk_object_class:all_classes(),
+    Pids = beamtalk_class_registry:all_classes(),
     [beamtalk_object_class:class_name(Pid) || Pid <- Pids];
 
 dispatch('classNamed:', [ClassName], _Receiver) when is_atom(ClassName) ->
     %% Look up a class by name, return wrapped class object or nil
-    case beamtalk_object_class:whereis_class(ClassName) of
+    case beamtalk_class_registry:whereis_class(ClassName) of
         undefined -> nil;
         Pid -> {beamtalk_object, ClassName, beamtalk_object_class, Pid}
     end;

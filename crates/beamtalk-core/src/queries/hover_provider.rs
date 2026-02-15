@@ -396,6 +396,21 @@ fn find_hover_in_expr(
                 None
             }
         }
+        Expression::StringInterpolation { segments, span } => {
+            if offset >= span.start() && offset < span.end() {
+                // Check interpolated expressions for hover targets
+                for segment in segments {
+                    if let crate::ast::StringSegment::Interpolation(expr) = segment {
+                        if let Some(info) = find_hover_in_expr(expr, offset) {
+                            return Some(info);
+                        }
+                    }
+                }
+                Some(HoverInfo::new("Interpolated string".to_string(), *span))
+            } else {
+                None
+            }
+        }
     }
 }
 

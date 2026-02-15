@@ -285,7 +285,7 @@ wrap_actor(#{pid := Pid, class := Class, module := Module}) ->
 register_class() ->
     try
         ClassInfo = class_info(),
-        case beamtalk_object_class:whereis_class('Workspace') of
+        case beamtalk_class_registry:whereis_class('Workspace') of
             undefined ->
                 case beamtalk_object_class:start_link('Workspace', ClassInfo) of
                     {ok, _Pid} ->

@@ -271,6 +271,13 @@ fn collect_identifiers_from_expr(expr: &Expression, identifiers: &mut HashSet<Ec
                 collect_identifiers_from_expr(&arm.body, identifiers);
             }
         }
+        Expression::StringInterpolation { segments, .. } => {
+            for segment in segments {
+                if let crate::ast::StringSegment::Interpolation(expr) = segment {
+                    collect_identifiers_from_expr(expr, identifiers);
+                }
+            }
+        }
         _ => {}
     }
 }

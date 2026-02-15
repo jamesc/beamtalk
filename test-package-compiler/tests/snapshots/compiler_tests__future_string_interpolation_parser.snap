@@ -40,75 +40,728 @@ Module {
                     },
                 },
             ),
-            value: MessageSend {
-                receiver: Error {
-                    message: "Unexpected token: expected expression, found \"Hello, {",
-                    span: Span {
-                        start: 328,
-                        end: 336,
-                    },
-                },
-                selector: Unary(
-                    "name",
-                ),
-                arguments: [],
+            value: StringInterpolation {
+                segments: [
+                    Literal(
+                        "Hello, ",
+                    ),
+                    Interpolation(
+                        Identifier(
+                            Identifier {
+                                name: "name",
+                                span: Span {
+                                    start: 337,
+                                    end: 341,
+                                },
+                            },
+                        ),
+                    ),
+                    Literal(
+                        "!",
+                    ),
+                ],
                 span: Span {
                     start: 328,
-                    end: 341,
+                    end: 344,
                 },
             },
             span: Span {
                 start: 316,
-                end: 341,
-            },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found }!\"",
-            span: Span {
-                start: 342,
                 end: 344,
             },
         },
-        MessageSend {
-            receiver: Error {
-                message: "Unexpected token: expected expression, found ]",
-                span: Span {
-                    start: 787,
-                    end: 788,
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "age",
+                    span: Span {
+                        start: 374,
+                        end: 377,
+                    },
                 },
-            },
-            selector: Keyword(
-                [
-                    KeywordPart {
-                        keyword: "value:",
-                        span: Span {
-                            start: 789,
-                            end: 795,
-                        },
-                    },
-                ],
             ),
-            arguments: [
-                Identifier(
-                    Identifier {
-                        name: "count",
-                        span: Span {
-                            start: 796,
-                            end: 801,
-                        },
-                    },
+            value: Literal(
+                Integer(
+                    25,
                 ),
-            ],
+                Span {
+                    start: 381,
+                    end: 383,
+                },
+            ),
             span: Span {
-                start: 787,
-                end: 801,
+                start: 374,
+                end: 383,
             },
         },
-        Error {
-            message: "Unexpected token: expected expression, found }\"",
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "message",
+                    span: Span {
+                        start: 384,
+                        end: 391,
+                    },
+                },
+            ),
+            value: StringInterpolation {
+                segments: [
+                    Literal(
+                        "You are ",
+                    ),
+                    Interpolation(
+                        MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "age",
+                                    span: Span {
+                                        start: 405,
+                                        end: 408,
+                                    },
+                                },
+                            ),
+                            selector: Binary(
+                                "+",
+                            ),
+                            arguments: [
+                                Literal(
+                                    Integer(
+                                        5,
+                                    ),
+                                    Span {
+                                        start: 411,
+                                        end: 412,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 405,
+                                end: 412,
+                            },
+                        },
+                    ),
+                    Literal(
+                        " years old in 5 years",
+                    ),
+                ],
+                span: Span {
+                    start: 395,
+                    end: 435,
+                },
+            },
             span: Span {
-                start: 802,
+                start: 384,
+                end: 435,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "firstName",
+                    span: Span {
+                        start: 478,
+                        end: 487,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "Bob",
+                ),
+                Span {
+                    start: 491,
+                    end: 496,
+                },
+            ),
+            span: Span {
+                start: 478,
+                end: 496,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "lastName",
+                    span: Span {
+                        start: 497,
+                        end: 505,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "Smith",
+                ),
+                Span {
+                    start: 509,
+                    end: 516,
+                },
+            ),
+            span: Span {
+                start: 497,
+                end: 516,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "fullName",
+                    span: Span {
+                        start: 517,
+                        end: 525,
+                    },
+                },
+            ),
+            value: StringInterpolation {
+                segments: [
+                    Literal(
+                        "Name: ",
+                    ),
+                    Interpolation(
+                        Identifier(
+                            Identifier {
+                                name: "firstName",
+                                span: Span {
+                                    start: 537,
+                                    end: 546,
+                                },
+                            },
+                        ),
+                    ),
+                    Literal(
+                        " ",
+                    ),
+                    Interpolation(
+                        Identifier(
+                            Identifier {
+                                name: "lastName",
+                                span: Span {
+                                    start: 549,
+                                    end: 557,
+                                },
+                            },
+                        ),
+                    ),
+                ],
+                span: Span {
+                    start: 529,
+                    end: 559,
+                },
+            },
+            span: Span {
+                start: 517,
+                end: 559,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "user",
+                    span: Span {
+                        start: 604,
+                        end: 608,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: ClassReference {
+                    name: Identifier {
+                        name: "User",
+                        span: Span {
+                            start: 612,
+                            end: 616,
+                        },
+                    },
+                    span: Span {
+                        start: 612,
+                        end: 616,
+                    },
+                },
+                selector: Unary(
+                    "new",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 612,
+                    end: 620,
+                },
+            },
+            span: Span {
+                start: 604,
+                end: 620,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "profile",
+                    span: Span {
+                        start: 621,
+                        end: 628,
+                    },
+                },
+            ),
+            value: StringInterpolation {
+                segments: [
+                    Literal(
+                        "User: ",
+                    ),
+                    Interpolation(
+                        MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "user",
+                                    span: Span {
+                                        start: 640,
+                                        end: 644,
+                                    },
+                                },
+                            ),
+                            selector: Unary(
+                                "getName",
+                            ),
+                            arguments: [],
+                            span: Span {
+                                start: 640,
+                                end: 652,
+                            },
+                        },
+                    ),
+                    Literal(
+                        ", Email: ",
+                    ),
+                    Interpolation(
+                        MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "user",
+                                    span: Span {
+                                        start: 663,
+                                        end: 667,
+                                    },
+                                },
+                            ),
+                            selector: Unary(
+                                "getEmail",
+                            ),
+                            arguments: [],
+                            span: Span {
+                                start: 663,
+                                end: 676,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 632,
+                    end: 678,
+                },
+            },
+            span: Span {
+                start: 621,
+                end: 678,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "count",
+                    span: Span {
+                        start: 723,
+                        end: 728,
+                    },
+                },
+            ),
+            value: Literal(
+                Integer(
+                    10,
+                ),
+                Span {
+                    start: 732,
+                    end: 734,
+                },
+            ),
+            span: Span {
+                start: 723,
+                end: 734,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "summary",
+                    span: Span {
+                        start: 735,
+                        end: 742,
+                    },
+                },
+            ),
+            value: StringInterpolation {
+                segments: [
+                    Literal(
+                        "Total: ",
+                    ),
+                    Interpolation(
+                        MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "count",
+                                    span: Span {
+                                        start: 755,
+                                        end: 760,
+                                    },
+                                },
+                            ),
+                            selector: Binary(
+                                "*",
+                            ),
+                            arguments: [
+                                Literal(
+                                    Integer(
+                                        2,
+                                    ),
+                                    Span {
+                                        start: 763,
+                                        end: 764,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 755,
+                                end: 764,
+                            },
+                        },
+                    ),
+                    Literal(
+                        ", Double: ",
+                    ),
+                    Interpolation(
+                        MessageSend {
+                            receiver: Block(
+                                Block {
+                                    parameters: [
+                                        BlockParameter {
+                                            name: "x",
+                                            span: Span {
+                                                start: 778,
+                                                end: 779,
+                                            },
+                                        },
+                                    ],
+                                    body: [
+                                        MessageSend {
+                                            receiver: Identifier(
+                                                Identifier {
+                                                    name: "x",
+                                                    span: Span {
+                                                        start: 782,
+                                                        end: 783,
+                                                    },
+                                                },
+                                            ),
+                                            selector: Binary(
+                                                "*",
+                                            ),
+                                            arguments: [
+                                                Literal(
+                                                    Integer(
+                                                        2,
+                                                    ),
+                                                    Span {
+                                                        start: 786,
+                                                        end: 787,
+                                                    },
+                                                ),
+                                            ],
+                                            span: Span {
+                                                start: 782,
+                                                end: 787,
+                                            },
+                                        },
+                                    ],
+                                    span: Span {
+                                        start: 776,
+                                        end: 788,
+                                    },
+                                },
+                            ),
+                            selector: Keyword(
+                                [
+                                    KeywordPart {
+                                        keyword: "value:",
+                                        span: Span {
+                                            start: 789,
+                                            end: 795,
+                                        },
+                                    },
+                                ],
+                            ),
+                            arguments: [
+                                Identifier(
+                                    Identifier {
+                                        name: "count",
+                                        span: Span {
+                                            start: 796,
+                                            end: 801,
+                                        },
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 776,
+                                end: 801,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 746,
+                    end: 803,
+                },
+            },
+            span: Span {
+                start: 735,
                 end: 803,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "escaped",
+                    span: Span {
+                        start: 849,
+                        end: 856,
+                    },
+                },
+            ),
+            value: StringInterpolation {
+                segments: [
+                    Literal(
+                        "Literal braces: \\{ and \\}, variable: ",
+                    ),
+                    Interpolation(
+                        Identifier(
+                            Identifier {
+                                name: "name",
+                                span: Span {
+                                    start: 899,
+                                    end: 903,
+                                },
+                            },
+                        ),
+                    ),
+                ],
+                span: Span {
+                    start: 860,
+                    end: 905,
+                },
+            },
+            span: Span {
+                start: 849,
+                end: 905,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "multiLine",
+                    span: Span {
+                        start: 941,
+                        end: 950,
+                    },
+                },
+            ),
+            value: StringInterpolation {
+                segments: [
+                    Literal(
+                        "First line: ",
+                    ),
+                    Interpolation(
+                        Identifier(
+                            Identifier {
+                                name: "firstName",
+                                span: Span {
+                                    start: 968,
+                                    end: 977,
+                                },
+                            },
+                        ),
+                    ),
+                    Literal(
+                        "\nSecond line: ",
+                    ),
+                    Interpolation(
+                        Identifier(
+                            Identifier {
+                                name: "lastName",
+                                span: Span {
+                                    start: 993,
+                                    end: 1001,
+                                },
+                            },
+                        ),
+                    ),
+                    Literal(
+                        "\nThird line: ",
+                    ),
+                    Interpolation(
+                        Identifier(
+                            Identifier {
+                                name: "age",
+                                span: Span {
+                                    start: 1016,
+                                    end: 1019,
+                                },
+                            },
+                        ),
+                    ),
+                ],
+                span: Span {
+                    start: 954,
+                    end: 1021,
+                },
+            },
+            span: Span {
+                start: 941,
+                end: 1021,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "emojiVar",
+                    span: Span {
+                        start: 1058,
+                        end: 1066,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "🎉",
+                ),
+                Span {
+                    start: 1070,
+                    end: 1076,
+                },
+            ),
+            span: Span {
+                start: 1058,
+                end: 1076,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "withEmoji",
+                    span: Span {
+                        start: 1077,
+                        end: 1086,
+                    },
+                },
+            ),
+            value: StringInterpolation {
+                segments: [
+                    Literal(
+                        "Celebration: ",
+                    ),
+                    Interpolation(
+                        Identifier(
+                            Identifier {
+                                name: "emojiVar",
+                                span: Span {
+                                    start: 1105,
+                                    end: 1113,
+                                },
+                            },
+                        ),
+                    ),
+                    Literal(
+                        " ",
+                    ),
+                    Interpolation(
+                        Identifier(
+                            Identifier {
+                                name: "name",
+                                span: Span {
+                                    start: 1116,
+                                    end: 1120,
+                                },
+                            },
+                        ),
+                    ),
+                    Literal(
+                        "!",
+                    ),
+                ],
+                span: Span {
+                    start: 1090,
+                    end: 1123,
+                },
+            },
+            span: Span {
+                start: 1077,
+                end: 1123,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "emptyInterp",
+                    span: Span {
+                        start: 1160,
+                        end: 1171,
+                    },
+                },
+            ),
+            value: StringInterpolation {
+                segments: [
+                    Literal(
+                        "Before ",
+                    ),
+                    Interpolation(
+                        Error {
+                            message: "Unexpected token: expected expression, found <error: empty interpolation {} is not allowed, use \\{ for literal brace>",
+                            span: Span {
+                                start: 1183,
+                                end: 1185,
+                            },
+                        },
+                    ),
+                    Literal(
+                        " After",
+                    ),
+                ],
+                span: Span {
+                    start: 1175,
+                    end: 1192,
+                },
+            },
+            span: Span {
+                start: 1160,
+                end: 1192,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "nested",
+                    span: Span {
+                        start: 1226,
+                        end: 1232,
+                    },
+                },
+            ),
+            value: Error {
+                message: "Unterminated string interpolation",
+                span: Span {
+                    start: 1236,
+                    end: 1243,
+                },
+            },
+            span: Span {
+                start: 1226,
+                end: 1243,
             },
         },
         Error {
@@ -176,8 +829,7 @@ Module {
 }
 
 Diagnostics:
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found \"Hello, {", span: Span { start: 328, end: 336 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }!\"", span: Span { start: 342, end: 344 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 787, end: 788 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }\"", span: Span { start: 802, end: 803 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found <error: empty interpolation {} is not allowed, use \\{ for literal brace>", span: Span { start: 1183, end: 1185 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found {", span: Span { start: 1254, end: 1255 }, hint: None }
+Diagnostic { severity: Error, message: "Unterminated string interpolation", span: Span { start: 1236, end: 1243 }, hint: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 1262, end: 1263 }, hint: None }

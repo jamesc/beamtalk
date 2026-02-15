@@ -246,9 +246,9 @@ term_to_json(#beamtalk_error{} = Error) ->
 term_to_json(Value) when is_tuple(Value) ->
     case Value of
         {beamtalk_object, Class, _Module, Pid} ->
-            case beamtalk_object_class:is_class_name(Class) of
+            case beamtalk_class_registry:is_class_name(Class) of
                 true ->
-                    beamtalk_object_class:class_display_name(Class);
+                    beamtalk_class_registry:class_display_name(Class);
                 false ->
                     ClassBin = atom_to_binary(Class, utf8),
                     PidStr = pid_to_list(Pid),

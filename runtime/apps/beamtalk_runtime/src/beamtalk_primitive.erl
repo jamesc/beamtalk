@@ -111,7 +111,7 @@ class_of_object('Metaclass') ->
     'Metaclass';
 class_of_object(#beamtalk_object{class = ClassName}) ->
     %% BT-412: class of a class object → 'Metaclass' sentinel (terminal)
-    case beamtalk_object_class:is_class_name(ClassName) of
+    case beamtalk_class_registry:is_class_name(ClassName) of
         true -> 'Metaclass';
         false -> class_of_object_inner(ClassName)
     end;
@@ -121,13 +121,13 @@ class_of_object(X) ->
 
 %% @private Helper to construct class object from class name.
 class_of_object_inner(ClassName) ->
-    case beamtalk_object_class:whereis_class(ClassName) of
+    case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
             %% Fallback for classes without a registered process
             ClassName;
         Pid when is_pid(Pid) ->
             ModuleName = beamtalk_object_class:module_name(Pid),
-            ClassTag = beamtalk_object_class:class_object_tag(ClassName),
+            ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
             {beamtalk_object, ClassTag, ModuleName, Pid}
     end.
 
@@ -136,11 +136,11 @@ class_of_object_inner(ClassName) ->
 %% Used by dispatch when the class name is already known (e.g., from state tag).
 -spec class_of_object_by_name(atom()) -> tuple() | atom().
 class_of_object_by_name(ClassName) ->
-    case beamtalk_object_class:whereis_class(ClassName) of
+    case beamtalk_class_registry:whereis_class(ClassName) of
         undefined -> ClassName;
         Pid when is_pid(Pid) ->
             ModuleName = beamtalk_object_class:module_name(Pid),
-            ClassTag = beamtalk_object_class:class_object_tag(ClassName),
+            ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
             {beamtalk_object, ClassTag, ModuleName, Pid}
     end.
 
@@ -168,9 +168,9 @@ print_string(X) when is_list(X) ->
     iolist_to_binary([<<"#(">>, lists:join(<<", ">>, [print_string(E) || E <- X]), <<")">>]);
 print_string(#beamtalk_object{class = ClassName}) ->
     %% BT-412: Class objects display as their class name (e.g., "Integer")
-    case beamtalk_object_class:is_class_name(ClassName) of
+    case beamtalk_class_registry:is_class_name(ClassName) of
         true ->
-            beamtalk_object_class:class_display_name(ClassName);
+            beamtalk_class_registry:class_display_name(ClassName);
         false ->
             iolist_to_binary([<<"a ">>, atom_to_binary(ClassName, utf8)])
     end;

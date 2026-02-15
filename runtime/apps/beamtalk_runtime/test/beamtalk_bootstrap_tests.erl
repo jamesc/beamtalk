@@ -90,7 +90,7 @@ protoobject_class_exists_test_() ->
                      {ok, _Pid} = beamtalk_bootstrap:start_link(),
                      beamtalk_stdlib:init(),
                      
-                     ProtoObjectClassPid = beamtalk_object_class:whereis_class('ProtoObject'),
+                     ProtoObjectClassPid = beamtalk_class_registry:whereis_class('ProtoObject'),
                      ?assert(is_pid(ProtoObjectClassPid)),
                      ?assert(is_process_alive(ProtoObjectClassPid)),
                      
@@ -110,7 +110,7 @@ object_class_exists_test_() ->
                      {ok, _Pid} = beamtalk_bootstrap:start_link(),
                      beamtalk_stdlib:init(),
                      
-                     ObjectClassPid = beamtalk_object_class:whereis_class('Object'),
+                     ObjectClassPid = beamtalk_class_registry:whereis_class('Object'),
                      ?assert(is_pid(ObjectClassPid)),
                      ?assert(is_process_alive(ObjectClassPid)),
                      
@@ -130,7 +130,7 @@ actor_class_exists_test_() ->
                      {ok, _Pid} = beamtalk_bootstrap:start_link(),
                      beamtalk_stdlib:init(),
                      
-                     ActorClassPid = beamtalk_object_class:whereis_class('Actor'),
+                     ActorClassPid = beamtalk_class_registry:whereis_class('Actor'),
                      ?assert(is_pid(ActorClassPid)),
                      ?assert(is_process_alive(ActorClassPid)),
                      
@@ -150,13 +150,13 @@ three_level_hierarchy_test_() ->
                      {ok, _Pid} = beamtalk_bootstrap:start_link(),
                      beamtalk_stdlib:init(),
                      
-                     ActorClassPid = beamtalk_object_class:whereis_class('Actor'),
+                     ActorClassPid = beamtalk_class_registry:whereis_class('Actor'),
                      ?assertEqual('Object', beamtalk_object_class:superclass(ActorClassPid)),
                      
-                     ObjectClassPid = beamtalk_object_class:whereis_class('Object'),
+                     ObjectClassPid = beamtalk_class_registry:whereis_class('Object'),
                      ?assertEqual('ProtoObject', beamtalk_object_class:superclass(ObjectClassPid)),
                      
-                     ProtoObjectClassPid = beamtalk_object_class:whereis_class('ProtoObject'),
+                     ProtoObjectClassPid = beamtalk_class_registry:whereis_class('ProtoObject'),
                      ?assertEqual(none, beamtalk_object_class:superclass(ProtoObjectClassPid))
                  end)
           ]
@@ -174,9 +174,9 @@ all_three_classes_in_pg_group_test_() ->
                      
                      Members = pg:get_members(beamtalk_classes),
                      
-                     ProtoObjectClassPid = beamtalk_object_class:whereis_class('ProtoObject'),
-                     ObjectClassPid = beamtalk_object_class:whereis_class('Object'),
-                     ActorClassPid = beamtalk_object_class:whereis_class('Actor'),
+                     ProtoObjectClassPid = beamtalk_class_registry:whereis_class('ProtoObject'),
+                     ObjectClassPid = beamtalk_class_registry:whereis_class('Object'),
+                     ActorClassPid = beamtalk_class_registry:whereis_class('Actor'),
                      
                      ?assert(lists:member(ProtoObjectClassPid, Members)),
                      ?assert(lists:member(ObjectClassPid, Members)),
@@ -199,7 +199,7 @@ protoobject_methods_test_() ->
                      {ok, _Pid} = beamtalk_bootstrap:start_link(),
                      beamtalk_stdlib:init(),
                      
-                     ProtoObjectClassPid = beamtalk_object_class:whereis_class('ProtoObject'),
+                     ProtoObjectClassPid = beamtalk_class_registry:whereis_class('ProtoObject'),
                      Methods = beamtalk_object_class:methods(ProtoObjectClassPid),
                      
                      ?assert(lists:member(class, Methods)),
@@ -220,7 +220,7 @@ object_methods_test_() ->
                      {ok, _Pid} = beamtalk_bootstrap:start_link(),
                      beamtalk_stdlib:init(),
                      
-                     ObjectClassPid = beamtalk_object_class:whereis_class('Object'),
+                     ObjectClassPid = beamtalk_class_registry:whereis_class('Object'),
                      Methods = beamtalk_object_class:methods(ObjectClassPid),
                      
                      ?assert(lists:member(isNil, Methods)),
@@ -243,7 +243,7 @@ actor_methods_test_() ->
                      {ok, _Pid} = beamtalk_bootstrap:start_link(),
                      beamtalk_stdlib:init(),
                      
-                     ActorClassPid = beamtalk_object_class:whereis_class('Actor'),
+                     ActorClassPid = beamtalk_class_registry:whereis_class('Actor'),
                      Methods = beamtalk_object_class:methods(ActorClassPid),
                      
                      ?assert(lists:member(describe, Methods))
