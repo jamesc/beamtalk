@@ -1925,6 +1925,7 @@ mod tests {
 
         let module = Module {
             classes: vec![class_def],
+            method_definitions: Vec::new(),
             expressions: vec![],
             leading_comments: vec![],
             span: test_span(),
@@ -2296,6 +2297,7 @@ mod tests {
 
         let module = Module {
             classes: vec![class],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
             leading_comments: vec![],
@@ -2331,6 +2333,7 @@ mod tests {
 
         let module = Module {
             classes: vec![class],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
             leading_comments: vec![],
@@ -2626,6 +2629,7 @@ mod tests {
 
         let module = Module {
             classes: vec![class],
+            method_definitions: Vec::new(),
             expressions: vec![spawn_expr],
             span: test_span(),
             leading_comments: vec![],

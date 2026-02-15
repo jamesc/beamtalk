@@ -356,6 +356,7 @@ Module {
             },
         },
     ],
+    method_definitions: [],
     expressions: [],
     span: Span {
         start: 138,

@@ -41,10 +41,15 @@ open(BinaryPath) ->
 %% @doc Compile a REPL expression through the port.
 %%
 %% Sends an ETF-encoded request and receives an ETF-encoded response.
-%% Returns `{ok, CoreErlang, Warnings}' on success or
-%% `{error, Diagnostics}' on failure.
+%% Returns `{ok, CoreErlang, Warnings}' on success,
+%% `{ok, class_definition, ClassInfo}' for inline class definitions (BT-571),
+%% `{ok, method_definition, MethodInfo}' for standalone method definitions (BT-571),
+%% or `{error, Diagnostics}' on failure.
 -spec compile_expression(port(), binary(), binary(), [binary()]) ->
-    {ok, binary(), [binary()]} | {error, [binary()]}.
+    {ok, binary(), [binary()]} |
+    {ok, class_definition, map()} |
+    {ok, method_definition, map()} |
+    {error, [binary()]}.
 compile_expression(Port, Source, ModuleName, KnownVars) ->
     Request = #{
         command => compile_expression,
@@ -80,6 +85,22 @@ close(Port) ->
 %%% Internal functions
 
 %% @private Handle ETF response from the compiler port.
+%% BT-571: Extended to handle class_definition and method_definition responses
+-spec handle_response(map()) ->
+    {ok, binary(), [binary()]} |
+    {ok, class_definition, map()} |
+    {ok, method_definition, map()} |
+    {error, [binary()]}.
+handle_response(#{status := ok, kind := class_definition, core_erlang := CoreErlang,
+                  module_name := ModuleName, classes := Classes, warnings := Warnings}) ->
+    {ok, class_definition, #{core_erlang => CoreErlang, module_name => ModuleName,
+                             classes => Classes, warnings => Warnings}};
+handle_response(#{status := ok, kind := method_definition, class_name := ClassName,
+                  selector := Selector, is_class_method := IsClassMethod,
+                  method_source := MethodSource, warnings := Warnings}) ->
+    {ok, method_definition, #{class_name => ClassName, selector => Selector,
+                              is_class_method => IsClassMethod,
+                              method_source => MethodSource, warnings => Warnings}};
 handle_response(#{status := ok, core_erlang := CoreErlang, warnings := Warnings}) ->
     {ok, CoreErlang, Warnings};
 handle_response(#{status := error, diagnostics := Diagnostics}) ->

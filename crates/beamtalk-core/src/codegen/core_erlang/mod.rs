@@ -3059,6 +3059,7 @@ end
         // Build a module with: test := [ myBlock := [self.value := 1]. myBlock ]
         let module = Module {
             classes: vec![],
+            method_definitions: Vec::new(),
             expressions: vec![Expression::Assignment {
                 target: Box::new(Expression::Identifier(Identifier::new(
                     "test",
@@ -3122,6 +3123,7 @@ end
         // Build a module with: test := [ count := 0. myBlock := [count := count + 1]. myBlock ]
         let module = Module {
             classes: vec![],
+            method_definitions: Vec::new(),
             expressions: vec![Expression::Assignment {
                 target: Box::new(Expression::Identifier(Identifier::new(
                     "test",
@@ -3250,6 +3252,7 @@ end
         let module = Module {
             expressions: vec![],
             classes: vec![class],
+            method_definitions: Vec::new(),
             span: Span::new(0, 50),
             leading_comments: vec![],
         };
@@ -3416,6 +3419,7 @@ end
         let module = Module {
             expressions: vec![],
             classes: vec![class1, class2],
+            method_definitions: Vec::new(),
             span: Span::new(0, 50),
             leading_comments: vec![],
         };
@@ -3613,6 +3617,7 @@ end
         let module = Module {
             expressions: vec![expr],
             classes: vec![],
+            method_definitions: Vec::new(),
             span: Span::new(0, 5),
             leading_comments: vec![],
         };
@@ -3661,6 +3666,7 @@ end
         let module = Module {
             expressions: vec![expr],
             classes: vec![],
+            method_definitions: Vec::new(),
             span: Span::new(0, 16),
             leading_comments: vec![],
         };
@@ -3709,6 +3715,7 @@ end
         };
         let module = Module {
             classes: vec![class],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: Span::new(0, 0),
             leading_comments: vec![],
@@ -3733,6 +3740,7 @@ end
         };
         let module = Module {
             classes: vec![class],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: Span::new(0, 0),
             leading_comments: vec![],
@@ -3772,6 +3780,7 @@ end
         // Module with both classes; first class is LoggingCounter
         let module = Module {
             classes: vec![counter, logging_counter.clone()],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: Span::new(0, 0),
             leading_comments: vec![],
@@ -3781,6 +3790,7 @@ end
         // Test with LoggingCounter as the first class
         let module_lc = Module {
             classes: vec![logging_counter],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: Span::new(0, 0),
             leading_comments: vec![],
@@ -3814,6 +3824,7 @@ end
         };
         let module = Module {
             classes: vec![class],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: Span::new(0, 0),
             leading_comments: vec![],
@@ -3839,6 +3850,7 @@ end
         };
         let module = Module {
             classes: vec![class],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: Span::new(0, 0),
             leading_comments: vec![],
@@ -3868,6 +3880,7 @@ end
         };
         let module = Module {
             classes: vec![class],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: Span::new(0, 0),
             leading_comments: vec![],
@@ -3896,6 +3909,7 @@ end
         };
         let module = Module {
             classes: vec![class],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: Span::new(0, 0),
             leading_comments: vec![],
@@ -3961,6 +3975,7 @@ end
         );
         let module = Module {
             classes: vec![class],
+            method_definitions: Vec::new(),
             expressions: Vec::new(),
             span: Span::new(0, 0),
             leading_comments: vec![],
