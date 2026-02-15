@@ -177,24 +177,18 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 
 %% @private ADR 0019 Phase 4: Inject workspace convenience bindings.
-%% Looks up Transcript, Beamtalk, Workspace singletons by registered name
-%% and adds them to the bindings map so ClassReference codegen can resolve them.
--include("beamtalk_workspace.hrl").
-
--define(BINDING_INFO, [
-    {'Transcript',  'TranscriptStream',      beamtalk_transcript_stream},
-    {'Beamtalk',    'SystemDictionary',       beamtalk_system_dictionary},
-    {'Workspace',   'WorkspaceEnvironment',   beamtalk_workspace_environment}
-]).
+%% Looks up workspace singletons by registered name and adds them to
+%% the bindings map so ClassReference codegen can resolve them.
+%% Singleton definitions from beamtalk_workspace_config:singletons/0.
 
 inject_workspace_bindings(Bindings) ->
     lists:foldl(
-        fun({Name, ClassName, Module}, Acc) ->
+        fun(#{binding_name := Name, class_name := ClassName, module := Module}, Acc) ->
             case erlang:whereis(Name) of
                 undefined -> Acc;
                 Pid -> maps:put(Name, {beamtalk_object, ClassName, Module, Pid}, Acc)
             end
         end,
         Bindings,
-        ?BINDING_INFO
+        beamtalk_workspace_config:singletons()
     ).

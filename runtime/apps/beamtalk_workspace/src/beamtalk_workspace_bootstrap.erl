@@ -7,12 +7,9 @@
 %%% starts the singleton actors. Monitors singleton PIDs and re-sets class
 %%% variables when children restart.
 %%%
-%%% **DDD Context:** Workspace
+%%% Singleton mapping derived from beamtalk_workspace_config:singletons/0.
 %%%
-%%% Singleton mapping:
-%%%   TranscriptStream.current  ← registered process 'Transcript'
-%%%   SystemDictionary.current  ← registered process 'Beamtalk'
-%%%   WorkspaceEnvironment.current ← registered process 'Workspace'
+%%% **DDD Context:** Workspace
 
 -module(beamtalk_workspace_bootstrap).
 -behaviour(gen_server).
@@ -23,15 +20,8 @@
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
-%% Singleton class ↔ registered process name ↔ binding class name mapping
--define(SINGLETONS, [
-    {'TranscriptStream',    'Transcript',   'TranscriptStream'},
-    {'SystemDictionary',    'Beamtalk',     'SystemDictionary'},
-    {'WorkspaceEnvironment', 'Workspace',   'WorkspaceEnvironment'}
-]).
-
 -record(state, {
-    monitors = #{} :: #{reference() => {ClassName :: atom(), RegName :: atom(), BindingClassName :: atom()}}
+    monitors = #{} :: #{reference() => {ClassName :: atom(), RegName :: atom()}}
 }).
 
 %% @doc Start the bootstrap worker.
@@ -49,24 +39,24 @@ handle_info({'DOWN', MonRef, process, _Pid, _Reason}, State) ->
     case maps:get(MonRef, State#state.monitors, undefined) of
         undefined ->
             {noreply, State};
-        {ClassName, RegName, BindingClassName} ->
+        {ClassName, RegName} ->
             Monitors = maps:remove(MonRef, State#state.monitors),
             NewState = State#state{monitors = Monitors},
             %% Re-bootstrap after a short delay to allow the supervisor
             %% to restart the child process
-            erlang:send_after(100, self(), {rebootstrap, ClassName, RegName, BindingClassName, 0}),
+            erlang:send_after(100, self(), {rebootstrap, ClassName, RegName, 0}),
             {noreply, NewState}
     end;
-handle_info({rebootstrap, ClassName, RegName, BindingClassName, Retries}, State) when Retries < 5 ->
+handle_info({rebootstrap, ClassName, RegName, Retries}, State) when Retries < 5 ->
     case erlang:whereis(RegName) of
         undefined ->
-            erlang:send_after(200, self(), {rebootstrap, ClassName, RegName, BindingClassName, Retries + 1}),
+            erlang:send_after(200, self(), {rebootstrap, ClassName, RegName, Retries + 1}),
             {noreply, State};
         _Pid ->
-            NewState = bootstrap_singleton(ClassName, RegName, BindingClassName, State),
+            NewState = bootstrap_singleton(ClassName, RegName, State),
             {noreply, NewState}
     end;
-handle_info({rebootstrap, ClassName, RegName, _BindingClassName, _Retries}, State) ->
+handle_info({rebootstrap, ClassName, RegName, _Retries}, State) ->
     ?LOG_ERROR("Bootstrap: failed to rewire singleton after retries", #{class => ClassName, name => RegName}),
     {noreply, State};
 handle_info(_Msg, State) ->
@@ -89,37 +79,43 @@ terminate(_Reason, _State) ->
 %% @private Bootstrap all singletons.
 bootstrap_all(State) ->
     lists:foldl(
-        fun({ClassName, RegName, BindingClassName}, AccState) ->
-            bootstrap_singleton(ClassName, RegName, BindingClassName, AccState)
+        fun(#{class_name := ClassName, binding_name := RegName}, AccState) ->
+            bootstrap_singleton(ClassName, RegName, AccState)
         end,
         State,
-        ?SINGLETONS
+        beamtalk_workspace_config:singletons()
     ).
 
 %% @private Bootstrap a single singleton: set class var and monitor.
-bootstrap_singleton(ClassName, RegName, BindingClassName, State) ->
+bootstrap_singleton(ClassName, RegName, State) ->
     case erlang:whereis(RegName) of
         undefined ->
             ?LOG_WARNING("Bootstrap: singleton not registered yet", #{name => RegName}),
             State;
         Pid ->
-            Obj = build_object_ref(BindingClassName, Pid),
+            Obj = build_object_ref(ClassName, Pid),
             set_class_variable(ClassName, Obj),
             MonRef = erlang:monitor(process, Pid),
             ?LOG_DEBUG("Bootstrap: wired singleton", #{class => ClassName, pid => Pid}),
-            Monitors = maps:put(MonRef, {ClassName, RegName, BindingClassName}, State#state.monitors),
+            Monitors = maps:put(MonRef, {ClassName, RegName}, State#state.monitors),
             State#state{monitors = Monitors}
     end.
 
 %% @private Build the beamtalk_object reference tuple for a singleton.
-build_object_ref(BindingClassName, Pid) ->
-    {beamtalk_object, BindingClassName, class_module(BindingClassName), Pid}.
+build_object_ref(ClassName, Pid) ->
+    {beamtalk_object, ClassName, class_module(ClassName), Pid}.
 
-%% @private Map binding class name to its Erlang module.
-class_module('TranscriptStream') -> beamtalk_transcript_stream;
-class_module('SystemDictionary') -> beamtalk_system_dictionary;
-class_module('WorkspaceEnvironment') -> beamtalk_workspace_environment;
-class_module('Workspace') -> beamtalk_workspace_environment.
+%% @private Map class name to its Erlang module using workspace config.
+class_module(ClassName) ->
+    Singletons = beamtalk_workspace_config:singletons(),
+    case lists:search(fun(#{class_name := C}) -> C =:= ClassName end, Singletons) of
+        {value, #{module := Module}} -> Module;
+        false ->
+            Err0 = beamtalk_error:new(class_not_found, ClassName),
+            Err = beamtalk_error:with_hint(Err0,
+                <<"Not a registered workspace singleton.">>),
+            error(Err)
+    end.
 
 %% @private Set the `current` class variable on the class.
 set_class_variable(ClassName, Obj) ->
