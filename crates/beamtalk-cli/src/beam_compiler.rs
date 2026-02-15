@@ -738,6 +738,7 @@ pub fn compile_source_with_bindings(
     diagnostics.extend(primitive_diags);
 
     // Run semantic analysis (BT-401: sealed enforcement, undefined vars, etc.)
+    // Also includes single-class-per-file validation (BT-349)
     let analysis_result = beamtalk_core::semantic_analysis::analyse(&module);
     diagnostics.extend(analysis_result.diagnostics);
 
