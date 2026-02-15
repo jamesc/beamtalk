@@ -212,4 +212,235 @@ mod tests {
             "Should not report any undefined variables, got: {diagnostics:?}"
         );
     }
+
+    // ── BT-563: Actor subclass new/new: warnings ──
+
+    #[test]
+    fn warn_actor_subclass_new() {
+        // Counter is an Actor subclass — using `new` should warn
+        let source = "Actor subclass: Counter\n  state: value = 0\n  increment => self.value := self.value + 1\n\nCounter new";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let has_warning = diagnostics.iter().any(|d| {
+            d.message.contains("Actor subclass")
+                && d.message.contains("spawn")
+                && d.severity == crate::source_analysis::Severity::Warning
+        });
+        assert!(
+            has_warning,
+            "Expected actor new warning, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn warn_actor_subclass_new_with_args() {
+        let source = "Actor subclass: Counter\n  state: value = 0\n  increment => self.value := self.value + 1\n\nCounter new: #{value => 0}";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let has_warning = diagnostics.iter().any(|d| {
+            d.message.contains("Actor subclass")
+                && d.message.contains("spawn")
+                && d.message.contains("new:")
+        });
+        assert!(
+            has_warning,
+            "Expected actor new: warning, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn no_warn_actor_subclass_spawn() {
+        let source = "Actor subclass: Counter\n  state: value = 0\n  increment => self.value := self.value + 1\n\nCounter spawn";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let has_warning = diagnostics
+            .iter()
+            .any(|d| d.message.contains("Actor subclass") && d.message.contains("spawn instead"));
+        assert!(
+            !has_warning,
+            "Should not warn on spawn, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn no_warn_non_actor_new() {
+        // Object subclass using new should NOT warn
+        let source =
+            "Object subclass: Point\n  state: x = 0\n  state: y = 0\n  getX => self.x\n\nPoint new";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let has_warning = diagnostics
+            .iter()
+            .any(|d| d.message.contains("Actor subclass") && d.message.contains("spawn"));
+        assert!(
+            !has_warning,
+            "Should not warn for non-Actor subclass, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn warn_actor_new_has_hint() {
+        let source = "Actor subclass: Counter\n  state: value = 0\n  increment => self.value := self.value + 1\n\nCounter new";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let diag = diagnostics
+            .iter()
+            .find(|d| d.message.contains("Actor subclass"))
+            .expect("Should have actor warning");
+        assert!(
+            diag.hint.as_ref().is_some_and(|h| h.contains("spawn")),
+            "Should have hint about spawn, got: {:?}",
+            diag.hint
+        );
+    }
+
+    // ── BT-563: Field name validation ──
+
+    #[test]
+    fn warn_unknown_field_in_new() {
+        let source = "Object subclass: Point\n  state: x = 0\n  state: y = 0\n  getX => self.x\n\nPoint new: #{#z => 1}";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let has_warning = diagnostics
+            .iter()
+            .any(|d| d.message.contains("Unknown field") && d.message.contains('z'));
+        assert!(
+            has_warning,
+            "Expected unknown field warning, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn no_warn_valid_fields_in_new() {
+        let source = "Object subclass: Point\n  state: x = 0\n  state: y = 0\n  getX => self.x\n\nPoint new: #{#x => 1, #y => 2}";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let has_field_warning = diagnostics
+            .iter()
+            .any(|d| d.message.contains("Unknown field"));
+        assert!(
+            !has_field_warning,
+            "Should not warn for valid fields, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn warn_unknown_field_has_hint() {
+        let source = "Object subclass: Point\n  state: x = 0\n  state: y = 0\n  getX => self.x\n\nPoint new: #{#z => 1}";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let diag = diagnostics
+            .iter()
+            .find(|d| d.message.contains("Unknown field"))
+            .expect("Should have unknown field warning");
+        assert!(
+            diag.hint
+                .as_ref()
+                .is_some_and(|h| h.contains('x') && h.contains('y')),
+            "Should hint about declared fields, got: {:?}",
+            diag.hint
+        );
+    }
+
+    // ── BT-563: Class variable access ──
+
+    #[test]
+    fn warn_undefined_classvar() {
+        let source = "Object subclass: Config\n  classVar: debug = false\n  check => 1\n\nConfig classVar: #verbose";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let has_warning = diagnostics.iter().any(|d| {
+            d.message.contains("Undefined class variable") && d.message.contains("verbose")
+        });
+        assert!(
+            has_warning,
+            "Expected undefined classVar warning, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn no_warn_valid_classvar() {
+        let source = "Object subclass: Config\n  classVar: debug = false\n  check => 1\n\nConfig classVar: #debug";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let has_warning = diagnostics
+            .iter()
+            .any(|d| d.message.contains("Undefined class variable"));
+        assert!(
+            !has_warning,
+            "Should not warn for valid classVar, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn warn_classvar_has_hint() {
+        let source = "Object subclass: Config\n  classVar: debug = false\n  check => 1\n\nConfig classVar: #verbose";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let diag = diagnostics
+            .iter()
+            .find(|d| d.message.contains("Undefined class variable"))
+            .expect("Should have classVar warning");
+        assert!(
+            diag.hint.as_ref().is_some_and(|h| h.contains("debug")),
+            "Should hint about declared class vars, got: {:?}",
+            diag.hint
+        );
+    }
+
+    #[test]
+    fn warn_actor_new_inside_method_body() {
+        // Actor new warning should also fire inside method bodies
+        let source = "Actor subclass: Counter\n  state: value = 0\n  increment => self.value := self.value + 1\n\nObject subclass: Factory\n  make => Counter new";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let has_warning = diagnostics
+            .iter()
+            .any(|d| d.message.contains("Actor subclass") && d.message.contains("spawn"));
+        assert!(
+            has_warning,
+            "Expected actor new warning inside method, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn no_warn_class_without_state_in_new() {
+        // Classes with no declared state should not warn about fields
+        let source = "Object subclass: Empty\n  greet => 42\n\nEmpty new: #{#x => 1}";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let has_field_warning = diagnostics
+            .iter()
+            .any(|d| d.message.contains("Unknown field"));
+        assert!(
+            !has_field_warning,
+            "Should not warn about fields for class with no state, got: {diagnostics:?}"
+        );
+    }
 }

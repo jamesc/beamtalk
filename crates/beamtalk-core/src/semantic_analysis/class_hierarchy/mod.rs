@@ -79,6 +79,8 @@ pub struct ClassInfo {
     pub methods: Vec<MethodInfo>,
     /// Class-side methods defined on this class.
     pub class_methods: Vec<MethodInfo>,
+    /// Class variable names (declared with `classVar:`).
+    pub class_variables: Vec<EcoString>,
 }
 
 impl ClassInfo {
@@ -175,6 +177,50 @@ impl ClassHierarchy {
         }
 
         chain
+    }
+
+    /// Returns true if the named class is a subclass of Actor.
+    #[must_use]
+    pub fn is_actor_subclass(&self, class_name: &str) -> bool {
+        if class_name == "Actor" {
+            return true;
+        }
+        self.superclass_chain(class_name)
+            .iter()
+            .any(|s| s.as_str() == "Actor")
+    }
+
+    /// Returns all class variable names for a class (local only, not inherited).
+    #[must_use]
+    pub fn class_variable_names(&self, class_name: &str) -> Vec<EcoString> {
+        self.classes
+            .get(class_name)
+            .map(|info| info.class_variables.clone())
+            .unwrap_or_default()
+    }
+
+    /// Returns all state (instance variable) names for a class,
+    /// including inherited state from the superclass chain.
+    #[must_use]
+    pub fn all_state(&self, class_name: &str) -> Vec<EcoString> {
+        let mut state = Vec::new();
+        let mut visited = HashSet::new();
+        let mut current = Some(class_name.to_string());
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break;
+            }
+            if let Some(info) = self.classes.get(name.as_str()) {
+                state.extend(info.state.iter().cloned());
+                current = info
+                    .superclass
+                    .as_ref()
+                    .map(std::string::ToString::to_string);
+            } else {
+                break;
+            }
+        }
+        state
     }
 
     /// Returns all methods available on a class (local + inherited).
@@ -422,6 +468,11 @@ impl ClassHierarchy {
                         defined_in: class.name.name.clone(),
                         is_sealed: m.is_sealed,
                     })
+                    .collect(),
+                class_variables: class
+                    .class_variables
+                    .iter()
+                    .map(|cv| cv.name.name.clone())
                     .collect(),
             };
 
@@ -1023,6 +1074,7 @@ mod tests {
                 state: vec![],
                 methods: vec![builtin_method("methodA", 0, "A")],
                 class_methods: vec![],
+                class_variables: vec![],
             },
         );
         h.classes.insert(
@@ -1035,6 +1087,7 @@ mod tests {
                 state: vec![],
                 methods: vec![builtin_method("methodB", 0, "B")],
                 class_methods: vec![],
+                class_variables: vec![],
             },
         );
 

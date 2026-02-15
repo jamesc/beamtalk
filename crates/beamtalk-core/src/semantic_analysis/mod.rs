@@ -303,6 +303,11 @@ pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> Analysis
     // Phase 4: Abstract instantiation check (BT-105)
     check_abstract_instantiation(module, &result.class_hierarchy, &mut result.diagnostics);
 
+    // Phase 5: Class-aware diagnostics (BT-563)
+    check_actor_new_usage(module, &result.class_hierarchy, &mut result.diagnostics);
+    check_new_field_names(module, &result.class_hierarchy, &mut result.diagnostics);
+    check_class_variable_access(module, &result.class_hierarchy, &mut result.diagnostics);
+
     result
 }
 
@@ -441,6 +446,294 @@ fn check_abstract_in_expr(
             }
         }
         _ => {}
+    }
+}
+
+// ── BT-563: Class-aware diagnostics ──────────────────────────────────────────
+
+/// Extracts a class name from a receiver expression (`Identifier` or `ClassReference`).
+fn receiver_class_name(receiver: &Expression) -> Option<&str> {
+    match receiver {
+        Expression::Identifier(Identifier { name, .. }) => Some(name.as_str()),
+        Expression::ClassReference { name, .. } => Some(name.name.as_str()),
+        _ => None,
+    }
+}
+
+/// Walks all expressions in a module (top-level + class methods),
+/// calling `visitor` on each expression.
+fn walk_module_expressions(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+    visitor: fn(&Expression, &ClassHierarchy, &mut Vec<Diagnostic>),
+) {
+    for expr in &module.expressions {
+        walk_expression(expr, hierarchy, diagnostics, visitor);
+    }
+    for class in &module.classes {
+        for method in class.methods.iter().chain(class.class_methods.iter()) {
+            for expr in &method.body {
+                walk_expression(expr, hierarchy, diagnostics, visitor);
+            }
+        }
+    }
+}
+
+/// Recursively walks an expression tree, calling `visitor` on each node
+/// before recursing into children.
+fn walk_expression(
+    expr: &Expression,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+    visitor: fn(&Expression, &ClassHierarchy, &mut Vec<Diagnostic>),
+) {
+    visitor(expr, hierarchy, diagnostics);
+    match expr {
+        Expression::MessageSend {
+            receiver,
+            arguments,
+            ..
+        } => {
+            walk_expression(receiver, hierarchy, diagnostics, visitor);
+            for arg in arguments {
+                walk_expression(arg, hierarchy, diagnostics, visitor);
+            }
+        }
+        Expression::Block(block) => {
+            for e in &block.body {
+                walk_expression(e, hierarchy, diagnostics, visitor);
+            }
+        }
+        Expression::Assignment { value, .. } | Expression::Return { value, .. } => {
+            walk_expression(value, hierarchy, diagnostics, visitor);
+        }
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            walk_expression(receiver, hierarchy, diagnostics, visitor);
+            for msg in messages {
+                for arg in &msg.arguments {
+                    walk_expression(arg, hierarchy, diagnostics, visitor);
+                }
+            }
+        }
+        Expression::Parenthesized { expression, .. } => {
+            walk_expression(expression, hierarchy, diagnostics, visitor);
+        }
+        Expression::FieldAccess { receiver, .. } => {
+            walk_expression(receiver, hierarchy, diagnostics, visitor);
+        }
+        Expression::Pipe { value, target, .. } => {
+            walk_expression(value, hierarchy, diagnostics, visitor);
+            walk_expression(target, hierarchy, diagnostics, visitor);
+        }
+        Expression::Match { value, arms, .. } => {
+            walk_expression(value, hierarchy, diagnostics, visitor);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    walk_expression(guard, hierarchy, diagnostics, visitor);
+                }
+                walk_expression(&arm.body, hierarchy, diagnostics, visitor);
+            }
+        }
+        Expression::MapLiteral { pairs, .. } => {
+            for pair in pairs {
+                walk_expression(&pair.key, hierarchy, diagnostics, visitor);
+                walk_expression(&pair.value, hierarchy, diagnostics, visitor);
+            }
+        }
+        Expression::ListLiteral { elements, tail, .. } => {
+            for elem in elements {
+                walk_expression(elem, hierarchy, diagnostics, visitor);
+            }
+            if let Some(t) = tail {
+                walk_expression(t, hierarchy, diagnostics, visitor);
+            }
+        }
+        Expression::StringInterpolation { segments, .. } => {
+            for seg in segments {
+                if let crate::ast::StringSegment::Interpolation(e) = seg {
+                    walk_expression(e, hierarchy, diagnostics, visitor);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// BT-563: Warn when Actor subclasses use `new` or `new:` instead of `spawn`.
+fn check_actor_new_usage(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    walk_module_expressions(module, hierarchy, diagnostics, visit_actor_new);
+}
+
+fn visit_actor_new(
+    expr: &Expression,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Expression::MessageSend {
+        receiver,
+        selector,
+        span,
+        ..
+    } = expr
+    {
+        if let Some(class_name) = receiver_class_name(receiver) {
+            let sel = selector.name();
+            if (sel == "new" || sel == "new:")
+                && class_name != "Actor"
+                && hierarchy.is_actor_subclass(class_name)
+            {
+                let mut diag = Diagnostic::warning(
+                    format!("Actor subclass `{class_name}` should use `spawn` instead of `{sel}`"),
+                    *span,
+                );
+                diag.hint = Some("Use spawn instead of new for Actor subclasses".into());
+                diagnostics.push(diag);
+            }
+        }
+    }
+    // Also check cascade messages
+    if let Expression::Cascade {
+        receiver, messages, ..
+    } = expr
+    {
+        if let Some(class_name) = receiver_class_name(receiver) {
+            for msg in messages {
+                let sel = msg.selector.name();
+                if (sel == "new" || sel == "new:")
+                    && class_name != "Actor"
+                    && hierarchy.is_actor_subclass(class_name)
+                {
+                    let mut diag = Diagnostic::warning(
+                        format!(
+                            "Actor subclass `{class_name}` should use `spawn` instead of `{sel}`"
+                        ),
+                        msg.span,
+                    );
+                    diag.hint = Some("Use spawn instead of new for Actor subclasses".into());
+                    diagnostics.push(diag);
+                }
+            }
+        }
+    }
+}
+
+/// BT-563: Validate field names in `ClassName new: #{field => value}`.
+fn check_new_field_names(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    walk_module_expressions(module, hierarchy, diagnostics, visit_new_field_names);
+}
+
+fn visit_new_field_names(
+    expr: &Expression,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Expression::MessageSend {
+        receiver,
+        selector,
+        arguments,
+        ..
+    } = expr
+    {
+        if let Some(class_name) = receiver_class_name(receiver) {
+            let sel = selector.name();
+            if sel == "new:" || sel == "spawn:" {
+                if let Some(Expression::MapLiteral { pairs, .. }) = arguments.first() {
+                    let declared_state = hierarchy.all_state(class_name);
+                    if !declared_state.is_empty() {
+                        validate_map_field_names(pairs, class_name, &declared_state, diagnostics);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Checks that symbol keys in a map literal match declared state fields.
+fn validate_map_field_names(
+    pairs: &[crate::ast::MapPair],
+    class_name: &str,
+    declared_state: &[EcoString],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for pair in pairs {
+        if let Expression::Literal(crate::ast::Literal::Symbol(sym), sym_span) = &pair.key {
+            if !declared_state.iter().any(|s| s.as_str() == sym.as_str()) {
+                let mut diag = Diagnostic::warning(
+                    format!("Unknown field `{sym}` for class `{class_name}`"),
+                    *sym_span,
+                );
+                let fields: Vec<&str> = declared_state.iter().map(EcoString::as_str).collect();
+                diag.hint = Some(format!("Declared fields: {}", fields.join(", ")).into());
+                diagnostics.push(diag);
+            }
+        }
+    }
+}
+
+/// BT-563: Warn on access to undeclared class variables.
+fn check_class_variable_access(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    walk_module_expressions(module, hierarchy, diagnostics, visit_classvar_access);
+}
+
+fn visit_classvar_access(
+    expr: &Expression,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Expression::MessageSend {
+        receiver,
+        selector,
+        arguments,
+        span,
+    } = expr
+    {
+        if let Some(class_name) = receiver_class_name(receiver) {
+            let sel = selector.name();
+            if sel == "classVar:" {
+                if let Some(Expression::Literal(crate::ast::Literal::Symbol(var_name), _)) =
+                    arguments.first()
+                {
+                    let class_vars = hierarchy.class_variable_names(class_name);
+                    if hierarchy.has_class(class_name)
+                        && !class_vars.iter().any(|cv| cv.as_str() == var_name.as_str())
+                    {
+                        let mut diag = Diagnostic::warning(
+                            format!(
+                                "Undefined class variable `{var_name}` on class `{class_name}`"
+                            ),
+                            *span,
+                        );
+                        if class_vars.is_empty() {
+                            diag.hint = Some(
+                                format!("`{class_name}` has no declared class variables").into(),
+                            );
+                        } else {
+                            let vars: Vec<&str> =
+                                class_vars.iter().map(EcoString::as_str).collect();
+                            diag.hint = Some(
+                                format!("Declared class variables: {}", vars.join(", ")).into(),
+                            );
+                        }
+                        diagnostics.push(diag);
+                    }
+                }
+            }
+        }
     }
 }
 
