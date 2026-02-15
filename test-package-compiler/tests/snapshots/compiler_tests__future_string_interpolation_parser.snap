@@ -40,392 +40,82 @@ Module {
                     },
                 },
             ),
-            value: Literal(
-                String(
-                    "Hello, {name}!",
-                ),
-                Span {
-                    start: 328,
-                    end: 344,
-                },
-            ),
-            span: Span {
-                start: 316,
-                end: 344,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "age",
-                    span: Span {
-                        start: 374,
-                        end: 377,
-                    },
-                },
-            ),
-            value: Literal(
-                Integer(
-                    25,
-                ),
-                Span {
-                    start: 381,
-                    end: 383,
-                },
-            ),
-            span: Span {
-                start: 374,
-                end: 383,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "message",
-                    span: Span {
-                        start: 384,
-                        end: 391,
-                    },
-                },
-            ),
-            value: Literal(
-                String(
-                    "You are {age + 5} years old in 5 years",
-                ),
-                Span {
-                    start: 395,
-                    end: 435,
-                },
-            ),
-            span: Span {
-                start: 384,
-                end: 435,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "firstName",
-                    span: Span {
-                        start: 478,
-                        end: 487,
-                    },
-                },
-            ),
-            value: Literal(
-                String(
-                    "Bob",
-                ),
-                Span {
-                    start: 491,
-                    end: 496,
-                },
-            ),
-            span: Span {
-                start: 478,
-                end: 496,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "lastName",
-                    span: Span {
-                        start: 497,
-                        end: 505,
-                    },
-                },
-            ),
-            value: Literal(
-                String(
-                    "Smith",
-                ),
-                Span {
-                    start: 509,
-                    end: 516,
-                },
-            ),
-            span: Span {
-                start: 497,
-                end: 516,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "fullName",
-                    span: Span {
-                        start: 517,
-                        end: 525,
-                    },
-                },
-            ),
-            value: Literal(
-                String(
-                    "Name: {firstName} {lastName}",
-                ),
-                Span {
-                    start: 529,
-                    end: 559,
-                },
-            ),
-            span: Span {
-                start: 517,
-                end: 559,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "user",
-                    span: Span {
-                        start: 604,
-                        end: 608,
-                    },
-                },
-            ),
             value: MessageSend {
-                receiver: ClassReference {
-                    name: Identifier {
-                        name: "User",
-                        span: Span {
-                            start: 612,
-                            end: 616,
-                        },
-                    },
+                receiver: Error {
+                    message: "Unexpected token: expected expression, found \"Hello, {",
                     span: Span {
-                        start: 612,
-                        end: 616,
+                        start: 328,
+                        end: 336,
                     },
                 },
                 selector: Unary(
-                    "new",
+                    "name",
                 ),
                 arguments: [],
                 span: Span {
-                    start: 612,
-                    end: 620,
+                    start: 328,
+                    end: 341,
                 },
             },
             span: Span {
-                start: 604,
-                end: 620,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "profile",
-                    span: Span {
-                        start: 621,
-                        end: 628,
-                    },
-                },
-            ),
-            value: Literal(
-                String(
-                    "User: {user getName}, Email: {user getEmail}",
-                ),
-                Span {
-                    start: 632,
-                    end: 678,
-                },
-            ),
-            span: Span {
-                start: 621,
-                end: 678,
+                start: 316,
+                end: 341,
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "count",
-                    span: Span {
-                        start: 723,
-                        end: 728,
-                    },
-                },
-            ),
-            value: Literal(
-                Integer(
-                    10,
-                ),
-                Span {
-                    start: 732,
-                    end: 734,
-                },
-            ),
+        Error {
+            message: "Unexpected token: expected expression, found }!\"",
             span: Span {
-                start: 723,
-                end: 734,
+                start: 342,
+                end: 344,
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "summary",
-                    span: Span {
-                        start: 735,
-                        end: 742,
+        MessageSend {
+            receiver: Error {
+                message: "Unexpected token: expected expression, found ]",
+                span: Span {
+                    start: 787,
+                    end: 788,
+                },
+            },
+            selector: Keyword(
+                [
+                    KeywordPart {
+                        keyword: "value:",
+                        span: Span {
+                            start: 789,
+                            end: 795,
+                        },
                     },
-                },
+                ],
             ),
-            value: Literal(
-                String(
-                    "Total: {count * 2}, Double: {[:x | x * 2] value: count}",
+            arguments: [
+                Identifier(
+                    Identifier {
+                        name: "count",
+                        span: Span {
+                            start: 796,
+                            end: 801,
+                        },
+                    },
                 ),
-                Span {
-                    start: 746,
-                    end: 803,
-                },
-            ),
+            ],
             span: Span {
-                start: 735,
+                start: 787,
+                end: 801,
+            },
+        },
+        Error {
+            message: "Unexpected token: expected expression, found }\"",
+            span: Span {
+                start: 802,
                 end: 803,
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "escaped",
-                    span: Span {
-                        start: 849,
-                        end: 856,
-                    },
-                },
-            ),
-            value: Literal(
-                String(
-                    "Literal braces: \\{ and \\}, variable: {name}",
-                ),
-                Span {
-                    start: 860,
-                    end: 905,
-                },
-            ),
+        Error {
+            message: "Unexpected token: expected expression, found }",
             span: Span {
-                start: 849,
-                end: 905,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "multiLine",
-                    span: Span {
-                        start: 941,
-                        end: 950,
-                    },
-                },
-            ),
-            value: Literal(
-                String(
-                    "First line: {firstName}\nSecond line: {lastName}\nThird line: {age}",
-                ),
-                Span {
-                    start: 954,
-                    end: 1021,
-                },
-            ),
-            span: Span {
-                start: 941,
-                end: 1021,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "emojiVar",
-                    span: Span {
-                        start: 1058,
-                        end: 1066,
-                    },
-                },
-            ),
-            value: Literal(
-                String(
-                    "🎉",
-                ),
-                Span {
-                    start: 1070,
-                    end: 1076,
-                },
-            ),
-            span: Span {
-                start: 1058,
-                end: 1076,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "withEmoji",
-                    span: Span {
-                        start: 1077,
-                        end: 1086,
-                    },
-                },
-            ),
-            value: Literal(
-                String(
-                    "Celebration: {emojiVar} {name}!",
-                ),
-                Span {
-                    start: 1090,
-                    end: 1123,
-                },
-            ),
-            span: Span {
-                start: 1077,
-                end: 1123,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "emptyInterp",
-                    span: Span {
-                        start: 1160,
-                        end: 1171,
-                    },
-                },
-            ),
-            value: Literal(
-                String(
-                    "Before {} After",
-                ),
-                Span {
-                    start: 1175,
-                    end: 1192,
-                },
-            ),
-            span: Span {
-                start: 1160,
-                end: 1192,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "nested",
-                    span: Span {
-                        start: 1226,
-                        end: 1232,
-                    },
-                },
-            ),
-            value: Literal(
-                String(
-                    "Outer {inner at: {key get}}",
-                ),
-                Span {
-                    start: 1236,
-                    end: 1265,
-                },
-            ),
-            span: Span {
-                start: 1226,
-                end: 1265,
+                start: 1262,
+                end: 1263,
             },
         },
     ],
@@ -484,3 +174,10 @@ Module {
         },
     ],
 }
+
+Diagnostics:
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found \"Hello, {", span: Span { start: 328, end: 336 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }!\"", span: Span { start: 342, end: 344 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 787, end: 788 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }\"", span: Span { start: 802, end: 803 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 1262, end: 1263 }, hint: None }

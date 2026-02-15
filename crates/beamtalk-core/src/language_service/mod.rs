@@ -47,9 +47,11 @@
 //! assert!(diagnostics.is_empty());
 //! ```
 
+mod project_index;
 mod value_objects;
 
 // Re-export value objects at the module level
+pub use project_index::ProjectIndex;
 pub use value_objects::{
     ByteOffset, Completion, CompletionKind, Diagnostic, DocumentSymbol, DocumentSymbolKind,
     HoverInfo, Location, Position,
@@ -108,11 +110,13 @@ pub trait LanguageService {
 /// A simple in-memory language service implementation.
 ///
 /// This implementation stores parsed files in memory and provides
-/// basic language service features without full semantic analysis.
-#[derive(Debug, Default)]
+/// language service features with cross-file class awareness via `ProjectIndex`.
+#[derive(Debug, Clone)]
 pub struct SimpleLanguageService {
     /// Cached file contents.
     files: HashMap<Utf8PathBuf, FileData>,
+    /// Cross-file project index (merged class hierarchy).
+    project_index: ProjectIndex,
 }
 
 #[derive(Debug, Clone)]
@@ -123,15 +127,34 @@ struct FileData {
     module: Module,
     /// Parse diagnostics.
     diagnostics: Vec<Diagnostic>,
-    /// Cached class hierarchy (built-in + module classes).
-    class_hierarchy: crate::semantic_analysis::ClassHierarchy,
 }
 
 impl SimpleLanguageService {
-    /// Creates a new language service.
+    /// Creates a new language service with an empty `ProjectIndex`.
     #[must_use]
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            files: HashMap::new(),
+            project_index: ProjectIndex::new(),
+        }
+    }
+
+    /// Creates a new language service with a pre-populated `ProjectIndex`.
+    ///
+    /// Use this to pre-index stdlib classes or other project-wide class
+    /// definitions before opening individual files.
+    #[must_use]
+    pub fn with_project_index(project_index: ProjectIndex) -> Self {
+        Self {
+            files: HashMap::new(),
+            project_index,
+        }
+    }
+
+    /// Returns a reference to the project index.
+    #[must_use]
+    pub fn project_index(&self) -> &ProjectIndex {
+        &self.project_index
     }
 
     /// Gets file data if it exists.
@@ -294,25 +317,6 @@ impl SimpleLanguageService {
             _ => {}
         }
     }
-
-    /// Finds the definition of a variable (first assignment).
-    fn find_definition(expr: &Expression, name: &str) -> Option<Span> {
-        match expr {
-            Expression::Assignment { target, .. } => {
-                if let Expression::Identifier(ident) = target.as_ref() {
-                    if ident.name == name {
-                        return Some(ident.span);
-                    }
-                }
-                None
-            }
-            Expression::Block(block) => block
-                .body
-                .iter()
-                .find_map(|expr| Self::find_definition(expr, name)),
-            _ => None,
-        }
-    }
 }
 
 impl LanguageService for SimpleLanguageService {
@@ -321,7 +325,16 @@ impl LanguageService for SimpleLanguageService {
 
         let tokens = lex_with_eof(&content);
         let (module, diagnostics) = parse(tokens);
-        let class_hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module).0;
+
+        // Build class hierarchy for the project index.
+        // This is intentionally lightweight (ClassHierarchy::build only, not full
+        // analyse()) since diagnostic_provider lazily runs full semantic analysis
+        // when diagnostics are requested, avoiding duplicate work.
+        let (class_hierarchy, _) = crate::semantic_analysis::ClassHierarchy::build(&module);
+
+        // Update the project-wide index with this file's class hierarchy
+        self.project_index
+            .update_file(file.clone(), &class_hierarchy);
 
         self.files.insert(
             file,
@@ -329,12 +342,12 @@ impl LanguageService for SimpleLanguageService {
                 source: content,
                 module,
                 diagnostics,
-                class_hierarchy,
             },
         );
     }
 
     fn remove_file(&mut self, file: &Utf8PathBuf) {
+        self.project_index.remove_file(file);
         self.files.remove(file);
     }
 
@@ -354,11 +367,12 @@ impl LanguageService for SimpleLanguageService {
             return Vec::new();
         };
 
+        // Use project-wide hierarchy for completions (cross-file class awareness)
         crate::queries::completion_provider::compute_completions(
             &file_data.module,
             &file_data.source,
             position,
-            &file_data.class_hierarchy,
+            self.project_index.hierarchy(),
         )
     }
 
@@ -377,14 +391,14 @@ impl LanguageService for SimpleLanguageService {
         let (ident, _span) = self.find_identifier_at_position(file, position)?;
         let file_data = self.get_file(file)?;
 
-        // Find the first assignment to this identifier (simple heuristic)
-        for expr in &file_data.module.expressions {
-            if let Some(def_span) = Self::find_definition(expr, &ident.name) {
-                return Some(Location::new(file.clone(), def_span));
-            }
-        }
-
-        None
+        // Cross-file definition lookup via definition provider (zero-copy)
+        crate::queries::definition_provider::find_definition_cross_file(
+            &ident.name,
+            file,
+            &file_data.module,
+            &self.project_index,
+            self.files.iter().map(|(path, data)| (path, &data.module)),
+        )
     }
 
     fn find_references(&self, file: &Utf8PathBuf, position: Position) -> Vec<Location> {
@@ -392,19 +406,27 @@ impl LanguageService for SimpleLanguageService {
             return Vec::new();
         };
 
-        let Some(file_data) = self.get_file(file) else {
-            return Vec::new();
-        };
-
-        let mut spans = Vec::new();
-        for expr in &file_data.module.expressions {
-            Self::collect_identifiers(expr, &ident.name, &mut spans);
+        // Search across all indexed files for references
+        let mut results = Vec::new();
+        for (file_path, file_data) in &self.files {
+            let mut spans = Vec::new();
+            for expr in &file_data.module.expressions {
+                Self::collect_identifiers(expr, &ident.name, &mut spans);
+            }
+            results.extend(
+                spans
+                    .into_iter()
+                    .map(|span| Location::new(file_path.clone(), span)),
+            );
         }
 
-        spans
-            .into_iter()
-            .map(|span| Location::new(file.clone(), span))
-            .collect()
+        results
+    }
+}
+
+impl Default for SimpleLanguageService {
+    fn default() -> Self {
+        Self::new()
     }
 
     fn document_symbols(&self, file: &Utf8PathBuf) -> Vec<DocumentSymbol> {

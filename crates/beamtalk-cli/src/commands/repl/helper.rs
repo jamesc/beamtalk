@@ -270,7 +270,11 @@ fn highlight_line(line: &str) -> String {
         };
 
         let col = match token.kind() {
-            TokenKind::String(_) | TokenKind::Character(_) => Some(color::GREEN),
+            TokenKind::String(_)
+            | TokenKind::StringStart(_)
+            | TokenKind::StringSegment(_)
+            | TokenKind::StringEnd(_)
+            | TokenKind::Character(_) => Some(color::GREEN),
             TokenKind::Integer(_) | TokenKind::Float(_) => Some(color::YELLOW),
             TokenKind::Symbol(_) | TokenKind::Hash => Some(color::CYAN),
             TokenKind::Identifier(name) => {

@@ -36,6 +36,51 @@ pub(super) fn builtin_sealed_method(selector: &str, arity: usize, defined_in: &s
     }
 }
 
+/// Returns true if the given class name is a built-in class.
+///
+/// This is a fast O(1) check using a static set, suitable for hot paths
+/// like `merge()` and `remove_classes()`.
+pub(super) fn is_builtin_class(name: &str) -> bool {
+    // Keep in sync with builtin_classes() below.
+    // Using a match for zero-allocation O(1) lookup.
+    matches!(
+        name,
+        "ProtoObject"
+            | "Object"
+            | "UndefinedObject"
+            | "Boolean"
+            | "True"
+            | "False"
+            | "Number"
+            | "Integer"
+            | "Float"
+            | "String"
+            | "Symbol"
+            | "Character"
+            | "Block"
+            | "Actor"
+            | "Future"
+            | "Collection"
+            | "List"
+            | "Dictionary"
+            | "Set"
+            | "Tuple"
+            | "Association"
+            | "Stream"
+            | "TranscriptStream"
+            | "File"
+            | "SystemDictionary"
+            | "WorkspaceEnvironment"
+            | "CompiledMethod"
+            | "Exception"
+            | "Error"
+            | "TypeError"
+            | "RuntimeError"
+            | "InstantiationError"
+            | "TestCase"
+    )
+}
+
 /// Returns all built-in class definitions.
 #[allow(clippy::too_many_lines)]
 pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
