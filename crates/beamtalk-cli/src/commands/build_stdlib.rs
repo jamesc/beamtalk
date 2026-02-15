@@ -198,7 +198,7 @@ fn compile_stdlib_file(
 }
 
 /// Metadata for a single stdlib class, used to generate the load-order file.
-#[allow(clippy::struct_field_names)]
+#[allow(clippy::struct_field_names)] // domain names like class_name match the domain model
 struct ClassMeta {
     module_name: String,
     class_name: String,

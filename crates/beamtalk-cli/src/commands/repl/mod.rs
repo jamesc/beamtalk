@@ -148,7 +148,6 @@ impl ReplResponse {
         }
         None
     }
-
 }
 
 #[derive(Debug, Deserialize)]

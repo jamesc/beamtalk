@@ -985,6 +985,7 @@ mod tests {
         let params: Vec<BlockParameter> = (0..arity)
             .map(|i| {
                 #[allow(clippy::cast_possible_truncation)]
+                // synthetic span positions for generated block params
                 let span = Span::new((i * 2 + 1) as u32, (i * 2 + 2) as u32);
                 BlockParameter::new(format!("p{i}"), span)
             })

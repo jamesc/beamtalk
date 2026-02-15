@@ -8,9 +8,9 @@
 //! This domain service analyzes blocks to detect which variables and fields are
 //! read/written, enabling proper state threading in tail-recursive loops.
 
-use crate::ast::{Block, Expression};
 #[cfg(test)]
 use crate::ast::MessageSelector;
+use crate::ast::{Block, Expression};
 use std::collections::HashSet;
 
 /// Analysis results for a block's variable and field usage.

@@ -36,7 +36,7 @@ impl CoreErlangGenerator {
     /// - Symbols: `#foo` → atom `'foo'`
     /// - Characters: `$a` → integer `97`
     /// - Arrays: `[1, 2, 3]` → list `[1, 2, 3]`
-    #[allow(clippy::self_only_used_in_recursion)]
+    #[allow(clippy::self_only_used_in_recursion)] // &self needed for method resolution
     pub(super) fn generate_literal(&self, lit: &Literal) -> Result<Document<'static>> {
         match lit {
             Literal::Integer(n) => Ok(docvec![format!("{n}")]),

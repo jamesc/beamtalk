@@ -268,7 +268,7 @@ impl CoreErlangGenerator {
     ///     let Error2 = call 'beamtalk_error':'with_hint'(Error1, <<"Use spawn instead">>) in
     ///     call 'beamtalk_error':'raise'(Error2)
     /// ```
-    #[allow(clippy::unused_self)]
+    #[allow(clippy::unused_self)] // method on impl for API consistency
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_actor_new_error_method(
         &self,
@@ -311,7 +311,7 @@ impl CoreErlangGenerator {
     ///     let Error2 = call 'beamtalk_error':'with_hint'(Error1, <<"Use spawnWith: instead">>) in
     ///     call 'beamtalk_error':'raise'(Error2)
     /// ```
-    #[allow(clippy::unused_self)]
+    #[allow(clippy::unused_self)] // method on impl for API consistency
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_actor_new_with_args_error_method(
         &self,
@@ -434,7 +434,7 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// 'superclass'/0 = fun () -> 'Actor'
     /// ```
-    #[allow(clippy::unused_self)]
+    #[allow(clippy::unused_self)] // method on impl for API consistency
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_superclass_function(
         &self,

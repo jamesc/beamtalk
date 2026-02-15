@@ -832,9 +832,11 @@ fn power_bif(params: &[String]) -> Option<String> {
 /// the compiled stdlib module's own dispatch/3.
 fn generate_compiled_method_bif(selector: &str, params: &[String]) -> Option<String> {
     match selector {
-        "selector" | "source" | "argumentCount" | "printString" | "asString" => {
-            Some(ops_dispatch("beamtalk_compiled_method_ops", selector, params))
-        }
+        "selector" | "source" | "argumentCount" | "printString" | "asString" => Some(ops_dispatch(
+            "beamtalk_compiled_method_ops",
+            selector,
+            params,
+        )),
         _ => None,
     }
 }

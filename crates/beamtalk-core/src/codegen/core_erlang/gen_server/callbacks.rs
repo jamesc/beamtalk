@@ -354,7 +354,7 @@ impl CoreErlangGenerator {
     }
 
     /// Generates the `code_change/3` callback for hot code reload.
-    #[allow(clippy::unused_self)]
+    #[allow(clippy::unused_self)] // method on impl for API consistency
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_code_change(
         &self,

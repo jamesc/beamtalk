@@ -259,7 +259,7 @@ impl CoreErlangGenerator {
 
     /// Generates a `new` or `new:` function that raises `instantiation_error`
     /// for primitive types that cannot be instantiated with `new`.
-    #[allow(clippy::unnecessary_wraps, clippy::unused_self)]
+    #[allow(clippy::unnecessary_wraps, clippy::unused_self)] // uniform codegen interface
     fn generate_primitive_new_error(
         &mut self,
         class_name: &str,
@@ -800,7 +800,7 @@ impl CoreErlangGenerator {
     }
 
     /// Generates a structured `arity_mismatch` error for dispatch/4 argument validation.
-    #[allow(clippy::unused_self)]
+    #[allow(clippy::unused_self)] // method on impl for API consistency
     fn arity_error_fragment(&self, selector: &str, expected_arity: u32, indent: &str) -> String {
         let hint = Self::core_erlang_binary(&format!(
             "Expected {expected_arity} argument(s) for {selector}"
@@ -814,7 +814,7 @@ impl CoreErlangGenerator {
     }
 
     /// Generates a structured `type_error` for dispatch/4 argument validation.
-    #[allow(clippy::unused_self)]
+    #[allow(clippy::unused_self)] // method on impl for API consistency
     fn type_error_fragment(&self, selector: &str, hint_msg: &str, indent: &str) -> String {
         let hint = Self::core_erlang_binary(hint_msg);
         format!(
