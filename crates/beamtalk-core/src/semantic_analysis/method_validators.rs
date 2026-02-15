@@ -161,7 +161,15 @@ fn method_description(selector: &str) -> &'static str {
 
 /// Primitive class names that cannot be instantiated with `new` or `new:`.
 const PRIMITIVE_CLASS_NAMES: &[&str] = &[
-    "Integer", "String", "Float", "True", "False", "Nil", "Symbol",
+    "Integer",
+    "String",
+    "Float",
+    "True",
+    "False",
+    "UndefinedObject",
+    "Symbol",
+    "Block",
+    "CompiledMethod",
 ];
 
 /// Check if the receiver of `new` or `new:` is a known primitive class.
@@ -195,7 +203,11 @@ pub(crate) fn validate_primitive_instantiation(
         "Symbol" => "Symbol values are created with literals (e.g., #name)",
         "True" => "Use the literal `true` instead",
         "False" => "Use the literal `false` instead",
-        "Nil" => "Use the literal `nil` instead",
+        "UndefinedObject" => "Use the literal `nil` instead",
+        "Block" => "Block values are created with block literals (e.g., [:x | x + 1])",
+        "CompiledMethod" => {
+            "CompiledMethod instances are created by the compiler when defining methods"
+        }
         _ => "Primitive values are created with literals",
     };
 
@@ -225,6 +237,7 @@ pub(crate) fn validate_immutable_mutation(
         Expression::Literal(Literal::String(_), _) => "String literal",
         Expression::Literal(Literal::Symbol(_), _) => "Symbol literal",
         Expression::Literal(Literal::Character(_), _) => "Character literal",
+        Expression::Literal(Literal::List(_), _) | Expression::ListLiteral { .. } => "List literal",
         Expression::Identifier(id) if matches!(id.name.as_str(), "true" | "false") => {
             "Boolean literal"
         }
@@ -598,5 +611,64 @@ mod tests {
         let receiver = Expression::Literal(Literal::Integer(42), test_span());
         let diag = validate_immutable_mutation(&receiver, "respondsTo:", test_span());
         assert!(diag.is_none());
+    }
+
+    #[test]
+    fn test_immutable_mutation_list_literal() {
+        let receiver = Expression::Literal(Literal::List(vec![Literal::Integer(1)]), test_span());
+        let diag = validate_immutable_mutation(&receiver, "instVarAt:put:", test_span());
+        assert!(diag.is_some());
+        assert!(diag.unwrap().message.contains("List literal"));
+    }
+
+    #[test]
+    fn test_immutable_mutation_list_literal_expression() {
+        let receiver = Expression::ListLiteral {
+            elements: vec![Expression::Literal(Literal::Integer(1), test_span())],
+            tail: None,
+            span: test_span(),
+        };
+        let diag = validate_immutable_mutation(&receiver, "instVarAt:put:", test_span());
+        assert!(diag.is_some());
+        assert!(diag.unwrap().message.contains("List literal"));
+    }
+
+    #[test]
+    fn test_primitive_instantiation_block_new() {
+        let receiver = Expression::ClassReference {
+            name: Identifier::new("Block", test_span()),
+            span: test_span(),
+        };
+        let diag = validate_primitive_instantiation(&receiver, "new", test_span());
+        assert!(diag.is_some());
+        assert!(
+            diag.unwrap()
+                .hint
+                .as_ref()
+                .unwrap()
+                .contains("block literal")
+        );
+    }
+
+    #[test]
+    fn test_primitive_instantiation_compiled_method_new() {
+        let receiver = Expression::ClassReference {
+            name: Identifier::new("CompiledMethod", test_span()),
+            span: test_span(),
+        };
+        let diag = validate_primitive_instantiation(&receiver, "new", test_span());
+        assert!(diag.is_some());
+        assert!(diag.unwrap().hint.as_ref().unwrap().contains("compiler"));
+    }
+
+    #[test]
+    fn test_primitive_instantiation_undefined_object_new() {
+        let receiver = Expression::ClassReference {
+            name: Identifier::new("UndefinedObject", test_span()),
+            span: test_span(),
+        };
+        let diag = validate_primitive_instantiation(&receiver, "new", test_span());
+        assert!(diag.is_some());
+        assert!(diag.unwrap().hint.as_ref().unwrap().contains("`nil`"));
     }
 }
