@@ -2104,6 +2104,26 @@ mod tests {
     }
 
     #[test]
+    fn parse_malformed_return_type_recovers() {
+        // `-> =>` (missing type name) should still detect the method definition
+        // and let parse_type_annotation emit the error, not truncate class parsing
+        let tokens = lex_with_eof(
+            "Actor subclass: Counter
+  increment -> => self",
+        );
+        let (module, diagnostics) = parse(tokens);
+        // Should have an error about missing type name
+        assert!(
+            !diagnostics.is_empty(),
+            "Expected error for missing type name after ->"
+        );
+        // But the method should still be parsed
+        assert_eq!(module.classes.len(), 1);
+        assert_eq!(module.classes[0].methods.len(), 1);
+        assert_eq!(module.classes[0].methods[0].selector.name(), "increment");
+    }
+
+    #[test]
     fn parse_class_with_mixed_content() {
         let module = parse_ok(
             "Actor subclass: Counter

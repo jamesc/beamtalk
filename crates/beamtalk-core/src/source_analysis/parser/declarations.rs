@@ -269,6 +269,9 @@ impl Parser {
     }
 
     /// Checks if there's a `-> Type =>` or `-> Type | Type =>` pattern at the given offset.
+    ///
+    /// Also accepts `-> =>` (missing type) for error recovery — lets `parse_type_annotation`
+    /// emit the specific error rather than failing to detect the method definition.
     fn is_return_type_then_fat_arrow(&self, offset: usize) -> bool {
         if !matches!(
             self.peek_at(offset),
@@ -278,6 +281,10 @@ impl Parser {
         }
         // Skip -> Type (and possible | Type unions)
         let mut o = offset + 1;
+        // Allow `-> =>` (missing type) for error recovery
+        if matches!(self.peek_at(o), Some(TokenKind::FatArrow)) {
+            return true;
+        }
         // Must have at least one type name
         if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
             return false;
