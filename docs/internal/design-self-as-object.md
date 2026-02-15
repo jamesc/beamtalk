@@ -1396,5 +1396,5 @@ None identified. This design follows established patterns from:
 - [BT-100 PR](https://github.com/jamesc/beamtalk/pull/103) — Object record implementation
 - [LFE Flavors](https://github.com/rvirding/flavors) — Robert Virding's OOP on BEAM
 - [Smalltalk-80 Blue Book](http://stephane.ducasse.free.fr/FreeBooks/BlueBook/Bluebook.pdf) — Chapter 5: Object Memory
-- [docs/beamtalk-object-model.md](../beamtalk-object-model.md) — Part 5: Code Sketches
+- [ADR 0005](../ADR/0005-beam-object-model-pragmatic-hybrid.md) — BEAM Object Model (Appendix B: LFE Flavors lessons)
 - [Pharo Reflection](https://books.pharo.org/booklet-ReflectiveCore/) — Modern Smalltalk reflection
