@@ -11,7 +11,7 @@
 %%% - beamtalk_workspace_sup — to build supervisor child specs
 %%% - beamtalk_workspace_bootstrap — to wire class variables
 %%% - beamtalk_repl_shell — to inject REPL convenience bindings
-%%% - beamtalk_workspace.hrl — to filter workspace binding names
+%%% - beamtalk_repl_server — to filter workspace binding names
 %%%
 %%% **DDD Context:** Workspace
 
@@ -35,6 +35,10 @@
 %% - class_name: the Beamtalk class name (e.g. 'TranscriptStream')
 %% - module: the Erlang implementation module
 %% - start_args: extra arguments after the registration tuple for start_link
+%%
+%% Order matters: the supervisor starts children in list order, and
+%% WorkspaceEnvironment must start after the actor registry (interleaved
+%% by beamtalk_workspace_sup:singleton_child_specs/0).
 -spec singletons() -> [singleton_config()].
 singletons() ->
     [
