@@ -83,7 +83,7 @@ call 'bt@stdlib@foo':'dispatch'('size', [], Self)
 
 'register_class'/0 = fun () ->
     try
-        let _Reg0 = case call 'beamtalk_object_class':'start'('Foo', ~{
+        let _ClassInfo0 = ~{
             'name' => 'Foo',
             'module' => 'intrinsic_keyword',
             'superclass' => 'Object',
@@ -98,9 +98,10 @@ call 'bt@stdlib@foo':'dispatch'('size', [], Self)
             }~,
             'method_source' => ~{'blockValue' => #{#<98>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<107>(8,1,'integer',['unsigned'|['big']]),#<86>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']])}#, 'size' => #{#<115>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<122>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']])}#}~,
             'class_variables' => ~{}~
-        }~) of
+        }~ in
+        let _Reg0 = case call 'beamtalk_object_class':'start'('Foo', _ClassInfo0) of
             <{'ok', _Pid0}> when 'true' -> 'ok'
-            <{'error', {'already_started', _Existing0}}> when 'true' -> 'ok'
+            <{'error', {'already_started', _Existing0}}> when 'true' -> call 'beamtalk_object_class':'update_class'('Foo', _ClassInfo0)
             <{'error', _Reason0}> when 'true' -> 'ok'
         end
 

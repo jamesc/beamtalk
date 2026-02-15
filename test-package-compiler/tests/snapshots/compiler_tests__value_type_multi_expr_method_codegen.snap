@@ -89,7 +89,7 @@ module 'value_type_multi_expr_method' ['new'/0, 'new'/1, 'addAndDouble:'/2, 'tri
 
 'register_class'/0 = fun () ->
     try
-        let _Reg0 = case call 'beamtalk_object_class':'start'('MultiExprTest', ~{
+        let _ClassInfo0 = ~{
             'name' => 'MultiExprTest',
             'module' => 'value_type_multi_expr_method',
             'superclass' => 'Object',
@@ -104,9 +104,10 @@ module 'value_type_multi_expr_method' ['new'/0, 'new'/1, 'addAndDouble:'/2, 'tri
             }~,
             'method_source' => ~{'addAndDouble:' => #{#<97>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<65>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<68>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']])}#, 'tripleStep:with:' => #{#<116>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<83>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<119>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']])}#}~,
             'class_variables' => ~{}~
-        }~) of
+        }~ in
+        let _Reg0 = case call 'beamtalk_object_class':'start'('MultiExprTest', _ClassInfo0) of
             <{'ok', _Pid0}> when 'true' -> 'ok'
-            <{'error', {'already_started', _Existing0}}> when 'true' -> 'ok'
+            <{'error', {'already_started', _Existing0}}> when 'true' -> call 'beamtalk_object_class':'update_class'('MultiExprTest', _ClassInfo0)
             <{'error', _Reason0}> when 'true' -> 'ok'
         end
 

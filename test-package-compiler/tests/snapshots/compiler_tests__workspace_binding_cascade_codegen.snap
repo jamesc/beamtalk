@@ -162,7 +162,7 @@ module 'workspace_binding_cascade' ['start_link'/1, 'init'/1, 'handle_cast'/2, '
 
 'register_class'/0 = fun () ->
     try
-        let _Reg0 = case call 'beamtalk_object_class':'start'('Logger', ~{
+        let _ClassInfo0 = ~{
             'name' => 'Logger',
             'module' => 'workspace_binding_cascade',
             'superclass' => 'Actor',
@@ -177,9 +177,10 @@ module 'workspace_binding_cascade' ['start_link'/1, 'init'/1, 'handle_cast'/2, '
             }~,
             'method_source' => ~{'run' => #{#<114>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']])}#}~,
             'class_variables' => ~{}~
-        }~) of
+        }~ in
+        let _Reg0 = case call 'beamtalk_object_class':'start'('Logger', _ClassInfo0) of
             <{'ok', _Pid0}> when 'true' -> 'ok'
-            <{'error', {'already_started', _Existing0}}> when 'true' -> 'ok'
+            <{'error', {'already_started', _Existing0}}> when 'true' -> call 'beamtalk_object_class':'update_class'('Logger', _ClassInfo0)
             <{'error', _Reason0}> when 'true' -> 'ok'
         end
 

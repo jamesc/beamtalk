@@ -171,7 +171,7 @@ module 'class_methods' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'
 
 'register_class'/0 = fun () ->
     try
-        let _Reg0 = case call 'beamtalk_object_class':'start'('ClassVarCounter', ~{
+        let _ClassInfo0 = ~{
             'name' => 'ClassVarCounter',
             'module' => 'class_methods',
             'superclass' => 'Actor',
@@ -188,9 +188,10 @@ module 'class_methods' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'
             }~,
             'method_source' => ~{'increment' => #{#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}#, 'getCount' => #{#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<67>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}#}~,
             'class_variables' => ~{'instanceCount' => 0}~
-        }~) of
+        }~ in
+        let _Reg0 = case call 'beamtalk_object_class':'start'('ClassVarCounter', _ClassInfo0) of
             <{'ok', _Pid0}> when 'true' -> 'ok'
-            <{'error', {'already_started', _Existing0}}> when 'true' -> 'ok'
+            <{'error', {'already_started', _Existing0}}> when 'true' -> call 'beamtalk_object_class':'update_class'('ClassVarCounter', _ClassInfo0)
             <{'error', _Reason0}> when 'true' -> 'ok'
         end
 

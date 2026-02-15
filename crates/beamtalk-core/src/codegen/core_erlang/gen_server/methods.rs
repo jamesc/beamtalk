@@ -468,9 +468,11 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// 'register_class'/0 = fun () ->
     ///     try
-    ///         case call 'beamtalk_object_class':'start'('Counter', ~{...}~) of
+    ///         let _ClassInfo0 = ~{...}~ in
+    ///         let _Reg0 = case call 'beamtalk_object_class':'start'('Counter', _ClassInfo0) of
     ///             <{'ok', _Pid}> when 'true' -> 'ok'
-    ///             <{'error', {'already_started', _}}> when 'true' -> 'ok'
+    ///             <{'error', {'already_started', _}}> when 'true' ->
+    ///                 call 'beamtalk_object_class':'update_class'('Counter', _ClassInfo0)
     ///             <{'error', _Reason}> when 'true' -> 'ok'
     ///         end
     ///     catch <_,_,_> -> 'ok'
@@ -586,10 +588,8 @@ impl CoreErlangGenerator {
 
             let class_doc = docvec![
                 line(),
-                format!(
-                    "{let_prefix}let _Reg{i} = case call 'beamtalk_object_class':'start'('{}', ~{{",
-                    class.name.name
-                ),
+                // BT-589: Bind ClassInfo so we can reuse it in the already_started branch
+                format!("{let_prefix}let _ClassInfo{i} = ~{{",),
                 nest(
                     INDENT,
                     docvec![
@@ -618,15 +618,22 @@ impl CoreErlangGenerator {
                     ]
                 ),
                 line(),
-                "}~) of",
+                "}~ in",
+                line(),
+                format!(
+                    "let _Reg{i} = case call 'beamtalk_object_class':'start'('{}', _ClassInfo{i}) of",
+                    class.name.name
+                ),
                 nest(
                     INDENT,
                     docvec![
                         line(),
                         format!("<{{'ok', _Pid{i}}}> when 'true' -> 'ok'"),
                         line(),
+                        // BT-589: Update class process with new ClassInfo on re-registration
                         format!(
-                            "<{{'error', {{'already_started', _Existing{i}}}}}> when 'true' -> 'ok'"
+                            "<{{'error', {{'already_started', _Existing{i}}}}}> when 'true' -> call 'beamtalk_object_class':'update_class'('{}', _ClassInfo{i})",
+                            class.name.name
                         ),
                         line(),
                         format!("<{{'error', _Reason{i}}}> when 'true' -> 'ok'"),
