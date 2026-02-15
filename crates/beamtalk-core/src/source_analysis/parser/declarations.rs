@@ -10,7 +10,7 @@
 
 use crate::ast::{
     ClassDefinition, Expression, Identifier, KeywordPart, MessageSelector, MethodDefinition,
-    MethodKind, StateDeclaration, TypeAnnotation,
+    MethodKind, StandaloneMethodDefinition, StateDeclaration, TypeAnnotation,
 };
 use crate::source_analysis::TokenKind;
 
@@ -148,7 +148,7 @@ impl Parser {
         // Skip any periods/statement terminators
         while self.match_token(&TokenKind::Period) {}
 
-        while !self.is_at_end() && !self.is_at_class_definition() {
+        while !self.is_at_end() && !self.is_at_class_definition() && !self.is_at_standalone_method_definition() {
             // Check for state declaration: `state: fieldName ...`
             if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:") {
                 if let Some(state_decl) = self.parse_state_declaration() {
@@ -567,10 +567,11 @@ impl Parser {
         let mut body = Vec::new();
 
         // Parse expressions until we hit something that looks like a new method,
-        // state declaration, or class definition
+        // state declaration, class definition, or standalone method definition
         while !self.is_at_end()
             && !self.is_at_class_definition()
             && !self.is_at_method_definition()
+            && !self.is_at_standalone_method_definition()
             && !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:")
         {
             let expr = self.parse_expression();
@@ -585,6 +586,7 @@ impl Parser {
                 if self.is_at_end()
                     || self.is_at_class_definition()
                     || self.is_at_method_definition()
+                    || self.is_at_standalone_method_definition()
                     || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:")
                 {
                     break;
@@ -599,6 +601,7 @@ impl Parser {
                 if self.is_at_end()
                     || self.is_at_class_definition()
                     || self.is_at_method_definition()
+                    || self.is_at_standalone_method_definition()
                     || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:")
                 {
                     break;
@@ -614,5 +617,56 @@ impl Parser {
         }
 
         body
+    }
+
+    /// Parses a standalone method definition (Tonel-style).
+    ///
+    /// Syntax:
+    /// - `ClassName >> selector => body` (instance method)
+    /// - `ClassName class >> selector => body` (class method)
+    pub(super) fn parse_standalone_method_definition(&mut self) -> StandaloneMethodDefinition {
+        let start = self.current_token().span();
+
+        // Parse class name
+        let class_name = self.parse_identifier("Expected class name");
+
+        // Check for optional `class` modifier
+        let is_class_method =
+            if matches!(self.current_kind(), TokenKind::Identifier(name) if name == "class") {
+                // Only treat as modifier if next token is `>>`
+                if matches!(self.peek_at(1), Some(TokenKind::BinarySelector(s)) if s == ">>") {
+                    self.advance(); // consume `class`
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+        // Consume `>>`
+        if !self.match_binary_selector(">>") {
+            self.error("Expected '>>' in standalone method definition");
+        }
+
+        // Parse method definition (selector => body)
+        let method = self.parse_method_definition().unwrap_or_else(|| {
+            let span = self.current_token().span();
+            MethodDefinition::new(
+                MessageSelector::Unary("error".into()),
+                Vec::new(),
+                Vec::new(),
+                span,
+            )
+        });
+
+        let span = start.merge(method.span);
+
+        StandaloneMethodDefinition {
+            class_name,
+            is_class_method,
+            method,
+            span,
+        }
     }
 }

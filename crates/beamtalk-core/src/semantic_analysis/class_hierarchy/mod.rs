@@ -613,6 +613,7 @@ mod tests {
     fn user_defined_class_added_to_hierarchy() {
         let module = Module {
             classes: vec![make_user_class("Counter", "Actor")],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
             leading_comments: vec![],
@@ -632,6 +633,7 @@ mod tests {
     fn user_class_inherits_from_actor_chain() {
         let module = Module {
             classes: vec![make_user_class("Counter", "Actor")],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
             leading_comments: vec![],
@@ -653,6 +655,7 @@ mod tests {
     fn user_class_resolves_inherited_selectors() {
         let module = Module {
             classes: vec![make_user_class("Counter", "Actor")],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
             leading_comments: vec![],
@@ -675,6 +678,7 @@ mod tests {
     fn sealed_class_subclassing_rejected() {
         let module = Module {
             classes: vec![make_user_class("MyInt", "Integer")],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
             leading_comments: vec![],
@@ -692,6 +696,7 @@ mod tests {
     fn sealed_string_subclassing_rejected() {
         let module = Module {
             classes: vec![make_user_class("MyString", "String")],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
             leading_comments: vec![],
@@ -705,6 +710,7 @@ mod tests {
     fn non_sealed_subclassing_allowed() {
         let module = Module {
             classes: vec![make_user_class("MyActor", "Actor")],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
             leading_comments: vec![],
@@ -753,6 +759,7 @@ mod tests {
 
         let module = Module {
             classes: vec![parent, child],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
             leading_comments: vec![],
@@ -775,6 +782,7 @@ mod tests {
 
         let module = Module {
             classes: vec![parent, child],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
             leading_comments: vec![],
@@ -792,6 +800,7 @@ mod tests {
 
         let module = Module {
             classes: vec![grandparent, parent, grandchild],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
             leading_comments: vec![],
@@ -814,6 +823,7 @@ mod tests {
 
         let module = Module {
             classes: vec![parent, child],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
             leading_comments: vec![],
@@ -829,6 +839,7 @@ mod tests {
 
         let module = Module {
             classes: vec![child],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
             leading_comments: vec![],
@@ -849,6 +860,7 @@ mod tests {
 
         let module = Module {
             classes: vec![child],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
             leading_comments: vec![],
@@ -869,6 +881,7 @@ mod tests {
         // Counter -> Actor -> Object -> ProtoObject
         let module = Module {
             classes: vec![make_user_class("Counter", "Actor")],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
             leading_comments: vec![],
@@ -978,6 +991,7 @@ mod tests {
 
         let module = Module {
             classes: vec![base, derived],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
             leading_comments: vec![],
@@ -996,6 +1010,7 @@ mod tests {
     fn user_class_with_unknown_superclass() {
         let module = Module {
             classes: vec![make_user_class("Orphan", "NonExistent")],
+            method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
             leading_comments: vec![],

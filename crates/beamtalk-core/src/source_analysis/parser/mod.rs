@@ -536,6 +536,7 @@ impl Parser {
     fn parse_module(&mut self) -> Module {
         let start = self.current_token().span();
         let mut classes = Vec::new();
+        let mut method_definitions = Vec::new();
         let mut expressions = Vec::new();
         let mut comments = Vec::new();
 
@@ -562,6 +563,9 @@ impl Parser {
             if self.is_at_class_definition() {
                 let class = self.parse_class_definition();
                 classes.push(class);
+            } else if self.is_at_standalone_method_definition() {
+                let method_def = self.parse_standalone_method_definition();
+                method_definitions.push(method_def);
             } else {
                 let expr = self.parse_expression();
                 let is_error = expr.is_error();
@@ -587,6 +591,7 @@ impl Parser {
 
         Module {
             classes,
+            method_definitions,
             expressions,
             span,
             leading_comments: comments,
@@ -620,6 +625,80 @@ impl Parser {
 
         // Expect `subclass:` keyword
         matches!(self.peek_at(offset), Some(TokenKind::Keyword(k)) if k == "subclass:")
+    }
+
+    /// Checks if the current position looks like a standalone method definition.
+    ///
+    /// Standalone method definitions follow the pattern:
+    /// - `ClassName >> selector => body` (instance method)
+    /// - `ClassName class >> selector => body` (class method)
+    ///
+    /// We look ahead to detect `Identifier >>` followed by a method selector and `=>`.
+    pub(super) fn is_at_standalone_method_definition(&self) -> bool {
+        let mut offset = 0;
+
+        // Must start with an uppercase identifier (class name)
+        match self.peek_at(offset) {
+            Some(TokenKind::Identifier(name)) => {
+                if !name.starts_with(|c: char| c.is_uppercase()) {
+                    return false;
+                }
+                offset += 1;
+            }
+            _ => return false,
+        }
+
+        // Optional `class` modifier for class-side methods
+        if matches!(self.peek_at(offset), Some(TokenKind::Identifier(name)) if name == "class") {
+            offset += 1;
+        }
+
+        // Must have `>>` binary selector
+        if !matches!(self.peek_at(offset), Some(TokenKind::BinarySelector(s)) if s == ">>") {
+            return false;
+        }
+        offset += 1;
+
+        // After `>>`, must have a method selector followed by `=>`
+        self.is_method_selector_at(offset)
+    }
+
+    /// Checks if there is a method selector followed by `=>` at the given offset.
+    fn is_method_selector_at(&self, offset: usize) -> bool {
+        match self.peek_at(offset) {
+            // Unary: `identifier =>`
+            Some(TokenKind::Identifier(_)) => {
+                matches!(self.peek_at(offset + 1), Some(TokenKind::FatArrow))
+            }
+            // Binary: `+ other =>`
+            Some(TokenKind::BinarySelector(_)) => {
+                matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_)))
+                    && matches!(self.peek_at(offset + 2), Some(TokenKind::FatArrow))
+            }
+            // Keyword: `at: index put: value =>`
+            Some(TokenKind::Keyword(_)) => self.is_keyword_method_selector_at(offset),
+            _ => false,
+        }
+    }
+
+    /// Checks if there's a keyword method selector followed by `=>` at the given offset.
+    fn is_keyword_method_selector_at(&self, start_offset: usize) -> bool {
+        let mut offset = start_offset;
+        loop {
+            if !matches!(self.peek_at(offset), Some(TokenKind::Keyword(_))) {
+                return false;
+            }
+            offset += 1;
+            if !matches!(self.peek_at(offset), Some(TokenKind::Identifier(_))) {
+                return false;
+            }
+            offset += 1;
+            match self.peek_at(offset) {
+                Some(TokenKind::FatArrow) => return true,
+                Some(TokenKind::Keyword(_)) => {}
+                _ => return false,
+            }
+        }
     }
 
     /// Peeks at a token at the given offset from current position.
