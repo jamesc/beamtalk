@@ -171,10 +171,13 @@ handle_load(Path, State) ->
                                     beamtalk_workspace_meta:update_activity(),
                                     
                                     %% BT-571: Store class source for method patching
+                                    %% ClassNames have string keys from compile_file,
+                                    %% but class_sources map uses binary keys
                                     NewState3 = lists:foldl(
                                         fun(#{name := Name}, AccState) ->
+                                            NameBin = list_to_binary(Name),
                                             beamtalk_repl_state:set_class_source(
-                                                Name, Source, AccState)
+                                                NameBin, Source, AccState)
                                         end,
                                         NewState2, ClassNames),
                                     
