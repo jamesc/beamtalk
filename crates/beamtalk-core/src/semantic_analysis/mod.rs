@@ -292,10 +292,11 @@ pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> Analysis
     let mut type_checker = TypeChecker::new();
     type_checker.check_module(module, &result.class_hierarchy);
     result.diagnostics.extend(type_checker.take_diagnostics());
+    let type_map = type_checker.take_type_map();
 
     // Phase 3: Block Context Analysis (captures, mutations, context determination)
-    // Receive scope from NameResolver - no need to re-build it
-    let mut analyser = Analyser::with_scope(scope);
+    // Receive scope from NameResolver and TypeMap from TypeChecker
+    let mut analyser = Analyser::with_scope(scope, type_map);
 
     analyser.analyse_module(module);
     result.diagnostics.extend(analyser.result.diagnostics);
@@ -812,21 +813,24 @@ struct Analyser {
     result: AnalysisResult,
     scope: scope::Scope,
     method_validators: method_validators::MethodValidatorRegistry,
+    type_map: TypeMap,
 }
 
 impl Analyser {
-    /// Creates a new analyser with an existing scope from `NameResolver`.
+    /// Creates a new analyser with an existing scope from `NameResolver`
+    /// and a `TypeMap` from `TypeChecker`.
     ///
     /// This constructor receives the scope built by `NameResolver`, eliminating
     /// duplicate scope construction. The scope already contains:
     /// - Built-in identifiers (true, false, nil)
     /// - Known REPL variables (if any)
     /// - All variable bindings from name resolution
-    fn with_scope(scope: scope::Scope) -> Self {
+    fn with_scope(scope: scope::Scope, type_map: TypeMap) -> Self {
         Self {
             result: AnalysisResult::new(),
             scope,
             method_validators: method_validators::MethodValidatorRegistry::new(),
+            type_map,
         }
     }
 
@@ -945,7 +949,8 @@ impl Analyser {
 
                 // Run method-specific validators (reuse selector_str to avoid extra allocation)
                 if let Some(validator) = self.method_validators.get(&selector_str) {
-                    let diagnostics = validator.validate(selector, arguments, *span);
+                    let receiver_type = self.type_map.get(receiver.span());
+                    let diagnostics = validator.validate(selector, arguments, receiver_type, *span);
                     self.result.diagnostics.extend(diagnostics);
                 }
 
@@ -988,8 +993,13 @@ impl Analyser {
 
                     // Run method-specific validators for cascade messages
                     if let Some(validator) = self.method_validators.get(&selector_str) {
-                        let diagnostics =
-                            validator.validate(&msg.selector, &msg.arguments, msg.span);
+                        let receiver_type = self.type_map.get(receiver.span());
+                        let diagnostics = validator.validate(
+                            &msg.selector,
+                            &msg.arguments,
+                            receiver_type,
+                            msg.span,
+                        );
                         self.result.diagnostics.extend(diagnostics);
                     }
 

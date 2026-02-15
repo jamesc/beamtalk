@@ -21,6 +21,7 @@
 //! symbol literal arguments rather than bare identifiers.
 
 use crate::ast::{Expression, Literal, MessageSelector};
+use crate::semantic_analysis::type_checker::InferredType;
 use crate::source_analysis::{Diagnostic, Span};
 use std::collections::HashMap;
 
@@ -28,11 +29,16 @@ use std::collections::HashMap;
 pub(crate) trait MethodValidator {
     /// Validate the arguments of a message send.
     ///
+    /// `receiver_type` is the inferred type of the receiver expression,
+    /// if available. Validators can use this to disambiguate polymorphic
+    /// methods (e.g., `at:` on List vs Dictionary).
+    ///
     /// Returns diagnostics for any invalid arguments.
     fn validate(
         &self,
         selector: &MessageSelector,
         arguments: &[Expression],
+        receiver_type: Option<&InferredType>,
         span: Span,
     ) -> Vec<Diagnostic>;
 }
@@ -103,20 +109,31 @@ impl MethodValidatorRegistry {
             .insert("inject:into:", Box::new(BlockArityValidator::new(2, 1)));
 
         // Integer argument validators
-        // Note: at: and at:put: are excluded because Dictionary uses them with
-        // non-integer keys (e.g., dict at: #key). Without receiver type info,
-        // we can't distinguish List at: (integer) from Dictionary at: (any key).
         for selector in &["take:", "drop:", "repeat:", "from:to:"] {
             self.validators
                 .insert(selector, Box::new(IntegerArgumentValidator));
         }
 
+        // Type-aware integer validators (polymorphic methods)
+        // at: and at:put: require integer args on List/Tuple/String, but
+        // Dictionary uses any key type. Only validate when receiver type is known.
+        for selector in &["at:", "at:put:"] {
+            self.validators
+                .insert(selector, Box::new(TypeAwareIntegerArgValidator));
+        }
+
         // String argument validators
-        // Note: includes: and indexOf: are excluded because List also defines
-        // these methods with non-string arguments (e.g., list includes: 42).
         for selector in &["startsWith:", "endsWith:", "splitOn:"] {
             self.validators
                 .insert(selector, Box::new(StringArgumentValidator));
+        }
+
+        // Type-aware string validators (polymorphic methods)
+        // includes: and indexOf: require string args on String, but
+        // List/Collection accepts any element type.
+        for selector in &["includes:", "indexOf:"] {
+            self.validators
+                .insert(selector, Box::new(TypeAwareStringArgValidator));
         }
     }
 }
@@ -133,6 +150,7 @@ impl MethodValidator for ReflectionMethodValidator {
         &self,
         selector: &MessageSelector,
         arguments: &[Expression],
+        _receiver_type: Option<&InferredType>,
         _span: Span,
     ) -> Vec<Diagnostic> {
         if arguments.is_empty() {
@@ -331,6 +349,7 @@ impl MethodValidator for BlockArityValidator {
         &self,
         selector: &MessageSelector,
         arguments: &[Expression],
+        _receiver_type: Option<&InferredType>,
         _span: Span,
     ) -> Vec<Diagnostic> {
         let idx = self.expectation.arg_index;
@@ -406,6 +425,7 @@ impl MethodValidator for IntegerArgumentValidator {
         &self,
         selector: &MessageSelector,
         arguments: &[Expression],
+        _receiver_type: Option<&InferredType>,
         _span: Span,
     ) -> Vec<Diagnostic> {
         if arguments.is_empty() {
@@ -472,6 +492,7 @@ impl MethodValidator for StringArgumentValidator {
         &self,
         selector: &MessageSelector,
         arguments: &[Expression],
+        _receiver_type: Option<&InferredType>,
         _span: Span,
     ) -> Vec<Diagnostic> {
         if arguments.is_empty() {
@@ -504,10 +525,120 @@ impl MethodValidator for StringArgumentValidator {
 
 fn string_arg_hint(selector: &str) -> String {
     match selector {
+        "includes:" => r#"Use a string argument: "hello" includes: "ell""#.into(),
         "startsWith:" => r#"Use a string argument: "hello" startsWith: "hel""#.into(),
         "endsWith:" => r#"Use a string argument: "hello" endsWith: "llo""#.into(),
+        "indexOf:" => r#"Use a string argument: "hello" indexOf: "ell""#.into(),
         "splitOn:" => r#"Use a string argument: "a,b,c" splitOn: ",""#.into(),
         _ => format!(r#"Use a string argument: receiver {selector} "text""#),
+    }
+}
+
+// ── Type-aware validators (polymorphic methods) ─────────────────────────
+
+/// Classes where `at:` and `at:put:` require integer arguments.
+const INTEGER_AT_CLASSES: &[&str] = &["List", "Tuple", "String"];
+
+/// Validates `at:` and `at:put:` with receiver type awareness.
+///
+/// When the receiver is a List, Tuple, or String, requires integer arguments.
+/// When the receiver is a Dictionary or unknown, skips validation.
+struct TypeAwareIntegerArgValidator;
+
+impl MethodValidator for TypeAwareIntegerArgValidator {
+    fn validate(
+        &self,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+        receiver_type: Option<&InferredType>,
+        _span: Span,
+    ) -> Vec<Diagnostic> {
+        if arguments.is_empty() {
+            return vec![];
+        }
+
+        // Only validate when receiver type is a known integer-indexed class
+        let is_integer_indexed = match receiver_type {
+            Some(InferredType::Known(class_name)) => {
+                INTEGER_AT_CLASSES.iter().any(|&c| c == class_name.as_str())
+            }
+            _ => false,
+        };
+
+        if !is_integer_indexed {
+            return vec![];
+        }
+
+        let first_arg = &arguments[0];
+        match first_arg {
+            Expression::Literal(Literal::Integer(_), _) => vec![],
+            Expression::Literal(lit, lit_span) => {
+                let type_name = literal_type_name(lit);
+                let selector_name = selector.name();
+                vec![Diagnostic {
+                    severity: crate::source_analysis::Severity::Error,
+                    message: format!(
+                        "{selector_name} expects an integer argument, got {type_name}"
+                    )
+                    .into(),
+                    span: *lit_span,
+                    hint: Some("Use a 1-based integer index: list at: 1".into()),
+                }]
+            }
+            _ => vec![],
+        }
+    }
+}
+
+/// Classes where `includes:` and `indexOf:` require string arguments.
+const STRING_INCLUDES_CLASSES: &[&str] = &["String"];
+
+/// Validates `includes:` and `indexOf:` with receiver type awareness.
+///
+/// When the receiver is a String, requires string arguments.
+/// When the receiver is a List/Collection or unknown, skips validation.
+struct TypeAwareStringArgValidator;
+
+impl MethodValidator for TypeAwareStringArgValidator {
+    fn validate(
+        &self,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+        receiver_type: Option<&InferredType>,
+        _span: Span,
+    ) -> Vec<Diagnostic> {
+        if arguments.is_empty() {
+            return vec![];
+        }
+
+        // Only validate when receiver is known to be String
+        let is_string_receiver = match receiver_type {
+            Some(InferredType::Known(class_name)) => STRING_INCLUDES_CLASSES
+                .iter()
+                .any(|&c| c == class_name.as_str()),
+            _ => false,
+        };
+
+        if !is_string_receiver {
+            return vec![];
+        }
+
+        let first_arg = &arguments[0];
+        match first_arg {
+            Expression::Literal(Literal::String(_), _) => vec![],
+            Expression::Literal(lit, lit_span) => {
+                let type_name = literal_type_name(lit);
+                let selector_name = selector.name();
+                vec![Diagnostic {
+                    severity: crate::source_analysis::Severity::Error,
+                    message: format!("{selector_name} expects a string argument, got {type_name}")
+                        .into(),
+                    span: *lit_span,
+                    hint: Some(string_arg_hint(&selector_name).into()),
+                }]
+            }
+            _ => vec![],
+        }
     }
 }
 
@@ -537,7 +668,7 @@ mod tests {
             test_span(),
         )];
 
-        let diagnostics = validator.validate(&responds_to_selector(), &args, test_span());
+        let diagnostics = validator.validate(&responds_to_selector(), &args, None, test_span());
         assert!(diagnostics.is_empty());
     }
 
@@ -549,7 +680,7 @@ mod tests {
             Span::new(15, 24),
         ))];
 
-        let diagnostics = validator.validate(&responds_to_selector(), &args, test_span());
+        let diagnostics = validator.validate(&responds_to_selector(), &args, None, test_span());
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("expects a symbol literal"));
         assert!(
@@ -571,7 +702,7 @@ mod tests {
             span: Span::new(12, 19),
         }];
 
-        let diagnostics = validator.validate(&class_named_selector(), &args, test_span());
+        let diagnostics = validator.validate(&class_named_selector(), &args, None, test_span());
         assert_eq!(diagnostics.len(), 1);
         assert!(
             diagnostics[0]
@@ -587,7 +718,7 @@ mod tests {
         let validator = ReflectionMethodValidator;
         let args = vec![Expression::Literal(Literal::Integer(42), test_span())];
 
-        let diagnostics = validator.validate(&responds_to_selector(), &args, test_span());
+        let diagnostics = validator.validate(&responds_to_selector(), &args, None, test_span());
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("expects a symbol literal"));
     }
@@ -595,7 +726,7 @@ mod tests {
     #[test]
     fn test_empty_arguments_no_error() {
         let validator = ReflectionMethodValidator;
-        let diagnostics = validator.validate(&responds_to_selector(), &[], test_span());
+        let diagnostics = validator.validate(&responds_to_selector(), &[], None, test_span());
         assert!(diagnostics.is_empty());
     }
 
@@ -631,7 +762,7 @@ mod tests {
             test_span(),
         ))];
 
-        let diagnostics = validator.validate(&responds_to_selector(), &args, test_span());
+        let diagnostics = validator.validate(&responds_to_selector(), &args, None, test_span());
         assert_eq!(diagnostics.len(), 1);
         let hint = diagnostics[0].hint.as_ref().unwrap();
         assert!(hint.contains("#increment"));
@@ -686,7 +817,7 @@ mod tests {
             Expression::Literal(Literal::Symbol("x".into()), test_span()),
             Expression::Literal(Literal::Integer(99), test_span()),
         ];
-        let diagnostics = validator.validate(&selector, &args, test_span());
+        let diagnostics = validator.validate(&selector, &args, None, test_span());
         assert!(diagnostics.is_empty());
     }
 
@@ -701,7 +832,7 @@ mod tests {
             Expression::Identifier(Identifier::new("x", Span::new(15, 16))),
             Expression::Literal(Literal::Integer(99), test_span()),
         ];
-        let diagnostics = validator.validate(&selector, &args, test_span());
+        let diagnostics = validator.validate(&selector, &args, None, test_span());
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("expects a symbol literal"));
         let hint = diagnostics[0].hint.as_ref().unwrap();
@@ -963,7 +1094,7 @@ mod tests {
     fn test_block_arity_correct_single_param() {
         let validator = BlockArityValidator::new(1, 0);
         let args = vec![make_block(1)];
-        let diags = validator.validate(&keyword_selector("collect:"), &args, test_span());
+        let diags = validator.validate(&keyword_selector("collect:"), &args, None, test_span());
         assert!(diags.is_empty());
     }
 
@@ -971,7 +1102,7 @@ mod tests {
     fn test_block_arity_wrong_single_param() {
         let validator = BlockArityValidator::new(1, 0);
         let args = vec![make_block(2)];
-        let diags = validator.validate(&keyword_selector("collect:"), &args, test_span());
+        let diags = validator.validate(&keyword_selector("collect:"), &args, None, test_span());
         assert_eq!(diags.len(), 1);
         assert!(
             diags[0]
@@ -991,7 +1122,7 @@ mod tests {
     fn test_block_arity_zero_param_correct() {
         let validator = BlockArityValidator::new(0, 0);
         let args = vec![make_block(0)];
-        let diags = validator.validate(&keyword_selector("timesRepeat:"), &args, test_span());
+        let diags = validator.validate(&keyword_selector("timesRepeat:"), &args, None, test_span());
         assert!(diags.is_empty());
     }
 
@@ -999,7 +1130,7 @@ mod tests {
     fn test_block_arity_zero_param_wrong() {
         let validator = BlockArityValidator::new(0, 0);
         let args = vec![make_block(1)];
-        let diags = validator.validate(&keyword_selector("timesRepeat:"), &args, test_span());
+        let diags = validator.validate(&keyword_selector("timesRepeat:"), &args, None, test_span());
         assert_eq!(diags.len(), 1);
         assert!(
             diags[0]
@@ -1012,7 +1143,12 @@ mod tests {
     fn test_block_arity_two_param_correct() {
         let validator = BlockArityValidator::new(2, 0);
         let args = vec![make_block(2)];
-        let diags = validator.validate(&keyword_selector("eachWithIndex:"), &args, test_span());
+        let diags = validator.validate(
+            &keyword_selector("eachWithIndex:"),
+            &args,
+            None,
+            test_span(),
+        );
         assert!(diags.is_empty());
     }
 
@@ -1020,7 +1156,12 @@ mod tests {
     fn test_block_arity_two_param_wrong() {
         let validator = BlockArityValidator::new(2, 0);
         let args = vec![make_block(1)];
-        let diags = validator.validate(&keyword_selector("eachWithIndex:"), &args, test_span());
+        let diags = validator.validate(
+            &keyword_selector("eachWithIndex:"),
+            &args,
+            None,
+            test_span(),
+        );
         assert_eq!(diags.len(), 1);
         assert!(
             diags[0]
@@ -1036,14 +1177,14 @@ mod tests {
             "myBlock",
             test_span(),
         ))];
-        let diags = validator.validate(&keyword_selector("collect:"), &args, test_span());
+        let diags = validator.validate(&keyword_selector("collect:"), &args, None, test_span());
         assert!(diags.is_empty());
     }
 
     #[test]
     fn test_block_arity_empty_args_skipped() {
         let validator = BlockArityValidator::new(1, 0);
-        let diags = validator.validate(&keyword_selector("collect:"), &[], test_span());
+        let diags = validator.validate(&keyword_selector("collect:"), &[], None, test_span());
         assert!(diags.is_empty());
     }
 
@@ -1055,7 +1196,7 @@ mod tests {
             Expression::Literal(Literal::Integer(0), test_span()),
             make_block(2),
         ];
-        let diags = validator.validate(&selector, &args, test_span());
+        let diags = validator.validate(&selector, &args, None, test_span());
         assert!(diags.is_empty());
     }
 
@@ -1067,7 +1208,7 @@ mod tests {
             Expression::Literal(Literal::Integer(0), test_span()),
             make_block(1),
         ];
-        let diags = validator.validate(&selector, &args, test_span());
+        let diags = validator.validate(&selector, &args, None, test_span());
         assert_eq!(diags.len(), 1);
         assert!(
             diags[0]
@@ -1111,7 +1252,7 @@ mod tests {
     fn test_integer_arg_integer_literal_ok() {
         let validator = IntegerArgumentValidator;
         let args = vec![Expression::Literal(Literal::Integer(1), test_span())];
-        let diags = validator.validate(&keyword_selector("take:"), &args, test_span());
+        let diags = validator.validate(&keyword_selector("take:"), &args, None, test_span());
         assert!(diags.is_empty());
     }
 
@@ -1122,7 +1263,7 @@ mod tests {
             Literal::String("hello".into()),
             test_span(),
         )];
-        let diags = validator.validate(&keyword_selector("take:"), &args, test_span());
+        let diags = validator.validate(&keyword_selector("take:"), &args, None, test_span());
         assert_eq!(diags.len(), 1);
         assert!(
             diags[0]
@@ -1136,7 +1277,7 @@ mod tests {
     fn test_integer_arg_float_literal_error() {
         let validator = IntegerArgumentValidator;
         let args = vec![Expression::Literal(Literal::Float(2.72), test_span())];
-        let diags = validator.validate(&keyword_selector("take:"), &args, test_span());
+        let diags = validator.validate(&keyword_selector("take:"), &args, None, test_span());
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("got a float"));
     }
@@ -1148,7 +1289,7 @@ mod tests {
             Literal::Symbol("x".into()),
             test_span(),
         )];
-        let diags = validator.validate(&keyword_selector("drop:"), &args, test_span());
+        let diags = validator.validate(&keyword_selector("drop:"), &args, None, test_span());
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("got a symbol"));
     }
@@ -1157,30 +1298,26 @@ mod tests {
     fn test_integer_arg_variable_skipped() {
         let validator = IntegerArgumentValidator;
         let args = vec![Expression::Identifier(Identifier::new("idx", test_span()))];
-        let diags = validator.validate(&keyword_selector("take:"), &args, test_span());
+        let diags = validator.validate(&keyword_selector("take:"), &args, None, test_span());
         assert!(diags.is_empty());
     }
 
     #[test]
     fn test_integer_arg_empty_args_skipped() {
         let validator = IntegerArgumentValidator;
-        let diags = validator.validate(&keyword_selector("take:"), &[], test_span());
+        let diags = validator.validate(&keyword_selector("take:"), &[], None, test_span());
         assert!(diags.is_empty());
     }
 
     #[test]
     fn test_integer_arg_registry_has_selectors() {
         let registry = MethodValidatorRegistry::new();
-        // at: and at:put: excluded — polymorphic with Dictionary
-        for selector in &["take:", "drop:", "repeat:", "from:to:"] {
+        for selector in &["take:", "drop:", "repeat:", "from:to:", "at:", "at:put:"] {
             assert!(
                 registry.get(selector).is_some(),
                 "Registry missing validator for {selector}"
             );
         }
-        // Verify at: and at:put: are NOT registered (Dictionary uses non-integer keys)
-        assert!(registry.get("at:").is_none());
-        assert!(registry.get("at:put:").is_none());
     }
 
     // ── String argument validator tests ──────────────────────────────────
@@ -1192,7 +1329,7 @@ mod tests {
             Literal::String("ell".into()),
             test_span(),
         )];
-        let diags = validator.validate(&keyword_selector("startsWith:"), &args, test_span());
+        let diags = validator.validate(&keyword_selector("startsWith:"), &args, None, test_span());
         assert!(diags.is_empty());
     }
 
@@ -1200,7 +1337,7 @@ mod tests {
     fn test_string_arg_integer_literal_error() {
         let validator = StringArgumentValidator;
         let args = vec![Expression::Literal(Literal::Integer(42), test_span())];
-        let diags = validator.validate(&keyword_selector("startsWith:"), &args, test_span());
+        let diags = validator.validate(&keyword_selector("startsWith:"), &args, None, test_span());
         assert_eq!(diags.len(), 1);
         assert!(
             diags[0]
@@ -1217,7 +1354,7 @@ mod tests {
             Literal::Symbol("x".into()),
             test_span(),
         )];
-        let diags = validator.validate(&keyword_selector("endsWith:"), &args, test_span());
+        let diags = validator.validate(&keyword_selector("endsWith:"), &args, None, test_span());
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("got a symbol"));
     }
@@ -1226,37 +1363,39 @@ mod tests {
     fn test_string_arg_variable_skipped() {
         let validator = StringArgumentValidator;
         let args = vec![Expression::Identifier(Identifier::new("s", test_span()))];
-        let diags = validator.validate(&keyword_selector("startsWith:"), &args, test_span());
+        let diags = validator.validate(&keyword_selector("startsWith:"), &args, None, test_span());
         assert!(diags.is_empty());
     }
 
     #[test]
     fn test_string_arg_empty_args_skipped() {
         let validator = StringArgumentValidator;
-        let diags = validator.validate(&keyword_selector("startsWith:"), &[], test_span());
+        let diags = validator.validate(&keyword_selector("startsWith:"), &[], None, test_span());
         assert!(diags.is_empty());
     }
 
     #[test]
     fn test_string_arg_registry_has_selectors() {
         let registry = MethodValidatorRegistry::new();
-        // includes: and indexOf: excluded — polymorphic with List
-        for selector in &["startsWith:", "endsWith:", "splitOn:"] {
+        for selector in &[
+            "startsWith:",
+            "endsWith:",
+            "splitOn:",
+            "includes:",
+            "indexOf:",
+        ] {
             assert!(
                 registry.get(selector).is_some(),
                 "Registry missing validator for {selector}"
             );
         }
-        // Verify includes: and indexOf: are NOT registered (polymorphic with List)
-        assert!(registry.get("includes:").is_none());
-        assert!(registry.get("indexOf:").is_none());
     }
 
     #[test]
     fn test_string_arg_block_skipped() {
         let validator = StringArgumentValidator;
         let args = vec![make_block(0)];
-        let diags = validator.validate(&keyword_selector("startsWith:"), &args, test_span());
+        let diags = validator.validate(&keyword_selector("startsWith:"), &args, None, test_span());
         assert!(diags.is_empty());
     }
 
@@ -1264,7 +1403,201 @@ mod tests {
     fn test_integer_arg_block_skipped() {
         let validator = IntegerArgumentValidator;
         let args = vec![make_block(0)];
-        let diags = validator.validate(&keyword_selector("take:"), &args, test_span());
+        let diags = validator.validate(&keyword_selector("take:"), &args, None, test_span());
+        assert!(diags.is_empty());
+    }
+
+    // ── Type-aware integer validator tests ───────────────────────────────
+
+    fn known_type(name: &str) -> InferredType {
+        InferredType::Known(name.into())
+    }
+
+    #[test]
+    fn test_type_aware_at_list_integer_ok() {
+        let validator = TypeAwareIntegerArgValidator;
+        let ty = known_type("List");
+        let args = vec![Expression::Literal(Literal::Integer(1), test_span())];
+        let diags = validator.validate(&keyword_selector("at:"), &args, Some(&ty), test_span());
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn test_type_aware_at_list_string_error() {
+        let validator = TypeAwareIntegerArgValidator;
+        let ty = known_type("List");
+        let args = vec![Expression::Literal(
+            Literal::String("key".into()),
+            test_span(),
+        )];
+        let diags = validator.validate(&keyword_selector("at:"), &args, Some(&ty), test_span());
+        assert_eq!(diags.len(), 1);
+        assert!(
+            diags[0]
+                .message
+                .contains("expects an integer argument, got a string")
+        );
+    }
+
+    #[test]
+    fn test_type_aware_at_dictionary_symbol_ok() {
+        let validator = TypeAwareIntegerArgValidator;
+        let ty = known_type("Dictionary");
+        let args = vec![Expression::Literal(
+            Literal::Symbol("key".into()),
+            test_span(),
+        )];
+        let diags = validator.validate(&keyword_selector("at:"), &args, Some(&ty), test_span());
+        assert!(
+            diags.is_empty(),
+            "Dictionary at: should accept non-integer keys"
+        );
+    }
+
+    #[test]
+    fn test_type_aware_at_unknown_receiver_skips() {
+        let validator = TypeAwareIntegerArgValidator;
+        let args = vec![Expression::Literal(
+            Literal::String("key".into()),
+            test_span(),
+        )];
+        let diags = validator.validate(&keyword_selector("at:"), &args, None, test_span());
+        assert!(diags.is_empty(), "Unknown receiver should skip validation");
+    }
+
+    #[test]
+    fn test_type_aware_at_dynamic_receiver_skips() {
+        let validator = TypeAwareIntegerArgValidator;
+        let ty = InferredType::Dynamic;
+        let args = vec![Expression::Literal(
+            Literal::String("key".into()),
+            test_span(),
+        )];
+        let diags = validator.validate(&keyword_selector("at:"), &args, Some(&ty), test_span());
+        assert!(diags.is_empty(), "Dynamic receiver should skip validation");
+    }
+
+    #[test]
+    fn test_type_aware_at_tuple_string_error() {
+        let validator = TypeAwareIntegerArgValidator;
+        let ty = known_type("Tuple");
+        let args = vec![Expression::Literal(
+            Literal::String("key".into()),
+            test_span(),
+        )];
+        let diags = validator.validate(&keyword_selector("at:"), &args, Some(&ty), test_span());
+        assert_eq!(diags.len(), 1);
+    }
+
+    #[test]
+    fn test_type_aware_at_string_receiver_error() {
+        let validator = TypeAwareIntegerArgValidator;
+        let ty = known_type("String");
+        let args = vec![Expression::Literal(
+            Literal::Symbol("x".into()),
+            test_span(),
+        )];
+        let diags = validator.validate(&keyword_selector("at:"), &args, Some(&ty), test_span());
+        assert_eq!(diags.len(), 1);
+    }
+
+    // ── Type-aware string validator tests ────────────────────────────────
+
+    #[test]
+    fn test_type_aware_includes_string_receiver_string_ok() {
+        let validator = TypeAwareStringArgValidator;
+        let ty = known_type("String");
+        let args = vec![Expression::Literal(
+            Literal::String("ell".into()),
+            test_span(),
+        )];
+        let diags = validator.validate(
+            &keyword_selector("includes:"),
+            &args,
+            Some(&ty),
+            test_span(),
+        );
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn test_type_aware_includes_string_receiver_integer_error() {
+        let validator = TypeAwareStringArgValidator;
+        let ty = known_type("String");
+        let args = vec![Expression::Literal(Literal::Integer(42), test_span())];
+        let diags = validator.validate(
+            &keyword_selector("includes:"),
+            &args,
+            Some(&ty),
+            test_span(),
+        );
+        assert_eq!(diags.len(), 1);
+        assert!(
+            diags[0]
+                .message
+                .contains("expects a string argument, got an integer")
+        );
+    }
+
+    #[test]
+    fn test_type_aware_includes_list_receiver_integer_ok() {
+        let validator = TypeAwareStringArgValidator;
+        let ty = known_type("List");
+        let args = vec![Expression::Literal(Literal::Integer(42), test_span())];
+        let diags = validator.validate(
+            &keyword_selector("includes:"),
+            &args,
+            Some(&ty),
+            test_span(),
+        );
+        assert!(
+            diags.is_empty(),
+            "List includes: should accept any element type"
+        );
+    }
+
+    #[test]
+    fn test_type_aware_includes_unknown_receiver_skips() {
+        let validator = TypeAwareStringArgValidator;
+        let args = vec![Expression::Literal(Literal::Integer(42), test_span())];
+        let diags = validator.validate(&keyword_selector("includes:"), &args, None, test_span());
+        assert!(diags.is_empty(), "Unknown receiver should skip validation");
+    }
+
+    #[test]
+    fn test_type_aware_includes_dynamic_receiver_skips() {
+        let validator = TypeAwareStringArgValidator;
+        let ty = InferredType::Dynamic;
+        let args = vec![Expression::Literal(Literal::Integer(42), test_span())];
+        let diags = validator.validate(
+            &keyword_selector("includes:"),
+            &args,
+            Some(&ty),
+            test_span(),
+        );
+        assert!(diags.is_empty(), "Dynamic receiver should skip validation");
+    }
+
+    #[test]
+    fn test_type_aware_indexof_string_receiver_symbol_error() {
+        let validator = TypeAwareStringArgValidator;
+        let ty = known_type("String");
+        let args = vec![Expression::Literal(
+            Literal::Symbol("x".into()),
+            test_span(),
+        )];
+        let diags =
+            validator.validate(&keyword_selector("indexOf:"), &args, Some(&ty), test_span());
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("got a symbol"));
+    }
+
+    #[test]
+    fn test_type_aware_at_variable_skipped() {
+        let validator = TypeAwareIntegerArgValidator;
+        let ty = known_type("List");
+        let args = vec![Expression::Identifier(Identifier::new("idx", test_span()))];
+        let diags = validator.validate(&keyword_selector("at:"), &args, Some(&ty), test_span());
         assert!(diags.is_empty());
     }
 }

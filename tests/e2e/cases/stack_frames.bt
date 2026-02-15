@@ -74,6 +74,8 @@
 [42 noSuchMethod] on: RuntimeError do: [:e | e stackTrace class]
 // => List
 
-// TypeError also has stackTrace
-[#(1, 2, 3) at: "hello"] on: TypeError do: [:e | e stackTrace class]
+// TypeError also has stackTrace (use variable to avoid compile-time validator)
+badIndex := "hello"
+// => _
+[#(1, 2, 3) at: badIndex] on: TypeError do: [:e | e stackTrace class]
 // => List
