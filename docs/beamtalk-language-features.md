@@ -54,7 +54,7 @@ emoji := "Status: {status} ✓"
 | Beamtalk | Erlang/BEAM | Notes |
 |----------|-------------|-------|
 | `"hello"` | `<<"hello">>` | UTF-8 binary |
-| `"Hi, {name}"` | `<<"Hi, ", Name/binary>>` | Interpolated UTF-8 (planned) |
+| `"Hi, {name}"` | `<<"Hi, ", Name/binary>>` | Interpolated UTF-8 (ADR 0023) |
 | Grapheme cluster | Via `:string` module | `"👨‍👩‍👧‍👦"` is one grapheme, multiple codepoints |
 | `$a` | `97` (codepoint) | Character literal = Unicode codepoint |
 

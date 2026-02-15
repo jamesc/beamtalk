@@ -29,7 +29,7 @@ Try some simple expressions:
 50
 
 > "Hello, " + "Beamtalk!"
-"Hello, Beamtalk!"
+Hello, Beamtalk!
 ```
 
 ## Variables
@@ -44,10 +44,35 @@ Assign values to variables:
 52
 
 > name := "Alice"
-"Alice"
+Alice
 ```
 
 **Note:** In Beamtalk, `:=` is used for assignment (not `=`).
+
+## String Interpolation
+
+Beamtalk strings support interpolation with `{expr}` — embed any expression inside a string:
+
+```beamtalk
+> name := "Alice"
+Alice
+
+> "Hello, {name}!"
+Hello, Alice!
+
+> "2 + 2 = {2 + 2}"
+2 + 2 = 4
+
+> "{name length} characters"
+5 characters
+```
+
+Non-string values are automatically converted via `printString`. To include literal braces in an interpolated string, prefix the brace characters with a backslash (write `\{` and `\}` inside the string):
+
+```beamtalk
+> "Set: \{1, 2, 3\}"
+Set: {1, 2, 3}
+```
 
 ## Viewing Bindings
 
@@ -164,7 +189,7 @@ Beamtalk uses message sends for control flow:
 5
 
 > x > 10 ifTrue: [ "big" ] ifFalse: [ "small" ]
-"small"
+small
 
 > count := 0
 0

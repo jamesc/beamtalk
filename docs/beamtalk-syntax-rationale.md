@@ -199,7 +199,7 @@ self getValue       // unary message
 
 ```
 name := "Alice"
-greeting := "Hello, {name}!"  // => "Hello, Alice!" (planned)
+greeting := "Hello, {name}!"  // => "Hello, Alice!"
 ```
 
 **Why:** String interpolation is table stakes in 2026. Using `{expr}` inside double-quoted strings is clean and unambiguous. All strings use double quotes (ADR 0023). Single quotes are reserved for `#'quoted symbols'` only.

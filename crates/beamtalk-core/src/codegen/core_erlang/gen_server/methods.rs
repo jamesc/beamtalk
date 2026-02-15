@@ -470,9 +470,11 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// 'register_class'/0 = fun () ->
     ///     try
-    ///         case call 'beamtalk_object_class':'start'('Counter', ~{...}~) of
+    ///         let ClassInfo0 = ~{...}~
+    ///         in let _Reg0 = case call 'beamtalk_object_class':'start'('Counter', ClassInfo0) of
     ///             <{'ok', _Pid}> when 'true' -> 'ok'
-    ///             <{'error', {'already_started', _}}> when 'true' -> 'ok'
+    ///             <{'error', {'already_started', _}}> when 'true' ->
+    ///                 call 'beamtalk_object_class':'update_class'('Counter', ClassInfo0)
     ///             <{'error', _Reason}> when 'true' -> 'ok'
     ///         end
     ///     catch <_,_,_> -> 'ok'
