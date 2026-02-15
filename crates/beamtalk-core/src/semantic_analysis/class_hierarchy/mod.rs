@@ -264,6 +264,45 @@ impl ClassHierarchy {
         None
     }
 
+    /// Returns all class names in the hierarchy.
+    #[must_use]
+    pub fn class_names(&self) -> Vec<EcoString> {
+        self.classes.keys().cloned().collect()
+    }
+
+    /// Returns a reference to the underlying class map.
+    #[must_use]
+    pub fn classes(&self) -> &HashMap<EcoString, ClassInfo> {
+        &self.classes
+    }
+
+    /// Merge another hierarchy's user-defined classes into this one.
+    ///
+    /// Built-in classes from `other` are skipped (they already exist in `self`).
+    /// User-defined classes from `other` overwrite any existing entry with the
+    /// same name, allowing incremental file updates.
+    pub fn merge(&mut self, other: &ClassHierarchy) {
+        let builtins = builtins::builtin_classes();
+        for (name, info) in &other.classes {
+            if builtins.contains_key(name) {
+                continue;
+            }
+            self.classes.insert(name.clone(), info.clone());
+        }
+    }
+
+    /// Remove all classes that were defined in the given set of class names.
+    ///
+    /// Built-in classes are never removed.
+    pub fn remove_classes(&mut self, names: &[EcoString]) {
+        let builtins = builtins::builtin_classes();
+        for name in names {
+            if !builtins.contains_key(name) {
+                self.classes.remove(name);
+            }
+        }
+    }
+
     /// Add classes from a parsed module. Returns diagnostics for errors.
     fn add_module_classes(&mut self, module: &Module) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
