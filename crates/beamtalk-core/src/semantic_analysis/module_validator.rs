@@ -14,7 +14,7 @@ use crate::source_analysis::Diagnostic;
 /// Validates that a module contains at most one class definition.
 ///
 /// Multi-class files are not supported. If more than one class is found,
-/// an error diagnostic is emitted pointing at each extra class definition.
+/// a single error diagnostic is emitted pointing at the second class definition.
 #[must_use]
 pub fn validate_single_class(module: &Module) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
@@ -27,17 +27,16 @@ pub fn validate_single_class(module: &Module) -> Vec<Diagnostic> {
             .collect();
         let names_list = class_names.join(", ");
 
-        for class in &module.classes[1..] {
-            let mut diag = Diagnostic::error(
-                format!(
-                    "Multiple classes in one file is not supported. Found classes: {names_list}. \
-                     Each class should be in its own .bt file."
-                ),
-                class.name.span,
-            );
-            diag.hint = Some("Move this class to a separate .bt file.".into());
-            diagnostics.push(diag);
-        }
+        // Emit a single diagnostic pointing at the second class definition
+        let mut diag = Diagnostic::error(
+            format!(
+                "Multiple classes in one file is not supported. Found classes: {names_list}. \
+                 Each class should be in its own .bt file."
+            ),
+            module.classes[1].name.span,
+        );
+        diag.hint = Some("Move this class to a separate .bt file.".into());
+        diagnostics.push(diag);
     }
 
     diagnostics
@@ -74,16 +73,15 @@ mod tests {
     }
 
     #[test]
-    fn three_classes_errors_on_second_and_third() {
+    fn three_classes_emits_single_error() {
         let source = "Object subclass: A\n\nObject subclass: B\n\nObject subclass: C";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         assert_eq!(module.classes.len(), 3);
 
         let diagnostics = validate_single_class(&module);
-        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("A, B, C"));
-        assert!(diagnostics[1].message.contains("A, B, C"));
     }
 
     #[test]
