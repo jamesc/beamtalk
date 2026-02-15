@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Transaction — an immutable value recording a transfer
+//
+// Transactions are value objects (Object subclass), not actors. They capture
+// the details of a transfer as an immutable record.
+//
+// Usage:
+//   txn := Transaction new: #{#amount => 250, #from => "Alice", #to => "Bob", #status => "completed"}
+//   txn getAmount   // => 250
+//   txn getStatus   // => "completed"
+
+Object subclass: Transaction
+  state: amount = 0
+  state: from = ""
+  state: to = ""
+  state: status = "pending"
+
+  getAmount => ^self.amount
+  getFrom => ^self.from
+  getTo => ^self.to
+  getStatus => ^self.status

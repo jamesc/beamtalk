@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Account fixture for E2E tests (BT-569)
+// An actor managing a single bank balance with overdraft protection
+
+Actor subclass: Account
+  state: balance = 0
+  state: owner = ""
+
+  deposit: amount =>
+    self.balance := self.balance + amount.
+    ^self.balance
+
+  withdraw: amount =>
+    self.balance < amount ifTrue: [
+      self error: "Insufficient funds (balance: " ++ self.balance printString ++ ", requested: " ++ amount printString ++ ")"
+    ].
+    self.balance := self.balance - amount.
+    ^self.balance
+
+  balance => ^self.balance
+
+  setOwner: name =>
+    self.owner := name
+
+  getOwner => ^self.owner

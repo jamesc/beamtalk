@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// TransferAgent actor — coordinates transfers between two Account actors
+//
+// A TransferAgent moves money between accounts by sending withdraw and
+// deposit messages. Since actor messaging is asynchronous, each Account
+// handles its own validation (e.g. overdraft protection) independently.
+//
+// This demonstrates the actor coordination pattern: the TransferAgent
+// orchestrates two independent actors, and each actor enforces its own
+// invariants.
+//
+// Usage:
+//   agent := TransferAgent spawn
+//   agent transfer: 250 from: alice to: bob
+
+Actor subclass: TransferAgent
+  state: lastAmount = 0
+
+  transfer: amount from: source to: destination =>
+    source withdraw: amount.
+    destination deposit: amount.
+    self.lastAmount := amount
+
+  getLastAmount => ^self.lastAmount

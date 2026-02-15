@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Bank fixture for E2E tests (BT-569)
+// Registry and factory for Account actors using Dictionary
+
+Actor subclass: Bank
+  state: accounts = #{}
+  state: lastCreated = nil
+
+  openAccount: name =>
+    self.lastCreated := Account spawn.
+    self.lastCreated setOwner: name.
+    self.accounts := self.accounts at: name put: self.lastCreated.
+    ^self.lastCreated
+
+  accountFor: name =>
+    ^self.accounts at: name ifAbsent: [
+      self error: "No account found for: " ++ name
+    ]
+
+  allAccounts => ^self.accounts
