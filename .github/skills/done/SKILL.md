@@ -96,7 +96,7 @@ When activated, execute this workflow to complete work and push:
     
     Poll for **both** Copilot and CodeRabbit reviews simultaneously:
     
-    ```
+    ```text
     Poll: check for reviews every 60 seconds, up to 10 attempts (10 minutes max)
     Stop polling once BOTH reviews have arrived (or timeout)
     ```
@@ -116,11 +116,12 @@ When activated, execute this workflow to complete work and push:
     **Important:** Only gate on verified bot identity (`user.login`). Never match on review body content alone, as that can be spoofed by arbitrary reviewers.
     
     **Bot identities:**
+
     | Bot | `user.login` |
     |-----|-------------|
     | Copilot | `copilot-pull-request-reviewer[bot]` |
     | CodeRabbit | `coderabbitai[bot]` |
-    
+
     **If reviews already exist** (PR was pre-existing):
     - Check if there are unresolved review threads from existing reviews
     - If all threads are resolved, report: "Copilot review already completed ✅" and/or "CodeRabbit review already completed ✅"
