@@ -46,7 +46,10 @@ start_link(Args) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Args, []).
 
 %% @doc Compile a REPL expression.
-%% Returns `{ok, CoreErlang, Warnings}' or `{error, Diagnostics}'.
+%% Returns `{ok, CoreErlang, Warnings}' for expressions,
+%% `{ok, class_definition, ClassInfo}' for inline class definitions (BT-571),
+%% `{ok, method_definition, MethodInfo}' for standalone method definitions (BT-571),
+%% or `{error, Diagnostics}' on failure.
 -spec compile_expression(binary(), binary(), [binary()]) ->
     {ok, binary(), [binary()]} |
     {ok, class_definition, map()} |

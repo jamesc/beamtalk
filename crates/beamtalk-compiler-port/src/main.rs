@@ -97,13 +97,16 @@ fn term_to_bool(term: &Term) -> Option<bool> {
     }
 }
 
-/// Merge a method into a method list, replacing any existing method with the same selector.
+/// Merge a method into a method list, replacing any existing method with the same selector and kind.
 fn merge_method(
     methods: &mut Vec<beamtalk_core::ast::MethodDefinition>,
     method: beamtalk_core::ast::MethodDefinition,
 ) {
     let selector = method.selector.name();
-    if let Some(existing) = methods.iter_mut().find(|m| m.selector.name() == selector) {
+    if let Some(existing) = methods
+        .iter_mut()
+        .find(|m| m.selector.name() == selector && m.kind == method.kind)
+    {
         *existing = method;
     } else {
         methods.push(method);

@@ -32,6 +32,7 @@
 //! // Source: x := 3 + 4
 //! let module = Module {
 //!     classes: Vec::new(),
+//!     method_definitions: Vec::new(),
 //!     expressions: vec![
 //!         Expression::Assignment {
 //!             target: Box::new(Expression::Identifier(Identifier {
