@@ -1,0 +1,79 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// StackFrame — A single frame in an exception stack trace (BT-107).
+///
+/// StackFrame wraps Erlang stacktrace entries as first-class Beamtalk objects.
+/// Only available post-exception (via `Exception>>stackTrace`), not during
+/// live execution (BEAM doesn't expose thisContext).
+///
+/// ## Examples
+/// ```beamtalk
+/// [1 / 0] on: Exception do: [:e |
+///   e stackTrace first method
+/// ]
+/// ```
+Object subclass: StackFrame
+  /// Return the function/method name as a symbol.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// frame method   // => #dispatch
+  /// ```
+  method => @primitive "method"
+
+  /// Return the Beamtalk class name, or nil if not a Beamtalk class.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// frame receiverClass   // => Counter
+  /// ```
+  receiverClass => @primitive "receiverClass"
+
+  /// Return the function arity (number of arguments).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// frame arguments   // => 4
+  /// ```
+  arguments => @primitive "arguments"
+
+  /// Return the source location as "file:line", or nil if unavailable.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// frame sourceLocation   // => "counter.erl:42"
+  /// ```
+  sourceLocation => @primitive "sourceLocation"
+
+  /// Return the Erlang module name as a string, or nil.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// frame moduleName   // => "counter"
+  /// ```
+  moduleName => @primitive "moduleName"
+
+  /// Return the source line number, or nil if unavailable.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// frame line   // => 42
+  /// ```
+  line => @primitive "line"
+
+  /// Return the source file path as a string, or nil if unavailable.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// frame file   // => "counter.erl"
+  /// ```
+  file => @primitive "file"
+
+  /// Return a human-readable string representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// frame printString   // => "Counter>>dispatch/4 (counter.erl:42)"
+  /// ```
+  printString => @primitive "printString"

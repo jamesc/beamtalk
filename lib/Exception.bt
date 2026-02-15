@@ -60,6 +60,17 @@ Object subclass: Exception
   /// ```
   printString => @primitive "printString"
 
+  /// Return the stack trace as a list of StackFrame objects (BT-107).
+  ///
+  /// Only available when the exception was caught via `on:do:`.
+  /// Returns an empty list if no stacktrace was captured.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// [1 / 0] on: Exception do: [:e | e stackTrace]
+  /// ```
+  stackTrace => @primitive "stackTrace"
+
   /// Human-readable description of the receiver.
   ///
   /// ## Examples
