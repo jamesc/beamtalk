@@ -305,7 +305,7 @@ fn span_to_range(span: Span, source: &str) -> Range {
     Range { start, end }
 }
 
-/// Converts a byte offset to an LSP `Position` (0-based line/character).
+/// Converts a byte offset to an LSP `Position` (0-based line/character in UTF-16 code units).
 fn offset_to_position(offset: usize, source: &str) -> tower_lsp::lsp_types::Position {
     let offset = offset.min(source.len());
     let mut line = 0u32;
@@ -318,7 +318,14 @@ fn offset_to_position(offset: usize, source: &str) -> tower_lsp::lsp_types::Posi
             line += 1;
             col = 0;
         } else {
-            col += 1;
+            // UTF-16 len is always 1 or 2, safe to truncate
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "char::len_utf16() is always 1 or 2"
+            )]
+            {
+                col += ch.len_utf16() as u32;
+            }
         }
     }
     tower_lsp::lsp_types::Position::new(line, col)

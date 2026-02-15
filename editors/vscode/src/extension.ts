@@ -22,7 +22,10 @@ export async function activate(
   };
 
   const clientOptions: LanguageClientOptions = {
-    documentSelector: [{ scheme: "file", language: "beamtalk" }],
+    documentSelector: [
+      { scheme: "file", language: "beamtalk" },
+      { scheme: "untitled", language: "beamtalk" },
+    ],
   };
 
   client = new LanguageClient(
