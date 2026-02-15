@@ -402,7 +402,7 @@ impl CoreErlangGenerator {
                     let mut arg_docs: Vec<Document<'static>> = Vec::new();
                     for (j, arg) in arguments.iter().enumerate() {
                         if j > 0 {
-                            arg_docs.push(Document::String(", ".to_string()));
+                            arg_docs.push(Document::Str(", "));
                         }
                         arg_docs.push(self.expression_doc(arg)?);
                     }
@@ -495,50 +495,53 @@ impl CoreErlangGenerator {
                 .filter(|m| m.kind == MethodKind::Primary)
                 .collect();
 
-            let methods_str: Vec<String> = instance_methods
-                .iter()
-                .map(|method| {
-                    let is_sealed = if method.is_sealed || class.is_sealed {
-                        "'true'"
-                    } else {
-                        "'false'"
-                    };
-                    format!(
-                        "'{}' => ~{{'arity' => {}, 'is_sealed' => {}}}~",
-                        method.selector.name(),
-                        method.selector.arity(),
-                        is_sealed
-                    )
-                })
-                .collect();
-            let instance_methods_str = methods_str.join(", ");
+            let mut instance_method_docs: Vec<Document<'static>> = Vec::new();
+            for (m_idx, method) in instance_methods.iter().enumerate() {
+                if m_idx > 0 {
+                    instance_method_docs.push(Document::Str(", "));
+                }
+                let is_sealed = if method.is_sealed || class.is_sealed {
+                    "'true'"
+                } else {
+                    "'false'"
+                };
+                instance_method_docs.push(Document::String(format!(
+                    "'{}' => ~{{'arity' => {}, 'is_sealed' => {}}}~",
+                    method.selector.name(),
+                    method.selector.arity(),
+                    is_sealed
+                )));
+            }
+            let instance_methods_doc = Document::Vec(instance_method_docs);
 
             // Instance variables
-            let inst_vars_str: Vec<String> = class
-                .state
-                .iter()
-                .map(|s| format!("'{}'", s.name.name))
-                .collect();
-            let inst_vars = inst_vars_str.join(", ");
+            let mut inst_var_docs: Vec<Document<'static>> = Vec::new();
+            for (s_idx, s) in class.state.iter().enumerate() {
+                if s_idx > 0 {
+                    inst_var_docs.push(Document::Str(", "));
+                }
+                inst_var_docs.push(Document::String(format!("'{}'", s.name.name)));
+            }
+            let inst_vars_doc = Document::Vec(inst_var_docs);
 
             // Class methods - depends on context
-            let mut class_method_entries = Vec::new();
+            let mut class_method_entries: Vec<Document<'static>> = Vec::new();
             if self.context == CodeGenContext::Actor {
-                class_method_entries.push("'spawn' => ~{'arity' => 0}~,".to_string());
-                class_method_entries.push("'spawnWith:' => ~{'arity' => 1}~,".to_string());
+                class_method_entries.push(Document::Str("'spawn' => ~{'arity' => 0}~,"));
+                class_method_entries.push(Document::Str("'spawnWith:' => ~{'arity' => 1}~,"));
             } else {
-                class_method_entries.push("'new' => ~{'arity' => 0}~,".to_string());
-                class_method_entries.push("'new:' => ~{'arity' => 1}~,".to_string());
+                class_method_entries.push(Document::Str("'new' => ~{'arity' => 0}~,"));
+                class_method_entries.push(Document::Str("'new:' => ~{'arity' => 1}~,"));
             }
-            class_method_entries.push("'superclass' => ~{'arity' => 0}~".to_string());
+            class_method_entries.push(Document::Str("'superclass' => ~{'arity' => 0}~"));
             // BT-411: User-defined class methods
             for method in &class.class_methods {
                 if method.kind == MethodKind::Primary {
-                    class_method_entries.push(format!(
+                    class_method_entries.push(Document::String(format!(
                         ", '{}' => ~{{'arity' => {}}}~",
                         method.selector.name(),
                         method.selector.arity()
-                    ));
+                    )));
                 }
             }
 
@@ -554,22 +557,23 @@ impl CoreErlangGenerator {
             ];
 
             // BT-101: Method source
-            let mut method_source_parts = Vec::new();
+            let mut method_source_docs: Vec<Document<'static>> = Vec::new();
             for (method_idx, method) in instance_methods.iter().enumerate() {
                 if method_idx > 0 {
-                    method_source_parts.push(", ".to_string());
+                    method_source_docs.push(Document::Str(", "));
                 }
                 let source_str = self.extract_method_source(method);
                 let binary = Self::binary_string_literal(&source_str);
-                method_source_parts.push(format!("'{}' => {binary}", method.selector.name()));
+                method_source_docs
+                    .push(Document::String(format!("'{}' => {binary}", method.selector.name())));
             }
-            let method_source_str = method_source_parts.join("");
+            let method_source_doc = Document::Vec(method_source_docs);
 
             // BT-412: Class variable initial values
             let mut class_var_parts: Vec<Document<'static>> = Vec::new();
             for (cv_idx, cv) in class.class_variables.iter().enumerate() {
                 if cv_idx > 0 {
-                    class_var_parts.push(Document::String(", ".to_string()));
+                    class_var_parts.push(Document::Str(", "));
                 }
                 let val = if let Some(ref default_value) = cv.default_value {
                     self.expression_doc(default_value)?
@@ -604,15 +608,21 @@ impl CoreErlangGenerator {
                         line(),
                         format!("'is_abstract' => '{is_abstract}',"),
                         line(),
-                        format!("'instance_methods' => ~{{{instance_methods_str}}}~,"),
+                        "'instance_methods' => ~{",
+                        instance_methods_doc,
+                        "}~,",
                         line(),
-                        format!("'instance_variables' => [{inst_vars}],"),
+                        "'instance_variables' => [",
+                        inst_vars_doc,
+                        "],",
                         line(),
                         class_methods_doc,
                         line(),
-                        format!("'method_source' => ~{{{method_source_str}}}~,"),
+                        "'method_source' => ~{",
+                        method_source_doc,
+                        "}~,",
                         line(),
-                        format!("'class_variables' => ~{{"),
+                        "'class_variables' => ~{",
                         class_vars_doc,
                         "}~",
                     ]

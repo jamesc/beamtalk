@@ -139,31 +139,31 @@ impl CoreErlangGenerator {
         // Generate new/0 - creates instance with default field values
         if !has_explicit_new {
             docs.push(self.generate_value_type_new(class)?);
-            docs.push(docvec!["\n"]);
+            docs.push(Document::Str("\n"));
         }
 
         // Generate new/1 - creates instance with initialization arguments
         if !has_explicit_new_with {
             docs.push(self.generate_value_type_new_with_args()?);
-            docs.push(docvec!["\n"]);
+            docs.push(Document::Str("\n"));
         }
 
         // Generate instance methods as pure functions
         for method in &class.methods {
             docs.push(self.generate_value_type_method(method, class)?);
-            docs.push(docvec!["\n"]);
+            docs.push(Document::Str("\n"));
         }
 
         // Generate dispatch/3 and has_method/1 for all value types
         // (superclass delegation chain — same pattern as actors)
         docs.push(self.generate_primitive_dispatch(class)?);
-        docs.push(docvec!["\n"]);
+        docs.push(Document::Str("\n"));
         // BT-446: Generate dispatch/4 for actor hierarchy walk.
         // The dispatch service only calls modules that export dispatch/4.
         docs.push(self.generate_dispatch_4(class)?);
-        docs.push(docvec!["\n"]);
+        docs.push(Document::Str("\n"));
         docs.push(self.generate_primitive_has_method(class)?);
-        docs.push(docvec!["\n"]);
+        docs.push(Document::Str("\n"));
 
         // Generate superclass/0 for reflection
         let superclass_atom = class.superclass.as_ref().map_or("nil", |s| s.name.as_str());
@@ -175,15 +175,15 @@ impl CoreErlangGenerator {
         // BT-411: Generate class-side method functions
         if !class.class_methods.is_empty() {
             docs.push(self.generate_class_method_functions(class)?);
-            docs.push(docvec!["\n"]);
+            docs.push(Document::Str("\n"));
         }
 
         // BT-246: Register value type class with the class system for dynamic dispatch
         docs.push(self.generate_register_class(module)?);
-        docs.push(docvec!["\n"]);
+        docs.push(Document::Str("\n"));
 
         // Module end
-        docs.push(docvec!["end\n"]);
+        docs.push(Document::Str("end\n"));
 
         Ok(Document::Vec(docs))
     }
@@ -295,14 +295,8 @@ impl CoreErlangGenerator {
 
     /// Generates `new/0` for a collection type that returns an empty native value.
     #[allow(clippy::unnecessary_wraps)]
-    fn generate_collection_new(empty_value: &str) -> Document<'static> {
-        docvec![
-            "'new'/0 = fun () ->\n",
-            "    ",
-            empty_value.to_string(),
-            "\n",
-            "\n",
-        ]
+    fn generate_collection_new(empty_value: &'static str) -> Document<'static> {
+        docvec!["'new'/0 = fun () ->\n", "    ", empty_value, "\n", "\n",]
     }
 
     /// Generates `new/1` for Dictionary: returns `InitArgs` directly.
@@ -336,7 +330,7 @@ impl CoreErlangGenerator {
         }
 
         // Build method body parts
-        let mut body_parts = Vec::new();
+        let mut body_parts: Vec<Document<'static>> = Vec::new();
 
         // Generate method body expressions
         // For value types, there's no state threading - they're immutable
@@ -350,23 +344,25 @@ impl CoreErlangGenerator {
             if let Expression::Return { value, .. } = expr {
                 let expr_code = self.capture_expression(value)?;
                 if i > 0 {
-                    body_parts.push("    ".to_string());
+                    body_parts.push(Document::Str("    "));
                 }
-                body_parts.push(expr_code);
+                body_parts.push(Document::String(expr_code));
                 break;
             }
 
             if is_last {
                 let expr_code = self.capture_expression(expr)?;
                 if i > 0 {
-                    body_parts.push("    ".to_string());
+                    body_parts.push(Document::Str("    "));
                 }
-                body_parts.push(expr_code);
+                body_parts.push(Document::String(expr_code));
             } else {
                 // Non-last expressions: wrap in let to sequence side effects
                 let tmp_var = self.fresh_temp_var("seq");
                 let expr_code = self.capture_expression(expr)?;
-                body_parts.push(format!("    let {tmp_var} = {expr_code} in\n"));
+                body_parts.push(Document::String(format!(
+                    "    let {tmp_var} = {expr_code} in\n"
+                )));
             }
         }
 
@@ -374,7 +370,7 @@ impl CoreErlangGenerator {
 
         Ok(docvec![
             format!("'{}'/{}= fun ({}) ->\n", mangled, arity, params.join(", ")),
-            body_parts.join(""),
+            Document::Vec(body_parts),
             "\n",
         ])
     }
@@ -465,7 +461,7 @@ impl CoreErlangGenerator {
     /// BT-447: For classes with zero instance methods (e.g., File), generates a
     /// minimal stub that handles only `class` and `respondsTo:`, delegating
     /// everything else to the superclass.
-    #[allow(clippy::too_many_lines, clippy::format_push_string)]
+    #[allow(clippy::too_many_lines)]
     fn generate_primitive_dispatch(
         &mut self,
         class: &ClassDefinition,
@@ -484,8 +480,8 @@ impl CoreErlangGenerator {
             .methods
             .iter()
             .any(|m| m.selector.name() == "asString");
-        let as_string_branch = if has_as_string {
-            String::new()
+        let as_string_branch: Document<'static> = if has_as_string {
+            Document::Vec(Vec::new())
         } else {
             let default_str = match class_name.as_str() {
                 "True" => "true",
@@ -495,14 +491,13 @@ impl CoreErlangGenerator {
                 _ => "",
             };
             if default_str.is_empty() {
-                String::new()
+                Document::Vec(Vec::new())
             } else {
                 let binary = Self::core_erlang_binary(default_str);
-                format!(
-                    "        <'asString'> when 'true' ->\n\
-                     {0}            {binary}\n",
-                    ""
-                )
+                docvec![
+                    "        <'asString'> when 'true' ->\n",
+                    format!("            {binary}\n"),
+                ]
             }
         };
 
@@ -517,15 +512,17 @@ impl CoreErlangGenerator {
         ));
 
         // Route each class-defined method to its individual function
-        let mut method_branches = String::new();
+        let mut method_branches: Vec<Document<'static>> = Vec::new();
         for method in &class.methods {
             let mangled = method.selector.to_erlang_atom();
-            method_branches.push_str(&format!("        <'{mangled}'> when 'true' ->\n"));
+            method_branches.push(Document::String(format!(
+                "        <'{mangled}'> when 'true' ->\n"
+            )));
 
             if method.parameters.is_empty() {
-                method_branches.push_str(&format!(
+                method_branches.push(Document::String(format!(
                     "            call '{mod_name}':'{mangled}'(Self)\n"
-                ));
+                )));
             } else {
                 // Extract args from Args list: hd(Args), hd(tl(Args)), ...
                 for (i, _param) in method.parameters.iter().enumerate() {
@@ -534,35 +531,37 @@ impl CoreErlangGenerator {
                     for _ in 0..i {
                         access = format!("call 'erlang':'tl'({access})");
                     }
-                    method_branches.push_str(&format!(
+                    method_branches.push(Document::String(format!(
                         "            let <{arg_var}> = call 'erlang':'hd'({access}) in\n"
-                    ));
+                    )));
                 }
-                method_branches
-                    .push_str(&format!("            call '{mod_name}':'{mangled}'(Self"));
+                let mut call_str = format!("            call '{mod_name}':'{mangled}'(Self");
                 for i in 0..method.parameters.len() {
-                    method_branches.push_str(&format!(", DispArg{i}"));
+                    use std::fmt::Write;
+                    let _ = write!(call_str, ", DispArg{i}");
                 }
-                method_branches.push_str(")\n");
+                call_str.push_str(")\n");
+                method_branches.push(Document::String(call_str));
             }
         }
 
         // Default case: extension fallback, then superclass delegation
-        let not_found_branch = if let Some(ref super_mod) = superclass_mod {
-            format!("                    call '{super_mod}':'dispatch'(Selector, Args, Self)\n")
+        let not_found_branch: Document<'static> = if let Some(ref super_mod) = superclass_mod {
+            Document::String(format!(
+                "                    call '{super_mod}':'dispatch'(Selector, Args, Self)\n"
+            ))
         } else {
             // Root of hierarchy — raise does_not_understand
             let dnu_hint = Self::core_erlang_binary(
                 "Check spelling or use 'respondsTo:' to verify method exists",
             );
-            format!(
-                "                    let <DnuClass> = call 'beamtalk_primitive':'class_of'(Self) in\n\
-                 {0}                    let <DnuErr0> = call 'beamtalk_error':'new'('does_not_understand', DnuClass) in\n\
-                 {0}                    let <DnuErr1> = call 'beamtalk_error':'with_selector'(DnuErr0, Selector) in\n\
-                 {0}                    let <DnuErr2> = call 'beamtalk_error':'with_hint'(DnuErr1, {dnu_hint}) in\n\
-                 {0}                    call 'beamtalk_error':'raise'(DnuErr2)\n",
-                ""
-            )
+            docvec![
+                "                    let <DnuClass> = call 'beamtalk_primitive':'class_of'(Self) in\n",
+                "                    let <DnuErr0> = call 'beamtalk_error':'new'('does_not_understand', DnuClass) in\n",
+                "                    let <DnuErr1> = call 'beamtalk_error':'with_selector'(DnuErr0, Selector) in\n",
+                format!("                    let <DnuErr2> = call 'beamtalk_error':'with_hint'(DnuErr1, {dnu_hint}) in\n"),
+                "                    call 'beamtalk_error':'raise'(DnuErr2)\n",
+            ]
         };
 
         let doc = docvec![
@@ -590,9 +589,7 @@ impl CoreErlangGenerator {
                 "            let <IvaErr0> = call 'beamtalk_error':'new'('immutable_value', '{class_name}') in\n"
             ),
             "            let <IvaErr1> = call 'beamtalk_error':'with_selector'(IvaErr0, 'instVarAt:') in\n",
-            "            let <IvaErr2> = call 'beamtalk_error':'with_hint'(IvaErr1, ",
-            iva_hint,
-            ") in\n",
+            format!("            let <IvaErr2> = call 'beamtalk_error':'with_hint'(IvaErr1, {iva_hint}) in\n"),
             "            call 'beamtalk_error':'raise'(IvaErr2)\n",
             // instVarAt:put:
             "        <'instVarAt:put:'> when 'true' ->\n",
@@ -600,9 +597,7 @@ impl CoreErlangGenerator {
                 "            let <ImmErr0> = call 'beamtalk_error':'new'('immutable_value', '{class_name}') in\n"
             ),
             "            let <ImmErr1> = call 'beamtalk_error':'with_selector'(ImmErr0, 'instVarAt:put:') in\n",
-            "            let <ImmErr2> = call 'beamtalk_error':'with_hint'(ImmErr1, ",
-            immutable_hint,
-            ") in\n",
+            format!("            let <ImmErr2> = call 'beamtalk_error':'with_hint'(ImmErr1, {immutable_hint}) in\n"),
             "            call 'beamtalk_error':'raise'(ImmErr2)\n",
             // perform:
             "        <'perform:'> when 'true' ->\n",
@@ -614,7 +609,7 @@ impl CoreErlangGenerator {
             "            let <PwaArgs> = call 'erlang':'hd'(call 'erlang':'tl'(Args)) in\n",
             format!("            call '{mod_name}':'dispatch'(PwaSel, PwaArgs, Self)\n"),
             // Class-defined method branches
-            method_branches,
+            Document::Vec(method_branches),
             // Default case
             "        <_Other> when 'true' ->\n",
             format!(
@@ -648,7 +643,8 @@ impl CoreErlangGenerator {
         let class_name = self.class_name().clone();
         let mod_name = self.module_name.clone();
 
-        let header = docvec!["'dispatch'/4 = fun (Selector, Args, Self, State) ->\n"];
+        let header: Document<'static> =
+            Document::Str("'dispatch'/4 = fun (Selector, Args, Self, State) ->\n");
 
         let body = if class_name == "Object" {
             self.generate_object_dispatch_4(mod_name.as_str())
@@ -803,28 +799,38 @@ impl CoreErlangGenerator {
 
     /// Generates a structured `arity_mismatch` error for dispatch/4 argument validation.
     #[allow(clippy::unused_self)]
-    fn arity_error_fragment(&self, selector: &str, expected_arity: u32, indent: &str) -> String {
+    fn arity_error_fragment(
+        &self,
+        selector: &str,
+        expected_arity: u32,
+        indent: &str,
+    ) -> Document<'static> {
         let hint = Self::core_erlang_binary(&format!(
             "Expected {expected_arity} argument(s) for {selector}"
         ));
-        format!(
-            "{indent}let <ArErr0> = call 'beamtalk_error':'new'('arity_mismatch', call 'beamtalk_tagged_map':'class_of'(State, 'Object')) in\n\
-             {indent}let <ArErr1> = call 'beamtalk_error':'with_selector'(ArErr0, {selector}) in\n\
-             {indent}let <ArErr2> = call 'beamtalk_error':'with_hint'(ArErr1, {hint}) in\n\
-             {indent}{{'error', ArErr2, State}}"
-        )
+        docvec![
+            format!("{indent}let <ArErr0> = call 'beamtalk_error':'new'('arity_mismatch', call 'beamtalk_tagged_map':'class_of'(State, 'Object')) in\n"),
+            format!("{indent}let <ArErr1> = call 'beamtalk_error':'with_selector'(ArErr0, {selector}) in\n"),
+            format!("{indent}let <ArErr2> = call 'beamtalk_error':'with_hint'(ArErr1, {hint}) in\n"),
+            format!("{indent}{{'error', ArErr2, State}}"),
+        ]
     }
 
     /// Generates a structured `type_error` for dispatch/4 argument validation.
     #[allow(clippy::unused_self)]
-    fn type_error_fragment(&self, selector: &str, hint_msg: &str, indent: &str) -> String {
+    fn type_error_fragment(
+        &self,
+        selector: &str,
+        hint_msg: &str,
+        indent: &str,
+    ) -> Document<'static> {
         let hint = Self::core_erlang_binary(hint_msg);
-        format!(
-            "{indent}let <TyErr0> = call 'beamtalk_error':'new'('type_error', call 'beamtalk_tagged_map':'class_of'(State, 'Object')) in\n\
-             {indent}let <TyErr1> = call 'beamtalk_error':'with_selector'(TyErr0, {selector}) in\n\
-             {indent}let <TyErr2> = call 'beamtalk_error':'with_hint'(TyErr1, {hint}) in\n\
-             {indent}{{'error', TyErr2, State}}"
-        )
+        docvec![
+            format!("{indent}let <TyErr0> = call 'beamtalk_error':'new'('type_error', call 'beamtalk_tagged_map':'class_of'(State, 'Object')) in\n"),
+            format!("{indent}let <TyErr1> = call 'beamtalk_error':'with_selector'(TyErr0, {selector}) in\n"),
+            format!("{indent}let <TyErr2> = call 'beamtalk_error':'with_hint'(TyErr1, {hint}) in\n"),
+            format!("{indent}{{'error', TyErr2, State}}"),
+        ]
     }
 
     /// Generates the `has_method/1` function for a value type.
@@ -874,10 +880,12 @@ impl CoreErlangGenerator {
             selectors.push(format!("'{mangled}'"));
         }
 
-        let false_branch = if let Some(ref super_mod) = superclass_mod {
-            format!("<'false'> when 'true' -> call '{super_mod}':'has_method'(Selector)\n")
+        let false_branch: Document<'static> = if let Some(ref super_mod) = superclass_mod {
+            Document::String(format!(
+                "<'false'> when 'true' -> call '{super_mod}':'has_method'(Selector)\n"
+            ))
         } else {
-            "<'false'> when 'true' -> 'false'\n".to_string()
+            Document::Str("<'false'> when 'true' -> 'false'\n")
         };
 
         let selectors_list = selectors.join(", ");
