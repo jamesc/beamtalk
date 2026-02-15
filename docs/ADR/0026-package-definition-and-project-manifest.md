@@ -408,6 +408,7 @@ Allow subdirectories within `src/` to be independent packages with their own `be
 ### Phase 4: Workspace integration
 - Workspace discovery (ADR 0004) uses `beamtalk.toml` as primary marker (already does)
 - When `beamtalk repl` finds a `beamtalk.toml`, it auto-compiles the package and adds `_build/dev/ebin/` to the code path — all package classes are available in the REPL immediately
+- **On compile failure:** show errors but start the REPL anyway — stdlib and workspace singletons are still available, just without the package's classes. The user can fix errors and `:reload`
 - `beamtalk test` discovers tests in `test/` relative to package root
 - `beamtalk run` resolves entry point from package
 
