@@ -45,6 +45,12 @@ build-rust-release:
     @cargo build --all-targets --release --quiet
     @echo "✅ Rust release build complete"
 
+# Build the LSP server
+build-lsp:
+    @echo "🔨 Building LSP server..."
+    @cargo build -p beamtalk-lsp --quiet
+    @echo "✅ LSP server built: target/debug/beamtalk-lsp"
+
 # Build Erlang runtime
 build-erlang:
     @echo "🔨 Building Erlang runtime..."
@@ -525,11 +531,21 @@ install PREFIX="/usr/local": build-release build-stdlib
         echo "❌ Compiler port binary not found. Run 'just build-release' first."
         exit 1
     fi
+    if [ ! -f target/release/beamtalk-lsp ]; then
+        echo "❌ LSP server binary not found. Run 'just build-release' first."
+        exit 1
+    fi
+    if [ ! -f target/release/beamtalk-mcp ]; then
+        echo "❌ MCP server binary not found. Run 'just build-release' first."
+        exit 1
+    fi
 
     # Binaries
     install -d "${PREFIX}/bin"
     install -m 755 target/release/beamtalk "${PREFIX}/bin/beamtalk"
     install -m 755 target/release/beamtalk-compiler-port "${PREFIX}/bin/beamtalk-compiler-port"
+    install -m 755 target/release/beamtalk-lsp "${PREFIX}/bin/beamtalk-lsp"
+    install -m 755 target/release/beamtalk-mcp "${PREFIX}/bin/beamtalk-mcp"
 
     # OTP application ebin directories
     for app in beamtalk_runtime beamtalk_workspace beamtalk_compiler jsx; do
@@ -560,6 +576,8 @@ install PREFIX="/usr/local": build-release build-stdlib
 
     echo "✅ Installed beamtalk to ${PREFIX}"
     echo "   Binary:  ${PREFIX}/bin/beamtalk"
+    echo "   LSP:     ${PREFIX}/bin/beamtalk-lsp"
+    echo "   MCP:     ${PREFIX}/bin/beamtalk-mcp"
     echo "   Runtime: ${PREFIX}/lib/beamtalk/lib/"
 
 # Uninstall beamtalk from PREFIX (default: /usr/local)
@@ -568,9 +586,23 @@ uninstall PREFIX="/usr/local":
     set -euo pipefail
     PREFIX="{{PREFIX}}"
     echo "🗑️  Uninstalling beamtalk from ${PREFIX}..."
-    rm -f "${PREFIX}/bin/beamtalk" "${PREFIX}/bin/beamtalk-compiler-port"
+    rm -f "${PREFIX}/bin/beamtalk" "${PREFIX}/bin/beamtalk-compiler-port" "${PREFIX}/bin/beamtalk-lsp" "${PREFIX}/bin/beamtalk-mcp"
     rm -rf "${PREFIX}/lib/beamtalk"
     echo "✅ Uninstalled beamtalk from ${PREFIX}"
+
+# Build VS Code extension (.vsix)
+dist-vscode:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📦 Building VS Code extension..."
+    cd editors/vscode
+    npm install --quiet
+    npm run compile
+    # Symlink repo LICENSE for vsce packaging
+    ln -sf ../../LICENSE LICENSE
+    npx --yes @vscode/vsce package --out ../../dist/beamtalk.vsix
+    rm -f LICENSE
+    echo "✅ VS Code extension: dist/beamtalk.vsix"
 
 # Create a distributable install in dist/
 dist: build-release build-stdlib
@@ -579,8 +611,10 @@ dist: build-release build-stdlib
     echo "📦 Creating distribution in dist/..."
     rm -rf dist
     just install dist
+    just dist-vscode
     echo "✅ Distribution ready in dist/"
     echo "   Run: dist/bin/beamtalk repl"
+    echo "   VS Code extension: dist/beamtalk.vsix"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Documentation
