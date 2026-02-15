@@ -72,6 +72,39 @@ c decrement              // ⚠️ Warning: Counter does not respond to 'decreme
 - Method calls on known types check against ClassHierarchy method tables
 - `doesNotUnderstand:` remains valid — if a class defines it, any message is accepted
 
+**Ambiguous control flow defaults to Dynamic:**
+
+```beamtalk
+// Control flow producing different types → Dynamic (no checking)
+x := condition ifTrue: [Counter spawn] ifFalse: [Timer spawn]
+x increment    // No warning — x is Dynamic (could be either type)
+
+// Single-branch or same-type → inferred
+y := condition ifTrue: [42] ifFalse: [0]
+y + 1          // ✅ y is Integer (both branches return Integer)
+```
+
+Phase 4 adds union types and type narrowing for control flow. In Phase 1, the rule is simple: if the compiler can't determine a single type, it falls back to `Dynamic` and stops checking. No false positives from conservative inference.
+
+**Block/closure typing — inferred from context:**
+
+Blocks are ubiquitous in beamtalk (control flow, iteration, callbacks). The type checker infers block parameter and return types from the message they're passed to:
+
+```beamtalk
+// collect: expects a block that takes an element and returns a value
+// The compiler knows List>>collect: takes Block<E, R>
+items collect: [:x | x + 1]     // x inferred as element type, result as Integer
+
+// Unknown context → block parameters are Dynamic
+myBlock := [:x | x + 1]         // x is Dynamic (no context yet)
+items collect: myBlock           // Now context exists, but too late to check x
+
+// Literal blocks in known positions are fully checked
+3 timesRepeat: [counter increment]  // ✅ counter checked as Counter
+```
+
+The key insight: **literal blocks at message-send sites can be typed from context** (the compiler knows what `collect:` expects). Stored blocks assigned to variables lose context and become `Dynamic`. This matches the existing control-flow vs stored-block distinction (ADR for block semantics).
+
 **What the compiler already knows:**
 - Every class and its methods (via `ClassHierarchy`)
 - Superclass chains and inheritance
@@ -180,6 +213,30 @@ BankAccount subclass: SavingsAccount
 ```
 
 This parallels how `sealed` is inherited — if the base class makes a contract, subclasses honor it.
+
+**Escape hatch for false positives:**
+
+When the type checker is wrong — and it will be — developers need a way to say "trust me." The `as:` message casts a value to a known type:
+
+```beamtalk
+typed Actor subclass: MessageRouter
+  state: handlers: Dictionary = Dictionary new
+
+  dispatch: message =>
+    handler := (self.handlers at: message class) as: Handler  // "I know this is a Handler"
+    handler handle: message                                    // No warning — handler is Handler
+```
+
+`as:` is a compile-time type assertion — it tells the type checker to treat the value as the given type. It generates no runtime code (type erasure). If the assertion is wrong, the runtime error is the same as today.
+
+For inline suppression of specific warnings, a comment directive works:
+
+```beamtalk
+  processRaw: data =>
+    // @type: Dynamic
+    result := self dangerousReflectiveThing: data   // No type checking on this line
+    result
+```
 
 **Use cases:**
 - Library authors: "this public API is fully typed"
