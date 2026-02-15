@@ -1,0 +1,64 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E test for method patching on file-loaded classes (BT-588)
+//
+// Tests that standalone method definitions (>>) work on classes
+// loaded from files via :load, not just inline-defined classes.
+// This was broken because handle_load stored class sources with
+// string keys but handle_method_definition looked them up with
+// binary keys.
+
+// @load tests/e2e/fixtures/counter.bt
+
+// ===========================================================================
+// LOAD + USE CLASS
+// ===========================================================================
+
+// Spawn and use the file-loaded Counter
+c := Counter spawn
+// => #Actor<Counter,_>
+
+c increment
+// => 1
+
+c increment
+// => 2
+
+c getValue
+// => 2
+
+// ===========================================================================
+// PATCH METHOD ON FILE-LOADED CLASS
+// ===========================================================================
+
+// Replace increment to add 10 instead of 1
+Counter >> increment => self.value := self.value + 10
+// => _
+
+// New instances should use patched method
+c2 := Counter spawn
+// => #Actor<Counter,_>
+
+c2 increment
+// => 10
+
+c2 getValue
+// => 10
+
+// ===========================================================================
+// ADD NEW METHOD TO FILE-LOADED CLASS
+// ===========================================================================
+
+// Add a new method that didn't exist in the original file
+Counter >> doubleValue => ^self.value * 2
+// => _
+
+c3 := Counter spawn
+// => #Actor<Counter,_>
+
+c3 increment
+// => 10
+
+c3 doubleValue
+// => 20
