@@ -1,7 +1,7 @@
 # ADR 0015: Signal-Time Exception Objects and Error Class Hierarchy
 
 ## Status
-Accepted (2026-02-10)
+Implemented (2026-02-15)
 
 ## Context
 

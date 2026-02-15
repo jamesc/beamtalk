@@ -1,7 +1,7 @@
 # ADR 0013: Class Variables, Class-Side Methods, and Instantiation Protocol
 
 ## Status
-Accepted (2026-02-09)
+Implemented (2026-02-15)
 
 ## Context
 

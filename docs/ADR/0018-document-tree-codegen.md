@@ -1,7 +1,7 @@
 # ADR 0018: Document Tree Code Generation (Wadler-Lindig Pretty Printer)
 
 ## Status
-Accepted (2026-02-11)
+Implemented (2026-02-15)
 
 ## Context
 

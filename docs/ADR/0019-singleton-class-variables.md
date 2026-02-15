@@ -1,7 +1,7 @@
 # ADR 0019: Singleton Access via Class Variables
 
 ## Status
-Accepted (2026-02-12)
+Implemented (2026-02-15)
 
 ## Context
 

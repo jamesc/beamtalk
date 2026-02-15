@@ -1,7 +1,7 @@
 # ADR 0010: Global Objects and Singleton Dispatch
 
 ## Status
-Accepted (2026-02-07)
+Implemented (2026-02-15)
 
 ## Context
 
