@@ -354,20 +354,23 @@ impl CoreErlangGenerator {
     }
 
     /// Generates the `code_change/3` callback for hot code reload.
+    ///
+    /// Delegates to `beamtalk_hot_reload:code_change/3` for state migration.
+    /// When Extra contains `{NewInstanceVars, Module}`, the hot reload service
+    /// migrates fields: adds new fields with defaults, preserves existing values,
+    /// and drops removed fields.
     #[allow(clippy::unused_self)] // method on impl for API consistency
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_code_change(
         &self,
     ) -> Result<Document<'static>> {
         let doc = docvec![
-            "'code_change'/3 = fun (_OldVsn, State, _Extra) ->",
+            "'code_change'/3 = fun (OldVsn, State, Extra) ->",
             nest(
                 INDENT,
                 docvec![
                     line(),
-                    "%% TODO: Add state migration logic",
-                    line(),
-                    "{'ok', State}",
+                    "call 'beamtalk_hot_reload':'code_change'(OldVsn, State, Extra)",
                 ]
             ),
             "\n",

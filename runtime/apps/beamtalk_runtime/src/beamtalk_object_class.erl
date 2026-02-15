@@ -82,7 +82,8 @@
     module_name/1,
     create_subclass/3,
     class_send/3,
-    set_class_var/3
+    set_class_var/3,
+    update_class/2
 ]).
 
 %% Deprecated re-exports — callers should migrate to beamtalk_class_registry (BT-576)
@@ -159,6 +160,21 @@ start_link(ClassName, ClassInfo) ->
 start_link(ClassInfo) ->
     ClassName = maps:get(name, ClassInfo),
     start_link(ClassName, ClassInfo).
+
+%% @doc Update an existing class process with new metadata after redefinition.
+%%
+%% Called when a class is reloaded (via :load or inline REPL).
+%% Updates instance methods, class methods, instance variables, method source,
+%% and rebuilds flattened method tables. Returns the list of instance variable
+%% names from the new definition (for state migration during hot reload).
+-spec update_class(class_name(), map()) -> {ok, [atom()]} | {error, term()}.
+update_class(ClassName, ClassInfo) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined ->
+            {error, {class_not_found, ClassName}};
+        Pid ->
+            gen_server:call(Pid, {update_class, ClassInfo})
+    end.
 
 %% @doc Look up a class by name.
 %% @deprecated Use {@link beamtalk_class_registry:whereis_class/1} instead (BT-576).
@@ -652,6 +668,37 @@ handle_call({put_method, Selector, Fun, Source}, _From, State) ->
     beamtalk_class_registry:invalidate_subclass_flattened_tables(State#class_state.name),
     
     {reply, ok, NewState};
+
+%% BT-572: Update class metadata after redefinition (hot reload).
+%% Returns {ok, InstanceVars} with the new instance variable list for state migration.
+handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = State) ->
+    NewInstanceMethods = maps:get(instance_methods, ClassInfo, State#class_state.instance_methods),
+    NewClassMethods = maps:get(class_methods, ClassInfo, State#class_state.class_methods),
+    NewInstanceVariables = maps:get(instance_variables, ClassInfo, State#class_state.instance_variables),
+    NewMethodSource = maps:get(method_source, ClassInfo, State#class_state.method_source),
+    NewModule = maps:get(module, ClassInfo, State#class_state.module),
+
+    %% Rebuild flattened method tables with new methods
+    NewFlattened = build_flattened_methods(
+        ClassName, State#class_state.superclass, NewInstanceMethods),
+    NewFlattenedClass = build_flattened_methods(
+        ClassName, State#class_state.superclass, NewClassMethods, get_flattened_class_methods),
+
+    NewState = State#class_state{
+        module = NewModule,
+        instance_methods = NewInstanceMethods,
+        class_methods = NewClassMethods,
+        instance_variables = NewInstanceVariables,
+        method_source = NewMethodSource,
+        flattened_methods = NewFlattened,
+        flattened_class_methods = NewFlattenedClass,
+        is_constructible = undefined
+    },
+
+    %% Notify subclasses to rebuild their flattened tables
+    beamtalk_class_registry:invalidate_subclass_flattened_tables(ClassName),
+
+    {reply, {ok, NewInstanceVariables}, NewState};
 
 handle_call(instance_variables, _From, #class_state{instance_variables = IVars} = State) ->
     {reply, IVars, State};

@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Hot reload counter - version 2 with modified increment (adds 10)
+// and new field 'step'
+
+Actor subclass: HotCounter
+  state: value = 0
+  state: step = 5
+
+  increment => self.value := self.value + 10
+  getValue => ^self.value
+  getStep => ^self.step

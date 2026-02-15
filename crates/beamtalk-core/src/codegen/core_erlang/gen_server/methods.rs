@@ -586,10 +586,7 @@ impl CoreErlangGenerator {
 
             let class_doc = docvec![
                 line(),
-                format!(
-                    "{let_prefix}let _Reg{i} = case call 'beamtalk_object_class':'start'('{}', ~{{",
-                    class.name.name
-                ),
+                format!("{let_prefix}let ClassInfo{i} = ~{{",),
                 nest(
                     INDENT,
                     docvec![
@@ -618,15 +615,31 @@ impl CoreErlangGenerator {
                     ]
                 ),
                 line(),
-                "}~) of",
+                "}~",
+                line(),
+                format!(
+                    "in let _Reg{i} = case call 'beamtalk_object_class':'start'('{}', ClassInfo{i}) of",
+                    class.name.name
+                ),
                 nest(
                     INDENT,
                     docvec![
                         line(),
                         format!("<{{'ok', _Pid{i}}}> when 'true' -> 'ok'"),
                         line(),
+                        // BT-572: On redefinition, update class metadata for hot reload
                         format!(
-                            "<{{'error', {{'already_started', _Existing{i}}}}}> when 'true' -> 'ok'"
+                            "<{{'error', {{'already_started', _Existing{i}}}}}> when 'true' ->"
+                        ),
+                        nest(
+                            INDENT,
+                            docvec![
+                                line(),
+                                format!(
+                                    "call 'beamtalk_object_class':'update_class'('{}', ClassInfo{i})",
+                                    class.name.name
+                                ),
+                            ]
                         ),
                         line(),
                         format!("<{{'error', _Reason{i}}}> when 'true' -> 'ok'"),

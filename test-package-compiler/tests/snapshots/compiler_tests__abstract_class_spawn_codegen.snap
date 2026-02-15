@@ -109,7 +109,7 @@ module 'abstract_class_spawn' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handl
 
 'register_class'/0 = fun () ->
     try
-        let _Reg0 = case call 'beamtalk_object_class':'start'('Shape', ~{
+        let ClassInfo0 = ~{
             'name' => 'Shape',
             'module' => 'abstract_class_spawn',
             'superclass' => 'Actor',
@@ -124,9 +124,11 @@ module 'abstract_class_spawn' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handl
             }~,
             'method_source' => ~{'area' => #{#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']])}#}~,
             'class_variables' => ~{}~
-        }~) of
+        }~
+        in let _Reg0 = case call 'beamtalk_object_class':'start'('Shape', ClassInfo0) of
             <{'ok', _Pid0}> when 'true' -> 'ok'
-            <{'error', {'already_started', _Existing0}}> when 'true' -> 'ok'
+            <{'error', {'already_started', _Existing0}}> when 'true' ->
+                call 'beamtalk_object_class':'update_class'('Shape', ClassInfo0)
             <{'error', _Reason0}> when 'true' -> 'ok'
         end
 

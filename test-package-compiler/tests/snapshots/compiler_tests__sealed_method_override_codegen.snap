@@ -78,7 +78,7 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
 
 'register_class'/0 = fun () ->
     try
-        let _Reg0 = case call 'beamtalk_object_class':'start'('Parent', ~{
+        let ClassInfo0 = ~{
             'name' => 'Parent',
             'module' => 'sealed_method_override',
             'superclass' => 'Object',
@@ -93,12 +93,14 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
             }~,
             'method_source' => ~{'frozen' => #{#<102>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<122>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']])}#}~,
             'class_variables' => ~{}~
-        }~) of
+        }~
+        in let _Reg0 = case call 'beamtalk_object_class':'start'('Parent', ClassInfo0) of
             <{'ok', _Pid0}> when 'true' -> 'ok'
-            <{'error', {'already_started', _Existing0}}> when 'true' -> 'ok'
+            <{'error', {'already_started', _Existing0}}> when 'true' ->
+                call 'beamtalk_object_class':'update_class'('Parent', ClassInfo0)
             <{'error', _Reason0}> when 'true' -> 'ok'
         end
-        in let _Reg1 = case call 'beamtalk_object_class':'start'('AllowedChild', ~{
+        in let ClassInfo1 = ~{
             'name' => 'AllowedChild',
             'module' => 'sealed_method_override',
             'superclass' => 'Object',
@@ -113,12 +115,14 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
             }~,
             'method_source' => ~{'frozen' => #{#<102>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<122>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']])}#}~,
             'class_variables' => ~{}~
-        }~) of
+        }~
+        in let _Reg1 = case call 'beamtalk_object_class':'start'('AllowedChild', ClassInfo1) of
             <{'ok', _Pid1}> when 'true' -> 'ok'
-            <{'error', {'already_started', _Existing1}}> when 'true' -> 'ok'
+            <{'error', {'already_started', _Existing1}}> when 'true' ->
+                call 'beamtalk_object_class':'update_class'('AllowedChild', ClassInfo1)
             <{'error', _Reason1}> when 'true' -> 'ok'
         end
-        in let _Reg2 = case call 'beamtalk_object_class':'start'('Child', ~{
+        in let ClassInfo2 = ~{
             'name' => 'Child',
             'module' => 'sealed_method_override',
             'superclass' => 'Parent',
@@ -133,9 +137,11 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
             }~,
             'method_source' => ~{'frozen' => #{#<102>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<122>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']])}#}~,
             'class_variables' => ~{}~
-        }~) of
+        }~
+        in let _Reg2 = case call 'beamtalk_object_class':'start'('Child', ClassInfo2) of
             <{'ok', _Pid2}> when 'true' -> 'ok'
-            <{'error', {'already_started', _Existing2}}> when 'true' -> 'ok'
+            <{'error', {'already_started', _Existing2}}> when 'true' ->
+                call 'beamtalk_object_class':'update_class'('Child', ClassInfo2)
             <{'error', _Reason2}> when 'true' -> 'ok'
         end
 
