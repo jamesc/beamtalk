@@ -1045,12 +1045,23 @@ mod tests {
 
     #[test]
     fn parse_interpolated_string() {
-        let module = parse_ok("\"Hello, {name}!\"");
+        // Interpolated strings now produce StringStart/StringEnd tokens from the lexer.
+        // The parser doesn't handle these yet (BT-557), so they produce diagnostics.
+        // Plain strings without interpolation still parse correctly.
+        let module = parse_ok("\"Hello, world!\"");
         assert_eq!(module.expressions.len(), 1);
         match &module.expressions[0] {
-            Expression::Literal(Literal::String(s), _) if s == "Hello, {name}!" => {}
-            _ => panic!("Expected interpolated string parsed as string literal"),
+            Expression::Literal(Literal::String(s), _) if s == "Hello, world!" => {}
+            _ => panic!("Expected plain string literal"),
         }
+
+        // Interpolated string produces parse errors (parser support in BT-557)
+        let tokens = lex_with_eof("\"Hello, {name}!\"");
+        let (_, diagnostics) = parse(tokens);
+        assert!(
+            !diagnostics.is_empty(),
+            "Expected diagnostics for interpolated string (parser support in BT-557)"
+        );
     }
 
     #[test]

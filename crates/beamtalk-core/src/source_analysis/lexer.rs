@@ -46,6 +46,8 @@ pub struct Lexer<'src> {
     position: usize,
     /// Pending trivia to attach to the next token.
     pending_trivia: Vec<Trivia>,
+    /// Buffered tokens from string interpolation (drained before lexing more).
+    pending_tokens: Vec<Token>,
 }
 
 impl std::fmt::Debug for Lexer<'_> {
@@ -66,6 +68,7 @@ impl<'src> Lexer<'src> {
             chars: source.char_indices().peekable(),
             position: 0,
             pending_trivia: Vec::new(),
+            pending_tokens: Vec::new(),
         }
     }
 
@@ -213,6 +216,11 @@ impl<'src> Lexer<'src> {
 
     /// Lexes the next token.
     fn lex_token(&mut self) -> Token {
+        // Drain buffered tokens from string interpolation first
+        if let Some(token) = self.pending_tokens.pop() {
+            return token;
+        }
+
         self.skip_trivia();
         let leading_trivia = std::mem::take(&mut self.pending_trivia);
 
@@ -433,33 +441,60 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    /// Lexes a double-quoted string literal.
+    /// Lexes a double-quoted string literal, detecting `{expr}` interpolation segments.
+    ///
+    /// Plain strings without `{expr}` produce a single `TokenKind::String`.
+    /// Interpolated strings produce `StringStart`, expression tokens, optional
+    /// `StringSegment`s, and `StringEnd`.
     fn lex_string(&mut self) -> TokenKind {
-        let start = self.current_position();
+        let string_start = self.current_position();
         self.advance(); // opening quote
+
+        let mut content_start = self.current_position();
+        let mut segments: Vec<(EcoString, u32, u32)> = Vec::new();
+        let mut interp_ranges: Vec<(u32, u32)> = Vec::new();
+        let mut has_interpolation = false;
 
         loop {
             match self.peek_char() {
                 None => {
-                    // Unterminated string - error recovery
-                    let text = self.text_for(self.span_from(start));
+                    let text = self.text_for(self.span_from(string_start));
                     return TokenKind::Error(EcoString::from(text));
                 }
                 Some('"') => {
+                    let seg_text = self.text_for(Span::new(content_start, self.current_position()));
+                    segments.push((
+                        EcoString::from(seg_text),
+                        content_start,
+                        self.current_position(),
+                    ));
                     self.advance(); // closing quote
                     break;
                 }
                 Some('\\') => {
-                    self.advance(); // backslash
-                    match self.peek_char() {
-                        None => {
-                            // Unterminated escape at end of string
-                            let text = self.text_for(self.span_from(start));
-                            return TokenKind::Error(EcoString::from(text));
+                    self.advance();
+                    if self.peek_char().is_none() {
+                        let text = self.text_for(self.span_from(string_start));
+                        return TokenKind::Error(EcoString::from(text));
+                    }
+                    self.advance();
+                }
+                Some('{') => {
+                    has_interpolation = true;
+                    let seg_text = self.text_for(Span::new(content_start, self.current_position()));
+                    segments.push((
+                        EcoString::from(seg_text),
+                        content_start,
+                        self.current_position(),
+                    ));
+                    self.advance(); // consume `{`
+
+                    match self.lex_interpolation_body(string_start) {
+                        Ok((interp_start, interp_end)) => {
+                            interp_ranges.push((interp_start, interp_end));
+                            content_start = self.current_position();
                         }
-                        Some(_) => {
-                            self.advance(); // escaped char
-                        }
+                        Err(error_kind) => return error_kind,
                     }
                 }
                 _ => {
@@ -468,10 +503,114 @@ impl<'src> Lexer<'src> {
             }
         }
 
-        // Extract content without quotes
-        let full_text = self.text_for(self.span_from(start));
-        let content = &full_text[1..full_text.len() - 1];
-        TokenKind::String(EcoString::from(content))
+        if !has_interpolation {
+            return TokenKind::String(segments[0].0.clone());
+        }
+
+        self.build_interpolation_tokens(&segments, &interp_ranges);
+        TokenKind::StringStart(segments[0].0.clone())
+    }
+
+    /// Scans the body of a `{...}` interpolation, tracking brace depth.
+    /// Returns `Ok((start, end))` of the expression range, or `Err` on unterminated input.
+    fn lex_interpolation_body(&mut self, string_start: u32) -> Result<(u32, u32), TokenKind> {
+        // Check for empty braces
+        self.skip_interpolation_whitespace();
+        if self.peek_char() == Some('}') {
+            self.advance();
+            let pos = self.current_position();
+            return Ok((pos, pos)); // empty range signals error token
+        }
+
+        let interp_start = self.current_position();
+        let mut depth: u32 = 1;
+        while depth > 0 {
+            match self.peek_char() {
+                None | Some('"') => {
+                    let text = self.text_for(self.span_from(string_start));
+                    return Err(TokenKind::Error(EcoString::from(text)));
+                }
+                Some('{') => {
+                    depth += 1;
+                    self.advance();
+                }
+                Some('}') => {
+                    depth -= 1;
+                    if depth == 0 {
+                        let interp_end = self.current_position();
+                        self.advance();
+                        return Ok((interp_start, interp_end));
+                    }
+                    self.advance();
+                }
+                Some('\\') => {
+                    self.advance();
+                    if self.peek_char().is_some() {
+                        self.advance();
+                    }
+                }
+                _ => {
+                    self.advance();
+                }
+            }
+        }
+        unreachable!()
+    }
+
+    /// Builds buffered tokens for an interpolated string's expression segments.
+    fn build_interpolation_tokens(
+        &mut self,
+        segments: &[(EcoString, u32, u32)],
+        interp_ranges: &[(u32, u32)],
+    ) {
+        let string_end = self.current_position();
+        let mut tokens: Vec<Token> = Vec::new();
+
+        for (i, interp) in interp_ranges.iter().enumerate() {
+            if i > 0 {
+                let seg = &segments[i];
+                tokens.push(Token::new(
+                    TokenKind::StringSegment(seg.0.clone()),
+                    Span::new(seg.1, seg.2),
+                ));
+            }
+
+            if interp.0 == interp.1 {
+                tokens.push(Token::new(
+                    TokenKind::Error(EcoString::from(
+                        "empty interpolation {} is not allowed, use \\{ for literal brace",
+                    )),
+                    Span::new(interp.0, interp.1),
+                ));
+            } else {
+                let expr_source = self.text_for(Span::new(interp.0, interp.1));
+                let sub_lexer = Lexer::new(expr_source);
+                for sub_token in sub_lexer {
+                    let adjusted_span = Span::new(
+                        sub_token.span().start() + interp.0,
+                        sub_token.span().end() + interp.0,
+                    );
+                    tokens.push(Token::new(sub_token.into_kind(), adjusted_span));
+                }
+            }
+        }
+
+        let last_seg = segments.last().unwrap();
+        tokens.push(Token::new(
+            TokenKind::StringEnd(last_seg.0.clone()),
+            Span::new(last_seg.1, string_end),
+        ));
+
+        tokens.reverse();
+        self.pending_tokens = tokens;
+    }
+
+    /// Skips whitespace inside interpolation (for empty brace detection).
+    fn skip_interpolation_whitespace(&mut self) {
+        // Only skip spaces/tabs, not newlines (to keep position accurate)
+        while self.peek_char().is_some_and(|c| matches!(c, ' ' | '\t')) {
+            self.advance();
+        }
     }
 
     /// Consumes a single-quoted string and produces a helpful error (ADR 0023).
@@ -847,11 +986,201 @@ mod tests {
 
     #[test]
     fn lex_string_with_backslash_escapes() {
+        // Escaped braces produce plain string (no interpolation)
         assert_eq!(
-            lex_kinds(r#""hello" "Hello, {name}!""#),
+            lex_kinds(r#""hello" "Hello, \{name\}!""#),
             vec![
                 TokenKind::String("hello".into()),
-                TokenKind::String("Hello, {name}!".into()),
+                TokenKind::String("Hello, \\{name\\}!".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_string_interpolation_simple() {
+        // Unescaped braces trigger interpolation
+        assert_eq!(
+            lex_kinds(r#""Hello, {name}!""#),
+            vec![
+                TokenKind::StringStart("Hello, ".into()),
+                TokenKind::Identifier("name".into()),
+                TokenKind::StringEnd("!".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_string_interpolation_multiple_segments() {
+        assert_eq!(
+            lex_kinds(r#""{x} and {y}""#),
+            vec![
+                TokenKind::StringStart("".into()),
+                TokenKind::Identifier("x".into()),
+                TokenKind::StringSegment(" and ".into()),
+                TokenKind::Identifier("y".into()),
+                TokenKind::StringEnd("".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_string_interpolation_complex_expression() {
+        assert_eq!(
+            lex_kinds(r#""result: {x + 1}""#),
+            vec![
+                TokenKind::StringStart("result: ".into()),
+                TokenKind::Identifier("x".into()),
+                TokenKind::BinarySelector("+".into()),
+                TokenKind::Integer("1".into()),
+                TokenKind::StringEnd("".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_string_interpolation_nested_braces() {
+        // Nested braces (e.g., tuple literal inside interpolation)
+        assert_eq!(
+            lex_kinds(r#""value: {#{1 => 2}}""#),
+            vec![
+                TokenKind::StringStart("value: ".into()),
+                TokenKind::MapOpen,
+                TokenKind::Integer("1".into()),
+                TokenKind::FatArrow,
+                TokenKind::Integer("2".into()),
+                TokenKind::RightBrace,
+                TokenKind::StringEnd("".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_string_interpolation_escaped_braces() {
+        // Escaped braces are literal, no interpolation
+        assert_eq!(
+            lex_kinds(r#""\{not interpolated\}""#),
+            vec![TokenKind::String("\\{not interpolated\\}".into())]
+        );
+    }
+
+    #[test]
+    fn lex_string_interpolation_mixed_escaped_and_real() {
+        assert_eq!(
+            lex_kinds(r#""\{literal\} {x}""#),
+            vec![
+                TokenKind::StringStart("\\{literal\\} ".into()),
+                TokenKind::Identifier("x".into()),
+                TokenKind::StringEnd("".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_string_interpolation_empty_braces_error() {
+        let kinds = lex_kinds(r#""empty: {}""#);
+        assert_eq!(kinds.len(), 3); // StringStart, Error, StringEnd
+        assert!(matches!(kinds[0], TokenKind::StringStart(_)));
+        assert!(matches!(kinds[1], TokenKind::Error(_)));
+        assert!(matches!(kinds[2], TokenKind::StringEnd(_)));
+    }
+
+    #[test]
+    fn lex_string_interpolation_at_start() {
+        assert_eq!(
+            lex_kinds(r#""{x} world""#),
+            vec![
+                TokenKind::StringStart("".into()),
+                TokenKind::Identifier("x".into()),
+                TokenKind::StringEnd(" world".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_string_interpolation_at_end() {
+        assert_eq!(
+            lex_kinds(r#""hello {x}""#),
+            vec![
+                TokenKind::StringStart("hello ".into()),
+                TokenKind::Identifier("x".into()),
+                TokenKind::StringEnd("".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_string_interpolation_only() {
+        assert_eq!(
+            lex_kinds(r#""{x}""#),
+            vec![
+                TokenKind::StringStart("".into()),
+                TokenKind::Identifier("x".into()),
+                TokenKind::StringEnd("".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_string_interpolation_keyword_message() {
+        assert_eq!(
+            lex_kinds(r#""{x printString}""#),
+            vec![
+                TokenKind::StringStart("".into()),
+                TokenKind::Identifier("x".into()),
+                TokenKind::Identifier("printString".into()),
+                TokenKind::StringEnd("".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_string_no_interpolation_plain() {
+        // Plain strings without braces are unchanged
+        assert_eq!(
+            lex_kinds(r#""hello world""#),
+            vec![TokenKind::String("hello world".into())]
+        );
+    }
+
+    #[test]
+    fn lex_string_interpolation_multiline() {
+        let source = "\"line1\n{x}\nline2\"";
+        assert_eq!(
+            lex_kinds(source),
+            vec![
+                TokenKind::StringStart("line1\n".into()),
+                TokenKind::Identifier("x".into()),
+                TokenKind::StringEnd("\nline2".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_string_interpolation_three_segments() {
+        assert_eq!(
+            lex_kinds(r#""{a} + {b} = {c}""#),
+            vec![
+                TokenKind::StringStart("".into()),
+                TokenKind::Identifier("a".into()),
+                TokenKind::StringSegment(" + ".into()),
+                TokenKind::Identifier("b".into()),
+                TokenKind::StringSegment(" = ".into()),
+                TokenKind::Identifier("c".into()),
+                TokenKind::StringEnd("".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_string_interpolation_followed_by_more_code() {
+        // Ensure lexer continues normally after interpolated string
+        assert_eq!(
+            lex_kinds(r#""hi {x}" printString"#),
+            vec![
+                TokenKind::StringStart("hi ".into()),
+                TokenKind::Identifier("x".into()),
+                TokenKind::StringEnd("".into()),
+                TokenKind::Identifier("printString".into()),
             ]
         );
     }

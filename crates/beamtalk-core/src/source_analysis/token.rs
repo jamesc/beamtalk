@@ -43,8 +43,20 @@ pub enum TokenKind {
     /// A floating-point literal: `3.14`, `2.5e10`
     Float(EcoString),
 
-    /// A double-quoted string: `"hello world"`
+    /// A double-quoted string: `"hello world"` (no interpolation)
     String(EcoString),
+
+    /// Start of an interpolated string: `"Hello, ` in `"Hello, {name}!"`
+    /// Contains the literal text from the opening `"` up to the first `{`.
+    StringStart(EcoString),
+
+    /// Middle segment of an interpolated string: ` and ` in `"a{x} and {y}b"`
+    /// Contains the literal text between a `}` and the next `{`.
+    StringSegment(EcoString),
+
+    /// End of an interpolated string: `!` in `"Hello, {name}!"`
+    /// Contains the literal text from the last `}` to the closing `"`.
+    StringEnd(EcoString),
 
     /// A symbol literal: `#foo`, `#'hello world'`
     Symbol(EcoString),
@@ -138,6 +150,7 @@ impl TokenKind {
             Self::Integer(_)
                 | Self::Float(_)
                 | Self::String(_)
+                | Self::StringStart(_)
                 | Self::Symbol(_)
                 | Self::Character(_)
         )
@@ -191,6 +204,9 @@ impl TokenKind {
             | Self::Integer(s)
             | Self::Float(s)
             | Self::String(s)
+            | Self::StringStart(s)
+            | Self::StringSegment(s)
+            | Self::StringEnd(s)
             | Self::Symbol(s)
             | Self::Keyword(s)
             | Self::BinarySelector(s)
@@ -230,6 +246,9 @@ impl std::fmt::Display for TokenKind {
             | Self::BinarySelector(s) => write!(f, "{s}"),
             // Tokens with delimiters around content
             Self::String(s) => write!(f, "\"{s}\""),
+            Self::StringStart(s) => write!(f, "\"{s}{{"),
+            Self::StringSegment(s) => write!(f, "}}{s}{{"),
+            Self::StringEnd(s) => write!(f, "}}{s}\""),
             Self::Symbol(s) => write!(f, "#{s}"),
             Self::Character(c) => write!(f, "${c}"),
             Self::Error(s) => write!(f, "<error: {s}>"),
