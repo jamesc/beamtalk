@@ -245,6 +245,13 @@ impl SimpleLanguageService {
                     arms.iter()
                         .find_map(|arm| Self::find_identifier_in_expr(&arm.body, offset))
                 }),
+            Expression::StringInterpolation { segments, .. } => segments.iter().find_map(|seg| {
+                if let crate::ast::StringSegment::Interpolation(expr) = seg {
+                    Self::find_identifier_in_expr(expr, offset)
+                } else {
+                    None
+                }
+            }),
             _ => None,
         }
     }
@@ -306,6 +313,13 @@ impl SimpleLanguageService {
                 Self::collect_identifiers(value, name, results);
                 for arm in arms {
                     Self::collect_identifiers(&arm.body, name, results);
+                }
+            }
+            Expression::StringInterpolation { segments, .. } => {
+                for segment in segments {
+                    if let crate::ast::StringSegment::Interpolation(expr) = segment {
+                        Self::collect_identifiers(expr, name, results);
+                    }
                 }
             }
             _ => {}

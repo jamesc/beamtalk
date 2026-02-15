@@ -32,6 +32,7 @@
 //! // Source: x := 3 + 4
 //! let module = Module {
 //!     classes: Vec::new(),
+//!     method_definitions: Vec::new(),
 //!     expressions: vec![
 //!         Expression::Assignment {
 //!             target: Box::new(Expression::Identifier(Identifier {
@@ -85,6 +86,8 @@ use ecow::EcoString;
 pub struct Module {
     /// Class definitions in this module.
     pub classes: Vec<ClassDefinition>,
+    /// Standalone method definitions (Tonel-style `Class >> method => body`).
+    pub method_definitions: Vec<StandaloneMethodDefinition>,
     /// Top-level expressions (scripts, REPL input).
     pub expressions: Vec<Expression>,
     /// Source location spanning the entire module.
@@ -99,6 +102,7 @@ impl Module {
     pub fn new(expressions: Vec<Expression>, span: Span) -> Self {
         Self {
             classes: Vec::new(),
+            method_definitions: Vec::new(),
             expressions,
             span,
             leading_comments: Vec::new(),
@@ -110,6 +114,7 @@ impl Module {
     pub fn with_classes(classes: Vec<ClassDefinition>, span: Span) -> Self {
         Self {
             classes,
+            method_definitions: Vec::new(),
             expressions: Vec::new(),
             span,
             leading_comments: Vec::new(),
@@ -125,6 +130,7 @@ impl Module {
     ) -> Self {
         Self {
             classes: Vec::new(),
+            method_definitions: Vec::new(),
             expressions,
             span,
             leading_comments,
@@ -260,6 +266,25 @@ impl ClassDefinition {
     pub fn superclass_name(&self) -> &str {
         self.superclass.as_ref().map_or("none", |s| s.name.as_str())
     }
+}
+
+/// A standalone method definition (Tonel-style).
+///
+/// Defines or replaces a single method on an existing class without
+/// redefining the entire class. Works in `.bt` files, REPL, and via LSP.
+///
+/// Example: `Counter >> increment => self.value := self.value + 1`
+/// Example: `Counter class >> withInitial: n => self spawnWith: #{value => n}`
+#[derive(Debug, Clone, PartialEq)]
+pub struct StandaloneMethodDefinition {
+    /// The class this method belongs to.
+    pub class_name: Identifier,
+    /// Whether this is a class-side method (`Counter class >> ...`).
+    pub is_class_method: bool,
+    /// The method definition.
+    pub method: MethodDefinition,
+    /// Source location of the entire standalone method definition.
+    pub span: Span,
 }
 
 /// A state (instance variable) declaration.
@@ -700,6 +725,20 @@ pub enum Expression {
         span: Span,
     },
 
+    /// A string interpolation expression (ADR 0023).
+    ///
+    /// Produced when a string contains `{expr}` interpolation segments.
+    /// Plain strings without interpolation remain as `Literal(String(...))`.
+    ///
+    /// Example: `"Hello, {name}!"` produces segments:
+    /// `[Literal("Hello, "), Expression(name), Literal("!")]`
+    StringInterpolation {
+        /// The segments of the interpolated string.
+        segments: Vec<StringSegment>,
+        /// Source location of the entire interpolated string.
+        span: Span,
+    },
+
     /// An error node for unparseable code.
     ///
     /// This allows the parser to recover from errors and continue.
@@ -730,6 +769,7 @@ impl Expression {
             | Self::MapLiteral { span, .. }
             | Self::ListLiteral { span, .. }
             | Self::Primitive { span, .. }
+            | Self::StringInterpolation { span, .. }
             | Self::Error { span, .. } => *span,
             Self::Identifier(id) => id.span,
             Self::Block(block) => block.span,
@@ -796,6 +836,20 @@ pub enum Literal {
     ///
     /// Example: `$a`, `$\n`
     Character(char),
+}
+
+/// A segment of an interpolated string (ADR 0023).
+///
+/// String interpolation breaks a string into alternating literal text
+/// and embedded expressions. For example, `"Hello, {name}!"` becomes:
+/// `[Literal("Hello, "), Interpolation(name_expr), Literal("!")]`
+#[derive(Debug, Clone, PartialEq)]
+pub enum StringSegment {
+    /// A literal text segment.
+    Literal(EcoString),
+
+    /// An interpolated expression segment (`{expr}`).
+    Interpolation(Expression),
 }
 
 /// An identifier (variable or class name).

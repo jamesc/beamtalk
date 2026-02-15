@@ -110,6 +110,14 @@ fn analyze_expression(
             // Primitive is a pragma, no variable access
         }
 
+        Expression::StringInterpolation { segments, .. } => {
+            for segment in segments {
+                if let crate::ast::StringSegment::Interpolation(expr) = segment {
+                    analyze_expression(expr, analysis, ctx);
+                }
+            }
+        }
+
         Expression::Identifier(id) => {
             // Read of a variable - track ALL reads, not just known locals
             // This is important for detecting outer scope variables that need threading

@@ -97,12 +97,82 @@ fn term_to_bool(term: &Term) -> Option<bool> {
     }
 }
 
+/// Merge a method into a method list, replacing any existing method with the same selector and kind.
+fn merge_method(
+    methods: &mut Vec<beamtalk_core::ast::MethodDefinition>,
+    method: beamtalk_core::ast::MethodDefinition,
+) {
+    let selector = method.selector.name();
+    if let Some(existing) = methods
+        .iter_mut()
+        .find(|m| m.selector.name() == selector && m.kind == method.kind)
+    {
+        *existing = method;
+    } else {
+        methods.push(method);
+    }
+}
+
 /// Build a response map for a successful `compile_expression`.
 fn ok_response(core_erlang: &str, warnings: &[String]) -> Term {
     let warning_terms: Vec<Term> = warnings.iter().map(|w| binary(w)).collect();
     Term::from(Map::from([
         (atom("status"), atom("ok")),
         (atom("core_erlang"), binary(core_erlang)),
+        (atom("warnings"), Term::from(List::from(warning_terms))),
+    ]))
+}
+
+/// Build a response map for a successful inline class definition in REPL.
+fn class_definition_ok_response(
+    core_erlang: &str,
+    module_name: &str,
+    classes: &[(String, String)],
+    warnings: &[String],
+) -> Term {
+    let warning_terms: Vec<Term> = warnings.iter().map(|w| binary(w)).collect();
+    let class_terms: Vec<Term> = classes
+        .iter()
+        .map(|(name, superclass)| {
+            Term::from(Map::from([
+                (atom("name"), binary(name)),
+                (atom("superclass"), binary(superclass)),
+            ]))
+        })
+        .collect();
+    Term::from(Map::from([
+        (atom("status"), atom("ok")),
+        (atom("kind"), atom("class_definition")),
+        (atom("core_erlang"), binary(core_erlang)),
+        (atom("module_name"), binary(module_name)),
+        (atom("classes"), Term::from(List::from(class_terms))),
+        (atom("warnings"), Term::from(List::from(warning_terms))),
+    ]))
+}
+
+/// Build a response map for a successful standalone method definition in REPL.
+fn method_definition_ok_response(
+    class_name: &str,
+    selector: &str,
+    is_class_method: bool,
+    method_source: &str,
+    warnings: &[String],
+) -> Term {
+    let warning_terms: Vec<Term> = warnings.iter().map(|w| binary(w)).collect();
+    Term::from(Map::from([
+        (atom("status"), atom("ok")),
+        (atom("kind"), atom("method_definition")),
+        (atom("class_name"), binary(class_name)),
+        (atom("selector"), binary(selector)),
+        (
+            atom("is_class_method"),
+            if is_class_method {
+                atom("true")
+            } else {
+                atom("false")
+            },
+        ),
+        (atom("method_source"), binary(method_source)),
         (atom("warnings"), Term::from(List::from(warning_terms))),
     ]))
 }
@@ -269,6 +339,32 @@ fn handle_compile_expression(request: &Map) -> Term {
         return error_response(&errors);
     }
 
+    // BT-571: If the parsed module contains class definitions, use compile path
+    if !module.classes.is_empty() {
+        return handle_inline_class_definition(module, &source, &warnings);
+    }
+
+    // BT-571: If the parsed module contains standalone method definitions, return method info
+    if !module.method_definitions.is_empty() {
+        if module.method_definitions.len() > 1 {
+            return error_response(&[
+                "Multiple standalone method definitions in a single expression are not supported. \
+                 Define each method separately, or use a class definition with inline methods."
+                    .to_string(),
+            ]);
+        }
+        let method_def = &module.method_definitions[0];
+        let class_name = method_def.class_name.name.to_string();
+        let selector = method_def.method.selector.name().to_string();
+        return method_definition_ok_response(
+            &class_name,
+            &selector,
+            method_def.is_class_method,
+            &source,
+            &warnings,
+        );
+    }
+
     if module.expressions.is_empty() {
         return error_response(&["No expressions to compile".to_string()]);
     }
@@ -277,6 +373,59 @@ fn handle_compile_expression(request: &Map) -> Term {
     let expression = &module.expressions[0];
     match beamtalk_core::erlang::generate_repl_expression(expression, &module_name) {
         Ok(code) => ok_response(&code, &warnings),
+        Err(e) => error_response(&[format!("Code generation failed: {e}")]),
+    }
+}
+
+/// BT-571: Handle inline class definition in REPL expression context.
+/// Merges any standalone method definitions into the class, generates code,
+/// and returns a `class_definition` response.
+fn handle_inline_class_definition(
+    module: beamtalk_core::ast::Module,
+    source: &str,
+    warnings: &[String],
+) -> Term {
+    let mut module = module;
+    let mut warnings = warnings.to_vec();
+    if !module.method_definitions.is_empty() {
+        let method_defs = std::mem::take(&mut module.method_definitions);
+        for method_def in method_defs {
+            let target_class = method_def.class_name.name.as_str();
+            if let Some(class) = module
+                .classes
+                .iter_mut()
+                .find(|c| c.name.name == target_class)
+            {
+                let methods = if method_def.is_class_method {
+                    &mut class.class_methods
+                } else {
+                    &mut class.methods
+                };
+                merge_method(methods, method_def.method);
+            } else {
+                warnings.push(format!(
+                    "Standalone method targets unknown class `{target_class}` in this module"
+                ));
+            }
+        }
+    }
+
+    let base_name = beamtalk_core::erlang::to_module_name(&module.classes[0].name.name);
+    let class_module_name = format!("bt@{base_name}");
+
+    let classes: Vec<(String, String)> = module
+        .classes
+        .iter()
+        .map(|c| (c.name.name.to_string(), c.superclass_name().to_string()))
+        .collect();
+
+    match beamtalk_core::erlang::generate_module(
+        &module,
+        beamtalk_core::erlang::CodegenOptions::new(&class_module_name)
+            .with_workspace_mode(true)
+            .with_source(source),
+    ) {
+        Ok(code) => class_definition_ok_response(&code, &class_module_name, &classes, &warnings),
         Err(e) => error_response(&[format!("Code generation failed: {e}")]),
     }
 }
@@ -319,11 +468,41 @@ fn handle_compile(request: &Map) -> Term {
         );
     all_diagnostics.extend(primitive_diags);
 
-    let (errors, warnings) = partition_diagnostics(&all_diagnostics);
+    let (errors, mut warnings) = partition_diagnostics(&all_diagnostics);
 
     if !errors.is_empty() {
         let error_msgs: Vec<String> = errors.iter().map(|e| e.message.clone()).collect();
         return error_response(&error_msgs);
+    }
+
+    // BT-571: Merge standalone method definitions into their target classes
+    let mut module = module;
+    if !module.method_definitions.is_empty() {
+        let method_defs = std::mem::take(&mut module.method_definitions);
+        for method_def in method_defs {
+            let target_class = method_def.class_name.name.as_str();
+            if let Some(class) = module
+                .classes
+                .iter_mut()
+                .find(|c| c.name.name == target_class)
+            {
+                let methods = if method_def.is_class_method {
+                    &mut class.class_methods
+                } else {
+                    &mut class.methods
+                };
+                merge_method(methods, method_def.method);
+            } else {
+                warnings.push(DiagInfo {
+                    message: format!(
+                        "Standalone method targets unknown class `{target_class}` in this module"
+                    ),
+                    severity: "warning".to_string(),
+                    start: method_def.span.start(),
+                    end: method_def.span.end(),
+                });
+            }
+        }
     }
 
     // Derive module name from first class in AST (ADR 0016)

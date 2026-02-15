@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for Tonel-style file format with separate class + method definitions (BT-571)
+//
+// Tests that .bt files can use the Tonel format where the class declaration
+// and method definitions are separate top-level constructs.
+
+// @load tests/e2e/fixtures/tonel_counter.bt
+
+// ===========================================================================
+// TONEL-STYLE CLASS USAGE
+// ===========================================================================
+
+// Spawn a TonelCounter (defined with separate class + method defs)
+tc := TonelCounter spawn
+// => #Actor<TonelCounter,_>
+
+tc increment
+// => 1
+
+tc increment
+// => 2
+
+tc getValue
+// => 2

@@ -13,7 +13,8 @@
          get_loaded_modules/1, add_loaded_module/2, set_loaded_modules/2,
          get_listen_socket/1, get_port/1,
          get_actor_registry/1, set_actor_registry/2,
-         get_module_tracker/1, set_module_tracker/2]).
+         get_module_tracker/1, set_module_tracker/2,
+         get_class_source/2, set_class_source/3]).
 
 -export_type([state/0]).
 
@@ -24,7 +25,9 @@
     eval_counter :: non_neg_integer(),
     loaded_modules :: [atom()],
     actor_registry :: pid() | undefined,
-    module_tracker :: beamtalk_repl_modules:module_tracker()
+    module_tracker :: beamtalk_repl_modules:module_tracker(),
+    %% BT-571: Track source code for inline-defined classes (for method patching)
+    class_sources :: #{binary() => string()}
 }).
 
 -opaque state() :: #state{}.
@@ -44,7 +47,8 @@ new(ListenSocket, Port, _Options) ->
         eval_counter = 0,
         loaded_modules = [],
         actor_registry = undefined,
-        module_tracker = beamtalk_repl_modules:new()
+        module_tracker = beamtalk_repl_modules:new(),
+        class_sources = #{}
     }.
 
 %% @doc Get current variable bindings.
@@ -116,3 +120,13 @@ get_module_tracker(#state{module_tracker = Tracker}) ->
 -spec set_module_tracker(beamtalk_repl_modules:module_tracker(), state()) -> state().
 set_module_tracker(Tracker, State) ->
     State#state{module_tracker = Tracker}.
+
+%% @doc Get stored source for a class (BT-571).
+-spec get_class_source(binary(), state()) -> string() | undefined.
+get_class_source(ClassName, #state{class_sources = Sources}) ->
+    maps:get(ClassName, Sources, undefined).
+
+%% @doc Store source code for a class (BT-571).
+-spec set_class_source(binary(), string(), state()) -> state().
+set_class_source(ClassName, Source, State = #state{class_sources = Sources}) ->
+    State#state{class_sources = Sources#{ClassName => Source}}.

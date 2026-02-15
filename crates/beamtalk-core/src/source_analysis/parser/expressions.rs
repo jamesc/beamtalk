@@ -18,7 +18,7 @@
 
 use crate::ast::{
     Block, BlockParameter, CascadeMessage, Expression, Identifier, KeywordPart, Literal, MapPair,
-    MatchArm, MessageSelector, Pattern,
+    MatchArm, MessageSelector, Pattern, StringSegment,
 };
 use crate::source_analysis::{Token, TokenKind};
 use ecow::EcoString;
@@ -344,6 +344,9 @@ impl Parser {
             | TokenKind::Symbol(_)
             | TokenKind::Character(_) => self.parse_literal(),
 
+            // String interpolation: "text {expr} more text"
+            TokenKind::StringStart(_) => self.parse_string_interpolation(),
+
             // Map literal: #{...}
             TokenKind::Hash => {
                 // Check if it's a map literal (followed by {)
@@ -437,6 +440,67 @@ impl Parser {
         };
 
         Expression::Literal(literal, span)
+    }
+
+    /// Parses a string interpolation expression.
+    ///
+    /// Consumes `StringStart`, embedded expressions, `StringSegment`s,
+    /// and `StringEnd` to produce an `Expression::StringInterpolation`.
+    ///
+    /// Token sequence example for `"Hello, {name}!"`:
+    /// - `StringStart("Hello, ")` → expression tokens → `StringEnd("!")`
+    fn parse_string_interpolation(&mut self) -> Expression {
+        let start_token = self.advance();
+        let start_span = start_token.span();
+        let TokenKind::StringStart(first_text) = start_token.into_kind() else {
+            unreachable!()
+        };
+
+        let mut segments = Vec::new();
+
+        // Add the initial literal segment (may be empty)
+        if !first_text.is_empty() {
+            segments.push(StringSegment::Literal(first_text));
+        }
+
+        loop {
+            // Parse the interpolated expression (keyword message level)
+            if !matches!(
+                self.current_kind(),
+                TokenKind::StringSegment(_) | TokenKind::StringEnd(_) | TokenKind::Eof
+            ) {
+                let expr = self.parse_keyword_message();
+                segments.push(StringSegment::Interpolation(expr));
+            }
+
+            match self.current_kind().clone() {
+                TokenKind::StringSegment(text) => {
+                    self.advance();
+                    if !text.is_empty() {
+                        segments.push(StringSegment::Literal(text));
+                    }
+                }
+                TokenKind::StringEnd(text) => {
+                    let end_token = self.advance();
+                    if !text.is_empty() {
+                        segments.push(StringSegment::Literal(text));
+                    }
+                    let span = start_span.merge(end_token.span());
+                    return Expression::StringInterpolation { segments, span };
+                }
+                _ => {
+                    // Unexpected EOF or token — unterminated interpolation
+                    self.diagnostics.push(Diagnostic::error(
+                        "Unterminated string interpolation",
+                        start_span,
+                    ));
+                    return Expression::Error {
+                        message: "Unterminated string interpolation".into(),
+                        span: start_span,
+                    };
+                }
+            }
+        }
     }
 
     /// Parses an identifier or field access.
