@@ -93,6 +93,13 @@ pub enum DaemonAction {
 
 /// Run the daemon command.
 pub fn run(action: &DaemonAction) -> Result<()> {
+    // BT-549: Daemon commands are deprecated in favor of the Port-based compiler backend.
+    eprintln!(
+        "⚠️  Warning: `beamtalk daemon` is deprecated. \
+         The Port-based compiler backend is now the default.\n   \
+         Set BEAMTALK_COMPILER=escript to use the legacy escript backend.\n   \
+         Daemon commands will be removed in a future release.\n"
+    );
     match action {
         DaemonAction::Start { foreground } => lifecycle::start_daemon(*foreground),
         DaemonAction::Stop => lifecycle::stop_daemon(),
