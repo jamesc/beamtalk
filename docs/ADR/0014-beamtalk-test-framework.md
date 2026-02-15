@@ -1,7 +1,7 @@
 # ADR 0014: Beamtalk Test Framework — Native Unit Tests and CLI Integration Tests
 
 ## Status
-Accepted (2026-02-09)
+Implemented (2026-02-15)
 
 ## Context
 

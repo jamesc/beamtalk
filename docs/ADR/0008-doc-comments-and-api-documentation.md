@@ -1,7 +1,7 @@
 # ADR 0008: Doc Comments and API Documentation
 
 ## Status
-Accepted (2026-02-12)
+Implemented (2026-02-15)
 
 ## Context
 

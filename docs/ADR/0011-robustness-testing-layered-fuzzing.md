@@ -1,7 +1,7 @@
 # ADR 0011: Robustness Testing — Layered Fuzzing and Error Quality
 
 ## Status
-Accepted (2026-02-12)
+Implemented (2026-02-15)
 
 ## Context
 
