@@ -1536,7 +1536,7 @@ Planned improvements tracked in Linear:
 - Method metadata (`methodDict`, `sourceCodeAt:`)
 - Block reflection (`sourceNode`, `numArgs`)
 
-See `docs/beamtalk-object-model.md` section 1.6 for full reflection design.
+See [ADR 0005](ADR/0005-beam-object-model-pragmatic-hybrid.md) for full object model design.
 
 ## Extension Methods (BT-229)
 
