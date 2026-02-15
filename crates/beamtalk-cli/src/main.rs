@@ -81,6 +81,10 @@ enum Command {
         /// Can also be set via `BEAMTALK_WORKSPACE_TIMEOUT` environment variable
         #[arg(long)]
         timeout: Option<u64>,
+
+        /// Disable colored output (also respects `NO_COLOR` environment variable)
+        #[arg(long)]
+        no_color: bool,
     },
 
     /// Check source files for errors without compiling
@@ -187,6 +191,7 @@ fn main() -> Result<()> {
             workspace,
             persistent,
             timeout,
+            no_color,
         } => commands::repl::run(
             port,
             node,
@@ -194,6 +199,7 @@ fn main() -> Result<()> {
             workspace.as_deref(),
             persistent,
             timeout,
+            no_color,
         ),
         Command::Transcript { workspace, recent } => {
             commands::transcript::run(workspace.as_deref(), recent)
