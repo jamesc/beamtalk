@@ -35,7 +35,7 @@ impl CoreErlangGenerator {
     ///             call 'beamtalk_error':'raise'(SpawnErr1)
     ///     end
     /// ```
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_spawn_function(
         &mut self,
         module: &Module,
@@ -149,7 +149,7 @@ impl CoreErlangGenerator {
     ///         end
     ///     end
     /// ```
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_spawn_with_args_function(
         &mut self,
         module: &Module,
@@ -268,8 +268,8 @@ impl CoreErlangGenerator {
     ///     let Error2 = call 'beamtalk_error':'with_hint'(Error1, <<"Use spawn instead">>) in
     ///     call 'beamtalk_error':'raise'(Error2)
     /// ```
-    #[allow(clippy::unused_self)]
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unused_self)] // method on impl for API consistency
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_actor_new_error_method(
         &self,
     ) -> Result<Document<'static>> {
@@ -311,8 +311,8 @@ impl CoreErlangGenerator {
     ///     let Error2 = call 'beamtalk_error':'with_hint'(Error1, <<"Use spawnWith: instead">>) in
     ///     call 'beamtalk_error':'raise'(Error2)
     /// ```
-    #[allow(clippy::unused_self)]
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unused_self)] // method on impl for API consistency
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_actor_new_with_args_error_method(
         &self,
     ) -> Result<Document<'static>> {
@@ -344,7 +344,7 @@ impl CoreErlangGenerator {
     /// Abstract classes cannot be instantiated — they must be subclassed first.
     /// This function generates a method that throws a structured `#beamtalk_error{}`
     /// record with `kind=instantiation_error`.
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_abstract_spawn_error_method(
         &mut self,
     ) -> Result<Document<'static>> {
@@ -377,7 +377,7 @@ impl CoreErlangGenerator {
     }
 
     /// Generates the `spawn/1` error method for abstract classes (BT-105).
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_abstract_spawn_with_args_error_method(
         &mut self,
     ) -> Result<Document<'static>> {
@@ -434,8 +434,8 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// 'superclass'/0 = fun () -> 'Actor'
     /// ```
-    #[allow(clippy::unused_self)]
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unused_self)] // method on impl for API consistency
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_superclass_function(
         &self,
         module: &Module,

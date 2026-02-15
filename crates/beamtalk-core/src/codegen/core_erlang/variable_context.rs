@@ -3,6 +3,8 @@
 
 //! Variable binding and scope management.
 //!
+//! **DDD Context:** Compilation — Code Generation
+//!
 //! This module provides the [`VariableContext`] aggregate which manages:
 //!
 //! - **Variable scopes**: Nested scopes for block parameters, method parameters, and local variables

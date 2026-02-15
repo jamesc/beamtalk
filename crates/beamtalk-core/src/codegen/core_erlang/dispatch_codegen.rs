@@ -3,9 +3,11 @@
 
 //! Message sending and dispatch compilation.
 //!
-//! This module handles the **core domain operation** of Beamtalk: message sending.
-//! In Smalltalk and Beamtalk, message sending is THE fundamental operation, not
-//! method calls or function invocation.
+//! **DDD Context:** Compilation — Code Generation
+//!
+//! This domain service handles the **core domain operation** of Beamtalk: message
+//! sending. In Smalltalk and Beamtalk, message sending is THE fundamental operation,
+//! not method calls or function invocation.
 //!
 //! # Message Send Protocol (ADR 0007 Phase 4)
 //!
