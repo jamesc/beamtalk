@@ -413,15 +413,25 @@ impl CoreErlangGenerator {
     ///
     /// Produces: `#{#<byte1>(8,1,'integer',['unsigned'|['big']]), ...}#`
     pub(in crate::codegen::core_erlang) fn binary_string_literal(s: &str) -> String {
-        use std::fmt::Write;
         let mut result = String::from("#{");
+        result.push_str(&Self::binary_byte_segments(s));
+        result.push_str("}#");
+        result
+    }
+
+    /// Returns Core Erlang binary byte segments for a string, without `#{...}#` wrapping.
+    ///
+    /// Used by `binary_string_literal` and string interpolation codegen.
+    /// Produces: `#<byte1>(8,1,'integer',['unsigned'|['big']]),#<byte2>(...), ...`
+    pub(in crate::codegen::core_erlang) fn binary_byte_segments(s: &str) -> String {
+        use std::fmt::Write;
+        let mut result = String::new();
         for (i, byte) in s.bytes().enumerate() {
             if i > 0 {
                 result.push(',');
             }
             write!(result, "#<{byte}>(8,1,'integer',['unsigned'|['big']])").unwrap();
         }
-        result.push_str("}#");
         result
     }
 

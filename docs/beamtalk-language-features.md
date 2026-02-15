@@ -42,7 +42,7 @@ Planned language features for beamtalk. See [beamtalk-principles.md](beamtalk-pr
 name := "Alice"
 greeting := "Hello, 世界! 🌍"
 
-// String interpolation (planned)
+// String interpolation (ADR 0023)
 message := "Welcome, {name}!"
 emoji := "Status: {status} ✓"
 
@@ -140,7 +140,7 @@ str := String fromCharlist: [72, 101, 108, 108, 111]  // => "Hello"
 | Feature | Status |
 |---------|--------|
 | UTF-8 string literals | ✅ Implemented - Lexer and parser support |
-| String interpolation | ❌ Not yet implemented - See `test-package-compiler/cases/future_string_interpolation/` for planned behavior |
+| String interpolation | ✅ Implemented (ADR 0023) - `"Hello, {name}!"` compiles to binary construction with `printString` dispatch |
 | Grapheme-aware length | ✅ Available via Erlang `:string` module |
 | Unicode normalization | ✅ Available via Erlang `:unicode` module |
 | Case folding | ✅ Available via Erlang `:string` module |
