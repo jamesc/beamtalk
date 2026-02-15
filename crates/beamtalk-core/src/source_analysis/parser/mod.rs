@@ -1785,16 +1785,18 @@ mod tests {
 
     #[test]
     fn parse_map_uppercase_key_not_converted() {
-        // BT-591: Uppercase identifiers (class references) are NOT converted to symbols
-        let module = parse_ok("#{#key => Counter}");
+        // BT-591: Uppercase identifiers (class references) used as map keys are NOT converted to symbols
+        let module = parse_ok("#{Counter => 1}");
         assert_eq!(module.expressions.len(), 1);
         match &module.expressions[0] {
             Expression::MapLiteral { pairs, .. } => {
                 assert_eq!(pairs.len(), 1);
-                assert!(
-                    matches!(&pairs[0].key, Expression::Literal(Literal::Symbol(s), _) if s == "key")
-                );
-                assert!(matches!(&pairs[0].value, Expression::ClassReference { .. }));
+                // Uppercase bare identifier `Counter` remains a ClassReference, not an implicit symbol
+                assert!(matches!(&pairs[0].key, Expression::ClassReference { .. }));
+                assert!(matches!(
+                    &pairs[0].value,
+                    Expression::Literal(Literal::Integer(1), _)
+                ));
             }
             _ => panic!("Expected MapLiteral"),
         }
