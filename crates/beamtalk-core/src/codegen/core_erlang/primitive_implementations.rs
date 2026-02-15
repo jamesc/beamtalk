@@ -921,9 +921,9 @@ fn generate_object_bif(selector: &str, params: &[String]) -> Option<Document<'st
         "->" => {
             let p0 = params.first()?;
             Some(docvec![
-                "~{{'$beamtalk_class' => 'Association', 'key' => Self, 'value' => ",
+                "~{'$beamtalk_class' => 'Association', 'key' => Self, 'value' => ",
                 p0.clone(),
-                "}}~",
+                "}~",
             ])
         }
         _ => None,
