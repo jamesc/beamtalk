@@ -3391,4 +3391,215 @@ mod tests {
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].message.contains("`temp`"));
     }
+
+    #[test]
+    fn test_block_parameter_no_unused_warning() {
+        // Block parameters should not warn: getValue => [:x | x]
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("getValue".into()),
+                parameters: vec![],
+                body: vec![Expression::Block(Block::new(
+                    vec![BlockParameter::new("x", test_span())],
+                    vec![Expression::Identifier(Identifier::new("x", test_span()))],
+                    test_span(),
+                ))],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused variable"))
+            .collect();
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_pattern_variable_no_unused_warning() {
+        // Pattern variables in match arms should not warn:
+        // getValue => x match: { 1 -> #one }
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("getValue".into()),
+                parameters: vec![],
+                body: vec![Expression::Match {
+                    value: Box::new(Expression::Literal(Literal::Integer(1), test_span())),
+                    arms: vec![MatchArm::new(
+                        Pattern::Variable(Identifier::new("result", test_span())),
+                        Expression::Identifier(Identifier::new("result", test_span())),
+                        test_span(),
+                    )],
+                    span: test_span(),
+                }],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused variable"))
+            .collect();
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_unused_variable_in_nested_block_warns() {
+        // Unused variable declared inside a nested block should warn:
+        // getValue => [unused := 42]
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("getValue".into()),
+                parameters: vec![],
+                body: vec![Expression::Block(Block::new(
+                    vec![],
+                    vec![Expression::Assignment {
+                        target: Box::new(Expression::Identifier(Identifier::new(
+                            "unused",
+                            Span::new(10, 16),
+                        ))),
+                        value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
+                        span: test_span(),
+                    }],
+                    test_span(),
+                ))],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused variable"))
+            .collect();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("`unused`"));
+    }
+
+    #[test]
+    fn test_variable_used_via_closure_no_warning() {
+        // Variable defined at method scope, used inside a block:
+        // getValue => x := 1. [x]
+        // The block reads x, so no unused warning.
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("getValue".into()),
+                parameters: vec![],
+                body: vec![
+                    Expression::Assignment {
+                        target: Box::new(Expression::Identifier(Identifier::new(
+                            "x",
+                            Span::new(10, 11),
+                        ))),
+                        value: Box::new(Expression::Literal(Literal::Integer(1), test_span())),
+                        span: test_span(),
+                    },
+                    Expression::Block(Block::new(
+                        vec![],
+                        vec![Expression::Identifier(Identifier::new("x", test_span()))],
+                        test_span(),
+                    )),
+                ],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused variable"))
+            .collect();
+        // x is used via closure in the block
+        assert!(warnings.is_empty());
+    }
 }

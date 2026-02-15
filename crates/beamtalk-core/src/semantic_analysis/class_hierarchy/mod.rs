@@ -492,10 +492,11 @@ impl ClassHierarchy {
         }
     }
 
-    /// Check for duplicate method selectors within a list of methods.
+    /// Check for duplicate methods within a list of methods.
     ///
-    /// Only Primary methods are checked for duplicates — advice methods
-    /// (Before, After, Around) are allowed to share selectors with primary methods.
+    /// Methods are considered duplicates based on their `(selector, kind)` tuple.
+    /// Advice methods (Before, After, Around) may share selectors with Primary
+    /// methods, but not with other advice methods of the same kind.
     fn check_duplicate_methods(
         methods: &[crate::ast::MethodDefinition],
         class_name: &EcoString,
@@ -1533,5 +1534,153 @@ mod tests {
 
         // No duplicate error — advice methods can share selector with primary
         assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn duplicate_before_advice_detected() {
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![
+                MethodDefinition {
+                    selector: crate::ast::MessageSelector::Unary("increment".into()),
+                    parameters: vec![],
+                    body: vec![],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: MethodKind::Before,
+                    doc_comment: None,
+                    span: Span::new(10, 20),
+                },
+                MethodDefinition {
+                    selector: crate::ast::MessageSelector::Unary("increment".into()),
+                    parameters: vec![],
+                    body: vec![],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: MethodKind::Before,
+                    doc_comment: None,
+                    span: Span::new(30, 40),
+                },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (_, diags) = ClassHierarchy::build(&module);
+
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("Duplicate method"));
+        assert!(diags[0].message.contains("`increment`"));
+    }
+
+    #[test]
+    fn duplicate_after_advice_detected() {
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![
+                MethodDefinition {
+                    selector: crate::ast::MessageSelector::Unary("increment".into()),
+                    parameters: vec![],
+                    body: vec![],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: MethodKind::After,
+                    doc_comment: None,
+                    span: Span::new(10, 20),
+                },
+                MethodDefinition {
+                    selector: crate::ast::MessageSelector::Unary("increment".into()),
+                    parameters: vec![],
+                    body: vec![],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: MethodKind::After,
+                    doc_comment: None,
+                    span: Span::new(30, 40),
+                },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (_, diags) = ClassHierarchy::build(&module);
+
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("Duplicate method"));
+    }
+
+    #[test]
+    fn duplicate_around_advice_detected() {
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![
+                MethodDefinition {
+                    selector: crate::ast::MessageSelector::Unary("increment".into()),
+                    parameters: vec![],
+                    body: vec![],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: MethodKind::Around,
+                    doc_comment: None,
+                    span: Span::new(10, 20),
+                },
+                MethodDefinition {
+                    selector: crate::ast::MessageSelector::Unary("increment".into()),
+                    parameters: vec![],
+                    body: vec![],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: MethodKind::Around,
+                    doc_comment: None,
+                    span: Span::new(30, 40),
+                },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (_, diags) = ClassHierarchy::build(&module);
+
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("Duplicate method"));
     }
 }
