@@ -21,6 +21,7 @@ pub mod block_context;
 pub mod class_hierarchy;
 pub mod error;
 pub(crate) mod method_validators;
+pub mod module_validator;
 pub mod name_resolver;
 pub mod primitive_validator;
 pub mod scope;
@@ -307,6 +308,10 @@ pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> Analysis
     check_actor_new_usage(module, &result.class_hierarchy, &mut result.diagnostics);
     check_new_field_names(module, &result.class_hierarchy, &mut result.diagnostics);
     check_class_variable_access(module, &result.class_hierarchy, &mut result.diagnostics);
+
+    // Phase 6: Module-level validation (BT-349)
+    let module_diags = module_validator::validate_single_class(module);
+    result.diagnostics.extend(module_diags);
 
     result
 }

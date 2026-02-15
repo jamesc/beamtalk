@@ -1,0 +1,94 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for class hierarchy queries (BT-573)
+//
+// Verifies that `subclasses` returns direct subclass names
+// and `allSubclasses` returns the full recursive hierarchy.
+//
+// Note: Other test files may load fixtures that add subclasses to the
+// hierarchy when running the full suite, so we use includes: checks
+// for non-leaf classes. We only assert isEmpty on primitive classes
+// that cannot be subclassed (sealed).
+
+// @load tests/e2e/fixtures/counter.bt
+
+// ---------------------------------------------------------------------------
+// subclasses — direct children only
+// ---------------------------------------------------------------------------
+
+// Number has Integer and Float as direct subclasses
+numSubs := Number subclasses
+// => _
+
+numSubs includes: #Integer
+// => true
+
+numSubs includes: #Float
+// => true
+
+// Boolean has True and False as direct subclasses
+boolSubs := Boolean subclasses
+// => _
+
+boolSubs includes: #True
+// => true
+
+boolSubs includes: #False
+// => true
+
+// Float is sealed — always a leaf
+Float subclasses
+// => []
+
+True subclasses
+// => []
+
+// ---------------------------------------------------------------------------
+// subclasses — user-defined classes
+// ---------------------------------------------------------------------------
+
+// Actor should include Counter (loaded fixture)
+actorSubs := Actor subclasses
+// => _
+
+actorSubs includes: #Counter
+// => true
+
+// ---------------------------------------------------------------------------
+// allSubclasses — recursive hierarchy
+// ---------------------------------------------------------------------------
+
+// Number allSubclasses includes Integer and Float
+numAllSubs := Number allSubclasses
+// => _
+
+numAllSubs includes: #Integer
+// => true
+
+numAllSubs includes: #Float
+// => true
+
+// Boolean allSubclasses includes True and False
+boolAllSubs := Boolean allSubclasses
+// => _
+
+boolAllSubs includes: #True
+// => true
+
+boolAllSubs includes: #False
+// => true
+
+// Collection allSubclasses includes List and Dictionary
+collSubs := Collection allSubclasses
+// => _
+
+collSubs includes: #List
+// => true
+
+collSubs includes: #Dictionary
+// => true
+
+// Float is sealed — always a leaf, allSubclasses returns empty
+Float allSubclasses
+// => []

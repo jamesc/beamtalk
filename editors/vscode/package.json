@@ -1,0 +1,61 @@
+{
+  "name": "beamtalk",
+  "displayName": "Beamtalk",
+  "description": "Language support for Beamtalk (.bt files)",
+  "version": "0.1.0",
+  "publisher": "beamtalk",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jamesc/beamtalk"
+  },
+  "engines": {
+    "vscode": "^1.82.0"
+  },
+  "categories": ["Programming Languages"],
+  "activationEvents": [
+    "onLanguage:beamtalk"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "beamtalk",
+        "aliases": ["Beamtalk", "beamtalk"],
+        "extensions": [".bt"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "beamtalk",
+        "scopeName": "source.beamtalk",
+        "path": "./syntaxes/beamtalk.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "Beamtalk",
+      "properties": {
+        "beamtalk.server.path": {
+          "type": "string",
+          "default": "beamtalk-lsp",
+          "description": "Path to the beamtalk-lsp executable"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.82.0",
+    "typescript": "^5.0.0"
+  }
+}

@@ -26,6 +26,9 @@
 // Using an unknown intrinsic name with @primitive is an error
 // @load-error tests/e2e/fixtures/semantic_unknown_intrinsic.bt => Unknown intrinsic
 
+// Multiple classes in one file is not supported (BT-349)
+// @load-error tests/e2e/fixtures/multi_class.bt => Multiple classes in one file is not supported
+
 // --- Reflection method validators ---
 
 // respondsTo: expects a symbol literal, not a bare identifier
