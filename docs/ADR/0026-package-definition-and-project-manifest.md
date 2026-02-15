@@ -155,6 +155,8 @@ The formula is: `bt@{package_name}@{relative_path_without_extension}` where path
 
 Subdirectories within `src/` are **namespacing only** — they do not create subpackages. The entire `src/` tree belongs to one flat package. This follows the Gleam model.
 
+**Class name uniqueness:** Within a workspace, class names must be globally unique across all loaded packages. If your package and a dependency both define `Counter`, the compiler will report an error. The BEAM module names are already unique (`bt@my_app@counter` vs `bt@other_lib@counter`), but Beamtalk dispatches by class name, not module name. Qualified class names (e.g., `Counting.Counter`) require a module/namespace system and are deferred to a future ADR.
+
 **Single-file mode** (no manifest): When `beamtalk build file.bt` is invoked on a file outside any package, the module name is the file stem without any package prefix (current behavior, preserved for scripting/experimentation).
 
 ### 5. Directory structure
