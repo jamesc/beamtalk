@@ -111,6 +111,13 @@ The key insight: **literal blocks at message-send sites can be typed from contex
 - Sealed classes (no unknown subclasses)
 - Built-in primitive types and their full method tables
 
+**Boundaries of inference:**
+
+- **Erlang interop:** Calls to Erlang modules (`erlang:length/1`, `lists:reverse/1`) return `Dynamic` unless we ship type stubs for common modules. Phase 2 could add a mechanism for declaring external module types.
+- **REPL re-definitions:** When a class is re-defined in the REPL, the type checker must invalidate cached types for that class and re-check dependents. This aligns with the workspace model (ADR 0004) — type state is per-workspace.
+- **Dynamic class creation:** `create_subclass/3` at runtime creates classes the compiler has never seen. These are `Dynamic` — the type checker doesn't attempt to type runtime-generated classes.
+- **`doesNotUnderstand:` proxies:** If a class defines `doesNotUnderstand:`, the type checker accepts any message to instances of that class (no warnings for unknown selectors).
+
 ### Phase 2: Optional Type Annotations
 
 Developers can annotate state fields, method parameters, and return types for extra precision.
@@ -362,29 +369,30 @@ x class = Integer ifTrue: [
 - **Phase 1:** "The editor catches my typos!" — immediate value, zero learning curve
 - **Phase 2:** "I can add types like TypeScript" — familiar concept
 - **Phase 3:** "Protocols are like TypeScript interfaces" — maps to known concepts
-- **Risk:** None — everything is optional, nothing breaks
+- **Risk:** Warning fatigue if inference produces too many false positives on idiomatic dynamic code. Mitigation: tune to high-confidence checks only in Phase 1.
 
 ### Smalltalk Developer
 - **Phase 1:** "Finally, the compiler uses what it already knows" — pure upside
 - **Phase 2:** "Type annotations are optional — I can still explore freely"
 - **Phase 3:** "Protocols formalize what we already do informally with message protocols"
-- **Risk:** "Don't let types become mandatory" — our design prevents this by principle
+- **Risk:** Cultural pressure to add types everywhere. Mitigation: the language never requires annotations — `typed` is opt-in per class, and untyped code is first-class.
 
 ### Erlang/Elixir Developer
 - **Phase 2:** "It generates Dialyzer specs — I get BEAM-level checking!" — huge win
 - **Phase 3:** "Protocols are like Elixir protocols" — familiar concept
-- **Risk:** None — Dialyzer integration is the expected path on BEAM
+- **Risk:** Beamtalk type warnings and Dialyzer warnings may overlap or contradict. Mitigation: Phase 2 must define deduplication strategy (see Consequences/Negative).
 
 ### Production Operator
 - **All phases:** Zero runtime cost, same BEAM bytecode, same observability
 - **Phase 2:** Dialyzer specs enable standard BEAM type checking in CI
-- **Risk:** None — type checking is compile-time only
+- **Risk:** No way to fail the build on type warnings without a `--strict` flag. Mitigation: `typed` classes make annotation completeness visible in source; CI can lint for `typed` class annotation coverage.
 
 ### Tooling Developer (LSP)
 - **Phase 1:** Type inference enables precise completions and hover
 - **Phase 2:** Return types enable signature help and go-to-type
 - **Phase 3:** Protocol types enable interface-level navigation
 - **This is the primary driver** — types exist to serve tooling
+- **Risk:** Type cache invalidation on REPL re-definitions. Phase 1 must handle class hierarchy changes incrementally.
 
 ## Steelman Analysis
 
@@ -400,7 +408,9 @@ x class = Integer ifTrue: [
 - 🧑‍💻 **Newcomer**: "Zero syntax to learn — the compiler just figures it out"
 - 🎩 **Smalltalk purist**: "Smalltalk never needed annotations and neither should we"
 - ⚙️ **BEAM veteran**: "But without annotations, no Dialyzer specs — I lose BEAM tooling"
-- 🎨 **Language designer**: "Inference alone can't disambiguate — `x := self getValue` returns what?"
+- 🏭 **Operator**: "If inference catches 80% of bugs with zero cost, why add annotation complexity?"
+- 🎨 **Language designer**: "Inference alone can't disambiguate — `x := self getValue` returns what? And annotations create a second language to maintain."
+- **Our answer:** Phase 1 IS pure inference. Annotations (Phase 2) are additive — you only annotate when inference falls short or you want Dialyzer integration.
 
 ### For Global Strict Mode (--strict flag — Rejected)
 - 🏭 **Operator**: "I want CI to fail on type warnings — just give me a flag"
@@ -414,7 +424,22 @@ x class = Integer ifTrue: [
 
 ## Alternatives Considered
 
-### Alternative A: Mandatory Static Typing (Gleam-style)
+### Alternative A: Do Nothing (Status Quo)
+Keep the compiler fully dynamic — no type checking, no inference, no warnings.
+
+```beamtalk
+// Today: typos are only caught at runtime
+c := Counter spawn
+c decremet                // No warning — crashes at runtime with doesNotUnderstand:
+```
+
+**Rejected because:**
+- IDE tooling (ADR 0024) cannot provide quality completions without type info
+- The compiler already has class hierarchy data — discarding it is waste
+- Every typo is a runtime surprise, even when the compiler could have caught it
+- However: this IS the current state, and it works. Type checking is an investment with deferred payoff.
+
+### Alternative B: Mandatory Static Typing (Gleam-style)
 Full Hindley-Milner type system with no dynamic escape.
 
 ```beamtalk
@@ -435,7 +460,7 @@ c foo                    // Compile ERROR (not warning)
 - Breaks Tonel-style method addition (`Counter >> newMethod => ...`)
 - Incompatible with gradual adoption — all-or-nothing forces full migration
 
-### Alternative B: Nominal Typing (Java-style)
+### Alternative C: Nominal Typing (Java-style)
 Type compatibility based on declared class hierarchy, not message sets.
 
 ```beamtalk
@@ -449,7 +474,7 @@ Counter implements: Incrementable   // Explicit declaration required
 - Forces planning ahead — you must declare interfaces before using them
 - Structural typing (our choice) is strictly more flexible
 
-### Alternative C: Global Strict Mode Flag
+### Alternative D: Global Strict Mode Flag
 A `--strict` compiler flag that promotes type warnings to errors, like TypeScript's `strict: true`.
 
 **Rejected because:**
@@ -476,7 +501,9 @@ A `--strict` compiler flag that promotes type warnings to errors, like TypeScrip
 - Implementing a type checker is significant engineering effort (especially Phase 3-4)
 - Type error messages must be carefully designed to not overwhelm users
 - Protocol conformance checking on large hierarchies has performance implications for compilation
-- Two-layer checking (Beamtalk + Dialyzer) could produce duplicate or contradictory warnings
+- Two-layer checking (Beamtalk + Dialyzer) could produce duplicate or contradictory warnings — Phase 2 must define a deduplication strategy (e.g., suppress Beamtalk warnings for methods with `-spec`)
+- Warning fatigue risk: if warnings are never errors, codebases may accumulate permanent warning debt. `typed` classes mitigate this by making annotation completeness visible.
+- REPL type cache invalidation adds complexity to the workspace model — re-defining a class must propagate type changes to all dependents
 
 ### Neutral
 - Generated BEAM bytecode is unchanged — types are erased at compile time
@@ -532,11 +559,24 @@ Union types, generic types, singleton types, type narrowing. Deferred to future 
 | 3 | TBD | Protocol definitions and structural conformance | L | Planned |
 | 4 | TBD | Advanced types (union, generic, singleton, narrowing) | XL | Future |
 
+## Migration Path
+
+No migration needed. This is purely additive — all existing code compiles and runs exactly as before. Type checking introduces new warnings only; no existing behavior changes.
+
+- **Phase 1:** Zero code changes required. New warnings may appear for existing code.
+- **Phase 2:** No code changes required. Annotations are opt-in.
+- **Phase 2b:** `typed` modifier is opt-in per class.
+- **Phase 3:** Protocol definitions are new syntax; no existing code affected.
+
 ## References
 
 - Related ADRs:
   - [ADR 0005: BEAM Object Model](0005-beam-object-model-pragmatic-hybrid.md) — Class hierarchy and method resolution
+  - [ADR 0006: Unified Method Dispatch](0006-unified-method-dispatch.md) — ClassHierarchy used for both dispatch and type checking
   - [ADR 0013: Class Variables, Methods, Instantiation](0013-class-variables-class-methods-instantiation.md) — Class system that types check against
+  - [ADR 0015: Exception Hierarchy](0015-repl-error-objects-and-exception-hierarchy.md) — Exception classes for future typed exception handling (Phase 4)
+  - [ADR 0018: Document Tree Codegen](0018-document-tree-codegen.md) — `-spec` generation should use Document API
+  - [ADR 0023: String Interpolation](0023-string-interpolation-and-binaries.md) — Type inference applies within interpolation expressions
   - [ADR 0024: Static-First IDE Tooling](0024-static-first-live-augmented-ide-tooling.md) — Types serve the tooling story
 - Language spec: `docs/beamtalk-language-features.md` — Optional Type Annotations, Protocols sections
 - Existing infrastructure:
