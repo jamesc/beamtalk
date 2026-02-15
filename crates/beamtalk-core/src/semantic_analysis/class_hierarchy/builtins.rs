@@ -103,6 +103,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("perform:withArguments:", 2, "ProtoObject"),
                 builtin_method("error:", 1, "ProtoObject"),
             ],
+            class_methods: vec![],
         },
     );
 
@@ -135,6 +136,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("new", 0, "Object"),
                 builtin_method("new:", 1, "Object"),
             ],
+            class_methods: vec![],
         },
     );
 
@@ -154,6 +156,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_sealed_method("new:", 1, "Actor"),
                 builtin_method("describe", 0, "Actor"),
             ],
+            class_methods: vec![],
         },
     );
 
@@ -173,6 +176,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("sign", 0, "Number"),
                 builtin_method("between:and:", 2, "Number"),
             ],
+            class_methods: vec![],
         },
     );
 
@@ -209,6 +213,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("asFloat", 0, "Integer"),
                 builtin_method("asString", 0, "Integer"),
             ],
+            class_methods: vec![],
         },
     );
 
@@ -245,6 +250,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("isInfinite", 0, "Float"),
                 builtin_method("isZero", 0, "Float"),
             ],
+            class_methods: vec![],
         },
     );
 
@@ -281,6 +287,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("asFloat", 0, "String"),
                 builtin_method("asList", 0, "String"),
             ],
+            class_methods: vec![],
         },
     );
 
@@ -328,6 +335,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("add:", 1, "List"),
                 builtin_method("=", 1, "List"),
             ],
+            class_methods: vec![],
         },
     );
 
@@ -356,6 +364,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("=", 1, "Dictionary"),
                 builtin_method("asList", 0, "Dictionary"),
             ],
+            class_methods: vec![],
         },
     );
 
@@ -380,6 +389,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("asList", 0, "Set"),
                 builtin_method("asArray", 0, "Set"),
             ],
+            class_methods: vec![],
         },
     );
 
@@ -405,6 +415,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("anySatisfy:", 1, "Stream"),
                 builtin_method("allSatisfy:", 1, "Stream"),
             ],
+            class_methods: vec![],
         },
     );
 
@@ -428,6 +439,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("unwrapOrElse:", 1, "Tuple"),
                 builtin_method("asString", 0, "Tuple"),
             ],
+            class_methods: vec![],
         },
     );
 
@@ -449,6 +461,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("whileFalse:", 1, "Block"),
                 builtin_method("repeat", 0, "Block"),
             ],
+            class_methods: vec![],
         },
     );
 
@@ -468,6 +481,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("ifNotNil:", 1, "UndefinedObject"),
                 builtin_method("ifNil:ifNotNil:", 2, "UndefinedObject"),
             ],
+            class_methods: vec![],
         },
     );
 
@@ -486,6 +500,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("or:", 1, "Boolean"),
                 builtin_method("xor:", 1, "Boolean"),
             ],
+            class_methods: vec![],
         },
     );
 
@@ -504,6 +519,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("ifFalse:", 1, "True"),
                 builtin_method("not", 0, "True"),
             ],
+            class_methods: vec![],
         },
     );
 
@@ -522,6 +538,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("ifFalse:", 1, "False"),
                 builtin_method("not", 0, "False"),
             ],
+            class_methods: vec![],
         },
     );
 
@@ -549,6 +566,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("allSatisfy:", 1, "Collection"),
                 builtin_method("asString", 0, "Collection"),
             ],
+            class_methods: vec![],
         },
     );
 
@@ -570,6 +588,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("should:raise:", 2, "TestCase"),
                 builtin_method("fail:", 1, "TestCase"),
             ],
+            class_methods: vec![],
         },
     );
 

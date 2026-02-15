@@ -270,6 +270,34 @@ impl HoverInfo {
 /// for consistency across the language service API.
 pub type Diagnostic = ParseDiagnostic;
 
+/// A document symbol (class, method, field, etc.) for outline views.
+///
+/// Follows LSP `DocumentSymbol` naming conventions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentSymbol {
+    /// Display name (e.g., "Counter (class)", "increment").
+    pub name: EcoString,
+    /// Symbol kind.
+    pub kind: DocumentSymbolKind,
+    /// Source span of the symbol.
+    pub span: Span,
+    /// Children (e.g., methods inside a class).
+    pub children: Vec<DocumentSymbol>,
+}
+
+/// The kind of a document symbol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DocumentSymbolKind {
+    /// A class definition.
+    Class,
+    /// An instance method.
+    Method,
+    /// A class-side method.
+    ClassMethod,
+    /// A state variable (field).
+    Field,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

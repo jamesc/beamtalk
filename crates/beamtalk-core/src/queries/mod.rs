@@ -10,6 +10,7 @@
 //! - [`completion_provider`] - Suggest completions at cursor position
 //! - [`definition_provider`] - Go-to-definition (single-file and cross-file)
 //! - [`diagnostic_provider`] - Collect errors and warnings
+//! - [`document_symbols_provider`] - Return document outline symbols
 //! - [`hover_provider`] - Show information on hover
 //!
 //! **DDD Context:** Language Service
@@ -27,4 +28,5 @@
 pub mod completion_provider;
 pub mod definition_provider;
 pub mod diagnostic_provider;
+pub mod document_symbols_provider;
 pub mod hover_provider;
