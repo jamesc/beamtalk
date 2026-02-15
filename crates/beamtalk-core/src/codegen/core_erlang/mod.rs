@@ -834,6 +834,9 @@ impl CoreErlangGenerator {
                 name, is_quoted, ..
             } => self.generate_primitive(name, *is_quoted),
             Expression::Match { value, arms, .. } => self.generate_match(value, arms),
+            Expression::StringInterpolation { segments, .. } => {
+                self.generate_string_interpolation(segments)
+            }
             _ => Err(CodeGenError::UnsupportedFeature {
                 feature: format!("expression type: {expr:?}"),
                 location: format!("{:?}", expr.span()),

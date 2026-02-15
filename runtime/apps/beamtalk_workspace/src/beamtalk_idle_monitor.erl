@@ -30,6 +30,7 @@
 
 -module(beamtalk_idle_monitor).
 -behaviour(gen_server).
+-include_lib("kernel/include/logger.hrl").
 
 %% Public API
 -export([start_link/1, mark_activity/0]).
@@ -101,7 +102,7 @@ handle_info(check_idle, State = #state{enabled = true, max_idle_seconds = MaxIdl
     %% Check if we should terminate
     case should_terminate(MaxIdle) of
         true ->
-            io:format(standard_error, "Workspace idle for >~p seconds, shutting down~n", [MaxIdle]),
+            ?LOG_WARNING("Workspace idle, shutting down", #{max_idle_seconds => MaxIdle}),
             %% Graceful shutdown - let supervisor tree clean up
             init:stop();
         false ->
