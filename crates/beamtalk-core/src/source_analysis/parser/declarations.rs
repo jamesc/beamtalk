@@ -250,7 +250,12 @@ impl Parser {
                 // Untyped: `+ other =>` or `+ other -> Type =>`
                 (matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_)))
                     && (matches!(self.peek_at(offset + 2), Some(TokenKind::FatArrow))
-                        || self.is_return_type_then_fat_arrow(offset + 2)))
+                        || self.is_return_type_then_fat_arrow(offset + 2)
+                        // Typed via Colon: `+ other : Type =>` (space before colon)
+                        || (matches!(self.peek_at(offset + 2), Some(TokenKind::Colon))
+                            && matches!(self.peek_at(offset + 3), Some(TokenKind::Identifier(_)))
+                            && (matches!(self.peek_at(offset + 4), Some(TokenKind::FatArrow))
+                                || self.is_return_type_then_fat_arrow(offset + 4)))))
                     // Typed via Keyword: `+ other: Type =>` (lexer makes `other:` a Keyword)
                     || (matches!(self.peek_at(offset + 1), Some(TokenKind::Keyword(_)))
                         && matches!(self.peek_at(offset + 2), Some(TokenKind::Identifier(_)))
@@ -331,12 +336,31 @@ impl Parser {
             }
             offset += 1;
 
-            // Check for => (end of method selector), return type, or another keyword
+            // After the parameter name, we may see:
+            // - a fat arrow (end of selector)
+            // - another keyword (more selector parts)
+            // - a return type introducer "->"
+            // - or a colon-type pair `: Type` (when param is written as `name : Type`)
             match self.peek_at(offset) {
                 Some(TokenKind::FatArrow) => return true,
                 Some(TokenKind::Keyword(_)) => {} // More keywords, continue loop
                 Some(TokenKind::BinarySelector(s)) if s.as_str() == "->" => {
                     return self.is_return_type_then_fat_arrow(offset);
+                }
+                Some(TokenKind::Colon) => {
+                    // Typed parameter: `paramName : Type`
+                    if !matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_))) {
+                        return false;
+                    }
+                    offset += 2; // skip `:` and type
+                    match self.peek_at(offset) {
+                        Some(TokenKind::FatArrow) => return true,
+                        Some(TokenKind::Keyword(_)) => {} // More keywords, continue loop
+                        Some(TokenKind::BinarySelector(s)) if s.as_str() == "->" => {
+                            return self.is_return_type_then_fat_arrow(offset);
+                        }
+                        _ => return false,
+                    }
                 }
                 _ => return false,
             }
@@ -635,7 +659,7 @@ impl Parser {
                 if let TokenKind::Keyword(kw) = self.current_kind() {
                     let param_name_str = kw.trim_end_matches(':');
                     let full_span = self.current_token().span();
-                    let param_span = Span::new(full_span.start(), full_span.end() - 1);
+                    let param_span = Self::span_without_trailing_colon(full_span);
                     let param_name = Identifier::new(param_name_str, param_span);
                     self.advance(); // consume `other:`
                     let type_ann = self.parse_type_annotation();
@@ -662,25 +686,27 @@ impl Parser {
                     keywords.push(KeywordPart::new(keyword.clone(), span));
                     self.advance();
 
-                    // Check if next token is a Keyword — that means typed parameter
-                    // Pattern: `keyword: paramName: Type`
-                    // Where `paramName:` is lexed as a Keyword token
+                    // Check for typed parameter: `keyword: paramName: Type`
+                    // where paramName: is a Keyword token followed by Identifier (type)
                     if let TokenKind::Keyword(param_keyword) = self.current_kind() {
-                        // Check if this is `paramName: Type` (followed by Identifier for type)
-                        // vs `nextKeyword: nextParam` (another keyword selector part)
-                        // Disambiguate: if after `paramName:` there's an Identifier followed by
-                        // `=>`, `->`, or another Keyword, it's a typed parameter.
-                        // If after `paramName:` there's an Identifier followed by something else,
-                        // it could be ambiguous. Use the rule: if the Identifier after `paramName:`
-                        // starts with uppercase, it's a type annotation.
+                        // Disambiguate typed param vs next keyword selector part.
+                        // If after `paramName:` + Identifier, we see `=>`, `->`, or another
+                        // Keyword, the Identifier is a type name (typed parameter).
+                        // Otherwise it's the next keyword selector part's parameter.
                         let param_name_str = param_keyword.trim_end_matches(':');
-                        if let Some(TokenKind::Identifier(next_ident)) = self.peek_at(1) {
-                            let first_char = next_ident.chars().next().unwrap_or('a');
-                            if first_char.is_uppercase() {
+                        if matches!(self.peek_at(1), Some(TokenKind::Identifier(_))) {
+                            let is_typed = matches!(
+                                self.peek_at(2),
+                                Some(
+                                    TokenKind::FatArrow
+                                        | TokenKind::Keyword(_)
+                                        | TokenKind::BinarySelector(_)
+                                )
+                            );
+                            if is_typed {
                                 // Typed parameter: `paramName: Type`
                                 let full_span = self.current_token().span();
-                                // Shrink span to exclude trailing colon
-                                let param_span = Span::new(full_span.start(), full_span.end() - 1);
+                                let param_span = Self::span_without_trailing_colon(full_span);
                                 let param_name = Identifier::new(param_name_str, param_span);
                                 self.advance(); // consume `paramName:`
 
@@ -712,9 +738,15 @@ impl Parser {
         }
     }
 
+    /// Creates a span that excludes the trailing colon from a keyword token span.
+    fn span_without_trailing_colon(full_span: Span) -> Span {
+        Span::new(full_span.start(), full_span.end() - 1)
+    }
+
     /// Parses an optional `: Type` annotation after a parameter name.
     ///
-    /// Used for binary method parameters: `+ other: Number`
+    /// Used for both binary (`+ other : Number`) and keyword (`deposit: amount : Integer`)
+    /// method parameters when the colon is a separate token (space before colon).
     fn parse_optional_param_type(&mut self) -> Option<TypeAnnotation> {
         if matches!(self.current_kind(), TokenKind::Colon) {
             self.advance(); // consume `:`

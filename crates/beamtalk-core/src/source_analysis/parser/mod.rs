@@ -2074,6 +2074,36 @@ mod tests {
     }
 
     #[test]
+    fn parse_keyword_typed_param_with_space_colon() {
+        // Space around colon: `amount : Integer` instead of `amount: Integer`
+        let module = parse_ok(
+            "Actor subclass: BankAccount
+  deposit: amount : Integer => self",
+        );
+
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.selector.name(), "deposit:");
+        assert_eq!(method.parameters.len(), 1);
+        assert_eq!(method.parameters[0].name.name, "amount");
+        assert!(method.parameters[0].type_annotation.is_some());
+    }
+
+    #[test]
+    fn parse_binary_typed_param_with_space_colon() {
+        // Space around colon: `other : Number` instead of `other: Number`
+        let module = parse_ok(
+            "Actor subclass: Adder
+  + other : Number => self",
+        );
+
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.selector.name(), "+");
+        assert_eq!(method.parameters.len(), 1);
+        assert_eq!(method.parameters[0].name.name, "other");
+        assert!(method.parameters[0].type_annotation.is_some());
+    }
+
+    #[test]
     fn parse_class_with_mixed_content() {
         let module = parse_ok(
             "Actor subclass: Counter
