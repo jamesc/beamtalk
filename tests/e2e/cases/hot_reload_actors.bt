@@ -1,0 +1,80 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E test for hot code reloading on existing actors
+//
+// Verifies that patching a method via >> on a class takes effect
+// immediately on EXISTING running actor instances, not just newly
+// spawned ones. This works because BEAM's hot code loading updates
+// function references (funs) in the __methods__ map automatically.
+
+// @load tests/e2e/fixtures/counter.bt
+
+// ===========================================================================
+// SPAWN AND USE ORIGINAL METHOD
+// ===========================================================================
+
+c := Counter spawn
+// => #Actor<Counter,_>
+
+c increment
+// => 1
+
+c increment
+// => 2
+
+c getValue
+// => 2
+
+// ===========================================================================
+// PATCH METHOD — EXISTING ACTOR PICKS UP NEW CODE
+// ===========================================================================
+
+// Replace increment to add 10 instead of 1
+Counter >> increment => self.value := self.value + 10
+// => _
+
+// Existing actor 'c' should use the NEW increment (not old +1)
+c increment
+// => 12
+
+c increment
+// => 22
+
+c getValue
+// => 22
+
+// ===========================================================================
+// PATCH AGAIN — MULTIPLY INSTEAD OF ADD
+// ===========================================================================
+
+Counter >> increment => self.value := self.value * 2
+// => _
+
+// Same actor, now uses multiplication
+c increment
+// => 44
+
+c increment
+// => 88
+
+// ===========================================================================
+// ADD NEW METHOD — EXISTING ACTOR CAN CALL IT
+// ===========================================================================
+
+Counter >> reset => self.value := 0
+// => _
+
+// Existing actor can call the brand new method
+c reset
+// => 0
+
+// Restore additive increment and verify from clean state
+Counter >> increment => self.value := self.value + 5
+// => _
+
+c increment
+// => 5
+
+c increment
+// => 10

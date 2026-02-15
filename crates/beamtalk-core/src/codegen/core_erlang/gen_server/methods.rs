@@ -98,7 +98,7 @@ impl CoreErlangGenerator {
 
         // Render at correct indent level
         let indent_spaces = indent_level * INDENT;
-        #[allow(clippy::cast_sign_loss)]
+        #[allow(clippy::cast_sign_loss)] // indent_spaces is always non-negative
         let indent_str = " ".repeat(indent_spaces as usize);
         let result_doc = docvec![indent_str, nest(indent_spaces, body_doc)];
 
@@ -477,7 +477,7 @@ impl CoreErlangGenerator {
     ///         end
     ///     catch <_,_,_> -> 'ok'
     /// ```
-    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::too_many_lines)] // builds class metadata map with methods, fields, and source
     pub(in crate::codegen::core_erlang) fn generate_register_class(
         &mut self,
         module: &Module,

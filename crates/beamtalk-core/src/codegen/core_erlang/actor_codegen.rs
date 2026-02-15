@@ -258,7 +258,6 @@ impl CoreErlangGenerator {
     ///
     /// Abstract classes can't be instantiated, so these callbacks will never
     /// be called. But `gen_server` behaviour requires them to be exported.
-    #[allow(clippy::unnecessary_wraps)]
     fn generate_abstract_callbacks_doc(&self) -> Document<'static> {
         let module_name = &self.module_name;
         docvec![

@@ -12,8 +12,8 @@ Module {
                 Identifier {
                     name: "name",
                     span: Span {
-                        start: 300,
-                        end: 304,
+                        start: 164,
+                        end: 168,
                     },
                 },
             ),
@@ -22,13 +22,13 @@ Module {
                     "Alice",
                 ),
                 Span {
-                    start: 308,
-                    end: 315,
+                    start: 172,
+                    end: 179,
                 },
             ),
             span: Span {
-                start: 300,
-                end: 315,
+                start: 164,
+                end: 179,
             },
         },
         Assignment {
@@ -36,8 +36,8 @@ Module {
                 Identifier {
                     name: "greeting",
                     span: Span {
-                        start: 316,
-                        end: 324,
+                        start: 180,
+                        end: 188,
                     },
                 },
             ),
@@ -51,8 +51,8 @@ Module {
                             Identifier {
                                 name: "name",
                                 span: Span {
-                                    start: 337,
-                                    end: 341,
+                                    start: 201,
+                                    end: 205,
                                 },
                             },
                         ),
@@ -62,13 +62,13 @@ Module {
                     ),
                 ],
                 span: Span {
-                    start: 328,
-                    end: 344,
+                    start: 192,
+                    end: 208,
                 },
             },
             span: Span {
-                start: 316,
-                end: 344,
+                start: 180,
+                end: 208,
             },
         },
         Assignment {
@@ -76,8 +76,8 @@ Module {
                 Identifier {
                     name: "age",
                     span: Span {
-                        start: 374,
-                        end: 377,
+                        start: 238,
+                        end: 241,
                     },
                 },
             ),
@@ -86,13 +86,13 @@ Module {
                     25,
                 ),
                 Span {
-                    start: 381,
-                    end: 383,
+                    start: 245,
+                    end: 247,
                 },
             ),
             span: Span {
-                start: 374,
-                end: 383,
+                start: 238,
+                end: 247,
             },
         },
         Assignment {
@@ -100,8 +100,8 @@ Module {
                 Identifier {
                     name: "message",
                     span: Span {
-                        start: 384,
-                        end: 391,
+                        start: 248,
+                        end: 255,
                     },
                 },
             ),
@@ -116,8 +116,8 @@ Module {
                                 Identifier {
                                     name: "age",
                                     span: Span {
-                                        start: 405,
-                                        end: 408,
+                                        start: 269,
+                                        end: 272,
                                     },
                                 },
                             ),
@@ -130,14 +130,14 @@ Module {
                                         5,
                                     ),
                                     Span {
-                                        start: 411,
-                                        end: 412,
+                                        start: 275,
+                                        end: 276,
                                     },
                                 ),
                             ],
                             span: Span {
-                                start: 405,
-                                end: 412,
+                                start: 269,
+                                end: 276,
                             },
                         },
                     ),
@@ -146,13 +146,13 @@ Module {
                     ),
                 ],
                 span: Span {
-                    start: 395,
-                    end: 435,
+                    start: 259,
+                    end: 299,
                 },
             },
             span: Span {
-                start: 384,
-                end: 435,
+                start: 248,
+                end: 299,
             },
         },
         Assignment {
@@ -160,8 +160,8 @@ Module {
                 Identifier {
                     name: "firstName",
                     span: Span {
-                        start: 478,
-                        end: 487,
+                        start: 342,
+                        end: 351,
                     },
                 },
             ),
@@ -170,13 +170,13 @@ Module {
                     "Bob",
                 ),
                 Span {
-                    start: 491,
-                    end: 496,
+                    start: 355,
+                    end: 360,
                 },
             ),
             span: Span {
-                start: 478,
-                end: 496,
+                start: 342,
+                end: 360,
             },
         },
         Assignment {
@@ -184,8 +184,8 @@ Module {
                 Identifier {
                     name: "lastName",
                     span: Span {
-                        start: 497,
-                        end: 505,
+                        start: 361,
+                        end: 369,
                     },
                 },
             ),
@@ -194,13 +194,13 @@ Module {
                     "Smith",
                 ),
                 Span {
-                    start: 509,
-                    end: 516,
+                    start: 373,
+                    end: 380,
                 },
             ),
             span: Span {
-                start: 497,
-                end: 516,
+                start: 361,
+                end: 380,
             },
         },
         Assignment {
@@ -208,8 +208,8 @@ Module {
                 Identifier {
                     name: "fullName",
                     span: Span {
-                        start: 517,
-                        end: 525,
+                        start: 381,
+                        end: 389,
                     },
                 },
             ),
@@ -223,8 +223,8 @@ Module {
                             Identifier {
                                 name: "firstName",
                                 span: Span {
-                                    start: 537,
-                                    end: 546,
+                                    start: 401,
+                                    end: 410,
                                 },
                             },
                         ),
@@ -237,130 +237,136 @@ Module {
                             Identifier {
                                 name: "lastName",
                                 span: Span {
-                                    start: 549,
-                                    end: 557,
+                                    start: 413,
+                                    end: 421,
                                 },
                             },
                         ),
                     ),
                 ],
                 span: Span {
-                    start: 529,
-                    end: 559,
+                    start: 393,
+                    end: 423,
                 },
             },
             span: Span {
-                start: 517,
-                end: 559,
+                start: 381,
+                end: 423,
             },
         },
         Assignment {
             target: Identifier(
                 Identifier {
-                    name: "user",
+                    name: "escaped",
                     span: Span {
-                        start: 604,
-                        end: 608,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: ClassReference {
-                    name: Identifier {
-                        name: "User",
-                        span: Span {
-                            start: 612,
-                            end: 616,
-                        },
-                    },
-                    span: Span {
-                        start: 612,
-                        end: 616,
-                    },
-                },
-                selector: Unary(
-                    "new",
-                ),
-                arguments: [],
-                span: Span {
-                    start: 612,
-                    end: 620,
-                },
-            },
-            span: Span {
-                start: 604,
-                end: 620,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "profile",
-                    span: Span {
-                        start: 621,
-                        end: 628,
+                        start: 469,
+                        end: 476,
                     },
                 },
             ),
             value: StringInterpolation {
                 segments: [
                     Literal(
-                        "User: ",
+                        "Literal braces: \\{ and \\}, variable: ",
                     ),
                     Interpolation(
-                        MessageSend {
-                            receiver: Identifier(
-                                Identifier {
-                                    name: "user",
-                                    span: Span {
-                                        start: 640,
-                                        end: 644,
-                                    },
+                        Identifier(
+                            Identifier {
+                                name: "name",
+                                span: Span {
+                                    start: 519,
+                                    end: 523,
                                 },
-                            ),
-                            selector: Unary(
-                                "getName",
-                            ),
-                            arguments: [],
-                            span: Span {
-                                start: 640,
-                                end: 652,
                             },
-                        },
-                    ),
-                    Literal(
-                        ", Email: ",
-                    ),
-                    Interpolation(
-                        MessageSend {
-                            receiver: Identifier(
-                                Identifier {
-                                    name: "user",
-                                    span: Span {
-                                        start: 663,
-                                        end: 667,
-                                    },
-                                },
-                            ),
-                            selector: Unary(
-                                "getEmail",
-                            ),
-                            arguments: [],
-                            span: Span {
-                                start: 663,
-                                end: 676,
-                            },
-                        },
+                        ),
                     ),
                 ],
                 span: Span {
-                    start: 632,
-                    end: 678,
+                    start: 480,
+                    end: 525,
                 },
             },
             span: Span {
-                start: 621,
-                end: 678,
+                start: 469,
+                end: 525,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "emojiVar",
+                    span: Span {
+                        start: 562,
+                        end: 570,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "🎉",
+                ),
+                Span {
+                    start: 574,
+                    end: 580,
+                },
+            ),
+            span: Span {
+                start: 562,
+                end: 580,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "withEmoji",
+                    span: Span {
+                        start: 581,
+                        end: 590,
+                    },
+                },
+            ),
+            value: StringInterpolation {
+                segments: [
+                    Literal(
+                        "Celebration: ",
+                    ),
+                    Interpolation(
+                        Identifier(
+                            Identifier {
+                                name: "emojiVar",
+                                span: Span {
+                                    start: 609,
+                                    end: 617,
+                                },
+                            },
+                        ),
+                    ),
+                    Literal(
+                        " ",
+                    ),
+                    Interpolation(
+                        Identifier(
+                            Identifier {
+                                name: "name",
+                                span: Span {
+                                    start: 620,
+                                    end: 624,
+                                },
+                            },
+                        ),
+                    ),
+                    Literal(
+                        "!",
+                    ),
+                ],
+                span: Span {
+                    start: 594,
+                    end: 627,
+                },
+            },
+            span: Span {
+                start: 581,
+                end: 627,
             },
         },
         Assignment {
@@ -368,8 +374,8 @@ Module {
                 Identifier {
                     name: "count",
                     span: Span {
-                        start: 723,
-                        end: 728,
+                        start: 663,
+                        end: 668,
                     },
                 },
             ),
@@ -378,13 +384,13 @@ Module {
                     10,
                 ),
                 Span {
-                    start: 732,
-                    end: 734,
+                    start: 672,
+                    end: 674,
                 },
             ),
             span: Span {
-                start: 723,
-                end: 734,
+                start: 663,
+                end: 674,
             },
         },
         Assignment {
@@ -392,8 +398,8 @@ Module {
                 Identifier {
                     name: "summary",
                     span: Span {
-                        start: 735,
-                        end: 742,
+                        start: 675,
+                        end: 682,
                     },
                 },
             ),
@@ -408,8 +414,8 @@ Module {
                                 Identifier {
                                     name: "count",
                                     span: Span {
-                                        start: 755,
-                                        end: 760,
+                                        start: 695,
+                                        end: 700,
                                     },
                                 },
                             ),
@@ -422,415 +428,168 @@ Module {
                                         2,
                                     ),
                                     Span {
-                                        start: 763,
-                                        end: 764,
+                                        start: 703,
+                                        end: 704,
                                     },
                                 ),
                             ],
                             span: Span {
-                                start: 755,
-                                end: 764,
-                            },
-                        },
-                    ),
-                    Literal(
-                        ", Double: ",
-                    ),
-                    Interpolation(
-                        MessageSend {
-                            receiver: Block(
-                                Block {
-                                    parameters: [
-                                        BlockParameter {
-                                            name: "x",
-                                            span: Span {
-                                                start: 778,
-                                                end: 779,
-                                            },
-                                        },
-                                    ],
-                                    body: [
-                                        MessageSend {
-                                            receiver: Identifier(
-                                                Identifier {
-                                                    name: "x",
-                                                    span: Span {
-                                                        start: 782,
-                                                        end: 783,
-                                                    },
-                                                },
-                                            ),
-                                            selector: Binary(
-                                                "*",
-                                            ),
-                                            arguments: [
-                                                Literal(
-                                                    Integer(
-                                                        2,
-                                                    ),
-                                                    Span {
-                                                        start: 786,
-                                                        end: 787,
-                                                    },
-                                                ),
-                                            ],
-                                            span: Span {
-                                                start: 782,
-                                                end: 787,
-                                            },
-                                        },
-                                    ],
-                                    span: Span {
-                                        start: 776,
-                                        end: 788,
-                                    },
-                                },
-                            ),
-                            selector: Keyword(
-                                [
-                                    KeywordPart {
-                                        keyword: "value:",
-                                        span: Span {
-                                            start: 789,
-                                            end: 795,
-                                        },
-                                    },
-                                ],
-                            ),
-                            arguments: [
-                                Identifier(
-                                    Identifier {
-                                        name: "count",
-                                        span: Span {
-                                            start: 796,
-                                            end: 801,
-                                        },
-                                    },
-                                ),
-                            ],
-                            span: Span {
-                                start: 776,
-                                end: 801,
+                                start: 695,
+                                end: 704,
                             },
                         },
                     ),
                 ],
                 span: Span {
-                    start: 746,
-                    end: 803,
+                    start: 686,
+                    end: 706,
                 },
             },
             span: Span {
-                start: 735,
-                end: 803,
+                start: 675,
+                end: 706,
             },
         },
         Assignment {
             target: Identifier(
                 Identifier {
-                    name: "escaped",
+                    name: "adjacent",
                     span: Span {
-                        start: 849,
-                        end: 856,
+                        start: 735,
+                        end: 743,
                     },
                 },
             ),
             value: StringInterpolation {
                 segments: [
-                    Literal(
-                        "Literal braces: \\{ and \\}, variable: ",
-                    ),
-                    Interpolation(
-                        Identifier(
-                            Identifier {
-                                name: "name",
-                                span: Span {
-                                    start: 899,
-                                    end: 903,
-                                },
-                            },
-                        ),
-                    ),
-                ],
-                span: Span {
-                    start: 860,
-                    end: 905,
-                },
-            },
-            span: Span {
-                start: 849,
-                end: 905,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "multiLine",
-                    span: Span {
-                        start: 941,
-                        end: 950,
-                    },
-                },
-            ),
-            value: StringInterpolation {
-                segments: [
-                    Literal(
-                        "First line: ",
-                    ),
                     Interpolation(
                         Identifier(
                             Identifier {
                                 name: "firstName",
                                 span: Span {
-                                    start: 968,
-                                    end: 977,
+                                    start: 749,
+                                    end: 758,
                                 },
                             },
                         ),
-                    ),
-                    Literal(
-                        "\nSecond line: ",
                     ),
                     Interpolation(
                         Identifier(
                             Identifier {
                                 name: "lastName",
                                 span: Span {
-                                    start: 993,
-                                    end: 1001,
-                                },
-                            },
-                        ),
-                    ),
-                    Literal(
-                        "\nThird line: ",
-                    ),
-                    Interpolation(
-                        Identifier(
-                            Identifier {
-                                name: "age",
-                                span: Span {
-                                    start: 1016,
-                                    end: 1019,
+                                    start: 760,
+                                    end: 768,
                                 },
                             },
                         ),
                     ),
                 ],
                 span: Span {
-                    start: 954,
-                    end: 1021,
+                    start: 747,
+                    end: 770,
                 },
             },
             span: Span {
-                start: 941,
-                end: 1021,
+                start: 735,
+                end: 770,
             },
         },
         Assignment {
             target: Identifier(
                 Identifier {
-                    name: "emojiVar",
+                    name: "bare",
                     span: Span {
-                        start: 1058,
-                        end: 1066,
-                    },
-                },
-            ),
-            value: Literal(
-                String(
-                    "🎉",
-                ),
-                Span {
-                    start: 1070,
-                    end: 1076,
-                },
-            ),
-            span: Span {
-                start: 1058,
-                end: 1076,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "withEmoji",
-                    span: Span {
-                        start: 1077,
-                        end: 1086,
+                        start: 816,
+                        end: 820,
                     },
                 },
             ),
             value: StringInterpolation {
                 segments: [
-                    Literal(
-                        "Celebration: ",
-                    ),
-                    Interpolation(
-                        Identifier(
-                            Identifier {
-                                name: "emojiVar",
-                                span: Span {
-                                    start: 1105,
-                                    end: 1113,
-                                },
-                            },
-                        ),
-                    ),
-                    Literal(
-                        " ",
-                    ),
                     Interpolation(
                         Identifier(
                             Identifier {
                                 name: "name",
                                 span: Span {
-                                    start: 1116,
-                                    end: 1120,
+                                    start: 826,
+                                    end: 830,
                                 },
                             },
                         ),
                     ),
-                    Literal(
-                        "!",
-                    ),
                 ],
                 span: Span {
-                    start: 1090,
-                    end: 1123,
+                    start: 824,
+                    end: 832,
                 },
             },
             span: Span {
-                start: 1077,
-                end: 1123,
+                start: 816,
+                end: 832,
             },
         },
         Assignment {
             target: Identifier(
                 Identifier {
-                    name: "emptyInterp",
+                    name: "plain",
                     span: Span {
-                        start: 1160,
-                        end: 1171,
+                        start: 884,
+                        end: 889,
                     },
                 },
             ),
-            value: StringInterpolation {
-                segments: [
-                    Literal(
-                        "Before ",
-                    ),
-                    Interpolation(
-                        Error {
-                            message: "Unexpected token: expected expression, found <error: empty interpolation {} is not allowed, use \\{ for literal brace>",
-                            span: Span {
-                                start: 1183,
-                                end: 1185,
-                            },
-                        },
-                    ),
-                    Literal(
-                        " After",
-                    ),
-                ],
-                span: Span {
-                    start: 1175,
-                    end: 1192,
-                },
-            },
-            span: Span {
-                start: 1160,
-                end: 1192,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "nested",
-                    span: Span {
-                        start: 1226,
-                        end: 1232,
-                    },
+            value: Literal(
+                String(
+                    "Hello, World!",
+                ),
+                Span {
+                    start: 893,
+                    end: 908,
                 },
             ),
-            value: Error {
-                message: "Unterminated string interpolation",
-                span: Span {
-                    start: 1236,
-                    end: 1243,
-                },
-            },
             span: Span {
-                start: 1226,
-                end: 1243,
-            },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found }",
-            span: Span {
-                start: 1262,
-                end: 1263,
+                start: 884,
+                end: 908,
             },
         },
     ],
     span: Span {
-        start: 300,
-        end: 1265,
+        start: 164,
+        end: 908,
     },
     leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {
-                start: 300,
-                end: 304,
+                start: 164,
+                end: 168,
             },
             kind: Line,
         },
         Comment {
             content: "// SPDX-License-Identifier: Apache-2.0",
             span: Span {
-                start: 300,
-                end: 304,
+                start: 164,
+                end: 168,
             },
             kind: Line,
         },
         Comment {
-            content: "// Test future feature: string interpolation",
+            content: "// Test string interpolation compilation (ADR 0023 Phase 3)",
             span: Span {
-                start: 300,
-                end: 304,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Double-quoted strings with embedded expressions using {expr} syntax",
-            span: Span {
-                start: 300,
-                end: 304,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// NOTE: This feature is not yet implemented - test documents expected behavior",
-            span: Span {
-                start: 300,
-                end: 304,
+                start: 164,
+                end: 168,
             },
             kind: Line,
         },
         Comment {
             content: "// Simple variable interpolation",
             span: Span {
-                start: 300,
-                end: 304,
+                start: 164,
+                end: 168,
             },
             kind: Line,
         },
     ],
 }
-
-Diagnostics:
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found <error: empty interpolation {} is not allowed, use \\{ for literal brace>", span: Span { start: 1183, end: 1185 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found {", span: Span { start: 1254, end: 1255 }, hint: None }
-Diagnostic { severity: Error, message: "Unterminated string interpolation", span: Span { start: 1236, end: 1243 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 1262, end: 1263 }, hint: None }
