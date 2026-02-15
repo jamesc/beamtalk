@@ -1772,9 +1772,13 @@ write!(result, "let {var} = ").unwrap();
 
 // ✅ RIGHT - Document API (structural, composable)
 docvec![
-    Document::String(format!("call '{module}':'{function}'(")),
+    Document::String("call '".into()),
+    Document::String(module.clone()),
+    Document::String("':'".into()),
+    Document::String(function.clone()),
+    Document::String("'(".into()),
     args_doc,
-    Document::String(")".to_string()),
+    Document::String(")".into()),
 ]
 ```
 
