@@ -5,6 +5,7 @@ expression: output
 AST:
 Module {
     classes: [],
+    method_definitions: [],
     expressions: [
         MessageSend {
             receiver: Identifier(
