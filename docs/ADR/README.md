@@ -28,23 +28,23 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | Number | Title | Status | Date |
 |--------|-------|--------|------|
 | [0001](0001-no-compound-assignment.md) | No Compound Assignment in Beamtalk | Implemented | 2026-02-08 |
-| [0002](0002-use-erlang-comparison-operators.md) | Use Erlang Comparison Operators Directly | Accepted | 2026-02-03 |
+| [0002](0002-use-erlang-comparison-operators.md) | Use Erlang Comparison Operators Directly | Implemented | 2026-02-08 |
 | [0003](0003-core-erlang-vs-erlang-source.md) | Keep Core Erlang as Primary Code Generation Target | Implemented | 2026-02-08 |
 | [0004](0004-persistent-workspace-management.md) | Persistent Workspace Management | Accepted | 2026-02-05 |
-| [0005](0005-beam-object-model-pragmatic-hybrid.md) | BEAM Object Model - Pragmatic Hybrid Approach | Accepted | 2026-02-05 |
-| [0006](0006-unified-method-dispatch.md) | Unified Method Dispatch with Hierarchy Walking | Accepted | 2026-02-05 |
-| [0007](0007-compilable-stdlib-with-primitive-injection.md) | Compilable Standard Library with Primitive Injection | Accepted | 2026-02-06 |
+| [0005](0005-beam-object-model-pragmatic-hybrid.md) | BEAM Object Model - Pragmatic Hybrid Approach | Implemented | 2026-02-08 |
+| [0006](0006-unified-method-dispatch.md) | Unified Method Dispatch with Hierarchy Walking | Implemented | 2026-02-08 |
+| [0007](0007-compilable-stdlib-with-primitive-injection.md) | Compilable Standard Library with Primitive Injection | Implemented | 2026-02-07 |
 | [0008](0008-doc-comments-and-api-documentation.md) | Doc Comments and API Documentation | Accepted | 2026-02-12 |
 | [0009](0009-otp-application-structure.md) | OTP Application Structure — Split Workspace from Runtime | Implemented | 2026-02-07 |
 | [0010](0010-global-objects-and-singleton-dispatch.md) | Global Objects and Singleton Dispatch | Accepted | 2026-02-07 |
 | [0011](0011-robustness-testing-layered-fuzzing.md) | Robustness Testing — Layered Fuzzing and Error Quality | Accepted | 2026-02-12 |
 | [0012](0012-list-literal-syntax.md) | Collection Literal Syntax and the `#` Data Literal System | Accepted | 2026-02-08 |
-| [0013](0013-class-variables-class-methods-instantiation.md) | Class Variables, Class-Side Methods, and Instantiation Protocol | Proposed | 2026-02-09 |
+| [0013](0013-class-variables-class-methods-instantiation.md) | Class Variables, Class-Side Methods, and Instantiation Protocol | Accepted | 2026-02-09 |
 | [0014](0014-beamtalk-test-framework.md) | Beamtalk Test Framework — Native Unit Tests and CLI Integration Tests | Accepted | 2026-02-09 |
-| [0015](0015-repl-error-objects-and-exception-hierarchy.md) | Signal-Time Exception Objects and Error Class Hierarchy | Proposed | 2026-02-10 |
-| [0016](0016-unified-stdlib-module-naming.md) | Unified Stdlib Packaging and Module Naming | Proposed | 2026-02-10 |
+| [0015](0015-repl-error-objects-and-exception-hierarchy.md) | Signal-Time Exception Objects and Error Class Hierarchy | Accepted | 2026-02-10 |
+| [0016](0016-unified-stdlib-module-naming.md) | Unified Stdlib Packaging and Module Naming | Implemented | 2026-02-10 |
 | [0017](0017-browser-connectivity-to-running-workspaces.md) | Browser Connectivity to Running Workspaces | Proposed | 2026-02-11 |
-| [0018](0018-document-tree-codegen.md) | Document Tree Code Generation (Wadler-Lindig Pretty Printer) | Proposed | 2026-02-11 |
+| [0018](0018-document-tree-codegen.md) | Document Tree Code Generation (Wadler-Lindig Pretty Printer) | Accepted | 2026-02-11 |
 | [0019](0019-singleton-class-variables.md) | Singleton Access via Class Variables | Accepted | 2026-02-12 |
 | [0020](0020-connection-security.md) | Connection Security — mTLS, Proxies, and Network Overlays | Proposed | 2026-02-12 |
 | [0021](0021-streams-and-io-design.md) | Stream — Universal Data Interface | Accepted | 2026-02-12 |
