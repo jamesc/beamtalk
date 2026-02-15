@@ -86,12 +86,12 @@ impl CoreErlangGenerator {
         Ok(docvec![
             format!("let {n_var} = "),
             receiver_code,
-            format!(" in letrec 'repeat'/1 = fun (I) -> "),
+            " in letrec 'repeat'/1 = fun (I) -> ",
             format!("case call 'erlang':'=<'(I, {n_var}) of "),
             "<'true'> when 'true' -> ",
             "let _ = ",
             body_code,
-            format!(" in apply 'repeat'/1 (call 'erlang':'+'(I, 1)) "),
+            " in apply 'repeat'/1 (call 'erlang':'+'(I, 1)) ",
             "<'false'> when 'true' -> 'nil' ",
             "end ",
             "in apply 'repeat'/1 (1)",
@@ -172,7 +172,7 @@ impl CoreErlangGenerator {
 
         for (i, expr) in body.body.iter().enumerate() {
             if i > 0 {
-                docs.push(docvec![" "]);
+                docs.push(Document::Str(" "));
             }
             let is_last = i == body.body.len() - 1;
 
@@ -400,7 +400,7 @@ impl CoreErlangGenerator {
                 // branches all emit trailing "in" or "in ").
                 let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
                 docs.push(assign_doc);
-                docs.push(docvec![" "]);
+                docs.push(Document::Str(" "));
             } else {
                 // Non-assignment expression (could be a nested control flow construct)
                 if is_last && !has_direct_field_assignments {

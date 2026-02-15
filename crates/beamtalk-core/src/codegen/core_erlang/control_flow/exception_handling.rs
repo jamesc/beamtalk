@@ -220,7 +220,9 @@ impl CoreErlangGenerator {
         if let Some(param) = handler_block.parameters.first() {
             let param_var = Self::to_core_erlang_var(&param.name);
             self.bind_var(&param.name, &param_var);
-            docs.push(docvec![format!("let {param_var} = {ex_obj_var} in ")]);
+            docs.push(Document::String(format!(
+                "let {param_var} = {ex_obj_var} in "
+            )));
         }
 
         // Generate handler body with state threading (from original StateAcc)
@@ -234,9 +236,9 @@ impl CoreErlangGenerator {
             format!("StateAcc{handler_final}")
         };
         // BT-483: Return {Result, State} from handler
-        docs.push(docvec![format!(
+        docs.push(Document::String(format!(
             " {{{handler_result_var}, {handler_final_var}}} "
-        )]);
+        )));
         self.pop_scope();
 
         // Re-raise non-matching exceptions
@@ -352,8 +354,9 @@ impl CoreErlangGenerator {
 
         // Rename current state to StateAcc
         let current_state = self.current_state_var();
-        let mut docs: Vec<Document<'static>> =
-            vec![docvec![format!("let StateAcc = {current_state} in try ")]];
+        let mut docs: Vec<Document<'static>> = vec![Document::String(format!(
+            "let StateAcc = {current_state} in try "
+        ))];
 
         // Generate try body with state threading
         // BT-483: Now returns (doc, result_var, state_version)
@@ -366,16 +369,18 @@ impl CoreErlangGenerator {
             format!("StateAcc{try_final}")
         };
         // BT-483: Return {Result, State} from try body
-        docs.push(docvec![format!(" {{{try_result_var}, {try_final_var}}} ")]);
+        docs.push(Document::String(format!(
+            " {{{try_result_var}, {try_final_var}}} "
+        )));
 
         // Success: run cleanup starting from try body's state
         // BT-483: Extract Result and State from {Result, State} tuple using element/N
         let result_from_try = self.fresh_temp_var("TryResult");
-        docs.push(docvec![format!(
+        docs.push(Document::String(format!(
             "of {state_after_try} -> \
              let {result_from_try} = call 'erlang':'element'(1, {state_after_try}) in \
              let StateAcc = call 'erlang':'element'(2, {state_after_try}) in "
-        )]);
+        )));
 
         let (cleanup_success_doc, _, cleanup_success_final) =
             self.generate_exception_body_with_threading(cleanup_block)?;
@@ -386,23 +391,23 @@ impl CoreErlangGenerator {
             format!("StateAcc{cleanup_success_final}")
         };
         // BT-483: Return try body result with cleanup's final state
-        docs.push(docvec![format!(
+        docs.push(Document::String(format!(
             " {{{result_from_try}, {cleanup_success_var}}} "
-        )]);
+        )));
 
         // Error: run cleanup for side effects (from original StateAcc), then re-raise
-        docs.push(docvec![format!(
+        docs.push(Document::String(format!(
             "catch <{type_var}, {error_var}, {stack_var}> -> "
-        )]);
+        )));
 
         // Cleanup body generates state mutations that are discarded (re-raise follows)
         let (cleanup_error_doc, _, _) =
             self.generate_exception_body_with_threading(cleanup_block)?;
         docs.push(cleanup_error_doc);
 
-        docs.push(docvec![format!(
+        docs.push(Document::String(format!(
             " primop 'raw_raise'({type_var}, {error_var}, {stack_var})"
-        )]);
+        )));
 
         Ok(Document::Vec(docs))
     }
@@ -436,7 +441,7 @@ impl CoreErlangGenerator {
 
         for (i, expr) in body.body.iter().enumerate() {
             if i > 0 {
-                docs.push(Document::String(" ".to_string()));
+                docs.push(Document::Str(" "));
             }
             let is_last = i == body.body.len() - 1;
 
@@ -459,9 +464,9 @@ impl CoreErlangGenerator {
                     // BT-483: Self-dispatch result is in last_dispatch_var
                     if let Some(dv) = self.last_dispatch_var.clone() {
                         let rv = self.fresh_temp_var("ExResult");
-                        docs.push(docvec![format!(
+                        docs.push(Document::String(format!(
                             "let {rv} = call 'erlang':'element'(1, {dv}) in "
-                        )]);
+                        )));
                         result_var = rv;
                     }
                 }

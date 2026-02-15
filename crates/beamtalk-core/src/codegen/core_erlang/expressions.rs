@@ -21,7 +21,7 @@ use super::document::Document;
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{
     Block, CascadeMessage, Expression, Identifier, Literal, MapPair, MatchArm, MessageSelector,
-    Pattern,
+    Pattern, StringSegment,
 };
 use crate::docvec;
 use std::fmt::Write; // For write!() on local String buffers (not self.output)
@@ -39,26 +39,102 @@ impl CoreErlangGenerator {
     #[allow(clippy::self_only_used_in_recursion)] // &self needed for method resolution
     pub(super) fn generate_literal(&self, lit: &Literal) -> Result<Document<'static>> {
         match lit {
-            Literal::Integer(n) => Ok(docvec![format!("{n}")]),
-            Literal::Float(f) => Ok(docvec![format!("{f}")]),
+            Literal::Integer(n) => Ok(Document::String(format!("{n}"))),
+            Literal::Float(f) => Ok(Document::String(format!("{f}"))),
             Literal::String(s) => {
                 let result = Self::binary_string_literal(s);
                 Ok(docvec![result])
             }
-            Literal::Symbol(s) => Ok(docvec![format!("'{s}'")]),
-            Literal::Character(c) => Ok(docvec![format!("{}", *c as u32)]),
+            Literal::Symbol(s) => Ok(Document::String(format!("'{s}'"))),
+            Literal::Character(c) => Ok(Document::String(format!("{}", *c as u32))),
             Literal::List(elements) => {
-                let mut parts: Vec<Document<'static>> = vec![Document::String("[".to_string())];
+                let mut parts: Vec<Document<'static>> = vec![Document::Str("[")];
                 for (i, elem) in elements.iter().enumerate() {
                     if i > 0 {
-                        parts.push(Document::String(", ".to_string()));
+                        parts.push(Document::Str(", "));
                     }
                     parts.push(self.generate_literal(elem)?);
                 }
-                parts.push(Document::String("]".to_string()));
+                parts.push(Document::Str("]"));
                 Ok(Document::Vec(parts))
             }
         }
+    }
+
+    /// Generates code for a string interpolation expression (ADR 0023 Phase 3).
+    ///
+    /// Compiles `StringInterpolation` to Core Erlang binary construction:
+    /// - Literal segments → byte sequences in the binary
+    /// - Expression segments → evaluate, dispatch `printString`, insert as binary segment
+    ///
+    /// Example: `"Hello, {name}!"` compiles to:
+    /// ```text
+    /// let _interpExpr1 = Name in
+    ///   let _interpRaw2 = call 'beamtalk_message_dispatch':'send'(_interpExpr1, 'printString', []) in
+    ///     let _interpStr3 =
+    ///       case call 'erlang':'is_pid'(_interpRaw2) of
+    ///         <'true'>  when 'true' -> call 'beamtalk_future':'await'(_interpRaw2)
+    ///         <'false'> when 'true' -> _interpRaw2
+    ///       end
+    ///     in
+    ///       #{#<72>(8,1,...), ..., #<_interpStr3>('all',8,'binary',...), #<33>(8,1,...)}#
+    /// ```
+    pub(super) fn generate_string_interpolation(
+        &mut self,
+        segments: &[StringSegment],
+    ) -> Result<Document<'static>> {
+        // Collect let-bindings for expression segments and binary segments
+        let mut let_bindings: Vec<Document<'static>> = Vec::new();
+        let mut binary_parts: Vec<String> = Vec::new();
+
+        for segment in segments {
+            match segment {
+                StringSegment::Literal(s) => {
+                    if !s.is_empty() {
+                        binary_parts.push(Self::binary_byte_segments(s));
+                    }
+                }
+                StringSegment::Interpolation(expr) => {
+                    let expr_doc = self.expression_doc(expr)?;
+                    let interp_var = self.fresh_temp_var("interpExpr");
+                    let raw_str_var = self.fresh_temp_var("interpRaw");
+                    let str_var = self.fresh_temp_var("interpStr");
+
+                    // Evaluate the expression
+                    let_bindings.push(docvec![format!("let {interp_var} = "), expr_doc, " in ",]);
+
+                    // Dispatch printString to convert to binary string
+                    let_bindings.push(docvec![format!(
+                        "let {raw_str_var} = call 'beamtalk_message_dispatch':'send'({interp_var}, 'printString', []) in "
+                    )]);
+
+                    // Auto-await if the result is a future (actor dispatch returns pid)
+                    let_bindings.push(docvec![format!(
+                        "let {str_var} = case call 'erlang':'is_pid'({raw_str_var}) of \
+                         <'true'> when 'true' -> call 'beamtalk_future':'await'({raw_str_var}) \
+                         <'false'> when 'true' -> {raw_str_var} end in "
+                    )]);
+
+                    // Add as binary segment: #<Var>('all',8,'binary',['unsigned'|['big']])
+                    binary_parts.push(format!(
+                        "#<{str_var}>('all',8,'binary',['unsigned'|['big']])"
+                    ));
+                }
+            }
+        }
+
+        // Build the binary literal: #{seg1,seg2,...}#
+        let binary_content = binary_parts.join(",");
+        let binary_doc = docvec![format!("#{{{binary_content}}}#")];
+
+        // Wrap with let-bindings
+        let mut doc = Document::Vec(Vec::new());
+        for binding in let_bindings {
+            doc = docvec![doc, binding];
+        }
+        doc = docvec![doc, binary_doc];
+
+        Ok(doc)
     }
 
     /// Generates code for an identifier reference.
@@ -73,15 +149,15 @@ impl CoreErlangGenerator {
     pub(super) fn generate_identifier(&mut self, id: &Identifier) -> Result<Document<'static>> {
         // Handle special reserved identifiers as atoms
         match id.name.as_str() {
-            "true" => Ok(docvec!["'true'"]),
-            "false" => Ok(docvec!["'false'"]),
-            "nil" => Ok(docvec!["'nil'"]),
+            "true" => Ok(Document::Str("'true'")),
+            "false" => Ok(Document::Str("'false'")),
+            "nil" => Ok(Document::Str("'nil'")),
             "self" => {
                 // BT-411: Check if self is explicitly bound (e.g., in class methods)
                 if let Some(var_name) = self.lookup_var("self").cloned() {
                     Ok(docvec![var_name])
                 } else {
-                    Ok(docvec!["Self"]) // self → Self parameter (BT-161)
+                    Ok(Document::Str("Self")) // self → Self parameter (BT-161)
                 }
             }
             "super" => {
@@ -131,10 +207,10 @@ impl CoreErlangGenerator {
                             }
                         }
                     };
-                    Ok(docvec![format!(
+                    Ok(Document::String(format!(
                         "call 'maps':'get'('{}', {state_var})",
                         id.name
-                    )])
+                    )))
                 }
             }
         }
@@ -149,25 +225,25 @@ impl CoreErlangGenerator {
     /// ```
     pub(super) fn generate_map_literal(&mut self, pairs: &[MapPair]) -> Result<Document<'static>> {
         if pairs.is_empty() {
-            return Ok(docvec!["~{}~"]);
+            return Ok(Document::Str("~{}~"));
         }
 
-        let mut parts: Vec<Document<'static>> = vec![Document::String("~{ ".to_string())];
+        let mut parts: Vec<Document<'static>> = vec![Document::Str("~{ ")];
 
         for (i, pair) in pairs.iter().enumerate() {
             if i > 0 {
-                parts.push(Document::String(", ".to_string()));
+                parts.push(Document::Str(", "));
             }
 
             // Generate the key
             parts.push(self.expression_doc(&pair.key)?);
-            parts.push(Document::String(" => ".to_string()));
+            parts.push(Document::Str(" => "));
 
             // Generate the value
             parts.push(self.expression_doc(&pair.value)?);
         }
 
-        parts.push(Document::String(" }~".to_string()));
+        parts.push(Document::Str(" }~"));
         Ok(Document::Vec(parts))
     }
 
@@ -179,20 +255,20 @@ impl CoreErlangGenerator {
         elements: &[Expression],
         tail: Option<&Expression>,
     ) -> Result<Document<'static>> {
-        let mut parts: Vec<Document<'static>> = vec![Document::String("[".to_string())];
+        let mut parts: Vec<Document<'static>> = vec![Document::Str("[")];
         for (i, elem) in elements.iter().enumerate() {
             if i > 0 {
-                parts.push(Document::String(", ".to_string()));
+                parts.push(Document::Str(", "));
             }
             parts.push(self.expression_doc(elem)?);
         }
         if let Some(t) = tail {
             if !elements.is_empty() {
-                parts.push(Document::String(" | ".to_string()));
+                parts.push(Document::Str(" | "));
             }
             parts.push(self.expression_doc(t)?);
         }
-        parts.push(Document::String("]".to_string()));
+        parts.push(Document::Str("]"));
         Ok(Document::Vec(parts))
     }
 
@@ -213,10 +289,10 @@ impl CoreErlangGenerator {
             if let Expression::Identifier(recv_id) = receiver {
                 if recv_id.name == "self" && self.class_var_names.contains(field.name.as_str()) {
                     let cv = self.current_class_var();
-                    return Ok(docvec![format!(
+                    return Ok(Document::String(format!(
                         "call 'maps':'get'('{}', {cv})",
                         field.name
-                    )]);
+                    )));
                 }
             }
             return Err(CodeGenError::UnsupportedFeature {
@@ -236,10 +312,10 @@ impl CoreErlangGenerator {
                     super::CodeGenContext::Actor => self.current_state_var(),
                     super::CodeGenContext::Repl => "State".to_string(),
                 };
-                return Ok(docvec![format!(
+                return Ok(Document::String(format!(
                     "call 'maps':'get'('{}', {state_var})",
                     field.name
-                )]);
+                )));
             }
         }
 
@@ -581,7 +657,7 @@ impl CoreErlangGenerator {
     /// for subsequent expressions. See inline comments for threading details.
     pub(super) fn generate_block_body(&mut self, block: &Block) -> Result<Document<'static>> {
         if block.body.is_empty() {
-            return Ok(docvec!["'nil'"]);
+            return Ok(Document::Str("'nil'"));
         }
 
         // Generate body expressions in sequence
@@ -696,14 +772,14 @@ impl CoreErlangGenerator {
 
         for (i, arm) in arms.iter().enumerate() {
             if i > 0 {
-                parts.push(Document::String(" ".to_string()));
+                parts.push(Document::Str(" "));
             }
 
             // Generate pattern
             let pattern_doc = self.generate_pattern(&arm.pattern)?;
-            parts.push(Document::String("<".to_string()));
+            parts.push(Document::Str("<"));
             parts.push(pattern_doc);
-            parts.push(Document::String(">".to_string()));
+            parts.push(Document::Str(">"));
 
             // Push scope and bind pattern variables so the guard and body
             // can reference them directly instead of looking up the bindings map.
@@ -714,61 +790,61 @@ impl CoreErlangGenerator {
 
             // Generate guard
             if let Some(guard) = &arm.guard {
-                parts.push(Document::String(" when ".to_string()));
+                parts.push(Document::Str(" when "));
                 let guard_doc = self.generate_guard_expression(guard)?;
                 parts.push(guard_doc);
             } else {
-                parts.push(Document::String(" when 'true'".to_string()));
+                parts.push(Document::Str(" when 'true'"));
             }
 
             // Generate body
-            parts.push(Document::String(" -> ".to_string()));
+            parts.push(Document::Str(" -> "));
             let body_doc = self.expression_doc(&arm.body)?;
             parts.push(body_doc);
 
             self.pop_scope();
         }
 
-        parts.push(Document::String(" end".to_string()));
+        parts.push(Document::Str(" end"));
         Ok(Document::Vec(parts))
     }
 
     /// Generates a Core Erlang pattern from a Pattern AST node.
     fn generate_pattern(&self, pattern: &Pattern) -> Result<Document<'static>> {
         match pattern {
-            Pattern::Wildcard(_) => Ok(Document::String("_".to_string())),
+            Pattern::Wildcard(_) => Ok(Document::Str("_")),
             Pattern::Variable(id) => {
                 let var_name = Self::to_core_erlang_var(&id.name);
                 Ok(Document::String(var_name))
             }
             Pattern::Literal(lit, _) => self.generate_literal(lit),
             Pattern::Tuple { elements, .. } => {
-                let mut parts = vec![Document::String("{".to_string())];
+                let mut parts = vec![Document::Str("{")];
                 for (i, elem) in elements.iter().enumerate() {
                     if i > 0 {
-                        parts.push(Document::String(", ".to_string()));
+                        parts.push(Document::Str(", "));
                     }
                     parts.push(self.generate_pattern(elem)?);
                 }
-                parts.push(Document::String("}".to_string()));
+                parts.push(Document::Str("}"));
                 Ok(Document::Vec(parts))
             }
             Pattern::List { elements, tail, .. } => {
                 if elements.is_empty() && tail.is_none() {
-                    return Ok(Document::String("[]".to_string()));
+                    return Ok(Document::Str("[]"));
                 }
-                let mut parts = vec![Document::String("[".to_string())];
+                let mut parts = vec![Document::Str("[")];
                 for (i, elem) in elements.iter().enumerate() {
                     if i > 0 {
-                        parts.push(Document::String(", ".to_string()));
+                        parts.push(Document::Str(", "));
                     }
                     parts.push(self.generate_pattern(elem)?);
                 }
                 if let Some(tail_pat) = tail {
-                    parts.push(Document::String(" | ".to_string()));
+                    parts.push(Document::Str(" | "));
                     parts.push(self.generate_pattern(tail_pat)?);
                 }
-                parts.push(Document::String("]".to_string()));
+                parts.push(Document::Str("]"));
                 Ok(Document::Vec(parts))
             }
             Pattern::Binary { .. } => Err(CodeGenError::UnsupportedFeature {
@@ -786,9 +862,9 @@ impl CoreErlangGenerator {
         match expr {
             Expression::Literal(lit, _) => self.generate_literal(lit),
             Expression::Identifier(id) => match id.name.as_str() {
-                "true" => Ok(Document::String("'true'".to_string())),
-                "false" => Ok(Document::String("'false'".to_string())),
-                "nil" => Ok(Document::String("'nil'".to_string())),
+                "true" => Ok(Document::Str("'true'")),
+                "false" => Ok(Document::Str("'false'")),
+                "nil" => Ok(Document::Str("'nil'")),
                 _ => {
                     if let Some(var_name) = self.lookup_var(&id.name) {
                         Ok(Document::String(var_name.clone()))

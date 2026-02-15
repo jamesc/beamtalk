@@ -2224,7 +2224,7 @@ fn test_multiple_classes_registration() {
 
     // Should use let-binding chain to sequence registrations
     assert!(
-        code.contains("let _ClassInfo0 = ~{"),
+        code.contains("let ClassInfo0 = ~{"),
         "Should have first ClassInfo binding. Got:\n{code}"
     );
     assert!(
@@ -2232,7 +2232,7 @@ fn test_multiple_classes_registration() {
         "Should have first registration with _Reg0. Got:\n{code}"
     );
     assert!(
-        code.contains("in let _ClassInfo1 = ~{"),
+        code.contains("in let ClassInfo1 = ~{"),
         "Should chain second ClassInfo binding with let. Got:\n{code}"
     );
     assert!(
@@ -2242,11 +2242,11 @@ fn test_multiple_classes_registration() {
 
     // BT-589: Should call update_class on already_started
     assert!(
-        code.contains("call 'beamtalk_object_class':'update_class'('Counter', _ClassInfo0)"),
+        code.contains("call 'beamtalk_object_class':'update_class'('Counter', ClassInfo0)"),
         "Should call update_class for Counter on already_started. Got:\n{code}"
     );
     assert!(
-        code.contains("call 'beamtalk_object_class':'update_class'('Logger', _ClassInfo1)"),
+        code.contains("call 'beamtalk_object_class':'update_class'('Logger', ClassInfo1)"),
         "Should call update_class for Logger on already_started. Got:\n{code}"
     );
 
@@ -2836,5 +2836,129 @@ fn test_class_method_rejects_field_assignment() {
     assert!(
         err.contains("cannot assign to instance field"),
         "Error should mention field assignment. Got: {err}"
+    );
+}
+
+#[test]
+fn test_string_interpolation_simple_variable() {
+    // "Hello, {name}!" — variable interpolation
+    let segments = vec![
+        StringSegment::Literal("Hello, ".into()),
+        StringSegment::Interpolation(Expression::Identifier(Identifier::new(
+            "name",
+            Span::new(8, 12),
+        ))),
+        StringSegment::Literal("!".into()),
+    ];
+    let expression = Expression::StringInterpolation {
+        segments,
+        span: Span::new(0, 15),
+    };
+    let code = generate_test_expression(&expression, "test_interp").expect("codegen should work");
+    // Should dispatch printString via beamtalk_message_dispatch
+    assert!(
+        code.contains("'printString'"),
+        "Should dispatch printString. Got:\n{code}"
+    );
+    assert!(
+        code.contains("beamtalk_message_dispatch':'send'"),
+        "Should use beamtalk_message_dispatch for dispatch. Got:\n{code}"
+    );
+    // Binary construction with byte segments and binary variable
+    assert!(
+        code.contains("#<"),
+        "Should contain byte segments for literal parts. Got:\n{code}"
+    );
+    assert!(
+        code.contains("('all',8,'binary',['unsigned'|['big']])"),
+        "Should contain binary variable segment. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_string_interpolation_no_interpolation() {
+    // Plain string — compiles as regular string literal (zero overhead)
+    let lit = Literal::String("Hello, World!".into());
+    let generator = CoreErlangGenerator::new("test");
+    let doc = generator.generate_literal(&lit).unwrap();
+    let code = doc.to_pretty_string();
+    // Should be a plain binary literal, no dispatch
+    assert!(
+        !code.contains("printString"),
+        "Plain string should NOT dispatch printString. Got:\n{code}"
+    );
+    assert!(
+        code.starts_with("#{"),
+        "Plain string should be binary literal. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_string_interpolation_multiple_expressions() {
+    // "a{x}b{y}c" — multiple expression segments
+    let segments = vec![
+        StringSegment::Literal("a".into()),
+        StringSegment::Interpolation(Expression::Identifier(Identifier::new(
+            "x",
+            Span::new(2, 3),
+        ))),
+        StringSegment::Literal("b".into()),
+        StringSegment::Interpolation(Expression::Identifier(Identifier::new(
+            "y",
+            Span::new(5, 6),
+        ))),
+        StringSegment::Literal("c".into()),
+    ];
+    let expression = Expression::StringInterpolation {
+        segments,
+        span: Span::new(0, 8),
+    };
+    let code = generate_test_expression(&expression, "test_multi").expect("codegen should work");
+    // Should have two printString dispatches
+    let dispatch_count = code.matches("'printString'").count();
+    assert_eq!(
+        dispatch_count, 2,
+        "Should have 2 printString dispatches. Got {dispatch_count}:\n{code}"
+    );
+}
+
+#[test]
+fn test_string_interpolation_only_expression() {
+    // "{name}" — only an interpolation, no literal segments
+    let segments = vec![StringSegment::Interpolation(Expression::Identifier(
+        Identifier::new("name", Span::new(1, 5)),
+    ))];
+    let expression = Expression::StringInterpolation {
+        segments,
+        span: Span::new(0, 6),
+    };
+    let code = generate_test_expression(&expression, "test_bare").expect("codegen should work");
+    assert!(
+        code.contains("'printString'"),
+        "Should dispatch printString even for bare expression. Got:\n{code}"
+    );
+    // Binary should contain only the variable segment
+    assert!(
+        code.contains("('all',8,'binary',['unsigned'|['big']])"),
+        "Should contain binary variable segment. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_string_interpolation_integer_expression() {
+    // "{42}" — integer literal in interpolation
+    let segments = vec![StringSegment::Interpolation(Expression::Literal(
+        Literal::Integer(42),
+        Span::new(1, 3),
+    ))];
+    let expression = Expression::StringInterpolation {
+        segments,
+        span: Span::new(0, 4),
+    };
+    let code = generate_test_expression(&expression, "test_int").expect("codegen should work");
+    // Should dispatch printString on the integer
+    assert!(
+        code.contains("'printString'"),
+        "Should dispatch printString on integer. Got:\n{code}"
     );
 }

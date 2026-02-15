@@ -12,6 +12,10 @@ module 'blocks_no_args' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('blocks_no_args', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
+            let _InstReg = try call 'beamtalk_object_instances':'register'('BlocksNoArgs', Pid)
+                of _RegOk -> _RegOk
+                catch <_RegT, _RegE, _RegS> -> 'ok'
+            in
             {'beamtalk_object', 'BlocksNoArgs', 'blocks_no_args', Pid}
         <{'error', Reason}> when 'true' ->
             let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'BlocksNoArgs') in
@@ -30,6 +34,10 @@ module 'blocks_no_args' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call
         <'true'> when 'true' ->
             case call 'gen_server':'start_link'('blocks_no_args', InitArgs, []) of
                 <{'ok', Pid}> when 'true' ->
+                    let _InstReg = try call 'beamtalk_object_instances':'register'('BlocksNoArgs', Pid)
+                        of _RegOk -> _RegOk
+                        catch <_RegT, _RegE, _RegS> -> 'ok'
+                    in
                     {'beamtalk_object', 'BlocksNoArgs', 'blocks_no_args', Pid}
                 <{'error', Reason}> when 'true' ->
                     let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'BlocksNoArgs') in
@@ -91,9 +99,8 @@ module 'blocks_no_args' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call
     end
 
 
-'code_change'/3 = fun (_OldVsn, State, _Extra) ->
-    %% TODO: Add state migration logic
-    {'ok', State}
+'code_change'/3 = fun (OldVsn, State, Extra) ->
+    call 'beamtalk_hot_reload':'code_change'(OldVsn, State, Extra)
 
 
 'terminate'/2 = fun (Reason, State) ->

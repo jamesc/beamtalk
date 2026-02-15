@@ -120,11 +120,11 @@ fn validate_if_not_nil_block(expr: &Expression, selector: &str) -> Result<bool> 
 
 /// Generates a Core Erlang `apply` call that adapts to block arity.
 /// For 0-arg blocks: `apply BlockVar ()`, for 1-arg blocks: `apply BlockVar (RecvVar)`.
-fn not_nil_apply(block_var: &str, recv_var: &str, block_takes_arg: bool) -> String {
+fn not_nil_apply(block_var: &str, recv_var: &str, block_takes_arg: bool) -> Document<'static> {
     if block_takes_arg {
-        format!("apply {block_var} ({recv_var})")
+        Document::String(format!("apply {block_var} ({recv_var})"))
     } else {
-        format!("apply {block_var} ()")
+        Document::String(format!("apply {block_var} ()"))
     }
 }
 
@@ -362,7 +362,7 @@ impl CoreErlangGenerator {
         let mut arg_parts: Vec<Document<'static>> = Vec::new();
         for (i, arg) in arguments.iter().enumerate() {
             if i > 0 {
-                arg_parts.push(Document::String(", ".to_string()));
+                arg_parts.push(Document::Str(", "));
             }
             arg_parts.push(self.expression_doc(arg)?);
         }
@@ -610,8 +610,10 @@ impl CoreErlangGenerator {
                             format!(" in let {block_var} = "),
                             block_code,
                             format!(
-                                " in case {recv_var} of <'nil'> when 'true' -> 'nil' <_> when 'true' -> {apply} end"
+                                " in case {recv_var} of <'nil'> when 'true' -> 'nil' <_> when 'true' -> "
                             ),
+                            apply,
+                            " end",
                         ];
                         Ok(Some(doc))
                     }
@@ -634,8 +636,10 @@ impl CoreErlangGenerator {
                             format!(" in let {not_nil_var} = "),
                             not_nil_code,
                             format!(
-                                " in case {recv_var} of <'nil'> when 'true' -> apply {nil_var} () <_> when 'true' -> {apply} end"
+                                " in case {recv_var} of <'nil'> when 'true' -> apply {nil_var} () <_> when 'true' -> "
                             ),
+                            apply,
+                            " end",
                         ];
                         Ok(Some(doc))
                     }
@@ -658,8 +662,10 @@ impl CoreErlangGenerator {
                             format!(" in let {nil_var} = "),
                             nil_code,
                             format!(
-                                " in case {recv_var} of <'nil'> when 'true' -> apply {nil_var} () <_> when 'true' -> {apply} end"
+                                " in case {recv_var} of <'nil'> when 'true' -> apply {nil_var} () <_> when 'true' -> "
                             ),
+                            apply,
+                            " end",
                         ];
                         Ok(Some(doc))
                     }

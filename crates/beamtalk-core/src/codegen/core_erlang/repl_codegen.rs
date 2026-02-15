@@ -82,26 +82,27 @@ impl CoreErlangGenerator {
         // Check if state was mutated (must happen after capture)
         let final_state = self.current_state_var();
 
-        let return_tuple = if self.repl_loop_mutated {
+        let return_tuple: Document<'static> = if self.repl_loop_mutated {
             // BT-483: Mutation-threaded control flow returns {Result, State} tuple.
             // Extract display value and updated bindings using element/2.
             // BT-245: repl_loop_mutated catches mutations inside StateAcc-threaded loops
             // where current_state_var() is restored after the loop.
-            "let _LoopResult = call 'erlang':'element'(1, Result) in \
-             let _LoopState = call 'erlang':'element'(2, Result) in \
-             {_LoopResult, _LoopState}"
-                .to_string()
+            Document::Str(
+                "let _LoopResult = call 'erlang':'element'(1, Result) in \
+                 let _LoopState = call 'erlang':'element'(2, Result) in \
+                 {_LoopResult, _LoopState}",
+            )
         } else if final_state != "State" {
             // Direct state mutation (field assignment) — Result is the value, use updated state
-            format!("{{Result, {final_state}}}")
+            Document::String(format!("{{Result, {final_state}}}"))
         } else {
             // No mutation - Result is the value, State is unchanged bindings
-            "{Result, State}".to_string()
+            Document::Str("{Result, State}")
         };
 
         let module_name = &self.module_name;
         let doc = docvec![
-            format!("module '{module_name}' ['eval'/1]\n"),
+            Document::String(format!("module '{module_name}' ['eval'/1]\n")),
             "  attributes []\n",
             "\n",
             "'eval'/1 = fun (Bindings) ->\n",

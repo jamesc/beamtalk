@@ -12,6 +12,10 @@ module 'hello_world' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('hello_world', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
+            let _InstReg = try call 'beamtalk_object_instances':'register'('HelloWorld', Pid)
+                of _RegOk -> _RegOk
+                catch <_RegT, _RegE, _RegS> -> 'ok'
+            in
             {'beamtalk_object', 'HelloWorld', 'hello_world', Pid}
         <{'error', Reason}> when 'true' ->
             let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'HelloWorld') in
@@ -30,6 +34,10 @@ module 'hello_world' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3
         <'true'> when 'true' ->
             case call 'gen_server':'start_link'('hello_world', InitArgs, []) of
                 <{'ok', Pid}> when 'true' ->
+                    let _InstReg = try call 'beamtalk_object_instances':'register'('HelloWorld', Pid)
+                        of _RegOk -> _RegOk
+                        catch <_RegT, _RegE, _RegS> -> 'ok'
+                    in
                     {'beamtalk_object', 'HelloWorld', 'hello_world', Pid}
                 <{'error', Reason}> when 'true' ->
                     let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'HelloWorld') in
@@ -90,9 +98,8 @@ module 'hello_world' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3
     end
 
 
-'code_change'/3 = fun (_OldVsn, State, _Extra) ->
-    %% TODO: Add state migration logic
-    {'ok', State}
+'code_change'/3 = fun (OldVsn, State, Extra) ->
+    call 'beamtalk_hot_reload':'code_change'(OldVsn, State, Extra)
 
 
 'terminate'/2 = fun (Reason, State) ->

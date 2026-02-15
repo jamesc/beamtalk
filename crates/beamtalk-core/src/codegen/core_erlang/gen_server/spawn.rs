@@ -14,6 +14,28 @@ use crate::ast::Module;
 use crate::docvec;
 
 impl CoreErlangGenerator {
+    /// Generates a Document for registering an actor instance with the hot reload
+    /// tracking registry. Uses try-catch to handle cases where the registry isn't
+    /// running (e.g., stdlib tests).
+    fn instance_registration_doc(class_name: &str) -> Document<'static> {
+        docvec![
+            format!(
+                "let _InstReg = try call 'beamtalk_object_instances':'register'('{class_name}', Pid)"
+            ),
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "of _RegOk -> _RegOk",
+                    line(),
+                    "catch <_RegT, _RegE, _RegS> -> 'ok'",
+                ]
+            ),
+            line(),
+            "in",
+        ]
+    }
+
     /// Generates the `spawn/0` class method for creating actor instances.
     ///
     /// This is a class-level method (not an instance method) that instantiates
@@ -52,9 +74,9 @@ impl CoreErlangGenerator {
         let ok_body = if has_initialize {
             Self::spawn_initialize_block_doc(&class_name, &module_name)
         } else {
-            docvec![format!(
+            Document::String(format!(
                 "{{'beamtalk_object', '{class_name}', '{module_name}', Pid}}"
-            )]
+            ))
         };
 
         let doc = docvec![
@@ -69,7 +91,16 @@ impl CoreErlangGenerator {
                         docvec![
                             line(),
                             "<{'ok', Pid}> when 'true' ->",
-                            nest(INDENT, docvec![line(), ok_body,]),
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    // BT-572: Register instance for hot reload tracking
+                                    Self::instance_registration_doc(&class_name),
+                                    line(),
+                                    ok_body,
+                                ]
+                            ),
                             line(),
                             "<{'error', Reason}> when 'true' ->",
                             nest(
@@ -166,9 +197,9 @@ impl CoreErlangGenerator {
         let ok_body = if has_initialize {
             Self::spawn_initialize_block_doc(&class_name, &module_name)
         } else {
-            docvec![format!(
+            Document::String(format!(
                 "{{'beamtalk_object', '{class_name}', '{module_name}', Pid}}"
-            )]
+            ))
         };
 
         // BT-473: Validate InitArgs is a map before passing to gen_server
@@ -219,7 +250,16 @@ impl CoreErlangGenerator {
                                         docvec![
                                             line(),
                                             "<{'ok', Pid}> when 'true' ->",
-                                            nest(INDENT, docvec![line(), ok_body,]),
+                                            nest(
+                                                INDENT,
+                                                docvec![
+                                                    line(),
+                                                    // BT-572: Register instance for hot reload tracking
+                                                    Self::instance_registration_doc(&class_name),
+                                                    line(),
+                                                    ok_body,
+                                                ]
+                                            ),
                                             line(),
                                             "<{'error', Reason}> when 'true' ->",
                                             nest(
@@ -413,15 +453,25 @@ impl CoreErlangGenerator {
     ///
     /// Produces: `#{#<byte1>(8,1,'integer',['unsigned'|['big']]), ...}#`
     pub(in crate::codegen::core_erlang) fn binary_string_literal(s: &str) -> String {
-        use std::fmt::Write;
         let mut result = String::from("#{");
+        result.push_str(&Self::binary_byte_segments(s));
+        result.push_str("}#");
+        result
+    }
+
+    /// Returns Core Erlang binary byte segments for a string, without `#{...}#` wrapping.
+    ///
+    /// Used by `binary_string_literal` and string interpolation codegen.
+    /// Produces: `#<byte1>(8,1,'integer',['unsigned'|['big']]),#<byte2>(...), ...`
+    pub(in crate::codegen::core_erlang) fn binary_byte_segments(s: &str) -> String {
+        use std::fmt::Write;
+        let mut result = String::new();
         for (i, byte) in s.bytes().enumerate() {
             if i > 0 {
                 result.push(',');
             }
             write!(result, "#<{byte}>(8,1,'integer',['unsigned'|['big']])").unwrap();
         }
-        result.push_str("}#");
         result
     }
 

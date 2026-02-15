@@ -834,6 +834,9 @@ impl CoreErlangGenerator {
                 name, is_quoted, ..
             } => self.generate_primitive(name, *is_quoted),
             Expression::Match { value, arms, .. } => self.generate_match(value, arms),
+            Expression::StringInterpolation { segments, .. } => {
+                self.generate_string_interpolation(segments)
+            }
             _ => Err(CodeGenError::UnsupportedFeature {
                 feature: format!("expression type: {expr:?}"),
                 location: format!("{:?}", expr.span()),
@@ -1174,7 +1177,7 @@ impl CoreErlangGenerator {
             if let Some(code) =
                 primitive_implementations::generate_primitive_bif(&class_name, name, &params)
             {
-                return Ok(Document::String(code));
+                return Ok(code);
             }
         }
 
@@ -1185,9 +1188,9 @@ impl CoreErlangGenerator {
         let runtime_module = PrimitiveBindingTable::runtime_module_for_class(&class_name);
 
         let params_str = self.current_method_params.join(", ");
-        Ok(docvec![format!(
+        Ok(Document::String(format!(
             "call '{runtime_module}':'dispatch'('{name}', [{params_str}], Self)"
-        )])
+        )))
     }
 }
 
