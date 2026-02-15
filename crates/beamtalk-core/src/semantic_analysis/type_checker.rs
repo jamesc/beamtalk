@@ -44,12 +44,14 @@ impl InferredType {
     }
 }
 
-/// Map of expression start offsets to their inferred types.
+/// Map of expression spans to their inferred types.
 ///
 /// Used by LSP providers (hover, completions) to query types at cursor positions.
+/// Keyed by full span (start + end) to avoid collisions between nested expressions
+/// that share the same start offset (e.g., a message send and its receiver).
 #[derive(Debug, Clone, Default)]
 pub struct TypeMap {
-    types: HashMap<u32, InferredType>,
+    types: HashMap<Span, InferredType>,
 }
 
 impl TypeMap {
@@ -61,17 +63,17 @@ impl TypeMap {
         }
     }
 
-    /// Looks up the inferred type at a byte offset.
+    /// Looks up the inferred type for an expression span.
     ///
-    /// Returns `None` if no type is recorded at that offset.
+    /// Returns `None` if no type is recorded at that span.
     #[must_use]
-    pub fn get(&self, offset: u32) -> Option<&InferredType> {
-        self.types.get(&offset)
+    pub fn get(&self, span: Span) -> Option<&InferredType> {
+        self.types.get(&span)
     }
 
-    /// Records an inferred type at a byte offset (expression start position).
-    fn insert(&mut self, offset: u32, ty: InferredType) {
-        self.types.insert(offset, ty);
+    /// Records an inferred type for an expression span.
+    fn insert(&mut self, span: Span, ty: InferredType) {
+        self.types.insert(span, ty);
     }
 }
 
@@ -323,8 +325,8 @@ impl TypeChecker {
             }
         };
 
-        // Record inferred type at expression start position for LSP queries
-        self.type_map.insert(expr.span().start(), ty.clone());
+        // Record inferred type for the expression's full span for LSP queries
+        self.type_map.insert(expr.span(), ty.clone());
         ty
     }
 
@@ -1101,8 +1103,8 @@ mod tests {
         let hierarchy = ClassHierarchy::with_builtins();
         let type_map = infer_types(&module, &hierarchy);
 
-        // The integer literal at offset 0 should be recorded as Integer
-        let ty = type_map.get(0);
+        // The integer literal should be recorded as Integer
+        let ty = type_map.get(module.expressions[0].span());
         assert!(ty.is_some(), "TypeMap should record literal type");
         assert_eq!(
             ty.unwrap(),
@@ -1120,7 +1122,7 @@ mod tests {
 
         // The second expression (var "x") should be recorded as Integer
         let x_expr = &module.expressions[1];
-        let ty = type_map.get(x_expr.span().start());
+        let ty = type_map.get(x_expr.span());
         assert!(
             ty.is_some(),
             "TypeMap should record variable type after assignment"
@@ -1137,7 +1139,7 @@ mod tests {
         let module = make_module(vec![str_lit("hello")]);
         let hierarchy = ClassHierarchy::with_builtins();
         let type_map = infer_types(&module, &hierarchy);
-        let ty = type_map.get(0);
+        let ty = type_map.get(module.expressions[0].span());
         assert_eq!(
             ty,
             Some(&InferredType::Known("String".into())),

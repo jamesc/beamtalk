@@ -187,9 +187,7 @@ fn find_hover_in_expr(
                     return Some(self_hover_info(ident.span, context));
                 }
                 // Show inferred type if available
-                let type_info = type_map
-                    .get(ident.span.start())
-                    .and_then(InferredType::as_known);
+                let type_info = type_map.get(ident.span).and_then(InferredType::as_known);
                 let contents = if let Some(ty) = type_info {
                     format!("Identifier: `{}` — Type: {ty}", ident.name)
                 } else {

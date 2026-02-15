@@ -295,13 +295,22 @@ fn collect_identifiers_from_expr(expr: &Expression, identifiers: &mut HashSet<Ec
     }
 }
 
+/// Distinguishes between instance-side and class-side receivers for type-filtered completions.
+#[derive(Debug)]
+enum ReceiverSide {
+    /// An instance of the class (show instance methods)
+    Instance(EcoString),
+    /// The class itself (show class-side methods like `spawn`, `new`)
+    Class(EcoString),
+}
+
 /// Finds the inferred type of the expression immediately before the cursor.
 ///
 /// This enables type-filtered completions: if the cursor follows an expression
 /// with a known type, we can restrict method suggestions to that type.
 ///
 /// Returns `None` if no receiver can be determined (falls back to showing all methods).
-fn find_receiver_type(module: &Module, offset: u32, type_map: &TypeMap) -> Option<InferredType> {
+fn find_receiver_type(module: &Module, offset: u32, type_map: &TypeMap) -> Option<ReceiverSide> {
     // Search expressions for one that ends just before the cursor
     // (the cursor is after the receiver, typing a message to send)
     let expressions = module
@@ -333,7 +342,7 @@ fn find_receiver_in_expr(
     expr: &Expression,
     offset: u32,
     type_map: &TypeMap,
-) -> Option<InferredType> {
+) -> Option<ReceiverSide> {
     let span = expr.span();
     // Check if cursor is within or just after this expression
     if offset < span.start() || offset > span.end() + 1 {
@@ -359,22 +368,28 @@ fn find_receiver_in_expr(
             }
             // If cursor is just after the message send span, use the send's result type
             if offset >= span.end() && offset <= span.end() + 1 {
-                return type_map.get(span.start()).cloned();
+                return type_map.get(*span).and_then(|ty| match ty {
+                    InferredType::Known(n) => Some(ReceiverSide::Instance(n.clone())),
+                    InferredType::Dynamic => None,
+                });
             }
             None
         }
         // If cursor is right after an identifier, use its type
         Expression::Identifier(ident) => {
             if offset >= ident.span.end() && offset <= ident.span.end() + 1 {
-                type_map.get(ident.span.start()).cloned()
+                type_map.get(ident.span).and_then(|ty| match ty {
+                    InferredType::Known(n) => Some(ReceiverSide::Instance(n.clone())),
+                    InferredType::Dynamic => None,
+                })
             } else {
                 None
             }
         }
-        // If cursor is right after a class reference, use its type (for class-side methods)
+        // If cursor is right after a class reference, use class-side methods
         Expression::ClassReference { name, span } => {
             if offset >= span.end() && offset <= span.end() + 1 {
-                Some(InferredType::Known(name.name.clone()))
+                Some(ReceiverSide::Class(name.name.clone()))
             } else {
                 None
             }
@@ -382,7 +397,10 @@ fn find_receiver_in_expr(
         // If cursor is after a literal, use its type
         Expression::Literal(_, span) => {
             if offset >= span.end() && offset <= span.end() + 1 {
-                type_map.get(span.start()).cloned()
+                type_map.get(*span).and_then(|ty| match ty {
+                    InferredType::Known(n) => Some(ReceiverSide::Instance(n.clone())),
+                    InferredType::Dynamic => None,
+                })
             } else {
                 None
             }
@@ -395,7 +413,10 @@ fn find_receiver_in_expr(
         // Recurse into parenthesized
         Expression::Parenthesized { expression, span } => {
             if offset >= span.end() && offset <= span.end() + 1 {
-                type_map.get(span.start()).cloned()
+                type_map.get(*span).and_then(|ty| match ty {
+                    InferredType::Known(n) => Some(ReceiverSide::Instance(n.clone())),
+                    InferredType::Dynamic => None,
+                })
             } else {
                 find_receiver_in_expr(expression, offset, type_map)
             }
@@ -409,27 +430,17 @@ fn find_receiver_in_expr(
     }
 }
 
-/// Adds method completions from the class hierarchy.
+/// Adds completions filtered by a known receiver type.
 ///
-/// Uses the cursor's class context to provide relevant completions:
-/// - In an instance method: instance methods of the enclosing class
-/// - In a class method: class-side methods of the enclosing class
-/// - At top level: all methods from all module classes + Object methods
-///
-/// When `receiver_type` is `Some(Known(class_name))`, completions are filtered
-/// to only show methods available on that type (type-aware completions).
-fn add_hierarchy_completions(
-    module: &Module,
+/// Returns `true` if completions were added (caller should skip context-based fallback).
+fn add_receiver_type_completions(
     hierarchy: &ClassHierarchy,
-    context: &ClassContext<'_>,
-    receiver_type: Option<&InferredType>,
+    receiver_type: Option<&ReceiverSide>,
     completions: &mut Vec<Completion>,
-) {
+) -> bool {
     let mut seen = HashSet::new();
-
-    // If we have a known receiver type, show only methods for that type
-    if let Some(InferredType::Known(class_name)) = receiver_type {
-        if hierarchy.has_class(class_name) {
+    match receiver_type {
+        Some(ReceiverSide::Instance(class_name)) if hierarchy.has_class(class_name) => {
             for method in hierarchy.all_methods(class_name) {
                 if seen.insert(method.selector.clone()) {
                     let doc = format!("{}#{}", method.defined_in, method.selector);
@@ -440,9 +451,48 @@ fn add_hierarchy_completions(
                     );
                 }
             }
-            return;
+            true
         }
+        Some(ReceiverSide::Class(class_name)) if hierarchy.has_class(class_name) => {
+            for method in hierarchy.all_class_methods(class_name) {
+                if seen.insert(method.selector.clone()) {
+                    let doc = format!("{}#{}", method.defined_in, method.selector);
+                    completions.push(
+                        Completion::new(method.selector.as_str(), CompletionKind::Function)
+                            .with_documentation(doc)
+                            .with_detail(format!("on {class_name} class")),
+                    );
+                }
+            }
+            true
+        }
+        _ => false,
     }
+}
+
+/// Adds method completions from the class hierarchy.
+///
+/// Uses the cursor's class context to provide relevant completions:
+/// - In an instance method: instance methods of the enclosing class
+/// - In a class method: class-side methods of the enclosing class
+/// - At top level: all methods from all module classes + Object methods
+///
+/// When `receiver_type` is `Some`, completions are filtered to only show methods
+/// available on that type — instance methods for `Instance`, class-side methods
+/// for `Class` (type-aware completions).
+fn add_hierarchy_completions(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    context: &ClassContext<'_>,
+    receiver_type: Option<&ReceiverSide>,
+    completions: &mut Vec<Completion>,
+) {
+    // If we have a known receiver type, show only methods for that type
+    if add_receiver_type_completions(hierarchy, receiver_type, completions) {
+        return;
+    }
+
+    let mut seen = HashSet::new();
 
     // Fall back to context-based completions (Dynamic or no receiver)
     match context {
