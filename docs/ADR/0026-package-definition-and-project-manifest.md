@@ -388,25 +388,44 @@ Allow subdirectories within `src/` to be independent packages with their own `be
 - `beamtalk test` discovers tests in `test/` relative to package root
 - `beamtalk run` resolves entry point from package
 
-### Phase 5: Application start callback (future)
-OTP applications support a `start/2` callback for initialization code (spawning actors, starting servers, registering handlers). This is how Erlang/Elixir applications bootstrap themselves, and Pharo achieves similar behavior via `#initialize` class-side methods and Metacello `postload:` blocks.
+### Phase 5: Application start callback
+A package without a start callback is a **library** — it provides classes but doesn't do anything on its own. A package with a start callback is an **application** — it runs.
 
-For Beamtalk, this would allow:
+The manifest declares the entry point:
 ```toml
-# beamtalk.toml
 [package]
 name = "my_web_app"
-start = "app"    # Module containing start callback
+version = "0.1.0"
+start = "app"    # Module containing start method (src/app.bt)
 ```
 
+The start module contains a `start` method — conceptually like `main` in C/Go, but it starts a long-running system rather than running to completion:
+
 ```beamtalk
-// src/app.bt — Application start callback
+// src/app.bt — Application entry point
 start =>
     server := WebServer spawn
     server listen: 8080
+    Transcript show: 'Web server started on port 8080'; cr
 ```
 
-The exact syntax and semantics of the start callback are **deferred** — they depend on how Beamtalk maps to OTP application behaviour callbacks, which is a design decision in its own right. The auto-compile + code-path integration (Phase 4) provides the immediate value: classes are available in the REPL without manual `:load` commands.
+**How it works under the hood:**
+1. `beamtalk run` compiles the package (Phase 2)
+2. Starts a BEAM node with `beamtalk_runtime` and `beamtalk_stdlib`
+3. Loads the package's `.app` file (adds `_build/dev/ebin/` to code path)
+4. Calls the start module's `start` method
+5. The BEAM node keeps running (actors are supervised under `beamtalk_actor_sup`)
+
+The `start` method is imperative — it spawns actors and they're auto-supervised. This works today because all Beamtalk actors are already `gen_server` processes under `beamtalk_actor_sup`. A future ADR on OTP Behaviour Mapping may evolve this to support declarative supervision trees and restart strategies, but the simple imperative `start` is the right starting point.
+
+**Library vs Application:**
+| | Library (no `start`) | Application (`start = "app"`) |
+|---|---|---|
+| `beamtalk build` | ✅ Compiles to `.beam` + `.app` | ✅ Same |
+| `beamtalk repl` | ✅ Classes available | ✅ Classes available + start method callable |
+| `beamtalk run` | ❌ Error: "no start module" | ✅ Starts the application |
+| OTP `.app` | No `{mod, ...}` entry | `{mod, {StartModule, []}}` |
+| As dependency | Loaded on code path | Started as OTP application |
 
 **Affected components:** `beamtalk-cli` (build, new, run commands), `beamtalk-core` (module naming in codegen), workspace discovery, REPL module loading.
 
