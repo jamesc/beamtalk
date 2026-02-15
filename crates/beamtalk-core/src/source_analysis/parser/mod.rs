@@ -1734,6 +1734,74 @@ mod tests {
         }
     }
 
+    #[test]
+    fn parse_map_with_bare_identifier_keys() {
+        // BT-591: Bare identifiers before `=>` in map literals become implicit symbols
+        let module = parse_ok("#{name => \"Alice\", age => 30}");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MapLiteral { pairs, .. } => {
+                assert_eq!(pairs.len(), 2);
+                // Bare `name` becomes Symbol("name")
+                assert!(
+                    matches!(&pairs[0].key, Expression::Literal(Literal::Symbol(s), _) if s == "name")
+                );
+                assert!(
+                    matches!(&pairs[0].value, Expression::Literal(Literal::String(s), _) if s == "Alice")
+                );
+                // Bare `age` becomes Symbol("age")
+                assert!(
+                    matches!(&pairs[1].key, Expression::Literal(Literal::Symbol(s), _) if s == "age")
+                );
+                assert!(matches!(
+                    &pairs[1].value,
+                    Expression::Literal(Literal::Integer(30), _)
+                ));
+            }
+            _ => panic!("Expected MapLiteral"),
+        }
+    }
+
+    #[test]
+    fn parse_map_with_mixed_keys() {
+        // BT-591: Mixed bare identifier and explicit symbol keys
+        let module = parse_ok("#{x => 1, #y => 2}");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MapLiteral { pairs, .. } => {
+                assert_eq!(pairs.len(), 2);
+                // Bare `x` becomes Symbol("x")
+                assert!(
+                    matches!(&pairs[0].key, Expression::Literal(Literal::Symbol(s), _) if s == "x")
+                );
+                // Explicit `#y` is also Symbol("y")
+                assert!(
+                    matches!(&pairs[1].key, Expression::Literal(Literal::Symbol(s), _) if s == "y")
+                );
+            }
+            _ => panic!("Expected MapLiteral"),
+        }
+    }
+
+    #[test]
+    fn parse_map_uppercase_key_not_converted() {
+        // BT-591: Uppercase identifiers (class references) used as map keys are NOT converted to symbols
+        let module = parse_ok("#{Counter => 1}");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MapLiteral { pairs, .. } => {
+                assert_eq!(pairs.len(), 1);
+                // Uppercase bare identifier `Counter` remains a ClassReference, not an implicit symbol
+                assert!(matches!(&pairs[0].key, Expression::ClassReference { .. }));
+                assert!(matches!(
+                    &pairs[0].value,
+                    Expression::Literal(Literal::Integer(1), _)
+                ));
+            }
+            _ => panic!("Expected MapLiteral"),
+        }
+    }
+
     // ========================================================================
     // Class Definition Parsing Tests
     // ========================================================================

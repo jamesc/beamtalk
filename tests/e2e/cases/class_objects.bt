@@ -30,8 +30,7 @@ cls new
 
 // ---------------------------------------------------------------------------
 // Dynamic new: with initialization arguments
-// NOTE: Map literal with identifier keys (#{x => 3}) has parse issues (BT-213).
-// Using symbol keys (#x) once supported, or skipping for now.
+// Map literal with bare identifier keys (#{x => 3}) now works (BT-591).
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
