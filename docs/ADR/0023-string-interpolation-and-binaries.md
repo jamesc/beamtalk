@@ -411,7 +411,7 @@ The language is pre-release — no external user code needs migration.
 | 2b | BT-557 | Parser/AST: StringInterpolation node | S | BT-556 | ✅ Done |
 | 3 | BT-558 | Codegen: binary construction + printString | M | BT-557 | ✅ Done |
 | 4a | BT-559 | E2E tests and REPL validation | S | BT-558 | Planned |
-| 4b | BT-560 | Documentation update | S | BT-558 | ✅ In Progress |
+| 4b | BT-560 | Documentation update | S | BT-558 | 🔄 In Progress |
 
 ## References
 - Related issues: BT-39 (Define string interpolation syntax)

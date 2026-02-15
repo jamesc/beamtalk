@@ -67,7 +67,7 @@ Beamtalk strings support interpolation with `{expr}` — embed any expression in
 "5 characters"
 ```
 
-Non-string values are automatically converted via `printString`. To include literal braces, escape them with `\`:
+Non-string values are automatically converted via `printString`. To include literal braces in an interpolated string, prefix the brace characters with a backslash (write `\{` and `\}` inside the string):
 
 ```beamtalk
 > "Set: \{1, 2, 3\}"
