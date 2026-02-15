@@ -19,11 +19,16 @@ pub(super) static COLOR_ENABLED: AtomicBool = AtomicBool::new(true);
 /// Color is disabled if:
 /// - `no_color_flag` is true (`--no-color` CLI argument)
 /// - `NO_COLOR` environment variable is set (per <https://no-color.org/>)
+/// - `TERM` environment variable is `dumb` (minimal terminal)
 /// - stdout is not a terminal (piped output)
+/// - stderr is not a terminal (error output is piped)
 pub fn init(no_color_flag: bool) {
+    let is_dumb_term = std::env::var("TERM").map(|v| v == "dumb").unwrap_or(false);
     let enabled = !no_color_flag
         && std::env::var_os("NO_COLOR").is_none()
-        && std::io::IsTerminal::is_terminal(&std::io::stdout());
+        && !is_dumb_term
+        && std::io::IsTerminal::is_terminal(&std::io::stdout())
+        && std::io::IsTerminal::is_terminal(&std::io::stderr());
     COLOR_ENABLED.store(enabled, Ordering::Relaxed);
 }
 
@@ -64,21 +69,42 @@ mod tests {
     use super::*;
     use serial_test::serial;
 
+    /// RAII guard that saves and restores `COLOR_ENABLED` on drop.
+    struct ColorGuard {
+        prev: bool,
+    }
+
+    impl ColorGuard {
+        fn disabled() -> Self {
+            let prev = COLOR_ENABLED.load(Ordering::Relaxed);
+            COLOR_ENABLED.store(false, Ordering::Relaxed);
+            Self { prev }
+        }
+
+        fn enabled() -> Self {
+            let prev = COLOR_ENABLED.load(Ordering::Relaxed);
+            COLOR_ENABLED.store(true, Ordering::Relaxed);
+            Self { prev }
+        }
+    }
+
+    impl Drop for ColorGuard {
+        fn drop(&mut self) {
+            COLOR_ENABLED.store(self.prev, Ordering::Relaxed);
+        }
+    }
+
     #[test]
     #[serial(color)]
     fn paint_with_color_disabled() {
-        let prev = COLOR_ENABLED.load(Ordering::Relaxed);
-        COLOR_ENABLED.store(false, Ordering::Relaxed);
+        let _guard = ColorGuard::disabled();
         assert_eq!(paint(RED, "hello"), "hello");
-        COLOR_ENABLED.store(prev, Ordering::Relaxed);
     }
 
     #[test]
     #[serial(color)]
     fn paint_with_color_enabled() {
-        let prev = COLOR_ENABLED.load(Ordering::Relaxed);
-        COLOR_ENABLED.store(true, Ordering::Relaxed);
+        let _guard = ColorGuard::enabled();
         assert_eq!(paint(RED, "hello"), "\x1b[31mhello\x1b[0m");
-        COLOR_ENABLED.store(prev, Ordering::Relaxed);
     }
 }
