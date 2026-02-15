@@ -223,7 +223,7 @@ pub(crate) fn eunit_helper_functions() -> &'static str {
      \x20   case V of\n\
      \x20       [] -> <<\"[]\">>;\n\
      \x20       _ ->\n\
-     \x20           try jsx:encode([beamtalk_repl_server:term_to_json(E) || E <- V])\n\
+     \x20           try jsx:encode([beamtalk_repl_json:term_to_json(E) || E <- V])\n\
      \x20           catch _:_ -> iolist_to_binary(io_lib:format(\"~p\", [V])) end\n\
      \x20   end;\n\
      format_result(V) -> iolist_to_binary(io_lib:format(\"~p\", [V])).\n\n\
