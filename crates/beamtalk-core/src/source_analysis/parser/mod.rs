@@ -247,7 +247,11 @@ pub fn is_input_complete(source: &str) -> bool {
 
             // Track class definition pattern
             TokenKind::Keyword(k) if k == "subclass:" => has_subclass_keyword = true,
-            TokenKind::FatArrow => has_method_arrow = true,
+            // Only count `=>` as a method arrow when not nested inside delimiters
+            // (e.g., `#{key => value}` in state initializers should not count)
+            TokenKind::FatArrow if bracket_depth == 0 && paren_depth == 0 && brace_depth == 0 => {
+                has_method_arrow = true;
+            }
 
             TokenKind::Eof => break,
             _ => {}
@@ -3163,6 +3167,14 @@ Actor subclass: Counter
     fn complete_class_definition_with_multiple_methods() {
         assert!(is_input_complete(
             "Actor subclass: Counter\n  state: value = 0\n  increment => self.value := self.value + 1\n  getValue => ^self.value"
+        ));
+    }
+
+    #[test]
+    fn incomplete_class_definition_with_map_in_state() {
+        // Map literals contain `=>` but should NOT count as method arrows
+        assert!(!is_input_complete(
+            "Object subclass: Config\n  state: opts = #{verbose => true}"
         ));
     }
 

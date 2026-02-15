@@ -343,6 +343,13 @@ fn handle_compile_expression(request: &Map) -> Term {
 
     // BT-571: If the parsed module contains standalone method definitions, return method info
     if !module.method_definitions.is_empty() {
+        if module.method_definitions.len() > 1 {
+            return error_response(&[
+                "Multiple standalone method definitions in a single expression are not supported. \
+                 Define each method separately, or use a class definition with inline methods."
+                    .to_string(),
+            ]);
+        }
         let method_def = &module.method_definitions[0];
         let class_name = method_def.class_name.name.to_string();
         let selector = method_def.method.selector.name().to_string();
@@ -453,7 +460,7 @@ fn handle_compile(request: &Map) -> Term {
         );
     all_diagnostics.extend(primitive_diags);
 
-    let (errors, warnings) = partition_diagnostics(&all_diagnostics);
+    let (errors, mut warnings) = partition_diagnostics(&all_diagnostics);
 
     if !errors.is_empty() {
         let error_msgs: Vec<String> = errors.iter().map(|e| e.message.clone()).collect();
@@ -477,9 +484,16 @@ fn handle_compile(request: &Map) -> Term {
                     &mut class.methods
                 };
                 merge_method(methods, method_def.method);
+            } else {
+                warnings.push(DiagInfo {
+                    message: format!(
+                        "Standalone method targets unknown class `{target_class}` in this module"
+                    ),
+                    severity: "warning".to_string(),
+                    start: method_def.span.start(),
+                    end: method_def.span.end(),
+                });
             }
-            // If class not found, silently ignore (the method target may be
-            // in a different file — runtime will handle the error)
         }
     }
 

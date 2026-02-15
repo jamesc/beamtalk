@@ -173,9 +173,8 @@ handle_load(Path, State) ->
                                     %% BT-571: Store class source for method patching
                                     NewState3 = lists:foldl(
                                         fun(#{name := Name}, AccState) ->
-                                            NameBin = list_to_binary(Name),
                                             beamtalk_repl_state:set_class_source(
-                                                NameBin, Source, AccState)
+                                                Name, Source, AccState)
                                         end,
                                         NewState2, ClassNames),
                                     
@@ -208,12 +207,20 @@ handle_class_definition(ClassInfo, Warnings, Expression, State) ->
             %% Register module with workspace metadata
             beamtalk_workspace_meta:register_module(ClassModName),
             beamtalk_workspace_meta:update_activity(),
-            %% Store class source for later method patching
-            ClassName = case Classes of
-                [#{name := Name} | _] -> Name;
-                _ -> atom_to_binary(ClassModName, utf8)
+            %% Store class source for later method patching (all classes)
+            {ClassName, NewState2} = case Classes of
+                [#{name := FirstName} | _] ->
+                    StoreFun = fun(#{name := Name}, AccState) ->
+                        beamtalk_repl_state:set_class_source(
+                            Name, Expression, AccState)
+                    end,
+                    {FirstName, lists:foldl(StoreFun, NewState1, Classes)};
+                _ ->
+                    FallbackName = atom_to_binary(ClassModName, utf8),
+                    {FallbackName,
+                     beamtalk_repl_state:set_class_source(
+                         FallbackName, Expression, NewState1)}
             end,
-            NewState2 = beamtalk_repl_state:set_class_source(ClassName, Expression, NewState1),
             {ok, ClassName, <<>>, Warnings, NewState2};
         {error, Reason} ->
             {error, {load_error, Reason}, <<>>, Warnings, State}
@@ -237,7 +244,10 @@ handle_method_definition(MethodInfo, Warnings, Expression, State) ->
             Options = #{stdlib_mode => false, workspace_mode => true},
             case beamtalk_compiler:compile(SourceBin, Options) of
                 {ok, #{core_erlang := CoreErlang, module_name := ModNameBin,
-                       classes := Classes}} ->
+                       classes := Classes} = CompileResult} ->
+                    %% Combine warnings from initial parse and recompile
+                    RecompileWarnings = maps:get(warnings, CompileResult, []),
+                    AllWarnings = Warnings ++ RecompileWarnings,
                     ModName = binary_to_atom(ModNameBin, utf8),
                     case beamtalk_compiler:compile_core_erlang(CoreErlang) of
                         {ok, _CompiledMod, Binary} ->
@@ -251,14 +261,14 @@ handle_method_definition(MethodInfo, Warnings, Expression, State) ->
                                         ClassNameBin, CombinedSource, State),
                                     Result = <<ClassNameBin/binary, ">>",
                                                SelectorBin/binary>>,
-                                    {ok, Result, <<>>, Warnings, NewState};
+                                    {ok, Result, <<>>, AllWarnings, NewState};
                                 {error, Reason} ->
-                                    {error, {load_error, Reason}, <<>>, Warnings, State}
+                                    {error, {load_error, Reason}, <<>>, AllWarnings, State}
                             end;
                         {error, Reason} ->
                             ErrorMsg = iolist_to_binary(
                                 io_lib:format("Core compile error: ~p", [Reason])),
-                            {error, {compile_error, ErrorMsg}, <<>>, Warnings, State}
+                            {error, {compile_error, ErrorMsg}, <<>>, AllWarnings, State}
                     end;
                 {error, Diagnostics} ->
                     ErrorMsg = iolist_to_binary(
