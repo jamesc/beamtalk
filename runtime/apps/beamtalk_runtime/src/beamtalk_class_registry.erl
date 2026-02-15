@@ -30,6 +30,8 @@
     ensure_pg_started/0,
     ensure_hierarchy_table/0,
     inherits_from/2,
+    direct_subclasses/1,
+    all_subclasses/1,
     invalidate_subclass_flattened_tables/1,
     class_object_tag/1,
     is_class_object/1,
@@ -123,6 +125,34 @@ inherits_from(ClassName, Ancestor) ->
                 [] -> false
             end
     end.
+
+%% @doc Return sorted list of direct subclass names for a given class.
+%%
+%% BT-573: Queries the ETS hierarchy table for all classes whose superclass
+%% matches the given class name. Returns sorted atom list for deterministic output.
+-spec direct_subclasses(class_name()) -> [class_name()].
+direct_subclasses(ClassName) ->
+    case ets:info(beamtalk_class_hierarchy) of
+        undefined -> [];
+        _ ->
+            Matches = ets:match(beamtalk_class_hierarchy, {'$1', ClassName}),
+            lists:sort([Name || [Name] <- Matches])
+    end.
+
+%% @doc Return sorted list of all subclass names recursively.
+%%
+%% BT-573: Walks the hierarchy tree depth-first, collecting all transitive
+%% subclasses. Returns sorted atom list for deterministic output.
+-spec all_subclasses(class_name()) -> [class_name()].
+all_subclasses(ClassName) ->
+    lists:sort(all_subclasses_acc([ClassName], [])).
+
+-spec all_subclasses_acc([class_name()], [class_name()]) -> [class_name()].
+all_subclasses_acc([], Acc) ->
+    Acc;
+all_subclasses_acc([Current | Rest], Acc) ->
+    Children = direct_subclasses(Current),
+    all_subclasses_acc(Children ++ Rest, Children ++ Acc).
 
 %% @doc Broadcast rebuild_flattened to all class processes except the caller.
 %%
