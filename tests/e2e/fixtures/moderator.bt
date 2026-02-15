@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Moderator actor fixture for E2E tests (BT-568)
+// Demonstrates: Actor inheritance (ChatMember subclass), super calls
+
+ChatMember subclass: Moderator
+  state: muted = Set new
+
+  say: message =>
+    super say: "[MOD] " ++ message
+
+  kick: member =>
+    self.room leave: member
+
+  mute: memberName =>
+    self.muted := self.muted add: memberName
+
+  unmute: memberName =>
+    self.muted := self.muted remove: memberName
+
+  isMuted: memberName =>
+    ^self.muted includes: memberName
+
+  getMuted =>
+    ^self.muted

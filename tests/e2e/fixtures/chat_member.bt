@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Chat member fixture for E2E tests (BT-431)
+// Chat member fixture for E2E tests (BT-431, BT-568)
 // Represents a chat participant with name, inbox, and room reference
 
 Actor subclass: ChatMember
@@ -21,9 +21,9 @@ Actor subclass: ChatMember
   receiveMessage: msg =>
     self.inbox := self.inbox ++ #(msg)
 
-  // Send a message via the room
+  // Send a message via the room, using own name as sender
   say: message =>
-    self.room say: message from: self
+    self.room say: message from: self.name
 
   // Return received messages
   getInbox =>

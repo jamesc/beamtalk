@@ -1,16 +1,47 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for chat room demo (BT-431)
+// E2E tests for chat room demo (BT-431, BT-568)
 //
 // Tests:
+// - Message value types (Object subclass) with new: initialization
 // - Actor references stored in Set (ordsets with PIDs)
 // - Actor method calls inside do: block (broadcasting)
-// - Multi-actor message passing
+// - Multi-actor message passing with formatted strings
 // - Set and List operations with actors
+// - Moderator actor inheritance with super calls
 
+// @load tests/e2e/fixtures/message.bt
 // @load tests/e2e/fixtures/chat_room.bt
 // @load tests/e2e/fixtures/chat_member.bt
+// @load tests/e2e/fixtures/moderator.bt
+
+// ===========================================================================
+// MESSAGE VALUE TYPE
+// ===========================================================================
+
+// Create a Message with default values
+Message new
+// => a Message
+
+// Create a Message with custom values via new:
+msgArgs := #{#text => "Hello!", #sender => "Alice"}
+// => _
+
+msg := Message new: msgArgs
+// => _
+
+msg getText
+// => Hello!
+
+msg getSender
+// => Alice
+
+msg describe
+// => Alice: Hello!
+
+msg class
+// => Message
 
 // ===========================================================================
 // CHAT ROOM CREATION & BASIC OPERATIONS
@@ -91,64 +122,67 @@ members includes: bob
 // MESSAGE BROADCASTING (actor method calls in do: block)
 // ===========================================================================
 
-// Send a message from Alice
-room say: "Hello everyone!" from: alice
+// Send a message from Alice (sender name as string)
+room say: "Hello everyone!" from: "Alice"
 // => nil
 
-// Check message history
+// Check message history — formatted as "sender: text" strings
 history := room getHistory
-// => ["Hello everyone!"]
+// => _
 
 history size
 // => 1
 
 history first
-// => Hello everyone!
+// => Alice: Hello everyone!
 
 // Check that alice received the message (via do: broadcast)
 aliceInbox := alice getInbox
-// => ["Hello everyone!"]
+// => _
 
 aliceInbox size
 // => 1
 
 aliceInbox first
-// => Hello everyone!
+// => Alice: Hello everyone!
 
 // Check that bob also received it
 bobInbox := bob getInbox
-// => ["Hello everyone!"]
+// => _
 
 bobInbox size
 // => 1
 
 bobInbox first
-// => Hello everyone!
+// => Alice: Hello everyone!
 
 // ===========================================================================
 // MULTIPLE MESSAGES
 // ===========================================================================
 
 // Bob replies
-room say: "Hey Alice!" from: bob
+room say: "Hey Alice!" from: "Bob"
 // => nil
 
 // History now has 2 messages
 history2 := room getHistory
-// => ["Hello everyone!","Hey Alice!"]
+// => _
 
 history2 size
 // => 2
 
+history2 last
+// => Bob: Hey Alice!
+
 // Both members received both messages
 aliceInbox2 := alice getInbox
-// => ["Hello everyone!","Hey Alice!"]
+// => _
 
 aliceInbox2 size
 // => 2
 
 bobInbox2 := bob getInbox
-// => ["Hello everyone!","Hey Alice!"]
+// => _
 
 bobInbox2 size
 // => 2
@@ -175,22 +209,113 @@ onlineAfter includes: bob
 // => true
 
 // Message sent after alice leaves
-room say: "Anyone there?" from: bob
+room say: "Anyone there?" from: "Bob"
 // => nil
 
 // Alice doesn't receive the new message
 aliceInbox3 := alice getInbox
-// => ["Hello everyone!","Hey Alice!"]
+// => _
 
 aliceInbox3 size
 // => 2
 
 // Bob receives it
 bobInbox3 := bob getInbox
-// => ["Hello everyone!","Hey Alice!","Anyone there?"]
+// => _
 
 bobInbox3 size
 // => 3
 
 bobInbox3 last
-// => Anyone there?
+// => Bob: Anyone there?
+
+// ===========================================================================
+// MODERATOR (Actor inheritance with super)
+// ===========================================================================
+
+// Create a moderator (subclass of ChatMember)
+mod := Moderator spawn
+// => #Actor<Moderator,_>
+
+mod class
+// => Moderator
+
+// Moderator has all ChatMember methods
+mod setName: "Admin"
+// => Admin
+
+mod getName
+// => Admin
+
+mod setRoom: room
+// => #Actor<ChatRoom,_>
+
+room join: mod
+// => Set(_)
+
+// Moderator can mute members
+mod mute: "Bob"
+// => Set(_)
+
+mod isMuted: "Bob"
+// => true
+
+mod isMuted: "Alice"
+// => false
+
+// Unmute
+mod unmute: "Bob"
+// => Set(_)
+
+mod isMuted: "Bob"
+// => false
+
+// ===========================================================================
+// MODERATOR KICK (Actor-to-actor method calls)
+// ===========================================================================
+
+// Re-add bob to the room for kick test
+room join: bob
+// => Set(_)
+
+membersBefore := room online
+// => Set(_)
+
+membersBefore includes: bob
+// => true
+
+// Moderator kicks bob from the room
+(mod kick: bob) await
+// => _
+
+membersAfter := room online
+// => Set(_)
+
+membersAfter includes: bob
+// => false
+
+// ===========================================================================
+// MODERATOR SAY: SUPER CALL (inheritance + prefix)
+// ===========================================================================
+
+// Re-add bob to receive the moderator message
+room join: bob
+// => Set(_)
+
+// Moderator say: prefixes with "[MOD] " then calls super (ChatMember say:)
+(mod say: "Welcome!") await
+// => nil
+
+// Room history should contain the prefixed message
+modHistory := room getHistory
+// => _
+
+modHistory last
+// => Admin: [MOD] Welcome!
+
+// Bob should have received the prefixed message
+bobInboxMod := bob getInbox
+// => _
+
+bobInboxMod last
+// => Admin: [MOD] Welcome!

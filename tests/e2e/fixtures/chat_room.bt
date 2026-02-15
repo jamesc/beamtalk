@@ -1,8 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Chat room fixture for E2E tests (BT-431)
-// Demonstrates: actors, message passing, Set, List, blocks
+// Chat room fixture for E2E tests (BT-431, BT-568)
+// Demonstrates: actors, Set, List, blocks, string formatting
 
 // ChatRoom actor manages members and message history
 Actor subclass: ChatRoom
@@ -18,15 +18,15 @@ Actor subclass: ChatRoom
     self.members := self.members remove: member
   
   // Broadcast a message to all members
-  // Uses do: to iterate over Set of actor references
-  say: message from: sender =>
-    self.history := self.history ++ #(message).
-    self.members do: [:m | m receiveMessage: message]
+  // Formats message as "sender: text" string
+  say: text from: senderName =>
+    self.history := self.history ++ #(senderName ++ ": " ++ text).
+    self.members do: [:m | m receiveMessage: senderName ++ ": " ++ text]
   
   // Return current online members (Set of actor refs)
   online =>
     ^self.members
   
-  // Return message history (List of strings)
+  // Return message history (List of formatted strings)
   getHistory =>
     ^self.history
