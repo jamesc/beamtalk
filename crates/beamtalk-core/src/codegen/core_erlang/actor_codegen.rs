@@ -82,41 +82,41 @@ impl CoreErlangGenerator {
             ]
         };
         docs.push(module_header);
-        docs.push(Document::String("\n".into()));
+        docs.push(Document::Str("\n"));
 
         // Generate start_link/1 (standard gen_server entry point)
         docs.push(self.generate_start_link_doc());
-        docs.push(Document::String("\n".into()));
+        docs.push(Document::Str("\n"));
 
         if is_abstract {
             // BT-105: Abstract classes cannot be spawned — generate error methods
             docs.push(self.generate_abstract_spawn_error_method()?);
-            docs.push(Document::String("\n".into()));
+            docs.push(Document::Str("\n"));
             docs.push(self.generate_abstract_spawn_with_args_error_method()?);
-            docs.push(Document::String("\n".into()));
+            docs.push(Document::Str("\n"));
         } else {
             // Generate spawn/0 function (class method to instantiate actors)
             docs.push(self.generate_spawn_function(module)?);
-            docs.push(Document::String("\n".into()));
+            docs.push(Document::Str("\n"));
 
             // Generate spawn/1 function (class method with init args)
             docs.push(self.generate_spawn_with_args_function(module)?);
-            docs.push(Document::String("\n".into()));
+            docs.push(Document::Str("\n"));
         }
 
         // BT-217: Generate new/0 and new/1 error methods for actors
         docs.push(self.generate_actor_new_error_method()?);
-        docs.push(Document::String("\n".into()));
+        docs.push(Document::Str("\n"));
         docs.push(self.generate_actor_new_with_args_error_method()?);
-        docs.push(Document::String("\n".into()));
+        docs.push(Document::Str("\n"));
 
         // Generate superclass/0 class method for reflection
         docs.push(self.generate_superclass_function(module)?);
-        docs.push(Document::String("\n".into()));
+        docs.push(Document::Str("\n"));
 
         // Generate init/1 function
         docs.push(self.generate_init_function(module)?);
-        docs.push(Document::String("\n".into()));
+        docs.push(Document::Str("\n"));
 
         // BT-403: Abstract classes skip gen_server callback scaffolding.
         // These callbacks are only needed for instantiable actors that receive messages.
@@ -124,36 +124,36 @@ impl CoreErlangGenerator {
             // BT-403: Abstract classes need minimal gen_server callbacks
             // (required by gen_server behaviour but will never be called)
             docs.push(self.generate_abstract_callbacks_doc());
-            docs.push(Document::String("\n".into()));
+            docs.push(Document::Str("\n"));
         } else {
             // Generate handle_cast/2 function with error handling
             docs.push(self.generate_handle_cast()?);
-            docs.push(Document::String("\n".into()));
+            docs.push(Document::Str("\n"));
 
             // Generate handle_call/3 function with error handling
             docs.push(self.generate_handle_call()?);
-            docs.push(Document::String("\n".into()));
+            docs.push(Document::Str("\n"));
 
             // Generate code_change/3 function
             docs.push(self.generate_code_change()?);
-            docs.push(Document::String("\n".into()));
+            docs.push(Document::Str("\n"));
 
             // Generate terminate/2 function (per BT-29)
             docs.push(self.generate_terminate(module)?);
-            docs.push(Document::String("\n".into()));
+            docs.push(Document::Str("\n"));
 
             // Generate safe_dispatch/3 with error isolation (per BT-29)
             docs.push(self.generate_safe_dispatch()?);
-            docs.push(Document::String("\n".into()));
+            docs.push(Document::Str("\n"));
         }
 
         // Generate dispatch function with DNU fallback
         docs.push(self.generate_dispatch(module)?);
-        docs.push(Document::String("\n".into()));
+        docs.push(Document::Str("\n"));
 
         // Generate method table
         docs.push(self.generate_method_table(module)?);
-        docs.push(Document::String("\n".into()));
+        docs.push(Document::Str("\n"));
 
         // Generate has_method/1 for reflection (BT-242)
         docs.push(self.generate_has_method(module)?);
@@ -172,12 +172,12 @@ impl CoreErlangGenerator {
 
         // Generate class registration function (BT-218)
         if !module.classes.is_empty() {
-            docs.push(Document::String("\n".into()));
+            docs.push(Document::Str("\n"));
             docs.push(self.generate_register_class(module)?);
         }
 
         // Module end
-        docs.push(docvec!["end\n"]);
+        docs.push(Document::Str("end\n"));
 
         Ok(Document::Vec(docs))
     }
@@ -299,7 +299,7 @@ impl CoreErlangGenerator {
         module: &Module,
     ) -> Result<Document<'static>> {
         let Some(class) = module.classes.first() else {
-            return Ok(Document::String(String::new()));
+            return Ok(Document::Nil);
         };
 
         let mut docs: Vec<Document<'static>> = Vec::new();

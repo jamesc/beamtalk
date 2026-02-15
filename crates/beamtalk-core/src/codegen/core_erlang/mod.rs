@@ -1186,9 +1186,9 @@ impl CoreErlangGenerator {
         let runtime_module = PrimitiveBindingTable::runtime_module_for_class(&class_name);
 
         let params_str = self.current_method_params.join(", ");
-        Ok(docvec![format!(
+        Ok(Document::String(format!(
             "call '{runtime_module}':'dispatch'('{name}', [{params_str}], Self)"
-        )])
+        )))
     }
 }
 

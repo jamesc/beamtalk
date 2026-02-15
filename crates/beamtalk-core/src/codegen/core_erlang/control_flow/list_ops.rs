@@ -88,10 +88,10 @@ impl CoreErlangGenerator {
 
         // BT-483: Return {Result, State} tuple — do: returns nil as result
         let fold_result = self.fresh_temp_var("FoldResult");
-        docs.push(docvec![format!(
+        docs.push(Document::String(format!(
             " in let {fold_result} = call 'lists':'foldl'({lambda_var}, {initial_state}, {safe_list_var}) \
              in {{'nil', {fold_result}}}"
-        )]);
+        )));
 
         Ok(Document::Vec(docs))
     }
@@ -128,7 +128,7 @@ impl CoreErlangGenerator {
 
                 if is_last {
                     // Last expression: close with the final state variable
-                    docs.push(docvec![self.current_state_var()]);
+                    docs.push(Document::String(self.current_state_var()));
                 }
             } else if self.is_actor_self_send(expr) {
                 // BT-245: Self-sends may mutate state — thread state through dispatch
@@ -136,19 +136,19 @@ impl CoreErlangGenerator {
                 docs.push(doc);
 
                 if is_last {
-                    docs.push(docvec![self.current_state_var()]);
+                    docs.push(Document::String(self.current_state_var()));
                 }
             } else {
                 // Non-assignment expression
                 if i > 0 {
                     // Sequence with previous expression using let _ = ... in
-                    docs.push(docvec!["let _ = "]);
+                    docs.push(Document::Str("let _ = "));
                 }
                 let doc = self.generate_expression(expr)?;
                 docs.push(doc);
 
                 if !is_last {
-                    docs.push(docvec![" in "]);
+                    docs.push(Document::Str(" in "));
                 }
             }
         }
@@ -368,12 +368,12 @@ impl CoreErlangGenerator {
         let acc_out = self.fresh_temp_var("AccOut");
         let state_out = self.fresh_temp_var("StOut");
 
-        docs.push(docvec![format!(
+        docs.push(Document::String(format!(
             " in let {result_var} = call 'lists':'foldl'({lambda_var}, {{{init_var}, {initial_state}}}, {safe_list_var}) \
              in let {acc_out} = call 'erlang':'element'(1, {result_var}) \
              in let {state_out} = call 'erlang':'element'(2, {result_var}) \
              in {{{acc_out}, {state_out}}}"
-        )]);
+        )));
 
         Ok(Document::Vec(docs))
     }
@@ -415,7 +415,7 @@ impl CoreErlangGenerator {
 
                 if is_last {
                     let final_state = self.current_state_var();
-                    docs.push(docvec![format!("{{_Val, {final_state}}}")]);
+                    docs.push(Document::String(format!("{{_Val, {final_state}}}")));
                 }
             } else if self.is_actor_self_send(expr) {
                 has_mutations = true;
@@ -427,18 +427,18 @@ impl CoreErlangGenerator {
                     let final_state = self.current_state_var();
                     if let Some(dv) = self.last_dispatch_var.clone() {
                         let acc_result = self.fresh_temp_var("AccResult");
-                        docs.push(docvec![format!(
+                        docs.push(Document::String(format!(
                             "let {acc_result} = call 'erlang':'element'(1, {dv}) in {{{acc_result}, {final_state}}}"
-                        )]);
+                        )));
                     } else {
-                        docs.push(docvec![format!("{{'nil', {final_state}}}")]);
+                        docs.push(Document::String(format!("{{'nil', {final_state}}}")));
                     }
                 }
             } else {
                 // Non-assignment expression
                 if i > 0 && !has_mutations {
                     // Previous expression was not a field assignment, so we need to sequence
-                    docs.push(docvec!["let _ = "]);
+                    docs.push(Document::Str("let _ = "));
                 }
 
                 if is_last {
@@ -460,7 +460,7 @@ impl CoreErlangGenerator {
                 } else {
                     let doc = self.generate_expression(expr)?;
                     docs.push(doc);
-                    docs.push(docvec![" in "]);
+                    docs.push(Document::Str(" in "));
                 }
             }
         }

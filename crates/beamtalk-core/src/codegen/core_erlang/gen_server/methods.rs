@@ -121,10 +121,10 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         if method.body.is_empty() {
             // Empty method body returns nil
-            return Ok(docvec![format!(
+            return Ok(Document::String(format!(
                 "{{'reply', 'nil', {}}}",
                 self.current_state_var()
-            )]);
+            )));
         }
 
         let mut docs: Vec<Document<'static>> = Vec::new();
@@ -260,7 +260,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         if block.body.is_empty() {
             let final_state = self.current_state_var();
-            return Ok(docvec![format!("{{'reply', 'nil', {final_state}}}")]);
+            return Ok(Document::String(format!("{{'reply', 'nil', {final_state}}}")));
         }
 
         let mut docs: Vec<Document<'static>> = Vec::new();
@@ -417,9 +417,9 @@ impl CoreErlangGenerator {
                 }
 
                 // Extract state from the {reply, Result, NewState} tuple using element/2
-                let doc = docvec![format!(
+                let doc = Document::String(format!(
                     " in let {new_state} = call 'erlang':'element'(3, {super_result_var}) in "
-                )];
+                ));
                 docs.push(doc);
             } else if self.control_flow_has_mutations(expr) {
                 // BT-483: Control flow with field mutations returns {Result, State} tuple.
@@ -578,7 +578,7 @@ impl CoreErlangGenerator {
                 let val = if let Some(ref default_value) = cv.default_value {
                     self.expression_doc(default_value)?
                 } else {
-                    docvec!["'nil'"]
+                    Document::Str("'nil'")
                 };
                 class_var_parts.push(docvec![format!("'{}' => ", cv.name.name), val]);
             }

@@ -38,7 +38,7 @@ impl CoreErlangGenerator {
                 let value_code = if let Some(ref default_value) = state.default_value {
                     self.expression_doc(default_value)?
                 } else {
-                    Document::String("'nil'".to_string())
+                    Document::Str("'nil'")
                 };
                 fields.push(docvec![
                     line(),
@@ -99,7 +99,7 @@ impl CoreErlangGenerator {
                 let value_code = if let Some(ref default_value) = state.default_value {
                     self.expression_doc(default_value)?
                 } else {
-                    Document::String("'nil'".to_string())
+                    Document::Str("'nil'")
                 };
                 fields.push(docvec![
                     line(),
@@ -114,7 +114,7 @@ impl CoreErlangGenerator {
                     let value_code = if let Some(ref default_value) = state.default_value {
                         self.expression_doc(default_value)?
                     } else {
-                        Document::String("'nil'".to_string())
+                        Document::Str("'nil'")
                     };
                     fields.push(docvec![
                         line(),
