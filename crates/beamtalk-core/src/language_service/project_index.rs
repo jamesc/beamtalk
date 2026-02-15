@@ -102,16 +102,7 @@ impl ProjectIndex {
             self.file_hierarchies.remove(&file);
 
             // Re-merge classes from other files that may have been shadowed
-            for name in &old_names {
-                for other_hierarchy in self.file_hierarchies.values() {
-                    if let Some(info) = other_hierarchy.classes().get(name) {
-                        self.merged_hierarchy
-                            .classes_mut()
-                            .insert(name.clone(), info.clone());
-                        break;
-                    }
-                }
-            }
+            self.remerge_classes(&old_names);
         }
 
         // Track new class names from this file
@@ -142,14 +133,27 @@ impl ProjectIndex {
             self.merged_hierarchy.remove_classes(&to_remove);
 
             // Re-merge classes from remaining files that shared a name
-            for name in &to_remove {
-                for other_hierarchy in self.file_hierarchies.values() {
-                    if let Some(info) = other_hierarchy.classes().get(name) {
-                        self.merged_hierarchy
-                            .classes_mut()
-                            .insert(name.clone(), info.clone());
-                        break;
-                    }
+            self.remerge_classes(&to_remove);
+        }
+    }
+
+    /// Re-merge class definitions from remaining files for the given class names.
+    ///
+    /// When a file is removed/updated, classes it defined may also exist in
+    /// other files. This method restores the first definition found, using
+    /// deterministic (sorted by path) iteration order.
+    fn remerge_classes(&mut self, names: &[EcoString]) {
+        // Sort file paths for deterministic conflict resolution
+        let mut sorted_paths: Vec<&Utf8PathBuf> = self.file_hierarchies.keys().collect();
+        sorted_paths.sort();
+
+        for name in names {
+            for path in &sorted_paths {
+                if let Some(info) = self.file_hierarchies[*path].classes().get(name) {
+                    self.merged_hierarchy
+                        .classes_mut()
+                        .insert(name.clone(), info.clone());
+                    break;
                 }
             }
         }
@@ -291,5 +295,35 @@ mod tests {
         // Both classes visible in merged hierarchy
         assert!(index.hierarchy().has_class("ClassA"));
         assert!(index.hierarchy().has_class("ClassB"));
+    }
+
+    #[test]
+    fn remerge_deterministic_on_conflict() {
+        // Two files define the same class name with different methods.
+        // After removing one, the surviving definition should be deterministic
+        // (alphabetically first file wins).
+        let mut index = ProjectIndex::new();
+
+        // a.bt defines Dup with methodA
+        let tokens_a = lex_with_eof("Object subclass: Dup\n  methodA => 1");
+        let (module_a, _) = parse(tokens_a);
+        let hierarchy_a = ClassHierarchy::build(&module_a).0;
+        index.update_file(Utf8PathBuf::from("a.bt"), &hierarchy_a);
+
+        // b.bt defines Dup with methodB
+        let tokens_b = lex_with_eof("Object subclass: Dup\n  methodB => 2");
+        let (module_b, _) = parse(tokens_b);
+        let hierarchy_b = ClassHierarchy::build(&module_b).0;
+        index.update_file(Utf8PathBuf::from("b.bt"), &hierarchy_b);
+
+        // b.bt was last to merge, so Dup currently has methodB
+        let class = index.hierarchy().get_class("Dup").unwrap();
+        assert!(class.methods.iter().any(|m| m.selector == "methodB"));
+
+        // Remove b.bt — a.bt's definition should survive (deterministic)
+        index.remove_file(&Utf8PathBuf::from("b.bt"));
+        assert!(index.hierarchy().has_class("Dup"));
+        let class = index.hierarchy().get_class("Dup").unwrap();
+        assert!(class.methods.iter().any(|m| m.selector == "methodA"));
     }
 }
