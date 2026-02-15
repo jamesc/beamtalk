@@ -293,7 +293,7 @@ integration_setup() ->
 
 wait_for_class(_ClassName, 0) -> ok;
 wait_for_class(ClassName, Retries) ->
-    case beamtalk_object_class:whereis_class(ClassName) of
+    case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
             timer:sleep(50),
             wait_for_class(ClassName, Retries - 1);

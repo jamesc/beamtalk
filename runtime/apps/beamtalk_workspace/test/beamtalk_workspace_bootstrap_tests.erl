@@ -92,12 +92,12 @@ bootstrap_sets_class_variables_test_() ->
          [?_test(begin
               {ok, TPid} = beamtalk_transcript_stream:start_link({local, 'Transcript'}, 1000),
               {ok, _} = beamtalk_workspace_bootstrap:start_link(),
-              case beamtalk_object_class:whereis_class('TranscriptStream') of
+              case beamtalk_class_registry:whereis_class('TranscriptStream') of
                   undefined -> ok;
                   _ClassPid ->
                       ExpectedObj = {beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, TPid},
                       ?assertEqual(ExpectedObj,
-                          gen_server:call(beamtalk_object_class:whereis_class('TranscriptStream'),
+                          gen_server:call(beamtalk_class_registry:whereis_class('TranscriptStream'),
                               {get_class_var, current}))
               end
           end)]

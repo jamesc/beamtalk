@@ -85,7 +85,7 @@ kind_to_class(_) -> 'Error'.
 %% Returns false if class is not registered (safe during bootstrap).
 -spec is_exception_class(atom()) -> boolean().
 is_exception_class(ClassName) ->
-    beamtalk_object_class:inherits_from(ClassName, 'Exception').
+    beamtalk_class_registry:inherits_from(ClassName, 'Exception').
 
 %% @doc Check if an error matches the requested exception class.
 %%
@@ -129,7 +129,7 @@ matches_class_name(ClassName, #beamtalk_error{kind = Kind, class = ErrorClass}) 
         true -> ErrorClass;
         false -> kind_to_class(Kind)
     end,
-    beamtalk_object_class:inherits_from(ActualClass, BaseName);
+    beamtalk_class_registry:inherits_from(ActualClass, BaseName);
 matches_class_name(ClassName, RawError) when not is_map(RawError) ->
     %% Raw Erlang error (e.g. badarith) — wrap to get a kind, then match
     #{'$beamtalk_class' := _, error := Inner} = wrap(RawError),

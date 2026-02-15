@@ -860,7 +860,7 @@ impl CoreErlangGenerator {
                 format!("case call 'maps':'find'('{class_name}', {state_var}) of "),
                 "<{'ok', _BindingVal}> when 'true' -> _BindingVal ",
                 "<'error'> when 'true' -> ",
-                format!("case call 'beamtalk_object_class':'whereis_class'('{class_name}') of "),
+                format!("case call 'beamtalk_class_registry':'whereis_class'('{class_name}') of "),
                 "<'undefined'> when 'true' -> 'nil' ",
                 format!("<{class_pid_var}> when 'true' -> "),
                 format!(
@@ -878,7 +878,7 @@ impl CoreErlangGenerator {
             let class_mod_var = self.fresh_var("ClassModName");
 
             Ok(docvec![
-                format!("case call 'beamtalk_object_class':'whereis_class'('{class_name}') of "),
+                format!("case call 'beamtalk_class_registry':'whereis_class'('{class_name}') of "),
                 "<'undefined'> when 'true' -> 'nil' ",
                 format!("<{class_pid_var}> when 'true' -> "),
                 format!(
@@ -894,7 +894,7 @@ impl CoreErlangGenerator {
             let class_mod_var = self.fresh_var("ClassModName");
 
             Ok(docvec![
-                format!("case call 'beamtalk_object_class':'whereis_class'('{class_name}') of "),
+                format!("case call 'beamtalk_class_registry':'whereis_class'('{class_name}') of "),
                 "<'undefined'> when 'true' -> 'nil' ",
                 format!("<{class_pid_var}> when 'true' -> "),
                 format!(
