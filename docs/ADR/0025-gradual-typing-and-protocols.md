@@ -37,11 +37,12 @@ Beamtalk adopts **gradual typing with structural protocols**, implemented in fou
 ### Design Principles
 
 1. **Types are always optional** — Untyped code compiles and runs exactly as today. No existing code breaks.
-2. **Warnings, not errors** — Type mismatches produce compiler warnings, not errors. Code always compiles. (A strict mode flag can promote warnings to errors for CI.)
+2. **Warnings, not errors** — Type mismatches always produce compiler warnings, never errors. Code always compiles. There is no "strict mode" — the language has one behavior everywhere.
 3. **Compile-time only** — Type checking happens entirely at compile time. No runtime cost, no type tags, no overhead.
 4. **Structural, not nominal** — Type compatibility is determined by what messages an object responds to (its "shape"), not its class hierarchy. A `Duck` and a `Person` that both have `walk` are both valid where "something that walks" is expected.
 5. **Infer first, annotate for precision** — The compiler infers what it can from class definitions and assignments. Annotations add precision where inference falls short.
 6. **BEAM integration** — Type annotations generate Dialyzer `-spec` attributes in Core Erlang, giving Erlang-level type checking for free at the BEAM boundary.
+7. **Per-class typing contracts** — Classes can opt into thorough type checking with the `typed` modifier. This is a contract with the compiler, not a language mode — semantics are identical.
 
 ### Phase 1: Type Inference from Known Classes (Zero New Syntax)
 
@@ -125,6 +126,65 @@ attributes ['spec' = [{'deposit', {type, fun, [{type, product, [{type, integer, 
 ```
 
 This enables Dialyzer to perform additional checking at the BEAM level — two layers of type safety.
+
+### Phase 2b: Typed Classes (Per-Class Typing Contract)
+
+The `typed` modifier declares that a class opts into thorough type checking. This is purely a compile-time concept — the generated BEAM bytecode is identical whether a class is typed or not. Same gen_server, same dispatch, same runtime behavior. `typed` is erased during compilation, just like all other type information.
+
+```beamtalk
+// Regular class — inference warnings only
+Actor subclass: Counter
+  state: value = 0
+  increment => self.value := self.value + 1
+
+// Typed class — compiler checks everything
+typed Actor subclass: BankAccount
+  state: balance: Integer = 0
+  state: owner: String
+
+  deposit: amount: Integer -> Integer =>
+    self.balance := self.balance + amount
+
+  withdraw: amount =>                    // ⚠️ Warning: untyped parameter in typed class
+    self.balance := self.balance - amount
+
+  getBalance -> Integer => self.balance
+```
+
+**What `typed` means:**
+- All state fields should have type annotations (warn if missing)
+- All method parameters should have type annotations (warn if missing)
+- All methods should declare return types (warn if missing)
+- Message sends checked for argument type compatibility (not just method existence)
+- Generates complete Dialyzer `-spec` for every method
+- Compiler reports which methods lack annotations, guiding the developer
+
+**What `typed` does NOT change:**
+- Same compilation, same bytecode, same runtime semantics
+- Untyped callers can still call typed classes freely
+- `doesNotUnderstand:` still works if defined
+- It's advice to the compiler, not a different language
+
+**Inheritance:** `typed` is sticky — subclasses of a typed class are automatically typed:
+
+```beamtalk
+typed Actor subclass: BankAccount
+  state: balance: Integer = 0
+  ...
+
+// SavingsAccount is automatically typed (inherits from typed class)
+BankAccount subclass: SavingsAccount
+  state: interestRate: Float = 0.05     // ✅ Typed — compiler checks
+
+  accrue => ...                          // ⚠️ Warning: missing return type in typed class
+```
+
+This parallels how `sealed` is inherited — if the base class makes a contract, subclasses honor it.
+
+**Use cases:**
+- Library authors: "this public API is fully typed"
+- Production services: "this actor handles money — type everything"
+- Gradual adoption: type the critical classes, leave the rest loose
 
 ### Phase 3: Protocols (Structural Typing)
 
@@ -212,7 +272,7 @@ x class = Integer ifTrue: [
 - Structural compatibility ("duck typing" at compile time)
 - Type inference from assignments and return values
 - `any`/`Dynamic` escape hatch for untyped code
-- Warnings as default, strict mode opt-in
+- Warnings by default, `typed` class modifier for thorough checking
 
 **What we adapt:**
 - TypeScript has interface declarations — we use protocols (message-oriented, not property-oriented)
@@ -277,6 +337,7 @@ x class = Integer ifTrue: [
 - ⚙️ **BEAM veteran**: "Gleam proves full static works on BEAM and catches more bugs"
 - 🏭 **Operator**: "Mandatory types mean fewer production crashes — I'd trade REPL convenience"
 - 🎨 **Language designer**: "Sound type systems are more elegant — no 'Dynamic' escape hatch"
+- **Our answer:** `typed` classes give operators and library authors the strictness they want, scoped to the classes that matter, without imposing it globally.
 
 ### For Pure Inference Only (No Annotations — Rejected)
 - 🧑‍💻 **Newcomer**: "Zero syntax to learn — the compiler just figures it out"
@@ -284,10 +345,15 @@ x class = Integer ifTrue: [
 - ⚙️ **BEAM veteran**: "But without annotations, no Dialyzer specs — I lose BEAM tooling"
 - 🎨 **Language designer**: "Inference alone can't disambiguate — `x := self getValue` returns what?"
 
+### For Global Strict Mode (--strict flag — Rejected)
+- 🏭 **Operator**: "I want CI to fail on type warnings — just give me a flag"
+- 🧑‍💻 **Newcomer**: "TypeScript has `strict: true` and it works fine"
+- **Why rejected:** Strict mode means the same code behaves differently depending on who runs it. "Works in dev, fails in CI" is a terrible developer experience. Two modes means testing two behaviors. The `typed` class modifier is better — strictness is a property of the code itself, not the environment.
+
 ### Tension Points
-- **Newcomers and operators** would prefer stricter checking — but Smalltalk purists insist on optionality
+- **Newcomers and operators** would prefer stricter checking — `typed` classes give them per-class opt-in without imposing it globally
 - **BEAM veterans** want `-spec` generation — which requires annotations (Phase 2), not just inference
-- **Resolution:** Gradual approach satisfies all: inference for exploration, annotations for production, specs for BEAM
+- **Resolution:** Gradual approach with `typed` classes satisfies all: inference for exploration, `typed` for production-critical classes, specs for BEAM
 
 ## Alternatives Considered
 
@@ -326,6 +392,15 @@ Counter implements: Incrementable   // Explicit declaration required
 - Forces planning ahead — you must declare interfaces before using them
 - Structural typing (our choice) is strictly more flexible
 
+### Alternative C: Global Strict Mode Flag
+A `--strict` compiler flag that promotes type warnings to errors, like TypeScript's `strict: true`.
+
+**Rejected because:**
+- Same code behaves differently depending on who runs it — "works in dev, fails in CI"
+- Forces testing two configurations (strict and non-strict)
+- Environment-dependent behavior is a design smell
+- `typed` class modifier is better — strictness is a property of the code itself, visible in source, inherited through the class hierarchy, and consistent everywhere
+
 ## Consequences
 
 ### Positive
@@ -336,6 +411,8 @@ Counter implements: Incrementable   // Explicit declaration required
 - All existing code continues to work unchanged — purely additive
 - `sealed` + type info enables future optimizations (bypass gen_server for known dispatch)
 - Error messages become actionable: "Counter doesn't respond to 'foo'" instead of runtime crash
+- `typed` classes let library authors and production teams opt into thorough checking without imposing it globally
+- No strict mode flag — one behavior everywhere, no "works in dev, fails in CI" surprises
 
 ### Negative
 - Type inference has limits — some code can't be typed without annotations (typed as `Dynamic`)
