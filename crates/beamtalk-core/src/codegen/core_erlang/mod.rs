@@ -894,7 +894,7 @@ impl CoreErlangGenerator {
                 format!("case call 'maps':'find'('{class_name}', {state_var}) of "),
                 "<{'ok', _BindingVal}> when 'true' -> _BindingVal ",
                 "<'error'> when 'true' -> ",
-                format!("case call 'beamtalk_object_class':'whereis_class'('{class_name}') of "),
+                format!("case call 'beamtalk_class_registry':'whereis_class'('{class_name}') of "),
                 "<'undefined'> when 'true' -> 'nil' ",
                 format!("<{class_pid_var}> when 'true' -> "),
                 format!(
@@ -912,7 +912,7 @@ impl CoreErlangGenerator {
             let class_mod_var = self.fresh_var("ClassModName");
 
             Ok(docvec![
-                format!("case call 'beamtalk_object_class':'whereis_class'('{class_name}') of "),
+                format!("case call 'beamtalk_class_registry':'whereis_class'('{class_name}') of "),
                 "<'undefined'> when 'true' -> 'nil' ",
                 format!("<{class_pid_var}> when 'true' -> "),
                 format!(
@@ -928,7 +928,7 @@ impl CoreErlangGenerator {
             let class_mod_var = self.fresh_var("ClassModName");
 
             Ok(docvec![
-                format!("case call 'beamtalk_object_class':'whereis_class'('{class_name}') of "),
+                format!("case call 'beamtalk_class_registry':'whereis_class'('{class_name}') of "),
                 "<'undefined'> when 'true' -> 'nil' ",
                 format!("<{class_pid_var}> when 'true' -> "),
                 format!(
@@ -3622,7 +3622,7 @@ end
 
         // Should call whereis_class to get the class PID
         assert!(
-            code.contains("call 'beamtalk_object_class':'whereis_class'('Point')"),
+            code.contains("call 'beamtalk_class_registry':'whereis_class'('Point')"),
             "Should call whereis_class to get class PID. Got:\n{code}"
         );
 
@@ -3670,7 +3670,9 @@ end
 
         // Should use a case expression to check for undefined
         assert!(
-            code.contains("case call 'beamtalk_object_class':'whereis_class'('NonExistentClass')"),
+            code.contains(
+                "case call 'beamtalk_class_registry':'whereis_class'('NonExistentClass')"
+            ),
             "Should use case expression to handle whereis_class result. Got:\n{code}"
         );
 

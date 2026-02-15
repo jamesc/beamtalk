@@ -15,7 +15,7 @@ start(_StartType, _StartArgs) ->
     
     %% BT-510: Create class hierarchy ETS table at app startup so it's owned
     %% by the application master (survives individual class process crashes).
-    beamtalk_object_class:ensure_hierarchy_table(),
+    beamtalk_class_registry:ensure_hierarchy_table(),
     
     %% Start the runtime supervisor tree (which starts beamtalk_bootstrap, beamtalk_stdlib,
     %% and beamtalk_object_instances; pg is conditionally started inside beamtalk_bootstrap:init/1)

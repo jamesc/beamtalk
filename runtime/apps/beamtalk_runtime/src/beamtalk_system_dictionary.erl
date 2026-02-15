@@ -251,13 +251,13 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% @doc Get all registered class names.
 %%
-%% Delegates to beamtalk_object_class:all_classes/0 which returns a list
+%% Delegates to beamtalk_class_registry:all_classes/0 which returns a list
 %% of class process pids, then extracts the class name from each pid.
 %% Guards against pg not running and filters dead processes.
 -spec handle_all_classes() -> [atom()].
 handle_all_classes() ->
     try
-        ClassPids = beamtalk_object_class:all_classes(),
+        ClassPids = beamtalk_class_registry:all_classes(),
         lists:filtermap(
             fun(Pid) ->
                 try
@@ -277,7 +277,7 @@ handle_all_classes() ->
 
 %% @doc Look up a class by name.
 %%
-%% Delegates to beamtalk_object_class:whereis_class/1.
+%% Delegates to beamtalk_class_registry:whereis_class/1.
 %% Returns the class as a beamtalk_object record (for dispatch), or nil if not found.
 %% BT-246: Wraps result in {beamtalk_object, ClassTag, ModuleName, Pid} tuple
 %% where ClassTag is 'ClassName class' (e.g., 'Point class') for is_class_object detection.
@@ -292,13 +292,13 @@ handle_class_named(ClassName) when is_binary(ClassName) ->
             nil
     end;
 handle_class_named(ClassName) when is_atom(ClassName) ->
-    case beamtalk_object_class:whereis_class(ClassName) of
+    case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
             nil;
         Pid when is_pid(Pid) ->
             ModuleName = beamtalk_object_class:module_name(Pid),
             %% BT-246: Use class object tag for is_class_object detection
-            ClassTag = beamtalk_object_class:class_object_tag(ClassName),
+            ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
             {beamtalk_object, ClassTag, ModuleName, Pid}
     end;
 handle_class_named(_ClassName) ->

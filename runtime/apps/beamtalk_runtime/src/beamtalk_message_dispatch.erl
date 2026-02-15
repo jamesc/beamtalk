@@ -43,7 +43,7 @@
 send(Receiver, Selector, Args) ->
     case is_actor(Receiver) of
         true ->
-            case beamtalk_object_class:is_class_object(Receiver) of
+            case beamtalk_class_registry:is_class_object(Receiver) of
                 true ->
                     ClassPid = element(4, Receiver),
                     beamtalk_object_class:class_send(ClassPid, Selector, Args);

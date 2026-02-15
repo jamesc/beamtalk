@@ -26,7 +26,7 @@
 %% Returns `{ok, FormattedBinary}` or `{error, Reason}`.
 -spec format_class_docs(atom()) -> {ok, binary()} | {error, term()}.
 format_class_docs(ClassName) ->
-    case beamtalk_object_class:whereis_class(ClassName) of
+    case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
             {error, {class_not_found, ClassName}};
         ClassPid ->
@@ -75,7 +75,7 @@ format_class_docs(ClassName) ->
 %% Returns `{ok, FormattedBinary}` or `{error, Reason}`.
 -spec format_method_doc(atom(), binary()) -> {ok, binary()} | {error, term()}.
 format_method_doc(ClassName, SelectorBin) ->
-    case beamtalk_object_class:whereis_class(ClassName) of
+    case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
             {error, {class_not_found, ClassName}};
         ClassPid ->
@@ -86,7 +86,7 @@ format_method_doc(ClassName, SelectorBin) ->
                     case gen_server:call(ClassPid, {lookup_flattened, SelectorAtom}, 5000) of
                         {ok, DefiningClass, _MethodInfo} ->
                             %% Found the method — get its doc from the defining class
-                            DocInfo = case beamtalk_object_class:whereis_class(DefiningClass) of
+                            DocInfo = case beamtalk_class_registry:whereis_class(DefiningClass) of
                                 undefined ->
                                     {atom_to_binary(SelectorAtom, utf8), none};
                                 DefClassPid ->

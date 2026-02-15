@@ -37,7 +37,7 @@
 resolve(ClassPid, Selector) when is_pid(ClassPid) ->
     gen_server:call(ClassPid, {method, Selector});
 resolve({beamtalk_object, ClassTag, _Module, ClassPid} = Obj, Selector) when is_atom(ClassTag), is_pid(ClassPid) ->
-    case beamtalk_object_class:is_class_name(ClassTag) of
+    case beamtalk_class_registry:is_class_name(ClassTag) of
         true ->
             gen_server:call(ClassPid, {method, Selector});
         false ->
@@ -48,7 +48,7 @@ resolve({beamtalk_object, ClassTag, _Module, ClassPid} = Obj, Selector) when is_
             beamtalk_error:raise(Error2)
     end;
 resolve(ClassName, Selector) when is_atom(ClassName) ->
-    case beamtalk_object_class:whereis_class(ClassName) of
+    case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
             Error0 = beamtalk_error:new(does_not_understand, ClassName),
             Error1 = beamtalk_error:with_selector(Error0, '>>'),

@@ -808,7 +808,7 @@ is_known_actor(Pid) when is_pid(Pid) ->
 %% Resolve a class name (e.g. 'Counter') to its BEAM module name (e.g. 'counter').
 -spec resolve_class_to_module(atom()) -> atom().
 resolve_class_to_module(ClassName) ->
-    ClassPids = try beamtalk_object_class:all_classes()
+    ClassPids = try beamtalk_class_registry:all_classes()
                 catch _:_ -> [] end,
     resolve_class_to_module(ClassName, ClassPids).
 
@@ -833,7 +833,7 @@ get_completions(<<>>) -> [];
 get_completions(Prefix) when is_binary(Prefix) ->
     PrefixStr = binary_to_list(Prefix),
     %% Collect completions from loaded class processes
-    ClassPids = try beamtalk_object_class:all_classes()
+    ClassPids = try beamtalk_class_registry:all_classes()
                 catch _:_ -> [] end,
     ClassNames = lists:filtermap(
         fun(Pid) ->
@@ -873,7 +873,7 @@ get_symbol_info(Symbol) when is_binary(Symbol) ->
         _ ->
             %% Check if it's a known class
             IsClass = try
-                ClassPids2 = beamtalk_object_class:all_classes(),
+                ClassPids2 = beamtalk_class_registry:all_classes(),
                 lists:any(fun(Pid) ->
                     try
                         beamtalk_object_class:class_name(Pid) =:= SymAtom
