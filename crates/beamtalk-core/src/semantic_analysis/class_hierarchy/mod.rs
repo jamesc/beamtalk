@@ -179,7 +179,7 @@ impl ClassHierarchy {
         chain
     }
 
-    /// Returns true if the named class is a subclass of Actor.
+    /// Returns true if the named class is Actor or a subclass of Actor.
     #[must_use]
     pub fn is_actor_subclass(&self, class_name: &str) -> bool {
         if class_name == "Actor" {
