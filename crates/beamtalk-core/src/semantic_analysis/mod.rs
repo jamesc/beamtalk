@@ -30,7 +30,7 @@ pub use class_hierarchy::ClassHierarchy;
 pub use error::{SemanticError, SemanticErrorKind};
 pub use name_resolver::NameResolver;
 pub use scope::BindingKind;
-pub use type_checker::TypeChecker;
+pub use type_checker::{InferredType, TypeChecker};
 
 /// Result of semantic analysis.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -287,9 +287,9 @@ pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> Analysis
     // - All variable bindings from name resolution
     let scope = name_resolver.into_scope();
 
-    // Phase 2: Type Checking (stub - currently does nothing)
+    // Phase 2: Type Checking (ADR 0025 Phase 1 — zero-syntax inference)
     let mut type_checker = TypeChecker::new();
-    type_checker.check_module(module);
+    type_checker.check_module(module, &result.class_hierarchy);
     result.diagnostics.extend(type_checker.take_diagnostics());
 
     // Phase 3: Block Context Analysis (captures, mutations, context determination)

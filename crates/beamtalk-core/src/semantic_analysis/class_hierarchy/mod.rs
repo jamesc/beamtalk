@@ -35,6 +35,9 @@ pub struct MethodInfo {
     pub defined_in: EcoString,
     /// Whether this method is sealed (cannot be overridden).
     pub is_sealed: bool,
+    /// Inferred return type (e.g., "Integer", "String", "Boolean").
+    /// `None` means the return type is unknown (Dynamic).
+    pub return_type: Option<EcoString>,
 }
 
 impl MethodInfo {
@@ -345,6 +348,79 @@ impl ClassHierarchy {
         false
     }
 
+    /// Find a method by selector in a class (including inherited methods).
+    ///
+    /// Returns the first matching primary method found in MRO order.
+    #[must_use]
+    pub fn find_method(&self, class_name: &str, selector: &str) -> Option<MethodInfo> {
+        let mut current = Some(class_name.to_string());
+        let mut visited = HashSet::new();
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break;
+            }
+            if let Some(info) = self.classes.get(name.as_str()) {
+                if let Some(method) = info
+                    .methods
+                    .iter()
+                    .find(|m| m.selector.as_str() == selector && m.kind == MethodKind::Primary)
+                {
+                    return Some(method.clone());
+                }
+                current = info
+                    .superclass
+                    .as_ref()
+                    .map(std::string::ToString::to_string);
+            } else {
+                break;
+            }
+        }
+        None
+    }
+
+    /// Find a class-side method by selector (including inherited class methods).
+    #[must_use]
+    pub fn find_class_method(&self, class_name: &str, selector: &str) -> Option<MethodInfo> {
+        let mut current = Some(class_name.to_string());
+        let mut visited = HashSet::new();
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break;
+            }
+            if let Some(info) = self.classes.get(name.as_str()) {
+                if let Some(method) = info
+                    .class_methods
+                    .iter()
+                    .find(|m| m.selector.as_str() == selector && m.kind == MethodKind::Primary)
+                {
+                    return Some(method.clone());
+                }
+                current = info
+                    .superclass
+                    .as_ref()
+                    .map(std::string::ToString::to_string);
+            } else {
+                break;
+            }
+        }
+        None
+    }
+
+    /// Check if a class explicitly overrides `doesNotUnderstand:args:`.
+    ///
+    /// Returns true only if the class itself (not an ancestor) defines the method.
+    /// Classes with DNU override accept any message, so type warnings are suppressed.
+    #[must_use]
+    pub fn has_dnu_override(&self, class_name: &str) -> bool {
+        self.classes.get(class_name).is_some_and(|info| {
+            info.methods.iter().any(|m| {
+                m.selector.as_str() == "doesNotUnderstand:args:"
+                    && m.kind == MethodKind::Primary
+                    && m.defined_in.as_str() == class_name
+            })
+        })
+    }
+
     /// Walk the superclass chain looking for a sealed primary method with the given selector.
     /// Returns `Some((class_name, MethodInfo))` if found, `None` otherwise.
     fn find_sealed_method_in_ancestors(
@@ -470,6 +546,7 @@ impl ClassHierarchy {
                         kind: m.kind,
                         defined_in: class.name.name.clone(),
                         is_sealed: m.is_sealed,
+                        return_type: None,
                     })
                     .collect(),
                 class_methods: class
@@ -481,6 +558,7 @@ impl ClassHierarchy {
                         kind: m.kind,
                         defined_in: class.name.name.clone(),
                         is_sealed: m.is_sealed,
+                        return_type: None,
                     })
                     .collect(),
                 class_variables: class
