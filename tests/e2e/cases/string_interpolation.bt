@@ -6,7 +6,6 @@
 // These tests verify string interpolation in the REPL context:
 // - Variable interpolation with workspace bindings
 // - Expression interpolation
-// - Multi-line interpolated strings
 // - Error messages (unterminated, undefined variable, doesNotUnderstand)
 // - REPL display correctness (no extra quotes)
 
