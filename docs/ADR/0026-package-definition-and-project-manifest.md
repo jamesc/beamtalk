@@ -86,7 +86,7 @@ There is no separate "project" concept. Following Gleam and Cargo, the term **pa
 name = "my_counter"
 version = "0.1.0"
 description = "A simple counter example"
-licences = ["Apache-2.0"]
+licenses = ["Apache-2.0"]
 
 # Optional metadata (for Hex.pm publishing — future ADR)
 # repository = "https://github.com/user/my_counter"
@@ -103,13 +103,14 @@ licences = ["Apache-2.0"]
 
 **Optional fields (initial):**
 - `description` — Short description (for Hex.pm, documentation).
-- `licences` — SPDX licence identifiers.
+- `licenses` — SPDX license identifiers.
 
 **Reserved for future ADRs:**
 - `[dependencies]` / `[dev-dependencies]` — Dependency resolution.
 - `repository`, `links` — Publishing metadata.
 - `target` — Compilation target options.
 - `beamtalk` — Minimum compiler version.
+- `start` — Application entry point module (see Phase 5 below). Added with the start callback implementation, not the initial manifest parser.
 
 ### 3. Package ↔ OTP Application mapping
 
@@ -155,7 +156,7 @@ The formula is: `bt@{package_name}@{relative_path_without_extension}` where path
 
 Subdirectories within `src/` are **namespacing only** — they do not create subpackages. The entire `src/` tree belongs to one flat package. This follows the Gleam model.
 
-**Class name uniqueness:** Within a workspace, class names must be globally unique across all loaded packages. If your package and a dependency both define `Counter`, the compiler will report an error. The BEAM module names are already unique (`bt@my_app@counter` vs `bt@other_lib@counter`), but Beamtalk dispatches by class name, not module name. Qualified class names (e.g., `Counting.Counter`) require a module/namespace system and are deferred to a future ADR.
+**Class name uniqueness (temporary constraint):** Within a workspace, class names must be globally unique across all loaded packages. If your package and a dependency both define `Counter`, the compiler will report an error. The BEAM module names are already unique (`bt@my_app@counter` vs `bt@other_lib@counter`), but Beamtalk dispatches by class name, not module name. This is a known limitation — qualified class names (e.g., `Counting.Counter`) require a module/namespace system (future ADR, high priority once dependencies are supported). Until then, the strict compiler error keeps behavior predictable.
 
 **Single-file mode** (no manifest): When `beamtalk build file.bt` is invoked on a file outside any package, the module name is the file stem without any package prefix (current behavior, preserved for scripting/experimentation).
 
@@ -331,7 +332,7 @@ OTP application structure means standard release tooling works: `relx`, `mix rel
 - 🧑‍💻 **Newcomer**: "Zero config is compelling — I just write code. Go did this for a decade before `go.mod`. No manifest means no manifest to mess up, no TOML syntax errors, no 'forgot to bump version' bugs. The BEAM itself uses conventions: `apps/`, `src/`, `ebin/` are structural, not declared in a file."
 - 🎩 **Smalltalk developer**: "Convention-only is closer to the Smalltalk philosophy — the code is the truth. In Pharo, there's no 'project manifest' — the package is defined by its contents. Directory structure as convention means the code organization *is* the metadata."
 - ⚙️ **BEAM veteran**: "rebar3 and Mix already infer a lot from directory structure. OTP's `.app` files can be generated from directory scans. I've shipped Erlang apps where the only 'manifest' was the directory name. But Hex.pm, rebar3, and Mix all expect manifests for metadata and dependency resolution — going convention-only would fight the established BEAM tooling and limit interop."
-- 🏭 **Operator**: "Convention-only can work if the conventions are strong enough — Git tags for versions, directory name for package name, LICENSE file for licence. But I'd need robust tooling to extract metadata for compliance."
+- 🏭 **Operator**: "Convention-only can work if the conventions are strong enough — Git tags for versions, directory name for package name, LICENSE file for license. But I'd need robust tooling to extract metadata for compliance."
 - 🎨 **Language designer**: "Convention over configuration is a legitimate design principle. Go ran convention-only (GOPATH, ≈2009–2018) but eventually hit walls on vendoring, version pinning, and reproducibility — `go.mod` was added to fix those real problems. Starting convention-only in the BEAM ecosystem would repeat known pain given Hex.pm already exists and expects manifests."
 
 ### Option C: Smalltalk-style image packages (Monticello-like)
@@ -360,7 +361,7 @@ OTP application structure means standard release tooling works: `relx`, `mix rel
 
 4. **Metadata Drift** — Option A introduces a class of bugs that B and C don't have: the manifest says one thing, the code says another. Version numbers not bumped, descriptions stale, module lists out of sync. Auto-generation mitigates this (we generate `.app` from source scanning) but doesn't eliminate it (version must be manually maintained).
 
-5. **Convention vs Explicit** — Option B argues conventions can replace manifests. True for some metadata (directory name → package name) but problematic for others (version numbers, licences). The tension is "derive what you can" (less boilerplate) vs "declare what you mean" (less magic). Reasonable engineers disagree here.
+5. **Convention vs Explicit** — Option B argues conventions can replace manifests. True for some metadata (directory name → package name) but problematic for others (version numbers, licenses). The tension is "derive what you can" (less boilerplate) vs "declare what you mean" (less magic). Reasonable engineers disagree here.
 
 6. **Build Reproducibility** — Manifests enable lockfiles and deterministic builds; images snapshot state but don't guarantee that independent rebuilds produce identical results. For CI/CD pipelines, manifests win; for deployment snapshots, images win.
 
@@ -373,7 +374,7 @@ OTP application structure means standard release tooling works: `relx`, `mix rel
 ### Alternative: No manifest — derive everything from directory name
 Package name = directory name, version = git tag, no `beamtalk.toml` needed.
 
-**Rejected because:** Can't set description, licence, or any metadata. Git tags are unreliable as the sole version source. Breaks when directory is renamed. Every other BEAM language uses a manifest.
+**Rejected because:** Can't set description, license, or any metadata. Git tags are unreliable as the sole version source. Breaks when directory is renamed. Every other BEAM language uses a manifest.
 
 ### Alternative: Erlang-term config (`beamtalk.config`)
 Use Erlang term format instead of TOML for the manifest.
@@ -405,7 +406,7 @@ Allow subdirectories within `src/` to be independent packages with their own `be
 - Existing projects created with `beamtalk new` need to add a `src/` directory (mild migration)
 - Single-file scripting requires detecting "no manifest" mode (added complexity in build command)
 - TOML parsing dependency needed in the compiler
-- **Package rename breaks actor identity** — actors hold module references; renaming a package changes all module names, breaking running actors in persistent workspaces (ADR 0004). Mitigation: document as limitation, recommend stopping workspace before rename.
+- **Package rename breaks actor identity** — actors hold module references; renaming a package changes all module names, breaking running actors in persistent workspaces (ADR 0004). Mitigation: document as limitation, recommend stopping workspace before rename. Future path: module aliasing or actor identity indirection could decouple actor identity from module names, but requires the module/namespace system.
 
 ### Neutral
 - Package name validation rules may reject some creative names (but prevents Hex.pm conflicts later)
@@ -416,7 +417,7 @@ Allow subdirectories within `src/` to be independent packages with their own `be
 
 ### Phase 1: Manifest parsing
 - Add `toml` crate dependency to `beamtalk-cli`
-- Create `PackageManifest` struct: `name`, `version`, `description`, `licences`
+- Create `PackageManifest` struct: `name`, `version`, `description`, `licenses`
 - Parse `beamtalk.toml` in build command when present
 - Validate package name (rules from §8)
 - Fallback to current behavior when no manifest found
@@ -478,7 +479,7 @@ The `start` method is imperative — it spawns actors and they're auto-supervise
 | `beamtalk build` | ✅ Compiles to `.beam` + `.app` | ✅ Same |
 | `beamtalk repl` | ✅ Classes available | ✅ Classes available + start method callable |
 | `beamtalk run` | ❌ Error: "no start module" | ✅ Starts the application |
-| OTP `.app` | No `{mod, ...}` entry | `{mod, {StartModule, []}}` |
+| OTP `.app` | No `{mod, ...}` entry | Includes OTP application metadata; `{mod, ...}` callback and Erlang shim mechanism defined in a future ADR |
 | As dependency | Loaded on code path | Started as OTP application |
 
 **Affected components:** `beamtalk-cli` (build, new, run commands), `beamtalk-core` (module naming in codegen), workspace discovery, REPL module loading.
