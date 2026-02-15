@@ -315,18 +315,20 @@ impl SimpleLanguageService {
 
 impl LanguageService for SimpleLanguageService {
     fn update_file(&mut self, file: Utf8PathBuf, content: String) {
-        use crate::semantic_analysis::analyse;
         use crate::source_analysis::{lex_with_eof, parse};
 
         let tokens = lex_with_eof(&content);
         let (module, diagnostics) = parse(tokens);
 
-        // Unified semantic analysis path: analyse() is the single entry point
-        let analysis = analyse(&module);
+        // Build class hierarchy for the project index.
+        // This is intentionally lightweight (ClassHierarchy::build only, not full
+        // analyse()) since diagnostic_provider lazily runs full semantic analysis
+        // when diagnostics are requested, avoiding duplicate work.
+        let (class_hierarchy, _) = crate::semantic_analysis::ClassHierarchy::build(&module);
 
         // Update the project-wide index with this file's class hierarchy
         self.project_index
-            .update_file(file.clone(), &analysis.class_hierarchy);
+            .update_file(file.clone(), &class_hierarchy);
 
         self.files.insert(
             file,

@@ -64,8 +64,10 @@ pub fn find_definition_cross_file<'a>(
         return Some(Location::new(current_file.clone(), span));
     }
 
-    // 2. Class definition in the project index
-    if project_index.hierarchy().has_class(name) {
+    // 2. Class definition in the project index (skip builtins — they have no file location)
+    if !crate::semantic_analysis::ClassHierarchy::is_builtin_class(name)
+        && project_index.hierarchy().has_class(name)
+    {
         // Find which file defines this class
         for (file_path, module) in files {
             for class in &module.classes {

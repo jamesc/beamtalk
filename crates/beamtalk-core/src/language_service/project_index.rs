@@ -23,7 +23,7 @@ use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::{lex_with_eof, parse};
 use camino::Utf8PathBuf;
 use ecow::EcoString;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Cross-file project index holding a merged class hierarchy.
 ///
@@ -38,8 +38,10 @@ pub struct ProjectIndex {
     merged_hierarchy: ClassHierarchy,
     /// Per-file tracking of which class names came from which file.
     file_classes: HashMap<Utf8PathBuf, Vec<EcoString>>,
+    /// Per-file class hierarchies for correct rebuild on conflicts.
+    file_hierarchies: HashMap<Utf8PathBuf, ClassHierarchy>,
     /// Class names from stdlib (never removed during file updates).
-    stdlib_class_names: Vec<EcoString>,
+    stdlib_class_names: HashSet<EcoString>,
 }
 
 impl ProjectIndex {
@@ -49,7 +51,8 @@ impl ProjectIndex {
         Self {
             merged_hierarchy: ClassHierarchy::with_builtins(),
             file_classes: HashMap::new(),
-            stdlib_class_names: Vec::new(),
+            file_hierarchies: HashMap::new(),
+            stdlib_class_names: HashSet::new(),
         }
     }
 
@@ -66,15 +69,16 @@ impl ProjectIndex {
             let file_hierarchy = ClassHierarchy::build(&module).0;
 
             // Track which classes came from this stdlib file
-            let mut class_names: Vec<EcoString> = Vec::new();
-            let builtins = ClassHierarchy::with_builtins();
-            for name in file_hierarchy.class_names() {
-                if builtins.get_class(&name).is_none() {
-                    class_names.push(name);
-                }
-            }
-            index.stdlib_class_names.extend(class_names.clone());
+            let class_names: Vec<EcoString> = file_hierarchy
+                .class_names()
+                .into_iter()
+                .filter(|name| !ClassHierarchy::is_builtin_class(name))
+                .collect();
+            index.stdlib_class_names.extend(class_names.iter().cloned());
             index.file_classes.insert(path.clone(), class_names);
+            index
+                .file_hierarchies
+                .insert(path.clone(), file_hierarchy.clone());
             index.merged_hierarchy.merge(&file_hierarchy);
         }
         index
@@ -89,36 +93,65 @@ impl ProjectIndex {
     /// Add or update a file in the index.
     ///
     /// If the file was previously indexed, its old class definitions are
-    /// removed before adding the new ones.
+    /// removed and then re-merged from remaining files to handle conflicts
+    /// correctly (two files defining the same class name).
     pub fn update_file(&mut self, file: Utf8PathBuf, hierarchy: &ClassHierarchy) {
         // Remove old classes from this file (if any)
         if let Some(old_names) = self.file_classes.remove(&file) {
             self.merged_hierarchy.remove_classes(&old_names);
+            self.file_hierarchies.remove(&file);
+
+            // Re-merge classes from other files that may have been shadowed
+            for name in &old_names {
+                for other_hierarchy in self.file_hierarchies.values() {
+                    if let Some(info) = other_hierarchy.classes().get(name) {
+                        self.merged_hierarchy
+                            .classes_mut()
+                            .insert(name.clone(), info.clone());
+                        break;
+                    }
+                }
+            }
         }
 
         // Track new class names from this file
-        let builtins = ClassHierarchy::with_builtins();
         let new_names: Vec<EcoString> = hierarchy
             .class_names()
             .into_iter()
-            .filter(|name| builtins.get_class(name).is_none())
+            .filter(|name| !ClassHierarchy::is_builtin_class(name))
             .collect();
 
-        self.file_classes.insert(file, new_names);
+        self.file_classes.insert(file.clone(), new_names);
+        self.file_hierarchies.insert(file, hierarchy.clone());
         self.merged_hierarchy.merge(hierarchy);
     }
 
     /// Remove a file from the index.
     ///
     /// Classes defined only in this file are removed from the merged hierarchy.
+    /// Classes also defined in other files are preserved (re-merged).
     pub fn remove_file(&mut self, file: &Utf8PathBuf) {
         if let Some(old_names) = self.file_classes.remove(file) {
+            self.file_hierarchies.remove(file);
             // Only remove non-stdlib classes
-            let non_stdlib: Vec<EcoString> = old_names
-                .into_iter()
-                .filter(|n| !self.stdlib_class_names.contains(n))
+            let to_remove: Vec<EcoString> = old_names
+                .iter()
+                .filter(|n| !self.stdlib_class_names.contains(n.as_str()))
+                .cloned()
                 .collect();
-            self.merged_hierarchy.remove_classes(&non_stdlib);
+            self.merged_hierarchy.remove_classes(&to_remove);
+
+            // Re-merge classes from remaining files that shared a name
+            for name in &to_remove {
+                for other_hierarchy in self.file_hierarchies.values() {
+                    if let Some(info) = other_hierarchy.classes().get(name) {
+                        self.merged_hierarchy
+                            .classes_mut()
+                            .insert(name.clone(), info.clone());
+                        break;
+                    }
+                }
+            }
         }
     }
 

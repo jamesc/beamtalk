@@ -97,6 +97,14 @@ pub struct ClassHierarchy {
 }
 
 impl ClassHierarchy {
+    /// Returns true if the given class name is a built-in class.
+    ///
+    /// This is a fast O(1) check suitable for hot paths.
+    #[must_use]
+    pub fn is_builtin_class(name: &str) -> bool {
+        builtins::is_builtin_class(name)
+    }
+
     /// Build a class hierarchy from built-in definitions and a parsed module.
     ///
     /// Returns the hierarchy and any diagnostics (e.g., sealed class violations).
@@ -276,15 +284,21 @@ impl ClassHierarchy {
         &self.classes
     }
 
+    /// Returns a mutable reference to the underlying class map.
+    ///
+    /// Used by `ProjectIndex` for conflict resolution when re-merging.
+    pub fn classes_mut(&mut self) -> &mut HashMap<EcoString, ClassInfo> {
+        &mut self.classes
+    }
+
     /// Merge another hierarchy's user-defined classes into this one.
     ///
     /// Built-in classes from `other` are skipped (they already exist in `self`).
     /// User-defined classes from `other` overwrite any existing entry with the
     /// same name, allowing incremental file updates.
     pub fn merge(&mut self, other: &ClassHierarchy) {
-        let builtins = builtins::builtin_classes();
         for (name, info) in &other.classes {
-            if builtins.contains_key(name) {
+            if builtins::is_builtin_class(name) {
                 continue;
             }
             self.classes.insert(name.clone(), info.clone());
@@ -295,9 +309,8 @@ impl ClassHierarchy {
     ///
     /// Built-in classes are never removed.
     pub fn remove_classes(&mut self, names: &[EcoString]) {
-        let builtins = builtins::builtin_classes();
         for name in names {
-            if !builtins.contains_key(name) {
+            if !builtins::is_builtin_class(name) {
                 self.classes.remove(name);
             }
         }
