@@ -2,5 +2,6 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: output
 ---
-Semantic errors (1):
+Semantic errors (2):
   - Cannot override sealed method `frozen` from class `Parent`
+  - Multiple classes in one file is not supported. Found classes: Parent, AllowedChild, Child. Each class should be in its own .bt file.

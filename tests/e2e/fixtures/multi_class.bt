@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test fixture: multiple classes in a single file (should be rejected by compiler)
+
+Object subclass: Foo
+
+  greet => "hello from Foo"
+
+Object subclass: Bar
+
+  greet => "hello from Bar"
