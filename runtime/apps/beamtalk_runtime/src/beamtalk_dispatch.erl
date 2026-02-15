@@ -154,7 +154,7 @@ super(Selector, Args, Self, State, CurrentClass) ->
     ?LOG_DEBUG("Super dispatch ~p from class ~p", [Selector, CurrentClass]),
     
     %% Look up the current class to get its superclass
-    case beamtalk_object_class:whereis_class(CurrentClass) of
+    case beamtalk_class_registry:whereis_class(CurrentClass) of
         undefined ->
             %% Class not found - return error
             Error0 = beamtalk_error:new(class_not_found, CurrentClass),
@@ -227,7 +227,7 @@ responds_to(Selector, ClassName) ->
         {ok, _Fun} ->
             true;
         not_found ->
-            case beamtalk_object_class:whereis_class(ClassName) of
+            case beamtalk_class_registry:whereis_class(ClassName) of
                 undefined ->
                     false;
                 ClassPid ->
@@ -254,7 +254,7 @@ responds_to_slow(Selector, ClassPid) ->
             case beamtalk_object_class:superclass(ClassPid) of
                 none -> false;
                 SuperclassName ->
-                    case beamtalk_object_class:whereis_class(SuperclassName) of
+                    case beamtalk_class_registry:whereis_class(SuperclassName) of
                         undefined -> false;
                         SuperclassPid -> responds_to_slow(Selector, SuperclassPid)
                     end
@@ -280,7 +280,7 @@ responds_to_slow(Selector, ClassPid) ->
 %% 5. Returns error if not found anywhere
 -spec lookup_in_class_chain(selector(), args(), bt_self(), state(), class_name()) -> dispatch_result().
 lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
-    case beamtalk_object_class:whereis_class(ClassName) of
+    case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
             %% Class not found
             Error0 = beamtalk_error:new(class_not_found, ClassName),
@@ -292,7 +292,7 @@ lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
                 {ok, DefiningClass, _MethodInfo} ->
                     %% Found in flattened table - invoke from defining class
                     ?LOG_DEBUG("Found method ~p in flattened table (defined in ~p)", [Selector, DefiningClass]),
-                    case beamtalk_object_class:whereis_class(DefiningClass) of
+                    case beamtalk_class_registry:whereis_class(DefiningClass) of
                         undefined ->
                             %% Defining class no longer exists (hot reload edge case)
                             %% Fall back to hierarchy walk
@@ -338,7 +338,7 @@ lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid) ->
                 SuperclassName ->
                     %% Recurse to superclass
                     ?LOG_DEBUG("Method ~p not in ~p, trying superclass ~p", [Selector, ClassName, SuperclassName]),
-                    case beamtalk_object_class:whereis_class(SuperclassName) of
+                    case beamtalk_class_registry:whereis_class(SuperclassName) of
                         undefined ->
                             Error0 = beamtalk_error:new(class_not_found, SuperclassName),
                             Error1 = beamtalk_error:with_selector(Error0, Selector),
@@ -405,7 +405,7 @@ continue_to_superclass(Selector, Args, Self, State, ClassPid) ->
             Error2 = beamtalk_error:with_hint(Error1, <<"Check spelling or use 'respondsTo:' to verify method exists">>),
             {error, Error2};
         SuperclassName ->
-            case beamtalk_object_class:whereis_class(SuperclassName) of
+            case beamtalk_class_registry:whereis_class(SuperclassName) of
                 undefined ->
                     Error0 = beamtalk_error:new(class_not_found, SuperclassName),
                     Error1 = beamtalk_error:with_selector(Error0, Selector),

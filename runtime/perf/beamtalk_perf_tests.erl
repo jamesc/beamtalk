@@ -42,7 +42,7 @@ setup() ->
 wait_for_actor_class(0) ->
     error(actor_class_not_registered_after_timeout);
 wait_for_actor_class(N) ->
-    case beamtalk_object_class:whereis_class('Actor') of
+    case beamtalk_class_registry:whereis_class('Actor') of
         undefined ->
             timer:sleep(50),
             wait_for_actor_class(N - 1);

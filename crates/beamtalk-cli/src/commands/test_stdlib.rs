@@ -207,8 +207,8 @@ pub(crate) fn eunit_helper_functions() -> &'static str {
      format_result(V) when is_tuple(V), tuple_size(V) >= 2, element(1, V) =:= beamtalk_object ->\n\
      \x20   %% BT-412: Match REPL formatting for class objects vs actor instances\n\
      \x20   Class = element(2, V),\n\
-     \x20   case beamtalk_object_class:is_class_name(Class) of\n\
-     \x20       true -> beamtalk_object_class:class_display_name(Class);\n\
+     \x20   case beamtalk_class_registry:is_class_name(Class) of\n\
+     \x20       true -> beamtalk_class_registry:class_display_name(Class);\n\
      \x20       false ->\n\
      \x20           Pid = element(4, V),\n\
      \x20           ClassBin = atom_to_binary(Class, utf8),\n\

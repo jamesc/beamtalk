@@ -1540,13 +1540,13 @@ setup_super_test_classes() ->
     
     %% Load modules and register classes explicitly
     {module, 'bt@counter'} = code:ensure_loaded('bt@counter'),
-    case beamtalk_object_class:whereis_class('Counter') of
+    case beamtalk_class_registry:whereis_class('Counter') of
         undefined -> 'bt@counter':register_class();
         _ -> ok
     end,
     
     {module, 'bt@logging_counter'} = code:ensure_loaded('bt@logging_counter'),
-    case beamtalk_object_class:whereis_class('LoggingCounter') of
+    case beamtalk_class_registry:whereis_class('LoggingCounter') of
         undefined -> 'bt@logging_counter':register_class();
         _ -> ok
     end,

@@ -987,7 +987,7 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// case call 'maps':'find'('Name', State) of
     ///   <{'ok', BindingVal}> -> call 'beamtalk_message_dispatch':'send'(BindingVal, Sel, Args)
-    ///   <'error'> -> call 'beamtalk_object_class':'class_send'(whereis_class('Name'), Sel, Args)
+    ///   <'error'> -> call 'beamtalk_object_class':'class_send'(beamtalk_class_registry:whereis_class('Name'), Sel, Args)
     /// end
     /// ```
     fn generate_binding_aware_class_send(
@@ -1012,7 +1012,7 @@ impl CoreErlangGenerator {
             "]) ",
             "<'error'> when 'true' -> ",
             format!(
-                "let {class_pid_var} = call 'beamtalk_object_class':'whereis_class'('{class_name}') in "
+                "let {class_pid_var} = call 'beamtalk_class_registry':'whereis_class'('{class_name}') in "
             ),
             format!(
                 "call 'beamtalk_object_class':'class_send'({class_pid_var}, '{selector_atom}', ["
@@ -1040,7 +1040,7 @@ impl CoreErlangGenerator {
         let args_doc = self.capture_argument_list_doc(arguments)?;
 
         let doc = docvec![
-            format!("case call 'beamtalk_object_class':'whereis_class'('{class_name}') of "),
+            format!("case call 'beamtalk_class_registry':'whereis_class'('{class_name}') of "),
             "<'undefined'> when 'true' -> 'nil' ",
             format!("<{class_pid_var}> when 'true' -> "),
             format!(
@@ -1077,7 +1077,7 @@ impl CoreErlangGenerator {
 
         let doc = docvec![
             format!(
-                "let {class_pid_var} = call 'beamtalk_object_class':'whereis_class'('{class_name}') in "
+                "let {class_pid_var} = call 'beamtalk_class_registry':'whereis_class'('{class_name}') in "
             ),
             format!(
                 "call 'beamtalk_object_class':'class_send'({class_pid_var}, '{selector_atom}', ["

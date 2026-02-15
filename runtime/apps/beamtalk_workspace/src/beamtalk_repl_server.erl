@@ -954,10 +954,10 @@ term_to_json(Value) when is_tuple(Value) ->
     case Value of
         {beamtalk_object, Class, _Module, Pid} ->
             %% BT-412: Check if this is a class object vs actor instance
-            case beamtalk_object_class:is_class_name(Class) of
+            case beamtalk_class_registry:is_class_name(Class) of
                 true ->
                     %% Class object: display as class name (e.g., "Integer")
-                    beamtalk_object_class:class_display_name(Class);
+                    beamtalk_class_registry:class_display_name(Class);
                 false ->
                     %% Actor instance: format as #Actor<Class, Pid>
                     ClassBin = atom_to_binary(Class, utf8),
@@ -1176,7 +1176,7 @@ is_known_actor(Pid) when is_pid(Pid) ->
 %% Resolve a class name (e.g. 'Counter') to its BEAM module name (e.g. 'counter').
 -spec resolve_class_to_module(atom()) -> atom().
 resolve_class_to_module(ClassName) ->
-    ClassPids = try beamtalk_object_class:all_classes()
+    ClassPids = try beamtalk_class_registry:all_classes()
                 catch _:_ -> [] end,
     resolve_class_to_module(ClassName, ClassPids).
 
@@ -1201,7 +1201,7 @@ get_completions(<<>>) -> [];
 get_completions(Prefix) when is_binary(Prefix) ->
     PrefixStr = binary_to_list(Prefix),
     %% Collect completions from loaded class processes
-    ClassPids = try beamtalk_object_class:all_classes()
+    ClassPids = try beamtalk_class_registry:all_classes()
                 catch _:_ -> [] end,
     ClassNames = lists:filtermap(
         fun(Pid) ->
@@ -1241,7 +1241,7 @@ get_symbol_info(Symbol) when is_binary(Symbol) ->
         _ ->
             %% Check if it's a known class
             IsClass = try
-                ClassPids2 = beamtalk_object_class:all_classes(),
+                ClassPids2 = beamtalk_class_registry:all_classes(),
                 lists:any(fun(Pid) ->
                     try
                         beamtalk_object_class:class_name(Pid) =:= SymAtom

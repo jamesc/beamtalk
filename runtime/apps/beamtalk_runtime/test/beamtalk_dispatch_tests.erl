@@ -270,7 +270,7 @@ test_super_finds_inherited() ->
 %% Ensure the Counter class is loaded and registered
 ensure_counter_loaded() ->
     %% Check if Counter class is already registered
-    case beamtalk_object_class:whereis_class('Counter') of
+    case beamtalk_class_registry:whereis_class('Counter') of
         undefined ->
             %% Counter not registered - register it
             %% The counter module is compiled from test fixture (ADR 0016: bt@ prefix)
@@ -411,7 +411,7 @@ test_flattened_table_memory_overhead() ->
     ok = ensure_counter_loaded(),
     
     %% Get Counter class process
-    CounterPid = beamtalk_object_class:whereis_class('Counter'),
+    CounterPid = beamtalk_class_registry:whereis_class('Counter'),
     ?assertNotEqual(undefined, CounterPid),
     
     %% Get process memory info
@@ -432,7 +432,7 @@ test_flattened_table_memory_overhead() ->
 test_flattened_table_invalidation_on_method_add() ->
     ok = ensure_counter_loaded(),
     
-    CounterPid = beamtalk_object_class:whereis_class('Counter'),
+    CounterPid = beamtalk_class_registry:whereis_class('Counter'),
     
     %% Get initial flattened methods
     {ok, InitialFlattened} = gen_server:call(CounterPid, get_flattened_methods),
@@ -462,8 +462,8 @@ test_subclass_invalidation_on_parent_change() ->
     ok = ensure_counter_loaded(),
     
     %% Counter inherits from Actor. Get both pids.
-    CounterPid = beamtalk_object_class:whereis_class('Counter'),
-    ActorPid = beamtalk_object_class:whereis_class('Actor'),
+    CounterPid = beamtalk_class_registry:whereis_class('Counter'),
+    ActorPid = beamtalk_class_registry:whereis_class('Actor'),
     ?assertNotEqual(undefined, CounterPid),
     ?assertNotEqual(undefined, ActorPid),
     

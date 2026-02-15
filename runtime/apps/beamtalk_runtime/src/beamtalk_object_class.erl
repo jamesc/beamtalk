@@ -63,8 +63,6 @@
     start/2,
     start_link/1,
     start_link/2,
-    whereis_class/1,
-    all_classes/0,
     new/1,
     new/2,
     methods/1,
@@ -83,14 +81,20 @@
     class_name/1,
     module_name/1,
     create_subclass/3,
+    class_send/3,
+    set_class_var/3
+]).
+
+%% Deprecated re-exports — callers should migrate to beamtalk_class_registry (BT-576)
+-export([
+    whereis_class/1,
+    all_classes/0,
     is_class_object/1,
     is_class_name/1,
     class_display_name/1,
-    class_send/3,
     class_object_tag/1,
     inherits_from/2,
-    ensure_hierarchy_table/0,
-    set_class_var/3
+    ensure_hierarchy_table/0
 ]).
 
 %% gen_server callbacks
@@ -141,15 +145,13 @@
 %% that must persist independently of whoever loaded the module.
 -spec start(class_name(), map()) -> {ok, pid()} | {error, term()}.
 start(ClassName, ClassInfo) ->
-    RegName = registry_name(ClassName),
+    RegName = beamtalk_class_registry:registry_name(ClassName),
     gen_server:start({local, RegName}, ?MODULE, {ClassName, ClassInfo}, []).
 
 %% @doc Start a class process with full options.
 -spec start_link(class_name(), map()) -> {ok, pid()} | {error, term()}.
 start_link(ClassName, ClassInfo) ->
-    %% Use gen_server's built-in registration to avoid race conditions
-    %% This atomically checks and registers the name
-    RegName = registry_name(ClassName),
+    RegName = beamtalk_class_registry:registry_name(ClassName),
     gen_server:start_link({local, RegName}, ?MODULE, {ClassName, ClassInfo}, []).
 
 %% @doc Start a class process with minimal info (for testing).
@@ -159,20 +161,21 @@ start_link(ClassInfo) ->
     start_link(ClassName, ClassInfo).
 
 %% @doc Look up a class by name.
+%% @deprecated Use {@link beamtalk_class_registry:whereis_class/1} instead (BT-576).
 -spec whereis_class(class_name()) -> pid() | undefined.
 whereis_class(ClassName) ->
-    RegName = registry_name(ClassName),
-    erlang:whereis(RegName).
+    beamtalk_class_registry:whereis_class(ClassName).
 
 %% @doc Get all class processes.
+%% @deprecated Use {@link beamtalk_class_registry:all_classes/0} instead (BT-576).
 -spec all_classes() -> [pid()].
 all_classes() ->
-    pg:get_members(beamtalk_classes).
+    beamtalk_class_registry:all_classes().
 
 %% @doc Set a class variable on a class by name.
 -spec set_class_var(class_name(), atom(), term()) -> term().
 set_class_var(ClassName, Name, Value) ->
-    case whereis_class(ClassName) of
+    case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
             Error0 = beamtalk_error:new(class_not_found, ClassName),
             error(Error0);
@@ -210,36 +213,22 @@ module_name(ClassPid) ->
     gen_server:call(ClassPid, module_name).
 
 %% @doc Check if a value is a class object (BT-246).
-%%
-%% Class objects are beamtalk_object records whose class name ends with " class".
-%% This distinguishes class objects from actor instances at runtime.
+%% @deprecated Use {@link beamtalk_class_registry:is_class_object/1} instead (BT-576).
 -spec is_class_object(term()) -> boolean().
-is_class_object({beamtalk_object, Class, _Mod, _Pid}) when is_atom(Class) ->
-    is_class_name(Class);
-is_class_object(_) ->
-    false.
+is_class_object(Value) ->
+    beamtalk_class_registry:is_class_object(Value).
 
 %% @doc Check if an atom class name represents a class object (ends with " class").
+%% @deprecated Use {@link beamtalk_class_registry:is_class_name/1} instead (BT-576).
 -spec is_class_name(atom()) -> boolean().
-is_class_name(ClassName) when is_atom(ClassName) ->
-    ClassBin = atom_to_binary(ClassName, utf8),
-    Size = byte_size(ClassBin) - 6,
-    Size >= 0 andalso binary:part(ClassBin, Size, 6) =:= <<" class">>;
-is_class_name(_) ->
-    false.
+is_class_name(ClassName) ->
+    beamtalk_class_registry:is_class_name(ClassName).
 
 %% @doc Strip " class" suffix from a class object name to get the display name.
-%%
-%% Returns the base class name (e.g., `'Integer class'` → `<<"Integer">>`).
-%% Returns the full name as binary if not a class name.
+%% @deprecated Use {@link beamtalk_class_registry:class_display_name/1} instead (BT-576).
 -spec class_display_name(atom()) -> binary().
-class_display_name(ClassName) when is_atom(ClassName) ->
-    ClassBin = atom_to_binary(ClassName, utf8),
-    Size = byte_size(ClassBin) - 6,
-    case Size >= 0 andalso binary:part(ClassBin, Size, 6) =:= <<" class">> of
-        true -> binary:part(ClassBin, 0, Size);
-        false -> ClassBin
-    end.
+class_display_name(ClassName) ->
+    beamtalk_class_registry:class_display_name(ClassName).
 
 %% @doc Send a message to a class object synchronously (BT-246 / ADR 0013 Phase 1).
 %%
@@ -295,13 +284,22 @@ class_send(ClassPid, Selector, Args) ->
     end.
 
 %% @doc Convert a class name atom to a class object tag (BT-246).
-%%
-%% Appends " class" to the atom, e.g. 'Point' -> 'Point class'.
-%% Used by codegen to create class object records with the right tag
-%% for is_class_object/1 detection.
+%% @deprecated Use {@link beamtalk_class_registry:class_object_tag/1} instead (BT-576).
 -spec class_object_tag(atom()) -> atom().
-class_object_tag(ClassName) when is_atom(ClassName) ->
-    list_to_atom(atom_to_list(ClassName) ++ " class").
+class_object_tag(ClassName) ->
+    beamtalk_class_registry:class_object_tag(ClassName).
+
+%% @doc Check if a class inherits from a given ancestor.
+%% @deprecated Use {@link beamtalk_class_registry:inherits_from/2} instead (BT-576).
+-spec inherits_from(class_name() | none, class_name()) -> boolean().
+inherits_from(ClassName, Ancestor) ->
+    beamtalk_class_registry:inherits_from(ClassName, Ancestor).
+
+%% @doc Ensure the class hierarchy ETS table exists.
+%% @deprecated Use {@link beamtalk_class_registry:ensure_hierarchy_table/0} instead (BT-576).
+-spec ensure_hierarchy_table() -> ok.
+ensure_hierarchy_table() ->
+    beamtalk_class_registry:ensure_hierarchy_table().
 
 %% @doc Get a compiled method object.
 %%
@@ -412,7 +410,7 @@ super_dispatch(State, Selector, Args) ->
             {error, Error};
         CurrentClass ->
             %% Look up the current class process
-            case whereis_class(CurrentClass) of
+            case beamtalk_class_registry:whereis_class(CurrentClass) of
                 undefined ->
                     Error0 = beamtalk_error:new(class_not_found, CurrentClass),
                     Error = beamtalk_error:with_selector(Error0, Selector),
@@ -461,7 +459,7 @@ super_dispatch(State, Selector, Args) ->
 -spec create_subclass(atom(), atom(), map()) -> {ok, pid()} | {error, term()}.
 create_subclass(SuperclassName, ClassName, ClassSpec) ->
     %% Verify superclass exists
-    case whereis_class(SuperclassName) of
+    case beamtalk_class_registry:whereis_class(SuperclassName) of
         undefined ->
             Error0 = beamtalk_error:new(class_not_found, SuperclassName),
             Error = beamtalk_error:with_hint(Error0, <<"Superclass must be registered before creating subclass">>),
@@ -472,7 +470,7 @@ create_subclass(SuperclassName, ClassName, ClassSpec) ->
             InstanceMethods = maps:get(instance_methods, ClassSpec, #{}),
             
             %% Validate and convert methods
-            try convert_methods_to_info(InstanceMethods) of
+            try beamtalk_class_instantiation:convert_methods_to_info(InstanceMethods) of
                 MethodInfo ->
                     %% Build ClassInfo compatible with beamtalk_class
                     ClassInfo = #{
@@ -509,10 +507,10 @@ create_subclass(SuperclassName, ClassName, ClassSpec) ->
 
 init({ClassName, ClassInfo}) ->
     %% Ensure pg is started (needed for class registry)
-    ensure_pg_started(),
+    beamtalk_class_registry:ensure_pg_started(),
     
     %% BT-510: Ensure hierarchy ETS table exists and register this class
-    ensure_hierarchy_table(),
+    beamtalk_class_registry:ensure_hierarchy_table(),
     
     %% Name registration is handled by gen_server:start_link({local, Name}, ...)
     %% Join pg group for all_classes enumeration
@@ -556,7 +554,7 @@ init({ClassName, ClassInfo}) ->
     %% ADR 0006 Phase 2: Notify existing subclasses to rebuild their flattened
     %% tables. Handles out-of-order registration (e.g., Counter registered
     %% before Actor) — subclasses that had incomplete tables now pick up our methods.
-    invalidate_subclass_flattened_tables(ClassName),
+    beamtalk_class_registry:invalidate_subclass_flattened_tables(ClassName),
     {ok, State}.
 
 %% BT-246: Actor spawn via dynamic class dispatch.
@@ -564,54 +562,11 @@ init({ClassName, ClassInfo}) ->
 %% Separate from {new, Args} to avoid confusion with value type new.
 handle_call({spawn, Args}, _From, #class_state{
     name = ClassName,
-    is_abstract = true
+    module = Module,
+    is_abstract = IsAbstract
 } = State) ->
-    Selector = case Args of
-        [] -> spawn;
-        _ -> 'spawnWith:'
-    end,
-    {reply, {error, abstract_class_error(ClassName, Selector)}, State};
-
-handle_call({spawn, Args}, _From, #class_state{
-    name = ClassName,
-    module = Module
-} = State) ->
-    try
-        SpawnResult = case Args of
-            [] ->
-                erlang:apply(Module, spawn, []);
-            [InitArgs] ->
-                %% BT-476: Delegate is_map validation to generated Module:spawn/1.
-                %% The generated spawn/1 validates argument type and raises type_error
-                %% for non-map args (single source of truth for spawnWith: validation).
-                %% See: crates/beamtalk-core/src/codegen/core_erlang/gen_server/spawn.rs
-                %%      generate_spawn_with_args_function()
-                erlang:apply(Module, spawn, [InitArgs]);
-            _ ->
-                %% Defensive: class_send always provides [] or [Arg], but guard
-                %% against unexpected multi-arg calls with a structured error.
-                Error0 = beamtalk_error:new(type_error, ClassName),
-                Error1 = beamtalk_error:with_selector(Error0, 'spawnWith:'),
-                Error2 = beamtalk_error:with_hint(Error1, <<"spawnWith: expects a Dictionary argument">>),
-                beamtalk_error:raise(Error2)
-        end,
-        case SpawnResult of
-            {beamtalk_object, _, _, _} = Obj ->
-                {reply, {ok, Obj}, State};
-            {ok, Pid} ->
-                Obj = #beamtalk_object{
-                    class = ClassName,
-                    class_mod = Module,
-                    pid = Pid
-                },
-                {reply, {ok, Obj}, State};
-            SpawnError ->
-                {reply, SpawnError, State}
-        end
-    catch
-        error:CaughtError ->
-            {reply, {error, CaughtError}, State}
-    end;
+    Result = beamtalk_class_instantiation:handle_spawn(Args, ClassName, Module, IsAbstract),
+    {reply, Result, State};
 
 handle_call({new, Args}, _From, #class_state{
     name = ClassName,
@@ -622,107 +577,22 @@ handle_call({new, Args}, _From, #class_state{
         [] -> 'new';
         _ -> 'new:'
     end,
-    {reply, {error, abstract_class_error(ClassName, Selector)}, State};
+    {reply, {error, beamtalk_class_instantiation:abstract_class_error(ClassName, Selector)}, State};
 
 handle_call({new, Args}, _From, #class_state{
     name = ClassName,
     module = Module,
     dynamic_methods = DynamicMethods,
-    instance_variables = InstanceVars
-} = State0) ->
-    %% BT-474: Lazily compute is_constructible on first {new, Args} call.
-    %% Can't compute during init because module isn't available during on_load.
-    State = ensure_is_constructible(State0),
-    #class_state{is_constructible = IsConstructible} = State,
-    %% Check if this is a dynamic class
-    case Module of
-        beamtalk_dynamic_object ->
-            %% Dynamic class - spawn beamtalk_dynamic_object instance
-            %% Build initial state with methods and fields
-            try
-                InitState = #{
-                    '$beamtalk_class' => ClassName,
-                    '__class_pid__' => self(),
-                    '__methods__' => DynamicMethods
-                },
-                %% Initialize instance variables from Args (expected to be a map or proplist)
-                InitStateWithFields = case Args of
-                    [FieldMap] when is_map(FieldMap) ->
-                        maps:merge(InitState, FieldMap);
-                    [] ->
-                        %% new with no args: initialize all instance variables to nil
-                        lists:foldl(fun(Var, Acc) ->
-                            maps:put(Var, nil, Acc)
-                        end, InitState, InstanceVars);
-                    _ ->
-                        %% BT-473: Reject non-map arguments with type_error
-                        DynErr0 = beamtalk_error:new(type_error, ClassName),
-                        DynErr1 = beamtalk_error:with_selector(DynErr0, 'new:'),
-                        DynErr2 = beamtalk_error:with_hint(DynErr1, <<"new: expects a Dictionary argument">>),
-                        error(DynErr2)
-                end,
-                
-                %% Spawn the dynamic object
-                case beamtalk_dynamic_object:start_link(ClassName, InitStateWithFields) of
-                    {ok, Pid} ->
-                        %% Wrap in beamtalk_object record
-                        Obj = #beamtalk_object{
-                            class = ClassName,
-                            class_mod = beamtalk_dynamic_object,
-                            pid = Pid
-                        },
-                        {reply, {ok, Obj}, State};
-                    DynError ->
-                        {reply, DynError, State}
-                end
-            catch
-                error:DynCaughtError ->
-                    {reply, {error, DynCaughtError}, State}
-            end;
-        _ ->
-            %% Compiled class — value type instantiation via new (BT-246 / ADR 0013)
-            %% Value types support new/new:. Actor classes should use {spawn, Args}
-            %% protocol via class_send. If 'new' is called on an actor, the
-            %% generated new/0 returns an appropriate error.
-            %% BT-422: Wrap in try/catch to prevent class gen_server crash
-            %% when new/0 or new/1 raises (e.g., instantiation_error for primitives).
-            %% BT-476: Unlike spawnWith: (where validation lives in generated code),
-            %% new: validation stays here because generated new/1 may not exist
-            %% for all classes. See also: spawn.rs for spawnWith: validation.
-            try
-                Result = case Args of
-                    [] ->
-                        erlang:apply(Module, new, []);
-                    [InitMap] when is_map(InitMap) ->
-                        case erlang:function_exported(Module, new, 1) of
-                            true ->
-                                erlang:apply(Module, new, [InitMap]);
-                            false ->
-                                erlang:apply(Module, new, [])
-                        end;
-                    _ ->
-                        %% BT-474: Use cached is_constructible query instead of
-                        %% probing via try new/0. No throwaway object creation.
-                        %% Priority: instantiation_error (can't construct) before
-                        %% type_error (wrong argument type).
-                        case IsConstructible of
-                            false ->
-                                %% Class can't be instantiated — delegate to new/0
-                                %% for its native instantiation_error.
-                                erlang:apply(Module, new, []);
-                            true ->
-                                %% Class IS constructible but got wrong arg type.
-                                Error0 = beamtalk_error:new(type_error, ClassName),
-                                Error1 = beamtalk_error:with_selector(Error0, 'new:'),
-                                Error2 = beamtalk_error:with_hint(Error1, <<"new: expects a Dictionary argument">>),
-                                beamtalk_error:raise(Error2)
-                        end
-                end,
-                {reply, {ok, Result}, State}
-            catch
-                error:Error ->
-                    {reply, {error, Error}, State}
-            end
+    instance_variables = InstanceVars,
+    is_constructible = IsConstructible0
+} = State) ->
+    case beamtalk_class_instantiation:handle_new(
+            Args, ClassName, Module, DynamicMethods, InstanceVars, IsConstructible0,
+            self()) of
+        {ok, Result, IsConstructible} ->
+            {reply, {ok, Result}, State#class_state{is_constructible = IsConstructible}};
+        {error, Error, IsConstructible} ->
+            {reply, {error, Error}, State#class_state{is_constructible = IsConstructible}}
     end;
 
 handle_call(methods, _From, #class_state{flattened_methods = Flattened} = State) ->
@@ -779,7 +649,7 @@ handle_call({put_method, Selector, Fun, Source}, _From, State) ->
     notify_instances(State#class_state.name, NewMethods),
     
     %% ADR 0006 Phase 2: Notify subclasses to rebuild their flattened tables
-    invalidate_subclass_flattened_tables(State#class_state.name),
+    beamtalk_class_registry:invalidate_subclass_flattened_tables(State#class_state.name),
     
     {reply, ok, NewState};
 
@@ -792,9 +662,14 @@ handle_call(is_sealed, _From, #class_state{is_sealed = Sealed} = State) ->
 handle_call(is_abstract, _From, #class_state{is_abstract = Abstract} = State) ->
     {reply, Abstract, State};
 
-handle_call(is_constructible, _From, State0) ->
-    State = ensure_is_constructible(State0),
-    {reply, State#class_state.is_constructible, State};
+handle_call(is_constructible, _From, #class_state{
+    is_constructible = IsConstructible0,
+    module = Module,
+    is_abstract = IsAbstract
+} = State) ->
+    IsConstructible = beamtalk_class_instantiation:ensure_is_constructible(
+        IsConstructible0, Module, IsAbstract),
+    {reply, IsConstructible, State#class_state{is_constructible = IsConstructible}};
 
 handle_call({add_before, Selector, Fun}, _From, State) ->
     Befores = maps:get(Selector, State#class_state.before_methods, []),
@@ -837,7 +712,7 @@ handle_call({class_method_call, Selector, Args}, From,
             DefiningModule = case DefiningClass of
                 ClassName -> Module;
                 _ ->
-                    case whereis_class(DefiningClass) of
+                    case beamtalk_class_registry:whereis_class(DefiningClass) of
                         undefined -> Module;
                         DefPid -> gen_server:call(DefPid, get_module, 5000)
                     end
@@ -863,7 +738,7 @@ handle_call({class_method_call, Selector, Args}, From,
                     {noreply, State};
                 false ->
                     %% Build class self object for `self` reference in class methods
-                    ClassSelf = {beamtalk_object, class_object_tag(ClassName), DefiningModule, self()},
+                    ClassSelf = {beamtalk_object, beamtalk_class_registry:class_object_tag(ClassName), DefiningModule, self()},
                     %% Class method function name: class_<selector>
                     FunName = class_method_fun_name(Selector),
                     %% BT-412: Pass class variables; handle {Result, NewClassVars} returns
@@ -957,7 +832,7 @@ handle_info({rebuild_flattened, ChangedClass}, #class_state{
     superclass = Superclass
 } = State) ->
     %% ADR 0006 Phase 2: A parent class changed — rebuild if we inherit from it.
-    try inherits_from(Superclass, ChangedClass) of
+    try beamtalk_class_registry:inherits_from(Superclass, ChangedClass) of
         true ->
             {noreply, rebuild_all_flattened_tables(State)};
         false ->
@@ -980,7 +855,7 @@ code_change(OldVsn, State, Extra) ->
     %% BT-474: Reset is_constructible cache — module exports may have changed
     FinalState2 = FinalState#class_state{is_constructible = undefined},
     %% Invalidate subclass tables in case hot_reload modified our methods
-    invalidate_subclass_flattened_tables(FinalState2#class_state.name),
+    beamtalk_class_registry:invalidate_subclass_flattened_tables(FinalState2#class_state.name),
     {ok, FinalState2}.
 
 %%====================================================================
@@ -1001,64 +876,6 @@ unwrap_class_call({error, Error}) ->
     error(Wrapped).
 
 %% @private
-%% @doc Build a structured instantiation_error for abstract classes.
-%%
-%% DRYs the repeated error construction in handle_call({spawn,...})
-%% and handle_call({new,...}) for abstract classes.
--spec abstract_class_error(atom(), atom()) -> #beamtalk_error{}.
-abstract_class_error(ClassName, Selector) ->
-    Error0 = beamtalk_error:new(instantiation_error, ClassName),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    beamtalk_error:with_hint(Error1, <<"Abstract classes cannot be instantiated. Subclass it first.">>).
-
-%% @private
-%% @doc Ensure is_constructible is computed and cached in state (BT-474).
-%%
-%% Lazily computes whether a class can be instantiated via new/new: on first
-%% access. Cannot be computed during init because the module isn't fully
-%% available during on_load. After first computation, the result is cached
-%% in class_state for all subsequent calls.
-%%
-%% Returns false for:
-%% - Abstract classes (cannot be instantiated at all)
-%% - Actors (have spawn/0 — must use spawn/spawnWith:)
-%% - Non-instantiable primitives (Integer, String, etc. — new/0 raises)
--spec ensure_is_constructible(#class_state{}) -> #class_state{}.
-ensure_is_constructible(#class_state{is_constructible = C} = State) when C =/= undefined ->
-    State;
-ensure_is_constructible(#class_state{
-    module = Module,
-    is_abstract = IsAbstract
-} = State) ->
-    Result = compute_is_constructible(Module, IsAbstract),
-    State#class_state{is_constructible = Result}.
-
-%% @private
--spec compute_is_constructible(atom(), boolean()) -> boolean().
-compute_is_constructible(_Module, true) ->
-    false;
-compute_is_constructible(beamtalk_dynamic_object, false) ->
-    true;
-compute_is_constructible(Module, false) ->
-    %% Actors export spawn/0; their new/0 raises instantiation_error
-    case erlang:function_exported(Module, spawn, 0) of
-        true -> false;
-        false ->
-            %% Value type: check if new/0 succeeds or raises.
-            %% Non-instantiable primitives (Integer, String, etc.) generate
-            %% error stubs. We probe once here, not on every error path.
-            case erlang:function_exported(Module, new, 0) of
-                false -> false;
-                true ->
-                    try erlang:apply(Module, new, []) of
-                        _ -> true
-                    catch
-                        error:_ -> false
-                    end
-            end
-    end.
-
-%% @private
 %% @doc Rebuild both instance and class flattened method tables from State.
 %%
 %% Returns updated State with new flattened_methods and flattened_class_methods.
@@ -1077,112 +894,11 @@ rebuild_all_flattened_tables(#class_state{
         flattened_class_methods = NewFlattenedClass
     }.
 
-%% Ensure pg (process groups) is started.
-%% pg is used for tracking all class processes.
-ensure_pg_started() ->
-    case whereis(pg) of
-        undefined ->
-            %% pg not running - start it
-            case pg:start_link() of
-                {ok, _Pid} -> ok;
-                {error, {already_started, _}} -> ok
-            end;
-        _Pid ->
-            ok
-    end.
-
-%% BT-510: Ensure the class hierarchy ETS table exists.
-%% Stores {ClassName, SuperclassName | none} pairs for O(1) hierarchy queries.
-%% Public named_table so any process can read; written only in init/1.
-%% Uses try/catch to handle concurrent creation race (TOCTOU safe).
-ensure_hierarchy_table() ->
-    case ets:info(beamtalk_class_hierarchy) of
-        undefined ->
-            try
-                ets:new(beamtalk_class_hierarchy,
-                        [set, public, named_table, {read_concurrency, true}]),
-                ok
-            catch
-                error:badarg -> ok  % Another process created it first
-            end;
-        _ ->
-            ok
-    end.
-
-registry_name(ClassName) ->
-    list_to_atom("beamtalk_class_" ++ atom_to_list(ClassName)).
-
 notify_instances(_ClassName, _NewMethods) ->
     %% TODO: Once beamtalk_object_instances is updated to work with per-class processes,
     %% this will broadcast method table updates to running instances.
     %% For now, this is a no-op.
     ok.
-
-%% @private
-%% @doc Broadcast rebuild_flattened to all class processes except ourselves.
-%%
-%% ADR 0006 Phase 2: When a class's methods change, all subclasses need to
-%% rebuild their flattened tables to include the new/changed method.
-%% Uses pg group for fire-and-forget broadcast.
--spec invalidate_subclass_flattened_tables(class_name()) -> ok.
-invalidate_subclass_flattened_tables(ChangedClass) ->
-    AllClasses = pg:get_members(beamtalk_classes),
-    Self = self(),
-    lists:foreach(fun(Pid) ->
-        case Pid of
-            Self -> ok;  % Skip ourselves
-            _ -> Pid ! {rebuild_flattened, ChangedClass}
-        end
-    end, AllClasses),
-    ok.
-
-%% @doc Check if a class inherits from a given ancestor (walks superclass chain).
-%%
-%% BT-510: Uses ETS hierarchy table for O(1) lookups per level instead of
-%% gen_server calls. No process messaging needed — pure ETS reads.
-%%
-%% Returns true if ClassName is equal to or a subclass of Ancestor.
-%% Returns false if the class is not in the hierarchy table (safe during bootstrap).
-%% Used by beamtalk_exception_handler for hierarchy-aware matching (BT-475).
--spec inherits_from(class_name() | none, class_name()) -> boolean().
-inherits_from(none, _Ancestor) ->
-    false;
-inherits_from(ClassName, Ancestor) when ClassName =:= Ancestor ->
-    true;
-inherits_from(ClassName, Ancestor) ->
-    case ets:info(beamtalk_class_hierarchy) of
-        undefined -> false;
-        _ ->
-            case ets:lookup(beamtalk_class_hierarchy, ClassName) of
-                [{_, none}] -> false;
-                [{_, SuperclassName}] -> inherits_from(SuperclassName, Ancestor);
-                [] -> false
-            end
-    end.
-
-%% @private
-%% Convert dynamic method closures to method_info maps.
-%% This allows dynamic classes to register with the same structure as compiled classes.
--spec convert_methods_to_info(#{selector() => fun()}) -> #{selector() => method_info()}.
-convert_methods_to_info(Methods) ->
-    maps:map(fun(Selector, Fun) ->
-        %% Extract arity from function (dynamic methods must be arity 3: Self, Args, State)
-        {arity, Arity} = erlang:fun_info(Fun, arity),
-        %% Validate that method has correct arity
-        case Arity of
-            3 -> ok;
-            _ ->
-                Error0 = beamtalk_error:new(arity_mismatch, 'DynamicClass'),
-                Error1 = beamtalk_error:with_selector(Error0, Selector),
-                Error2 = beamtalk_error:with_hint(Error1, <<"Dynamic methods must be arity 3 (Self, Args, State)">>),
-                Error3 = beamtalk_error:with_details(Error2, #{actual_arity => Arity, expected_arity => 3}),
-                beamtalk_error:raise(Error3)
-        end,
-        #{
-            arity => Arity,
-            block => Fun
-        }
-    end, Methods).
 
 %% @private
 %% Find and invoke a method in the superclass chain.
@@ -1191,7 +907,7 @@ convert_methods_to_info(Methods) ->
 -spec find_and_invoke_super_method(class_name(), selector(), list(), map()) ->
     {reply, term(), map()} | {error, term()}.
 find_and_invoke_super_method(ClassName, Selector, Args, State) ->
-    case whereis_class(ClassName) of
+    case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
             Error0 = beamtalk_error:new(class_not_found, ClassName),
             Error = beamtalk_error:with_selector(Error0, Selector),
@@ -1310,7 +1026,7 @@ build_flattened_methods(CurrentClass, Superclass, LocalMethods, QueryMsg) ->
             LocalFlattened;
         SuperclassName ->
             %% Get inherited methods from superclass
-            case whereis_class(SuperclassName) of
+            case beamtalk_class_registry:whereis_class(SuperclassName) of
                 undefined ->
                     %% BT-510: Superclass not registered yet (out-of-order loading).
                     %% Return local methods only; invalidate_subclass_flattened_tables

@@ -113,7 +113,7 @@ registry_name_test_() ->
                          superclass => none
                      },
                      {ok, _Pid} = beamtalk_object_class:start_link('RegistryTestClass', ClassInfo),
-                     RegPid = beamtalk_object_class:whereis_class('RegistryTestClass'),
+                     RegPid = beamtalk_class_registry:whereis_class('RegistryTestClass'),
                      ?assert(is_pid(RegPid)),
                      ?assertEqual(RegPid, whereis(beamtalk_class_RegistryTestClass))
                  end)
@@ -491,7 +491,7 @@ all_classes_test_() ->
           ?_test(begin
                      %% Test that all_classes returns a list
                      %% More thorough testing happens in other tests
-                     AllClasses = beamtalk_object_class:all_classes(),
+                     AllClasses = beamtalk_class_registry:all_classes(),
                      ?assert(is_list(AllClasses))
                  end)
          ]
@@ -523,7 +523,7 @@ duplicate_registration_test_() ->
      end}.
 
 whereis_nonexistent_class_test() ->
-    Result = beamtalk_object_class:whereis_class('NonexistentClass'),
+    Result = beamtalk_class_registry:whereis_class('NonexistentClass'),
     ?assertEqual(undefined, Result).
 
 %%====================================================================
@@ -618,10 +618,10 @@ create_subclass_success_test_() ->
               ?assertMatch({ok, _Pid}, Result),
 
               %% Verify child class is registered
-              ?assertNotEqual(undefined, beamtalk_object_class:whereis_class('TestChildClass')),
+              ?assertNotEqual(undefined, beamtalk_class_registry:whereis_class('TestChildClass')),
 
               %% Verify superclass
-              ChildPid = beamtalk_object_class:whereis_class('TestChildClass'),
+              ChildPid = beamtalk_class_registry:whereis_class('TestChildClass'),
               ?assertEqual('TestParentClass', beamtalk_object_class:superclass(ChildPid))
           end)]
      end}.
@@ -901,17 +901,17 @@ hierarchy_inherits_from_test_() ->
                          instance_methods => #{leafMethod => #{arity => 0}}
                      }),
                      %% Direct parent
-                     ?assert(beamtalk_object_class:inherits_from('HierMid', 'HierRoot')),
+                     ?assert(beamtalk_class_registry:inherits_from('HierMid', 'HierRoot')),
                      %% Grandparent
-                     ?assert(beamtalk_object_class:inherits_from('HierLeaf', 'HierRoot')),
+                     ?assert(beamtalk_class_registry:inherits_from('HierLeaf', 'HierRoot')),
                      %% Self
-                     ?assert(beamtalk_object_class:inherits_from('HierRoot', 'HierRoot')),
+                     ?assert(beamtalk_class_registry:inherits_from('HierRoot', 'HierRoot')),
                      %% Not an ancestor
-                     ?assertNot(beamtalk_object_class:inherits_from('HierRoot', 'HierLeaf')),
+                     ?assertNot(beamtalk_class_registry:inherits_from('HierRoot', 'HierLeaf')),
                      %% Unrelated class
-                     ?assertNot(beamtalk_object_class:inherits_from('HierRoot', 'NonExistent')),
+                     ?assertNot(beamtalk_class_registry:inherits_from('HierRoot', 'NonExistent')),
                      %% none base case
-                     ?assertNot(beamtalk_object_class:inherits_from(none, 'HierRoot'))
+                     ?assertNot(beamtalk_class_registry:inherits_from(none, 'HierRoot'))
                  end)]
      end}.
 
@@ -1000,9 +1000,9 @@ hierarchy_orphan_registration_test_() ->
                                   ets:lookup(beamtalk_class_hierarchy, 'HierOrphan')),
                      %% inherits_from follows the declared chain:
                      %% HierOrphan -> NonExistentParent (self-match = true)
-                     ?assert(beamtalk_object_class:inherits_from('HierOrphan', 'NonExistentParent')),
+                     ?assert(beamtalk_class_registry:inherits_from('HierOrphan', 'NonExistentParent')),
                      %% But NonExistentParent has no entry, so deeper queries stop
-                     ?assertNot(beamtalk_object_class:inherits_from('HierOrphan', 'SomeOtherClass'))
+                     ?assertNot(beamtalk_class_registry:inherits_from('HierOrphan', 'SomeOtherClass'))
                  end)]
      end}.
 

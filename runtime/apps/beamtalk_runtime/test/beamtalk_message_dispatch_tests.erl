@@ -57,9 +57,9 @@ actor_future_is_pid() ->
     exit(Dummy, kill).
 
 class_object_returns_value() ->
-    ClassPid = beamtalk_object_class:whereis_class('Object'),
+    ClassPid = beamtalk_class_registry:whereis_class('Object'),
     ?assert(is_pid(ClassPid)),
-    ClassTag = beamtalk_object_class:class_object_tag('Object'),
+    ClassTag = beamtalk_class_registry:class_object_tag('Object'),
     ClassMod = beamtalk_object_class:module_name(ClassPid),
     ClassObj = #beamtalk_object{class = ClassTag, class_mod = ClassMod, pid = ClassPid},
     Result = beamtalk_message_dispatch:send(ClassObj, class_name, []),
