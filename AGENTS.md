@@ -1761,6 +1761,61 @@ All source files must include Apache 2.0 header:
 - **No periods**: Newlines separate statements, not `.`
 - **Comments**: Use `//` and `/* */`, not Smalltalk's `"..."`
 
+### Code Generation — Document API Only
+
+**CRITICAL:** All Core Erlang code generation MUST use the `Document` / `docvec!` API. **Never** use `format!()`, `write!()`, or string concatenation to build Core Erlang output.
+
+```rust
+// ❌ WRONG - string-based generation (fragile, unverifiable)
+format!("call '{module}':'{function}'({args})")
+write!(result, "let {var} = ").unwrap();
+
+// ✅ RIGHT - Document API (structural, composable)
+docvec![
+    Document::String("call '".into()),
+    Document::String(module.clone()),
+    Document::String("':'".into()),
+    Document::String(function.clone()),
+    Document::String("'(".into()),
+    args_doc,
+    Document::String(")".into()),
+]
+```
+
+**Why:**
+- String-based codegen has no structural guarantees — easy to get whitespace, quoting, or nesting wrong
+- `Document` provides composable, pretty-printable output with correct indentation
+- Structural generation is easier to review and maintain
+- Snapshot tests verify output stability
+
+**When modifying codegen files:** If you see existing `format!`/`write!` patterns, convert them to `Document` as part of your change. Don't add new string-based generation.
+
+### Clippy Discipline
+
+**Never suppress clippy warnings without justification.** The goal is to keep suppressions under 30 across the entire codebase.
+
+```rust
+// ❌ WRONG - blanket suppression
+#[allow(clippy::too_many_lines)]
+fn my_function() { ... }
+
+// ✅ RIGHT - refactor the function instead
+fn my_function() {
+    let result = helper_one();
+    helper_two(result)
+}
+
+// ✅ ACCEPTABLE - when suppression is truly needed, document why
+#[allow(clippy::cast_sign_loss)] // arity is always non-negative from parser
+let arity_u32 = arity as u32;
+```
+
+**Rules:**
+1. **`too_many_lines`** — Split the function. If genuinely irreducible (e.g., one arm per AST variant), add a comment explaining why.
+2. **`unnecessary_wraps`** — Fix the return type. If the signature must match a trait, document it.
+3. **`dead_code`** — Remove it. If planned for future use, create an issue and remove the code.
+4. **New `#[allow(...)]`** — Requires a comment explaining why suppression is necessary.
+
 ### Logging Strategy
 
 The beamtalk CLI uses the `tracing` crate for structured logging and instrumentation.

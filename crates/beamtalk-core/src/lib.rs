@@ -29,7 +29,7 @@ pub mod prelude {
         StateDeclaration, TypeAnnotation,
     };
     pub use crate::language_service::{
-        Completion, CompletionKind, HoverInfo, LanguageService, Location, Position,
+        Completion, CompletionKind, HoverInfo, LanguageService, Location, Position, ProjectIndex,
         SimpleLanguageService,
     };
     pub use crate::source_analysis::Span;

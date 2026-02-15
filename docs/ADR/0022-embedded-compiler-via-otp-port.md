@@ -546,6 +546,23 @@ The setting lives at the **workspace** level (not per-REPL-session), so all comp
 - CLI `beamtalk daemon start/stop/status` commands deprecated at Phase 3, removed at Phase 5
 - JSON-RPC protocol code (`protocol.rs`, `transport.rs`) removed at Phase 5
 
+## Implementation Tracking
+
+**Epic:** BT-543 — Epic: Embedded Compiler via OTP Port (ADR 0022)
+**Progress:** 100% complete (8/8 issues done)
+
+| Phase | Issue | Title | Size | Status |
+|-------|-------|-------|------|--------|
+| Baseline | BT-544 | Establish compilation latency baseline | S | ✅ Done |
+| Phase 0 | BT-545 | Wire check — OTP Port invokes Rust compiler binary | S | ✅ Done |
+| Phase 1 | BT-546 | beamtalk_compiler OTP app with Port backend | M | ✅ Done |
+| Phase 2 | BT-547 | Replace daemon IPC in REPL with beamtalk_compiler | M | ✅ Done |
+| Perf | BT-548 | Validate compilation latency improvement | S | ✅ Done |
+| Phase 3 | BT-549 | Move beamtalk build to use Port-based compiler | M | ✅ Done |
+| Phase 4 | BT-550 | Release CI: Linux distributable workflow | L | ✅ Done |
+| Phase 5 | BT-551 | Remove daemon code | M | ✅ Done |
+| Phase 6 | — | NIF backend (future, optional) | M | ⏳ Deferred |
+
 ## References
 - Related ADRs: [ADR 0003](0003-core-erlang-vs-erlang-source.md) (Core Erlang target — unaffected), [ADR 0009](0009-otp-application-structure.md) (app structure — enhanced), [ADR 0004](0004-persistent-workspace-management.md) (workspace architecture)
 - Rustler: https://github.com/rusterlium/rustler

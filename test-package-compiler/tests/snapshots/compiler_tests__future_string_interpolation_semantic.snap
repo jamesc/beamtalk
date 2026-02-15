@@ -2,4 +2,5 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: output
 ---
-No semantic errors
+Semantic errors (1):
+  - Undefined variable: count
