@@ -3063,9 +3063,11 @@ mod tests {
             .filter(|d| d.message.contains("self"))
             .collect();
         assert_eq!(self_errors.len(), 1);
-        assert!(self_errors[0]
-            .message
-            .contains("self can only be used inside a method body"));
+        assert!(
+            self_errors[0]
+                .message
+                .contains("self can only be used inside a method body")
+        );
         // Should NOT say "Undefined variable: self"
         assert!(!self_errors[0].message.contains("Undefined variable"));
     }
@@ -3208,10 +3210,7 @@ mod tests {
                 parameters: vec![],
                 body: vec![
                     Expression::Assignment {
-                        target: Box::new(Expression::Identifier(Identifier::new(
-                            "x",
-                            test_span(),
-                        ))),
+                        target: Box::new(Expression::Identifier(Identifier::new("x", test_span()))),
                         value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
                         span: test_span(),
                     },
@@ -3259,10 +3258,7 @@ mod tests {
                 selector: MessageSelector::Unary("doSomething".into()),
                 parameters: vec![],
                 body: vec![Expression::Assignment {
-                    target: Box::new(Expression::Identifier(Identifier::new(
-                        "_x",
-                        test_span(),
-                    ))),
+                    target: Box::new(Expression::Identifier(Identifier::new("_x", test_span()))),
                     value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
                     span: test_span(),
                 }],
