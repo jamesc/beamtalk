@@ -146,10 +146,7 @@ fn method_definition_ok_response(
     Term::from(Map::from([
         (atom("status"), atom("ok")),
         (atom("kind"), atom("method_definition")),
-        (
-            atom("class_name"),
-            binary(class_name),
-        ),
+        (atom("class_name"), binary(class_name)),
         (atom("selector"), binary(selector)),
         (
             atom("is_class_method"),
@@ -328,8 +325,7 @@ fn handle_compile_expression(request: &Map) -> Term {
 
     // BT-571: If the parsed module contains class definitions, use compile path
     if !module.classes.is_empty() {
-        let base_name =
-            beamtalk_core::erlang::to_module_name(&module.classes[0].name.name);
+        let base_name = beamtalk_core::erlang::to_module_name(&module.classes[0].name.name);
         let class_module_name = format!("bt@{base_name}");
 
         let classes: Vec<(String, String)> = module

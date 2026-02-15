@@ -148,7 +148,10 @@ impl Parser {
         // Skip any periods/statement terminators
         while self.match_token(&TokenKind::Period) {}
 
-        while !self.is_at_end() && !self.is_at_class_definition() && !self.is_at_standalone_method_definition() {
+        while !self.is_at_end()
+            && !self.is_at_class_definition()
+            && !self.is_at_standalone_method_definition()
+        {
             // Check for state declaration: `state: fieldName ...`
             if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:") {
                 if let Some(state_decl) = self.parse_state_declaration() {
@@ -631,18 +634,18 @@ impl Parser {
         let class_name = self.parse_identifier("Expected class name");
 
         // Check for optional `class` modifier
-        let is_class_method =
-            if matches!(self.current_kind(), TokenKind::Identifier(name) if name == "class") {
-                // Only treat as modifier if next token is `>>`
-                if matches!(self.peek_at(1), Some(TokenKind::BinarySelector(s)) if s == ">>") {
-                    self.advance(); // consume `class`
-                    true
-                } else {
-                    false
-                }
+        let is_class_method = if matches!(self.current_kind(), TokenKind::Identifier(name) if name == "class")
+        {
+            // Only treat as modifier if next token is `>>`
+            if matches!(self.peek_at(1), Some(TokenKind::BinarySelector(s)) if s == ">>") {
+                self.advance(); // consume `class`
+                true
             } else {
                 false
-            };
+            }
+        } else {
+            false
+        };
 
         // Consume `>>`
         if !self.match_binary_selector(">>") {
