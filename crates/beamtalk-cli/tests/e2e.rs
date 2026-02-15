@@ -75,35 +75,6 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// Find the beamtalk binary (either debug or release).
-fn beamtalk_binary() -> PathBuf {
-    let root = workspace_root();
-
-    // Try llvm-cov target first (for coverage runs), then debug, then release
-    let llvm_cov_debug_path = root.join("target/llvm-cov-target/debug/beamtalk");
-    if llvm_cov_debug_path.exists() {
-        return llvm_cov_debug_path;
-    }
-
-    let debug_path = root.join("target/debug/beamtalk");
-    if debug_path.exists() {
-        return debug_path;
-    }
-
-    let release_path = root.join("target/release/beamtalk");
-    if release_path.exists() {
-        return release_path;
-    }
-
-    panic!(
-        "beamtalk binary not found. Run `cargo build` first.\n\
-         Checked:\n  - {}\n  - {}\n  - {}",
-        llvm_cov_debug_path.display(),
-        debug_path.display(),
-        release_path.display()
-    );
-}
-
 /// Find the runtime directory.
 fn runtime_dir() -> PathBuf {
     workspace_root().join("runtime")
@@ -114,31 +85,7 @@ fn test_cases_dir() -> PathBuf {
     workspace_root().join("tests/e2e/cases")
 }
 
-/// Get the daemon socket path.
-///
-/// Respects `BEAMTALK_DAEMON_SOCKET` environment variable for worktree isolation.
-/// When not set, creates a deterministic session-based path using a fixed
-/// E2E test session name to ensure the test harness and daemon agree on the path.
-fn daemon_socket_path() -> PathBuf {
-    if let Ok(socket_path) = env::var("BEAMTALK_DAEMON_SOCKET") {
-        if !socket_path.is_empty() {
-            return PathBuf::from(socket_path);
-        }
-    }
-    // Use a fixed session name so the test and daemon child process agree.
-    // The daemon child has a different PPID than the test process, so we
-    // can't rely on PPID-based session resolution matching.
-    dirs::home_dir()
-        .map(|h| {
-            h.join(".beamtalk")
-                .join("sessions")
-                .join("e2e-test")
-                .join("daemon.sock")
-        })
-        .unwrap_or_default()
-}
-
-/// Session name used for E2E test daemon isolation.
+/// Session name used for E2E test isolation.
 const E2E_SESSION_NAME: &str = "e2e-test";
 
 /// A test case parsed from a `.bt` file.
@@ -313,9 +260,8 @@ fn parse_test_file(content: &str) -> ParsedTestFile {
     }
 }
 
-/// Manages the daemon and BEAM processes for tests.
-struct DaemonManager {
-    daemon_process: Option<Child>,
+/// Manages the BEAM process for tests.
+struct ProcessManager {
     beam_process: Option<Child>,
     cover_enabled: bool,
 }
@@ -358,8 +304,8 @@ fn beam_eval_cmd(cover: bool, ebin: &str, signal: &str, export: &str) -> String 
     }
 }
 
-impl DaemonManager {
-    /// Start the daemon and BEAM REPL backend if not already running.
+impl ProcessManager {
+    /// Start the BEAM REPL backend if not already running.
     ///
     /// Note: If the test detects an existing REPL on the port, it will use that
     /// and not start its own processes. This is useful for development but means
@@ -371,39 +317,13 @@ impl DaemonManager {
         if TcpStream::connect(format!("127.0.0.1:{REPL_PORT}")).is_ok() {
             eprintln!("E2E: REPL already running on port {REPL_PORT}");
             return Self {
-                daemon_process: None,
                 beam_process: None,
                 cover_enabled: false,
             };
         }
 
-        // Start the compiler daemon first
-        eprintln!("E2E: Starting compiler daemon...");
-        let binary = beamtalk_binary();
-
         // Check if debug output is requested via environment variable
         let debug_output = env::var("E2E_DEBUG").is_ok();
-        let (stdout_cfg, stderr_cfg) = if debug_output {
-            (Stdio::inherit(), Stdio::inherit())
-        } else {
-            (Stdio::null(), Stdio::null())
-        };
-
-        let daemon_child = Command::new(&binary)
-            .args(["daemon", "start", "--foreground"])
-            .env("BEAMTALK_WORKSPACE", E2E_SESSION_NAME)
-            .stdout(stdout_cfg)
-            .stderr(stderr_cfg)
-            .spawn()
-            .expect("Failed to start daemon");
-
-        // Poll for daemon socket instead of fixed sleep
-        let daemon_socket = daemon_socket_path();
-        let mut daemon_retries = 20;
-        while daemon_retries > 0 && !daemon_socket.exists() {
-            std::thread::sleep(Duration::from_millis(100));
-            daemon_retries -= 1;
-        }
 
         // Start the BEAM node with REPL backend
         eprintln!("E2E: Starting BEAM REPL backend...");
@@ -422,7 +342,6 @@ impl DaemonManager {
             assert!(status.success(), "Failed to build runtime");
         }
 
-        // Reuse debug output settings for BEAM
         let (stdout_cfg, stderr_cfg) = if debug_output {
             (Stdio::inherit(), Stdio::inherit())
         } else {
@@ -465,7 +384,7 @@ impl DaemonManager {
             .arg("-noshell")
             .args(&pa_args)
             .current_dir(workspace_root())
-            .env("BEAMTALK_DAEMON_SOCKET", daemon_socket.to_str().unwrap())
+            .env("BEAMTALK_WORKSPACE", E2E_SESSION_NAME)
             .stdout(stdout_cfg)
             .stderr(stderr_cfg)
             .spawn()
@@ -478,7 +397,6 @@ impl DaemonManager {
             if TcpStream::connect(format!("127.0.0.1:{REPL_PORT}")).is_ok() {
                 eprintln!("E2E: REPL ready on port {REPL_PORT}");
                 return Self {
-                    daemon_process: Some(daemon_child),
                     beam_process: Some(beam_child),
                     cover_enabled,
                 };
@@ -489,13 +407,12 @@ impl DaemonManager {
         eprintln!("E2E: Warning - REPL may not be fully started. Port {REPL_PORT} not responding.");
 
         Self {
-            daemon_process: Some(daemon_child),
             beam_process: Some(beam_child),
             cover_enabled,
         }
     }
 
-    /// Stop the daemon and BEAM if we started them.
+    /// Stop the BEAM if we started it.
     ///
     /// Uses SIGTERM first for graceful shutdown, then SIGKILL if needed.
     #[cfg(unix)]
@@ -552,18 +469,6 @@ impl DaemonManager {
                 let _ = child.wait();
             }
         }
-
-        if let Some(ref mut child) = self.daemon_process {
-            eprintln!("E2E: Stopping daemon...");
-            // SAFETY: libc::kill with SIGTERM is safe to call on any pid.
-            // If pid doesn't exist, it returns an error which we ignore.
-            unsafe {
-                libc::kill(child.id() as i32, libc::SIGTERM);
-            }
-            std::thread::sleep(Duration::from_millis(200));
-            let _ = child.kill();
-            let _ = child.wait();
-        }
     }
 
     #[cfg(not(unix))]
@@ -575,16 +480,10 @@ impl DaemonManager {
             let _ = child.kill();
             let _ = child.wait();
         }
-
-        if let Some(ref mut child) = self.daemon_process {
-            eprintln!("E2E: Stopping daemon...");
-            let _ = child.kill();
-            let _ = child.wait();
-        }
     }
 }
 
-impl Drop for DaemonManager {
+impl Drop for ProcessManager {
     fn drop(&mut self) {
         self.stop();
     }
@@ -1370,15 +1269,15 @@ fn e2e_language_tests() {
         return;
     }
 
-    // Start or connect to daemon
-    let _daemon = DaemonManager::start();
+    // Start or connect to BEAM REPL
+    let _manager = ProcessManager::start();
 
     // Connect to REPL
     let mut client = match ReplClient::connect() {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Failed to connect to REPL on port {REPL_PORT}: {e}");
-            eprintln!("Make sure the daemon is running: beamtalk daemon start --foreground");
+            eprintln!("Make sure the REPL backend is running");
             panic!("Could not connect to REPL");
         }
     };

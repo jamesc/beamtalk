@@ -5,15 +5,11 @@
 %%%
 %%% This module handles compilation, bytecode generation, and evaluation
 %%% of Beamtalk expressions via the beamtalk_compiler OTP application
-%%% (ADR 0022, Phase 2).
-%%%
-%%% The default backend is the OTP Port (`BEAMTALK_COMPILER=port').
-%%% Set `BEAMTALK_COMPILER=daemon' to use the legacy JSON-RPC daemon.
+%%% (ADR 0022). Uses the OTP Port backend exclusively.
 
 -module(beamtalk_repl_eval).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
--include_lib("kernel/include/file.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 -export([do_eval/2, handle_load/2]).
@@ -22,16 +18,13 @@
 -ifdef(TEST).
 -export([extract_assignment/1,
          format_formatted_diagnostics/1,
-         compile_core_erlang/2, extract_class_names/1, ensure_secure_temp_dir/0,
-         ensure_dir_with_mode/2, maybe_await_future/1, should_purge_module/2,
-         strip_internal_bindings/1, parse_file_compile_result/1,
+         maybe_await_future/1, should_purge_module/2,
+         strip_internal_bindings/1,
          start_io_capture/0, stop_io_capture/1, io_capture_loop/1,
          is_stdlib_path/1, reset_captured_group_leaders/2,
          inject_output/3, handle_io_request/2]).
 -endif.
 
--define(RECV_TIMEOUT, 30000).
--define(DAEMON_CONNECT_TIMEOUT, 5000).
 -define(INTERNAL_REGISTRY_KEY, '__repl_actor_registry__').
 -define(IO_CAPTURE_TIMEOUT, 5000).
 
@@ -56,8 +49,8 @@ do_eval(Expression, State) ->
     %% Get actor registry PID to pass to eval context
     RegistryPid = beamtalk_repl_state:get_actor_registry(State),
     
-    %% Compile expression via daemon
-    case compile_expression(Expression, ModuleName, Bindings, State) of
+    %% Compile expression
+    case compile_expression(Expression, ModuleName, Bindings) of
         {ok, Binary, _ResultExpr, Warnings} ->
             %% Load the compiled module
             case code:load_binary(ModuleName, "", Binary) of
@@ -146,8 +139,8 @@ handle_load(Path, State) ->
                     Source = binary_to_list(SourceBin),
                     %% Detect if file is from the stdlib (lib/ directory)
                     StdlibMode = is_stdlib_path(Path),
-                    %% Compile file — dispatches to port or daemon backend
-                    case compile_file(Source, Path, StdlibMode, State) of
+                    %% Compile file via port backend
+                    case compile_file(Source, Path, StdlibMode) of
                         {ok, Binary, ClassNames, ModuleName} ->
                             %% Load the module (persistent, not deleted)
                             case code:load_binary(ModuleName, Path, Binary) of
@@ -194,18 +187,11 @@ is_stdlib_path(Path) ->
         _ -> true
     end.
 
-%% Compile a Beamtalk expression to bytecode.
-%% Dispatches to beamtalk_compiler (port) or legacy daemon based on
-%% BEAMTALK_COMPILER env var.
--spec compile_expression(string(), atom(), map(), beamtalk_repl_state:state()) ->
+%% Compile a Beamtalk expression to bytecode via OTP Port backend.
+-spec compile_expression(string(), atom(), map()) ->
     {ok, binary(), term(), [binary()]} | {error, term()}.
-compile_expression(Expression, ModuleName, Bindings, State) ->
-    case beamtalk_compiler_backend:backend() of
-        port ->
-            compile_expression_via_port(Expression, ModuleName, Bindings);
-        daemon ->
-            compile_expression_via_daemon(Expression, ModuleName, Bindings, State)
-    end.
+compile_expression(Expression, ModuleName, Bindings) ->
+    compile_expression_via_port(Expression, ModuleName, Bindings).
 
 %% Compile expression via beamtalk_compiler OTP app (port backend).
 compile_expression_via_port(Expression, ModuleName, Bindings) ->
@@ -238,34 +224,11 @@ compile_expression_via_port(Expression, ModuleName, Bindings) ->
             {error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason]))}
     end.
 
-%% Compile expression via legacy daemon (BEAMTALK_COMPILER=daemon).
-compile_expression_via_daemon(Expression, ModuleName, Bindings, State) ->
-    case compile_via_daemon(Expression, ModuleName, Bindings, State) of
-        {ok, Binary, Warnings} ->
-            {ok, Binary, {daemon_compiled}, Warnings};
-        {error, daemon_unavailable} ->
-            {error, <<"Compiler daemon not running. Start with: beamtalk daemon start --foreground">>};
-        {error, {compile_error_formatted, FormattedDiagnostics}} ->
-            {error, format_formatted_diagnostics(FormattedDiagnostics)};
-        {error, {core_compile_error, Errors}} ->
-            {error, iolist_to_binary(io_lib:format("Core Erlang compile error: ~p", [Errors]))};
-        {error, {daemon_error, Msg}} ->
-            {error, iolist_to_binary([<<"Daemon error: ">>, Msg])};
-        {error, Reason} ->
-            {error, iolist_to_binary(io_lib:format("Compilation error: ~p", [Reason]))}
-    end.
-
-%% Compile a file and extract class metadata.
-%% Dispatches to beamtalk_compiler (port) or legacy daemon.
--spec compile_file(string(), string(), boolean(), beamtalk_repl_state:state()) ->
+%% Compile a file and extract class metadata via OTP Port backend.
+-spec compile_file(string(), string(), boolean()) ->
     {ok, binary(), [#{name := string(), superclass := string()}], atom()} | {error, term()}.
-compile_file(Source, Path, StdlibMode, State) ->
-    case beamtalk_compiler_backend:backend() of
-        port ->
-            compile_file_via_port(Source, Path, StdlibMode);
-        daemon ->
-            compile_file_via_daemon(Source, Path, StdlibMode, State)
-    end.
+compile_file(Source, Path, StdlibMode) ->
+    compile_file_via_port(Source, Path, StdlibMode).
 
 %% Compile file via beamtalk_compiler OTP app (port backend).
 compile_file_via_port(Source, _Path, StdlibMode) ->
@@ -300,93 +263,6 @@ compile_file_via_port(Source, _Path, StdlibMode) ->
             {error, {compile_error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason]))}}
     end.
 
-%% Compile expression via compiler daemon using JSON-RPC over Unix socket.
--spec compile_via_daemon(string(), atom(), map(), beamtalk_repl_state:state()) ->
-    {ok, binary(), [binary()]} | {error, term()}.
-compile_via_daemon(Expression, ModuleName, Bindings, _State) ->
-    SocketPath = daemon_socket_path(),
-    %% Try to connect to daemon
-    case connect_to_daemon(SocketPath) of
-        {ok, Socket} ->
-            try
-                compile_via_daemon_socket(Expression, ModuleName, Bindings, Socket)
-            after
-                gen_tcp:close(Socket)
-            end;
-        {error, _Reason} ->
-            {error, daemon_unavailable}
-    end.
-
-%% Resolve daemon socket path from environment.
-%% Used only when BEAMTALK_COMPILER=daemon (legacy fallback).
--spec daemon_socket_path() -> string().
-daemon_socket_path() ->
-    case os:getenv("BEAMTALK_DAEMON_SOCKET") of
-        false -> daemon_socket_from_home();
-        "" -> daemon_socket_from_home();
-        SocketPath -> SocketPath
-    end.
-
-daemon_socket_from_home() ->
-    case os:getenv("HOME") of
-        false ->
-            Error0 = beamtalk_error:new(internal_error, 'ReplEval'),
-            Error1 = beamtalk_error:with_hint(Error0, <<"HOME must be set to locate daemon socket. Set HOME or BEAMTALK_DAEMON_SOCKET.">>),
-            erlang:error(Error1);
-        Home ->
-            filename:join([Home, ".beamtalk", "daemon.sock"])
-    end.
-
-%% Connect to the compiler daemon Unix socket.
-%% Uses a large receive buffer (64KB) to handle large JSON responses containing
-%% Core Erlang code, since {packet, line} mode truncates lines longer than recbuf.
--spec connect_to_daemon(string()) -> {ok, gen_tcp:socket()} | {error, term()}.
-connect_to_daemon(SocketPath) ->
-    %% Use local address family for Unix socket
-    %% Set recbuf to 64KB to handle large JSON responses (Core Erlang can be big)
-    case gen_tcp:connect({local, SocketPath}, 0, 
-                         [binary, {active, false}, {packet, line}, {recbuf, 65536}],
-                         ?DAEMON_CONNECT_TIMEOUT) of
-        {ok, Socket} ->
-            {ok, Socket};
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
-%% Send compile request to daemon and process response.
--spec compile_via_daemon_socket(string(), atom(), map(), gen_tcp:socket()) ->
-    {ok, binary(), [binary()]} | {error, term()}.
-compile_via_daemon_socket(Expression, ModuleName, Bindings, Socket) ->
-    %% Extract known variable names from bindings (filter internal keys)
-    KnownVariables = [atom_to_binary(K, utf8) 
-                      || K <- maps:keys(Bindings), 
-                         is_atom(K), 
-                         not is_internal_key(K)],
-    
-    %% Build JSON-RPC request using jsx
-    RequestId = erlang:unique_integer([positive]),
-    Request = jsx:encode(#{
-        <<"jsonrpc">> => <<"2.0">>,
-        <<"id">> => RequestId,
-        <<"method">> => <<"compile_expression">>,
-        <<"params">> => #{
-            <<"source">> => list_to_binary(Expression),
-            <<"module_name">> => atom_to_binary(ModuleName, utf8),
-            <<"known_variables">> => KnownVariables
-        }
-    }),
-    
-    %% Send request (with newline delimiter)
-    ok = gen_tcp:send(Socket, [Request, <<"\n">>]),
-    
-    %% Receive response
-    case gen_tcp:recv(Socket, 0, ?RECV_TIMEOUT) of
-        {ok, ResponseLine} ->
-            parse_daemon_response(ResponseLine, ModuleName);
-        {error, Reason} ->
-            {error, {recv_error, Reason}}
-    end.
-
 %% Check if a binding key is internal (not a user variable).
 -spec is_internal_key(atom()) -> boolean().
 is_internal_key(Key) when is_atom(Key) ->
@@ -396,189 +272,13 @@ is_internal_key(Key) when is_atom(Key) ->
         _ -> false
     end.
 
-%% Parse daemon JSON-RPC response using jsx.
--spec parse_daemon_response(binary(), atom()) -> {ok, binary(), [binary()]} | {error, term()}.
-parse_daemon_response(ResponseLine, ModuleName) ->
-    try
-        Response = jsx:decode(ResponseLine, [return_maps]),
-        case maps:get(<<"error">>, Response, undefined) of
-            undefined ->
-                %% No error, check for result
-                case maps:get(<<"result">>, Response, undefined) of
-                    undefined ->
-                        {error, {daemon_error, <<"Invalid JSON-RPC response">>}};
-                    Result ->
-                        parse_compile_result(Result, ModuleName)
-                end;
-            ErrorObj ->
-                %% JSON-RPC error
-                Msg = maps:get(<<"message">>, ErrorObj, <<"Unknown error">>),
-                {error, {daemon_error, Msg}}
-        end
-    catch
-        Class:Error:Stack ->
-            ?LOG_DEBUG("Failed to parse daemon response", #{
-                class => Class,
-                reason => Error,
-                stack => Stack,
-                response => ResponseLine
-            }),
-            {error, {daemon_error, <<"Invalid JSON in response">>}}
-    end.
-
-%% Parse compile result from daemon response.
--spec parse_compile_result(map(), atom()) -> {ok, binary(), [binary()]} | {error, term()}.
-parse_compile_result(Result, ModuleName) ->
-    case maps:get(<<"success">>, Result, false) of
-        true ->
-            case maps:get(<<"core_erlang">>, Result, undefined) of
-                undefined ->
-                    {error, {daemon_error, <<"No core_erlang in response">>}};
-                CoreErlang ->
-                    %% Extract warnings from result
-                    FormattedWarnings = maps:get(<<"formatted_warnings">>, Result, []),
-                    case compile_core_erlang(CoreErlang, ModuleName) of
-                        {ok, Binary} ->
-                            {ok, Binary, FormattedWarnings};
-                        {error, Reason} ->
-                            {error, Reason}
-                    end
-            end;
-        false ->
-            %% Compilation failed - use pre-formatted miette diagnostics
-            FormattedList = maps:get(<<"formatted_diagnostics">>, Result, []),
-            {error, {compile_error_formatted, FormattedList}}
-    end.
-
-%% Compile Core Erlang source to BEAM bytecode.
-%% Uses a secure per-user temp directory to prevent symlink attacks (CWE-377, CWE-59).
--spec compile_core_erlang(binary(), atom()) -> {ok, binary()} | {error, term()}.
-compile_core_erlang(CoreErlangBin, ModuleName) ->
-    case ensure_secure_temp_dir() of
-        {ok, SecureTempDir} ->
-            %% Generate unique filename to prevent race conditions
-            %% Format: {module_name}_{random_suffix}.core
-            RandomSuffix = integer_to_list(erlang:unique_integer([positive])),
-            TempFile = filename:join(SecureTempDir, 
-                                     atom_to_list(ModuleName) ++ "_" ++ RandomSuffix ++ ".core"),
-            try
-                ok = file:write_file(TempFile, CoreErlangBin),
-                %% Compile Core Erlang to BEAM
-                case compile:file(TempFile, [from_core, binary, return_errors]) of
-                    {ok, _CompiledModule, Binary} ->
-                        {ok, Binary};
-                    {ok, _CompiledModule, Binary, _Warnings} ->
-                        {ok, Binary};
-                    {error, Errors, _Warnings} ->
-                        {error, {core_compile_error, format_compile_errors(Errors)}}
-                end
-            catch
-                _:Error ->
-                    {error, {core_compile_error, Error}}
-            after
-                file:delete(TempFile)
-            end;
-        {error, Reason} ->
-            {error, {temp_dir_error, Reason}}
-    end.
-
-%% Ensure a secure per-user temp directory exists for Core Erlang compilation.
-%% Creates ~/.beamtalk/tmp/ with mode 0700 (user-only access) to prevent
-%% symlink attacks (CWE-377, CWE-59).
-%%
-%% The directory is created with restricted permissions so that:
-%% - Only the user can read/write/execute (mode 0700)
-%% - Other users cannot create symlinks in this directory
-%% - Combined with unique filenames, this prevents symlink race conditions
-%%
-%% Returns {ok, Path} where Path is the absolute path to the secure temp directory,
-%% or {error, Reason} if the directory cannot be created.
--spec ensure_secure_temp_dir() -> {ok, string()} | {error, term()}.
-ensure_secure_temp_dir() ->
-    %% Use ~/.beamtalk/tmp/ as secure per-user temp directory
-    %% Requires HOME to be set to avoid falling back to insecure /tmp
-    case os:getenv("HOME") of
-        false ->
-            %% Do not fall back to /tmp to avoid reintroducing symlink attacks.
-            %% Mirror behavior of beamtalk_repl_state: require HOME to be set.
-            {error, no_home_dir};
-        HomeDir ->
-            BeamtalkDir = filename:join(HomeDir, ".beamtalk"),
-            TempDir = filename:join(BeamtalkDir, "tmp"),
-            
-            %% Ensure parent directory exists with secure permissions (0700)
-            case ensure_dir_with_mode(BeamtalkDir, 8#700) of
-                {ok, _} ->
-                    %% Ensure temp directory exists with secure permissions (0700)
-                    ensure_dir_with_mode(TempDir, 8#700);
-                {error, _} = Error ->
-                    Error
-            end
-    end.
-
-%% Ensure a directory exists with the specified mode (octal permissions).
-%% If the directory exists, verifies and corrects permissions if needed.
-%%
-%% ## Platform Support
-%%
-%% This function requires Unix-like systems. On Windows, file:change_mode/2
-%% has limited or no effect, and the security guarantees cannot be ensured.
-%%
-%% Returns {ok, Path} | {error, Reason}.
--spec ensure_dir_with_mode(string(), non_neg_integer()) -> {ok, string()} | {error, term()}.
-ensure_dir_with_mode(Dir, Mode) ->
-    case filelib:is_dir(Dir) of
-        true ->
-            %% Directory exists, verify permissions
-            case file:read_file_info(Dir) of
-                {ok, FileInfo} ->
-                    CurrentMode = FileInfo#file_info.mode,
-                    %% Check if mode matches (compare only permission bits)
-                    case CurrentMode band 8#777 of
-                        Mode ->
-                            {ok, Dir};
-                        _ ->
-                            %% Fix permissions
-                            case file:change_mode(Dir, Mode) of
-                                ok -> {ok, Dir};
-                                {error, ChmodReason} -> {error, {chmod_failed, Dir, ChmodReason}}
-                            end
-                    end;
-                {error, StatReason} ->
-                    {error, {stat_failed, Dir, StatReason}}
-            end;
-        false ->
-            case file:make_dir(Dir) of
-                ok ->
-                    %% Set restrictive permissions
-                    case file:change_mode(Dir, Mode) of
-                        ok -> {ok, Dir};
-                        {error, ChmodReason} -> {error, {chmod_failed, Dir, ChmodReason}}
-                    end;
-                {error, eexist} ->
-                    %% Race condition: dir was created between check and make_dir
-                    %% Recurse to verify permissions
-                    ensure_dir_with_mode(Dir, Mode);
-                {error, MkdirReason} ->
-                    {error, {make_dir_failed, Dir, MkdirReason}}
-            end
-    end.
-
-%% Format pre-formatted diagnostics from daemon (miette output).
+%% Format pre-formatted diagnostics (miette output).
 -spec format_formatted_diagnostics(list()) -> binary().
 format_formatted_diagnostics([]) ->
     <<"Compilation failed">>;
 format_formatted_diagnostics(FormattedList) ->
     %% Join the formatted diagnostics with double newlines for separation
     iolist_to_binary(lists:join(<<"\n\n">>, FormattedList)).
-
-%% Format Erlang compile errors.
-format_compile_errors(Errors) ->
-    lists:flatten([
-        io_lib:format("~s:~p: ~s~n", [File, Line, erl_lint:format_error(Desc)])
-        || {File, FileErrors} <- Errors,
-           {Line, _Module, Desc} <- FileErrors
-    ]).
 
 %% Extract variable name from assignment expression.
 -spec extract_assignment(string()) -> {ok, atom()} | none.
@@ -588,119 +288,6 @@ extract_assignment(Expression) ->
             {ok, list_to_atom(VarName)};
         nomatch ->
             none
-    end.
-
-%% Compile a file via the daemon and extract class metadata.
-%% The daemon derives the module name from the class definition in the AST
-%% and returns it in the response, so we no longer derive from the filename.
--spec compile_file_via_daemon(string(), string(), boolean(), beamtalk_repl_state:state()) ->
-    {ok, binary(), [#{name := string(), superclass := string()}], atom()} | {error, term()}.
-compile_file_via_daemon(Source, Path, StdlibMode, _State) ->
-    SocketPath = daemon_socket_path(),
-    case connect_to_daemon(SocketPath) of
-        {ok, Socket} ->
-            try
-                %% Use compile method (not compile_expression) for files
-                RequestId = erlang:unique_integer([positive]),
-                Request = jsx:encode(#{
-                    <<"jsonrpc">> => <<"2.0">>,
-                    <<"id">> => RequestId,
-                    <<"method">> => <<"compile">>,
-                    <<"params">> => #{
-                        <<"path">> => list_to_binary(Path),
-                        <<"source">> => list_to_binary(Source),
-                        <<"stdlib_mode">> => StdlibMode
-                    }
-                }),
-                
-                ok = gen_tcp:send(Socket, [Request, <<"\n">>]),
-                
-                case gen_tcp:recv(Socket, 0, ?RECV_TIMEOUT) of
-                    {ok, ResponseLine} ->
-                        parse_file_compile_response(ResponseLine);
-                    {error, Reason} ->
-                        {error, {recv_error, Reason}}
-                end
-            after
-                gen_tcp:close(Socket)
-            end;
-        {error, _Reason} ->
-            {error, daemon_unavailable}
-    end.
-
-%% Parse compile response and extract bytecode + class metadata.
--spec parse_file_compile_response(binary()) ->
-    {ok, binary(), [string()], atom()} | {error, term()}.
-parse_file_compile_response(ResponseLine) ->
-    try
-        Response = jsx:decode(ResponseLine, [return_maps]),
-        case maps:get(<<"error">>, Response, undefined) of
-            undefined ->
-                case maps:get(<<"result">>, Response, undefined) of
-                    undefined ->
-                        {error, {daemon_error, <<"Invalid JSON-RPC response">>}};
-                    Result ->
-                        parse_file_compile_result(Result)
-                end;
-            ErrorObj ->
-                Msg = maps:get(<<"message">>, ErrorObj, <<"Unknown error">>),
-                {error, {daemon_error, Msg}}
-        end
-    catch
-        Class:Error:Stack ->
-            ?LOG_DEBUG("Failed to parse file compile response", #{
-                class => Class,
-                reason => Error,
-                stack => Stack,
-                response_preview => binary:part(ResponseLine, 0, min(200, byte_size(ResponseLine)))
-            }),
-            {error, {daemon_error, <<"Invalid JSON in response">>}}
-    end.
-
-%% Parse file compile result and extract bytecode + class names + module name.
--spec parse_file_compile_result(map()) ->
-    {ok, binary(), [string()], atom()} | {error, term()}.
-parse_file_compile_result(Result) ->
-    case maps:get(<<"success">>, Result, false) of
-        true ->
-            case maps:get(<<"core_erlang">>, Result, undefined) of
-                undefined ->
-                    {error, {daemon_error, <<"No core_erlang in response">>}};
-                CoreErlang ->
-                    %% Get module name from daemon response (derived from class name)
-                    case maps:get(<<"module_name">>, Result, undefined) of
-                        undefined ->
-                            {error, {daemon_error, <<"No module_name in response">>}};
-                        ModuleNameBin ->
-                            ModuleName = list_to_atom(binary_to_list(ModuleNameBin)),
-                            %% Compile Core Erlang to BEAM
-                            case compile_core_erlang(CoreErlang, ModuleName) of
-                                {ok, Binary} ->
-                                    ClassNames = extract_class_names(Result),
-                                    {ok, Binary, ClassNames, ModuleName};
-                                {error, Reason} ->
-                                    {error, Reason}
-                            end
-                    end
-            end;
-        false ->
-            %% Use pre-formatted miette diagnostics
-            FormattedList = maps:get(<<"formatted_diagnostics">>, Result, []),
-            {error, {compile_error, format_formatted_diagnostics(FormattedList)}}
-    end.
-
-%% Extract class info from compile result.
-%% Returns list of #{name => string(), superclass => string()} maps.
--spec extract_class_names(map()) -> [map()].
-extract_class_names(Result) ->
-    case maps:get(<<"classes">>, Result, undefined) of
-        undefined ->
-            [];
-        ClassInfoList when is_list(ClassInfoList) ->
-            [#{
-                name => binary_to_list(maps:get(<<"name">>, C, <<"">>)),
-                superclass => binary_to_list(maps:get(<<"superclass">>, C, <<"Object">>))
-            } || C <- ClassInfoList]
     end.
 
 %% Register loaded classes by calling the module's register_class/0 function.

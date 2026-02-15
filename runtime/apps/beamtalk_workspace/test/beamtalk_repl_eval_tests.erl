@@ -3,11 +3,10 @@
 
 %%% @doc Unit tests for beamtalk_repl_eval module
 %%%
-%%% Tests expression evaluation, file loading, and daemon interaction.
+%%% Tests expression evaluation, file loading, and compilation.
 
 -module(beamtalk_repl_eval_tests).
 -include_lib("eunit/include/eunit.hrl").
--include_lib("kernel/include/file.hrl").
 
 %%====================================================================
 %% Tests
@@ -35,7 +34,7 @@ extract_assignment_invalid_variable_name_test() ->
     ?assertEqual(none, beamtalk_repl_eval:extract_assignment("123 := 456")),
     ?assertEqual(none, beamtalk_repl_eval:extract_assignment("$var := 1")).
 
-%%% Daemon diagnostics formatting tests
+%%% Diagnostics formatting tests
 
 format_formatted_diagnostics_empty_test() ->
     ?assertEqual(<<"Compilation failed">>, beamtalk_repl_eval:format_formatted_diagnostics([])).
@@ -51,21 +50,7 @@ format_formatted_diagnostics_multiple_test() ->
     ?assert(binary:match(Result, <<"Error 2">>) =/= nomatch),
     ?assert(binary:match(Result, <<"Error 3">>) =/= nomatch).
 
-%%% Core Erlang compilation tests
-%%%
-%%% Note: Valid Core Erlang compilation requires proper erlc environment setup
-%%% and module name matching. These tests focus on error handling and are
-%%% suitable for unit testing. Valid compilation paths are better tested in
-%%% integration tests with a running compiler daemon.
-
-compile_core_erlang_invalid_test() ->
-    %% Invalid Core Erlang
-    CoreErlang = <<"not valid core erlang">>,
-    ModuleName = bad_module,
-    Result = beamtalk_repl_eval:compile_core_erlang(CoreErlang, ModuleName),
-    ?assertMatch({error, {core_compile_error, _}}, Result).
-
-%%% State-based do_eval tests (require mock daemon)
+%%% State-based do_eval tests
 
 do_eval_increments_counter_test() ->
     %% Test that do_eval increments the eval counter
@@ -79,8 +64,8 @@ do_eval_increments_counter_test() ->
     
     ?assertEqual(InitialCounter + 1, NewCounter).
 
-do_eval_no_daemon_error_test() ->
-    %% Without a running compiler server, should get compile_error
+do_eval_no_compiler_error_test() ->
+    %% Without a running compiler server (port backend), should get compile_error
     State = beamtalk_repl_state:new(undefined, 0),
     Result = beamtalk_repl_eval:do_eval("1 + 1", State),
     ?assertMatch({error, {compile_error, _}, _, _, _}, Result),
@@ -104,67 +89,7 @@ handle_load_directory_test() ->
     %% Should get read_error since it's a directory
     ?assertMatch({error, {read_error, _}, _}, Result).
 
-%%% Class name extraction tests
-
-extract_class_names_no_classes_test() ->
-    Result = #{<<"success">> => true, <<"core_erlang">> => <<"...">>},
-    ?assertEqual([], beamtalk_repl_eval:extract_class_names(Result)).
-
-extract_class_names_with_classes_test() ->
-    Result = #{
-        <<"success">> => true,
-        <<"classes">> => [
-            #{<<"name">> => <<"Counter">>, <<"superclass">> => <<"Actor">>},
-            #{<<"name">> => <<"Point">>, <<"superclass">> => <<"Object">>},
-            #{<<"name">> => <<"Actor">>, <<"superclass">> => <<"Object">>}
-        ]
-    },
-    Expected = [
-        #{name => "Counter", superclass => "Actor"},
-        #{name => "Point", superclass => "Object"},
-        #{name => "Actor", superclass => "Object"}
-    ],
-    ?assertEqual(Expected, beamtalk_repl_eval:extract_class_names(Result)).
-
-extract_class_names_empty_list_test() ->
-    Result = #{<<"success">> => true, <<"classes">> => []},
-    ?assertEqual([], beamtalk_repl_eval:extract_class_names(Result)).
-
-%%% compile_core_erlang tests
-
-compile_core_erlang_valid_simple_module_test() ->
-    %% Valid minimal Core Erlang module
-    %% Note: Core Erlang is very strict about format
-    CoreErlang = <<"module 'test_module' ['main'/0]\n"
-                   "attributes []\n"
-                   "'main'/0 = fun () -> 42\n">>,
-    ModuleName = test_module,
-    Result = beamtalk_repl_eval:compile_core_erlang(CoreErlang, ModuleName),
-    %% This should succeed or fail with core_compile_error depending on Core Erlang validity
-    case Result of
-        {ok, Binary} ->
-            %% If it succeeds, verify it's a valid BEAM binary
-            ?assert(is_binary(Binary)),
-            ?assert(byte_size(Binary) > 0);
-        {error, {core_compile_error, _}} ->
-            %% Core Erlang syntax might be too strict for this simple test
-            %% The important thing is that the function handles compilation
-            ok
-    end.
-
-compile_core_erlang_file_write_error_test() ->
-    %% Test with an invalid temp directory that doesn't exist
-    %% This will cause file:write_file to fail
-    %% Note: We can't easily mock file:write_file in EUnit, so we test
-    %% the error path by providing invalid Core Erlang instead
-    CoreErlang = <<"not valid core erlang syntax at all">>,
-    ModuleName = bad_syntax_module,
-    Result = beamtalk_repl_eval:compile_core_erlang(CoreErlang, ModuleName),
-    ?assertMatch({error, {core_compile_error, _}}, Result).
-
-%%% format_compile_errors is internal - tested indirectly via compile_core_erlang
-
-%%% Additional do_eval tests (with mocked daemon scenarios)
+%%% Additional do_eval tests
 
 do_eval_load_binary_error_test() ->
     %% Test case where compilation fails without compiler server
@@ -218,161 +143,6 @@ handle_load_compile_error_test() ->
         Other -> error({unexpected_result, Other})
     end.
 
-%%% Secure temp directory tests (BT-56)
-
-ensure_secure_temp_dir_creates_directory_test() ->
-    %% Test that ensure_secure_temp_dir creates the directory
-    Result = beamtalk_repl_eval:ensure_secure_temp_dir(),
-    ?assertMatch({ok, _}, Result),
-    {ok, Dir} = Result,
-    %% Verify directory exists
-    ?assert(filelib:is_dir(Dir)),
-    %% Verify it's under ~/.beamtalk/tmp/
-    ?assert(lists:suffix("/tmp", Dir) orelse lists:suffix("/tmp/", Dir)).
-
-%% Helper to check if we're on Unix (where permission tests work)
-is_unix() ->
-    case os:type() of
-        {unix, _} -> true;
-        _ -> false
-    end.
-
-ensure_secure_temp_dir_has_secure_permissions_test() ->
-    %% Test that directory has mode 0700 (Unix only)
-    case is_unix() of
-        true ->
-            {ok, Dir} = beamtalk_repl_eval:ensure_secure_temp_dir(),
-            {ok, FileInfo} = file:read_file_info(Dir),
-            Mode = FileInfo#file_info.mode band 8#777,
-            %% Should be 0700 (448 in decimal)
-            ?assertEqual(8#700, Mode);
-        false ->
-            %% Skip on non-Unix platforms (Windows)
-            ok
-    end.
-
-ensure_secure_temp_dir_idempotent_test() ->
-    %% Calling multiple times should return same directory
-    {ok, Dir1} = beamtalk_repl_eval:ensure_secure_temp_dir(),
-    {ok, Dir2} = beamtalk_repl_eval:ensure_secure_temp_dir(),
-    ?assertEqual(Dir1, Dir2).
-
-ensure_dir_with_mode_creates_new_directory_test() ->
-    %% Create a temporary directory with unique name for testing (Unix only)
-    case is_unix() of
-        true ->
-            UniqueId = erlang:unique_integer([positive]),
-            TestDir = filename:join(os:getenv("TMPDIR", "/tmp"), 
-                                    io_lib:format("test_dir_mode_~p", [UniqueId])),
-            
-            %% Ensure it doesn't exist
-            file:del_dir(TestDir),
-            
-            %% Create with mode 0700
-            Result = beamtalk_repl_eval:ensure_dir_with_mode(TestDir, 8#700),
-            ?assertMatch({ok, _}, Result),
-            {ok, ReturnedDir} = Result,
-            ?assertEqual(TestDir, ReturnedDir),
-            
-            %% Verify it exists and has correct permissions
-            ?assert(filelib:is_dir(TestDir)),
-            {ok, FileInfo} = file:read_file_info(TestDir),
-            Mode = FileInfo#file_info.mode band 8#777,
-            ?assertEqual(8#700, Mode),
-            
-            %% Clean up
-            file:del_dir(TestDir);
-        false ->
-            %% Skip on non-Unix platforms
-            ok
-    end.
-
-ensure_dir_with_mode_fixes_permissions_test() ->
-    %% Create a directory with wrong permissions, verify it gets fixed (Unix only)
-    case is_unix() of
-        true ->
-            UniqueId = erlang:unique_integer([positive]),
-            TestDir = filename:join(os:getenv("TMPDIR", "/tmp"), 
-                                    io_lib:format("test_dir_perms_~p", [UniqueId])),
-            
-            %% Create with permissive mode 0755
-            file:del_dir(TestDir),
-            ok = file:make_dir(TestDir),
-            ok = file:change_mode(TestDir, 8#755),
-            
-            %% Verify wrong permissions
-            {ok, FileInfo1} = file:read_file_info(TestDir),
-            ?assertEqual(8#755, FileInfo1#file_info.mode band 8#777),
-            
-            %% Call ensure_dir_with_mode to fix it
-            {ok, _} = beamtalk_repl_eval:ensure_dir_with_mode(TestDir, 8#700),
-            
-            %% Verify permissions are now correct
-            {ok, FileInfo2} = file:read_file_info(TestDir),
-            ?assertEqual(8#700, FileInfo2#file_info.mode band 8#777),
-            
-            %% Clean up
-            file:del_dir(TestDir);
-        false ->
-            %% Skip on non-Unix platforms
-            ok
-    end.
-
-ensure_dir_with_mode_existing_correct_permissions_test() ->
-    %% If directory exists with correct permissions, should just return ok (Unix only)
-    case is_unix() of
-        true ->
-            UniqueId = erlang:unique_integer([positive]),
-            TestDir = filename:join(os:getenv("TMPDIR", "/tmp"), 
-                                    io_lib:format("test_dir_ok_~p", [UniqueId])),
-            
-            %% Create with correct mode
-            file:del_dir(TestDir),
-            ok = file:make_dir(TestDir),
-            ok = file:change_mode(TestDir, 8#700),
-            
-            %% Call ensure_dir_with_mode
-            Result = beamtalk_repl_eval:ensure_dir_with_mode(TestDir, 8#700),
-            ?assertMatch({ok, _}, Result),
-            
-            %% Permissions should still be correct
-            {ok, FileInfo} = file:read_file_info(TestDir),
-            ?assertEqual(8#700, FileInfo#file_info.mode band 8#777),
-            
-            %% Clean up
-            file:del_dir(TestDir);
-        false ->
-            %% Skip on non-Unix platforms
-            ok
-    end.
-
-compile_core_erlang_uses_secure_temp_dir_test() ->
-    %% Test that compile_core_erlang uses the secure temp directory (Unix only)
-    case is_unix() of
-        true ->
-            %% We can't easily test the full compilation path without a valid Core Erlang module,
-            %% but we can verify that the secure temp dir is created
-            CoreErlang = <<"module 'test_secure' ['main'/0]\n"
-                           "attributes []\n"
-                           "'main'/0 = fun () -> 42\n">>,
-            ModuleName = test_secure,
-            
-            %% Call compile_core_erlang (will likely fail with invalid Core Erlang syntax)
-            _Result = beamtalk_repl_eval:compile_core_erlang(CoreErlang, ModuleName),
-            
-            %% Verify secure temp directory was created
-            {ok, SecureTempDir} = beamtalk_repl_eval:ensure_secure_temp_dir(),
-            ?assert(filelib:is_dir(SecureTempDir)),
-            
-            %% Verify it has secure permissions
-            {ok, FileInfo} = file:read_file_info(SecureTempDir),
-            Mode = FileInfo#file_info.mode band 8#777,
-            ?assertEqual(8#700, Mode);
-        false ->
-            %% Skip on non-Unix platforms
-            ok
-    end.
-
 %%% BT-238: Test future_rejected → error conversion
 
 %% Test that do_eval treats {future_rejected, Reason} as an error
@@ -392,43 +162,6 @@ do_eval_rejected_future_becomes_error_test() ->
     
     %% TODO BT-240: Add proper unit test with mocked maybe_await_future
     ok.
-
-%%% parse_file_compile_result tests
-
-parse_file_compile_result_extracts_module_name_test() ->
-    %% Simulate a daemon response with module_name, core_erlang, and classes.
-    %% We use a minimal Core Erlang module that compile:forms can handle.
-    CoreErlang = <<"module 'counter' ['__info__'/0]\n  attributes []\n'__info__'/0 = fun () -> 'ok'\nend">>,
-    Result = #{
-        <<"success">> => true,
-        <<"core_erlang">> => CoreErlang,
-        <<"module_name">> => <<"counter">>,
-        <<"classes">> => []
-    },
-    case beamtalk_repl_eval:parse_file_compile_result(Result) of
-        {ok, Binary, _ClassNames, ModuleName} ->
-            ?assertEqual(counter, ModuleName),
-            ?assert(is_binary(Binary));
-        {error, Reason} ->
-            error({unexpected_error, Reason})
-    end.
-
-parse_file_compile_result_missing_module_name_test() ->
-    Result = #{
-        <<"success">> => true,
-        <<"core_erlang">> => <<"module 'test' [] attributes [] end">>,
-        <<"classes">> => []
-    },
-    ?assertMatch({error, {daemon_error, <<"No module_name in response">>}},
-                 beamtalk_repl_eval:parse_file_compile_result(Result)).
-
-parse_file_compile_result_failure_test() ->
-    Result = #{
-        <<"success">> => false,
-        <<"formatted_diagnostics">> => [<<"Error at line 1">>]
-    },
-    ?assertMatch({error, {compile_error, _}},
-                 beamtalk_repl_eval:parse_file_compile_result(Result)).
 
 %%% IO Capture tests (BT-355)
 
@@ -651,59 +384,6 @@ maybe_await_future_non_future_pid_test() ->
     Result = beamtalk_repl_eval:maybe_await_future(NonFuturePid),
     ?assertEqual(NonFuturePid, Result).
 
-%%% compile_core_erlang valid test
-
-compile_core_erlang_valid_module_test() ->
-    %% A properly formatted Core Erlang module that erlc should accept
-    CoreErlang = <<"module 'bt_test_valid_core' ['main'/0]\n"
-                   "  attributes []\n"
-                   "'main'/0 = fun () -> 42\n"
-                   "end">>,
-    Result = beamtalk_repl_eval:compile_core_erlang(CoreErlang, bt_test_valid_core),
-    ?assertMatch({ok, _Binary}, Result),
-    {ok, Binary} = Result,
-    ?assert(is_binary(Binary)),
-    ?assert(byte_size(Binary) > 0).
-
-%%% parse_file_compile_result edge cases
-
-parse_file_compile_result_missing_core_erlang_test() ->
-    %% success=true but no core_erlang field
-    Result = #{
-        <<"success">> => true,
-        <<"module_name">> => <<"test">>,
-        <<"classes">> => []
-    },
-    ?assertMatch({error, {daemon_error, <<"No core_erlang in response">>}},
-                 beamtalk_repl_eval:parse_file_compile_result(Result)).
-
-parse_file_compile_result_failure_with_empty_diagnostics_test() ->
-    Result = #{
-        <<"success">> => false
-    },
-    ?assertMatch({error, {compile_error, <<"Compilation failed">>}},
-                 beamtalk_repl_eval:parse_file_compile_result(Result)).
-
-parse_file_compile_result_with_classes_test() ->
-    %% Success path with class metadata
-    CoreErlang = <<"module 'counter' ['__info__'/0]\n  attributes []\n'__info__'/0 = fun () -> 'ok'\nend">>,
-    Result = #{
-        <<"success">> => true,
-        <<"core_erlang">> => CoreErlang,
-        <<"module_name">> => <<"counter">>,
-        <<"classes">> => [
-            #{<<"name">> => <<"Counter">>, <<"superclass">> => <<"Actor">>}
-        ]
-    },
-    case beamtalk_repl_eval:parse_file_compile_result(Result) of
-        {ok, Binary, ClassNames, ModuleName} ->
-            ?assertEqual(counter, ModuleName),
-            ?assert(is_binary(Binary)),
-            ?assertEqual([#{name => "Counter", superclass => "Actor"}], ClassNames);
-        {error, Reason} ->
-            error({unexpected_error, Reason})
-    end.
-
 %%% extract_assignment edge cases
 
 extract_assignment_empty_string_test() ->
@@ -718,46 +398,6 @@ extract_assignment_complex_rhs_test() ->
 
 extract_assignment_underscore_prefix_test() ->
     ?assertEqual({ok, '_temp'}, beamtalk_repl_eval:extract_assignment("_temp := 0")).
-
-%%% extract_class_names edge cases
-
-extract_class_names_missing_name_field_test() ->
-    %% Class with missing name defaults to empty string
-    Result = #{
-        <<"success">> => true,
-        <<"classes">> => [
-            #{<<"superclass">> => <<"Object">>}
-        ]
-    },
-    ?assertEqual([#{name => "", superclass => "Object"}],
-                 beamtalk_repl_eval:extract_class_names(Result)).
-
-extract_class_names_missing_superclass_field_test() ->
-    %% Class with missing superclass defaults to "Object"
-    Result = #{
-        <<"success">> => true,
-        <<"classes">> => [
-            #{<<"name">> => <<"Point">>}
-        ]
-    },
-    ?assertEqual([#{name => "Point", superclass => "Object"}],
-                 beamtalk_repl_eval:extract_class_names(Result)).
-
-extract_class_names_multiple_classes_test() ->
-    Result = #{
-        <<"success">> => true,
-        <<"classes">> => [
-            #{<<"name">> => <<"A">>, <<"superclass">> => <<"Object">>},
-            #{<<"name">> => <<"B">>, <<"superclass">> => <<"A">>},
-            #{<<"name">> => <<"C">>, <<"superclass">> => <<"B">>}
-        ]
-    },
-    Expected = [
-        #{name => "A", superclass => "Object"},
-        #{name => "B", superclass => "A"},
-        #{name => "C", superclass => "B"}
-    ],
-    ?assertEqual(Expected, beamtalk_repl_eval:extract_class_names(Result)).
 
 %%% handle_io_request tests
 

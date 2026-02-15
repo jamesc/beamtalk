@@ -56,8 +56,6 @@ use miette::{IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::paths::socket_path;
-
 /// Default idle timeout in seconds (4 hours)
 const DEFAULT_IDLE_TIMEOUT_SECONDS: u64 = 3600 * 4;
 
@@ -467,7 +465,7 @@ pub fn start_detached_node(
         stdlib_beam_dir,
         &eval_cmd,
         &project_path,
-    )?;
+    );
 
     let _child = cmd.spawn().map_err(|e| {
         miette!("Failed to start detached BEAM node: {e}\nIs Erlang/OTP installed?")
@@ -532,7 +530,7 @@ fn build_detached_node_command(
     stdlib_beam_dir: &Path,
     eval_cmd: &str,
     project_root: &Path,
-) -> Result<Command> {
+) -> Command {
     let (node_flag, node_arg) = if node_name.contains('@') {
         ("-name", node_name.to_string())
     } else {
@@ -563,12 +561,11 @@ fn build_detached_node_command(
     let mut cmd = Command::new("erl");
     cmd.args(&args)
         .current_dir(project_root)
-        .env("BEAMTALK_DAEMON_SOCKET", socket_path()?.as_os_str())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
 
-    Ok(cmd)
+    cmd
 }
 
 /// Find the PID of a BEAM process by its node name.
@@ -1610,34 +1607,6 @@ mod tests {
                 "All threads must observe the same cookie value"
             );
         }
-    }
-
-    #[test]
-    fn test_detached_node_command_sets_daemon_socket_env() {
-        let cmd = build_detached_node_command(
-            "beamtalk_workspace_test@localhost",
-            "test-cookie",
-            Path::new("/tmp/runtime"),
-            Path::new("/tmp/repl"),
-            Path::new("/tmp/jsx"),
-            Path::new("/tmp/compiler"),
-            Path::new("/tmp/stdlib"),
-            "ok.",
-            Path::new("/tmp/project"),
-        )
-        .unwrap();
-
-        let expected_socket = socket_path().unwrap();
-        let env_vars: std::collections::HashMap<_, _> = cmd.get_envs().collect();
-        assert!(
-            env_vars.contains_key(std::ffi::OsStr::new("BEAMTALK_DAEMON_SOCKET")),
-            "Command must set BEAMTALK_DAEMON_SOCKET env var"
-        );
-        assert_eq!(
-            env_vars[std::ffi::OsStr::new("BEAMTALK_DAEMON_SOCKET")],
-            Some(expected_socket.as_os_str()),
-            "BEAMTALK_DAEMON_SOCKET must match socket_path()"
-        );
     }
 
     #[test]

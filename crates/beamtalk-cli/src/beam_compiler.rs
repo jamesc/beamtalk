@@ -61,11 +61,15 @@ pub enum CompilerBackend {
 
 /// Resolve the compiler backend from the `BEAMTALK_COMPILER` environment variable.
 ///
-/// - `"escript"` or `"daemon"` → [`CompilerBackend::Escript`] (daemon maps to escript for build)
+/// - `"escript"` → [`CompilerBackend::Escript`] (legacy fallback)
 /// - Anything else (including unset) → [`CompilerBackend::Port`] (default)
 pub fn resolve_backend() -> CompilerBackend {
     match std::env::var("BEAMTALK_COMPILER").as_deref() {
-        Ok("escript" | "daemon") => CompilerBackend::Escript,
+        Ok("escript") => CompilerBackend::Escript,
+        Ok(other) => {
+            eprintln!("Warning: unknown BEAMTALK_COMPILER value '{other}', defaulting to port");
+            CompilerBackend::Port
+        }
         _ => CompilerBackend::Port,
     }
 }
