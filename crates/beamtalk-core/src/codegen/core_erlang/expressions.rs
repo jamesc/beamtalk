@@ -3,7 +3,9 @@
 
 //! Expression code generation.
 //!
-//! This module handles code generation for Beamtalk expressions:
+//! **DDD Context:** Compilation — Code Generation
+//!
+//! This domain service handles code generation for Beamtalk expressions:
 //! - Literals (integers, floats, strings, symbols)
 //! - Identifiers and variable references
 //! - Map literals
@@ -19,7 +21,7 @@ use super::document::Document;
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{
     Block, CascadeMessage, Expression, Identifier, Literal, MapPair, MatchArm, MessageSelector,
-    Pattern,
+    Pattern, StringSegment,
 };
 use crate::docvec;
 use std::fmt::Write; // For write!() on local String buffers (not self.output)
@@ -34,7 +36,7 @@ impl CoreErlangGenerator {
     /// - Symbols: `#foo` → atom `'foo'`
     /// - Characters: `$a` → integer `97`
     /// - Arrays: `[1, 2, 3]` → list `[1, 2, 3]`
-    #[allow(clippy::self_only_used_in_recursion)]
+    #[allow(clippy::self_only_used_in_recursion)] // &self needed for method resolution
     pub(super) fn generate_literal(&self, lit: &Literal) -> Result<Document<'static>> {
         match lit {
             Literal::Integer(n) => Ok(docvec![format!("{n}")]),
@@ -57,6 +59,82 @@ impl CoreErlangGenerator {
                 Ok(Document::Vec(parts))
             }
         }
+    }
+
+    /// Generates code for a string interpolation expression (ADR 0023 Phase 3).
+    ///
+    /// Compiles `StringInterpolation` to Core Erlang binary construction:
+    /// - Literal segments → byte sequences in the binary
+    /// - Expression segments → evaluate, dispatch `printString`, insert as binary segment
+    ///
+    /// Example: `"Hello, {name}!"` compiles to:
+    /// ```text
+    /// let _interpExpr1 = Name in
+    ///   let _interpRaw2 = call 'beamtalk_message_dispatch':'send'(_interpExpr1, 'printString', []) in
+    ///     let _interpStr3 =
+    ///       case call 'erlang':'is_pid'(_interpRaw2) of
+    ///         <'true'>  when 'true' -> call 'beamtalk_future':'await'(_interpRaw2)
+    ///         <'false'> when 'true' -> _interpRaw2
+    ///       end
+    ///     in
+    ///       #{#<72>(8,1,...), ..., #<_interpStr3>('all',8,'binary',...), #<33>(8,1,...)}#
+    /// ```
+    pub(super) fn generate_string_interpolation(
+        &mut self,
+        segments: &[StringSegment],
+    ) -> Result<Document<'static>> {
+        // Collect let-bindings for expression segments and binary segments
+        let mut let_bindings: Vec<Document<'static>> = Vec::new();
+        let mut binary_parts: Vec<String> = Vec::new();
+
+        for segment in segments {
+            match segment {
+                StringSegment::Literal(s) => {
+                    if !s.is_empty() {
+                        binary_parts.push(Self::binary_byte_segments(s));
+                    }
+                }
+                StringSegment::Interpolation(expr) => {
+                    let expr_doc = self.expression_doc(expr)?;
+                    let interp_var = self.fresh_temp_var("interpExpr");
+                    let raw_str_var = self.fresh_temp_var("interpRaw");
+                    let str_var = self.fresh_temp_var("interpStr");
+
+                    // Evaluate the expression
+                    let_bindings.push(docvec![format!("let {interp_var} = "), expr_doc, " in ",]);
+
+                    // Dispatch printString to convert to binary string
+                    let_bindings.push(docvec![format!(
+                        "let {raw_str_var} = call 'beamtalk_message_dispatch':'send'({interp_var}, 'printString', []) in "
+                    )]);
+
+                    // Auto-await if the result is a future (actor dispatch returns pid)
+                    let_bindings.push(docvec![format!(
+                        "let {str_var} = case call 'erlang':'is_pid'({raw_str_var}) of \
+                         <'true'> when 'true' -> call 'beamtalk_future':'await'({raw_str_var}) \
+                         <'false'> when 'true' -> {raw_str_var} end in "
+                    )]);
+
+                    // Add as binary segment: #<Var>('all',8,'binary',['unsigned'|['big']])
+                    binary_parts.push(format!(
+                        "#<{str_var}>('all',8,'binary',['unsigned'|['big']])"
+                    ));
+                }
+            }
+        }
+
+        // Build the binary literal: #{seg1,seg2,...}#
+        let binary_content = binary_parts.join(",");
+        let binary_doc = docvec![format!("#{{{binary_content}}}#")];
+
+        // Wrap with let-bindings
+        let mut doc = Document::Vec(Vec::new());
+        for binding in let_bindings {
+            doc = docvec![doc, binding];
+        }
+        doc = docvec![doc, binary_doc];
+
+        Ok(doc)
     }
 
     /// Generates code for an identifier reference.

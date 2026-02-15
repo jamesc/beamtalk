@@ -59,7 +59,7 @@ impl CoreErlangGenerator {
     ///     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
     ///        in {'ok', FinalState}
     /// ```
-    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::too_many_lines)] // inheritance-aware init with parent state merge
     pub(in crate::codegen::core_erlang) fn generate_init_function(
         &mut self,
         module: &Module,
@@ -211,7 +211,7 @@ impl CoreErlangGenerator {
     ///
     /// Per BT-29 design doc, uses `safe_dispatch/3` for error isolation and
     /// sends `{resolve, Result}` or `{reject, Error}` to the `FuturePid`.
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_handle_cast(
         &mut self,
     ) -> Result<Document<'static>> {
@@ -287,7 +287,7 @@ impl CoreErlangGenerator {
     ///
     /// Per BT-29 design doc, uses `safe_dispatch/3` for error isolation and
     /// returns `{ok, Result}` or `{error, Error}` tuples.
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_handle_call(
         &mut self,
     ) -> Result<Document<'static>> {
@@ -359,8 +359,8 @@ impl CoreErlangGenerator {
     /// When Extra contains `{NewInstanceVars, Module}`, the hot reload service
     /// migrates fields: adds new fields with defaults, preserves existing values,
     /// and drops removed fields.
-    #[allow(clippy::unused_self)]
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unused_self)] // method on impl for API consistency
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_code_change(
         &self,
     ) -> Result<Document<'static>> {
@@ -395,7 +395,7 @@ impl CoreErlangGenerator {
     ///         <_Other> when 'true' -> 'ok'
     ///     end
     /// ```
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_terminate(
         &mut self,
         _module: &Module,

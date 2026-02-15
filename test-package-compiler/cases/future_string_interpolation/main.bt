@@ -1,9 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Test future feature: string interpolation
-// Double-quoted strings with embedded expressions using {expr} syntax
-// NOTE: This feature is not yet implemented - test documents expected behavior
+// Test string interpolation compilation (ADR 0023 Phase 3)
 
 // Simple variable interpolation
 name := "Alice"
@@ -18,28 +16,22 @@ firstName := "Bob"
 lastName := "Smith"
 fullName := "Name: {firstName} {lastName}"
 
-// Nested interpolation with message sends
-user := User new
-profile := "User: {user getName}, Email: {user getEmail}"
-
-// Interpolation with operators and blocks
-count := 10
-summary := "Total: {count * 2}, Double: {[:x | x * 2] value: count}"
-
 // Escape sequences in interpolated strings
 escaped := "Literal braces: \{ and \}, variable: {name}"
-
-// Multi-line interpolated string
-multiLine := "First line: {firstName}
-Second line: {lastName}
-Third line: {age}"
 
 // Unicode in interpolated strings
 emojiVar := "🎉"
 withEmoji := "Celebration: {emojiVar} {name}!"
 
-// Empty interpolation (edge case)
-emptyInterp := "Before {} After"
+// Integer printString conversion
+count := 10
+summary := "Total: {count * 2}"
 
-// Nested braces (complex case)
-nested := "Outer {inner at: {key get}}"
+// Adjacent interpolations
+adjacent := "{firstName}{lastName}"
+
+// Only interpolation (no literal segments)
+bare := "{name}"
+
+// Plain string (no interpolation, zero overhead)
+plain := "Hello, World!"

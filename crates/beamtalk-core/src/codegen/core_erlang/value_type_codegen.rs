@@ -259,7 +259,7 @@ impl CoreErlangGenerator {
 
     /// Generates a `new` or `new:` function that raises `instantiation_error`
     /// for primitive types that cannot be instantiated with `new`.
-    #[allow(clippy::unnecessary_wraps, clippy::unused_self)]
+    #[allow(clippy::unnecessary_wraps, clippy::unused_self)] // uniform codegen interface
     fn generate_primitive_new_error(
         &mut self,
         class_name: &str,
@@ -294,7 +294,6 @@ impl CoreErlangGenerator {
     }
 
     /// Generates `new/0` for a collection type that returns an empty native value.
-    #[allow(clippy::unnecessary_wraps)]
     fn generate_collection_new(empty_value: &str) -> Document<'static> {
         docvec![
             "'new'/0 = fun () ->\n",
@@ -306,7 +305,6 @@ impl CoreErlangGenerator {
     }
 
     /// Generates `new/1` for Dictionary: returns `InitArgs` directly.
-    #[allow(clippy::unnecessary_wraps)]
     fn generate_collection_new_with_args() -> Document<'static> {
         docvec!["'new'/1 = fun (InitArgs) ->\n", "    InitArgs\n", "\n",]
     }
@@ -465,7 +463,7 @@ impl CoreErlangGenerator {
     /// BT-447: For classes with zero instance methods (e.g., File), generates a
     /// minimal stub that handles only `class` and `respondsTo:`, delegating
     /// everything else to the superclass.
-    #[allow(clippy::too_many_lines, clippy::format_push_string)]
+    #[allow(clippy::too_many_lines, clippy::format_push_string)] // one arm per primitive selector
     fn generate_primitive_dispatch(
         &mut self,
         class: &ClassDefinition,
@@ -643,7 +641,7 @@ impl CoreErlangGenerator {
     /// for reflection primitives (instVarAt:, printString, etc.) that need
     /// access to the actor's state map. For all other value types, this is
     /// a simple wrapper that delegates to dispatch/3.
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     fn generate_dispatch_4(&mut self, _class: &ClassDefinition) -> Result<Document<'static>> {
         let class_name = self.class_name().clone();
         let mod_name = self.module_name.clone();
@@ -664,7 +662,7 @@ impl CoreErlangGenerator {
     /// Actor instances inherit Object methods via the hierarchy walk. These
     /// methods need access to the actor's State map for proper reflection
     /// (field access, class name, etc.).
-    #[allow(clippy::too_many_lines, clippy::unnecessary_wraps)]
+    #[allow(clippy::too_many_lines)] // Object dispatch with reflection primitives
     fn generate_object_dispatch_4(&self, mod_name: &str) -> Document<'static> {
         let a_space_binary = Self::core_erlang_binary("a ");
 
@@ -802,7 +800,7 @@ impl CoreErlangGenerator {
     }
 
     /// Generates a structured `arity_mismatch` error for dispatch/4 argument validation.
-    #[allow(clippy::unused_self)]
+    #[allow(clippy::unused_self)] // method on impl for API consistency
     fn arity_error_fragment(&self, selector: &str, expected_arity: u32, indent: &str) -> String {
         let hint = Self::core_erlang_binary(&format!(
             "Expected {expected_arity} argument(s) for {selector}"
@@ -816,7 +814,7 @@ impl CoreErlangGenerator {
     }
 
     /// Generates a structured `type_error` for dispatch/4 argument validation.
-    #[allow(clippy::unused_self)]
+    #[allow(clippy::unused_self)] // method on impl for API consistency
     fn type_error_fragment(&self, selector: &str, hint_msg: &str, indent: &str) -> String {
         let hint = Self::core_erlang_binary(hint_msg);
         format!(
@@ -907,7 +905,7 @@ impl CoreErlangGenerator {
     /// superclass. `perform:` must re-dispatch through this module to preserve
     /// extension lookup and correct error attribution. Skips instVarNames,
     /// instVarAt:, instVarAt:put: since the superclass already handles them.
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     fn generate_minimal_dispatch(&mut self, class: &ClassDefinition) -> Result<Document<'static>> {
         let class_name = self.class_name().clone();
         let mod_name = self.module_name.clone();
@@ -958,7 +956,7 @@ impl CoreErlangGenerator {
     ///
     /// Checks `class`, `respondsTo:`, `perform:`, `perform:withArguments:`,
     /// then extensions, then delegates to superclass.
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     fn generate_minimal_has_method(
         &mut self,
         class: &ClassDefinition,

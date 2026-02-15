@@ -3,10 +3,14 @@
 
 //! Block mutation analysis for control flow constructs.
 //!
-//! This module analyzes blocks to detect which variables and fields are read/written,
-//! enabling proper state threading in tail-recursive loops.
+//! **DDD Context:** Compilation — Code Generation
+//!
+//! This domain service analyzes blocks to detect which variables and fields are
+//! read/written, enabling proper state threading in tail-recursive loops.
 
-use crate::ast::{Block, Expression, MessageSelector};
+#[cfg(test)]
+use crate::ast::MessageSelector;
+use crate::ast::{Block, Expression};
 use std::collections::HashSet;
 
 /// Analysis results for a block's variable and field usage.
@@ -31,7 +35,6 @@ impl BlockMutationAnalysis {
     }
 
     /// Returns true if the block has any mutations (local or field).
-    #[allow(dead_code)] // Used in tests and will be used for error detection
     pub fn has_mutations(&self) -> bool {
         !self.local_writes.is_empty() || !self.field_writes.is_empty()
     }
@@ -43,19 +46,10 @@ impl BlockMutationAnalysis {
     }
 
     /// Returns all variables that need threading (read AND written).
-    #[allow(dead_code)] // Used in tests
+    #[cfg(test)]
     pub fn threaded_vars(&self) -> HashSet<String> {
         self.local_reads
             .intersection(&self.local_writes)
-            .cloned()
-            .collect()
-    }
-
-    /// Returns all fields that need threading (read AND written).
-    #[allow(dead_code)] // Used in tests
-    pub fn threaded_fields(&self) -> HashSet<String> {
-        self.field_reads
-            .intersection(&self.field_writes)
             .cloned()
             .collect()
     }
@@ -255,13 +249,13 @@ fn is_self_reference(expr: &Expression) -> bool {
 }
 
 /// Checks if a block is a literal block (not a variable reference).
-#[allow(dead_code)] // Will be used for timesRepeat:, to:do:, etc.
+#[cfg(test)]
 pub fn is_literal_block(expr: &Expression) -> bool {
     matches!(expr, Expression::Block(_))
 }
 
 /// Checks if a message send is a control flow construct with a literal block.
-#[allow(dead_code)] // Will be used for control flow detection
+#[cfg(test)]
 pub fn is_control_flow_construct(
     receiver: &Expression,
     selector: &MessageSelector,

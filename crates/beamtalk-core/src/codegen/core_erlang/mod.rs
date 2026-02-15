@@ -457,8 +457,7 @@ pub(super) struct CoreErlangGenerator {
     source_text: Option<String>,
     /// BT-295: Primitive binding table from compiled stdlib (ADR 0007).
     /// Used by `generate_primitive()` for method body compilation via static methods.
-    /// The field is stored for future call-site optimization with static typing.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // stored for future call-site optimization with static typing
     primitive_bindings: PrimitiveBindingTable,
     /// Identity of the class currently being compiled (if any).
     /// Set from the AST class definition at the start of module generation.
@@ -835,6 +834,9 @@ impl CoreErlangGenerator {
                 name, is_quoted, ..
             } => self.generate_primitive(name, *is_quoted),
             Expression::Match { value, arms, .. } => self.generate_match(value, arms),
+            Expression::StringInterpolation { segments, .. } => {
+                self.generate_string_interpolation(segments)
+            }
             _ => Err(CodeGenError::UnsupportedFeature {
                 feature: format!("expression type: {expr:?}"),
                 location: format!("{:?}", expr.span()),
@@ -847,7 +849,7 @@ impl CoreErlangGenerator {
     /// ADR 0019 Phase 3: In workspace mode, checks REPL bindings first for
     /// convenience names (Transcript, Beamtalk, Workspace), then falls back
     /// to class registry lookup. In batch mode, goes directly to the registry.
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     fn generate_class_reference(&mut self, class_name: &str) -> Result<Document<'static>> {
         // ADR 0019 Phase 3: Only check bindings in REPL top-level context.
         // Actor methods compiled in workspace mode should NOT check REPL bindings.
@@ -919,7 +921,7 @@ impl CoreErlangGenerator {
     ///
     /// Check if an expression is a control flow construct (whileTrue:, whileFalse:, timesRepeat:, etc.)
     /// with literal blocks that has threaded mutations. Returns the threaded variable names if so.
-    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::too_many_lines)] // one branch per control flow construct (whileTrue:, timesRepeat:, etc.)
     fn get_control_flow_threaded_vars(expr: &Expression) -> Option<Vec<String>> {
         use crate::codegen::core_erlang::block_analysis::analyze_block;
 
