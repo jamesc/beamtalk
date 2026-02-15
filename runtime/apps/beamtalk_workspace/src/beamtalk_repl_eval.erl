@@ -281,7 +281,10 @@ is_stdlib_path(Path) ->
 
 %% Compile a Beamtalk expression to bytecode via OTP Port backend.
 -spec compile_expression(string(), atom(), map()) ->
-    {ok, binary(), term(), [binary()]} | {error, term()}.
+    {ok, binary(), term(), [binary()]} |
+    {ok, class_definition, map(), [binary()]} |
+    {ok, method_definition, map(), [binary()]} |
+    {error, term()}.
 compile_expression(Expression, ModuleName, Bindings) ->
     compile_expression_via_port(Expression, ModuleName, Bindings).
 

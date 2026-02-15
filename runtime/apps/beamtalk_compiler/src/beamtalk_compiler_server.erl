@@ -48,7 +48,10 @@ start_link(Args) ->
 %% @doc Compile a REPL expression.
 %% Returns `{ok, CoreErlang, Warnings}' or `{error, Diagnostics}'.
 -spec compile_expression(binary(), binary(), [binary()]) ->
-    {ok, binary(), [binary()]} | {error, [binary()]}.
+    {ok, binary(), [binary()]} |
+    {ok, class_definition, map()} |
+    {ok, method_definition, map()} |
+    {error, [binary()]}.
 compile_expression(Source, ModuleName, KnownVars) ->
     gen_server:call(?MODULE, {compile_expression, Source, ModuleName, KnownVars}, 30000).
 

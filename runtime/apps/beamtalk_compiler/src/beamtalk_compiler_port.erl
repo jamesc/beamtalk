@@ -41,10 +41,15 @@ open(BinaryPath) ->
 %% @doc Compile a REPL expression through the port.
 %%
 %% Sends an ETF-encoded request and receives an ETF-encoded response.
-%% Returns `{ok, CoreErlang, Warnings}' on success or
-%% `{error, Diagnostics}' on failure.
+%% Returns `{ok, CoreErlang, Warnings}' on success,
+%% `{ok, class_definition, ClassInfo}' for inline class definitions (BT-571),
+%% `{ok, method_definition, MethodInfo}' for standalone method definitions (BT-571),
+%% or `{error, Diagnostics}' on failure.
 -spec compile_expression(port(), binary(), binary(), [binary()]) ->
-    {ok, binary(), [binary()]} | {error, [binary()]}.
+    {ok, binary(), [binary()]} |
+    {ok, class_definition, map()} |
+    {ok, method_definition, map()} |
+    {error, [binary()]}.
 compile_expression(Port, Source, ModuleName, KnownVars) ->
     Request = #{
         command => compile_expression,
