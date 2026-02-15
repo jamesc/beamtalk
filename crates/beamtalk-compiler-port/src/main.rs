@@ -386,6 +386,7 @@ fn handle_inline_class_definition(
     warnings: &[String],
 ) -> Term {
     let mut module = module;
+    let mut warnings = warnings.to_vec();
     if !module.method_definitions.is_empty() {
         let method_defs = std::mem::take(&mut module.method_definitions);
         for method_def in method_defs {
@@ -401,6 +402,10 @@ fn handle_inline_class_definition(
                     &mut class.methods
                 };
                 merge_method(methods, method_def.method);
+            } else {
+                warnings.push(format!(
+                    "Standalone method targets unknown class `{target_class}` in this module"
+                ));
             }
         }
     }
@@ -420,7 +425,7 @@ fn handle_inline_class_definition(
         true,
         Some(source),
     ) {
-        Ok(code) => class_definition_ok_response(&code, &class_module_name, &classes, warnings),
+        Ok(code) => class_definition_ok_response(&code, &class_module_name, &classes, &warnings),
         Err(e) => error_response(&[format!("Code generation failed: {e}")]),
     }
 }
