@@ -659,9 +659,7 @@ impl<'src> Lexer<'src> {
     fn is_empty_interpolation(&self) -> bool {
         let mut offset = 0;
         loop {
-            let ch = self.source[self.position + offset..]
-                .chars()
-                .next();
+            let ch = self.source[self.position + offset..].chars().next();
             match ch {
                 Some(' ' | '\t') => offset += 1,
                 Some('}') => return true,
