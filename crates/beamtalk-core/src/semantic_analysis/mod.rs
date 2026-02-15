@@ -3338,4 +3338,57 @@ mod tests {
             .collect();
         assert!(warnings.is_empty());
     }
+
+    #[test]
+    fn test_unused_variable_in_class_method_warns() {
+        // Class method with unused local: class create => x := 42. nil
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![],
+            class_methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("create".into()),
+                parameters: vec![],
+                body: vec![
+                    Expression::Assignment {
+                        target: Box::new(Expression::Identifier(Identifier::new(
+                            "temp",
+                            Span::new(10, 14),
+                        ))),
+                        value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
+                        span: test_span(),
+                    },
+                    Expression::Identifier(Identifier::new("nil", test_span())),
+                ],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused variable"))
+            .collect();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("`temp`"));
+    }
 }

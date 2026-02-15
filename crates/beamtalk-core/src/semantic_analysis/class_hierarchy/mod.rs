@@ -493,13 +493,18 @@ impl ClassHierarchy {
     }
 
     /// Check for duplicate method selectors within a list of methods.
+    ///
+    /// Only Primary methods are checked for duplicates — advice methods
+    /// (Before, After, Around) are allowed to share selectors with primary methods.
     fn check_duplicate_methods(
         methods: &[crate::ast::MethodDefinition],
         class_name: &EcoString,
         is_class_method: bool,
         diagnostics: &mut Vec<Diagnostic>,
     ) {
-        let mut seen: HashMap<EcoString, crate::source_analysis::Span> = HashMap::new();
+        use crate::ast::MethodKind;
+        let mut seen: HashMap<(EcoString, MethodKind), crate::source_analysis::Span> =
+            HashMap::new();
         let label = if is_class_method {
             "class method"
         } else {
@@ -507,7 +512,8 @@ impl ClassHierarchy {
         };
         for method in methods {
             let selector = method.selector.name();
-            if let Some(&first_span) = seen.get(&selector) {
+            let key = (selector.clone(), method.kind);
+            if let Some(&first_span) = seen.get(&key) {
                 let mut diag = Diagnostic::error(
                     format!("Duplicate {label} `{selector}` in class `{class_name}`"),
                     method.span,
@@ -521,7 +527,7 @@ impl ClassHierarchy {
                 );
                 diagnostics.push(diag);
             } else {
-                seen.insert(selector, method.span);
+                seen.insert(key, method.span);
             }
         }
     }
@@ -1476,6 +1482,56 @@ mod tests {
         };
         let (_, diags) = ClassHierarchy::build(&module);
 
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn advice_method_same_selector_as_primary_allowed() {
+        // A Before advice and a Primary method with the same selector should NOT be flagged
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![
+                MethodDefinition {
+                    selector: crate::ast::MessageSelector::Unary("increment".into()),
+                    parameters: vec![],
+                    body: vec![],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: MethodKind::Primary,
+                    doc_comment: None,
+                    span: Span::new(10, 20),
+                },
+                MethodDefinition {
+                    selector: crate::ast::MessageSelector::Unary("increment".into()),
+                    parameters: vec![],
+                    body: vec![],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: MethodKind::Before,
+                    doc_comment: None,
+                    span: Span::new(30, 40),
+                },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (_, diags) = ClassHierarchy::build(&module);
+
+        // No duplicate error — advice methods can share selector with primary
         assert!(diags.is_empty());
     }
 }

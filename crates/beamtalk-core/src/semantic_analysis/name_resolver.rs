@@ -111,8 +111,13 @@ impl NameResolver {
                 .define(&state.name.name, state.span, BindingKind::InstanceField);
         }
 
-        // Resolve methods
+        // Resolve instance methods
         for method in &class.methods {
+            self.resolve_method(method);
+        }
+
+        // Resolve class methods
+        for method in &class.class_methods {
             self.resolve_method(method);
         }
 
