@@ -126,13 +126,12 @@ impl ProjectIndex {
     /// Classes defined only in this file are removed from the merged hierarchy.
     /// Classes also defined in other files are preserved (re-merged).
     pub fn remove_file(&mut self, file: &Utf8PathBuf) {
+        if self.stdlib_files.contains(file) {
+            // Stdlib files are never truly removed — preserve their hierarchy
+            return;
+        }
         if let Some(old_names) = self.file_classes.remove(file) {
             self.file_hierarchies.remove(file);
-
-            if self.stdlib_files.contains(file) {
-                // Stdlib files are never truly removed — skip cleanup
-                return;
-            }
 
             // Remove all classes from this file (including stdlib overrides)
             self.merged_hierarchy.remove_classes(&old_names);
