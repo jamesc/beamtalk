@@ -132,10 +132,13 @@ impl LanguageServer for Backend {
         let Some(path) = uri_to_path(uri) else {
             return Ok(None);
         };
-        let pos = to_bt_position(params.text_document_position.position);
 
         let items: Vec<CompletionItem> = {
             let svc = self.service.lock().expect("service lock poisoned");
+            let Some(source) = svc.file_source(&path) else {
+                return Ok(None);
+            };
+            let pos = to_bt_position(params.text_document_position.position, &source);
             svc.completions(&path, pos)
                 .into_iter()
                 .map(|c| CompletionItem {
@@ -172,10 +175,13 @@ impl LanguageServer for Backend {
         let Some(path) = uri_to_path(uri) else {
             return Ok(None);
         };
-        let pos = to_bt_position(params.text_document_position_params.position);
 
         let svc = self.service.lock().expect("service lock poisoned");
         let source = svc.file_source(&path);
+        let Some(src) = source.as_deref() else {
+            return Ok(None);
+        };
+        let pos = to_bt_position(params.text_document_position_params.position, src);
         let hover = svc.hover(&path, pos);
 
         Ok(hover.map(|h| {
@@ -189,7 +195,7 @@ impl LanguageServer for Backend {
                     kind: MarkupKind::Markdown,
                     value,
                 }),
-                range: source.as_deref().map(|src| span_to_range(h.span, src)),
+                range: Some(span_to_range(h.span, src)),
             }
         }))
     }
@@ -202,9 +208,12 @@ impl LanguageServer for Backend {
         let Some(path) = uri_to_path(uri) else {
             return Ok(None);
         };
-        let pos = to_bt_position(params.text_document_position_params.position);
 
         let svc = self.service.lock().expect("service lock poisoned");
+        let Some(source) = svc.file_source(&path) else {
+            return Ok(None);
+        };
+        let pos = to_bt_position(params.text_document_position_params.position, &source);
         let location = svc.goto_definition(&path, pos);
 
         Ok(location.and_then(|loc| {
@@ -227,9 +236,12 @@ impl LanguageServer for Backend {
         let Some(path) = uri_to_path(uri) else {
             return Ok(None);
         };
-        let pos = to_bt_position(params.text_document_position.position);
 
         let svc = self.service.lock().expect("service lock poisoned");
+        let Some(source) = svc.file_source(&path) else {
+            return Ok(None);
+        };
+        let pos = to_bt_position(params.text_document_position.position, &source);
         let refs = svc.find_references(&path, pos);
 
         let locations: Vec<tower_lsp::lsp_types::Location> = refs
@@ -283,19 +295,76 @@ impl LanguageServer for Backend {
 
 /// Converts an LSP URI to a `Utf8PathBuf`.
 fn uri_to_path(uri: &Url) -> Option<Utf8PathBuf> {
-    uri.to_file_path()
-        .ok()
-        .and_then(|p| Utf8PathBuf::try_from(p).ok())
+    match uri.scheme() {
+        "file" => uri
+            .to_file_path()
+            .ok()
+            .and_then(|p| Utf8PathBuf::try_from(p).ok()),
+        "untitled" => {
+            let name = uri.path().trim_start_matches('/');
+            Some(Utf8PathBuf::from(format!("__untitled__/{name}")))
+        }
+        _ => None,
+    }
 }
 
 /// Converts a `Utf8PathBuf` to an LSP URI.
 fn path_to_uri(path: &Utf8PathBuf) -> Option<Url> {
-    Url::from_file_path(path.as_str()).ok()
+    if let Some(name) = path.as_str().strip_prefix("__untitled__/") {
+        Url::parse(&format!("untitled:{name}")).ok()
+    } else {
+        Url::from_file_path(path.as_str()).ok()
+    }
 }
 
-/// Converts an LSP `Position` to a beamtalk `Position`.
-fn to_bt_position(pos: tower_lsp::lsp_types::Position) -> BtPosition {
-    BtPosition::new(pos.line, pos.character)
+/// Converts an LSP `Position` (UTF-16 code units) to a beamtalk `Position` (byte offsets).
+///
+/// LSP positions use UTF-16 code units for the character field.
+/// Beamtalk positions use byte offsets within the line.
+fn to_bt_position(pos: tower_lsp::lsp_types::Position, source: &str) -> BtPosition {
+    let target_line = pos.line;
+    let target_utf16_col = pos.character;
+
+    let mut current_line = 0u32;
+    let mut line_start = 0usize;
+
+    // Find the start of the target line
+    for (i, ch) in source.char_indices() {
+        if current_line == target_line {
+            break;
+        }
+        if ch == '\n' {
+            current_line += 1;
+            line_start = i + 1;
+        }
+    }
+
+    // Walk the target line, counting UTF-16 code units until we reach the target column
+    let mut utf16_col = 0u32;
+    let mut byte_col = 0u32;
+    for ch in source[line_start..].chars() {
+        if ch == '\n' || utf16_col >= target_utf16_col {
+            break;
+        }
+        // UTF-16 len is always 1 or 2, safe to truncate
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "char::len_utf16() is always 1 or 2"
+        )]
+        {
+            utf16_col += ch.len_utf16() as u32;
+        }
+        // len_utf8 is always 1-4, safe to truncate
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "char::len_utf8() is always 1 to 4"
+        )]
+        {
+            byte_col += ch.len_utf8() as u32;
+        }
+    }
+
+    BtPosition::new(target_line, byte_col)
 }
 
 /// Converts a beamtalk `Span` to an LSP `Range` using source text.
