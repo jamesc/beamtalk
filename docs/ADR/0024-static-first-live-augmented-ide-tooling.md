@@ -420,10 +420,34 @@ Design a type annotation syntax and build all tooling on top of the type checker
 - BT-301 (ADR: Hybrid Static+Dynamic Tooling) is superseded by this ADR
 - BT-456 (Epic: LSP Class System Integration) gains an architectural foundation
 - The informal design document (`docs/internal/design-tooling-ide.md`) is superseded — its content is captured here and in the implementation
-- No type annotation syntax is introduced; this decision is deferred to a future ADR
+- No type annotation syntax is introduced; this decision is deferred to a future ADR (BT-304)
 - The daemon protocol (JSON-RPC 2.0) is unaffected — it remains the transport between editor and language server
 - The MCP server (BT-512) and LSP live connector should share a unified workspace introspection API to avoid duplicating the BEAM query surface
 - Tier 3 live queries reuse ADR 0017's Cowboy WebSocket transport — no new connection mechanism is introduced
+
+### DDD Model Impact
+
+This ADR introduces new domain concepts that extend the **Language Service** bounded context in `docs/beamtalk-ddd-model.md`:
+
+**New Aggregate:**
+- `ProjectIndex` (Aggregate Root) — manages the project-wide symbol index across all files. Replaces `SimpleLanguageService`'s per-file `HashMap` with a merged view. Owns the cross-file `ClassHierarchy`.
+
+**New Domain Services:**
+- `LiveConnector` — queries a running workspace BEAM for runtime method tables, live values, and actor state. Stateless: each query is independent. Belongs to Language Service context but crosses into Workspace context.
+- `QueryMerger` — combines static analysis results with live workspace results. Applies conflict resolution rules (Tier 2 corrects Tier 1; Tier 3 augments with `(runtime)` label). Pure function: `merge(static_results, live_results) → merged_results`.
+
+**New Value Objects:**
+- `TierSource` — enum `{Static, CrossFile, Runtime}` annotating where a completion/diagnostic originated. Enables UI labeling (`(runtime)`) and conflict resolution.
+- `ProviderBudget` — per-provider latency limit (completions: 50ms, hover: 30ms, diagnostics: 100ms). Used by `LiveConnector` to decide whether to serve live or static-only results.
+
+**Extended Entities:**
+- `Completion` — gains `source: TierSource` field to distinguish static vs runtime suggestions
+- `CachedFile` — gains reference to `ProjectIndex` for cross-file resolution
+
+**Relationship Changes:**
+- Language Service context gains a **dependency on Workspace context** (Tier 3 only, optional). This is a controlled anti-corruption layer — the `LiveConnector` translates workspace domain concepts (actors, modules, method tables) into Language Service value objects (completions, hover info).
+
+**DDD Model Update Required:** `docs/beamtalk-ddd-model.md` should be updated when Phase 1 implementation begins to reflect `ProjectIndex`, `LiveConnector`, and `TierSource`.
 
 ## Implementation
 
