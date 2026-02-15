@@ -790,8 +790,7 @@ fn visit_classvar_access(
                                 let vars: Vec<&str> =
                                     class_vars.iter().map(EcoString::as_str).collect();
                                 diag.hint = Some(
-                                    format!("Declared class variables: {}", vars.join(", "))
-                                        .into(),
+                                    format!("Declared class variables: {}", vars.join(", ")).into(),
                                 );
                             }
                             diagnostics.push(diag);
