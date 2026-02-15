@@ -12,25 +12,31 @@ use miette::{IntoDiagnostic, Result};
 
 use crate::paths::beamtalk_dir;
 
+use super::color;
+
 pub(super) fn history_path() -> Result<PathBuf> {
     let dir = beamtalk_dir()?;
     fs::create_dir_all(&dir).into_diagnostic()?;
     Ok(dir.join("repl_history"))
 }
 
-/// Format a value for REPL display.
+/// Format a value for REPL display with optional coloring.
 pub(super) fn format_value(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::String(s) => {
             // Values are pre-formatted by the backend:
             // - Actors: "#Actor<0.123.0>" or "#ClassName<0.123.0>"
             // - Blocks: "a Block/N"
-            // Just return as-is
-            s.clone()
+            // Just return as-is with cyan coloring for actor/block references
+            if (s.starts_with('#') && s.contains('<')) || s.starts_with("a Block") {
+                color::paint(color::CYAN, s)
+            } else {
+                color::paint(color::GREEN, s)
+            }
         }
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::Null => "nil".to_string(),
+        serde_json::Value::Number(n) => color::paint(color::YELLOW, &n.to_string()),
+        serde_json::Value::Bool(b) => color::paint(color::BOLD_BLUE, &b.to_string()),
+        serde_json::Value::Null => color::paint(color::BOLD_BLUE, "nil"),
         serde_json::Value::Array(arr) => {
             let items: Vec<String> = arr.iter().map(format_value).collect();
             format!("[{}]", items.join(", "))
@@ -43,6 +49,15 @@ pub(super) fn format_value(value: &serde_json::Value) -> String {
                 .collect();
             format!("{{{}}}", pairs.join(", "))
         }
+    }
+}
+
+/// Format an error message for REPL display.
+pub(super) fn format_error(msg: &str) -> String {
+    if color::is_enabled() {
+        format!("{}{}Error:{} {msg}", color::BOLD, color::RED, color::RESET)
+    } else {
+        format!("Error: {msg}")
     }
 }
 

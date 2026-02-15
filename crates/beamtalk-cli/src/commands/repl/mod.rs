@@ -65,13 +65,14 @@ const MAX_CONNECT_RETRIES: u32 = 10;
 const RETRY_DELAY_MS: u64 = 500;
 
 mod client;
-mod completer;
+mod color;
 mod display;
+mod helper;
 mod process;
 
 use client::ReplClient;
-use completer::ReplCompleter;
-use display::{format_value, history_path, print_help};
+use display::{format_error, format_value, history_path, print_help};
+use helper::ReplHelper;
 use process::{
     BeamChildGuard, connect_with_retries, read_port_from_child, resolve_node_name, resolve_port,
     start_beam_node,
@@ -189,7 +190,7 @@ struct SessionInfo {
 fn display_reload_result(response: &ReplResponse, module_name: Option<&str>) {
     if response.is_error() {
         if let Some(msg) = response.error_message() {
-            eprintln!("Error: {msg}");
+            eprintln!("{}", format_error(msg));
         }
         return;
     }
@@ -229,7 +230,11 @@ pub fn run(
     workspace_name: Option<&str>,
     persistent: bool,
     timeout: Option<u64>,
+    no_color: bool,
 ) -> Result<()> {
+    // Initialize color support
+    color::init(no_color);
+
     // Resolve port and node name using priority logic
     let port = resolve_port(port_arg)?;
 
@@ -349,14 +354,13 @@ pub fn run(
 
     println!();
 
-    // Set up rustyline editor with tab completion
+    // Set up rustyline editor with tab completion and syntax highlighting
     let config = Config::builder()
         .completion_type(CompletionType::List)
         .build();
-    let completer = ReplCompleter::new(connect_port);
-    let mut rl: Editor<ReplCompleter, FileHistory> =
-        Editor::with_config(config).into_diagnostic()?;
-    rl.set_helper(Some(completer));
+    let helper = ReplHelper::new(connect_port);
+    let mut rl: Editor<ReplHelper, FileHistory> = Editor::with_config(config).into_diagnostic()?;
+    rl.set_helper(Some(helper));
 
     // Load history
     let history_file = history_path()?;
@@ -714,7 +718,7 @@ pub fn run(
                         }
                         if response.is_error() {
                             if let Some(msg) = response.error_message() {
-                                eprintln!("Error: {msg}");
+                                eprintln!("{}", format_error(msg));
                             }
                         } else if let Some(value) = response.value {
                             println!("{}", format_value(&value));
@@ -765,40 +769,78 @@ mod tests {
     use super::*;
     use process::DEFAULT_REPL_PORT;
     use serial_test::serial;
+    use std::sync::atomic::Ordering;
+
+    /// RAII guard that restores `COLOR_ENABLED` on drop (even if test panics).
+    struct ColorGuard {
+        prev: bool,
+    }
+
+    impl ColorGuard {
+        fn disabled() -> Self {
+            let prev = color::COLOR_ENABLED.load(Ordering::Relaxed);
+            color::COLOR_ENABLED.store(false, Ordering::Relaxed);
+            Self { prev }
+        }
+
+        fn enabled() -> Self {
+            let prev = color::COLOR_ENABLED.load(Ordering::Relaxed);
+            color::COLOR_ENABLED.store(true, Ordering::Relaxed);
+            Self { prev }
+        }
+    }
+
+    impl Drop for ColorGuard {
+        fn drop(&mut self) {
+            color::COLOR_ENABLED.store(self.prev, Ordering::Relaxed);
+        }
+    }
 
     #[test]
+    #[serial(color)]
     fn format_value_string() {
+        let _guard = ColorGuard::disabled();
         let value = serde_json::json!("hello");
         assert_eq!(format_value(&value), "hello");
     }
 
     #[test]
+    #[serial(color)]
     fn format_value_number() {
+        let _guard = ColorGuard::disabled();
         let value = serde_json::json!(42);
         assert_eq!(format_value(&value), "42");
     }
 
     #[test]
+    #[serial(color)]
     fn format_value_bool() {
+        let _guard = ColorGuard::disabled();
         let value = serde_json::json!(true);
         assert_eq!(format_value(&value), "true");
     }
 
     #[test]
+    #[serial(color)]
     fn format_value_array() {
+        let _guard = ColorGuard::disabled();
         let value = serde_json::json!([1, 2, 3]);
         assert_eq!(format_value(&value), "[1, 2, 3]");
     }
 
     #[test]
+    #[serial(color)]
     fn format_value_pid() {
+        let _guard = ColorGuard::disabled();
         // Backend now pre-formats pids as "#Actor<pid>"
         let value = serde_json::json!("#Actor<0.123.0>");
         assert_eq!(format_value(&value), "#Actor<0.123.0>");
     }
 
     #[test]
+    #[serial(color)]
     fn format_value_block() {
+        let _guard = ColorGuard::disabled();
         // Blocks are formatted as "a Block/N" by the backend
         let value = serde_json::json!("a Block/1");
         assert_eq!(format_value(&value), "a Block/1");
@@ -808,10 +850,30 @@ mod tests {
     }
 
     #[test]
+    #[serial(color)]
     fn format_value_tuple() {
+        let _guard = ColorGuard::disabled();
         // BT-536: Tuples are pre-formatted as strings by the backend
         let value = serde_json::json!("{1, hello}");
         assert_eq!(format_value(&value), "{1, hello}");
+    }
+
+    #[test]
+    #[serial(color)]
+    fn format_error_with_color_disabled() {
+        let _guard = ColorGuard::disabled();
+        assert_eq!(format_error("test error"), "Error: test error");
+    }
+
+    #[test]
+    #[serial(color)]
+    fn format_error_with_color_enabled() {
+        let _guard = ColorGuard::enabled();
+        let result = format_error("test error");
+        assert!(result.contains("Error:"));
+        assert!(result.contains("test error"));
+        assert!(result.contains(color::RED));
+        assert!(result.contains(color::RESET));
     }
 
     /// Uses `#[serial(env_var)]` because it modifies the `BEAMTALK_RUNTIME_DIR`
