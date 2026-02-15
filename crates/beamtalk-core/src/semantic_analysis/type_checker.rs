@@ -223,6 +223,9 @@ impl TypeChecker {
             Expression::Match { value, arms, .. } => {
                 self.infer_expr(value, hierarchy, env, in_abstract_method);
                 for arm in arms {
+                    if let Some(guard) = &arm.guard {
+                        self.infer_expr(guard, hierarchy, env, in_abstract_method);
+                    }
                     self.infer_expr(&arm.body, hierarchy, env, in_abstract_method);
                 }
                 InferredType::Dynamic
