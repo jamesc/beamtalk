@@ -22,11 +22,12 @@
 //! let _HandlerFun = <handler> in
 //! try apply _BlockFun ()
 //! of _Result -> _Result
-//! catch <_Type, _Error, _Stacktrace> ->
-//!     let _ExObj = call 'beamtalk_exception_handler':'ensure_wrapped'(_Error) in
+//! catch <_Type, _Error, _RawStack> ->
+//!     let _BuiltStack = primop 'build_stacktrace'(_RawStack) in
+//!     let _ExObj = call 'beamtalk_exception_handler':'ensure_wrapped'(_Error, _BuiltStack) in
 //!     case matches_class(ExClass, Error) of
 //!         true  -> apply _HandlerFun (_ExObj)
-//!         false -> primop 'raw_raise'(_Type, _Error, _Stacktrace)
+//!         false -> primop 'raw_raise'(_Type, _Error, _RawStack)
 //! ```
 //!
 //! # `ensure:` — Cleanup (try/after)
@@ -105,6 +106,7 @@ impl CoreErlangGenerator {
         let type_var = self.fresh_temp_var("Type");
         let error_var = self.fresh_temp_var("Error");
         let stack_var = self.fresh_temp_var("Stack");
+        let built_stack_var = self.fresh_temp_var("BuiltStack");
         let ex_obj_var = self.fresh_temp_var("ExObj");
         let match_var = self.fresh_temp_var("Match");
 
@@ -124,7 +126,8 @@ impl CoreErlangGenerator {
             format!("of {result_var} -> {result_var} "),
             format!(
                 "catch <{type_var}, {error_var}, {stack_var}> -> \
-                 let {ex_obj_var} = call 'beamtalk_exception_handler':'ensure_wrapped'({error_var}) in \
+                 let {built_stack_var} = primop 'build_stacktrace'({stack_var}) in \
+                 let {ex_obj_var} = call 'beamtalk_exception_handler':'ensure_wrapped'({error_var}, {built_stack_var}) in \
                  let {match_var} = call 'beamtalk_exception_handler':'matches_class'({ex_class_var}, {error_var}) in \
                  case {match_var} of \
                  <'true'> when 'true' -> {handler_apply} \
@@ -152,12 +155,13 @@ impl CoreErlangGenerator {
     ///     <inlined receiver body with state threading>
     ///     StateAccN
     /// of StateAfterTry -> StateAfterTry
-    /// catch <Type, Error, Stack> ->
-    ///     let ExObj = call 'beamtalk_exception_handler':'ensure_wrapped'(Error) in
+    /// catch <Type, Error, RawStack> ->
+    ///     let BuiltStack = primop 'build_stacktrace'(RawStack) in
+    ///     let ExObj = call 'beamtalk_exception_handler':'ensure_wrapped'(Error, BuiltStack) in
     ///     let Match = call 'beamtalk_exception_handler':'matches_class'(ExClass, Error) in
     ///     case Match of
     ///         true  -> let _e = ExObj in <handler body with threading> StateAccM
-    ///         false -> primop 'raw_raise'(Type, Error, Stack)
+    ///         false -> primop 'raw_raise'(Type, Error, RawStack)
     /// ```
     fn generate_on_do_with_mutations(
         &mut self,
@@ -173,6 +177,7 @@ impl CoreErlangGenerator {
         let type_var = self.fresh_temp_var("Type");
         let error_var = self.fresh_temp_var("Error");
         let stack_var = self.fresh_temp_var("Stack");
+        let built_stack_var = self.fresh_temp_var("BuiltStack");
         let ex_obj_var = self.fresh_temp_var("ExObj");
         let match_var = self.fresh_temp_var("Match");
         let state_after_try = self.fresh_temp_var("StateAfterTry");
@@ -206,7 +211,10 @@ impl CoreErlangGenerator {
             format!("of {state_after_try} -> {state_after_try} "),
             format!("catch <{type_var}, {error_var}, {stack_var}> -> "),
             format!(
-                "let {ex_obj_var} = call 'beamtalk_exception_handler':'ensure_wrapped'({error_var}) in "
+                "let {built_stack_var} = primop 'build_stacktrace'({stack_var}) in "
+            ),
+            format!(
+                "let {ex_obj_var} = call 'beamtalk_exception_handler':'ensure_wrapped'({error_var}, {built_stack_var}) in "
             ),
             format!(
                 "let {match_var} = call 'beamtalk_exception_handler':'matches_class'({ex_class_var}, {error_var}) in "

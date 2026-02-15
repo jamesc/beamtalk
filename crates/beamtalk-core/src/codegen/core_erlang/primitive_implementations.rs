@@ -53,6 +53,7 @@ pub fn generate_primitive_bif(
         "TestCase" => generate_test_case_bif(selector, params),
         "Stream" => generate_stream_bif(selector, params),
         "Collection" => generate_collection_bif(selector, params),
+        "StackFrame" => generate_stack_frame_bif(selector, params),
         _ => None,
     }
 }
@@ -444,6 +445,22 @@ fn generate_exception_bif(selector: &str, params: &[String]) -> Option<Document<
                 ")",
             ])
         }
+        "stackTrace" => Some(Document::Str(
+            "call 'beamtalk_exception_handler':'dispatch'('stackTrace', [], Self)",
+        )),
+        _ => None,
+    }
+}
+
+/// `StackFrame` primitive implementations (BT-107).
+///
+/// `StackFrame` field access delegates to `beamtalk_stack_frame` runtime module.
+fn generate_stack_frame_bif(selector: &str, _params: &[String]) -> Option<Document<'static>> {
+    match selector {
+        "method" | "receiverClass" | "arguments" | "sourceLocation" | "moduleName" | "line"
+        | "file" | "printString" => Some(Document::String(format!(
+            "call 'beamtalk_stack_frame':'dispatch'('{selector}', [], Self)"
+        ))),
         _ => None,
     }
 }
