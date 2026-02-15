@@ -197,3 +197,15 @@ thisIsAVeryLongIdentifierNameThatGoesOnAndOnAndOnButShouldStillBeValid := 42
 // Tab characters in expression (should work - whitespace is ignored)
 1	+	2
 // => 3
+
+// ===========================================================================
+// UNDEFINED CLASS ERRORS (BT-597)
+// ===========================================================================
+
+// Accessing undefined class
+UndefinedClassXyz123 class
+// => ERROR: Class 'UndefinedClassXyz123' not found
+
+// Sending message to undefined class (hits class_send defense-in-depth)
+UndefinedClassXyz123 new
+// => ERROR: not found
