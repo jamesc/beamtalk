@@ -1,0 +1,50 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Moderator — Actor subclass of ChatMember (BT-568)
+//
+// Demonstrates:
+// 1. **Actor inheritance** — ChatMember subclass: Moderator
+// 2. **super calls** — Moderator overrides say: to add "[MOD]" prefix
+// 3. **New methods** — kick: and mute: for moderation actions
+//
+// Usage in REPL:
+//   > :load examples/chat-room/message.bt
+//   > :load examples/chat-room/chat_room.bt
+//   > :load examples/chat-room/chat_member.bt
+//   > :load examples/chat-room/moderator.bt
+//   > room := ChatRoom spawn
+//   > mod := Moderator spawn
+//   > mod setName: "Admin"
+//   > mod setRoom: room
+//   > room join: mod
+//   > mod say: "Welcome!"
+
+ChatMember subclass: Moderator
+  state: muted = Set new        // Set of muted member names
+
+  // Override say to prefix messages with [MOD]
+  // Demonstrates: super call to parent method
+  say: message =>
+    super say: "[MOD] " ++ message
+
+  // Kick a member from the room
+  // Demonstrates: Actor-to-actor method calls
+  kick: member =>
+    self.room leave: member
+
+  // Mute a member by name
+  mute: memberName =>
+    self.muted := self.muted add: memberName
+
+  // Unmute a member by name
+  unmute: memberName =>
+    self.muted := self.muted remove: memberName
+
+  // Check if a member name is muted
+  isMuted: memberName =>
+    ^self.muted includes: memberName
+
+  // Return the set of muted member names
+  getMuted =>
+    ^self.muted
