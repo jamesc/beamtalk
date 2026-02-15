@@ -1,0 +1,171 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for bank transfer demo (BT-569)
+//
+// Tests:
+// - Account actor: deposit, withdraw, balance, overdraft protection
+// - Bank actor: account registry, factory pattern, Dictionary usage
+// - Transaction value type: immutable transfer record
+// - TransferAgent actor: coordinated debit + credit across actors
+
+// @load tests/e2e/fixtures/bank_account.bt
+// @load tests/e2e/fixtures/bank_transaction.bt
+// @load tests/e2e/fixtures/bank.bt
+// @load tests/e2e/fixtures/bank_transfer_agent.bt
+
+// ===========================================================================
+// ACCOUNT — BASIC OPERATIONS
+// ===========================================================================
+
+// Create an account
+acct := Account spawn
+// => #Actor<Account,_>
+
+// Initial balance is zero
+acct balance
+// => 0
+
+// Deposit money
+acct deposit: 500
+// => 500
+
+// Balance reflects deposit
+acct balance
+// => 500
+
+// Withdraw money
+acct withdraw: 200
+// => 300
+
+// Balance reflects withdrawal
+acct balance
+// => 300
+
+// Set and get owner
+acct setOwner: "Test"
+// => _
+
+acct getOwner
+// => Test
+
+// ===========================================================================
+// ACCOUNT — OVERDRAFT PROTECTION
+// ===========================================================================
+
+// Overdraft raises an error
+acct withdraw: 9999
+// => ERROR: Insufficient funds
+
+// Negative deposit rejected
+acct deposit: -100
+// => ERROR: Amount must be non-negative
+
+// Negative withdrawal rejected
+acct withdraw: -50
+// => ERROR: Amount must be non-negative
+
+// Balance unchanged after failed withdrawal
+acct balance
+// => 300
+
+// ===========================================================================
+// TRANSACTION — VALUE TYPE
+// ===========================================================================
+
+// Create a transaction record
+txn := Transaction new: #{#amount => 100, #from => "Alice", #to => "Bob", #status => "completed"}
+// => _
+
+txn getAmount
+// => 100
+
+txn getFrom
+// => Alice
+
+txn getTo
+// => Bob
+
+txn getStatus
+// => completed
+
+// ===========================================================================
+// BANK — REGISTRY AND FACTORY
+// ===========================================================================
+
+// Create a bank
+bank := Bank spawn
+// => #Actor<Bank,_>
+
+// Open accounts (spawns Account actors)
+bank openAccount: "Alice"
+// => #Actor<Account,_>
+
+bank openAccount: "Bob"
+// => #Actor<Account,_>
+
+// Look up an account
+alice := bank accountFor: "Alice"
+// => #Actor<Account,_>
+
+bob := bank accountFor: "Bob"
+// => #Actor<Account,_>
+
+// Verify owner names
+alice getOwner
+// => Alice
+
+bob getOwner
+// => Bob
+
+// Unknown account raises an error
+bank accountFor: "Nobody"
+// => ERROR: No account found for
+
+// ===========================================================================
+// TRANSFER — SUCCESSFUL
+// ===========================================================================
+
+// Fund Alice's account
+alice deposit: 1000
+// => 1000
+
+// Fund Bob's account
+bob deposit: 500
+// => 500
+
+// Create transfer agent
+agent := TransferAgent spawn
+// => #Actor<TransferAgent,_>
+
+// Transfer 250 from Alice to Bob
+agent transfer: 250 from: alice to: bob
+// => _
+
+// Alice debited
+alice balance
+// => 750
+
+// Bob credited
+bob balance
+// => 750
+
+// Check last transfer amount
+agent getLastAmount
+// => 250
+
+// ===========================================================================
+// TRANSFER — OVERDRAFT (Account rejects independently)
+// ===========================================================================
+
+// Try to withdraw more than Alice has directly
+alice withdraw: 5000
+// => ERROR: Insufficient funds
+
+// Alice's balance unchanged after failed withdrawal
+alice balance
+// => 750
+
+// Bob's balance unchanged
+bob balance
+// => 750

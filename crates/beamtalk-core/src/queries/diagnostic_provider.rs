@@ -444,4 +444,44 @@ mod tests {
             "Should not warn about fields for class with no state, got: {diagnostics:?}"
         );
     }
+
+    #[test]
+    fn type_checker_warning_with_hint() {
+        // Type checker should surface warnings with "Did you mean" hints
+        let source = "42 lenght";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let type_warning = diagnostics
+            .iter()
+            .find(|d| d.message.contains("does not understand"));
+        assert!(
+            type_warning.is_some(),
+            "Should emit type warning for unknown selector. Got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn type_checker_warning_severity_is_warning() {
+        use crate::source_analysis::Severity;
+
+        let source = "42 foo";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let type_warning = diagnostics
+            .iter()
+            .find(|d| d.message.contains("does not understand"));
+        assert!(
+            type_warning.is_some(),
+            "Should have type warning. Got: {diagnostics:?}"
+        );
+        assert_eq!(
+            type_warning.unwrap().severity,
+            Severity::Warning,
+            "Type checker warnings should be Warning severity"
+        );
+    }
 }

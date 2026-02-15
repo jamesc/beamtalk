@@ -416,7 +416,11 @@ fn to_lsp_diagnostic(
             Severity::Warning => DiagnosticSeverity::WARNING,
         }),
         source: Some("beamtalk".into()),
-        message: diag.message.to_string(),
+        message: if let Some(ref hint) = diag.hint {
+            format!("{}\nHint: {hint}", diag.message)
+        } else {
+            diag.message.to_string()
+        },
         ..Default::default()
     }
 }
