@@ -149,6 +149,8 @@ src/util/math.bt  → bt@my_counter@util@math
 
 The formula is: `bt@{package_name}@{relative_path_without_extension}` where path separators become `@`.
 
+Subdirectories within `src/` are **namespacing only** — they do not create subpackages. The entire `src/` tree belongs to one flat package. This follows the Gleam model.
+
 **Single-file mode** (no manifest): When `beamtalk build file.bt` is invoked on a file outside any package, the module name is the file stem without any package prefix (current behavior, preserved for scripting/experimentation).
 
 ### 5. Directory structure
@@ -332,6 +334,11 @@ Use Erlang term format instead of TOML for the manifest.
 Support a `[workspace]` section in `beamtalk.toml` listing sub-packages, like Cargo workspaces.
 
 **Deferred:** Valuable for large projects but adds complexity. Can be added as an extension to `beamtalk.toml` in a future ADR without breaking changes. Start with one package per repository.
+
+### Alternative: Subpackages (Pharo-style)
+Allow subdirectories within `src/` to be independent packages with their own `beamtalk.toml`, similar to Pharo's package categories or Cargo workspaces.
+
+**Rejected in favor of flat packages with nested modules:** Subdirectories within `src/` are purely namespace segments — `src/util/math.bt` becomes module `bt@my_app@util@math` within the single `my_app` package. This follows the Gleam model and is the simplest design. Multi-package repositories can be supported later via workspaces without breaking this convention.
 
 ## Consequences
 
