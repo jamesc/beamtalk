@@ -1,7 +1,7 @@
 # ADR 0023: String Interpolation Syntax and Compilation
 
 ## Status
-Proposed (2026-02-14)
+Accepted (2026-02-15)
 
 ## Context
 
