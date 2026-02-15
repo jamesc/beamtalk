@@ -89,6 +89,8 @@ impl TypeChecker {
             }
             for method in &class.class_methods {
                 let mut method_env = TypeEnv::new();
+                // `self` in class methods refers to the class itself
+                method_env.set("self", InferredType::Known(class.name.name.clone()));
                 for expr in &method.body {
                     self.infer_expr(expr, hierarchy, &mut method_env, is_abstract);
                 }
@@ -100,9 +102,8 @@ impl TypeChecker {
             let class_name = &standalone.class_name.name;
             let is_abstract = hierarchy.is_abstract(class_name);
             let mut method_env = TypeEnv::new();
-            if !standalone.is_class_method {
-                method_env.set("self", InferredType::Known(class_name.clone()));
-            }
+            // `self` is the class for class methods, an instance for instance methods
+            method_env.set("self", InferredType::Known(class_name.clone()));
             for expr in &standalone.method.body {
                 self.infer_expr(expr, hierarchy, &mut method_env, is_abstract);
             }
@@ -177,12 +178,22 @@ impl TypeChecker {
                 receiver, messages, ..
             } => {
                 let receiver_ty = self.infer_expr(receiver, hierarchy, env, in_abstract_method);
+                let is_class_ref = matches!(receiver.as_ref(), Expression::ClassReference { .. });
                 for msg in messages {
                     let selector_name = msg.selector.name();
                     for arg in &msg.arguments {
                         self.infer_expr(arg, hierarchy, env, in_abstract_method);
                     }
-                    if let InferredType::Known(ref class_name) = receiver_ty {
+                    if is_class_ref {
+                        if let Expression::ClassReference { name, .. } = receiver.as_ref() {
+                            self.check_class_side_send(
+                                &name.name,
+                                &selector_name,
+                                msg.span,
+                                hierarchy,
+                            );
+                        }
+                    } else if let InferredType::Known(ref class_name) = receiver_ty {
                         if !in_abstract_method || !Self::is_self_receiver(receiver) {
                             self.check_instance_selector(
                                 class_name,
@@ -223,10 +234,11 @@ impl TypeChecker {
             Expression::Match { value, arms, .. } => {
                 self.infer_expr(value, hierarchy, env, in_abstract_method);
                 for arm in arms {
+                    let mut arm_env = env.child();
                     if let Some(guard) = &arm.guard {
-                        self.infer_expr(guard, hierarchy, env, in_abstract_method);
+                        self.infer_expr(guard, hierarchy, &mut arm_env, in_abstract_method);
                     }
-                    self.infer_expr(&arm.body, hierarchy, env, in_abstract_method);
+                    self.infer_expr(&arm.body, hierarchy, &mut arm_env, in_abstract_method);
                 }
                 InferredType::Dynamic
             }
