@@ -171,8 +171,10 @@ handle_load(Path, State) ->
                                     beamtalk_workspace_meta:update_activity(),
                                     
                                     %% BT-571: Store class source for method patching
-                                    %% ClassNames have string keys from compile_file,
-                                    %% but class_sources map uses binary keys
+                                    %% ClassNames is a list of maps with atom keys
+                                    %% (name, superclass) whose values are strings
+                                    %% (from binary_to_list/1 in compile_file_via_port/3),
+                                    %% but class_sources lookups use binary keys
                                     NewState3 = lists:foldl(
                                         fun(#{name := Name}, AccState) ->
                                             NameBin = list_to_binary(Name),
