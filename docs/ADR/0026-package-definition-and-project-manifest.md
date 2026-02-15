@@ -75,7 +75,7 @@ A **package** is a directory containing a `beamtalk.toml` manifest. It is:
 
 There is no separate "project" concept. Following Gleam and Cargo, the term **package** covers both local development and distribution.
 
-**Relationship to workspaces (ADR 0004):** Persistent workspaces are the *runtime development environment* — a running BEAM node where you interactively develop and test your package. The package (source files + manifest) is the *authoring format* — what you check into git, review in PRs, and publish to Hex.pm. A workspace loads a package's compiled code; it doesn't replace or compete with it. For deployment, the package compiles to an OTP release (a self-contained BEAM node). The lifecycle is: **author** (source files) → **develop** (workspace) → **deploy** (OTP release).
+**Relationship to workspaces (ADR 0004):** Your package *is* the workspace — it's the running application you develop interactively. Dependency packages are libraries loaded into your workspace. When you `beamtalk repl` in a package directory, you create (or reconnect to) a workspace that owns that package's actors and state. Dependencies provide classes but don't own the workspace. The lifecycle is: **author** (source files) → **develop** (workspace = your running package) → **deploy** (OTP release). Future work on durable workspaces (e.g., Khepri-backed persistence) would make the workspace survive restarts, with your package's actors maintaining state across reboots.
 
 ### 2. `beamtalk.toml` manifest format
 
