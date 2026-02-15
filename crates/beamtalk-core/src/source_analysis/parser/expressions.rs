@@ -917,8 +917,22 @@ impl Parser {
 
             let pair_start = self.current_token().span();
 
-            // Parse key expression (unary only - stops at `=>`, `,`, `}`)
-            let key = self.parse_unary_message();
+            // BT-591: Bare identifier keys in map literals are implicit symbols.
+            // If the current token is a lowercase identifier followed by `=>`,
+            // treat it as a symbol literal (e.g., `#{x => 3}` means `#{#x => 3}`).
+            let key = if matches!(self.current_kind(), TokenKind::Identifier(name) if name.chars().next().is_some_and(char::is_lowercase))
+                && matches!(self.peek_kind(), Some(TokenKind::FatArrow))
+            {
+                let token = self.advance();
+                let span = token.span();
+                let TokenKind::Identifier(name) = token.kind() else {
+                    unreachable!()
+                };
+                Expression::Literal(Literal::Symbol(name.clone()), span)
+            } else {
+                // Parse key expression (unary only - stops at `=>`, `,`, `}`)
+                self.parse_unary_message()
+            };
 
             // Expect '=>' separator between key and value
             if !matches!(self.current_kind(), TokenKind::FatArrow) {

@@ -61,6 +61,20 @@ Counter spawnWith: true
 // => ERROR: type_error
 
 // ===========================================================================
+// spawnWith: WITH BARE IDENTIFIER KEYS (BT-591)
+// ===========================================================================
+
+// Bare identifier keys in map literals work as implicit symbols
+c3 := Counter spawnWith: #{value => 10}
+// => #Actor<Counter,_>
+
+c3 getValue await
+// => 10
+
+c3 increment await
+// => 11
+
+// ===========================================================================
 // printString — actor instance and class object (BT-477)
 // ===========================================================================
 
