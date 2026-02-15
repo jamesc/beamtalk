@@ -250,28 +250,14 @@ pub fn find_selector_in_expr(expr: &Expression, offset: u32) -> Option<(EcoStrin
                 None
             }
         }),
-        Expression::ListLiteral { elements, tail, .. } => {
-            for element in elements {
-                if let Some(result) = find_selector_in_expr(element, offset) {
-                    return Some(result);
-                }
-            }
-            if let Some(tail_expr) = tail {
-                return find_selector_in_expr(tail_expr, offset);
-            }
-            None
-        }
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                if let Some(result) = find_selector_in_expr(&pair.key, offset) {
-                    return Some(result);
-                }
-                if let Some(result) = find_selector_in_expr(&pair.value, offset) {
-                    return Some(result);
-                }
-            }
-            None
-        }
+        Expression::ListLiteral { elements, tail, .. } => elements
+            .iter()
+            .find_map(|e| find_selector_in_expr(e, offset))
+            .or_else(|| tail.as_ref().and_then(|t| find_selector_in_expr(t, offset))),
+        Expression::MapLiteral { pairs, .. } => pairs.iter().find_map(|pair| {
+            find_selector_in_expr(&pair.key, offset)
+                .or_else(|| find_selector_in_expr(&pair.value, offset))
+        }),
         _ => None,
     }
 }
