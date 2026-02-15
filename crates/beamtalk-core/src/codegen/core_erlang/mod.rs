@@ -847,7 +847,7 @@ impl CoreErlangGenerator {
     /// ADR 0019 Phase 3: In workspace mode, checks REPL bindings first for
     /// convenience names (Transcript, Beamtalk, Workspace), then falls back
     /// to class registry lookup. In batch mode, goes directly to the registry.
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     fn generate_class_reference(&mut self, class_name: &str) -> Result<Document<'static>> {
         // ADR 0019 Phase 3: Only check bindings in REPL top-level context.
         // Actor methods compiled in workspace mode should NOT check REPL bindings.

@@ -294,7 +294,6 @@ impl CoreErlangGenerator {
     }
 
     /// Generates `new/0` for a collection type that returns an empty native value.
-    #[allow(clippy::unnecessary_wraps)]
     fn generate_collection_new(empty_value: &str) -> Document<'static> {
         docvec![
             "'new'/0 = fun () ->\n",
@@ -306,7 +305,6 @@ impl CoreErlangGenerator {
     }
 
     /// Generates `new/1` for Dictionary: returns `InitArgs` directly.
-    #[allow(clippy::unnecessary_wraps)]
     fn generate_collection_new_with_args() -> Document<'static> {
         docvec!["'new'/1 = fun (InitArgs) ->\n", "    InitArgs\n", "\n",]
     }
@@ -643,7 +641,7 @@ impl CoreErlangGenerator {
     /// for reflection primitives (instVarAt:, printString, etc.) that need
     /// access to the actor's state map. For all other value types, this is
     /// a simple wrapper that delegates to dispatch/3.
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     fn generate_dispatch_4(&mut self, _class: &ClassDefinition) -> Result<Document<'static>> {
         let class_name = self.class_name().clone();
         let mod_name = self.module_name.clone();
@@ -907,7 +905,7 @@ impl CoreErlangGenerator {
     /// superclass. `perform:` must re-dispatch through this module to preserve
     /// extension lookup and correct error attribution. Skips instVarNames,
     /// instVarAt:, instVarAt:put: since the superclass already handles them.
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     fn generate_minimal_dispatch(&mut self, class: &ClassDefinition) -> Result<Document<'static>> {
         let class_name = self.class_name().clone();
         let mod_name = self.module_name.clone();
@@ -958,7 +956,7 @@ impl CoreErlangGenerator {
     ///
     /// Checks `class`, `respondsTo:`, `perform:`, `perform:withArguments:`,
     /// then extensions, then delegates to superclass.
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     fn generate_minimal_has_method(
         &mut self,
         class: &ClassDefinition,

@@ -833,7 +833,7 @@ fn power_bif(params: &[String]) -> Option<String> {
 fn generate_compiled_method_bif(selector: &str, params: &[String]) -> Option<String> {
     match selector {
         "selector" | "source" | "argumentCount" | "printString" | "asString" => {
-            ops_dispatch("beamtalk_compiled_method_ops", selector, params)
+            Some(ops_dispatch("beamtalk_compiled_method_ops", selector, params))
         }
         _ => None,
     }
@@ -965,8 +965,7 @@ fn generate_collection_bif(selector: &str, params: &[String]) -> Option<String> 
 }
 
 /// Generates a call to a `_ops` Erlang module's dispatch/3 function.
-#[allow(clippy::unnecessary_wraps)]
-fn ops_dispatch(module: &str, selector: &str, params: &[String]) -> Option<String> {
+fn ops_dispatch(module: &str, selector: &str, params: &[String]) -> String {
     let mut result = format!("call '{module}':'dispatch'('{selector}', [");
     for (i, param) in params.iter().enumerate() {
         if i > 0 {
@@ -975,7 +974,7 @@ fn ops_dispatch(module: &str, selector: &str, params: &[String]) -> Option<Strin
         result.push_str(param);
     }
     result.push_str("], Self)");
-    Some(result)
+    result
 }
 
 #[cfg(test)]

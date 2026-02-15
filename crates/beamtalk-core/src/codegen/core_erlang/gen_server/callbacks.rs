@@ -211,7 +211,7 @@ impl CoreErlangGenerator {
     ///
     /// Per BT-29 design doc, uses `safe_dispatch/3` for error isolation and
     /// sends `{resolve, Result}` or `{reject, Error}` to the `FuturePid`.
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_handle_cast(
         &mut self,
     ) -> Result<Document<'static>> {
@@ -287,7 +287,7 @@ impl CoreErlangGenerator {
     ///
     /// Per BT-29 design doc, uses `safe_dispatch/3` for error isolation and
     /// returns `{ok, Result}` or `{error, Error}` tuples.
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_handle_call(
         &mut self,
     ) -> Result<Document<'static>> {
@@ -355,7 +355,7 @@ impl CoreErlangGenerator {
 
     /// Generates the `code_change/3` callback for hot code reload.
     #[allow(clippy::unused_self)]
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_code_change(
         &self,
     ) -> Result<Document<'static>> {
@@ -392,7 +392,7 @@ impl CoreErlangGenerator {
     ///         <_Other> when 'true' -> 'ok'
     ///     end
     /// ```
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_terminate(
         &mut self,
         _module: &Module,

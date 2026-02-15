@@ -26,7 +26,7 @@ impl CoreErlangGenerator {
     ///     ~{'increment' => 0, 'value' => 0}~
     /// ```
     #[allow(clippy::unused_self)]
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_method_table(
         &self,
         module: &Module,
@@ -96,7 +96,7 @@ impl CoreErlangGenerator {
     ///     call 'lists':'member'(Selector, ['increment', 'decrement', 'getValue', 'setValue:'])
     /// ```
     #[allow(clippy::unused_self)]
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_has_method(
         &self,
         module: &Module,
@@ -176,7 +176,7 @@ impl CoreErlangGenerator {
     ///     catch <Type, Error, _Stacktrace> ->
     ///         {'error', {Type, Error}, State}
     /// ```
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_safe_dispatch(
         &mut self,
     ) -> Result<Document<'static>> {
