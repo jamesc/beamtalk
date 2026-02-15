@@ -70,8 +70,14 @@ impl CoreErlangGenerator {
     /// Example: `"Hello, {name}!"` compiles to:
     /// ```text
     /// let _interpExpr1 = Name in
-    ///   let _interpStr2 = call 'beamtalk_message_dispatch':'send'(_interpExpr1, 'printString', []) in
-    ///     #{#<72>(8,1,...), ..., #<_interpStr2>('all',8,'binary',...), #<33>(8,1,...)}#
+    ///   let _interpRaw2 = call 'beamtalk_message_dispatch':'send'(_interpExpr1, 'printString', []) in
+    ///     let _interpStr3 =
+    ///       case call 'erlang':'is_pid'(_interpRaw2) of
+    ///         <'true'>  when 'true' -> call 'beamtalk_future':'await'(_interpRaw2)
+    ///         <'false'> when 'true' -> _interpRaw2
+    ///       end
+    ///     in
+    ///       #{#<72>(8,1,...), ..., #<_interpStr3>('all',8,'binary',...), #<33>(8,1,...)}#
     /// ```
     pub(super) fn generate_string_interpolation(
         &mut self,
