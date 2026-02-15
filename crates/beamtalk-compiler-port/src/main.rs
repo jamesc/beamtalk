@@ -419,11 +419,11 @@ fn handle_inline_class_definition(
         .map(|c| (c.name.name.to_string(), c.superclass_name().to_string()))
         .collect();
 
-    match beamtalk_core::erlang::generate_with_workspace_and_source(
+    match beamtalk_core::erlang::generate_module(
         &module,
-        &class_module_name,
-        true,
-        Some(source),
+        beamtalk_core::erlang::CodegenOptions::new(&class_module_name)
+            .with_workspace_mode(true)
+            .with_source(source),
     ) {
         Ok(code) => class_definition_ok_response(&code, &class_module_name, &classes, &warnings),
         Err(e) => error_response(&[format!("Code generation failed: {e}")]),
@@ -528,11 +528,11 @@ fn handle_compile(request: &Map) -> Term {
 
     // Generate Core Erlang
     let warning_msgs: Vec<String> = warnings.iter().map(|w| w.message.clone()).collect();
-    match beamtalk_core::erlang::generate_with_workspace_and_source(
+    match beamtalk_core::erlang::generate_module(
         &module,
-        &module_name,
-        workspace_mode,
-        Some(&source),
+        beamtalk_core::erlang::CodegenOptions::new(&module_name)
+            .with_workspace_mode(workspace_mode)
+            .with_source(&source),
     ) {
         Ok(code) => compile_ok_response(&code, &module_name, &classes, &warning_msgs),
         Err(e) => error_response(&[format!("Code generation failed: {e}")]),
