@@ -225,7 +225,9 @@ impl BeamCompiler {
         let runtime_dir = runtime_dir
             .canonicalize()
             .into_diagnostic()
-            .wrap_err("Failed to resolve runtime directory")?;
+            .wrap_err_with(|| {
+                format!("{RUNTIME_UNAVAILABLE_PREFIX} a resolvable runtime directory")
+            })?;
 
         let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
 
