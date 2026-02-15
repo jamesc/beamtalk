@@ -165,11 +165,10 @@ my_counter/
 │   └── counter_test.bt
 ├── _build/                 # Build output (generated)
 │   └── dev/                # Profile (future: test, prod)
-│       ├── ebin/           # .beam files + .app file
-│       │   ├── my_counter.app
-│       │   ├── bt@my_counter@main.beam
-│       │   └── bt@my_counter@counter.beam
-│       └── core/           # Intermediate .core files
+│       └── ebin/           # .beam files + .app file
+│           ├── my_counter.app
+│           ├── bt@my_counter@main.beam
+│           └── bt@my_counter@counter.beam
 ├── AGENTS.md               # AI agent guide (generated)
 ├── .github/
 │   └── copilot-instructions.md  # Copilot custom instructions (generated)
@@ -201,9 +200,11 @@ Build complete: 2 modules in _build/dev/ebin/
 The build system:
 1. Reads `beamtalk.toml` for package name and version
 2. Discovers `.bt` files in `src/` (not the root — prevents compiling test files)
-3. Compiles each with `bt@{name}@` prefix
+3. Compiles each with `bt@{name}@` prefix via the embedded compiler port (ADR 0022)
 4. Generates `.app` file with module list and class metadata
-5. Outputs to `_build/dev/ebin/` **relative to the package root** (where `beamtalk.toml` lives), regardless of the current working directory
+5. Writes `.beam` files to `_build/dev/ebin/` **relative to the package root** (where `beamtalk.toml` lives), regardless of the current working directory
+
+**Single compilation path:** Both `beamtalk build` and `beamtalk repl` use the same embedded compiler port (ADR 0022). There are no intermediate `.core` files on disk — compilation is fully in-memory (`Source → Port → Core Erlang → compile:forms → .beam`). For debugging, `beamtalk build --emit-core` can dump Core Erlang to disk.
 
 **Note:** This fixes a current bug where `beamtalk build` creates `build/` relative to the CWD. In package mode, `_build/` is always anchored to the manifest location.
 
@@ -391,9 +392,11 @@ Allow subdirectories within `src/` to be independent packages with their own `be
 - Fallback to current behavior when no manifest found
 
 ### Phase 2: Build output restructuring
+- Migrate `beamtalk build` to use embedded compiler port (ADR 0022) — same path as REPL, no `.core` files on disk
 - Output to `_build/dev/ebin/` when in package mode
 - Generate `.app` file from manifest + discovered modules
 - Apply `bt@{name}@{module}` naming to compiled modules
+- Add `--emit-core` flag for debugging (writes `.core` files to `_build/dev/core/`)
 - Update `.gitignore` template to include `_build/`
 
 ### Phase 3: Scaffold updates
