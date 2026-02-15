@@ -145,3 +145,19 @@ bob balance
 // Check last transfer amount
 agent getLastAmount
 // => 250
+
+// ===========================================================================
+// TRANSFER — OVERDRAFT (Account rejects independently)
+// ===========================================================================
+
+// Try to withdraw more than Alice has directly
+alice withdraw: 5000
+// => ERROR: Insufficient funds
+
+// Alice's balance unchanged after failed withdrawal
+alice balance
+// => 750
+
+// Bob's balance unchanged
+bob balance
+// => 750

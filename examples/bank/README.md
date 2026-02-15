@@ -2,7 +2,7 @@
 
 This example demonstrates **actor coordination** — the kind of problem the BEAM
 virtual machine excels at. Each bank account is an independent actor (process),
-and transferring money requires safely coordinating two actors.
+and transferring money requires coordinating two actors.
 
 ## What You'll Learn
 
@@ -119,8 +119,10 @@ The `TransferAgent` coordinates two actors by sending messages:
 
 Each account is a separate BEAM process that serialises its own messages.
 The `Account` enforces its own overdraft protection independently.
-Because actor messaging is asynchronous, the `TransferAgent` fires off both
-operations — each account handles its own validation.
+Note that actor messaging is asynchronous — the `TransferAgent` fires off
+both operations without awaiting their results. The REPL auto-awaits the
+`transfer:from:to:` call, so by the time the prompt returns both messages
+have been delivered and processed in order.
 
 ## Key Takeaways
 
