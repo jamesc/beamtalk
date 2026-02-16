@@ -1,0 +1,22 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("Actor"), span: Span { start: 166, end: 171 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test empty method body codegen (BT-631)"), Whitespace("\n"), LineComment("// Empty methods should return self instead of nil."), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 172, end: 181 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("EmptyActor"), span: Span { start: 182, end: 192 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("state:"), span: Span { start: 195, end: 201 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("value"), span: Span { start: 202, end: 207 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("="), span: Span { start: 208, end: 209 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("0"), span: Span { start: 210, end: 211 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("doNothing"), span: Span { start: 215, end: 224 }, leading_trivia: [Whitespace("\n\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 225, end: 227 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("getValue"), span: Span { start: 231, end: 239 }, leading_trivia: [Whitespace("\n\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 240, end: 242 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 243, end: 247 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 247, end: 248 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("value"), span: Span { start: 248, end: 253 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("class"), span: Span { start: 257, end: 262 }, leading_trivia: [Whitespace("\n\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("classEmpty"), span: Span { start: 263, end: 273 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 274, end: 276 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 277, end: 277 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

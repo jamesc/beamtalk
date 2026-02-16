@@ -484,4 +484,73 @@ mod tests {
             "Type checker warnings should be Warning severity"
         );
     }
+
+    // ── BT-631: Empty method body warnings ──
+
+    #[test]
+    fn warn_empty_instance_method_body() {
+        let source = "Object subclass: Foo\n  doNothing =>";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let has_warning = diagnostics.iter().any(|d| {
+            d.message.contains("doNothing")
+                && d.message.contains("empty body")
+                && d.severity == crate::source_analysis::Severity::Warning
+        });
+        assert!(
+            has_warning,
+            "Expected empty body warning, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn warn_empty_class_method_body() {
+        let source = "Object subclass: Foo\n  class reset =>";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let has_warning = diagnostics.iter().any(|d| {
+            d.message.contains("reset")
+                && d.message.contains("empty body")
+                && d.severity == crate::source_analysis::Severity::Warning
+        });
+        assert!(
+            has_warning,
+            "Expected empty body warning for class method, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn no_warning_for_nonempty_method() {
+        let source = "Object subclass: Foo\n  getValue => 42";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let has_empty_warning = diagnostics.iter().any(|d| d.message.contains("empty body"));
+        assert!(
+            !has_empty_warning,
+            "Should not warn about non-empty method, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn empty_body_warning_has_hint() {
+        let source = "Object subclass: Foo\n  doNothing =>";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let warning = diagnostics
+            .iter()
+            .find(|d| d.message.contains("empty body"));
+        assert!(warning.is_some(), "Expected warning, got: {diagnostics:?}");
+        assert!(
+            warning.unwrap().hint.is_some(),
+            "Warning should have a hint"
+        );
+    }
 }

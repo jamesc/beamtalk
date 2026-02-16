@@ -309,6 +309,7 @@ pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> Analysis
     check_actor_new_usage(module, &result.class_hierarchy, &mut result.diagnostics);
     check_new_field_names(module, &result.class_hierarchy, &mut result.diagnostics);
     check_class_variable_access(module, &result.class_hierarchy, &mut result.diagnostics);
+    check_empty_method_bodies(module, &mut result.diagnostics);
 
     // Phase 6: Module-level validation (BT-349)
     let module_diags = module_validator::validate_single_class(module);
@@ -803,6 +804,27 @@ fn visit_classvar_access(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// BT-631: Warn about empty method bodies.
+///
+/// Methods declared with `=>` but no body expressions are likely incomplete.
+/// The codegen returns `self` for these, but users should be aware.
+fn check_empty_method_bodies(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+    for class in &module.classes {
+        for method in class.methods.iter().chain(class.class_methods.iter()) {
+            if method.body.is_empty() {
+                let selector = method.selector.name();
+                let mut diag = Diagnostic::warning(
+                    format!("Method `{selector}` has an empty body and will return `self`"),
+                    method.span,
+                );
+                diag.hint =
+                    Some("Add an expression after `=>`, or remove the method if unneeded".into());
+                diagnostics.push(diag);
             }
         }
     }
