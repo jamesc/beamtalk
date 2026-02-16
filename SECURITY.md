@@ -53,9 +53,8 @@ When using Beamtalk, follow these security guidelines:
 ## Security Scanning
 
 This repository uses:
-- **cargo-audit** - Rust dependency vulnerability scanning (CI pipeline)
 - **GitHub Dependabot** - Automated dependency updates and security alerts
-- **GitHub Advanced Security** - Secret scanning (if enabled)
+- **GitHub Advanced Security** - Secret scanning
 
 ## Acknowledgments
 
