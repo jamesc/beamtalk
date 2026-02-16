@@ -23,7 +23,9 @@
 //! {{function, SelectorAtom, Arity}, Anno, [Signature], Doc, Metadata}
 //! ```
 
+use super::document::Document;
 use crate::ast::{MessageSelector, MethodDefinition, Module};
+use crate::docvec;
 
 /// Generates an EEP-48 `docs_v1` Erlang term from a module's doc comments.
 ///
@@ -49,36 +51,43 @@ pub fn generate_docs_term(module: &Module) -> Option<String> {
 
     let mut all_docs = method_docs;
     all_docs.extend(class_method_docs);
-    let docs_list = if all_docs.is_empty() {
-        "[]".to_string()
+    let docs_list: Document<'static> = if all_docs.is_empty() {
+        Document::Str("[]")
     } else {
-        format!("[\n{}\n]", all_docs.join(",\n"))
+        docvec![
+            "[\n",
+            super::document::join(all_docs, &Document::Str(",\n")),
+            "\n]"
+        ]
     };
 
-    // {docs_v1, Anno, beamtalk, <<"text/markdown">>, ModuleDoc, Metadata, Docs}
-    let term = format!(
-        "{{docs_v1, #{{}}, beamtalk, <<\"text/markdown\">>, {module_doc}, #{{}}, {docs_list}}}.\n"
-    );
+    let term: Document<'static> = docvec![
+        "{docs_v1, #{}, beamtalk, <<\"text/markdown\">>, ",
+        module_doc,
+        ", #{}, ",
+        docs_list,
+        "}.\n"
+    ];
 
-    Some(term)
+    Some(term.to_pretty_string())
 }
 
 /// Formats a doc comment as an EEP-48 doc value.
 ///
 /// - `Some(text)` → `#{<<"en">> => <<"text">>}`
 /// - `None` → `none`
-fn format_doc(doc: Option<&String>) -> String {
+fn format_doc(doc: Option<&String>) -> Document<'static> {
     match doc {
         Some(text) => {
             let escaped = escape_erlang_binary(text);
-            format!("#{{<<\"en\">> => <<\"{escaped}\"/utf8>>}}")
+            Document::String(format!("#{{<<\"en\">> => <<\"{escaped}\"/utf8>>}}"))
         }
-        None => "none".to_string(),
+        None => Document::Str("none"),
     }
 }
 
 /// Generates EEP-48 doc entries for a list of methods.
-fn generate_method_docs(methods: &[MethodDefinition]) -> Vec<String> {
+fn generate_method_docs(methods: &[MethodDefinition]) -> Vec<Document<'static>> {
     methods.iter().map(generate_method_doc_entry).collect()
 }
 
@@ -88,18 +97,22 @@ fn generate_method_docs(methods: &[MethodDefinition]) -> Vec<String> {
 ///
 /// Arity uses the Erlang function arity (message arity + 1 for Self parameter)
 /// to align with actual BEAM exports for value types.
-fn generate_method_doc_entry(method: &MethodDefinition) -> String {
+fn generate_method_doc_entry(method: &MethodDefinition) -> Document<'static> {
     let selector_atom = escape_erlang_atom(&method.selector.to_erlang_atom());
-    // Erlang function arity = message arity + 1 (implicit Self parameter)
     let arity = method.selector.arity() + 1;
     let signature = format_signature(&method.selector, &method.parameters);
     let doc = format_doc(method.doc_comment.as_ref());
     let metadata = format_method_metadata(&method.selector);
 
-    format!(
-        "  {{{{{function}, '{selector_atom}', {arity}}}, #{{}}, [<<\"{signature}\"/utf8>>], {doc}, {metadata}}}",
-        function = "function"
-    )
+    docvec![
+        Document::String(format!(
+            "  {{{{function, '{selector_atom}', {arity}}}, #{{}}, [<<\"{signature}\"/utf8>>], "
+        )),
+        doc,
+        ", ",
+        metadata,
+        "}"
+    ]
 }
 
 /// Formats a method signature for display.
@@ -138,9 +151,9 @@ fn format_signature(
 }
 
 /// Formats method metadata with the selector name.
-fn format_method_metadata(selector: &MessageSelector) -> String {
+fn format_method_metadata(selector: &MessageSelector) -> Document<'static> {
     let selector_atom = escape_erlang_atom(&selector.to_erlang_atom());
-    format!("#{{selector => '{selector_atom}'}}")
+    Document::String(format!("#{{selector => '{selector_atom}'}}"))
 }
 
 /// Escapes a string for use inside an Erlang binary literal (`<<"...">>`).
