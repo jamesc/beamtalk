@@ -23,7 +23,7 @@ test_metadata() ->
 ensure_meta_stopped() ->
     case whereis(beamtalk_workspace_meta) of
         undefined -> ok;
-        OldPid -> gen_server:stop(OldPid), timer:sleep(10)
+        OldPid -> gen_server:stop(OldPid)
     end.
 
 %%====================================================================
@@ -37,11 +37,14 @@ status_returns_error_when_meta_not_started_test() ->
 status_returns_ok_map_when_meta_started_test() ->
     ensure_meta_stopped(),
     {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
-    {ok, Status} = beamtalk_workspace:status(),
-    ?assertEqual(<<"test-ws-123">>, maps:get(workspace_id, Status)),
-    ?assertEqual(<<"/tmp/test-project">>, maps:get(project_path, Status)),
-    ?assert(is_integer(maps:get(created_at, Status))),
-    ?assert(is_integer(maps:get(last_activity, Status))),
-    ?assertEqual(0, maps:get(actor_count, Status)),
-    ?assertEqual([], maps:get(loaded_modules, Status)),
-    gen_server:stop(Pid).
+    try
+        {ok, Status} = beamtalk_workspace:status(),
+        ?assertEqual(<<"test-ws-123">>, maps:get(workspace_id, Status)),
+        ?assertEqual(<<"/tmp/test-project">>, maps:get(project_path, Status)),
+        ?assert(is_integer(maps:get(created_at, Status))),
+        ?assert(is_integer(maps:get(last_activity, Status))),
+        ?assertEqual(0, maps:get(actor_count, Status)),
+        ?assertEqual([], maps:get(loaded_modules, Status))
+    after
+        gen_server:stop(Pid)
+    end.
