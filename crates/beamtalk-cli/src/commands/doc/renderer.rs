@@ -1,290 +1,22 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Generate HTML API documentation from Beamtalk source files.
+//! HTML rendering, CSS, search JS, and utility helpers.
 //!
 //! **DDD Context:** CLI / Documentation
-//!
-//! Parses `.bt` source files, extracts doc comments and class hierarchy,
-//! and generates static HTML reference documentation. The generated docs
-//! match what would be available at runtime via EEP-48 `code:get_doc/1`.
-//!
-//! Part of ADR 0008 (Doc Comments and API Documentation).
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8Path;
 use miette::{Context, IntoDiagnostic, Result};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::fs;
-use tracing::{debug, info, instrument, warn};
+use tracing::debug;
 
-/// Information about a documented class.
-struct ClassInfo {
-    /// The class name (e.g., `Counter`).
-    name: String,
-    /// The superclass name, if any (e.g., `Actor`).
-    superclass: Option<String>,
-    /// The class-level doc comment extracted from source.
-    doc_comment: Option<String>,
-    /// Instance methods defined on the class.
-    methods: Vec<MethodInfo>,
-    /// Class-side methods defined on the class.
-    class_methods: Vec<MethodInfo>,
-    source_file: Option<String>,
-    source_root: Option<String>,
-}
-
-/// Information about a documented method.
-struct MethodInfo {
-    /// The formatted method signature (e.g., `at: index put: value`).
-    signature: String,
-    /// The method-level doc comment extracted from source.
-    doc_comment: Option<String>,
-    line_number: Option<usize>,
-}
-
-/// Generate HTML API documentation.
-///
-/// Parses all `.bt` files in the given path, extracts doc comments and
-/// class hierarchy, and generates static HTML to the output directory.
-#[instrument(skip_all, fields(path = %path, output = %output_dir))]
-pub fn run(path: &str, output_dir: &str) -> Result<()> {
-    info!("Generating documentation");
-    let source_path = Utf8PathBuf::from(path);
-    let output_path = Utf8PathBuf::from(output_dir);
-
-    // Find .bt source files
-    let source_files = find_source_files(&source_path)?;
-    if source_files.is_empty() {
-        miette::bail!("No .bt source files found in '{path}'");
-    }
-
-    println!("Generating docs for {} file(s)...", source_files.len());
-
-    // Parse all source files to extract class info
-    let mut classes = Vec::new();
-    for file in &source_files {
-        if let Some(class_info) = parse_class_info(&source_path, file)? {
-            classes.push(class_info);
-        }
-    }
-
-    // Sort classes alphabetically
-    classes.sort_by(|a, b| a.name.cmp(&b.name));
-
-    // Build class hierarchy map for inherited methods
-    let hierarchy: HashMap<String, String> = classes
-        .iter()
-        .filter_map(|c| c.superclass.as_ref().map(|s| (c.name.clone(), s.clone())))
-        .collect();
-
-    // Collect all methods by class name for inheritance lookup
-    let methods_by_class: HashMap<String, &ClassInfo> =
-        classes.iter().map(|c| (c.name.clone(), c)).collect();
-
-    // Create output directory
-    fs::create_dir_all(&output_path)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to create output directory '{output_path}'"))?;
-
-    // Generate CSS and JS assets
-    write_css(&output_path)?;
-    write_search_js(&output_path, &classes)?;
-
-    // Build sidebar HTML (shared across all pages)
-    let sidebar_html = build_sidebar_html(&classes);
-
-    // Generate index page (include README.md from source dir if present, per ADR 0008)
-    let readme_path = source_path.join("README.md");
-    let readme = fs::read_to_string(&readme_path).ok();
-    write_index_page(&output_path, &classes, readme.as_deref(), &sidebar_html)?;
-
-    // Generate per-class pages
-    for class in &classes {
-        let inherited = collect_inherited_methods(class, &hierarchy, &methods_by_class);
-        write_class_page(
-            &output_path,
-            class,
-            &inherited,
-            &methods_by_class,
-            &sidebar_html,
-        )?;
-    }
-
-    info!(
-        class_count = classes.len(),
-        "Documentation generated successfully"
-    );
-    println!("Generated documentation for {} class(es)", classes.len());
-    println!("  Output: {output_path}/");
-
-    Ok(())
-}
-
-/// Find all `.bt` source files in a path.
-fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
-    let mut files = Vec::new();
-
-    if path.is_file() {
-        if path.extension() == Some("bt") {
-            files.push(path.to_path_buf());
-        } else {
-            miette::bail!("File '{}' is not a .bt source file", path);
-        }
-    } else if path.is_dir() {
-        for entry in fs::read_dir(path)
-            .into_diagnostic()
-            .wrap_err_with(|| format!("Failed to read directory '{path}'"))?
-        {
-            let entry = entry.into_diagnostic()?;
-            let entry_path = Utf8PathBuf::from_path_buf(entry.path())
-                .map_err(|_| miette::miette!("Non-UTF-8 path"))?;
-
-            if entry_path.extension() == Some("bt") {
-                files.push(entry_path);
-            }
-        }
-    } else {
-        miette::bail!("Path '{}' does not exist", path);
-    }
-
-    files.sort();
-    Ok(files)
-}
-
-/// Parse a `.bt` source file and extract class documentation info.
-fn parse_class_info(root: &Utf8Path, path: &Utf8Path) -> Result<Option<ClassInfo>> {
-    let source = fs::read_to_string(path)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to read '{path}'"))?;
-
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
-    let (module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
-
-    let has_errors = diagnostics
-        .iter()
-        .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
-    if has_errors {
-        warn!("Skipping '{}': parse errors detected", path);
-        return Ok(None);
-    }
-
-    let Some(class) = module.classes.first() else {
-        debug!("No class definition in '{}'", path);
-        return Ok(None);
-    };
-
-    let source_file = path
-        .strip_prefix(root)
-        .ok()
-        .map(|p| p.as_str().to_string())
-        .or_else(|| path.file_name().map(String::from));
-
-    let make_method_info = |m: &beamtalk_core::ast::MethodDefinition| {
-        let line_number = {
-            let offset = m.span.start() as usize;
-            source[..offset].lines().count() + 1
-        };
-        MethodInfo {
-            signature: format_signature(&m.selector, &m.parameters),
-            doc_comment: m.doc_comment.clone(),
-            line_number: Some(line_number),
-        }
-    };
-
-    let methods = class.methods.iter().map(&make_method_info).collect();
-    let class_methods = class.class_methods.iter().map(&make_method_info).collect();
-
-    Ok(Some(ClassInfo {
-        name: class.name.name.to_string(),
-        superclass: class.superclass.as_ref().map(|s| s.name.to_string()),
-        doc_comment: class.doc_comment.clone(),
-        methods,
-        class_methods,
-        source_file,
-        source_root: Some(root.as_str().to_string()),
-    }))
-}
-
-/// Format a method signature for display.
-fn format_signature(
-    selector: &beamtalk_core::ast::MessageSelector,
-    parameters: &[beamtalk_core::ast::ParameterDefinition],
-) -> String {
-    use beamtalk_core::ast::MessageSelector;
-    match selector {
-        MessageSelector::Unary(name) => name.to_string(),
-        MessageSelector::Binary(op) => {
-            if let Some(param) = parameters.first() {
-                format!("{op} {}", param.name.name)
-            } else {
-                op.to_string()
-            }
-        }
-        MessageSelector::Keyword(parts) => {
-            let mut sig = String::new();
-            for (i, part) in parts.iter().enumerate() {
-                if i > 0 {
-                    sig.push(' ');
-                }
-                sig.push_str(&part.keyword);
-                if let Some(param) = parameters.get(i) {
-                    sig.push(' ');
-                    sig.push_str(&param.name.name);
-                }
-            }
-            sig
-        }
-    }
-}
-
-/// Collect inherited methods by walking the class hierarchy.
-///
-/// Includes cycle detection to prevent infinite loops from malformed hierarchies.
-fn collect_inherited_methods<'a>(
-    class: &ClassInfo,
-    hierarchy: &'a HashMap<String, String>,
-    methods_by_class: &'a HashMap<String, &'a ClassInfo>,
-) -> Vec<(&'a str, &'a [MethodInfo])> {
-    let mut inherited = Vec::new();
-    let mut visited = std::collections::HashSet::new();
-
-    let Some(ref superclass_name) = class.superclass else {
-        return inherited;
-    };
-
-    // Walk from superclass upward
-    let mut current: Option<&'a String> = hierarchy
-        .keys()
-        .find(|k| k.as_str() == superclass_name.as_str());
-
-    // If superclass not in hierarchy keys, try looking it up in methods_by_class directly
-    if current.is_none() {
-        if let Some((key, parent)) = methods_by_class.get_key_value(superclass_name.as_str()) {
-            if !parent.methods.is_empty() {
-                inherited.push((key.as_str(), parent.methods.as_slice()));
-            }
-        }
-        return inherited;
-    }
-
-    while let Some(parent_name) = current {
-        if !visited.insert(parent_name.as_str()) {
-            break; // cycle detected
-        }
-        if let Some(parent) = methods_by_class.get(parent_name.as_str()) {
-            if !parent.methods.is_empty() {
-                inherited.push((parent_name.as_str(), parent.methods.as_slice()));
-            }
-        }
-        current = hierarchy.get(parent_name.as_str());
-    }
-
-    inherited
-}
+use super::extractor::{ClassInfo, MethodInfo};
+use super::highlighter::highlight_beamtalk;
 
 /// Escape HTML special characters.
-fn html_escape(s: &str) -> String {
+pub(super) fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
@@ -292,7 +24,7 @@ fn html_escape(s: &str) -> String {
 }
 
 /// Convert a class name to a link if the class exists in the docs.
-fn class_link(name: &str, classes: &HashMap<String, &ClassInfo>) -> String {
+pub(super) fn class_link(name: &str, classes: &HashMap<String, &ClassInfo>) -> String {
     if classes.contains_key(name) {
         format!("<a href=\"{name}.html\">{name}</a>")
     } else {
@@ -306,7 +38,7 @@ fn class_link(name: &str, classes: &HashMap<String, &ClassInfo>) -> String {
 /// Beamtalk code blocks get syntax highlighting via `highlight_beamtalk()`.
 ///
 /// Raw HTML events are escaped to prevent injection from doc comments.
-fn render_doc(doc: &str) -> String {
+pub(super) fn render_doc(doc: &str) -> String {
     use pulldown_cmark::{CodeBlockKind, CowStr, Event, Options, Parser, Tag, TagEnd};
 
     let options =
@@ -762,7 +494,7 @@ footer {
 ";
 
 /// Write CSS stylesheet.
-fn write_css(output_dir: &Utf8Path) -> Result<()> {
+pub(super) fn write_css(output_dir: &Utf8Path) -> Result<()> {
     let css_path = output_dir.join("style.css");
     fs::write(&css_path, CSS_STYLESHEET)
         .into_diagnostic()
@@ -775,7 +507,7 @@ fn write_css(output_dir: &Utf8Path) -> Result<()> {
 ///
 /// If `readme` is provided (from source dir's README.md), it is rendered
 /// above the class listing as the project overview (per ADR 0008).
-fn write_index_page(
+pub(super) fn write_index_page(
     output_dir: &Utf8Path,
     classes: &[ClassInfo],
     readme: Option<&str>,
@@ -832,7 +564,7 @@ fn write_index_page(
 }
 
 /// Write a per-class documentation page.
-fn write_class_page(
+pub(super) fn write_class_page(
     output_dir: &Utf8Path,
     class: &ClassInfo,
     inherited: &[(&str, &[MethodInfo])],
@@ -1011,7 +743,7 @@ fn write_method_html_with_source(
 }
 
 /// Generate an HTML anchor ID from a method signature.
-fn method_anchor(signature: &str) -> String {
+pub(super) fn method_anchor(signature: &str) -> String {
     let mut result = String::new();
     for c in signature.chars() {
         match c {
@@ -1061,7 +793,7 @@ fn page_footer() -> String {
 }
 
 /// Build sidebar HTML with class list navigation.
-fn build_sidebar_html(classes: &[ClassInfo]) -> String {
+pub(super) fn build_sidebar_html(classes: &[ClassInfo]) -> String {
     let mut html = String::new();
     html.push_str("<nav class=\"sidebar\">\n");
     html.push_str("<div class=\"sidebar-header\">\n");
@@ -1153,7 +885,7 @@ fn write_hierarchy_node(html: &mut String, name: &str, children: &HashMap<String
 }
 
 /// Generate search JavaScript and write search.js file.
-fn write_search_js(output_dir: &Utf8Path, classes: &[ClassInfo]) -> Result<()> {
+pub(super) fn write_search_js(output_dir: &Utf8Path, classes: &[ClassInfo]) -> Result<()> {
     // Build search index as JSON
     let mut index_entries = Vec::new();
     for class in classes {
@@ -1289,445 +1021,3 @@ function esc(s) {
   return d.innerHTML;
 }
 "#;
-
-/// Syntax-highlight Beamtalk source code.
-///
-/// Applies HTML span tags for keywords, strings, numbers, comments,
-/// selectors, symbols, class names, and `self`.
-fn highlight_beamtalk(code: &str) -> String {
-    let mut result = String::new();
-    let chars: Vec<char> = code.chars().collect();
-    let len = chars.len();
-    let mut i = 0;
-
-    while i < len {
-        if let Some(new_i) = hl_comment(&chars, i, &mut result) {
-            i = new_i;
-        } else if let Some(new_i) = hl_string(&chars, i, &mut result) {
-            i = new_i;
-        } else if let Some(new_i) = hl_symbol(&chars, i, &mut result) {
-            i = new_i;
-        } else if let Some(new_i) = hl_number(&chars, i, &mut result) {
-            i = new_i;
-        } else if let Some(new_i) = hl_word(&chars, i, &mut result) {
-            i = new_i;
-        } else {
-            match chars[i] {
-                '&' => result.push_str("&amp;"),
-                '<' => result.push_str("&lt;"),
-                '>' => result.push_str("&gt;"),
-                '"' => result.push_str("&quot;"),
-                c => result.push(c),
-            }
-            i += 1;
-        }
-    }
-
-    result
-}
-
-/// Highlight line or block comments. Returns new index if matched.
-fn hl_comment(chars: &[char], i: usize, out: &mut String) -> Option<usize> {
-    let len = chars.len();
-    if i + 1 >= len || chars[i] != '/' {
-        return None;
-    }
-
-    let mut j = i;
-    if chars[i + 1] == '/' {
-        while j < len && chars[j] != '\n' {
-            j += 1;
-        }
-    } else if chars[i + 1] == '*' {
-        j += 2;
-        while j + 1 < len && !(chars[j] == '*' && chars[j + 1] == '/') {
-            j += 1;
-        }
-        if j + 1 < len && chars[j] == '*' && chars[j + 1] == '/' {
-            j += 2;
-        } else {
-            j = len;
-        }
-    } else {
-        return None;
-    }
-
-    let text: String = chars[i..j].iter().collect();
-    let _ = write!(
-        out,
-        "<span class=\"hl-comment\">{}</span>",
-        html_escape(&text)
-    );
-    Some(j)
-}
-
-/// Highlight string literals. Returns new index if matched.
-fn hl_string(chars: &[char], i: usize, out: &mut String) -> Option<usize> {
-    if chars[i] != '\'' && chars[i] != '"' {
-        return None;
-    }
-    let quote = chars[i];
-    let len = chars.len();
-    let mut j = i + 1;
-    while j < len && chars[j] != quote {
-        if chars[j] == '\\' {
-            j += 1;
-            if j >= len {
-                break;
-            }
-        }
-        j += 1;
-    }
-    if j < len {
-        j += 1;
-    }
-    let s: String = chars[i..j].iter().collect();
-    let _ = write!(out, "<span class=\"hl-string\">{}</span>", html_escape(&s));
-    Some(j)
-}
-
-/// Highlight symbol literals (#name). Returns new index if matched.
-fn hl_symbol(chars: &[char], i: usize, out: &mut String) -> Option<usize> {
-    let len = chars.len();
-    if chars[i] != '#' || i + 1 >= len || !(chars[i + 1].is_alphabetic() || chars[i + 1] == '_') {
-        return None;
-    }
-    let mut j = i + 1;
-    while j < len && (chars[j].is_alphanumeric() || chars[j] == '_' || chars[j] == ':') {
-        j += 1;
-    }
-    let sym: String = chars[i..j].iter().collect();
-    let _ = write!(
-        out,
-        "<span class=\"hl-symbol\">{}</span>",
-        html_escape(&sym)
-    );
-    Some(j)
-}
-
-/// Highlight numeric literals. Returns new index if matched.
-fn hl_number(chars: &[char], i: usize, out: &mut String) -> Option<usize> {
-    let len = chars.len();
-    let is_neg = chars[i] == '-'
-        && i + 1 < len
-        && chars[i + 1].is_ascii_digit()
-        && (i == 0 || !chars[i - 1].is_alphanumeric());
-
-    if !chars[i].is_ascii_digit() && !is_neg {
-        return None;
-    }
-
-    let mut j = i;
-    if chars[j] == '-' {
-        j += 1;
-    }
-    while j < len && (chars[j].is_ascii_digit() || chars[j] == '.') {
-        j += 1;
-    }
-    let num: String = chars[i..j].iter().collect();
-    let _ = write!(
-        out,
-        "<span class=\"hl-number\">{}</span>",
-        html_escape(&num)
-    );
-    Some(j)
-}
-
-/// Highlight identifiers, keywords, and class names. Returns new index if matched.
-fn hl_word(chars: &[char], i: usize, out: &mut String) -> Option<usize> {
-    if !chars[i].is_alphabetic() && chars[i] != '_' {
-        return None;
-    }
-    let len = chars.len();
-    let mut j = i;
-    while j < len && (chars[j].is_alphanumeric() || chars[j] == '_') {
-        j += 1;
-    }
-    let word: String = chars[i..j].iter().collect();
-
-    match word.as_str() {
-        "self" => {
-            let _ = write!(out, "<span class=\"hl-self\">{word}</span>");
-        }
-        "true" | "false" | "nil" | "super" | "sealed" => {
-            let _ = write!(
-                out,
-                "<span class=\"hl-keyword\">{}</span>",
-                html_escape(&word)
-            );
-        }
-        "subclass" | "state" | "ifTrue" | "ifFalse" | "ifNil" | "ifNotNil" | "whileTrue"
-        | "whileFalse" | "timesRepeat" => {
-            let _ = write!(
-                out,
-                "<span class=\"hl-selector\">{}</span>",
-                html_escape(&word)
-            );
-        }
-        _ if word.starts_with(|c: char| c.is_uppercase()) => {
-            let _ = write!(
-                out,
-                "<span class=\"hl-class\">{}</span>",
-                html_escape(&word)
-            );
-        }
-        _ => out.push_str(&html_escape(&word)),
-    }
-    Some(j)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use tempfile::TempDir;
-
-    #[test]
-    fn test_find_source_files_single_file() {
-        let temp = TempDir::new().unwrap();
-        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        let file = dir.join("Test.bt");
-        fs::write(&file, "// stub").unwrap();
-
-        let files = find_source_files(&file).unwrap();
-        assert_eq!(files.len(), 1);
-    }
-
-    #[test]
-    fn test_find_source_files_directory() {
-        let temp = TempDir::new().unwrap();
-        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        fs::write(dir.join("A.bt"), "// stub").unwrap();
-        fs::write(dir.join("B.bt"), "// stub").unwrap();
-        fs::write(dir.join("README.md"), "not bt").unwrap();
-
-        let files = find_source_files(&dir).unwrap();
-        assert_eq!(files.len(), 2);
-    }
-
-    #[test]
-    fn test_find_source_files_sorted() {
-        let temp = TempDir::new().unwrap();
-        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        fs::write(dir.join("Zebra.bt"), "// stub").unwrap();
-        fs::write(dir.join("Alpha.bt"), "// stub").unwrap();
-
-        let files = find_source_files(&dir).unwrap();
-        assert!(files[0].as_str() < files[1].as_str());
-    }
-
-    #[test]
-    fn test_find_source_files_nonexistent() {
-        let result = find_source_files(Utf8Path::new("/nonexistent"));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_parse_class_info() {
-        let temp = TempDir::new().unwrap();
-        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        let file = dir.join("Counter.bt");
-        fs::write(
-            &file,
-            "/// A simple counter.\nActor subclass: Counter\n  increment => 1\n",
-        )
-        .unwrap();
-
-        let info = parse_class_info(&dir, &file).unwrap().unwrap();
-        assert_eq!(info.name, "Counter");
-        assert_eq!(info.superclass.as_deref(), Some("Actor"));
-        assert!(info.doc_comment.unwrap().contains("simple counter"));
-        assert_eq!(info.methods.len(), 1);
-        assert_eq!(info.methods[0].signature, "increment");
-    }
-
-    #[test]
-    fn test_parse_class_info_no_class() {
-        let temp = TempDir::new().unwrap();
-        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        let file = dir.join("empty.bt");
-        fs::write(&file, "x := 42\n").unwrap();
-
-        let info = parse_class_info(&dir, &file).unwrap();
-        assert!(info.is_none());
-    }
-
-    #[test]
-    fn test_html_escape() {
-        assert_eq!(html_escape("<div>"), "&lt;div&gt;");
-        assert_eq!(html_escape("a & b"), "a &amp; b");
-        assert_eq!(html_escape("\"hi\""), "&quot;hi&quot;");
-    }
-
-    #[test]
-    fn test_method_anchor() {
-        assert_eq!(method_anchor("increment"), "increment");
-        assert_eq!(method_anchor("+ other"), "plus-other");
-        assert_eq!(method_anchor("- other"), "minus-other");
-        assert_eq!(method_anchor("* other"), "star-other");
-        assert_eq!(
-            method_anchor("at: index put: value"),
-            "at--index-put--value"
-        );
-        assert_eq!(method_anchor("/= other"), "slasheq-other");
-        assert_eq!(method_anchor("<= other"), "lteq-other");
-    }
-
-    #[test]
-    fn test_render_doc_basic() {
-        let html = render_doc("Hello world.");
-        assert!(html.contains("<p>Hello world.</p>"));
-    }
-
-    #[test]
-    fn test_render_doc_code_block() {
-        let html = render_doc("Example:\n```beamtalk\n3 + 4\n```");
-        assert!(html.contains("<pre><code class=\"language-beamtalk\">"));
-        // Content is syntax-highlighted, so check for the number spans
-        assert!(html.contains("hl-number"));
-    }
-
-    #[test]
-    fn test_render_doc_heading() {
-        let html = render_doc("## Examples");
-        assert!(html.contains("<h2>Examples</h2>"));
-    }
-
-    #[test]
-    fn test_render_doc_inline_code() {
-        let html = render_doc("use `foo` here");
-        assert!(html.contains("<code>foo</code>"));
-    }
-
-    #[test]
-    fn test_render_doc_table() {
-        let md = "| A | B |\n|---|---|\n| 1 | 2 |";
-        let html = render_doc(md);
-        assert!(html.contains("<table>"));
-        assert!(html.contains("</table>"));
-        // Table renders with header and body rows
-        assert!(html.contains("<thead>"));
-        assert!(html.contains("<th>"));
-        assert!(html.contains("<tbody>"));
-    }
-
-    #[test]
-    fn test_render_doc_link() {
-        let html = render_doc("[click](https://example.com)");
-        assert!(html.contains("<a href=\"https://example.com\">click</a>"));
-    }
-
-    #[test]
-    fn test_render_doc_bold_italic() {
-        let html = render_doc("**bold** and *italic*");
-        assert!(html.contains("<strong>bold</strong>"));
-        assert!(html.contains("<em>italic</em>"));
-    }
-
-    #[test]
-    fn test_render_doc_list() {
-        let html = render_doc("- one\n- two");
-        assert!(html.contains("<ul>"));
-        assert!(html.contains("<li>one</li>"));
-    }
-
-    #[test]
-    fn test_render_doc_sanitizes_raw_html() {
-        let html = render_doc("<script>alert('xss')</script>");
-        assert!(!html.contains("<script>"));
-        assert!(html.contains("&lt;script&gt;"));
-    }
-
-    #[test]
-    fn test_collect_inherited_methods() {
-        let parent = ClassInfo {
-            name: "Parent".into(),
-            superclass: None,
-            doc_comment: None,
-            methods: vec![MethodInfo {
-                signature: "parentMethod".into(),
-                doc_comment: None,
-                line_number: None,
-            }],
-            class_methods: vec![],
-            source_file: None,
-            source_root: None,
-        };
-        let child = ClassInfo {
-            name: "Child".into(),
-            superclass: Some("Parent".into()),
-            doc_comment: None,
-            methods: vec![],
-            class_methods: vec![],
-            source_file: None,
-            source_root: None,
-        };
-
-        let hierarchy: HashMap<String, String> = [("Child".into(), "Parent".into())].into();
-        let methods_by_class: HashMap<String, &ClassInfo> =
-            [("Parent".into(), &parent), ("Child".into(), &child)].into();
-
-        let inherited = collect_inherited_methods(&child, &hierarchy, &methods_by_class);
-        assert_eq!(inherited.len(), 1);
-        assert_eq!(inherited[0].0, "Parent");
-        assert_eq!(inherited[0].1.len(), 1);
-    }
-
-    #[test]
-    fn test_generate_full_docs() {
-        let temp = TempDir::new().unwrap();
-        let src_dir = Utf8PathBuf::from_path_buf(temp.path().join("src")).unwrap();
-        let out_dir = Utf8PathBuf::from_path_buf(temp.path().join("out")).unwrap();
-        fs::create_dir_all(&src_dir).unwrap();
-
-        fs::write(
-            src_dir.join("Counter.bt"),
-            "/// A counter class.\nActor subclass: Counter\n  /// Increment by one.\n  increment => 1\n",
-        )
-        .unwrap();
-
-        run(src_dir.as_str(), out_dir.as_str()).unwrap();
-
-        // Verify output files exist
-        assert!(out_dir.join("index.html").exists());
-        assert!(out_dir.join("Counter.html").exists());
-        assert!(out_dir.join("style.css").exists());
-        assert!(out_dir.join("search.js").exists());
-
-        // Verify content
-        let index = fs::read_to_string(out_dir.join("index.html")).unwrap();
-        assert!(index.contains("Counter"));
-        assert!(index.contains("A counter class."));
-
-        let class_page = fs::read_to_string(out_dir.join("Counter.html")).unwrap();
-        assert!(class_page.contains("Counter"));
-        assert!(class_page.contains("increment"));
-        assert!(class_page.contains("Increment by one."));
-        assert!(class_page.contains("Actor"));
-    }
-
-    #[test]
-    fn test_generate_cross_references() {
-        let temp = TempDir::new().unwrap();
-        let src_dir = Utf8PathBuf::from_path_buf(temp.path().join("src")).unwrap();
-        let out_dir = Utf8PathBuf::from_path_buf(temp.path().join("out")).unwrap();
-        fs::create_dir_all(&src_dir).unwrap();
-
-        fs::write(
-            src_dir.join("Parent.bt"),
-            "Object subclass: Parent\n  base => 1\n",
-        )
-        .unwrap();
-        fs::write(
-            src_dir.join("Child.bt"),
-            "Parent subclass: Child\n  extra => 2\n",
-        )
-        .unwrap();
-
-        run(src_dir.as_str(), out_dir.as_str()).unwrap();
-
-        let child_page = fs::read_to_string(out_dir.join("Child.html")).unwrap();
-        // Should link to Parent
-        assert!(child_page.contains("Parent.html"));
-    }
-}

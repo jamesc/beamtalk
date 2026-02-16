@@ -59,26 +59,24 @@ pub use lifecycle::{
 };
 pub use process::is_node_running;
 pub use storage::{
-    cleanup_stale_node_info, get_node_info, get_workspace_metadata,
-    workspace_exists, workspace_id_for,
+    cleanup_stale_node_info, get_node_info, get_workspace_metadata, workspace_exists,
+    workspace_id_for,
 };
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use super::lifecycle::{
-        find_workspace_by_project_path, resolve_workspace_id, WorkspaceStatus,
-    };
+    use super::lifecycle::{WorkspaceStatus, find_workspace_by_project_path, resolve_workspace_id};
     use super::process::wait_for_workspace_exit;
-    use super::storage::{
-        generate_cookie, generate_workspace_id, read_port_file, read_workspace_cookie,
-        save_node_info, save_workspace_cookie, save_workspace_metadata, validate_workspace_name,
-        workspace_dir, workspaces_base_dir, NodeInfo, WorkspaceMetadata,
-    };
-    #[cfg(target_os = "linux")]
-    use super::storage::read_proc_start_time;
     #[cfg(unix)]
     use super::process::{force_kill_process, start_detached_node};
+    #[cfg(target_os = "linux")]
+    use super::storage::read_proc_start_time;
+    use super::storage::{
+        NodeInfo, WorkspaceMetadata, generate_cookie, generate_workspace_id, read_port_file,
+        read_workspace_cookie, save_node_info, save_workspace_cookie, save_workspace_metadata,
+        validate_workspace_name, workspace_dir, workspaces_base_dir,
+    };
+    use super::*;
     #[cfg(unix)]
     use serial_test::serial;
     use std::fs;

@@ -17,11 +17,11 @@ use std::time::Duration;
 use miette::{IntoDiagnostic, Result, miette};
 use serde::Deserialize;
 
+#[cfg(target_os = "linux")]
+use super::storage::read_proc_start_time;
 use super::storage::{
     NodeInfo, get_workspace_metadata, read_port_file, read_workspace_cookie, save_node_info,
 };
-#[cfg(target_os = "linux")]
-use super::storage::read_proc_start_time;
 
 /// Default idle timeout in seconds (4 hours)
 const DEFAULT_IDLE_TIMEOUT_SECONDS: u64 = 3600 * 4;
@@ -88,9 +88,8 @@ pub fn tcp_health_probe(port: u16) -> Result<HealthProbeResponse> {
         .parse()
         .map_err(|e| miette!("Invalid address: {e}"))?;
 
-    let stream =
-        TcpStream::connect_timeout(&addr, Duration::from_millis(TCP_CONNECT_TIMEOUT_MS))
-            .into_diagnostic()?;
+    let stream = TcpStream::connect_timeout(&addr, Duration::from_millis(TCP_CONNECT_TIMEOUT_MS))
+        .into_diagnostic()?;
     stream
         .set_read_timeout(Some(Duration::from_millis(TCP_READ_TIMEOUT_MS)))
         .into_diagnostic()?;
@@ -123,9 +122,8 @@ pub fn tcp_send_shutdown(port: u16, cookie: &str) -> Result<()> {
         .parse()
         .map_err(|e| miette!("Invalid address: {e}"))?;
 
-    let stream =
-        TcpStream::connect_timeout(&addr, Duration::from_millis(TCP_CONNECT_TIMEOUT_MS))
-            .into_diagnostic()?;
+    let stream = TcpStream::connect_timeout(&addr, Duration::from_millis(TCP_CONNECT_TIMEOUT_MS))
+        .into_diagnostic()?;
     stream
         .set_read_timeout(Some(Duration::from_millis(TCP_READ_TIMEOUT_MS)))
         .into_diagnostic()?;
