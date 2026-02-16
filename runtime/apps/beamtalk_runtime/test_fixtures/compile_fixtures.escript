@@ -47,7 +47,11 @@ main([]) ->
     case filelib:is_regular(CounterBeam) of
         true -> ok;
         false ->
-            io:format(standard_error, "Failed to compile counter.bt (no .beam output)~n", []),
+            io:format(standard_error, "Failed to compile counter.bt (no .beam output)~n"
+                      "  Expected: ~s~n"
+                      "  Beamtalk: ~s~n"
+                      "  Source:   ~s~n"
+                      "  RepoRoot: ~s~n", [CounterBeam, Beamtalk, CounterSrc, RepoRoot]),
             halt(1)
     end,
 
@@ -61,7 +65,10 @@ main([]) ->
     case filelib:is_regular(LoggingCounterBeam) of
         true -> ok;
         false ->
-            io:format(standard_error, "Failed to compile logging_counter.bt (no .beam output)~n", []),
+            io:format(standard_error, "Failed to compile logging_counter.bt (no .beam output)~n"
+                      "  Expected: ~s~n"
+                      "  Beamtalk: ~s~n"
+                      "  Source:   ~s~n", [LoggingCounterBeam, Beamtalk, LoggingCounterSrc]),
             halt(1)
     end,
 
@@ -72,8 +79,12 @@ main([]) ->
 
 %% @private Run beamtalk build on a source file.
 run_beamtalk(Beamtalk, SrcFile) ->
-    Cmd = "\"" ++ Beamtalk ++ "\" build \"" ++ SrcFile ++ "\"",
-    os:cmd(Cmd).
+    Cmd = "\"" ++ Beamtalk ++ "\" build \"" ++ SrcFile ++ "\" 2>&1",
+    Output = os:cmd(Cmd),
+    case Output of
+        [] -> ok;
+        _  -> io:put_chars(["beamtalk build ", filename:basename(SrcFile), ":\n", Output, "\n"])
+    end.
 
 %% @private Delete a file if it exists.
 delete_if_exists(Path) ->
