@@ -97,13 +97,13 @@ trigger_code_change(Module, Pids, Extra) ->
 %% Internal functions
 %%====================================================================
 
-%% @private
-%% Migrate old `__class__` tag key to `$beamtalk_class` (BT-399).
+%% @doc Migrate old `__class__` tag key to `$beamtalk_class` (BT-399).
 %%
 %% Idempotent: migration may add the new key and/or remove the old key,
 %% but will not change an existing `$beamtalk_class` value.
 %% Only adds the new key when the legacy value is an atom (actor class names);
 %% when both keys exist, the legacy key is removed regardless to complete cleanup.
+%% @private
 -spec maybe_migrate_class_key(map()) -> map().
 maybe_migrate_class_key(State) ->
     ClassKey = beamtalk_tagged_map:class_key(),
@@ -118,14 +118,14 @@ maybe_migrate_class_key(State) ->
             State
     end.
 
-%% @private
-%% BT-572: Migrate actor state fields during hot reload.
+%% @doc Migrate actor state fields during hot reload (BT-572).
 %%
 %% Calls the module's init(#{}) to get default state, then:
 %% - Preserves all existing field values from old state
 %% - Adds new fields with their default values
 %% - Drops removed fields (with log warning)
 %% - Preserves internal keys ($beamtalk_class, __methods__, __class_mod__)
+%% @private
 -spec migrate_fields(map(), [atom()], atom()) -> map().
 migrate_fields(OldState, NewInstanceVars, Module) ->
     %% Get new default state by calling init with empty args
@@ -182,8 +182,8 @@ migrate_fields(OldState, NewInstanceVars, Module) ->
             OldState
     end.
 
+%% @doc Try to trigger code_change for a single actor via sys:change_code/4.
 %% @private
-%% Try to trigger code_change for a single actor.
 -spec try_change_code(pid(), atom(), term()) -> ok | {error, term()}.
 try_change_code(Pid, Module, Extra) ->
     try

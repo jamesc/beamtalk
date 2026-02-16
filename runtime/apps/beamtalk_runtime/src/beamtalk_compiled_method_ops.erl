@@ -45,6 +45,7 @@ dispatch(Selector, Args, Value) ->
 has_method(Selector) ->
     is_builtin(Selector).
 
+%% @doc Return true if the given selector is a builtin CompiledMethod method.
 -spec is_builtin(atom()) -> boolean().
 is_builtin('selector') -> true;
 is_builtin('source') -> true;
@@ -59,6 +60,8 @@ is_builtin(_) -> false.
 %%% Builtin Dispatch
 %%% ============================================================================
 
+%% @doc Dispatch a builtin selector on a CompiledMethod map, returning
+%% `{ok, Result}' or `not_found'.
 -spec builtin_dispatch(atom(), list(), map()) -> {ok, term()} | not_found.
 
 %% selector => returns the method's selector atom
@@ -98,6 +101,7 @@ builtin_dispatch(_Selector, _Args, _Value) ->
 %%% Error Handling
 %%% ============================================================================
 
+%% @doc Raise a does_not_understand error for an unknown CompiledMethod selector.
 -spec does_not_understand(atom(), list(), map()) -> no_return().
 does_not_understand(Selector, _Args, _Value) ->
     Error0 = beamtalk_error:new(does_not_understand, 'CompiledMethod'),

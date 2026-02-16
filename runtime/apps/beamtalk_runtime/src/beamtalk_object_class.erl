@@ -960,7 +960,7 @@ notify_instances(_ClassName, _NewMethods) ->
     ok.
 
 %% @private
-%% Find and invoke a method in the superclass chain.
+%% @doc Find and invoke a method in the superclass chain.
 %% Recursively walks up the inheritance hierarchy until the method is found.
 %% Returns {reply, Result, NewState} matching the actor dispatch protocol.
 -spec find_and_invoke_super_method(class_name(), selector(), list(), map()) ->
@@ -994,7 +994,7 @@ find_and_invoke_super_method(ClassName, Selector, Args, State) ->
     end.
 
 %% @private
-%% Get method info for a selector from a class process.
+%% @doc Get method info for a selector from a class process.
 -spec get_class_method_info(pid(), selector()) ->
     {ok, atom(), method_info()} | method_not_found.
 get_class_method_info(ClassPid, Selector) ->
@@ -1010,7 +1010,7 @@ get_class_method_info(ClassPid, Selector) ->
     end.
 
 %% @private
-%% Invoke a method found in the superclass.
+%% @doc Invoke a method found in the superclass.
 %% Returns {reply, Result, NewState} matching the actor dispatch protocol.
 -spec invoke_super_method(atom(), selector(), method_info(), list(), map()) ->
     {reply, term(), map()}.

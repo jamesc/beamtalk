@@ -109,7 +109,7 @@ format_method_doc(ClassName, SelectorBin) ->
 
 %%% Internal functions
 
-%% @private Return hardcoded documentation for the Metaclass terminal sentinel.
+%% @doc Return hardcoded documentation for the Metaclass terminal sentinel.
 -spec format_metaclass_docs() -> binary().
 format_metaclass_docs() ->
     iolist_to_binary([
@@ -126,7 +126,7 @@ format_metaclass_docs() ->
         <<"\nUse :help ClassName for docs on a specific class.">>
     ]).
 
-%% @private Return documentation for a Metaclass method.
+%% @doc Return documentation for a Metaclass method.
 -spec format_metaclass_method_doc(binary()) -> {ok, binary()} | {error, term()}.
 format_metaclass_method_doc(SelectorBin) ->
     case metaclass_method_doc(SelectorBin) of
@@ -140,7 +140,7 @@ format_metaclass_method_doc(SelectorBin) ->
             {error, {method_not_found, 'Metaclass', SelectorBin}}
     end.
 
-%% @private Lookup doc text for known Metaclass class-side methods.
+%% @doc Lookup doc text for known Metaclass class-side methods.
 -spec metaclass_method_doc(binary()) -> {ok, binary()} | not_found.
 metaclass_method_doc(<<"new">>) ->
     {ok, <<"Create a new instance of the class.">>};
@@ -153,7 +153,7 @@ metaclass_method_doc(<<"describe">>) ->
 metaclass_method_doc(_) ->
     not_found.
 
-%% @private Safe atom conversion — returns error instead of creating new atoms.
+%% @doc Safe atom conversion — returns error instead of creating new atoms.
 -spec safe_to_existing_atom(binary()) -> {ok, atom()} | {error, badarg}.
 safe_to_existing_atom(<<>>) -> {error, badarg};
 safe_to_existing_atom(Bin) when is_binary(Bin) ->
@@ -163,7 +163,7 @@ safe_to_existing_atom(Bin) when is_binary(Bin) ->
         error:badarg -> {error, badarg}
     end.
 
-%% @private Get module-level doc from EEP-48 chunks.
+%% @doc Get module-level doc from EEP-48 chunks.
 -spec get_module_doc(atom()) -> binary() | none.
 get_module_doc(ModuleName) ->
     case code:get_doc(ModuleName) of
@@ -176,7 +176,7 @@ get_module_doc(ModuleName) ->
             none
     end.
 
-%% @private Get method signatures from EEP-48 doc entries.
+%% @doc Get method signatures from EEP-48 doc entries.
 -spec get_method_signatures(atom(), [atom()]) -> [{atom(), binary(), binary() | none}].
 get_method_signatures(ModuleName, Selectors) ->
     DocEntries = get_doc_entries(ModuleName),
@@ -193,7 +193,7 @@ get_method_signatures(ModuleName, Selectors) ->
         Selectors
     ).
 
-%% @private Get full method doc (signature + doc text) for a specific selector.
+%% @doc Get full method doc (signature + doc text) for a specific selector.
 -spec get_method_doc(atom(), atom()) -> {binary(), binary() | none}.
 get_method_doc(ModuleName, Selector) ->
     DocEntries = get_doc_entries(ModuleName),
@@ -202,7 +202,7 @@ get_method_doc(ModuleName, Selector) ->
         not_found -> {atom_to_binary(Selector, utf8), none}
     end.
 
-%% @private Extract doc entries from EEP-48 chunks.
+%% @doc Extract doc entries from EEP-48 chunks.
 -spec get_doc_entries(atom()) -> list().
 get_doc_entries(ModuleName) ->
     case code:get_doc(ModuleName) of
@@ -212,7 +212,7 @@ get_doc_entries(ModuleName) ->
             []
     end.
 
-%% @private Find a doc entry by selector atom.
+%% @doc Find a doc entry by selector atom.
 -spec find_doc_entry(atom(), list()) -> {ok, binary(), binary() | none} | not_found.
 find_doc_entry(Selector, DocEntries) ->
     Result = lists:dropwhile(
@@ -241,7 +241,7 @@ find_doc_entry(Selector, DocEntries) ->
             not_found
     end.
 
-%% @private Group inherited methods by defining class.
+%% @doc Group inherited methods by defining class.
 -spec group_by_class([{atom(), atom()}]) -> [{atom(), [atom()]}].
 group_by_class(Methods) ->
     Grouped = lists:foldl(
@@ -263,7 +263,7 @@ group_by_class(Methods) ->
         )
     ).
 
-%% @private Format the complete class documentation output.
+%% @doc Format the complete class documentation output.
 -spec format_class_output(atom(), atom() | none, binary() | none,
                           [{atom(), binary(), binary() | none}],
                           [{atom(), [atom()]}]) -> binary().
@@ -335,13 +335,13 @@ format_class_output(ClassName, Superclass, ModuleDoc, OwnDocs, InheritedGrouped)
     iolist_to_binary(lists:filter(fun(<<>>) -> false; (_) -> true end,
                                    lists:flatten(Parts))).
 
-%% @private Format superclass portion of header.
+%% @doc Format superclass portion of header.
 -spec format_superclass(atom() | none) -> iolist().
 format_superclass(none) -> [];
 format_superclass(Superclass) ->
     [<<" < ">>, atom_to_binary(Superclass, utf8)].
 
-%% @private Format method-specific documentation output.
+%% @doc Format method-specific documentation output.
 -spec format_method_output(atom(), binary(), atom(),
                            {binary(), binary() | none}) -> binary().
 format_method_output(ClassName, SelectorBin, DefiningClass, {Signature, DocText}) ->

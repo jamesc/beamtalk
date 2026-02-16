@@ -68,8 +68,8 @@ init(Parent) ->
     %% Enter idle loop - this process stays alive but doesn't do anything
     stdlib_loop().
 
+%% @doc Shared initialization logic for stdlib loading.
 %% @private
-%% Shared initialization logic
 -spec do_init() -> ok.
 do_init() ->
     ?LOG_INFO("Loading compiled stdlib modules"),
@@ -79,6 +79,7 @@ do_init() ->
     load_compiled_stdlib_modules(),
     ok.
 
+%% @doc Idle receive loop to keep the stdlib process alive.
 %% @private
 -spec stdlib_loop() -> no_return().
 stdlib_loop() ->
@@ -125,7 +126,8 @@ load_compiled_stdlib_modules() ->
             discover_and_load_fallback(EbinDir)
     end.
 
-%% @private Find the stdlib ebin directory (for fallback loading).
+%% @doc Find the stdlib ebin directory (for fallback loading).
+%% @private
 -spec find_stdlib_ebin() -> file:filename().
 find_stdlib_ebin() ->
     case code:lib_dir(beamtalk_stdlib, ebin) of
@@ -133,9 +135,11 @@ find_stdlib_ebin() ->
         Dir -> Dir
     end.
 
-%% @private Ensure a class is registered after module loading.
+%% @doc Ensure a class is registered after module loading.
+%%
 %% If on_load already ran but the class process was killed (e.g., during
 %% test teardown), call register_class/0 again to recreate it.
+%% @private
 -spec ensure_class_registered(module(), atom()) -> ok.
 ensure_class_registered(Mod, ClassName) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
@@ -171,13 +175,17 @@ ensure_class_registered(Mod, ClassName) ->
             ok
     end.
 
-%% @private Topological sort by superclass dependency.
+%% @doc Topological sort by superclass dependency.
+%%
 %% Returns entries ordered so that each class's superclass appears before it.
+%% @private
 -spec topo_sort([{module(), atom(), atom()}]) -> [{module(), atom(), atom()}].
 topo_sort(Entries) ->
     ClassSet = sets:from_list([Class || {_, Class, _} <- Entries]),
     topo_sort_waves(Entries, ClassSet, sets:new(), []).
 
+%% @doc Iteratively emit classes whose superclass dependencies are satisfied.
+%% @private
 -spec topo_sort_waves([{module(), atom(), atom()}], sets:set(atom()), sets:set(atom()),
                       [{module(), atom(), atom()}]) -> [{module(), atom(), atom()}].
 topo_sort_waves([], _ClassSet, _Emitted, Acc) ->
@@ -200,8 +208,10 @@ topo_sort_waves(Remaining, ClassSet, Emitted, Acc) ->
             topo_sort_waves(Deferred, ClassSet, NewEmitted, lists:reverse(Ready) ++ Acc)
     end.
 
-%% @private Fallback: discover .beam files and load them all.
+%% @doc Fallback: discover .beam files and load them all.
+%%
 %% Used when stdlib_classes.term is missing (e.g., development without build-stdlib).
+%% @private
 -spec discover_and_load_fallback(file:filename()) -> ok.
 discover_and_load_fallback(Dir) ->
     case file:list_dir(Dir) of

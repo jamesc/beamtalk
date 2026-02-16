@@ -245,9 +245,8 @@ handle_client_loop(Socket, SessionPid) ->
 %% @private
 %% Read a complete line from the socket, accumulating partial reads.
 %% With {packet, line}, a complete line includes the trailing \n.
-%% If the line exceeds the buffer, recv returns data without \n
-%% and we must accumulate until we get the newline (BT-388).
-%% Guards against unbounded accumulation and slowloris attacks.
+%% @doc Receive a complete newline-terminated line from a TCP socket.
+%% Accumulates partial reads, guarding against unbounded buffering and slowloris attacks.
 -spec recv_line(gen_tcp:socket(), binary()) -> {ok, binary()} | {error, term()}.
 recv_line(_Socket, Acc) when byte_size(Acc) >= ?MAX_LINE_LENGTH ->
     {error, line_too_long};
@@ -680,7 +679,7 @@ parse_request(Data) when is_binary(Data) ->
     end.
 
 %% @private
-%% Translate new protocol op to internal request tuple.
+%% @doc Translate a protocol operation name to an internal request tuple.
 -spec op_to_request(binary(), map()) ->
     {eval, string()} | {clear_bindings} | {get_bindings} |
     {load_file, string()} | {list_actors} | {list_modules} |
@@ -717,7 +716,7 @@ op_to_request(Op, _Map) ->
 %%% Reload helpers
 
 %% @private
-%% Execute reload: load file, trigger code_change for affected actors,
+%% @doc Execute reload: load file, trigger code_change for affected actors,
 %% and return response with actor count and migration results.
 -spec do_reload(string(), atom() | undefined, beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 do_reload(Path, ModuleAtom, Msg, SessionPid) ->
@@ -733,7 +732,7 @@ do_reload(Path, ModuleAtom, Msg, SessionPid) ->
     end.
 
 %% @private
-%% Trigger code_change for actors using the reloaded module.
+%% @doc Trigger code_change for actors using the reloaded module.
 %% Returns {ActorCount, Failures} where Failures is list of {Pid, Reason}.
 -spec trigger_actor_code_change(atom() | undefined, [map()]) ->
     {non_neg_integer(), [{pid(), term()}]}.
@@ -760,7 +759,7 @@ trigger_actor_code_change(ModuleAtom, Classes) ->
     end.
 
 %% @private
-%% Resolve module atoms from explicit module name or loaded class names.
+%% @doc Resolve module atoms from an explicit module name or loaded class names.
 -spec resolve_module_atoms(atom() | undefined, [map()]) -> [atom()].
 resolve_module_atoms(ModuleAtom, _Classes) when is_atom(ModuleAtom), ModuleAtom =/= undefined ->
     [ModuleAtom];
@@ -780,7 +779,7 @@ resolve_module_atoms(undefined, Classes) ->
 %%% Completion and Info helpers
 
 %% @private
-%% Build base response map with id/session for protocol responses.
+%% @doc Build base response map with id/session fields for protocol responses.
 -spec base_protocol_response(term()) -> map().
 base_protocol_response(Msg) ->
     Id = beamtalk_repl_protocol:get_id(Msg),
@@ -790,7 +789,7 @@ base_protocol_response(Msg) ->
     case Session of undefined -> M1; _ -> M1#{<<"session">> => Session} end.
 
 %% @private
-%% Check whether a PID belongs to a registered Beamtalk actor.
+%% @doc Check whether a PID belongs to a registered Beamtalk actor.
 -spec is_known_actor(pid()) -> boolean().
 is_known_actor(Pid) when is_pid(Pid) ->
     case whereis(beamtalk_actor_registry) of
@@ -804,7 +803,7 @@ is_known_actor(Pid) when is_pid(Pid) ->
     end.
 
 %% @private
-%% Resolve a class name (e.g. 'Counter') to its BEAM module name (e.g. 'counter').
+%% @doc Resolve a class name (e.g. 'Counter') to its BEAM module name (e.g. 'counter').
 -spec resolve_class_to_module(atom()) -> atom().
 resolve_class_to_module(ClassName) ->
     ClassPids = try beamtalk_class_registry:all_classes()
@@ -826,7 +825,7 @@ resolve_class_to_module(ClassName, [Pid | Rest]) ->
     end.
 
 %% @private
-%% Get autocompletion suggestions for a prefix.
+%% @doc Get autocompletion suggestions matching a given prefix.
 -spec get_completions(binary()) -> [binary()].
 get_completions(<<>>) -> [];
 get_completions(Prefix) when is_binary(Prefix) ->
@@ -852,6 +851,7 @@ get_completions(Prefix) when is_binary(Prefix) ->
            PrefixStr =/= ""].
 
 %% @private
+%% @doc Return the list of built-in language keywords for autocompletion.
 -spec builtin_keywords() -> [binary()].
 builtin_keywords() ->
     [<<"self">>, <<"super">>, <<"true">>, <<"false">>, <<"nil">>,
@@ -860,7 +860,7 @@ builtin_keywords() ->
      <<"subclass:">>, <<"spawn">>, <<"new">>].
 
 %% @private
-%% Get info about a symbol.
+%% @doc Look up information about a symbol, returning whether it is a known class.
 -spec get_symbol_info(binary()) -> map().
 get_symbol_info(Symbol) when is_binary(Symbol) ->
     SymAtom = try binary_to_existing_atom(Symbol, utf8)
@@ -891,7 +891,8 @@ get_symbol_info(Symbol) when is_binary(Symbol) ->
             end
     end.
 
-%% @private Safe atom conversion — returns error instead of creating new atoms.
+%% @private
+%% @doc Safely convert a binary to an existing atom, returning error instead of creating new atoms.
 -spec safe_to_existing_atom(binary()) -> {ok, atom()} | {error, badarg}.
 safe_to_existing_atom(<<>>) -> {error, badarg};
 safe_to_existing_atom(Bin) when is_binary(Bin) ->
