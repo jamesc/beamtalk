@@ -1,0 +1,309 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "TypedPoint",
+                span: Span {
+                    start: 65,
+                    end: 75,
+                },
+            },
+            superclass: Some(
+                Identifier {
+                    name: "Object",
+                    span: Span {
+                        start: 48,
+                        end: 54,
+                    },
+                },
+            ),
+            is_abstract: false,
+            is_sealed: false,
+            state: [
+                StateDeclaration {
+                    name: Identifier {
+                        name: "x",
+                        span: Span {
+                            start: 85,
+                            end: 87,
+                        },
+                    },
+                    type_annotation: Some(
+                        Simple(
+                            Identifier {
+                                name: "Integer",
+                                span: Span {
+                                    start: 88,
+                                    end: 95,
+                                },
+                            },
+                        ),
+                    ),
+                    default_value: Some(
+                        Literal(
+                            Integer(
+                                0,
+                            ),
+                            Span {
+                                start: 98,
+                                end: 99,
+                            },
+                        ),
+                    ),
+                    span: Span {
+                        start: 78,
+                        end: 99,
+                    },
+                },
+                StateDeclaration {
+                    name: Identifier {
+                        name: "y",
+                        span: Span {
+                            start: 109,
+                            end: 111,
+                        },
+                    },
+                    type_annotation: Some(
+                        Simple(
+                            Identifier {
+                                name: "Integer",
+                                span: Span {
+                                    start: 112,
+                                    end: 119,
+                                },
+                            },
+                        ),
+                    ),
+                    default_value: Some(
+                        Literal(
+                            Integer(
+                                0,
+                            ),
+                            Span {
+                                start: 122,
+                                end: 123,
+                            },
+                        ),
+                    ),
+                    span: Span {
+                        start: 102,
+                        end: 123,
+                    },
+                },
+            ],
+            methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "getX",
+                    ),
+                    parameters: [],
+                    body: [
+                        FieldAccess {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "self",
+                                    span: Span {
+                                        start: 171,
+                                        end: 175,
+                                    },
+                                },
+                            ),
+                            field: Identifier {
+                                name: "x",
+                                span: Span {
+                                    start: 176,
+                                    end: 177,
+                                },
+                            },
+                            span: Span {
+                                start: 171,
+                                end: 177,
+                            },
+                        },
+                    ],
+                    return_type: Some(
+                        Simple(
+                            Identifier {
+                                name: "Integer",
+                                span: Span {
+                                    start: 160,
+                                    end: 167,
+                                },
+                            },
+                        ),
+                    ),
+                    is_sealed: false,
+                    kind: Primary,
+                    doc_comment: None,
+                    span: Span {
+                        start: 152,
+                        end: 177,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "getY",
+                    ),
+                    parameters: [],
+                    body: [
+                        FieldAccess {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "self",
+                                    span: Span {
+                                        start: 199,
+                                        end: 203,
+                                    },
+                                },
+                            ),
+                            field: Identifier {
+                                name: "y",
+                                span: Span {
+                                    start: 204,
+                                    end: 205,
+                                },
+                            },
+                            span: Span {
+                                start: 199,
+                                end: 205,
+                            },
+                        },
+                    ],
+                    return_type: Some(
+                        Simple(
+                            Identifier {
+                                name: "Integer",
+                                span: Span {
+                                    start: 188,
+                                    end: 195,
+                                },
+                            },
+                        ),
+                    ),
+                    is_sealed: false,
+                    kind: Primary,
+                    doc_comment: None,
+                    span: Span {
+                        start: 180,
+                        end: 205,
+                    },
+                },
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "distanceTo:",
+                                span: Span {
+                                    start: 235,
+                                    end: 246,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "other",
+                                span: Span {
+                                    start: 247,
+                                    end: 252,
+                                },
+                            },
+                            type_annotation: Some(
+                                Simple(
+                                    Identifier {
+                                        name: "TypedPoint",
+                                        span: Span {
+                                            start: 254,
+                                            end: 264,
+                                        },
+                                    },
+                                ),
+                            ),
+                        },
+                    ],
+                    body: [
+                        Primitive {
+                            name: "distanceTo:",
+                            is_quoted: true,
+                            span: Span {
+                                start: 281,
+                                end: 305,
+                            },
+                        },
+                    ],
+                    return_type: Some(
+                        Simple(
+                            Identifier {
+                                name: "Float",
+                                span: Span {
+                                    start: 268,
+                                    end: 273,
+                                },
+                            },
+                        ),
+                    ),
+                    is_sealed: false,
+                    kind: Primary,
+                    doc_comment: None,
+                    span: Span {
+                        start: 235,
+                        end: 305,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "printString",
+                    ),
+                    parameters: [],
+                    body: [
+                        Primitive {
+                            name: "printString",
+                            is_quoted: true,
+                            span: Span {
+                                start: 354,
+                                end: 378,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    doc_comment: None,
+                    span: Span {
+                        start: 339,
+                        end: 378,
+                    },
+                },
+            ],
+            class_methods: [],
+            class_variables: [],
+            doc_comment: None,
+            span: Span {
+                start: 48,
+                end: 378,
+            },
+        },
+    ],
+    method_definitions: [],
+    expressions: [],
+    span: Span {
+        start: 48,
+        end: 378,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Typed value type methods for spec generation",
+            span: Span {
+                start: 48,
+                end: 54,
+            },
+            kind: Line,
+        },
+    ],
+}

@@ -101,6 +101,7 @@ pub mod primitive_bindings;
 mod primitive_implementations;
 mod repl_codegen;
 pub mod selector_mangler;
+mod spec_codegen;
 mod state_codegen;
 mod util;
 mod value_type_codegen;

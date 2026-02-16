@@ -1,0 +1,44 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("Object"), span: Span { start: 48, end: 54 }, leading_trivia: [LineComment("// Typed value type methods for spec generation"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 55, end: 64 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("TypedPoint"), span: Span { start: 65, end: 75 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("state:"), span: Span { start: 78, end: 84 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("x:"), span: Span { start: 85, end: 87 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Integer"), span: Span { start: 88, end: 95 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("="), span: Span { start: 96, end: 97 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("0"), span: Span { start: 98, end: 99 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("state:"), span: Span { start: 102, end: 108 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("y:"), span: Span { start: 109, end: 111 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Integer"), span: Span { start: 112, end: 119 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("="), span: Span { start: 120, end: 121 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("0"), span: Span { start: 122, end: 123 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("getX"), span: Span { start: 152, end: 156 }, leading_trivia: [Whitespace("\n\n  "), LineComment("// Typed unary methods"), Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("->"), span: Span { start: 157, end: 159 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Integer"), span: Span { start: 160, end: 167 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 168, end: 170 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 171, end: 175 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 175, end: 176 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("x"), span: Span { start: 176, end: 177 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("getY"), span: Span { start: 180, end: 184 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("->"), span: Span { start: 185, end: 187 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Integer"), span: Span { start: 188, end: 195 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 196, end: 198 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 199, end: 203 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 203, end: 204 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("y"), span: Span { start: 204, end: 205 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("distanceTo:"), span: Span { start: 235, end: 246 }, leading_trivia: [Whitespace("\n\n  "), LineComment("// Typed keyword method"), Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("other:"), span: Span { start: 247, end: 253 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("TypedPoint"), span: Span { start: 254, end: 264 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("->"), span: Span { start: 265, end: 267 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Float"), span: Span { start: 268, end: 273 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 274, end: 276 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: AtPrimitive, span: Span { start: 281, end: 291 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("distanceTo:"), span: Span { start: 292, end: 305 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("printString"), span: Span { start: 339, end: 350 }, leading_trivia: [Whitespace("\n\n  "), LineComment("// Untyped method (no spec)"), Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 351, end: 353 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: AtPrimitive, span: Span { start: 354, end: 364 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("printString"), span: Span { start: 365, end: 378 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 379, end: 379 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

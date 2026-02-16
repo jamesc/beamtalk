@@ -1,0 +1,18 @@
+// Typed method definitions for spec generation
+Actor subclass: TypedCounter
+  state: value: Integer = 0
+
+  // Unary method with return type
+  getValue -> Integer => self.value
+
+  // Keyword method with typed parameter and return type
+  deposit: amount: Integer -> Integer =>
+    self.value := self.value + amount
+
+  // Method with union return type
+  tryGet -> Integer | Nil =>
+    (self.value > 0) ifTrue: [self.value] ifFalse: [nil]
+
+  // Untyped method (should not generate spec)
+  increment =>
+    self.value := self.value + 1

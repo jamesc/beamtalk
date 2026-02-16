@@ -1,0 +1,15 @@
+// Typed value type methods for spec generation
+Object subclass: TypedPoint
+  state: x: Integer = 0
+  state: y: Integer = 0
+
+  // Typed unary methods
+  getX -> Integer => self.x
+  getY -> Integer => self.y
+
+  // Typed keyword method
+  distanceTo: other: TypedPoint -> Float =>
+    @primitive "distanceTo:"
+
+  // Untyped method (no spec)
+  printString => @primitive "printString"
