@@ -13,7 +13,9 @@
 -include_lib("kernel/include/logger.hrl").
 
 -export([start_link/1, get_port/0, get_nonce/0, handle_client/2, parse_request/1, safe_to_existing_atom/1]).
--export([generate_nonce/0]). %% exported for tests
+-ifdef(TEST).
+-export([generate_nonce/0]).
+-endif.
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -106,6 +108,13 @@ handle_info({'DOWN', _Ref, process, AcceptorPid, Reason}, State = #state{accepto
     ?LOG_WARNING("REPL acceptor died: ~p, restarting", [Reason]),
     {ok, NewAcceptorPid} = start_acceptor(ListenSocket),
     {noreply, State#state{acceptor_pid = NewAcceptorPid}};
+
+handle_info(shutdown_requested, State) ->
+    %% TCP shutdown endpoint (BT-611): initiate OTP-level graceful teardown.
+    %% This runs in the gen_server process after the TCP response was sent.
+    ?LOG_INFO("Executing TCP-requested shutdown", #{}),
+    init:stop(),
+    {noreply, State};
 
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -668,11 +677,10 @@ handle_op(<<"shutdown">>, Params, Msg, _SessionPid) ->
     case ProvidedCookie of
         NodeCookie ->
             ?LOG_INFO("Shutdown requested via TCP protocol", #{}),
-            %% Spawn shutdown in separate process so we can send response first
-            spawn(fun() ->
-                timer:sleep(100),
-                init:stop()
-            end),
+            %% Schedule shutdown via gen_server handle_info after TCP response is sent.
+            %% Using send_after to the registered server ensures init:stop() runs
+            %% only after the response has been flushed to the client socket.
+            erlang:send_after(100, ?MODULE, shutdown_requested),
             beamtalk_repl_protocol:encode_status(ok, Msg,
                 fun beamtalk_repl_json:term_to_json/1);
         _ ->
