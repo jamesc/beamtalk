@@ -98,7 +98,7 @@ mod gen_server;
 mod intrinsics;
 mod operators;
 pub mod primitive_bindings;
-mod primitive_implementations;
+mod primitives;
 mod repl_codegen;
 pub mod selector_mangler;
 mod spec_codegen;
@@ -1214,7 +1214,7 @@ impl CoreErlangGenerator {
         if is_quoted {
             let params = self.current_method_params.clone();
             if let Some(code) =
-                primitive_implementations::generate_primitive_bif(&class_name, name, &params)
+                primitives::generate_primitive_bif(&class_name, name, &params)
             {
                 return Ok(code);
             }
