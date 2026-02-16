@@ -73,6 +73,9 @@ jobs:
       - name: Test Rust (unit + integration)
         run: cargo test --all-targets
 
+      - name: Smoke test
+        run: cargo run --bin beamtalk --quiet -- --version
+
   # ─── Full test suite on Linux only (requires Erlang/OTP) ──────────────
   test:
     runs-on: ubuntu-latest
