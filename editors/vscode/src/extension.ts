@@ -1,6 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
+import * as fs from "fs";
+import * as path from "path";
 import * as vscode from "vscode";
 import {
   LanguageClient,
@@ -10,11 +12,42 @@ import {
 
 let client: LanguageClient | undefined;
 
+/**
+ * Resolve the path to `beamtalk-lsp`.
+ *
+ * Resolution order:
+ * 1. User-configured override (`beamtalk.server.path`)
+ * 2. Bundled binary shipped inside the extension (`bin/beamtalk-lsp[.exe]`)
+ * 3. Fallback to bare command name (requires PATH)
+ */
+function resolveServerPath(context: vscode.ExtensionContext): string {
+  const config = vscode.workspace.getConfiguration("beamtalk");
+  const override = config.get<string>("server.path", "");
+
+  // 1. Explicit user override
+  if (override && override !== "beamtalk-lsp") {
+    return override;
+  }
+
+  // 2. Bundled binary
+  const ext = process.platform === "win32" ? ".exe" : "";
+  const bundled = path.join(
+    context.extensionPath,
+    "bin",
+    `beamtalk-lsp${ext}`
+  );
+  if (fs.existsSync(bundled)) {
+    return bundled;
+  }
+
+  // 3. Fall back to PATH
+  return "beamtalk-lsp";
+}
+
 export async function activate(
   context: vscode.ExtensionContext
 ): Promise<void> {
-  const config = vscode.workspace.getConfiguration("beamtalk");
-  const serverPath = config.get<string>("server.path", "beamtalk-lsp");
+  const serverPath = resolveServerPath(context);
 
   const serverOptions: ServerOptions = {
     command: serverPath,

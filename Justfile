@@ -604,6 +604,16 @@ dist-vscode:
         echo "   Install node/npm: https://github.com/nvm-sh/nvm"
         exit 1
     fi
+    # Bundle beamtalk-lsp binary if a release build exists
+    LSP_BIN="target/release/beamtalk-lsp"
+    if [ -f "${LSP_BIN}" ]; then
+        mkdir -p editors/vscode/bin
+        cp "${LSP_BIN}" editors/vscode/bin/beamtalk-lsp
+        chmod +x editors/vscode/bin/beamtalk-lsp
+        echo "   Bundled beamtalk-lsp ($(du -h editors/vscode/bin/beamtalk-lsp | cut -f1))"
+    else
+        echo "   ⚠️  No release build found — extension will use PATH"
+    fi
     cd editors/vscode
     npm install --quiet
     npm run compile
@@ -611,7 +621,51 @@ dist-vscode:
     ln -sf ../../LICENSE LICENSE
     npx --yes @vscode/vsce package --out ../../dist/beamtalk.vsix
     rm -f LICENSE
+    rm -rf bin
     echo "✅ VS Code extension: dist/beamtalk.vsix"
+
+# Build VS Code extension for a specific platform target
+# Usage: just dist-vscode-platform linux-x64
+dist-vscode-platform target:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📦 Building VS Code extension for {{target}}..."
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "❌ npm not found (needed for VS Code extension)"
+        exit 1
+    fi
+    # Determine binary name
+    case "{{target}}" in
+        win32-*) BIN_NAME="beamtalk-lsp.exe" ;;
+        *)       BIN_NAME="beamtalk-lsp" ;;
+    esac
+    # Map vsce target to Rust target triple
+    case "{{target}}" in
+        linux-x64)    RUST_TARGET="x86_64-unknown-linux-gnu" ;;
+        linux-arm64)  RUST_TARGET="aarch64-unknown-linux-gnu" ;;
+        darwin-x64)   RUST_TARGET="x86_64-apple-darwin" ;;
+        darwin-arm64) RUST_TARGET="aarch64-apple-darwin" ;;
+        win32-x64)    RUST_TARGET="x86_64-pc-windows-msvc" ;;
+        *) echo "❌ Unknown target: {{target}}"; exit 1 ;;
+    esac
+    LSP_BIN="target/${RUST_TARGET}/release/${BIN_NAME}"
+    if [ ! -f "${LSP_BIN}" ]; then
+        echo "❌ Binary not found: ${LSP_BIN}"
+        echo "   Build first: cargo build --release --bin beamtalk-lsp --target ${RUST_TARGET}"
+        exit 1
+    fi
+    mkdir -p editors/vscode/bin
+    cp "${LSP_BIN}" "editors/vscode/bin/${BIN_NAME}"
+    chmod +x "editors/vscode/bin/${BIN_NAME}"
+    echo "   Bundled ${BIN_NAME} ($(du -h editors/vscode/bin/${BIN_NAME} | cut -f1))"
+    cd editors/vscode
+    npm install --quiet
+    npm run compile
+    ln -sf ../../LICENSE LICENSE
+    npx --yes @vscode/vsce package --target "{{target}}" --out "../../dist/beamtalk-{{target}}.vsix"
+    rm -f LICENSE
+    rm -rf bin
+    echo "✅ VS Code extension: dist/beamtalk-{{target}}.vsix"
 
 # Create a distributable install in dist/
 dist: build-release build-stdlib

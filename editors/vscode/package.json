@@ -39,8 +39,8 @@
       "properties": {
         "beamtalk.server.path": {
           "type": "string",
-          "default": "beamtalk-lsp",
-          "description": "Path to the beamtalk-lsp executable"
+          "default": "",
+          "description": "Override path to the beamtalk-lsp binary. Leave empty to use the bundled server."
         }
       }
     }
