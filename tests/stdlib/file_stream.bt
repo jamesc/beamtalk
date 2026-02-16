@@ -190,3 +190,47 @@ File lines: 42
 // File not found with open:do:
 File open: "tests/stdlib/fixtures/nonexistent.txt" do: [:h | h lines asList]
 // => ERROR: file_not_found
+
+// ===========================================================================
+// ERROR PATHS: TYPE ERRORS
+// ===========================================================================
+
+// open:do: with non-string path
+File open: 42 do: [:h | h lines asList]
+// => ERROR: type_error
+
+// open:do: with non-block argument
+File open: "tests/stdlib/fixtures/stream_test.txt" do: "not a block"
+// => ERROR: type_error
+
+// lines: with absolute path (security)
+File lines: "/etc/passwd"
+// => ERROR: invalid_path
+
+// lines: with directory traversal
+File lines: "../secret.txt"
+// => ERROR: invalid_path
+
+// open:do: with absolute path
+File open: "/etc/passwd" do: [:h | h lines asList]
+// => ERROR: invalid_path
+
+// open:do: with directory traversal
+File open: "../secret.txt" do: [:h | h lines asList]
+// => ERROR: invalid_path
+
+// ===========================================================================
+// WINDOWS-STYLE LINE ENDINGS (\r\n)
+// ===========================================================================
+
+// Windows CRLF line endings are stripped correctly
+(File lines: "tests/stdlib/fixtures/stream_crlf.txt") asList
+// => ["alpha","beta","gamma"]
+
+// ===========================================================================
+// UNICODE FILE CONTENT
+// ===========================================================================
+
+// Unicode content (multi-byte UTF-8) reads correctly through streams
+(File lines: "tests/stdlib/fixtures/stream_unicode.txt") asList
+// => ["Hello 世界","café","über"]

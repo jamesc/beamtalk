@@ -113,3 +113,4 @@ _rel/
 *.backup
 *.crashdump
 _bt_stdlib_*.txt
+_bt_stdlib_subdir/

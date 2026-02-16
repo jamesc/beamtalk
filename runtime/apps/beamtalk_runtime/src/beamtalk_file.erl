@@ -196,7 +196,7 @@ handle_has_method(_) -> false.
 'lines:'(Path) when is_binary(Path) ->
     case validate_path(Path) of
         {ok, ValidPath} ->
-            case file:open(ValidPath, [read, binary, {encoding, utf8}]) of
+            case file:open(ValidPath, [read, binary]) of
                 {ok, Fd} ->
                     make_line_stream(Fd, Path);
                 {error, enoent} ->
@@ -243,7 +243,7 @@ handle_has_method(_) -> false.
 'open:do:'(Path, Block) when is_binary(Path), is_function(Block, 1) ->
     case validate_path(Path) of
         {ok, ValidPath} ->
-            case file:open(ValidPath, [read, binary, {encoding, utf8}]) of
+            case file:open(ValidPath, [read, binary]) of
                 {ok, Fd} ->
                     Handle = #{'$beamtalk_class' => 'FileHandle', fd => Fd},
                     try
