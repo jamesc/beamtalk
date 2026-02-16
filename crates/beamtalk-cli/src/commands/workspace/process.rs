@@ -44,6 +44,9 @@ const DISCOVERY_MAX_RETRIES: usize = 10;
 /// Delay between port file read attempts in milliseconds.
 const PORT_DISCOVERY_DELAY_MS: u64 = 200;
 
+/// TCP connect timeout for exit probe in milliseconds.
+const EXIT_PROBE_CONNECT_TIMEOUT_MS: u64 = 500;
+
 /// Check if a BEAM node is actually running (handle stale node.info files).
 ///
 /// Uses TCP health probe (cross-platform) to verify the workspace is alive.
@@ -404,7 +407,7 @@ pub(super) fn wait_for_workspace_exit(port: u16, timeout_secs: u64) -> Result<()
     while std::time::Instant::now() < deadline {
         // Lightweight connect-only probe (no JSON exchange).
         // Connection refused = port released = process exited.
-        if TcpStream::connect_timeout(&addr, Duration::from_millis(PID_DISCOVERY_RETRY_DELAY_MS))
+        if TcpStream::connect_timeout(&addr, Duration::from_millis(EXIT_PROBE_CONNECT_TIMEOUT_MS))
             .is_err()
         {
             return Ok(());
