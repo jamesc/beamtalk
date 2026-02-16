@@ -16,7 +16,14 @@
 
 -export([start_link/1, get_port/0, get_nonce/0, handle_client/2, parse_request/1, safe_to_existing_atom/1]).
 -ifdef(TEST).
--export([generate_nonce/0]).
+-export([generate_nonce/0, validate_actor_pid/1, is_known_actor/1,
+         get_completions/1, get_symbol_info/1, resolve_class_to_module/1,
+         ensure_structured_error/1, ensure_structured_error/2,
+         make_class_not_found_error/1, format_name/1,
+         generate_session_id/0, base_protocol_response/1,
+         resolve_module_atoms/2,
+         handle_op/4, handle_protocol_request/2, recv_line/2,
+         write_port_file/3, handle_client_once/2]).
 -endif.
 
 %% gen_server callbacks
