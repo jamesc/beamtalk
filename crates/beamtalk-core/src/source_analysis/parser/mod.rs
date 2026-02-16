@@ -50,9 +50,9 @@
 //! assert_eq!(module.expressions.len(), 1);
 //! ```
 
-use crate::ast::{Comment, CommentKind, Module};
+use crate::ast::{Comment, CommentKind, Expression, Module};
 #[cfg(test)]
-use crate::ast::{Expression, Literal, MessageSelector};
+use crate::ast::{Literal, MessageSelector};
 use crate::source_analysis::{Span, Token, TokenKind, Trivia, lex_with_eof};
 use ecow::EcoString;
 
@@ -349,6 +349,13 @@ pub enum Severity {
     Warning,
 }
 
+/// Maximum nesting depth for expressions before the parser bails out.
+///
+/// Prevents stack overflow on deeply nested input (e.g., `(((((...)))))`).
+/// 256 is generous enough for any realistic program while keeping the
+/// parser safe from adversarial input discovered by fuzzing.
+const MAX_NESTING_DEPTH: usize = 256;
+
 /// The parser state.
 pub(super) struct Parser {
     /// The tokens being parsed.
@@ -359,6 +366,8 @@ pub(super) struct Parser {
     pub(super) diagnostics: Vec<Diagnostic>,
     /// Whether the parser is currently inside a method body.
     pub(super) in_method_body: bool,
+    /// Current expression nesting depth (guards against stack overflow).
+    nesting_depth: usize,
 }
 
 impl Parser {
@@ -369,6 +378,7 @@ impl Parser {
             current: 0,
             diagnostics: Vec::new(),
             in_method_body: false,
+            nesting_depth: 0,
         }
     }
 
@@ -491,6 +501,34 @@ impl Parser {
     pub(super) fn error(&mut self, message: impl Into<EcoString>) {
         let span = self.current_token().span();
         self.diagnostics.push(Diagnostic::error(message, span));
+    }
+
+    /// Increments the nesting depth and returns `Err(Expression::Error)` if
+    /// it exceeds [`MAX_NESTING_DEPTH`].  Call [`leave_nesting`] on every
+    /// exit path when this returns `Ok(())`.
+    pub(super) fn enter_nesting(&mut self, span: Span) -> Result<(), Expression> {
+        self.nesting_depth += 1;
+        if self.nesting_depth > MAX_NESTING_DEPTH {
+            self.diagnostics.push(Diagnostic::error(
+                format!("Expression nesting is too deep (maximum {MAX_NESTING_DEPTH} levels)"),
+                span,
+            ));
+            self.nesting_depth -= 1;
+            return Err(Expression::Error {
+                message: "Expression nesting too deep".into(),
+                span,
+            });
+        }
+        Ok(())
+    }
+
+    /// Decrements the nesting depth (pair with [`enter_nesting`]).
+    pub(super) fn leave_nesting(&mut self) {
+        debug_assert!(
+            self.nesting_depth > 0,
+            "leave_nesting called without matching enter_nesting"
+        );
+        self.nesting_depth = self.nesting_depth.saturating_sub(1);
     }
 
     /// Synchronizes parser to a safe recovery point.
@@ -3826,5 +3864,70 @@ Actor subclass: Counter
         let module = parse_ok("Counter >> #increment");
         assert!(module.method_definitions.is_empty());
         assert_eq!(module.expressions.len(), 1);
+    }
+
+    #[test]
+    fn deeply_nested_parens_does_not_stack_overflow() {
+        // 300 levels of nesting exceeds MAX_NESTING_DEPTH (256)
+        let source = "(".repeat(300) + "1" + &")".repeat(300);
+        let diagnostics = parse_err(&source);
+        assert!(
+            diagnostics.iter().any(|d| d.message.contains("nesting")),
+            "Expected nesting depth error, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn deeply_chained_assignments_does_not_stack_overflow() {
+        // 300 chained assignments: a := a := a := ... := 1
+        let source = "a := ".repeat(300) + "1";
+        let diagnostics = parse_err(&source);
+        assert!(
+            diagnostics.iter().any(|d| d.message.contains("nesting")),
+            "Expected nesting depth error, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn deeply_nested_blocks_does_not_stack_overflow() {
+        // 300 nested blocks: [[[...1...]]]
+        let source = "[".repeat(300) + "1" + &"]".repeat(300);
+        let diagnostics = parse_err(&source);
+        assert!(
+            diagnostics.iter().any(|d| d.message.contains("nesting")),
+            "Expected nesting depth error, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn deeply_nested_match_patterns_does_not_stack_overflow() {
+        // Nested tuple patterns in match: x match: [{{{...}}} => 1]
+        let source =
+            "x match: [".to_string() + &"{".repeat(300) + "a" + &"}".repeat(300) + " => 1]";
+        let diagnostics = parse_err(&source);
+        assert!(
+            diagnostics.iter().any(|d| d.message.contains("nesting")),
+            "Expected nesting depth error, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn deeply_nested_string_interpolation_does_not_stack_overflow() {
+        // Each nesting level needs a real string-in-interpolation: "x {"y {"z {1} z"} y"} x"
+        // The lexer only produces StringStart inside {..."..."...} sequences.
+        // Build: "{"{"{ ... 1 ... "}"}"}"
+        let mut source = String::new();
+        for _ in 0..300 {
+            source.push_str("\"a{");
+        }
+        source.push('1');
+        for _ in 0..300 {
+            source.push_str("}a\"");
+        }
+        // This input may or may not trigger the nesting guard depending on
+        // lexer behavior, but it must never stack overflow.
+        let tokens = crate::source_analysis::lex_with_eof(&source);
+        let (_module, _diagnostics) = crate::source_analysis::parse(tokens);
+        // Success = no panic/stack overflow
     }
 }

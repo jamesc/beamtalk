@@ -544,6 +544,22 @@ Starting at C would require building all five simultaneously — workspace sync,
 
 **The BEAM makes this path uniquely viable.** OTP's native hot code loading, two-version module support, release handlers, and `code_change` callbacks mean "workspace as deployable image" isn't a novel runtime — it's leveraging infrastructure that already exists. Beamtalk just needs to expose it with the right abstractions.
 
+## Implementation Tracking
+
+**Epic:** BT-600
+**Issues:** BT-601, BT-602, BT-603, BT-604, BT-605, BT-606, BT-607
+**Status:** Planned
+
+| Phase | Issue | Title | Size | Blocked by |
+|-------|-------|-------|------|------------|
+| 1 | BT-601 | Parse `beamtalk.toml` manifest | M | — |
+| 1 | BT-602 | Validate package names | S | BT-601 |
+| 2 | BT-603 | Apply `bt@{package}@{module}` naming | M | BT-601 |
+| 2 | BT-604 | Build output + `.app` file generation | M | BT-601, BT-603 |
+| 3 | BT-605 | Update `beamtalk new` scaffold | S | BT-602 |
+| 3 | BT-606 | REPL auto-compile on startup | M | BT-604 |
+| 4 | BT-607 | `beamtalk run` with start callback | M | BT-604, BT-606 |
+
 ## References
 - Related ADRs: ADR 0004 (workspaces), ADR 0007 (compilable stdlib), ADR 0009 (OTP app structure), ADR 0016 (module naming), ADR 0022 (embedded compiler)
 - Prior art: [Gleam `gleam.toml`](https://gleam.run/writing-gleam/gleam-toml/), [Cargo manifest](https://doc.rust-lang.org/cargo/reference/manifest.html), [Elixir Mix](https://hexdocs.pm/mix/Mix.html)
