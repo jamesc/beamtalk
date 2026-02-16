@@ -90,6 +90,15 @@ impl CoreErlangGenerator {
             return self.generate_super_send(selector, arguments);
         }
 
+        // Compile-time type assertion: `expr asType: SomeClass` (ADR 0025 Phase 2b)
+        // Erased at codegen — generates only the receiver expression (zero runtime cost)
+        if let MessageSelector::Keyword(parts) = selector {
+            let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+            if selector_name == "asType:" {
+                return self.expression_doc(receiver);
+            }
+        }
+
         // For binary operators, use Erlang's built-in operators (these are synchronous)
         if let MessageSelector::Binary(op) = selector {
             // BT-101: Method lookup via `>>` operator (e.g., Counter >> #increment)

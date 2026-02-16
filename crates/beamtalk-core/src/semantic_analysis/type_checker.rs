@@ -125,12 +125,22 @@ impl TypeChecker {
         // Check method bodies inside class definitions
         for class in &module.classes {
             let is_abstract = class.is_abstract || hierarchy.is_abstract(&class.name.name);
+
+            // Determine if this class requires type annotations (typed modifier or inherited)
+            let is_typed = class.is_typed
+                || hierarchy
+                    .get_class(&class.name.name)
+                    .is_some_and(|info| info.is_typed);
+
             for method in &class.methods {
                 let mut method_env = TypeEnv::new();
                 method_env.set("self", InferredType::Known(class.name.name.clone()));
                 Self::set_param_types(&mut method_env, &method.parameters);
                 for expr in &method.body {
                     self.infer_expr(expr, hierarchy, &mut method_env, is_abstract);
+                }
+                if is_typed {
+                    self.check_typed_method_annotations(method, &class.name.name);
                 }
             }
             for method in &class.class_methods {
@@ -140,6 +150,9 @@ impl TypeChecker {
                 Self::set_param_types(&mut method_env, &method.parameters);
                 for expr in &method.body {
                     self.infer_expr(expr, hierarchy, &mut method_env, is_abstract);
+                }
+                if is_typed {
+                    self.check_typed_method_annotations(method, &class.name.name);
                 }
             }
         }
@@ -373,6 +386,15 @@ impl TypeChecker {
             self.infer_expr(arg, hierarchy, env, in_abstract_method);
         }
 
+        // Handle asType: compile-time type assertion (ADR 0025 Phase 2b)
+        // `expr asType: SomeClass` asserts expr is SomeClass, returns Known(SomeClass)
+        if selector_name == "asType:" {
+            if let Some(Expression::ClassReference { name, .. }) = arguments.first() {
+                return InferredType::Known(name.name.clone());
+            }
+            return receiver_ty;
+        }
+
         // If receiver is a class reference, check class-side methods
         if let Expression::ClassReference { name, .. } = receiver {
             let class_name = &name.name;
@@ -492,6 +514,50 @@ impl TypeChecker {
         }
 
         self.diagnostics.push(diag);
+    }
+
+    /// Checks that a method in a `typed` class has full type annotations.
+    ///
+    /// Emits warnings for missing parameter type annotations and return types.
+    /// Skips primitive/intrinsic methods (their bodies are runtime-provided).
+    fn check_typed_method_annotations(
+        &mut self,
+        method: &crate::ast::MethodDefinition,
+        class_name: &EcoString,
+    ) {
+        // Skip primitive/intrinsic methods — their types are runtime-defined
+        if method
+            .body
+            .iter()
+            .any(|e| matches!(e, Expression::Primitive { .. }))
+        {
+            return;
+        }
+
+        let selector = method.selector.name();
+
+        // Check each parameter for missing type annotation
+        for param in &method.parameters {
+            if param.type_annotation.is_none() {
+                self.diagnostics.push(Diagnostic::warning(
+                    format!(
+                        "Missing type annotation for parameter `{}` in typed class `{class_name}` (method `{selector}`)",
+                        param.name.name
+                    ),
+                    param.name.span,
+                ));
+            }
+        }
+
+        // Check for missing return type (only for methods that take no params or have params)
+        if method.return_type.is_none() {
+            self.diagnostics.push(Diagnostic::warning(
+                format!(
+                    "Missing return type annotation in typed class `{class_name}` (method `{selector}`)"
+                ),
+                method.span,
+            ));
+        }
     }
 
     /// Find a similar selector for "did you mean" hints.
