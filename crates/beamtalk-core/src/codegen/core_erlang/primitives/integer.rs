@@ -17,6 +17,7 @@ pub(crate) fn generate_integer_bif(selector: &str, params: &[String]) -> Option<
         "-" => binary_bif("-", params),
         "*" => binary_bif("*", params),
         "/" => binary_bif("/", params),
+        "div:" => binary_bif("div", params),
         "%" => binary_bif("rem", params),
         "**" => power_bif(params),
         // Comparison (ADR 0002: Erlang operators)

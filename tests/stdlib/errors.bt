@@ -17,6 +17,10 @@
 1 / 0
 // => ERROR: badarith
 
+// Integer division by zero (Erlang badarith)
+1 div: 0
+// => ERROR: badarith
+
 // Arithmetic type error (string is not a number)
 "hello" + 42
 // => ERROR: badarith
