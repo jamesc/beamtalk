@@ -166,24 +166,31 @@ format_class_docs_metaclass_test() ->
     ?assert(binary:match(Result, <<"== Metaclass ==">>)  =/= nomatch).
 
 format_metaclass_method_doc_known_test() ->
-    Result = beamtalk_repl_docs:format_metaclass_method_doc(<<"spawn">>),
+    {ok, Result} = beamtalk_repl_docs:format_metaclass_method_doc(<<"spawn">>),
     ?assert(binary:match(Result, <<"Metaclass >> spawn">>)  =/= nomatch),
     ?assert(binary:match(Result, <<"actor">>)               =/= nomatch).
 
 format_metaclass_method_doc_new_test() ->
-    Result = beamtalk_repl_docs:format_metaclass_method_doc(<<"new">>),
+    {ok, Result} = beamtalk_repl_docs:format_metaclass_method_doc(<<"new">>),
     ?assert(binary:match(Result, <<"Metaclass >> new">>)       =/= nomatch),
     ?assert(binary:match(Result, <<"new instance">>)           =/= nomatch).
 
 format_metaclass_method_doc_unknown_test() ->
-    Result = beamtalk_repl_docs:format_metaclass_method_doc(<<"unknownMethod">>),
-    ?assert(binary:match(Result, <<"Metaclass >> unknownMethod">>)  =/= nomatch),
-    ?assert(binary:match(Result, <<"terminal sentinel">>)           =/= nomatch).
+    ?assertMatch(
+        {error, {method_not_found, 'Metaclass', <<"unknownMethod">>}},
+        beamtalk_repl_docs:format_metaclass_method_doc(<<"unknownMethod">>)
+    ).
 
 format_method_doc_metaclass_test() ->
     ?assertMatch({ok, _}, beamtalk_repl_docs:format_method_doc('Metaclass', <<"spawn">>)),
     {ok, Result} = beamtalk_repl_docs:format_method_doc('Metaclass', <<"spawn">>),
     ?assert(binary:match(Result, <<"Metaclass >> spawn">>)  =/= nomatch).
+
+format_method_doc_metaclass_unknown_test() ->
+    ?assertMatch(
+        {error, {method_not_found, 'Metaclass', <<"unknownMethod">>}},
+        beamtalk_repl_docs:format_method_doc('Metaclass', <<"unknownMethod">>)
+    ).
 
 %%====================================================================
 %% EEP-48 doc chunk tests (require stdlib .beam files)

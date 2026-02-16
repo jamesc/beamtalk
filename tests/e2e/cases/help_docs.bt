@@ -28,3 +28,7 @@
 // :help Metaclass with a known class-side method (BT-618)
 :help Metaclass spawn
 // => Metaclass >> spawn_
+
+// :help Metaclass with unknown method — should show error (BT-618)
+:help Metaclass nonExistentMethod
+// => ERROR: Metaclass does not understand nonExistentMethod

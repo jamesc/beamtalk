@@ -20,7 +20,7 @@
          find_doc_entry/2, get_method_signatures/2, get_method_doc/2,
          group_by_class/1, format_class_output/5, format_superclass/1,
          format_method_output/4, format_metaclass_docs/0,
-         format_metaclass_method_doc/1]).
+         format_metaclass_method_doc/1, metaclass_method_doc/1]).
 -endif.
 
 %% @doc Format documentation for a class, including method listing.
@@ -78,7 +78,7 @@ format_class_docs(ClassName) ->
 %% Returns `{ok, FormattedBinary}` or `{error, Reason}`.
 -spec format_method_doc(atom(), binary()) -> {ok, binary()} | {error, term()}.
 format_method_doc('Metaclass', SelectorBin) ->
-    {ok, format_metaclass_method_doc(SelectorBin)};
+    format_metaclass_method_doc(SelectorBin);
 format_method_doc(ClassName, SelectorBin) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
@@ -127,25 +127,31 @@ format_metaclass_docs() ->
     ]).
 
 %% @private Return documentation for a Metaclass method.
--spec format_metaclass_method_doc(binary()) -> binary().
+-spec format_metaclass_method_doc(binary()) -> {ok, binary()} | {error, term()}.
 format_metaclass_method_doc(SelectorBin) ->
-    Doc = case SelectorBin of
-        <<"new">> ->
-            <<"Create a new instance of the class.">>;
-        <<"spawn">> ->
-            <<"Create a new actor instance. Returns an actor reference.">>;
-        <<"spawnWith:">> ->
-            <<"Create a new actor with initial state from a map.">>;
-        <<"describe">> ->
-            <<"Return a description of the class.">>;
-        _ ->
-            <<"Metaclass is the terminal sentinel of the class hierarchy.">>
-    end,
-    iolist_to_binary([
-        <<"Metaclass >> ">>, SelectorBin,
-        <<"\n  ">>, SelectorBin,
-        <<"\n\n">>, Doc
-    ]).
+    case metaclass_method_doc(SelectorBin) of
+        {ok, Doc} ->
+            {ok, iolist_to_binary([
+                <<"Metaclass >> ">>, SelectorBin,
+                <<"\n  ">>, SelectorBin,
+                <<"\n\n">>, Doc
+            ])};
+        not_found ->
+            {error, {method_not_found, 'Metaclass', SelectorBin}}
+    end.
+
+%% @private Lookup doc text for known Metaclass class-side methods.
+-spec metaclass_method_doc(binary()) -> {ok, binary()} | not_found.
+metaclass_method_doc(<<"new">>) ->
+    {ok, <<"Create a new instance of the class.">>};
+metaclass_method_doc(<<"spawn">>) ->
+    {ok, <<"Create a new actor instance. Returns an actor reference.">>};
+metaclass_method_doc(<<"spawnWith:">>) ->
+    {ok, <<"Create a new actor with initial state from a Dictionary.">>};
+metaclass_method_doc(<<"describe">>) ->
+    {ok, <<"Return a description of the class.">>};
+metaclass_method_doc(_) ->
+    not_found.
 
 %% @private Safe atom conversion — returns error instead of creating new atoms.
 -spec safe_to_existing_atom(binary()) -> {ok, atom()} | {error, badarg}.
