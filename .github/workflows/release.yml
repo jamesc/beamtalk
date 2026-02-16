@@ -115,6 +115,317 @@ jobs:
           path: ${{ steps.package.outputs.archive }}
           retention-days: 7
 
+  # ─── Full distribution (macOS x86_64) ──────────────────────────────────
+  macos-x86_64:
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          elif [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "dev")
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "📦 Building release: ${VERSION}"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.0'
+          rebar3-version: '3.23'
+
+      - name: Install Just
+        uses: extractions/setup-just@v3
+
+      - name: Cache Erlang/rebar3 artifacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: ${{ runner.os }}-x86_64-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-otp-27.0-rebar3-3.23
+          restore-keys: |
+            ${{ runner.os }}-x86_64-erlang-otp-27.0-
+
+      - name: Cache cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-x86_64-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-x86_64-cargo-release-
+            ${{ runner.os }}-cargo-
+
+      - name: Build and install distribution
+        run: just install dist
+
+      - name: Smoke test
+        run: just test-install
+
+      - name: Package tarball
+        id: package
+        run: |
+          ARCHIVE="beamtalk-${{ steps.version.outputs.version }}-macos-x86_64.tar.gz"
+          tar -czf "${ARCHIVE}" -C dist .
+          echo "archive=${ARCHIVE}" >> "$GITHUB_OUTPUT"
+          echo "📦 Created ${ARCHIVE} ($(du -h "${ARCHIVE}" | cut -f1))"
+
+      - name: Upload release asset
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ steps.version.outputs.tag }}" \
+            "${{ steps.package.outputs.archive }}" \
+            --clobber
+
+      - name: Upload artifact (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v6
+        with:
+          name: beamtalk-${{ steps.version.outputs.version }}-macos-x86_64
+          path: ${{ steps.package.outputs.archive }}
+          retention-days: 7
+
+  # ─── Full distribution (macOS ARM64) ──────────────────────────────────
+  macos-arm64:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          elif [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "dev")
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "📦 Building release: ${VERSION}"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.0'
+          rebar3-version: '3.23'
+
+      - name: Install Just
+        uses: extractions/setup-just@v3
+
+      - name: Cache Erlang/rebar3 artifacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: ${{ runner.os }}-arm64-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-otp-27.0-rebar3-3.23
+          restore-keys: |
+            ${{ runner.os }}-arm64-erlang-otp-27.0-
+
+      - name: Cache cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-arm64-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-arm64-cargo-release-
+            ${{ runner.os }}-cargo-
+
+      - name: Build and install distribution
+        run: just install dist
+
+      - name: Smoke test
+        run: just test-install
+
+      - name: Package tarball
+        id: package
+        run: |
+          ARCHIVE="beamtalk-${{ steps.version.outputs.version }}-macos-arm64.tar.gz"
+          tar -czf "${ARCHIVE}" -C dist .
+          echo "archive=${ARCHIVE}" >> "$GITHUB_OUTPUT"
+          echo "📦 Created ${ARCHIVE} ($(du -h "${ARCHIVE}" | cut -f1))"
+
+      - name: Upload release asset
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ steps.version.outputs.tag }}" \
+            "${{ steps.package.outputs.archive }}" \
+            --clobber
+
+      - name: Upload artifact (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v6
+        with:
+          name: beamtalk-${{ steps.version.outputs.version }}-macos-arm64
+          path: ${{ steps.package.outputs.archive }}
+          retention-days: 7
+
+  # ─── Full distribution (Windows x86_64) ────────────────────────────────
+  windows-x86_64:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          elif [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "dev")
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "📦 Building release: ${VERSION}"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.0'
+          rebar3-version: '3.23'
+
+      - name: Cache Erlang/rebar3 artifacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-otp-27.0-rebar3-3.23
+          restore-keys: |
+            ${{ runner.os }}-erlang-otp-27.0-
+
+      - name: Cache cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+
+      - name: Build Rust (release)
+        run: cargo build --all-targets --release --quiet
+
+      - name: Build Erlang runtime
+        shell: bash
+        run: cd runtime && rebar3 compile
+
+      - name: Build standard library
+        shell: bash
+        run: |
+          ./target/release/beamtalk.exe build-stdlib
+
+      - name: Smoke test
+        run: ./target/release/beamtalk.exe --version
+        shell: bash
+
+      - name: Package zip
+        id: package
+        shell: bash
+        run: |
+          ARCHIVE="beamtalk-${{ steps.version.outputs.version }}-windows-x86_64.zip"
+          STAGING="beamtalk-staging"
+          mkdir -p "${STAGING}/bin" "${STAGING}/lib/beamtalk/lib"
+
+          # Binaries
+          cp target/release/beamtalk.exe "${STAGING}/bin/"
+          cp target/release/beamtalk-compiler-port.exe "${STAGING}/bin/"
+          cp target/release/beamtalk-lsp.exe "${STAGING}/bin/"
+          cp target/release/beamtalk-mcp.exe "${STAGING}/bin/"
+
+          # OTP application ebin directories
+          for app in beamtalk_runtime beamtalk_workspace beamtalk_compiler jsx; do
+            SRC="runtime/_build/default/lib/${app}/ebin"
+            if [ ! -d "${SRC}" ] || ! ls "${SRC}"/*.beam 1>/dev/null 2>&1; then
+              echo "❌ No .beam files found in ${SRC}. Erlang build may have failed."
+              exit 1
+            fi
+            mkdir -p "${STAGING}/lib/beamtalk/lib/${app}/ebin"
+            cp "${SRC}"/*.beam "${STAGING}/lib/beamtalk/lib/${app}/ebin/"
+            cp "${SRC}"/*.app "${STAGING}/lib/beamtalk/lib/${app}/ebin/" 2>/dev/null || true
+          done
+
+          # Stdlib
+          STDLIB_SRC="runtime/apps/beamtalk_stdlib/ebin"
+          if [ ! -d "${STDLIB_SRC}" ] || ! ls "${STDLIB_SRC}"/*.beam 1>/dev/null 2>&1; then
+            echo "❌ No stdlib .beam files found in ${STDLIB_SRC}. Stdlib build may have failed."
+            exit 1
+          fi
+          mkdir -p "${STAGING}/lib/beamtalk/lib/beamtalk_stdlib/ebin"
+          cp "${STDLIB_SRC}"/*.beam "${STAGING}/lib/beamtalk/lib/beamtalk_stdlib/ebin/"
+          cp "${STDLIB_SRC}"/*.app "${STAGING}/lib/beamtalk/lib/beamtalk_stdlib/ebin/" 2>/dev/null || true
+
+          # Create zip (from inside staging dir so paths are relative)
+          cd "${STAGING}" && 7z a "../${ARCHIVE}" . && cd ..
+          echo "archive=${ARCHIVE}" >> "$GITHUB_OUTPUT"
+          echo "📦 Created ${ARCHIVE}"
+
+      - name: Upload release asset
+        if: github.event_name == 'release'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ steps.version.outputs.tag }}" \
+            "${{ steps.package.outputs.archive }}" \
+            --clobber
+
+      - name: Upload artifact (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v6
+        with:
+          name: beamtalk-${{ steps.version.outputs.version }}-windows-x86_64
+          path: ${{ steps.package.outputs.archive }}
+          retention-days: 7
+
   # ─── Cross-compile beamtalk-lsp for per-platform VS Code extensions ───
   build-lsp:
     strategy:

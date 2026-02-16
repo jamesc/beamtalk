@@ -168,7 +168,7 @@ test-mcp: build-stdlib
     # Wait for "Connected to REPL backend on port <N>" line
     MCP_TEST_PORT=""
     for i in $(seq 1 30); do
-        MCP_TEST_PORT=$(grep -oP 'Connected to REPL backend on port \K[0-9]+' "$OUTFILE" 2>/dev/null || true)
+        MCP_TEST_PORT=$(sed -n 's/.*Connected to REPL backend on port \([0-9][0-9]*\).*/\1/p' "$OUTFILE" 2>/dev/null | tail -1)
         if [ -n "$MCP_TEST_PORT" ]; then break; fi
         sleep 1
     done
@@ -208,7 +208,7 @@ test-install: build-release build-stdlib
     # Wait for "Connected to REPL backend on port <N>" line
     PORT=""
     for i in $(seq 1 30); do
-        PORT=$(grep -oP 'Connected to REPL backend on port \K[0-9]+' "$OUTFILE" 2>/dev/null || true)
+        PORT=$(sed -n 's/.*Connected to REPL backend on port \([0-9][0-9]*\).*/\1/p' "$OUTFILE" 2>/dev/null | tail -1)
         if [ -n "$PORT" ]; then break; fi
         sleep 1
     done
