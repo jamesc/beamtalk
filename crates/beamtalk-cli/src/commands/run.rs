@@ -31,20 +31,31 @@ use super::manifest;
 #[instrument(skip_all, fields(path = %path))]
 pub fn run(path: &str) -> Result<()> {
     info!("Starting run command");
-    let project_root = Utf8PathBuf::from(path);
+    let input_path = Utf8PathBuf::from(path);
+
+    // Derive project root: directory uses itself, file uses parent
+    let project_root = if input_path.is_dir() {
+        input_path
+    } else {
+        input_path
+            .parent()
+            .map(camino::Utf8Path::to_path_buf)
+            .unwrap_or_else(|| Utf8PathBuf::from("."))
+    };
 
     // Look for package manifest
     let pkg = manifest::find_manifest(&project_root)?.ok_or_else(|| {
         miette!(
-            "No beamtalk.toml found in '{path}'.\n\
+            "No beamtalk.toml found in '{}'.\n\
              The run command requires a package manifest.\n\
-             Create one with: beamtalk new <project_name>"
+             Create one with: beamtalk new <project_name>",
+            project_root
         )
     })?;
 
     let start_module = pkg.start.as_deref().ok_or_else(|| {
         miette!(
-            "Error: no start module defined — add start = \"module_name\" to [package] in beamtalk.toml"
+            "No start module defined — add start = \"module_name\" to [package] in beamtalk.toml"
         )
     })?;
 
@@ -55,7 +66,7 @@ pub fn run(path: &str) -> Result<()> {
             .all(|c| c == '_' || c.is_ascii_alphanumeric())
     {
         miette::bail!(
-            "Invalid start module '{start_module}': must contain only alphanumeric characters and underscores"
+            "Invalid start module '{start_module}': must be non-empty and contain only alphanumeric characters and underscores"
         );
     }
 
@@ -63,7 +74,10 @@ pub fn run(path: &str) -> Result<()> {
 
     // Build the project
     println!("Building...");
-    super::build::build(path, &beamtalk_core::CompilerOptions::default())?;
+    super::build::build(
+        project_root.as_str(),
+        &beamtalk_core::CompilerOptions::default(),
+    )?;
 
     // Resolve the Erlang module name: bt@{package}@{start_module}
     let erlang_module = format!(
@@ -203,7 +217,7 @@ mod tests {
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
-            err.contains("no start module defined"),
+            err.contains("No start module defined"),
             "Should mention missing start field: {err}"
         );
     }
