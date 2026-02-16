@@ -172,9 +172,17 @@ compile_modules_batch(TmpDir) ->
     ?assert(lists:member(mod_b, Modules)).
 
 compile_modules_bad_outdir() ->
-    %% /dev/null/ebin cannot be created as a directory
-    Result = beamtalk_build_worker:compile_modules("/dev/null/ebin", ["dummy.core"]),
-    ?assertEqual(error, Result).
+    %% Create a regular file — compile_modules can't create a directory inside a file
+    TmpDir = setup_temp_dir(),
+    try
+        BlockingFile = filename:join(TmpDir, "not_a_dir"),
+        ok = file:write_file(BlockingFile, <<>>),
+        BadOutDir = filename:join(BlockingFile, "ebin"),
+        Result = beamtalk_build_worker:compile_modules(BadOutDir, ["dummy.core"]),
+        ?assertEqual(error, Result)
+    after
+        cleanup_temp_dir(TmpDir)
+    end.
 
 compile_modules_mixed(TmpDir) ->
     OutDir = filename:join(TmpDir, "mixed_out"),
@@ -191,14 +199,34 @@ compile_modules_mixed(TmpDir) ->
 %%% ---------------------------------------------------------------
 
 setup_temp_dir() ->
-    TmpDir = filename:join(["/tmp", "beamtalk_build_worker_test_" ++
+    TmpBase = case os:getenv("TMPDIR") of
+        false -> "/tmp";
+        "" -> "/tmp";
+        Dir -> Dir
+    end,
+    TmpDir = filename:join([TmpBase, "beamtalk_build_worker_test_" ++
                             integer_to_list(erlang:unique_integer([positive]))]),
     ok = filelib:ensure_dir(filename:join(TmpDir, "dummy")),
     TmpDir.
 
 cleanup_temp_dir(TmpDir) ->
-    os:cmd("rm -rf " ++ TmpDir),
-    ok.
+    remove_dir_recursive(TmpDir).
+
+remove_dir_recursive(Dir) ->
+    case file:list_dir(Dir) of
+        {ok, Files} ->
+            lists:foreach(fun(F) ->
+                Path = filename:join(Dir, F),
+                case filelib:is_dir(Path) of
+                    true -> remove_dir_recursive(Path);
+                    false -> file:delete(Path)
+                end
+            end, Files),
+            file:del_dir(Dir),
+            ok;
+        {error, _} ->
+            ok
+    end.
 
 %% Minimal valid Core Erlang module with a hello/0 function.
 valid_core_erlang_source() ->
