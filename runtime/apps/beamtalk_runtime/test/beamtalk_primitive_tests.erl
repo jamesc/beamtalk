@@ -610,3 +610,163 @@ maps_get_form(Name, Field) ->
        [{call, 1,
          {remote, 1, {atom, 1, maps}, {atom, 1, get}},
          [{atom, 1, Field}, {var, 1, 'Self'}]}]}]}.
+
+%%% ============================================================================
+%%% print_string/1 Tests — Complex Types
+%%% ============================================================================
+
+print_string_integer_test() ->
+    ?assertEqual(<<"42">>, beamtalk_primitive:print_string(42)),
+    ?assertEqual(<<"-7">>, beamtalk_primitive:print_string(-7)).
+
+print_string_float_test() ->
+    Result = beamtalk_primitive:print_string(3.14),
+    ?assert(is_binary(Result)).
+
+print_string_string_test() ->
+    ?assertEqual(<<"hello">>, beamtalk_primitive:print_string(<<"hello">>)).
+
+print_string_boolean_test() ->
+    ?assertEqual(<<"true">>, beamtalk_primitive:print_string(true)),
+    ?assertEqual(<<"false">>, beamtalk_primitive:print_string(false)).
+
+print_string_nil_test() ->
+    ?assertEqual(<<"nil">>, beamtalk_primitive:print_string(nil)).
+
+print_string_metaclass_test() ->
+    ?assertEqual(<<"Metaclass">>, beamtalk_primitive:print_string('Metaclass')).
+
+print_string_symbol_test() ->
+    ?assertEqual(<<"#hello">>, beamtalk_primitive:print_string(hello)).
+
+print_string_list_test() ->
+    Result = beamtalk_primitive:print_string([1, 2, 3]),
+    ?assertEqual(<<"#(1, 2, 3)">>, Result).
+
+print_string_empty_list_test() ->
+    ?assertEqual(<<"#()">>, beamtalk_primitive:print_string([])).
+
+print_string_tuple_test() ->
+    Result = beamtalk_primitive:print_string({1, <<"two">>, 3}),
+    ?assertEqual(<<"{1, two, 3}">>, Result).
+
+print_string_empty_tuple_test() ->
+    ?assertEqual(<<"{}">>, beamtalk_primitive:print_string({})).
+
+print_string_beamtalk_error_test() ->
+    Error = #beamtalk_error{kind = does_not_understand, class = 'Integer',
+                            selector = 'foo', message = <<"Integer does not understand 'foo'">>},
+    Result = beamtalk_primitive:print_string(Error),
+    ?assert(is_binary(Result)),
+    ?assert(byte_size(Result) > 0).
+
+print_string_set_test() ->
+    Set = #{'$beamtalk_class' => 'Set', elements => [1, 2, 3]},
+    Result = beamtalk_primitive:print_string(Set),
+    ?assertEqual(<<"Set(1, 2, 3)">>, Result).
+
+print_string_plain_map_test_() ->
+    {setup,
+     fun() ->
+         case whereis(pg) of
+             undefined -> pg:start_link();
+             _ -> ok
+         end,
+         beamtalk_extensions:init(),
+         {ok, _} = beamtalk_bootstrap:start_link(),
+         beamtalk_stdlib:init(),
+         ok
+     end,
+     fun(_) -> ok end,
+     fun() ->
+         %% Plain map (Dictionary) — should use beamtalk_map_ops format
+         Result = beamtalk_primitive:print_string(#{a => 1}),
+         ?assert(is_binary(Result))
+     end}.
+
+print_string_catchall_test() ->
+    %% Pid/reference should use the catch-all io_lib:format path
+    Result = beamtalk_primitive:print_string(self()),
+    ?assert(is_binary(Result)).
+
+%%% ============================================================================
+%%% class_of_object/1 Tests
+%%% ============================================================================
+
+class_of_object_metaclass_sentinel_test() ->
+    ?assertEqual('Metaclass', beamtalk_primitive:class_of_object('Metaclass')).
+
+class_of_object_primitive_test_() ->
+    {setup,
+     fun() ->
+         case whereis(pg) of
+             undefined -> pg:start_link();
+             _ -> ok
+         end,
+         beamtalk_extensions:init(),
+         {ok, _} = beamtalk_bootstrap:start_link(),
+         beamtalk_stdlib:init(),
+         ok
+     end,
+     fun(_) -> ok end,
+     [
+        {"class_of_object for integer returns class object",
+         fun() ->
+             Result = beamtalk_primitive:class_of_object(42),
+             ?assertMatch({beamtalk_object, _, _, _}, Result)
+         end},
+        {"class_of_object for string returns class object",
+         fun() ->
+             Result = beamtalk_primitive:class_of_object(<<"hello">>),
+             ?assertMatch({beamtalk_object, _, _, _}, Result)
+         end},
+        {"class_of_object for class object returns Metaclass",
+         fun() ->
+             IntegerPid = beamtalk_class_registry:whereis_class('Integer'),
+             %% Class objects have class field ending in " class"
+             ClassObj = #beamtalk_object{class = 'Integer class', class_mod = beamtalk_object_class, pid = IntegerPid},
+             Result = beamtalk_primitive:class_of_object(ClassObj),
+             ?assertEqual('Metaclass', Result)
+         end}
+     ]}.
+
+%%% ============================================================================
+%%% class_of_object_by_name/1 Tests
+%%% ============================================================================
+
+class_of_object_by_name_test_() ->
+    {setup,
+     fun() ->
+         case whereis(pg) of
+             undefined -> pg:start_link();
+             _ -> ok
+         end,
+         beamtalk_extensions:init(),
+         {ok, _} = beamtalk_bootstrap:start_link(),
+         beamtalk_stdlib:init(),
+         ok
+     end,
+     fun(_) -> ok end,
+     [
+        {"known class returns class object",
+         fun() ->
+             Result = beamtalk_primitive:class_of_object_by_name('Integer'),
+             ?assertMatch({beamtalk_object, _, _, _}, Result)
+         end},
+        {"unknown class returns atom",
+         fun() ->
+             Result = beamtalk_primitive:class_of_object_by_name('NonExistentClass'),
+             ?assertEqual('NonExistentClass', Result)
+         end}
+     ]}.
+
+%%% ============================================================================
+%%% camel_to_snake/1 Tests (via class_name_to_module)
+%%% ============================================================================
+
+class_name_to_module_test() ->
+    ?assertEqual('bt@counter', beamtalk_primitive:class_name_to_module('Counter')),
+    ?assertEqual('bt@my_class', beamtalk_primitive:class_name_to_module('MyClass')),
+    %% Consecutive uppercase: only insert _ when transitioning from lowercase to uppercase
+    ?assertEqual('bt@abc', beamtalk_primitive:class_name_to_module('ABC')),
+    ?assertEqual('bt@htmlparser', beamtalk_primitive:class_name_to_module('HTMLParser')).

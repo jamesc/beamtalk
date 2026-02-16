@@ -5,6 +5,7 @@
 -module(beamtalk_stdlib_tests).
 
 -include_lib("eunit/include/eunit.hrl").
+-include("beamtalk.hrl").
 
 %%% ============================================================================
 %%% Test Fixtures
@@ -243,3 +244,75 @@ beamtalk_has_method_test() ->
     %% Check has_method for unknown methods
     ?assertNot(beamtalk_stdlib:has_method(unknownMethod)),
     ?assertNot(beamtalk_stdlib:has_method(fooBar)).
+
+%%% ============================================================================
+%%% Topological Sort Tests
+%%% ============================================================================
+
+topo_sort_test_() ->
+    [
+        {"linear chain sorts correctly", fun topo_sort_linear_chain_test/0},
+        {"diamond dependency sorts correctly", fun topo_sort_diamond_test/0},
+        {"single entry sorts correctly", fun topo_sort_single_test/0},
+        {"empty list sorts correctly", fun topo_sort_empty_test/0},
+        {"external superclass treated as ready", fun topo_sort_external_super_test/0}
+    ].
+
+topo_sort_linear_chain_test() ->
+    %% C -> B -> A (C depends on B, B depends on A)
+    Entries = [{mod_c, 'C', 'B'}, {mod_a, 'A', 'External'}, {mod_b, 'B', 'A'}],
+    Result = beamtalk_stdlib:topo_sort(Entries),
+    Names = [Class || {_, Class, _} <- Result],
+    %% A must come before B, B must come before C
+    PosA = pos(Names, 'A'),
+    PosB = pos(Names, 'B'),
+    PosC = pos(Names, 'C'),
+    ?assert(PosA < PosB),
+    ?assert(PosB < PosC).
+
+topo_sort_diamond_test() ->
+    %% D depends on B and C; B and C both depend on A
+    Entries = [{mod_d, 'D', 'B'}, {mod_b, 'B', 'A'}, {mod_c, 'C', 'A'}, {mod_a, 'A', 'External'}],
+    Result = beamtalk_stdlib:topo_sort(Entries),
+    Names = [Class || {_, Class, _} <- Result],
+    PosA = pos(Names, 'A'),
+    PosB = pos(Names, 'B'),
+    PosD = pos(Names, 'D'),
+    ?assert(PosA < PosB),
+    ?assert(PosB < PosD orelse pos(Names, 'C') < PosD).
+
+topo_sort_single_test() ->
+    Result = beamtalk_stdlib:topo_sort([{mod_a, 'A', 'Object'}]),
+    ?assertEqual([{mod_a, 'A', 'Object'}], Result).
+
+topo_sort_empty_test() ->
+    ?assertEqual([], beamtalk_stdlib:topo_sort([])).
+
+topo_sort_external_super_test() ->
+    %% Both depend on external 'Object' — both should be ready in first wave
+    Entries = [{mod_a, 'A', 'Object'}, {mod_b, 'B', 'Object'}],
+    Result = beamtalk_stdlib:topo_sort(Entries),
+    ?assertEqual(2, length(Result)).
+
+pos(List, Elem) ->
+    pos(List, Elem, 1).
+pos([Elem | _], Elem, N) -> N;
+pos([_ | T], Elem, N) -> pos(T, Elem, N + 1).
+
+%%% ============================================================================
+%%% Dispatch Error Tests
+%%% ============================================================================
+
+dispatch_unknown_selector_test_() ->
+    {setup,
+     fun stdlib_setup/0,
+     fun stdlib_teardown/1,
+     [
+        {"dispatch unknown selector raises does_not_understand",
+         fun dispatch_unknown_selector_test/0}
+     ]}.
+
+dispatch_unknown_selector_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand, class = 'Beamtalk'}},
+        beamtalk_stdlib:dispatch(nonExistentMethod, [], 'Beamtalk')).
