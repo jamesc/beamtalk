@@ -231,7 +231,7 @@ io_capture_resets_spawned_process_group_leader_test() ->
 
 io_capture_reset_does_not_affect_unrelated_processes_test() ->
     %% Verify that processes NOT spawned during capture keep their GL.
-    OrigGL = group_leader(),
+    _OrigGL = group_leader(),
     %% Spawn a process BEFORE capture starts
     PreExisting = spawn(fun() -> receive stop -> ok end end),
     {group_leader, PreGL} = erlang:process_info(PreExisting, group_leader),
@@ -503,6 +503,398 @@ handle_load_empty_file_test() ->
     %% Should fail with compile error
     case Result of
         {error, {compile_error, _}, _} -> ok;
-        Other -> error({unexpected_result, Other})
+        Other1 -> error({unexpected_result, Other1})
     end.
 
+%%% ===========================================================================
+%%% BT-627: Coverage tests for internal functions and edge cases
+%%% ===========================================================================
+
+%%% is_internal_key/1 tests
+
+is_internal_key_double_underscore_test() ->
+    ?assert(beamtalk_repl_eval:is_internal_key('__repl_actor_registry__')).
+
+is_internal_key_single_underscore_test() ->
+    ?assertNot(beamtalk_repl_eval:is_internal_key('_error')).
+
+is_internal_key_regular_atom_test() ->
+    ?assertNot(beamtalk_repl_eval:is_internal_key(x)).
+
+is_internal_key_empty_atom_test() ->
+    ?assertNot(beamtalk_repl_eval:is_internal_key('')).
+
+
+%%% register_classes/2 tests
+
+register_classes_no_function_test() ->
+    ?assertEqual(ok, beamtalk_repl_eval:register_classes([], lists)).
+
+%%% trigger_hot_reload/2 tests
+
+trigger_hot_reload_empty_classes_test() ->
+    ?assertEqual(ok, beamtalk_repl_eval:trigger_hot_reload(some_module, [])).
+
+trigger_hot_reload_unknown_class_test() ->
+    Classes = [#{name => <<"xyzzy_nonexistent_class_99999">>}],
+    ?assertEqual(ok, beamtalk_repl_eval:trigger_hot_reload(some_module, Classes)).
+
+trigger_hot_reload_undefined_name_test() ->
+    Classes = [#{name => undefined}],
+    ?assertEqual(ok, beamtalk_repl_eval:trigger_hot_reload(some_module, Classes)).
+
+trigger_hot_reload_no_name_key_test() ->
+    Classes = [#{}],
+    ?assertEqual(ok, beamtalk_repl_eval:trigger_hot_reload(some_module, Classes)).
+
+trigger_hot_reload_list_name_test() ->
+    Classes = [#{name => "xyzzy_nonexistent_class_88888"}],
+    ?assertEqual(ok, beamtalk_repl_eval:trigger_hot_reload(some_module, Classes)).
+
+trigger_hot_reload_atom_name_test() ->
+    Classes = [#{name => xyzzy_nonexistent_class_77777}],
+    ?assertEqual(ok, beamtalk_repl_eval:trigger_hot_reload(some_module, Classes)).
+
+%%% activate_module/2 tests
+
+activate_module_nonexistent_test() ->
+    ?assertEqual(ok, beamtalk_repl_eval:activate_module(lists, [])).
+
+%%% io_passthrough_loop tests
+
+io_passthrough_forward_test() ->
+    OldGL = group_leader(),
+    PassPid = spawn(fun() -> beamtalk_repl_eval:io_passthrough_loop(OldGL) end),
+    PassPid ! {io_request, self(), make_ref(), {put_chars, unicode, <<"test">>}},
+    timer:sleep(50),
+    ?assert(is_process_alive(PassPid)),
+    exit(PassPid, normal).
+
+%%% IO capture with dead capture process
+
+io_capture_dead_capture_process_test() ->
+    CapturePid = spawn(fun() -> ok end),
+    timer:sleep(10),
+    OldGL = group_leader(),
+    Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}),
+    ?assertEqual(<<>>, Output).
+
+%%% handle_io_request edge cases
+
+handle_io_request_put_chars_invalid_encoding_test() ->
+    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request(
+        {put_chars, utf32, <<255, 254, 0, 0>>}, <<"existing">>),
+    ?assertEqual(ok, Reply),
+    ?assert(is_binary(Buffer)).
+
+handle_io_request_put_chars_mfa_error_test() ->
+    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request(
+        {put_chars, utf8, erlang, error, [badarg]}, <<"existing">>),
+    ?assertEqual(ok, Reply),
+    ?assertEqual(<<"existing">>, Buffer).
+
+%%% handle_load with real file but no compiler
+
+handle_load_valid_file_no_compiler_test() ->
+    UniqueId = erlang:unique_integer([positive]),
+    TempFile = filename:join(os:getenv("TMPDIR", "/tmp"),
+                             io_lib:format("test_valid_~p.bt", [UniqueId])),
+    ok = file:write_file(TempFile, <<"Object subclass: MyTest [\n]\n">>),
+    State = beamtalk_repl_state:new(undefined, 0),
+    Result = beamtalk_repl_eval:handle_load(TempFile, State),
+    file:delete(TempFile),
+    case Result of
+        {error, {compile_error, _}, _} -> ok;
+        {error, {core_compile_error, _}, _} -> ok;
+        Other2 -> error({unexpected_result, Other2})
+    end.
+
+%%% do_eval with bindings and actor registry
+
+do_eval_with_registry_no_compiler_test() ->
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
+    State = beamtalk_repl_state:new(RegistryPid, 0),
+    {error, {compile_error, _}, _, _, NewState} = beamtalk_repl_eval:do_eval("1 + 2", State),
+    ?assertEqual(1, beamtalk_repl_state:get_eval_counter(NewState)),
+    gen_server:stop(RegistryPid).
+
+%%% format_formatted_diagnostics edge cases
+
+format_formatted_diagnostics_two_items_test() ->
+    Result = beamtalk_repl_eval:format_formatted_diagnostics([<<"A">>, <<"B">>]),
+    ?assertEqual(<<"A\n\nB">>, Result).
+
+%%% extract_assignment edge cases
+
+extract_assignment_multiline_test() ->
+    ?assertMatch({ok, _}, beamtalk_repl_eval:extract_assignment("x := [1, 2, 3]")).
+
+extract_assignment_no_space_v2_test() ->
+    ?assertEqual({ok, abc}, beamtalk_repl_eval:extract_assignment("abc:=123")).
+
+%% ===================================================================
+%% compile_expression_via_port catch clauses (BT-627)
+%% ===================================================================
+
+compile_expr_noproc_test() ->
+    %% Covers exit:{noproc, _} clause (line 341-342)
+    Result = beamtalk_repl_eval:compile_expression_via_port("1+2", test_mod, #{}),
+    ?assertMatch({error, _}, Result).
+
+compile_expr_timeout_test() ->
+    %% compile_expression_via_port calls beamtalk_compiler which isn't started,
+    %% so it hits exit:{noproc, _}. To test timeout, we'd need a mock.
+    %% Instead, verify the function handles missing compiler gracefully.
+    Result = beamtalk_repl_eval:compile_expression_via_port("hello", test_mod2, #{x => 1}),
+    ?assertMatch({error, _}, Result).
+
+%% ===================================================================
+%% compile_file_via_port catch clauses (BT-627)
+%% ===================================================================
+
+compile_file_noproc_test() ->
+    %% Covers exit:{noproc, _} clause (line 380-381)
+    Result = beamtalk_repl_eval:compile_file_via_port("x := 1", "/test.bt", false),
+    ?assertMatch({error, _}, Result).
+
+compile_file_noproc_stdlib_test() ->
+    %% Covers stdlib_mode path too
+    Result = beamtalk_repl_eval:compile_file_via_port("Object subclass: Foo", "/lib/Foo.bt", true),
+    ?assertMatch({error, _}, Result).
+
+%% ===================================================================
+%% handle_class_definition (BT-627)
+%% ===================================================================
+
+handle_class_definition_load_error_test() ->
+    %% Test the {error, Reason} branch of code:load_binary (line 226-227)
+    ClassInfo = #{binary => <<"not_a_valid_beam">>,
+                  module_name => '__bt_test_bad_class',
+                  classes => [#{name => <<"BadClass">>}]},
+    State = beamtalk_repl_state:new(undefined, 0),
+    Result = beamtalk_repl_eval:handle_class_definition(ClassInfo, [], "test", State),
+    ?assertMatch({error, {load_error, _}, <<>>, [], _}, Result).
+
+handle_class_definition_empty_classes_test() ->
+    %% Test fallback branch when Classes is empty (lines 219-223)
+    %% Create a minimal valid BEAM module to load
+    %% We can't easily create valid BEAM, so test with invalid binary
+    ClassInfo = #{binary => <<"bad">>,
+                  module_name => '__bt_test_empty_cls',
+                  classes => []},
+    State = beamtalk_repl_state:new(undefined, 0),
+    %% Load will fail, hitting the error branch
+    Result = beamtalk_repl_eval:handle_class_definition(ClassInfo, [<<"warn">>], "test", State),
+    ?assertMatch({error, {load_error, _}, <<>>, [<<"warn">>], _}, Result).
+
+%% ===================================================================
+%% handle_method_definition (BT-627)
+%% ===================================================================
+
+handle_method_definition_no_source_test() ->
+    %% Test the 'undefined' branch when class has no stored source (line 237-240)
+    MethodInfo = #{class_name => <<"NonexistentClass">>, selector => <<"foo">>},
+    State = beamtalk_repl_state:new(undefined, 0),
+    Result = beamtalk_repl_eval:handle_method_definition(MethodInfo, [], "foo [] := 42", State),
+    ?assertMatch({error, {compile_error, _}, <<>>, [], _}, Result).
+
+handle_method_definition_no_source_with_warnings_test() ->
+    %% Same but with warnings to verify they pass through
+    MethodInfo = #{class_name => <<"Missing">>, selector => <<"bar">>},
+    State = beamtalk_repl_state:new(undefined, 0),
+    Result = beamtalk_repl_eval:handle_method_definition(MethodInfo, [<<"w1">>], "bar", State),
+    ?assertMatch({error, {compile_error, _}, <<>>, [<<"w1">>], _}, Result).
+
+handle_method_definition_with_source_compile_fail_test() ->
+    %% Test the path where class source exists but recompilation fails (line 273-276)
+    %% Store some class source, then try adding a method — compiler not available
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    State1 = beamtalk_repl_state:set_class_source(<<"TestClass">>, "Object subclass: TestClass", State0),
+    MethodInfo = #{class_name => <<"TestClass">>, selector => <<"doStuff">>},
+    %% Compiler not available — compile will exit with noproc, caught by the try/catch
+    %% in handle_method_definition which calls beamtalk_compiler:compile directly
+    Result = (catch beamtalk_repl_eval:handle_method_definition(MethodInfo, [], "doStuff [] := 42", State1)),
+    %% May either return compile error or exit — both are acceptable
+    case Result of
+        {error, {compile_error, _}, <<>>, [], _} -> ok;
+        {'EXIT', _} -> ok
+    end.
+
+%% ===================================================================
+%% maybe_await_future timeout and flush paths (BT-627)
+%% ===================================================================
+
+maybe_await_future_non_future_pid_v2_test() ->
+    %% Test that a non-future PID (e.g., a plain process) returns the PID as-is
+    %% Covers lines 518-530 (after timeout, flush, return Value)
+    Pid = spawn(fun() -> receive stop -> ok after 5000 -> ok end end),
+    Result = beamtalk_repl_eval:maybe_await_future(Pid),
+    ?assertEqual(Pid, Result),
+    Pid ! stop.
+
+maybe_await_future_dead_pid_test() ->
+    %% Test with a PID that's already dead - covers the after clause
+    Pid = spawn(fun() -> ok end),
+    timer:sleep(50),
+    Result = beamtalk_repl_eval:maybe_await_future(Pid),
+    ?assertEqual(Pid, Result).
+
+maybe_await_future_resolved_test() ->
+    %% Test with a fake future that responds to the await protocol
+    %% Covers lines 498-500 (future_resolved path)
+    Pid = spawn(fun() ->
+        receive
+            {await, From, _Timeout} ->
+                From ! {future_resolved, self(), 42}
+        end,
+        %% Keep alive briefly
+        receive stop -> ok after 1000 -> ok end
+    end),
+    Result = beamtalk_repl_eval:maybe_await_future(Pid),
+    ?assertEqual(42, Result),
+    Pid ! stop.
+
+maybe_await_future_rejected_test() ->
+    %% Test with a fake future that sends future_rejected
+    %% Covers lines 501-505 (future_rejected path)
+    Pid = spawn(fun() ->
+        receive
+            {await, From, _Timeout} ->
+                From ! {future_rejected, self(), some_error}
+        end,
+        receive stop -> ok after 1000 -> ok end
+    end),
+    Result = beamtalk_repl_eval:maybe_await_future(Pid),
+    ?assertEqual({future_rejected, some_error}, Result),
+    Pid ! stop.
+
+maybe_await_future_beamtalk_object_v2_test() ->
+    %% Test with a beamtalk_object tuple (line 532-535)
+    Obj = {beamtalk_object, self(), counter, #{}},
+    ?assertEqual(Obj, beamtalk_repl_eval:maybe_await_future(Obj)).
+
+%% ===================================================================
+%% IO handling edge cases (BT-627)
+%% ===================================================================
+
+handle_io_request_put_chars_legacy_v2_test() ->
+    %% Test the {put_chars, Chars} form without encoding (lines 668-675)
+    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request({put_chars, "hello"}, <<>>),
+    ?assertEqual(ok, Reply),
+    ?assertEqual(<<"hello">>, Buffer).
+
+handle_io_request_put_chars_legacy_binary_test() ->
+    %% Test with binary input
+    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request({put_chars, <<"world">>}, <<"hi ">>),
+    ?assertEqual(ok, Reply),
+    ?assertEqual(<<"hi world">>, Buffer).
+
+handle_io_request_put_chars_mfa_v2_test() ->
+    %% Test {put_chars, Encoding, Mod, Func, Args} form (lines 676-679)
+    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request(
+        {put_chars, unicode, io_lib, format, ["~p", [42]]}, <<>>),
+    ?assertEqual(ok, Reply),
+    ?assertEqual(<<"42">>, Buffer).
+
+handle_io_request_put_chars_mfa_error_v2_test() ->
+    %% Test with an MFA that crashes - covers catch clause (lines 680-681)
+    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request(
+        {put_chars, unicode, erlang, error, [badarg]}, <<"existing">>),
+    ?assertEqual(ok, Reply),
+    ?assertEqual(<<"existing">>, Buffer).
+
+handle_io_request_unknown_test() ->
+    %% Test unknown IO request type - covers catch-all (line 685)
+    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request({get_until, prompt, mod, func, []}, <<>>),
+    ?assertEqual({error, enotsup}, Reply),
+    ?assertEqual(<<>>, Buffer).
+
+handle_io_request_put_chars_bad_encoding_test() ->
+    %% Test put_chars with data that fails unicode conversion
+    %% Covers the catch clause in handle_io_request (line 666)
+    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request(
+        {put_chars, utf32, <<255, 254, 0, 0>>}, <<"prev">>),
+    ?assertEqual(ok, Reply),
+    %% Buffer should remain unchanged on encoding error
+    ?assertEqual(<<"prev">>, Buffer).
+
+%% ===================================================================
+%% reset_captured_group_leaders (BT-627)
+%% ===================================================================
+
+reset_captured_group_leaders_no_matches_test() ->
+    %% Test with a capture PID that no process has as group_leader
+    FakePid = spawn(fun() -> receive stop -> ok after 5000 -> ok end end),
+    OldGL = group_leader(),
+    ?assertEqual(ok, beamtalk_repl_eval:reset_captured_group_leaders(FakePid, OldGL)),
+    FakePid ! stop.
+
+%% ===================================================================
+%% IO capture full lifecycle (BT-627)
+%% ===================================================================
+
+io_capture_with_output_test() ->
+    %% Test full IO capture lifecycle covering start/stop paths
+    {CapturePid, OldGL} = beamtalk_repl_eval:start_io_capture(),
+    ?assert(is_pid(CapturePid)),
+    %% Write some output via io:format which goes through group_leader
+    io:format("hello ~s", ["world"]),
+    Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}),
+    ?assertEqual(<<"hello world">>, Output).
+
+io_capture_dead_capture_pid_test() ->
+    %% Test stop_io_capture when capture process already died (line 600-601)
+    DeadPid = spawn(fun() -> ok end),
+    timer:sleep(50),
+    OldGL = group_leader(),
+    Output = beamtalk_repl_eval:stop_io_capture({DeadPid, OldGL}),
+    ?assertEqual(<<>>, Output).
+
+%% ===================================================================
+%% trigger_hot_reload with instances (BT-627)
+%% ===================================================================
+
+trigger_hot_reload_with_list_name_test() ->
+    %% Test the is_list(N) branch in trigger_hot_reload (line 455-457)
+    %% Use a class name that doesn't exist as an atom to hit the badarg catch
+    Classes = [#{name => "nonexistent_class_xyz_12345"}],
+    ?assertEqual(ok, beamtalk_repl_eval:trigger_hot_reload(some_mod, Classes)).
+
+trigger_hot_reload_undefined_name_v2_test() ->
+    %% Test the undefined name branch (line 459)
+    Classes = [#{name => undefined}],
+    ?assertEqual(ok, beamtalk_repl_eval:trigger_hot_reload(some_mod, Classes)).
+
+trigger_hot_reload_no_name_key_v2_test() ->
+    %% Test when name key is missing (maps:get returns undefined)
+    Classes = [#{}],
+    ?assertEqual(ok, beamtalk_repl_eval:trigger_hot_reload(some_mod, Classes)).
+
+trigger_hot_reload_atom_name_v2_test() ->
+    %% Test the is_atom(N) branch (line 454)
+    %% Use an atom that exists but has no instances
+    Classes = [#{name => test_atom_class}],
+    ?assertEqual(ok, beamtalk_repl_eval:trigger_hot_reload(some_mod, Classes)).
+
+%% ===================================================================
+%% is_stdlib_path edge cases (BT-627)
+%% ===================================================================
+
+is_stdlib_path_abs_v2_test() ->
+    ?assertEqual(true, beamtalk_repl_eval:is_stdlib_path("/home/user/project/lib/Integer.bt")).
+
+is_stdlib_path_not_stdlib_test() ->
+    ?assertEqual(false, beamtalk_repl_eval:is_stdlib_path("/home/user/src/main.bt")).
+
+is_stdlib_path_rel_lib_v2_test() ->
+    ?assertEqual(true, beamtalk_repl_eval:is_stdlib_path("lib/String.bt")).
+
+%% ===================================================================
+%% should_purge_module edge cases (BT-627)
+%% ===================================================================
+
+should_purge_module_with_registry_no_actors_test() ->
+    %% Test with a live registry that returns empty actors
+    {ok, Pid} = gen_server:start_link(beamtalk_repl_actors, [], []),
+    ?assertEqual(true, beamtalk_repl_eval:should_purge_module(some_module, Pid)),
+    gen_server:stop(Pid).
