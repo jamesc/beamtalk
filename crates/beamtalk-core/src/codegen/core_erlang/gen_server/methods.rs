@@ -120,11 +120,9 @@ impl CoreErlangGenerator {
         method: &MethodDefinition,
     ) -> Result<Document<'static>> {
         if method.body.is_empty() {
-            // Empty method body returns nil
-            return Ok(Document::String(format!(
-                "{{'reply', 'nil', {}}}",
-                self.current_state_var()
-            )));
+            // Empty method body returns self (the actor object reference)
+            let state = self.current_state_var();
+            return Ok(Document::String(format!("{{'reply', Self, {state}}}")));
         }
 
         let mut docs: Vec<Document<'static>> = Vec::new();
@@ -330,9 +328,10 @@ impl CoreErlangGenerator {
         block: &Block,
     ) -> Result<Document<'static>> {
         if block.body.is_empty() {
+            // Empty method body returns self (the actor object reference)
             let final_state = self.current_state_var();
             return Ok(Document::String(format!(
-                "{{'reply', 'nil', {final_state}}}"
+                "{{'reply', Self, {final_state}}}"
             )));
         }
 
@@ -903,7 +902,8 @@ impl CoreErlangGenerator {
 
             // Generate body as Document, render to string for embedding
             let body_str = if method.body.is_empty() {
-                "'nil'".to_string()
+                // Empty class method body returns self (ClassSelf)
+                "ClassSelf".to_string()
             } else {
                 let body_doc = self.generate_class_method_body(method, &class.class_variables)?;
                 body_doc.to_pretty_string()

@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// EmptyMethodActor - Actor fixture for testing empty method body behavior (BT-631)
+// Empty methods should return self instead of nil.
+
+Actor subclass: EmptyMethodActor
+  state: value = 42
+
+  // Empty method body — should return self
+  doNothing =>
+
+  // Non-empty method for comparison
+  getValue => ^self.value

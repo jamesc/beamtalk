@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test empty method body codegen (BT-631)
+// Empty methods should return self instead of nil.
+
+Actor subclass: EmptyActor
+  state: value = 0
+
+  doNothing =>
+
+  getValue => ^self.value
+
+  class classEmpty =>

@@ -2,23 +2,23 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'empty_blocks' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 'terminate'/2, 'dispatch'/4, 'safe_dispatch'/3, 'method_table'/0, 'has_method'/1, 'spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, 'superclass'/0]
-  attributes ['behaviour' = ['gen_server']]
+module 'empty_method_body' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 'terminate'/2, 'dispatch'/4, 'safe_dispatch'/3, 'method_table'/0, 'has_method'/1, 'spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, 'superclass'/0, 'class_classEmpty'/2, 'register_class'/0]
+  attributes ['behaviour' = ['gen_server'], 'on_load' = [{'register_class', 0}]]
 
 'start_link'/1 = fun (InitArgs) ->
-    call 'gen_server':'start_link'('empty_blocks', InitArgs, [])
+    call 'gen_server':'start_link'('empty_method_body', InitArgs, [])
 
 
 'spawn'/0 = fun () ->
-    case call 'gen_server':'start_link'('empty_blocks', ~{}~, []) of
+    case call 'gen_server':'start_link'('empty_method_body', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
-            let _InstReg = try call 'beamtalk_object_instances':'register'('EmptyBlocks', Pid)
+            let _InstReg = try call 'beamtalk_object_instances':'register'('EmptyActor', Pid)
                 of _RegOk -> _RegOk
                 catch <_RegT, _RegE, _RegS> -> 'ok'
             in
-            {'beamtalk_object', 'EmptyBlocks', 'empty_blocks', Pid}
+            {'beamtalk_object', 'EmptyActor', 'empty_method_body', Pid}
         <{'error', Reason}> when 'true' ->
-            let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'EmptyBlocks') in
+            let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'EmptyActor') in
             let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawn') in
             call 'beamtalk_error':'raise'(SpawnErr1)
     end
@@ -27,20 +27,20 @@ module 'empty_blocks' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/
 'spawn'/1 = fun (InitArgs) ->
     case call 'erlang':'is_map'(InitArgs) of
         <'false'> when 'true' ->
-            let TypeErr0 = call 'beamtalk_error':'new'('type_error', 'EmptyBlocks') in
+            let TypeErr0 = call 'beamtalk_error':'new'('type_error', 'EmptyActor') in
             let TypeErr1 = call 'beamtalk_error':'with_selector'(TypeErr0, 'spawnWith:') in
             let TypeErr2 = call 'beamtalk_error':'with_hint'(TypeErr1, #{#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<119>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<87>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<120>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<68>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}#) in
             call 'beamtalk_error':'raise'(TypeErr2)
         <'true'> when 'true' ->
-            case call 'gen_server':'start_link'('empty_blocks', InitArgs, []) of
+            case call 'gen_server':'start_link'('empty_method_body', InitArgs, []) of
                 <{'ok', Pid}> when 'true' ->
-                    let _InstReg = try call 'beamtalk_object_instances':'register'('EmptyBlocks', Pid)
+                    let _InstReg = try call 'beamtalk_object_instances':'register'('EmptyActor', Pid)
                         of _RegOk -> _RegOk
                         catch <_RegT, _RegE, _RegS> -> 'ok'
                     in
-                    {'beamtalk_object', 'EmptyBlocks', 'empty_blocks', Pid}
+                    {'beamtalk_object', 'EmptyActor', 'empty_method_body', Pid}
                 <{'error', Reason}> when 'true' ->
-                    let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'EmptyBlocks') in
+                    let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'EmptyActor') in
                     let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawnWith:') in
                     call 'beamtalk_error':'raise'(SpawnErr1)
             end
@@ -59,14 +59,15 @@ module 'empty_blocks' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/
     let Error2 = call 'beamtalk_error':'with_hint'(Error1, #{#<85>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<119>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<87>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']])}#) in
     call 'beamtalk_error':'raise'(Error2)
 
-'superclass'/0 = fun () -> 'nil'
+'superclass'/0 = fun () -> 'Actor'
 
 
 'init'/1 = fun (InitArgs) ->
     let DefaultState = ~{
-        '$beamtalk_class' => 'EmptyBlocks',
-        '__class_mod__' => 'empty_blocks',
-        '__methods__' => call 'empty_blocks':'method_table'()
+        '$beamtalk_class' => 'EmptyActor',
+        '__class_mod__' => 'empty_method_body',
+        '__methods__' => call 'empty_method_body':'method_table'()
+        , 'value' => 0
     }~
     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
     in {'ok', FinalState}
@@ -75,7 +76,7 @@ module 'empty_blocks' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/
 'handle_cast'/2 = fun (Msg, State) ->
     case Msg of
         <{Selector, Args, FuturePid}> when 'true' ->
-            case call 'empty_blocks':'safe_dispatch'(Selector, Args, State) of
+            case call 'empty_method_body':'safe_dispatch'(Selector, Args, State) of
                 <{'reply', Result, NewState}> when 'true' ->
                     let _Ignored = call 'erlang':'!'(FuturePid, {'resolve', Result})
                     in {'noreply', NewState}
@@ -89,7 +90,7 @@ module 'empty_blocks' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/
 'handle_call'/3 = fun (Msg, _From, State) ->
     case Msg of
         <{Selector, Args}> when 'true' ->
-            case call 'empty_blocks':'safe_dispatch'(Selector, Args, State) of
+            case call 'empty_method_body':'safe_dispatch'(Selector, Args, State) of
                 <{'reply', Result, NewState}> when 'true' ->
                     {'reply', {'ok', Result}, NewState}
                 <{'error', Error, NewState}> when 'true' ->
@@ -105,7 +106,7 @@ module 'empty_blocks' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/
 'terminate'/2 = fun (Reason, State) ->
     %% Call terminate method if defined (Flavors pattern)
     let Self = call 'beamtalk_actor':'make_self'(State) in
-    case call 'empty_blocks':'dispatch'('terminate', [Reason], Self, State) of
+    case call 'empty_method_body':'dispatch'('terminate', [Reason], Self, State) of
         <{'reply', _TermResult, _TermState}> when 'true' -> 'ok'
         <{'error', _TermError, _TermState2}> when 'true' -> 'ok'
         <_TermOther> when 'true' -> 'ok'
@@ -114,22 +115,20 @@ module 'empty_blocks' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/
 
 'safe_dispatch'/3 = fun (Selector, Args, State) ->
     let Self = call 'beamtalk_actor':'make_self'(State) in
-    try call 'empty_blocks':'dispatch'(Selector, Args, Self, State)
+    try call 'empty_method_body':'dispatch'(Selector, Args, Self, State)
     of Result -> Result
     catch <Type, Error, _Stacktrace> -> {'error', {Type, Error}, State}
 
 
 'dispatch'/4 = fun (Selector, Args, Self, State) ->
     case Selector of
-        <'empty'> when 'true' ->
+        <'doNothing'> when 'true' ->
             {'reply', Self, State}
-        <'emptyWithSpace'> when 'true' ->
-            {'reply', Self, State}
-        <'emptyWithNewlines'> when 'true' ->
-            {'reply', Self, State}
+        <'getValue'> when 'true' ->
+            let _ReturnValue = call 'maps':'get'('value', State) in {'reply', _ReturnValue, State}
         <OtherSelector> when 'true' ->
             %% BT-229/ADR 0005: Check extension registry before hierarchy walk
-            let ExtLookup = try call 'beamtalk_extensions':'lookup'('EmptyBlocks', OtherSelector)
+            let ExtLookup = try call 'beamtalk_extensions':'lookup'('EmptyActor', OtherSelector)
                 of ExtLookupResult -> ExtLookupResult
                 catch <_EType, _EReason, _EStack> -> 'not_found'
             in
@@ -139,7 +138,7 @@ module 'empty_blocks' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/
                     {'reply', ExtResult, State}
                 <'not_found'> when 'true' ->
                     %% ADR 0006: Try hierarchy walk before DNU
-                    case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, 'EmptyBlocks') of
+                    case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, 'EmptyActor') of
                         <{'reply', InheritedResult, InheritedState}> when 'true' ->
                             {'reply', InheritedResult, InheritedState}
                         <{'error', _DispatchError}> when 'true' ->
@@ -148,7 +147,7 @@ module 'empty_blocks' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/
                             let Methods = call 'maps':'get'('__methods__', State) in
                             case call 'maps':'is_key'(DnuSelector, Methods) of
                                 <'true'> when 'true' ->
-                                    call 'empty_blocks':'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)
+                                    call 'empty_method_body':'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)
                                 <'false'> when 'true' ->
                                     %% No DNU handler - return #beamtalk_error{} record
                                     let ClassName = call 'maps':'get'('$beamtalk_class', State) in
@@ -164,10 +163,44 @@ module 'empty_blocks' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/
 
 
 'method_table'/0 = fun () ->
-    ~{'empty' => 0, 'emptyWithSpace' => 0, 'emptyWithNewlines' => 0}~
+    ~{'doNothing' => 0, 'getValue' => 0}~
 
 
 'has_method'/1 = fun (Selector) ->
-    call 'lists':'member'(Selector, ['empty', 'emptyWithSpace', 'emptyWithNewlines'])
+    call 'lists':'member'(Selector, ['doNothing', 'getValue'])
+
+
+'class_classEmpty'/2 = fun (ClassSelf, ClassVars) ->
+    ClassSelf
+
+'register_class'/0 = fun () ->
+    try
+        let ClassInfo0 = ~{
+            'name' => 'EmptyActor',
+            'module' => 'empty_method_body',
+            'superclass' => 'Actor',
+            'is_sealed' => 'false',
+            'is_abstract' => 'false',
+            'instance_methods' => ~{'doNothing' => ~{'arity' => 0, 'is_sealed' => 'false'}~, 'getValue' => ~{'arity' => 0, 'is_sealed' => 'false'}~}~,
+            'instance_variables' => ['value'],
+            'class_methods' => ~{
+                'spawn' => ~{'arity' => 0}~,
+                'spawnWith:' => ~{'arity' => 1}~,
+                'superclass' => ~{'arity' => 0}~
+                , 'classEmpty' => ~{'arity' => 0}~
+            }~,
+            'method_source' => ~{'doNothing' => #{#<100>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<78>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']])}#, 'getValue' => #{#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<86>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']])}#}~,
+            'class_variables' => ~{}~
+        }~
+        in let _Reg0 = case call 'beamtalk_object_class':'start'('EmptyActor', ClassInfo0) of
+            <{'ok', _Pid0}> when 'true' -> 'ok'
+            <{'error', {'already_started', _Existing0}}> when 'true' ->
+                call 'beamtalk_object_class':'update_class'('EmptyActor', ClassInfo0)
+            <{'error', _Reason0}> when 'true' -> 'ok'
+        end
+
+        in 'ok'
+    of RegResult -> RegResult
+    catch <CatchType, CatchError, CatchStack> -> 'ok'
 
 end
