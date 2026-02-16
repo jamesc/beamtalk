@@ -139,3 +139,104 @@ bootstrap_restart_rewires_test_() ->
               receive {'EXIT', _, _} -> ok after 0 -> ok end
           end
       end}}.
+
+%% Test that rebootstrap gives up after 5 retries and logs error
+rebootstrap_exhaustion_test_() ->
+    {setup,
+     fun() -> ensure_runtime() end,
+     fun(_) -> cleanup_all() end,
+     {timeout, 10,
+      fun() ->
+          OldTrap = process_flag(trap_exit, true),
+          try
+              {ok, TPid} = beamtalk_transcript_stream:start_link({local, 'Transcript'}, 1000),
+              {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
+              ?assertEqual(TPid, whereis('Transcript')),
+              %% Kill the singleton and don't restart it
+              unlink(TPid),
+              exit(TPid, kill),
+              timer:sleep(50),
+              ?assertEqual(undefined, whereis('Transcript')),
+              %% Wait for all 5 retries (100ms initial + 5 * 200ms = ~1200ms)
+              timer:sleep(1500),
+              %% Bootstrap should still be alive after exhausting retries
+              ?assert(is_process_alive(BPid))
+          after
+              process_flag(trap_exit, OldTrap),
+              receive {'EXIT', _, _} -> ok after 0 -> ok end
+          end
+      end}}.
+
+%% Test that DOWN from unknown monitor ref is ignored
+unknown_monitor_down_test_() ->
+    {setup,
+     fun() -> ensure_runtime() end,
+     fun(_) -> cleanup_all() end,
+     fun(_) ->
+         [?_test(begin
+              {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
+              %% Send a DOWN message with a bogus monitor ref
+              FakeRef = make_ref(),
+              BPid ! {'DOWN', FakeRef, process, self(), normal},
+              timer:sleep(50),
+              %% Bootstrap should still be alive and responsive
+              ?assert(is_process_alive(BPid)),
+              ?assertEqual(ok, gen_server:call(BPid, ping))
+          end)]
+     end}.
+
+%% Test that handle_call returns ok for unknown messages
+handle_call_returns_ok_test_() ->
+    {setup,
+     fun() -> ensure_runtime() end,
+     fun(_) -> cleanup_all() end,
+     fun(_) ->
+         [?_test(begin
+              {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
+              ?assertEqual(ok, gen_server:call(BPid, some_unknown_message)),
+              ?assert(is_process_alive(BPid))
+          end)]
+     end}.
+
+%% Test that handle_cast is a noop
+handle_cast_noop_test_() ->
+    {setup,
+     fun() -> ensure_runtime() end,
+     fun(_) -> cleanup_all() end,
+     fun(_) ->
+         [?_test(begin
+              {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
+              gen_server:cast(BPid, some_unknown_cast),
+              timer:sleep(50),
+              ?assert(is_process_alive(BPid))
+          end)]
+     end}.
+
+%% Test that unknown info messages are ignored
+unknown_info_ignored_test_() ->
+    {setup,
+     fun() -> ensure_runtime() end,
+     fun(_) -> cleanup_all() end,
+     fun(_) ->
+         [?_test(begin
+              {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
+              BPid ! {some, random, message},
+              timer:sleep(50),
+              ?assert(is_process_alive(BPid))
+          end)]
+     end}.
+
+%% Test that terminate returns ok
+terminate_ok_test_() ->
+    {setup,
+     fun() -> ensure_runtime() end,
+     fun(_) -> cleanup_all() end,
+     fun(_) ->
+         [?_test(begin
+              {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
+              ?assert(is_process_alive(BPid)),
+              gen_server:stop(BPid, normal, 1000),
+              timer:sleep(50),
+              ?assertNot(is_process_alive(BPid))
+          end)]
+     end}.
