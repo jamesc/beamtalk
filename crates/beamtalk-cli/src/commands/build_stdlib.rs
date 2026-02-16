@@ -200,16 +200,14 @@ fn is_stdlib_up_to_date(ebin_dir: &Utf8Path, source_files: &[Utf8PathBuf]) -> bo
 
     // Check compiler binary — if we can't locate it, force rebuild to be safe
     match std::env::current_exe() {
-        Ok(exe) => {
-            match fs::metadata(&exe).and_then(|m| m.modified()) {
-                Ok(t) if t > oldest_output => {
-                    info!("Compiler binary newer than stdlib output");
-                    return false;
-                }
-                Err(_) => return false,
-                _ => {}
+        Ok(exe) => match fs::metadata(&exe).and_then(|m| m.modified()) {
+            Ok(t) if t > oldest_output => {
+                info!("Compiler binary newer than stdlib output");
+                return false;
             }
-        }
+            Err(_) => return false,
+            _ => {}
+        },
         Err(_) => return false,
     }
 
