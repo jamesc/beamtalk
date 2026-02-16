@@ -3,6 +3,8 @@
 
 %%% @doc Primitive type dispatch and reflection.
 %%%
+%%% **DDD Context:** Object System
+%%%
 %%% This module provides uniform dispatch and class identity for primitive types
 %%% (integers, strings, etc.) that are not actors. It enables reflection operations
 %%% like `42 class` to return `'Integer'`.
@@ -231,20 +233,19 @@ send(#beamtalk_object{pid = Pid}, Selector, Args) ->
     %% Actor: use gen_server
     gen_server:call(Pid, {Selector, Args});
 send(X, Selector, Args) when is_integer(X) ->
-    %% Primitive: static dispatch to class module (ADR 0016)
-    'bt@stdlib@integer':dispatch(Selector, Args, X);
+    dispatch_via_module(X, Selector, Args);
 send(X, Selector, Args) when is_binary(X) ->
-    'bt@stdlib@string':dispatch(Selector, Args, X);
+    dispatch_via_module(X, Selector, Args);
 send(X, Selector, Args) when X =:= true ->
-    'bt@stdlib@true':dispatch(Selector, Args, X);
+    dispatch_via_module(X, Selector, Args);
 send(X, Selector, Args) when X =:= false ->
-    'bt@stdlib@false':dispatch(Selector, Args, X);
+    dispatch_via_module(X, Selector, Args);
 send(nil, Selector, Args) ->
-    'bt@stdlib@undefined_object':dispatch(Selector, Args, nil);
+    dispatch_via_module(nil, Selector, Args);
 send(X, Selector, Args) when is_atom(X) ->
-    'bt@stdlib@symbol':dispatch(Selector, Args, X);
+    dispatch_via_module(X, Selector, Args);
 send(X, Selector, Args) when is_function(X) ->
-    'bt@stdlib@block':dispatch(Selector, Args, X);
+    dispatch_via_module(X, Selector, Args);
 send(X, Selector, Args) when is_tuple(X) ->
     %% Check if it's a beamtalk_object (should not happen - covered by clause above)
     %% but handle tuples that might not match the record pattern
@@ -256,24 +257,24 @@ send(X, Selector, Args) when is_tuple(X) ->
             gen_server:call(Pid, {Selector, Args});
         false ->
             %% Regular tuple - dispatch to tuple class
-            'bt@stdlib@tuple':dispatch(Selector, Args, X)
+            dispatch_via_module(X, Selector, Args)
     end;
 send(X, Selector, Args) when is_float(X) ->
-    'bt@stdlib@float':dispatch(Selector, Args, X);
+    dispatch_via_module(X, Selector, Args);
 send(X, Selector, Args) when is_map(X) ->
     %% Check for tagged maps (CompiledMethod, value type instances, plain maps)
     case beamtalk_tagged_map:class_of(X) of
         'CompiledMethod' ->
-            'bt@stdlib@compiled_method':dispatch(Selector, Args, X);
+            dispatch_via_module(X, Selector, Args);
         'Association' ->
             %% BT-335: Association value type - direct dispatch (ADR 0016)
-            'bt@stdlib@association':dispatch(Selector, Args, X);
+            dispatch_via_module(X, Selector, Args);
         'Set' ->
             %% BT-73: Set value type - dispatch to compiled stdlib
-            'bt@stdlib@set':dispatch(Selector, Args, X);
+            dispatch_via_module(X, Selector, Args);
         'Stream' ->
             %% BT-511: Stream value type - dispatch to compiled stdlib
-            'bt@stdlib@stream':dispatch(Selector, Args, X);
+            dispatch_via_module(X, Selector, Args);
         'FileHandle' ->
             %% BT-513: FileHandle - dispatch to beamtalk_file runtime
             case Selector of
@@ -295,13 +296,13 @@ send(X, Selector, Args) when is_map(X) ->
             end;
         'TestCase' ->
             %% BT-438: TestCase value type - dispatch to compiled stdlib
-            'bt@stdlib@test_case':dispatch(Selector, Args, X);
+            dispatch_via_module(X, Selector, Args);
         'StackFrame' ->
             %% BT-107: StackFrame value type - dispatch to runtime
             beamtalk_stack_frame:dispatch(Selector, Args, X);
         undefined ->
             %% Plain map (Dictionary) — BT-418: compiled stdlib dispatch
-            'bt@stdlib@dictionary':dispatch(Selector, Args, X);
+            dispatch_via_module(X, Selector, Args);
         Class ->
             case beamtalk_exception_handler:is_exception_class(Class) of
                 true ->
@@ -314,7 +315,7 @@ send(X, Selector, Args) when is_map(X) ->
     end;
 send(X, Selector, Args) when is_list(X) ->
     %% List/Array dispatch
-    'bt@stdlib@list':dispatch(Selector, Args, X);
+    dispatch_via_module(X, Selector, Args);
 send(X, Selector, _Args) ->
     %% Other primitives: dispatch to generic handler
     Class = class_of(X),
@@ -342,19 +343,19 @@ responds_to(#beamtalk_object{class_mod = Mod}, Selector) ->
     %% Actor: check if module exports has_method/1
     erlang:function_exported(Mod, has_method, 1) andalso Mod:has_method(Selector);
 responds_to(X, Selector) when is_integer(X) ->
-    'bt@stdlib@integer':has_method(Selector);
+    responds_via_module(X, Selector);
 responds_to(X, Selector) when is_binary(X) ->
-    'bt@stdlib@string':has_method(Selector);
+    responds_via_module(X, Selector);
 responds_to(X, Selector) when X =:= true ->
-    'bt@stdlib@true':has_method(Selector);
+    responds_via_module(X, Selector);
 responds_to(X, Selector) when X =:= false ->
-    'bt@stdlib@false':has_method(Selector);
+    responds_via_module(X, Selector);
 responds_to(nil, Selector) ->
-    'bt@stdlib@undefined_object':has_method(Selector);
+    responds_via_module(nil, Selector);
 responds_to(X, Selector) when is_atom(X) ->
-    'bt@stdlib@symbol':has_method(Selector);
+    responds_via_module(X, Selector);
 responds_to(X, Selector) when is_function(X) ->
-    'bt@stdlib@block':has_method(Selector);
+    responds_via_module(X, Selector);
 responds_to(X, Selector) when is_tuple(X) ->
     %% Check if it's a beamtalk_object (should not happen - covered by clause above)
     case tuple_size(X) >= 2 andalso element(1, X) =:= beamtalk_object of
@@ -364,23 +365,23 @@ responds_to(X, Selector) when is_tuple(X) ->
             erlang:function_exported(Mod, has_method, 1) andalso Mod:has_method(Selector);
         false ->
             %% Regular tuple
-            'bt@stdlib@tuple':has_method(Selector)
+            responds_via_module(X, Selector)
     end;
 responds_to(X, Selector) when is_float(X) ->
-    'bt@stdlib@float':has_method(Selector);
+    responds_via_module(X, Selector);
 responds_to(X, Selector) when is_map(X) ->
     case beamtalk_tagged_map:class_of(X) of
         'CompiledMethod' ->
-            'bt@stdlib@compiled_method':has_method(Selector);
+            responds_via_module(X, Selector);
         'Association' ->
             %% BT-335: Association value type (ADR 0016)
-            'bt@stdlib@association':has_method(Selector);
+            responds_via_module(X, Selector);
         'Set' ->
             %% BT-73: Set value type
-            'bt@stdlib@set':has_method(Selector);
+            responds_via_module(X, Selector);
         'Stream' ->
             %% BT-511: Stream value type
-            'bt@stdlib@stream':has_method(Selector);
+            responds_via_module(X, Selector);
         'StackFrame' ->
             %% BT-107: StackFrame value type
             beamtalk_stack_frame:has_method(Selector);
@@ -389,7 +390,7 @@ responds_to(X, Selector) when is_map(X) ->
             beamtalk_file:handle_has_method(Selector) orelse
                 beamtalk_object_ops:has_method(Selector);
         undefined ->
-            'bt@stdlib@dictionary':has_method(Selector);
+            responds_via_module(X, Selector);
         Class ->
             case beamtalk_exception_handler:is_exception_class(Class) of
                 true ->
@@ -401,10 +402,62 @@ responds_to(X, Selector) when is_map(X) ->
             end
     end;
 responds_to(X, Selector) when is_list(X) ->
-    'bt@stdlib@list':has_method(Selector);
+    responds_via_module(X, Selector);
 responds_to(_, _) ->
     %% Other primitives: no methods yet
     false.
+
+%% @private
+%% @doc Dispatch a value using its mapped stdlib module.
+-spec dispatch_via_module(term(), atom(), list()) -> term().
+dispatch_via_module(X, Selector, Args) ->
+    case module_for_value(X) of
+        undefined ->
+            Class = class_of(X),
+            Error = beamtalk_error:new(
+                does_not_understand,
+                Class,
+                Selector,
+                <<"Primitive type does not support this message">>),
+            beamtalk_error:raise(Error);
+        Mod ->
+            Mod:dispatch(Selector, Args, X)
+    end.
+
+%% @private
+%% @doc Check method support using the mapped stdlib module.
+-spec responds_via_module(term(), atom()) -> boolean().
+responds_via_module(X, Selector) ->
+    case module_for_value(X) of
+        undefined -> false;
+        Mod -> Mod:has_method(Selector)
+    end.
+
+%% @private
+%% @doc Map a runtime value to its stdlib dispatch module.
+-spec module_for_value(term()) -> atom() | undefined.
+module_for_value(X) when is_integer(X) -> 'bt@stdlib@integer';
+module_for_value(X) when is_binary(X) -> 'bt@stdlib@string';
+module_for_value(true) -> 'bt@stdlib@true';
+module_for_value(false) -> 'bt@stdlib@false';
+module_for_value(nil) -> 'bt@stdlib@undefined_object';
+module_for_value(X) when is_atom(X) -> 'bt@stdlib@symbol';
+module_for_value(X) when is_function(X) -> 'bt@stdlib@block';
+module_for_value(X) when is_tuple(X) -> 'bt@stdlib@tuple';
+module_for_value(X) when is_float(X) -> 'bt@stdlib@float';
+module_for_value(X) when is_list(X) -> 'bt@stdlib@list';
+module_for_value(X) when is_map(X) ->
+    case beamtalk_tagged_map:class_of(X) of
+        'CompiledMethod' -> 'bt@stdlib@compiled_method';
+        'Association' -> 'bt@stdlib@association';
+        'Set' -> 'bt@stdlib@set';
+        'Stream' -> 'bt@stdlib@stream';
+        'TestCase' -> 'bt@stdlib@test_case';
+        undefined -> 'bt@stdlib@dictionary';
+        _ -> undefined
+    end;
+module_for_value(_) ->
+    undefined.
 
 %%% ============================================================================
 %%% Internal: Value Type Dispatch (BT-354)

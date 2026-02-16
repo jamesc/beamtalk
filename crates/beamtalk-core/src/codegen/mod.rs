@@ -3,6 +3,8 @@
 
 //! Code generation for Beamtalk.
 //!
+//! **DDD Context:** Code Generation
+//!
 //! This module contains code generators for different target formats:
 //! - **`core_erlang`**: Core Erlang code generation (BEAM bytecode target)
 //!

@@ -3,6 +3,8 @@
 
 //! Semantic analysis for Beamtalk.
 //!
+//! **DDD Context:** Semantic Analysis
+//!
 //! This module performs semantic analysis on the AST, including:
 //! - Variable scope and lifetime analysis (via `scope` module)
 //! - Pattern variable binding in match expressions
@@ -17,14 +19,14 @@ use crate::source_analysis::{Diagnostic, Span};
 use ecow::EcoString;
 use std::collections::HashMap;
 
-pub mod block_context;
+pub(crate) mod block_context;
 pub mod class_hierarchy;
 pub mod error;
 pub(crate) mod method_validators;
 pub mod module_validator;
 pub mod name_resolver;
 pub mod primitive_validator;
-pub mod scope;
+pub(crate) mod scope;
 pub mod type_checker;
 
 pub use class_hierarchy::ClassHierarchy;

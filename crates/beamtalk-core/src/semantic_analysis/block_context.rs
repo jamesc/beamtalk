@@ -21,17 +21,12 @@ use crate::source_analysis::Span;
 ///
 /// # Examples
 ///
+/// ```text
+/// is_control_flow_selector("whileTrue:", 0)  // true
+/// is_control_flow_selector("to:do:", 1)      // true
+/// is_control_flow_selector("at:put:", 0)     // false
 /// ```
-/// # use beamtalk_core::semantic_analysis::block_context::is_control_flow_selector;
-/// assert!(is_control_flow_selector("whileTrue:", 0));
-/// assert!(is_control_flow_selector("to:do:", 1));
-/// assert!(is_control_flow_selector("ifTrue:ifFalse:", 0));
-/// assert!(is_control_flow_selector("ifTrue:ifFalse:", 1));
-/// assert!(is_control_flow_selector("on:do:", 1));
-/// assert!(is_control_flow_selector("ensure:", 0));
-/// assert!(!is_control_flow_selector("at:put:", 0));
-/// ```
-pub fn is_control_flow_selector(selector: &str, arg_index: usize) -> bool {
+pub(crate) fn is_control_flow_selector(selector: &str, arg_index: usize) -> bool {
     match selector {
         // Loop constructs - block at index 0
         "whileTrue:" | "whileFalse:" | "timesRepeat:" | "do:" | "collect:" | "select:"
@@ -54,19 +49,21 @@ pub fn is_control_flow_selector(selector: &str, arg_index: usize) -> bool {
 /// Determines if an expression is a block variable (identifier).
 ///
 /// Returns true if the expression is an identifier that could be a block variable.
-pub fn is_block_variable(expr: &Expression) -> bool {
+#[allow(dead_code)] // Used by classify_block, which is tested but not yet called from production code
+pub(crate) fn is_block_variable(expr: &Expression) -> bool {
     matches!(expr, Expression::Identifier(_))
 }
 
 /// Determines if an expression is a literal block.
 ///
 /// Returns true if the expression is a block literal (not a block variable).
-pub fn is_literal_block(expr: &Expression) -> bool {
+#[allow(dead_code)] // Used by classify_block, which is tested but not yet called from production code
+pub(crate) fn is_literal_block(expr: &Expression) -> bool {
     matches!(expr, Expression::Block(_))
 }
 
 /// Extracts the selector string from a message selector.
-pub fn selector_to_string(selector: &MessageSelector) -> String {
+pub(crate) fn selector_to_string(selector: &MessageSelector) -> String {
     match selector {
         MessageSelector::Unary(name) => name.to_string(),
         MessageSelector::Binary(op) => op.to_string(),
@@ -106,22 +103,16 @@ pub fn selector_to_string(selector: &MessageSelector) -> String {
 ///
 /// # Examples
 ///
-/// ```
-/// # use beamtalk_core::semantic_analysis::block_context::classify_block;
-/// # use beamtalk_core::semantic_analysis::BlockContext;
-/// # use beamtalk_core::ast::{Expression, Block, MessageSelector, Identifier};
-/// # use beamtalk_core::source_analysis::Span;
+/// ```text
 /// // Control flow: literal block in whileTrue:
 /// // [x < 10] whileTrue: [x := x + 1]
 /// // The argument block [x := x + 1] is ControlFlow
 ///
 /// // Stored: block on RHS of assignment
 /// // myBlock := [x + 1]
-/// // let block_expr = Expression::Block(...);
-/// // let context = classify_block(block_expr.span(), &parent, true);
-/// // assert_eq!(context, BlockContext::Stored);
 /// ```
-pub fn classify_block(
+#[allow(dead_code)] // Tested but not yet called from production code
+pub(crate) fn classify_block(
     block_span: Span,
     parent_expr: &Expression,
     in_assignment: bool,

@@ -2,6 +2,8 @@
 %% SPDX-License-Identifier: Apache-2.0
 
 %%% @doc Application callback module for the Beamtalk runtime.
+%%%
+%%% **DDD Context:** Runtime
 -module(beamtalk_runtime_app).
 -behaviour(application).
 

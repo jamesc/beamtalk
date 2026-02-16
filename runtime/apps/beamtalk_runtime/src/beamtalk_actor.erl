@@ -3,6 +3,8 @@
 
 %%% @doc Beamtalk Actor Runtime (gen_server wrapper)
 %%%
+%%% **DDD Context:** Actor System
+%%%
 %%% Every Beamtalk actor is a BEAM process running a gen_server.
 %%% This module provides the actor behavior template and message dispatch.
 %%%
@@ -272,10 +274,12 @@ async_send(ActorPid, stop, [], FuturePid) ->
             beamtalk_future:resolve(FuturePid, ok);
         exit:Reason ->
             %% Other stop failures (e.g., timeout) - reject Future deterministically
-            Error0 = beamtalk_error:new(actor_dead, unknown),
-            Error1 = beamtalk_error:with_selector(Error0, stop),
-            Error2 = beamtalk_error:with_hint(Error1, iolist_to_binary(io_lib:format("Actor stop failed: ~p", [Reason]))),
-            beamtalk_future:reject(FuturePid, Error2)
+            Error = beamtalk_error:new(
+                actor_dead,
+                unknown,
+                stop,
+                iolist_to_binary(io_lib:format("Actor stop failed: ~p", [Reason]))),
+            beamtalk_future:reject(FuturePid, Error)
     end,
     ok;
 async_send(ActorPid, monitor, [], FuturePid) ->
@@ -360,10 +364,12 @@ sync_send(ActorPid, Selector, Args) ->
 %% @doc Construct a structured actor_dead error for the given selector.
 -spec actor_dead_error(atom()) -> {error, #beamtalk_error{}}.
 actor_dead_error(Selector) ->
-    Error0 = beamtalk_error:new(actor_dead, unknown),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Use 'isAlive' to check, or use monitors for lifecycle events">>),
-    {error, Error2}.
+    Error = beamtalk_error:new(
+        actor_dead,
+        unknown,
+        Selector,
+        <<"Use 'isAlive' to check, or use monitors for lifecycle events">>),
+    {error, Error}.
 
 %%% gen_server callbacks
 
@@ -530,8 +536,7 @@ dispatch(Selector, Args, Self, State) ->
                     dispatch(TargetSelector, [], Self, State);
                 false ->
                     ClassName = beamtalk_tagged_map:class_of(State, unknown),
-                    Error0 = beamtalk_error:new(type_error, ClassName),
-                    Error = beamtalk_error:with_selector(Error0, 'perform:'),
+                    Error = beamtalk_error:new(type_error, ClassName, 'perform:'),
                     {error, Error, State}
             end;
         'perform:withArguments:' when length(Args) =:= 2 ->
@@ -542,8 +547,7 @@ dispatch(Selector, Args, Self, State) ->
                     dispatch(TargetSelector, ArgList, Self, State);
                 false ->
                     ClassName = beamtalk_tagged_map:class_of(State, unknown),
-                    Error0 = beamtalk_error:new(type_error, ClassName),
-                    Error = beamtalk_error:with_selector(Error0, 'perform:withArguments:'),
+                    Error = beamtalk_error:new(type_error, ClassName, 'perform:withArguments:'),
                     {error, Error, State}
             end;
         _ ->
@@ -567,20 +571,7 @@ dispatch_user_method(Selector, Args, Self, State) ->
                     %% Preserve structured beamtalk errors from method implementations
                     {error, BtError, State};
                 Class:Reason:_Stacktrace ->
-                    %% Non-beamtalk exception - wrap with context
-                    ?LOG_ERROR("Error in method", #{
-                        selector => Selector,
-                        class => Class,
-                        reason => Reason
-                    }),
-                    ClassName = beamtalk_tagged_map:class_of(State, unknown),
-                    Error0 = beamtalk_error:new(type_error, ClassName),
-                    Error1 = beamtalk_error:with_selector(Error0, Selector),
-                    Error = beamtalk_error:with_details(Error1, #{
-                        original_class => Class,
-                        original_reason => Reason
-                    }),
-                    {error, Error, State}
+                    wrap_method_error(Selector, State, Class, Reason)
             end;
         {ok, Fun} when is_function(Fun, 2) ->
             %% Old-style method: Fun(Args, State) - for backward compatibility
@@ -591,26 +582,12 @@ dispatch_user_method(Selector, Args, Self, State) ->
                     %% Preserve structured beamtalk errors from method implementations
                     {error, BtError, State};
                 Class:Reason:_Stacktrace ->
-                    %% Non-beamtalk exception - wrap with context
-                    ?LOG_ERROR("Error in method", #{
-                        selector => Selector,
-                        class => Class,
-                        reason => Reason
-                    }),
-                    ClassName = beamtalk_tagged_map:class_of(State, unknown),
-                    Error0 = beamtalk_error:new(type_error, ClassName),
-                    Error1 = beamtalk_error:with_selector(Error0, Selector),
-                    Error = beamtalk_error:with_details(Error1, #{
-                        original_class => Class,
-                        original_reason => Reason
-                    }),
-                    {error, Error, State}
+                    wrap_method_error(Selector, State, Class, Reason)
             end;
         {ok, _NotAFunction} ->
             %% Method value is not a function
             ClassName = beamtalk_tagged_map:class_of(State, unknown),
-            Error0 = beamtalk_error:new(type_error, ClassName),
-            Error = beamtalk_error:with_selector(Error0, Selector),
+            Error = beamtalk_error:new(type_error, ClassName, Selector),
             {error, Error, State};
         error ->
             %% Method not found - try doesNotUnderstand
@@ -633,16 +610,7 @@ handle_dnu(Selector, Args, Self, State) ->
                 DnuFun([Selector, Args], Self, State)
             catch
                 Class:Reason:_Stacktrace ->
-                    %% DNU handler threw an exception - log without stack trace to avoid leaking sensitive data
-                    ?LOG_ERROR("Error in doesNotUnderstand handler", #{
-                        selector => Selector,
-                        class => Class,
-                        reason => Reason
-                    }),
-                    ClassName = beamtalk_tagged_map:class_of(State, unknown),
-                    Error0 = beamtalk_error:new(type_error, ClassName),
-                    Error = beamtalk_error:with_selector(Error0, 'doesNotUnderstand:args:'),
-                    {error, Error, State}
+                    wrap_dnu_handler_error(Selector, State, Class, Reason)
             end;
         {ok, DnuFun} when is_function(DnuFun, 2) ->
             %% Old-style DNU handler (backward compatibility)
@@ -650,16 +618,7 @@ handle_dnu(Selector, Args, Self, State) ->
                 DnuFun([Selector, Args], State)
             catch
                 Class:Reason:_Stacktrace ->
-                    %% DNU handler threw an exception - log without stack trace to avoid leaking sensitive data
-                    ?LOG_ERROR("Error in doesNotUnderstand handler", #{
-                        selector => Selector,
-                        class => Class,
-                        reason => Reason
-                    }),
-                    ClassName = beamtalk_tagged_map:class_of(State, unknown),
-                    Error0 = beamtalk_error:new(type_error, ClassName),
-                    Error = beamtalk_error:with_selector(Error0, 'doesNotUnderstand:args:'),
-                    {error, Error, State}
+                    wrap_dnu_handler_error(Selector, State, Class, Reason)
             end;
         _ ->
             %% No DNU handler — delegate to class hierarchy walk (BT-427)
@@ -707,9 +666,45 @@ handle_dnu(Selector, Args, Self, State) ->
 %% @doc Create a does_not_understand error result.
 -spec make_dnu_error(atom(), atom(), map()) -> {error, term(), map()}.
 make_dnu_error(Selector, ClassName, State) ->
-    Error0 = beamtalk_error:new(does_not_understand, ClassName),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    Error = beamtalk_error:with_hint(Error1, <<"Check spelling or use 'respondsTo:' to verify method exists">>),
+    Error = beamtalk_error:new(
+        does_not_understand,
+        ClassName,
+        Selector,
+        <<"Check spelling or use 'respondsTo:' to verify method exists">>),
+    {error, Error, State}.
+
+%% @private
+%% @doc Wrap method dispatch exceptions as type_error with source exception details.
+-spec wrap_method_error(atom(), map(), term(), term()) -> {error, term(), map()}.
+wrap_method_error(Selector, State, Class, Reason) ->
+    ?LOG_ERROR("Error in method", #{
+        selector => Selector,
+        class => Class,
+        reason => Reason
+    }),
+    ClassName = beamtalk_tagged_map:class_of(State, unknown),
+    Error0 = beamtalk_error:new(type_error, ClassName, Selector),
+    Error = beamtalk_error:with_details(Error0, #{
+        original_class => Class,
+        original_reason => Reason
+    }),
+    {error, Error, State}.
+
+%% @private
+%% @doc Wrap doesNotUnderstand handler exceptions consistently for both arities.
+-spec wrap_dnu_handler_error(atom(), map(), term(), term()) -> {error, term(), map()}.
+wrap_dnu_handler_error(Selector, State, Class, Reason) ->
+    ?LOG_ERROR("Error in doesNotUnderstand handler", #{
+        selector => Selector,
+        class => Class,
+        reason => Reason
+    }),
+    ClassName = beamtalk_tagged_map:class_of(State, unknown),
+    Error0 = beamtalk_error:new(type_error, ClassName, 'doesNotUnderstand:args:'),
+    Error = beamtalk_error:with_details(Error0, #{
+        original_class => Class,
+        original_reason => Reason
+    }),
     {error, Error, State}.
 
 %% @private
@@ -724,4 +719,3 @@ object_fallback(Selector, Args, Self, State, ClassName) ->
         Result ->
             Result
     end.
-

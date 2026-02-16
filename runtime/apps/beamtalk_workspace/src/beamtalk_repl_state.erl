@@ -3,6 +3,8 @@
 
 %%% @doc State management for Beamtalk REPL
 %%%
+%%% **DDD Context:** REPL
+%%%
 %%% This module defines the REPL state record and provides utilities
 %%% for manipulating state during REPL sessions.
 

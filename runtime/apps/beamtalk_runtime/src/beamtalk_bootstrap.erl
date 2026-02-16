@@ -3,6 +3,8 @@
 
 %%% @doc Bootstrap the runtime environment.
 %%%
+%%% **DDD Context:** Runtime
+%%%
 %%% BT-446: Bootstrap no longer creates class processes for ProtoObject,
 %%% Object, and Actor. Those are now registered by their compiled stdlib
 %%% modules' on_load via beamtalk_stdlib:load_compiled_stdlib_modules().

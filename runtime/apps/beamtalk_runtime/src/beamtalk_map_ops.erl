@@ -3,6 +3,8 @@
 
 %% @doc Runtime helper operations for Dictionary (Erlang maps).
 %%
+%% **DDD Context:** Runtime Context — Domain Service
+%%
 %% BT-418: Complex Dictionary operations that cannot be inlined as
 %% direct BIF calls in generated Core Erlang. Called from compiled
 %% stdlib module bt@stdlib@dictionary.

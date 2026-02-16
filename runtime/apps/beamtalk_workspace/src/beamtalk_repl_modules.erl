@@ -3,6 +3,8 @@
 
 %%% @doc Module management for Beamtalk REPL
 %%%
+%%% **DDD Context:** REPL
+%%%
 %%% Tracks loaded modules, their source files, load times, and actor usage.
 %%% Provides utilities for listing, unloading, and reloading modules.
 

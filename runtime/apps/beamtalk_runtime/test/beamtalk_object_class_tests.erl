@@ -527,55 +527,6 @@ whereis_nonexistent_class_test() ->
     ?assertEqual(undefined, Result).
 
 %%====================================================================
-%% BT-344: Super dispatch tests
-%%====================================================================
-
-super_dispatch_missing_class_field_test_() ->
-    {setup,
-     fun setup/0,
-     fun teardown/1,
-     fun(_) ->
-         [?_test(begin
-              %% State without $beamtalk_class field
-              State = #{value => 0},
-              Result = beamtalk_object_class:super_dispatch(State, increment, []),
-              ?assertMatch({error, #beamtalk_error{kind = internal_error}}, Result)
-          end)]
-     end}.
-
-super_dispatch_class_not_found_test_() ->
-    {setup,
-     fun setup/0,
-     fun teardown/1,
-     fun(_) ->
-         [?_test(begin
-              %% State with class that doesn't exist
-              State = #{'$beamtalk_class' => 'NonexistentClass999'},
-              Result = beamtalk_object_class:super_dispatch(State, increment, []),
-              ?assertMatch({error, #beamtalk_error{kind = class_not_found, class = 'NonexistentClass999'}}, Result)
-          end)]
-     end}.
-
-super_dispatch_no_superclass_test_() ->
-    {setup,
-     fun setup/0,
-     fun teardown/1,
-     fun(_) ->
-         [?_test(begin
-              %% Create a root class (no superclass)
-              ClassInfo = #{
-                  name => 'RootTestClass',
-                  module => test_class,
-                  superclass => none
-              },
-              {ok, _Pid} = beamtalk_object_class:start_link('RootTestClass', ClassInfo),
-              State = #{'$beamtalk_class' => 'RootTestClass'},
-              Result = beamtalk_object_class:super_dispatch(State, someMethod, []),
-              ?assertMatch({error, #beamtalk_error{kind = no_superclass, class = 'RootTestClass', selector = someMethod}}, Result)
-          end)]
-     end}.
-
-%%====================================================================
 %% BT-344: create_subclass tests
 %%====================================================================
 

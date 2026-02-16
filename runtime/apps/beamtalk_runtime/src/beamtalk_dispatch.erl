@@ -49,13 +49,6 @@
 %%%     -> {reply, Result, NewState} | {error, #beamtalk_error{}}
 %%% ```
 %%%
-%%% ### invoke_with_combinations/5
-%%% Method combinations. Collects before/after from full chain.
-%%% ```erlang
-%%% invoke_with_combinations(Selector, Args, Self, State, CurrentClass)
-%%%     -> {reply, Result, NewState}
-%%% ```
-%%%
 %%% ## References
 %%%
 %%% - ADR 0006: Unified Method Dispatch with Hierarchy Walking
@@ -67,7 +60,6 @@
 -export([
     lookup/5,
     super/5,
-    invoke_with_combinations/5,
     responds_to/2
 ]).
 
@@ -157,18 +149,15 @@ super(Selector, Args, Self, State, CurrentClass) ->
     case beamtalk_class_registry:whereis_class(CurrentClass) of
         undefined ->
             %% Class not found - return error
-            Error0 = beamtalk_error:new(class_not_found, CurrentClass),
-            Error1 = beamtalk_error:with_selector(Error0, Selector),
-            {error, Error1};
+            {error, beamtalk_error:new(class_not_found, CurrentClass, Selector)};
         ClassPid ->
             %% Get the superclass
             case beamtalk_object_class:superclass(ClassPid) of
                 none ->
                     %% No superclass - method not found
-                    Error0 = beamtalk_error:new(does_not_understand, CurrentClass),
-                    Error1 = beamtalk_error:with_selector(Error0, Selector),
-                    Error2 = beamtalk_error:with_hint(Error1, <<"Method not found in superclass chain">>),
-                    {error, Error2};
+                    Error = beamtalk_error:new(
+                        does_not_understand, CurrentClass, Selector, <<"Method not found in superclass chain">>),
+                    {error, Error};
                 SuperclassName ->
                     %% Check extension registry on superclass before hierarchy walk
                     case check_extension(SuperclassName, Selector) of
@@ -181,37 +170,6 @@ super(Selector, Args, Self, State, CurrentClass) ->
                     end
             end
     end.
-
-%% @doc Method combinations - collects before/after from full chain.
-%%
-%% This function implements method combinations (before/after/primary ordering).
-%% It walks the full superclass chain and collects:
-%% - Before methods: run from superclass → subclass (setup flows down)
-%% - Primary method: run only the most specific method (no chain)
-%% - After methods: run from subclass → superclass (cleanup flows up)
-%%
-%% ## Method Combination Ordering
-%%
-%% ```
-%% ProtoObject>>method:before   ← run 1st
-%% Object>>method:before        ← run 2nd
-%% Counter>>method:before       ← run 3rd
-%% Counter>>method              ← run 4th (primary)
-%% Counter>>method:after        ← run 5th
-%% Object>>method:after         ← run 6th
-%% ProtoObject>>method:after    ← run 7th
-%% ```
-%%
-%% ## TODO
-%%
-%% Method combinations are not yet implemented. This is a placeholder
-%% for Phase 1b. For now, this function delegates to `lookup/5`.
--spec invoke_with_combinations(selector(), args(), bt_self(), state(), class_name()) -> dispatch_result().
-invoke_with_combinations(Selector, Args, Self, State, CurrentClass) ->
-    %% TODO: Implement method combinations
-    %% For now, just delegate to normal lookup
-    ?LOG_DEBUG("Method combinations not yet implemented, using normal lookup", []),
-    lookup(Selector, Args, Self, State, CurrentClass).
 
 %% @doc Check if a class or any of its ancestors responds to a selector.
 %%
@@ -283,9 +241,7 @@ lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
             %% Class not found
-            Error0 = beamtalk_error:new(class_not_found, ClassName),
-            Error1 = beamtalk_error:with_selector(Error0, Selector),
-            {error, Error1};
+            {error, beamtalk_error:new(class_not_found, ClassName, Selector)};
         ClassPid ->
             %% ADR 0006 Phase 2: Try flattened table first (O(1) lookup)
             case try_flattened_lookup(ClassPid, Selector) of
@@ -331,18 +287,18 @@ lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid) ->
                 none ->
                     %% Reached root without finding method
                     ?LOG_DEBUG("Method ~p not found in hierarchy (root: ~p)", [Selector, ClassName]),
-                    Error0 = beamtalk_error:new(does_not_understand, beamtalk_tagged_map:class_of(State, ClassName)),
-                    Error1 = beamtalk_error:with_selector(Error0, Selector),
-                    Error2 = beamtalk_error:with_hint(Error1, <<"Check spelling or use 'respondsTo:' to verify method exists">>),
-                    {error, Error2};
+                    Error = beamtalk_error:new(
+                        does_not_understand,
+                        beamtalk_tagged_map:class_of(State, ClassName),
+                        Selector,
+                        <<"Check spelling or use 'respondsTo:' to verify method exists">>),
+                    {error, Error};
                 SuperclassName ->
                     %% Recurse to superclass
                     ?LOG_DEBUG("Method ~p not in ~p, trying superclass ~p", [Selector, ClassName, SuperclassName]),
                     case beamtalk_class_registry:whereis_class(SuperclassName) of
                         undefined ->
-                            Error0 = beamtalk_error:new(class_not_found, SuperclassName),
-                            Error1 = beamtalk_error:with_selector(Error0, Selector),
-                            {error, Error1};
+                            {error, beamtalk_error:new(class_not_found, SuperclassName, Selector)};
                         SuperclassPid ->
                             lookup_in_class_chain_slow(Selector, Args, Self, State, SuperclassName, SuperclassPid)
                     end
@@ -400,16 +356,16 @@ continue_to_superclass(Selector, Args, Self, State, ClassPid) ->
         none ->
             %% Reached root without finding dispatchable method
             ClassName = beamtalk_tagged_map:class_of(State, unknown),
-            Error0 = beamtalk_error:new(does_not_understand, ClassName),
-            Error1 = beamtalk_error:with_selector(Error0, Selector),
-            Error2 = beamtalk_error:with_hint(Error1, <<"Check spelling or use 'respondsTo:' to verify method exists">>),
-            {error, Error2};
+            Error = beamtalk_error:new(
+                does_not_understand,
+                ClassName,
+                Selector,
+                <<"Check spelling or use 'respondsTo:' to verify method exists">>),
+            {error, Error};
         SuperclassName ->
             case beamtalk_class_registry:whereis_class(SuperclassName) of
                 undefined ->
-                    Error0 = beamtalk_error:new(class_not_found, SuperclassName),
-                    Error1 = beamtalk_error:with_selector(Error0, Selector),
-                    {error, Error1};
+                    {error, beamtalk_error:new(class_not_found, SuperclassName, Selector)};
                 SuperclassPid ->
                     lookup_in_class_chain_slow(Selector, Args, Self, State, SuperclassName, SuperclassPid)
             end

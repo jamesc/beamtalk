@@ -3,6 +3,8 @@
 
 %%% @doc REPL session shell for workspace
 %%%
+%%% **DDD Context:** REPL
+%%%
 %%% Maintains per-session state including:
 %%% - Variable bindings (counter := Counter spawn)
 %%% - Session ID

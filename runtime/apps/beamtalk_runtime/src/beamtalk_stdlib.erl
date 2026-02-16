@@ -3,6 +3,8 @@
 
 %%% @doc Standard library initialization for Beamtalk.
 %%%
+%%% **DDD Context:** Standard Library
+%%%
 %%% This module loads all compiled stdlib modules (from lib/*.bt) at runtime
 %%% startup. All class registrations are handled by compiled stdlib modules
 %%% themselves — no hand-written registrations remain.

@@ -3,6 +3,8 @@
 
 %%% @doc Root supervisor for Beamtalk workspace application.
 %%%
+%%% **DDD Context:** Workspace
+%%%
 %%% This supervisor manages workspace supervisors dynamically.
 %%% Each workspace is supervised independently and can be started/stopped
 %%% on demand.
