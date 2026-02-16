@@ -549,7 +549,7 @@ impl TypeChecker {
             }
         }
 
-        // Check for missing return type (only for methods that take no params or have params)
+        // Check for missing return type
         if method.return_type.is_none() {
             self.diagnostics.push(Diagnostic::warning(
                 format!(
