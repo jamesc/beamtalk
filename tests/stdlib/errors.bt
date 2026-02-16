@@ -123,3 +123,36 @@ Dictionary new: true
 // operations raise function_clause instead of structured beamtalk_errors.
 // See pre-existing failures in file_io.bt E2E tests.
 // TODO: Re-add when beamtalk_file.erl properly handles these error paths.
+
+// ===========================================================================
+// ACTOR INSTANTIATION ERRORS (BT-623)
+// ===========================================================================
+// Actors must use spawn/spawnWith: — calling new should raise instantiation_error
+
+// @load tests/e2e/fixtures/counter.bt
+
+Counter new
+// => ERROR: instantiation_error
+
+// Abstract class instantiation
+Number new
+// => ERROR: instantiation_error
+
+Collection new
+// => ERROR: instantiation_error
+
+// ===========================================================================
+// DOES NOT UNDERSTAND — additional types (BT-623)
+// ===========================================================================
+
+// Unknown method on float
+3.14 nonExistentMethod
+// => ERROR: does_not_understand
+
+// Unknown method on list
+#(1, 2) nonExistentMethod
+// => ERROR: does_not_understand
+
+// Unknown method on dictionary
+#{} nonExistentMethod
+// => ERROR: does_not_understand
