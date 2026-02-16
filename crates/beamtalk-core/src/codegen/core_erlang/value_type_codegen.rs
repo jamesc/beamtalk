@@ -98,7 +98,7 @@ impl CoreErlangGenerator {
         // Add instance method exports (each takes Self as first parameter)
         for method in &class.methods {
             // All methods in a class are instance methods in Beamtalk
-            // MethodKind is about method combination (Primary, Before, After, Around)
+            // MethodKind indicates the method type (currently only Primary)
             let arity = method.parameters.len() + 1; // +1 for Self parameter
             let mangled = method.selector.to_erlang_atom();
             exports.push(format!("'{mangled}'/{arity}"));

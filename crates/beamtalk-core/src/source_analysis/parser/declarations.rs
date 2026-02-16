@@ -6,7 +6,7 @@
 //! This module handles parsing of top-level declarations including:
 //! - Class definitions with modifiers (`abstract`, `sealed`, `typed`)
 //! - State (field) declarations with types and default values
-//! - Method definitions with advice modifiers (`before`, `after`, `around`)
+//! - Method definitions with optional `sealed` modifier
 
 use crate::ast::{
     ClassDefinition, Expression, Identifier, KeywordPart, MessageSelector, MethodDefinition,
@@ -30,9 +30,6 @@ impl Parser {
     ///   state: fieldName: TypeName = defaultValue
     ///
     ///   methodName => body
-    ///   before methodName => body
-    ///   after methodName => body
-    ///   around methodName => body
     ///   sealed methodName => body
     /// ```
     pub(super) fn parse_class_definition(&mut self) -> ClassDefinition {

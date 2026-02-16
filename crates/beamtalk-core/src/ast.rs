@@ -420,7 +420,7 @@ pub struct MethodDefinition {
     pub return_type: Option<TypeAnnotation>,
     /// Whether this method is sealed (cannot be overridden).
     pub is_sealed: bool,
-    /// The kind of method (primary, before, after, around).
+    /// The kind of method.
     pub kind: MethodKind,
     /// Doc comment attached to this method (`///` lines).
     pub doc_comment: Option<String>,
