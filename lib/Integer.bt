@@ -4,8 +4,8 @@
 /// Integer — Whole number arithmetic and operations.
 ///
 /// Integers in Beamtalk are arbitrary precision (Erlang integers).
-/// All arithmetic operations return integers unless explicitly
-/// converted with `asFloat`.
+/// Arithmetic operations return integers except `/` which returns
+/// a Float. Use `div:` for integer (truncating) division.
 ///
 /// ## BEAM Mapping
 /// Beamtalk integers map directly to Erlang integers.
@@ -45,14 +45,30 @@ sealed Number subclass: Integer
   /// ```
   * other: Number -> Integer => @primitive "*"
 
-  /// Divide the receiver by an integer (integer division).
+  /// Divide the receiver by a number (float division).
+  ///
+  /// Always returns a Float, even when both operands are integers.
+  /// For integer (truncating) division, use `div:`.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// 10 / 3        // => 3
-  /// 42 / 7        // => 6
+  /// 10 / 3        // => 3.3333333333333335
+  /// 42 / 7        // => 6.0
   /// ```
-  / other: Number -> Integer => @primitive "/"
+  / other: Number -> Float => @primitive "/"
+
+  /// Integer (truncating) division of the receiver by another integer.
+  ///
+  /// Truncates toward zero. For float division, use `/`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 10 div: 3     // => 3
+  /// 42 div: 7     // => 6
+  /// 7 div: 2      // => 3
+  /// -7 div: 2     // => -3
+  /// ```
+  div: other: Integer -> Integer => @primitive "div:"
 
   /// Remainder after integer division.
   ///
@@ -302,7 +318,7 @@ sealed Number subclass: Integer
   /// 4 lcm: 6        // => 12
   /// 3 lcm: 5        // => 15
   /// ```
-  lcm: other: Integer -> Integer => (self gcd: other) =:= 0 ifTrue: [0] ifFalse: [(((self abs) / (self gcd: other)) rounded) * (other abs)]
+  lcm: other: Integer -> Integer => (self gcd: other) =:= 0 ifTrue: [0] ifFalse: [((self abs) div: (self gcd: other)) * (other abs)]
 
   /// Test if the codepoint is a Unicode letter.
   ///

@@ -21,6 +21,15 @@
 
 -export([main/0]).
 
+-ifdef(TEST).
+-export([
+    compile_core_erlang/1,
+    compile_core_file/2,
+    inject_docs_chunk/3,
+    compile_modules/2
+]).
+-endif.
+
 -spec main() -> no_return().
 main() ->
     ok = io:setopts([binary, {encoding, utf8}]),
