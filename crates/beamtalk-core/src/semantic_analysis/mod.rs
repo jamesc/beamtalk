@@ -2321,6 +2321,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![state_decl],
             methods: vec![get_value_method],
             class_methods: vec![],
@@ -2679,6 +2680,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![StateDeclaration {
                 name: Identifier::new("count", test_span()),
                 type_annotation: None,
@@ -2729,6 +2731,7 @@ mod tests {
             superclass: Some(Identifier::new("Integer", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![],
             class_methods: vec![],
@@ -3005,6 +3008,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: true,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("area".into()),
@@ -3090,6 +3094,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![StateDeclaration {
                 name: Identifier::new("value", test_span()),
                 type_annotation: None,
@@ -3146,6 +3151,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![StateDeclaration {
                 name: Identifier::new("value", test_span()),
                 type_annotation: None,
@@ -3214,6 +3220,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("getValue".into()),
@@ -3263,6 +3270,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("doSomething".into()),
@@ -3309,6 +3317,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart {
@@ -3357,6 +3366,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![],
             class_methods: vec![MethodDefinition {
@@ -3410,6 +3420,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("getValue".into()),
@@ -3457,6 +3468,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("getValue".into()),
@@ -3508,6 +3520,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("getValue".into()),
@@ -3564,6 +3577,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("getValue".into()),
@@ -3623,6 +3637,7 @@ mod tests {
             superclass: Some(Identifier::new("Object", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("getValue".into()),
@@ -3684,6 +3699,7 @@ mod tests {
             superclass: Some(Identifier::new("Object", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("getValue".into()),
@@ -3739,6 +3755,7 @@ mod tests {
             superclass: Some(Identifier::new("Object", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("test".into()),
@@ -3781,6 +3798,7 @@ mod tests {
             superclass: Some(Identifier::new("Object", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("getValue".into()),
@@ -3849,6 +3867,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("reset".into()),
@@ -3941,6 +3960,7 @@ mod tests {
             superclass: Some(Identifier::new("Object", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("test".into()),
@@ -4006,6 +4026,7 @@ mod tests {
             superclass: Some(Identifier::new("Object", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("test".into()),
@@ -4069,6 +4090,7 @@ mod tests {
             superclass: Some(Identifier::new("Object", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("test".into()),

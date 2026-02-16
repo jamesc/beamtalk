@@ -322,6 +322,8 @@ struct ClassMeta {
     is_sealed: bool,
     /// Whether the class is abstract (cannot be instantiated directly).
     is_abstract: bool,
+    /// Whether the class has the explicit `typed` modifier.
+    is_typed: bool,
     /// Instance state (field) names declared in the class.
     state: Vec<String>,
     /// Instance method signatures.
@@ -443,6 +445,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         superclass_name: class.superclass_name().to_string(),
         is_sealed: class.is_sealed,
         is_abstract: class.is_abstract,
+        is_typed: class.is_typed,
         state,
         methods,
         class_methods,
@@ -648,10 +651,12 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
          \x20           name: \"{name}\".into(),\n\
          \x20           superclass: {superclass},\n\
          \x20           is_sealed: {sealed},\n\
-         \x20           is_abstract: {abstract_},\n",
+         \x20           is_abstract: {abstract_},\n\
+         \x20           is_typed: {typed},\n",
         name = meta.class_name,
         sealed = meta.is_sealed,
         abstract_ = meta.is_abstract,
+        typed = meta.is_typed,
     );
 
     // State
@@ -863,6 +868,7 @@ mod tests {
             superclass_name: "Actor".to_string(),
             is_sealed: false,
             is_abstract: false,
+            is_typed: false,
             state: vec!["count".to_string()],
             methods: vec![
                 MethodMeta {
@@ -923,6 +929,7 @@ mod tests {
             superclass_name: "none".to_string(),
             is_sealed: false,
             is_abstract: true,
+            is_typed: false,
             state: vec![],
             methods: vec![],
             class_methods: vec![],
@@ -952,6 +959,7 @@ mod tests {
                 superclass_name: "Object".to_string(),
                 is_sealed: false,
                 is_abstract: false,
+                is_typed: false,
                 state: vec![],
                 methods: vec![],
                 class_methods: vec![],
@@ -963,6 +971,7 @@ mod tests {
                 superclass_name: "Object".to_string(),
                 is_sealed: true,
                 is_abstract: false,
+                is_typed: false,
                 state: vec![],
                 methods: vec![],
                 class_methods: vec![],

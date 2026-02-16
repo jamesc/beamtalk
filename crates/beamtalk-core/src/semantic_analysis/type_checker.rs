@@ -125,12 +125,19 @@ impl TypeChecker {
         // Check method bodies inside class definitions
         for class in &module.classes {
             let is_abstract = class.is_abstract || hierarchy.is_abstract(&class.name.name);
+
+            // Determine if this class requires type annotations (typed modifier or inherited)
+            let is_typed = hierarchy.is_typed(&class.name.name);
+
             for method in &class.methods {
                 let mut method_env = TypeEnv::new();
                 method_env.set("self", InferredType::Known(class.name.name.clone()));
                 Self::set_param_types(&mut method_env, &method.parameters);
                 for expr in &method.body {
                     self.infer_expr(expr, hierarchy, &mut method_env, is_abstract);
+                }
+                if is_typed {
+                    self.check_typed_method_annotations(method, &class.name.name);
                 }
             }
             for method in &class.class_methods {
@@ -140,6 +147,9 @@ impl TypeChecker {
                 Self::set_param_types(&mut method_env, &method.parameters);
                 for expr in &method.body {
                     self.infer_expr(expr, hierarchy, &mut method_env, is_abstract);
+                }
+                if is_typed {
+                    self.check_typed_method_annotations(method, &class.name.name);
                 }
             }
         }
@@ -389,6 +399,15 @@ impl TypeChecker {
             .map(|arg| self.infer_expr(arg, hierarchy, env, in_abstract_method))
             .collect();
 
+        // Handle asType: compile-time type assertion (ADR 0025 Phase 2b)
+        // `expr asType: SomeClass` asserts expr is SomeClass, returns Known(SomeClass)
+        if selector_name == "asType:" {
+            if let Some(Expression::ClassReference { name, .. }) = arguments.first() {
+                return InferredType::Known(name.name.clone());
+            }
+            return receiver_ty;
+        }
+
         // Validate binary operand types when both sides are known
         // Only check if the receiver type actually defines the operator (avoids
         // duplicate warnings when the selector is already unknown).
@@ -495,6 +514,47 @@ impl TypeChecker {
 
         if !hierarchy.resolves_selector(class_name, selector) {
             self.emit_unknown_selector_warning(class_name, selector, span, hierarchy, false);
+        }
+    }
+
+    /// Check that methods in typed classes have proper type annotations.
+    fn check_typed_method_annotations(
+        &mut self,
+        method: &crate::ast::MethodDefinition,
+        class_name: &EcoString,
+    ) {
+        // Skip primitive/intrinsic methods — their types are runtime-defined
+        if method
+            .body
+            .iter()
+            .any(|e| matches!(e, Expression::Primitive { .. }))
+        {
+            return;
+        }
+
+        let selector = method.selector.name();
+
+        // Check each parameter for missing type annotation
+        for param in &method.parameters {
+            if param.type_annotation.is_none() {
+                self.diagnostics.push(Diagnostic::warning(
+                    format!(
+                        "Missing type annotation for parameter `{}` in typed class `{class_name}` (method `{selector}`)",
+                        param.name.name
+                    ),
+                    param.name.span,
+                ));
+            }
+        }
+
+        // Check for missing return type
+        if method.return_type.is_none() {
+            self.diagnostics.push(Diagnostic::warning(
+                format!(
+                    "Missing return type annotation in typed class `{class_name}` (method `{selector}`)"
+                ),
+                method.span,
+            ));
         }
     }
 
@@ -709,7 +769,7 @@ mod tests {
     use super::*;
     use crate::ast::{
         Block, CascadeMessage, ClassDefinition, Identifier, KeywordPart, MethodDefinition,
-        MethodKind, Module,
+        MethodKind, Module, ParameterDefinition, TypeAnnotation,
     };
     use crate::source_analysis::Span;
 
@@ -884,6 +944,7 @@ mod tests {
                 superclass: Some(ident("Actor")),
                 is_abstract: false,
                 is_sealed: false,
+                is_typed: false,
                 state: vec![],
                 methods: vec![MethodDefinition {
                     selector: MessageSelector::Unary("increment".into()),
@@ -1124,6 +1185,7 @@ mod tests {
                 superclass: Some(ident("Object")),
                 is_abstract: false,
                 is_sealed: false,
+                is_typed: false,
                 state: vec![],
                 methods: vec![MethodDefinition {
                     selector: MessageSelector::Unary("greet".into()),
@@ -1275,6 +1337,7 @@ mod tests {
             superclass: Some(ident("Actor")),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: instance_methods,
             class_methods,
@@ -1439,6 +1502,7 @@ mod tests {
             superclass: Some(ident("Object")),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("reset".into()),
@@ -1463,6 +1527,7 @@ mod tests {
             superclass: Some(ident("Parent")),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("reset".into()),
@@ -1507,6 +1572,7 @@ mod tests {
             superclass: Some(ident("Object")),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("reset".into()),
@@ -1529,6 +1595,7 @@ mod tests {
             superclass: Some(ident("Parent")),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("test".into()),
@@ -1738,5 +1805,197 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ---- Typed class tests (BT-587) ----
+
+    #[test]
+    fn test_typed_class_warns_on_missing_param_annotation() {
+        // typed class with untyped parameter
+        let mut class_def = ClassDefinition::with_modifiers(
+            ident("StrictCounter"),
+            Some(ident("Actor")),
+            false,
+            false,
+            vec![],
+            vec![MethodDefinition::new(
+                MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
+                vec![ParameterDefinition::new(ident("amount"))], // no type annotation
+                vec![int_lit(0)],
+                span(),
+            )],
+            span(),
+        );
+        class_def.is_typed = true;
+        let module = make_module_with_classes(vec![], vec![class_def]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("Missing type annotation for parameter"))
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "should warn about untyped param `amount`"
+        );
+        assert!(warnings[0].message.contains("amount"));
+    }
+
+    #[test]
+    fn test_typed_class_warns_on_missing_return_type() {
+        // typed class with method missing return type
+        let mut class_def = ClassDefinition::with_modifiers(
+            ident("StrictCounter"),
+            Some(ident("Actor")),
+            false,
+            false,
+            vec![],
+            vec![MethodDefinition::new(
+                MessageSelector::Unary("increment".into()),
+                vec![],
+                vec![int_lit(1)],
+                span(),
+            )],
+            span(),
+        );
+        class_def.is_typed = true;
+        let module = make_module_with_classes(vec![], vec![class_def]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("Missing return type"))
+            .collect();
+        assert_eq!(warnings.len(), 1, "should warn about missing return type");
+    }
+
+    #[test]
+    fn test_typed_class_no_warning_when_fully_annotated() {
+        // typed class with fully annotated method
+        let mut class_def = ClassDefinition::with_modifiers(
+            ident("StrictCounter"),
+            Some(ident("Actor")),
+            false,
+            false,
+            vec![],
+            vec![MethodDefinition::with_return_type(
+                MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
+                vec![ParameterDefinition::with_type(
+                    ident("amount"),
+                    TypeAnnotation::Simple(ident("Integer")),
+                )],
+                vec![int_lit(0)],
+                TypeAnnotation::Simple(ident("Integer")),
+                span(),
+            )],
+            span(),
+        );
+        class_def.is_typed = true;
+        let module = make_module_with_classes(vec![], vec![class_def]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let typed_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("Missing"))
+            .collect();
+        assert!(
+            typed_warnings.is_empty(),
+            "fully annotated method should not warn, got: {typed_warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_non_typed_class_no_warnings() {
+        // non-typed class with untyped method — no warnings expected
+        let class_def = ClassDefinition::with_modifiers(
+            ident("Counter"),
+            Some(ident("Actor")),
+            false,
+            false,
+            vec![],
+            vec![MethodDefinition::new(
+                MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
+                vec![ParameterDefinition::new(ident("amount"))],
+                vec![int_lit(0)],
+                span(),
+            )],
+            span(),
+        );
+        let module = make_module_with_classes(vec![], vec![class_def]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let typed_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("Missing"))
+            .collect();
+        assert!(
+            typed_warnings.is_empty(),
+            "non-typed class should not warn about annotations"
+        );
+    }
+
+    #[test]
+    fn test_typed_class_skips_primitive_methods() {
+        // typed class with @primitive method — no warnings
+        let mut class_def = ClassDefinition::with_modifiers(
+            ident("StrictInteger"),
+            Some(ident("Object")),
+            false,
+            false,
+            vec![],
+            vec![MethodDefinition::new(
+                MessageSelector::Binary("+".into()),
+                vec![ParameterDefinition::new(ident("other"))],
+                vec![Expression::Primitive {
+                    name: "+".into(),
+                    is_quoted: true,
+                    span: span(),
+                }],
+                span(),
+            )],
+            span(),
+        );
+        class_def.is_typed = true;
+        let module = make_module_with_classes(vec![], vec![class_def]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let typed_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("Missing"))
+            .collect();
+        assert!(
+            typed_warnings.is_empty(),
+            "primitive methods should be skipped in typed classes"
+        );
+    }
+
+    #[test]
+    fn test_as_type_assertion_infers_correct_type() {
+        // x asType: Integer  should infer x as Integer
+        let module = make_module(vec![msg_send(
+            var("x"),
+            MessageSelector::Keyword(vec![KeywordPart::new("asType:", span())]),
+            vec![class_ref("Integer")],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        // The send itself shouldn't warn (asType: is special)
+        assert!(
+            checker.diagnostics().is_empty(),
+            "asType: should not produce warnings, got: {:?}",
+            checker.diagnostics()
+        );
     }
 }

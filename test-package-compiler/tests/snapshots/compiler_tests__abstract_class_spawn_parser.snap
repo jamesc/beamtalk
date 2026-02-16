@@ -24,6 +24,7 @@ Module {
             ),
             is_abstract: true,
             is_sealed: false,
+            is_typed: false,
             state: [],
             methods: [
                 MethodDefinition {

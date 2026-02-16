@@ -33,11 +33,10 @@ pub struct PackageManifest {
     pub version: String,
     /// Optional human-readable package description.
     #[serde(default)]
-    #[allow(dead_code)] // Read by future phases (module naming, .app generation)
     pub description: Option<String>,
     /// Optional SPDX license identifiers (e.g. `["Apache-2.0"]`).
     #[serde(default)]
-    #[allow(dead_code)] // Read by future phases (.app generation, Hex publishing)
+    #[allow(dead_code)] // Read by future phases (Hex publishing)
     pub licenses: Option<Vec<String>>,
 }
 

@@ -9,6 +9,7 @@ use miette::{Context, IntoDiagnostic, Result};
 use std::fs;
 use tracing::{debug, error, info, instrument};
 
+use super::app_file;
 use super::manifest;
 
 /// Build beamtalk source files.
@@ -39,9 +40,6 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
             .map_or_else(|| Utf8PathBuf::from("."), Utf8Path::to_path_buf)
     };
 
-    // Create build directory relative to project root
-    let build_dir = project_root.join("build");
-
     // Look for package manifest
     let pkg_manifest = manifest::find_manifest(&project_root)?;
     if let Some(ref pkg) = pkg_manifest {
@@ -51,6 +49,14 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
         debug!("No beamtalk.toml found, using default behavior");
     }
 
+    // Create build directory relative to project root
+    // ADR 0026 §5: Package mode outputs to _build/dev/ebin/, single-file mode keeps build/
+    let build_dir = if pkg_manifest.is_some() {
+        project_root.join("_build").join("dev").join("ebin")
+    } else {
+        project_root.join("build")
+    };
+
     debug!("Creating build directory: {}", build_dir);
     std::fs::create_dir_all(&build_dir)
         .into_diagnostic()
@@ -58,6 +64,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
 
     // Compile each file to Core Erlang
     let mut core_files = Vec::new();
+    let mut module_names = Vec::new();
     // Determine the source root for computing relative module paths
     let src_dir = project_root.join("src");
     let source_root = if src_dir.exists() {
@@ -93,12 +100,13 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
 
         compile_file(file, &module_name, &core_file, options)?;
         core_files.push(core_file);
+        module_names.push(module_name);
     }
 
     // Batch compile Core Erlang to BEAM
     info!("Compiling Core Erlang to BEAM");
     println!("  Compiling to BEAM bytecode...");
-    let compiler = BeamCompiler::new(build_dir);
+    let compiler = BeamCompiler::new(build_dir.clone());
     let beam_files = compiler
         .compile_batch(&core_files)
         .wrap_err("Failed to compile Core Erlang to BEAM")?;
@@ -107,8 +115,27 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
         beam_count = beam_files.len(),
         "Build completed successfully"
     );
+
+    // ADR 0026 §3: Generate .app file in package mode
+    if let Some(ref pkg) = pkg_manifest {
+        // TODO: Extract class metadata from compiled modules in a future issue.
+        // For now, pass an empty list — .app file still includes module list.
+        let class_metadata: Vec<app_file::ClassMetadata> = Vec::new();
+        app_file::generate_app_file(&build_dir, pkg, &module_names, &class_metadata)?;
+        info!(name = %pkg.name, "Generated .app file");
+        println!("  Generated {}.app", pkg.name);
+    }
+
+    let output_label = if pkg_manifest.is_some() {
+        "_build/dev/ebin/"
+    } else {
+        "build/"
+    };
     println!("Build complete");
-    println!("  Generated {} BEAM file(s) in build/", beam_files.len());
+    println!(
+        "  Generated {} BEAM file(s) in {output_label}",
+        beam_files.len()
+    );
 
     Ok(())
 }
@@ -525,7 +552,7 @@ mod tests {
             let error_msg = format!("{e:?}");
             if error_msg.contains("escript not found") {
                 // Verify the .core file was generated with package-qualified name
-                let core_file = project_path.join("build/bt@my_app@counter.core");
+                let core_file = project_path.join("_build/dev/ebin/bt@my_app@counter.core");
                 assert!(
                     core_file.exists(),
                     "Expected package-qualified .core file at {core_file}"
@@ -578,7 +605,7 @@ mod tests {
         if let Err(e) = result {
             let error_msg = format!("{e:?}");
             if error_msg.contains("escript not found") {
-                let core_file = project_path.join("build/bt@my_app@util@math.core");
+                let core_file = project_path.join("_build/dev/ebin/bt@my_app@util@math.core");
                 assert!(
                     core_file.exists(),
                     "Expected package-qualified .core file at {core_file}"
@@ -587,5 +614,97 @@ mod tests {
             }
             panic!("Build failed with unexpected error: {e:?}");
         }
+    }
+
+    #[test]
+    fn test_build_with_manifest_creates_build_dev_ebin() {
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        let src_path = project_path.join("src");
+        write_test_file(&src_path.join("main.bt"), "main := [42].");
+        write_test_file(
+            &project_path.join("beamtalk.toml"),
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
+        );
+
+        let result = build(project_path.as_str(), &default_options());
+
+        // Verify _build/dev/ebin/ directory structure exists
+        let ebin_dir = project_path.join("_build/dev/ebin");
+        assert!(ebin_dir.exists(), "Expected _build/dev/ebin/ directory");
+
+        if let Err(e) = result {
+            let error_msg = format!("{e:?}");
+            if error_msg.contains("escript not found") {
+                return;
+            }
+            panic!("Build failed with unexpected error: {e:?}");
+        }
+    }
+
+    #[test]
+    fn test_build_without_manifest_uses_build_dir() {
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        let src_path = project_path.join("src");
+        write_test_file(&src_path.join("main.bt"), "main := [42].");
+        // No beamtalk.toml
+
+        let result = build(project_path.as_str(), &default_options());
+
+        // Verify build/ directory is used (not _build/)
+        let build_dir = project_path.join("build");
+        assert!(
+            build_dir.exists(),
+            "Expected build/ directory for single-file mode"
+        );
+        let ebin_dir = project_path.join("_build");
+        assert!(
+            !ebin_dir.exists(),
+            "_build/ should not exist in single-file mode"
+        );
+
+        if let Err(e) = result {
+            let error_msg = format!("{e:?}");
+            if error_msg.contains("escript not found") {
+                return;
+            }
+            panic!("Build failed with unexpected error: {e:?}");
+        }
+    }
+
+    #[test]
+    fn test_build_with_manifest_generates_app_file() {
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        let src_path = project_path.join("src");
+        write_test_file(&src_path.join("counter.bt"), "counter := [42].");
+        write_test_file(
+            &project_path.join("beamtalk.toml"),
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\ndescription = \"Test app\"\n",
+        );
+
+        let result = build(project_path.as_str(), &default_options());
+
+        if let Err(e) = result {
+            let error_msg = format!("{e:?}");
+            if error_msg.contains("escript not found") {
+                // .app is generated after BEAM compile — may not exist if escript missing
+                // but the .core file should exist
+                let core_file = project_path.join("_build/dev/ebin/bt@my_app@counter.core");
+                assert!(core_file.exists(), "Expected .core file at {core_file}");
+                return;
+            }
+            panic!("Build failed with unexpected error: {e:?}");
+        }
+
+        // If BEAM compilation succeeded, .app file should exist
+        let app_file = project_path.join("_build/dev/ebin/my_app.app");
+        assert!(app_file.exists(), "Expected .app file at {app_file}");
+        let content = fs::read_to_string(&app_file).unwrap();
+        assert!(content.contains("{application, my_app, ["));
+        assert!(content.contains("{description, \"Test app\"}"));
+        assert!(content.contains("{vsn, \"0.1.0\"}"));
+        assert!(content.contains("'bt@my_app@counter'"));
     }
 }
