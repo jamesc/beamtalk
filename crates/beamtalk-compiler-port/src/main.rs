@@ -655,3 +655,255 @@ fn main() {
         }
     }
 }
+
+// ============================================================================
+// Property-based tests (ADR 0011 Phase 4)
+// ============================================================================
+
+#[cfg(test)]
+mod property_tests {
+    //! Property-based tests for the compiler port compile round-trip.
+    //!
+    //! These tests use `proptest` to verify that `handle_compile()` and
+    //! `handle_compile_expression()` never panic on arbitrary input and
+    //! always return well-formed ETF responses.
+    //!
+    //! **DDD Context:** Compilation (Anti-Corruption Layer)
+    //!
+    //! ADR 0011 Phase 4.
+
+    use super::*;
+    use proptest::prelude::*;
+
+    /// Build an ETF Map for a `compile` request with the given source.
+    fn compile_request(source: &str) -> Map {
+        Map::from([
+            (atom("command"), atom("compile")),
+            (atom("source"), binary(source)),
+        ])
+    }
+
+    /// Build an ETF Map for a `compile_expression` request with the given source.
+    fn compile_expression_request(source: &str) -> Map {
+        Map::from([
+            (atom("command"), atom("compile_expression")),
+            (atom("source"), binary(source)),
+            (atom("module"), binary("bt@test_module")),
+        ])
+    }
+
+    /// Extract the status atom from a response Term.
+    fn response_status(term: &Term) -> Option<String> {
+        if let Term::Map(map) = term {
+            map_get(map, "status").and_then(|t| {
+                if let Term::Atom(a) = t {
+                    Some(a.name.clone())
+                } else {
+                    None
+                }
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Extract the diagnostics list from a response Term.
+    fn response_diagnostics(term: &Term) -> Option<&List> {
+        if let Term::Map(map) = term {
+            if let Some(Term::List(list)) = map_get(map, "diagnostics") {
+                return Some(list);
+            }
+        }
+        None
+    }
+
+    /// Near-valid Beamtalk source fragments (reuses patterns from parser property tests).
+    const FRAGMENTS: &[&str] = &[
+        "42",
+        "3.14",
+        "\"hello\"",
+        "true",
+        "false",
+        "nil",
+        "x := 42",
+        "x + y",
+        "arr at: 1",
+        "[:x | x + 1]",
+        "(3 + 4)",
+        "^42",
+        "self",
+        "#(1, 2, 3)",
+        "#{a => 1}",
+        "Object subclass: Counter\n  state: count = 0\n  increment => count := count + 1",
+        "3 timesRepeat: [x := x + 1]",
+    ];
+
+    /// Generates a near-valid Beamtalk input using one of several mutation strategies.
+    fn near_valid_beamtalk() -> impl Strategy<Value = String> {
+        prop_oneof![
+            // Valid fragments
+            prop::sample::select(FRAGMENTS).prop_map(std::string::ToString::to_string),
+            // Truncated valid expressions
+            prop::sample::select(FRAGMENTS).prop_flat_map(|s| {
+                let len = s.len();
+                if len <= 1 {
+                    Just(s.to_string()).boxed()
+                } else {
+                    (1..len)
+                        .prop_map(move |cut| {
+                            let safe_cut = s.floor_char_boundary(cut);
+                            if safe_cut == 0 {
+                                s.to_string()
+                            } else {
+                                s[..safe_cut].to_string()
+                            }
+                        })
+                        .boxed()
+                }
+            }),
+            // Mismatched brackets
+            prop::sample::select(FRAGMENTS).prop_map(|s| {
+                s.chars()
+                    .map(|ch| match ch {
+                        '[' => '(',
+                        ']' => '}',
+                        '(' => '[',
+                        _ => ch,
+                    })
+                    .collect()
+            }),
+        ]
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 512,
+            .. ProptestConfig::default()
+        })]
+
+        /// Property 1a: `handle_compile` never panics on arbitrary string input.
+        #[test]
+        fn compile_never_panics(input in "\\PC{0,500}") {
+            let request = compile_request(&input);
+            let response = handle_compile(&request);
+            let status = response_status(&response);
+            prop_assert!(
+                status.is_some(),
+                "Response must have a status field for input: {:?}",
+                input,
+            );
+            let status = status.unwrap();
+            prop_assert!(
+                status == "ok" || status == "error",
+                "Status must be 'ok' or 'error', got {:?} for input: {:?}",
+                status,
+                input,
+            );
+        }
+
+        /// Property 1b: `handle_compile_expression` never panics on arbitrary string input.
+        #[test]
+        fn compile_expression_never_panics(input in "\\PC{0,500}") {
+            let request = compile_expression_request(&input);
+            let response = handle_compile_expression(&request);
+            let status = response_status(&response);
+            prop_assert!(
+                status.is_some(),
+                "Response must have a status field for input: {:?}",
+                input,
+            );
+            let status = status.unwrap();
+            prop_assert!(
+                status == "ok" || status == "error",
+                "Status must be 'ok' or 'error', got {:?} for input: {:?}",
+                status,
+                input,
+            );
+        }
+
+        /// Property 1c: `handle_compile` never panics on near-valid structured input.
+        #[test]
+        fn compile_never_panics_near_valid(input in near_valid_beamtalk()) {
+            let request = compile_request(&input);
+            let response = handle_compile(&request);
+            let status = response_status(&response);
+            prop_assert!(status.is_some());
+        }
+
+        /// Property 1d: `handle_compile_expression` never panics on near-valid structured input.
+        #[test]
+        fn compile_expression_never_panics_near_valid(input in near_valid_beamtalk()) {
+            let request = compile_expression_request(&input);
+            let response = handle_compile_expression(&request);
+            let status = response_status(&response);
+            prop_assert!(status.is_some());
+        }
+
+        /// Property 2: Error responses have non-empty diagnostics.
+        ///
+        /// When status is "error", the diagnostics list must be non-empty.
+        #[test]
+        fn error_responses_have_diagnostics(input in "\\PC{0,500}") {
+            // Test both compile paths
+            for response in [
+                handle_compile(&compile_request(&input)),
+                handle_compile_expression(&compile_expression_request(&input)),
+            ] {
+                if response_status(&response).as_deref() == Some("error") {
+                    let diags = response_diagnostics(&response);
+                    prop_assert!(
+                        diags.is_some(),
+                        "Error response must have 'diagnostics' field for input: {:?}",
+                        input,
+                    );
+                    prop_assert!(
+                        !diags.unwrap().elements.is_empty(),
+                        "Error diagnostics must be non-empty for input: {:?}",
+                        input,
+                    );
+                }
+            }
+        }
+
+        /// Property 3: Diagnostic entries are non-empty valid UTF-8 strings.
+        ///
+        /// Every diagnostic in an error response must be a non-empty binary
+        /// that decodes to valid UTF-8.
+        #[test]
+        fn diagnostics_are_nonempty_strings(input in "\\PC{0,500}") {
+            for response in [
+                handle_compile(&compile_request(&input)),
+                handle_compile_expression(&compile_expression_request(&input)),
+            ] {
+                if response_status(&response).as_deref() == Some("error") {
+                    if let Some(diags) = response_diagnostics(&response) {
+                        for (i, diag_term) in diags.elements.iter().enumerate() {
+                            if let Term::Binary(b) = diag_term {
+                                let text = String::from_utf8(b.bytes.clone());
+                                prop_assert!(
+                                    text.is_ok(),
+                                    "Diagnostic {} is not valid UTF-8 for input: {:?}",
+                                    i,
+                                    input,
+                                );
+                                prop_assert!(
+                                    !text.unwrap().is_empty(),
+                                    "Diagnostic {} is empty for input: {:?}",
+                                    i,
+                                    input,
+                                );
+                            } else {
+                                prop_assert!(
+                                    false,
+                                    "Diagnostic {} is not a Binary term for input: {:?}",
+                                    i,
+                                    input,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

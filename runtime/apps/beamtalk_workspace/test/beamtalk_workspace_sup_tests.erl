@@ -254,3 +254,145 @@ all_children_alive_test() ->
         end,
         process_flag(trap_exit, OldTrap)
     end.
+
+%%% Default config value tests
+
+default_auto_cleanup_test() ->
+    %% Config without auto_cleanup should default to true
+    Config = #{
+        workspace_id => <<"test-defaults">>,
+        project_path => <<"/tmp/test">>,
+        tcp_port => 49152
+    },
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(Config),
+
+    [MonitorSpec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_idle_monitor],
+    {beamtalk_idle_monitor, start_link, [MonitorConfig]} = maps:get(start, MonitorSpec),
+    ?assertEqual(true, maps:get(enabled, MonitorConfig)).
+
+default_max_idle_seconds_test() ->
+    %% Config without max_idle_seconds should default to 4 hours
+    Config = #{
+        workspace_id => <<"test-defaults">>,
+        project_path => <<"/tmp/test">>,
+        tcp_port => 49152
+    },
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(Config),
+
+    [MonitorSpec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_idle_monitor],
+    {beamtalk_idle_monitor, start_link, [MonitorConfig]} = maps:get(start, MonitorSpec),
+    ?assertEqual(3600 * 4, maps:get(max_idle_seconds, MonitorConfig)).
+
+idle_monitor_config_propagation_test() ->
+    %% Custom max_idle_seconds should be propagated
+    Config0 = test_config(),
+    Config = Config0#{max_idle_seconds => 1800},
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(Config),
+
+    [MonitorSpec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_idle_monitor],
+    {beamtalk_idle_monitor, start_link, [MonitorConfig]} = maps:get(start, MonitorSpec),
+    ?assertEqual(1800, maps:get(max_idle_seconds, MonitorConfig)).
+
+%%% Shutdown configuration tests
+
+actor_sup_shutdown_infinity_test() ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
+
+    [ActorSupSpec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_actor_sup],
+    ?assertEqual(infinity, maps:get(shutdown, ActorSupSpec)).
+
+session_sup_shutdown_infinity_test() ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
+
+    [SessionSupSpec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_session_sup],
+    ?assertEqual(infinity, maps:get(shutdown, SessionSupSpec)).
+
+%%% Workspace environment child spec test
+
+workspace_environment_spec_test() ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
+
+    [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_workspace_environment],
+    ?assertEqual(worker, maps:get(type, Spec)),
+    ?assertEqual(permanent, maps:get(restart, Spec)),
+    ?assertEqual({beamtalk_workspace_environment, start_link, [{local, 'Workspace'}]},
+                 maps:get(start, Spec)).
+
+%%% Registry interleaving test
+
+registry_before_workspace_environment_test() ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
+
+    Ids = [maps:get(id, S) || S <- ChildSpecs],
+    RegistryIdx = index_of(beamtalk_actor_registry, Ids),
+    WorkspaceEnvIdx = index_of(beamtalk_workspace_environment, Ids),
+    %% Registry must come before WorkspaceEnvironment (it depends on registry)
+    ?assert(RegistryIdx < WorkspaceEnvIdx).
+
+%%% File logger tests
+
+file_logger_disabled_by_env_test() ->
+    %% BEAMTALK_NO_FILE_LOG=1 should skip file logger setup entirely
+    OldVal = os:getenv("BEAMTALK_NO_FILE_LOG"),
+    try
+        os:putenv("BEAMTALK_NO_FILE_LOG", "1"),
+        %% init should succeed without adding a file handler
+        {ok, {_SupFlags, _ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
+        ok
+    after
+        case OldVal of
+            false -> os:unsetenv("BEAMTALK_NO_FILE_LOG");
+            Val -> os:putenv("BEAMTALK_NO_FILE_LOG", Val)
+        end
+    end.
+
+%%% Bootstrap child spec details test
+
+bootstrap_spec_modules_test() ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
+
+    [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_workspace_bootstrap],
+    ?assertEqual([beamtalk_workspace_bootstrap], maps:get(modules, Spec)),
+    ?assertEqual(5000, maps:get(shutdown, Spec)).
+
+%%% Singleton child spec generation tests
+
+singleton_specs_have_local_registration_test() ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
+
+    %% Every singleton should use {local, Name} registration
+    SingletonIds = [beamtalk_transcript_stream, beamtalk_system_dictionary, beamtalk_workspace_environment],
+    lists:foreach(fun(Id) ->
+        [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == Id],
+        {_Mod, start_link, [{local, _Name} | _Args]} = maps:get(start, Spec),
+        ok
+    end, SingletonIds).
+
+%%% REPL server config test
+
+repl_server_config_test() ->
+    Config0 = test_config(),
+    Config = Config0#{tcp_port => 12345, workspace_id => <<"ws-custom">>},
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(Config),
+
+    [ReplSpec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_repl_server],
+    ?assertEqual({beamtalk_repl_server, start_link, [#{port => 12345, workspace_id => <<"ws-custom">>}]},
+                 maps:get(start, ReplSpec)).
+
+%%% Workspace meta config test
+
+workspace_meta_config_test() ->
+    Config = #{
+        workspace_id => <<"meta-test">>,
+        project_path => <<"/home/test/project">>,
+        tcp_port => 5555,
+        auto_cleanup => false
+    },
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(Config),
+
+    [MetaSpec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_workspace_meta],
+    {beamtalk_workspace_meta, start_link, [MetaConfig]} = maps:get(start, MetaSpec),
+    ?assertEqual(<<"meta-test">>, maps:get(workspace_id, MetaConfig)),
+    ?assertEqual(<<"/home/test/project">>, maps:get(project_path, MetaConfig)),
+    ?assertEqual(5555, maps:get(repl_port, MetaConfig)),
+    ?assert(is_integer(maps:get(created_at, MetaConfig))).

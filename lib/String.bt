@@ -293,6 +293,14 @@ sealed Object subclass: String
   /// ```
   padLeft: width: Integer with: char: String -> String => @primitive "padLeft:with:"
 
+  /// Right-pad the string to the given width with the specified character.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// "hi" padRight: 5 with: "0"  // => "hi000"
+  /// ```
+  padRight: width: Integer with: char: String -> String => @primitive "padRight:with:"
+
   /// Test if the string is empty.
   ///
   /// ## Examples

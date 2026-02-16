@@ -60,6 +60,10 @@ use ecow::EcoString;
 mod declarations;
 mod expressions;
 
+// Property-based tests (ADR 0011 Phase 2)
+#[cfg(test)]
+mod property_tests;
+
 // Re-export helper functions for tests
 #[cfg(test)]
 use expressions::parse_integer;

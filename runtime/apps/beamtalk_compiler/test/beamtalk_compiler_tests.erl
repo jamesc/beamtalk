@@ -42,8 +42,13 @@ compiler_test_() ->
       {"version returns binary", fun version_succeeds/0},
       {"compile_core_erlang in memory", fun compile_core_erlang_in_memory/0},
       {"compile_core_erlang with invalid source", fun compile_core_erlang_invalid/0},
+      {"compile_core_erlang scan error", fun compile_core_erlang_scan_error/0},
+      {"compile_core_erlang parse error", fun compile_core_erlang_parse_error/0},
       {"backend defaults to port", fun backend_default_port/0},
-      {"multiple compiles on same server", fun multiple_compiles/0}
+      {"multiple compiles on same server", fun multiple_compiles/0},
+      {"compile file with workspace_mode=false", fun compile_file_workspace_mode/0},
+      {"compile_expression with class definition", fun compile_expression_class_def/0},
+      {"compiler app module callbacks", fun compiler_app_callbacks/0}
      ]}.
 
 %%% Tests
@@ -147,6 +152,16 @@ compile_core_erlang_invalid() ->
     Result = beamtalk_compiler:compile_core_erlang(<<"this is not core erlang">>),
     ?assertMatch({error, _}, Result).
 
+compile_core_erlang_scan_error() ->
+    %% Binary that produces core_scan error
+    Result = beamtalk_compiler:compile_core_erlang(<<"\x00\x01">>),
+    ?assertMatch({error, _}, Result).
+
+compile_core_erlang_parse_error() ->
+    %% Scannable but invalid Core Erlang structure
+    Result = beamtalk_compiler:compile_core_erlang(<<"module 'x' []\n">>),
+    ?assertMatch({error, {core_parse_error, _}}, Result).
+
 backend_default_port() ->
     Original = os:getenv("BEAMTALK_COMPILER"),
     try
@@ -163,3 +178,19 @@ multiple_compiles() ->
     {ok, _, []} = beamtalk_compiler:compile_expression(<<"1 + 2">>, <<"m1">>, []),
     {ok, _, []} = beamtalk_compiler:compile_expression(<<"3 * 4">>, <<"m2">>, []),
     {ok, _, []} = beamtalk_compiler:compile_expression(<<"5 - 1">>, <<"m3">>, []).
+
+compile_file_workspace_mode() ->
+    Source = <<"Actor subclass: WsModeTest\n  value => 42">>,
+    {ok, Result} = beamtalk_compiler:compile(Source, #{workspace_mode => false}),
+    ?assert(is_map(Result)),
+    ?assert(is_binary(maps:get(core_erlang, Result))).
+
+compile_expression_class_def() ->
+    %% Inline class definition should return class_definition tuple
+    Source = <<"Actor subclass: InlineClassTest\n  value => 42">>,
+    Result = beamtalk_compiler:compile_expression(Source, <<"inline_test">>, []),
+    ?assertMatch({ok, class_definition, _}, Result).
+
+compiler_app_callbacks() ->
+    %% stop/1 returns ok
+    ?assertEqual(ok, beamtalk_compiler_app:stop(undefined)).

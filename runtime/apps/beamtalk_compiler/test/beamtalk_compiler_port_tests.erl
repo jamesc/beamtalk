@@ -103,3 +103,108 @@ compile_on_closed_port_returns_error_test() ->
     %% Calling compile on a closed port should return error, not crash BEAM
     Result = beamtalk_compiler_port:compile_expression(Port, <<"1">>, <<"t">>, []),
     ?assertMatch({error, _}, Result).
+
+%%% ---------------------------------------------------------------
+%%% handle_response/1 — ETF response parsing
+%%% ---------------------------------------------------------------
+
+handle_response_expression_ok_test() ->
+    Response = #{status => ok, core_erlang => <<"core">>, warnings => []},
+    ?assertEqual({ok, <<"core">>, []},
+                 beamtalk_compiler_port:handle_response(Response)).
+
+handle_response_expression_with_warnings_test() ->
+    Response = #{status => ok, core_erlang => <<"core">>,
+                 warnings => [<<"unused var">>]},
+    ?assertEqual({ok, <<"core">>, [<<"unused var">>]},
+                 beamtalk_compiler_port:handle_response(Response)).
+
+handle_response_class_definition_test() ->
+    Response = #{status => ok, kind => class_definition,
+                 core_erlang => <<"core">>, module_name => <<"mod">>,
+                 classes => [<<"Foo">>], warnings => []},
+    {ok, class_definition, Info} =
+        beamtalk_compiler_port:handle_response(Response),
+    ?assertEqual(<<"core">>, maps:get(core_erlang, Info)),
+    ?assertEqual(<<"mod">>, maps:get(module_name, Info)),
+    ?assertEqual([<<"Foo">>], maps:get(classes, Info)).
+
+handle_response_method_definition_test() ->
+    Response = #{status => ok, kind => method_definition,
+                 class_name => <<"Counter">>, selector => <<"increment">>,
+                 is_class_method => false, method_source => <<"src">>,
+                 warnings => []},
+    {ok, method_definition, Info} =
+        beamtalk_compiler_port:handle_response(Response),
+    ?assertEqual(<<"Counter">>, maps:get(class_name, Info)),
+    ?assertEqual(<<"increment">>, maps:get(selector, Info)),
+    ?assertEqual(false, maps:get(is_class_method, Info)).
+
+handle_response_error_test() ->
+    Response = #{status => error, diagnostics => [<<"err">>]},
+    ?assertEqual({error, [<<"err">>]},
+                 beamtalk_compiler_port:handle_response(Response)).
+
+handle_response_unexpected_test() ->
+    Response = #{bogus => true},
+    ?assertMatch({error, [<<"Unexpected compiler response">>]},
+                 beamtalk_compiler_port:handle_response(Response)).
+
+%%% ---------------------------------------------------------------
+%%% find_compiler_binary/0 — binary discovery paths
+%%% ---------------------------------------------------------------
+
+find_compiler_binary_returns_path_test() ->
+    Path = beamtalk_compiler_port:find_compiler_binary(),
+    ?assert(is_list(Path) orelse is_binary(Path)),
+    ?assert(filelib:is_regular(Path)).
+
+find_compiler_binary_env_override_test() ->
+    Original = os:getenv("BEAMTALK_COMPILER_PORT_BIN"),
+    try
+        %% Point to the real binary via env var
+        RealPath = beamtalk_compiler_port:find_compiler_binary(),
+        os:putenv("BEAMTALK_COMPILER_PORT_BIN", RealPath),
+        Found = beamtalk_compiler_port:find_compiler_binary(),
+        ?assertEqual(RealPath, Found)
+    after
+        case Original of
+            false -> os:unsetenv("BEAMTALK_COMPILER_PORT_BIN");
+            Value -> os:putenv("BEAMTALK_COMPILER_PORT_BIN", Value)
+        end
+    end.
+
+find_compiler_binary_invalid_env_fallback_test() ->
+    Original = os:getenv("BEAMTALK_COMPILER_PORT_BIN"),
+    try
+        os:putenv("BEAMTALK_COMPILER_PORT_BIN", "/nonexistent/binary"),
+        %% Should fall back to dev path / PATH search
+        Path = beamtalk_compiler_port:find_compiler_binary(),
+        ?assert(filelib:is_regular(Path))
+    after
+        case Original of
+            false -> os:unsetenv("BEAMTALK_COMPILER_PORT_BIN");
+            Value -> os:putenv("BEAMTALK_COMPILER_PORT_BIN", Value)
+        end
+    end.
+
+find_compiler_binary_empty_env_fallback_test() ->
+    Original = os:getenv("BEAMTALK_COMPILER_PORT_BIN"),
+    try
+        os:putenv("BEAMTALK_COMPILER_PORT_BIN", ""),
+        Path = beamtalk_compiler_port:find_compiler_binary(),
+        ?assert(filelib:is_regular(Path))
+    after
+        case Original of
+            false -> os:unsetenv("BEAMTALK_COMPILER_PORT_BIN");
+            Value -> os:putenv("BEAMTALK_COMPILER_PORT_BIN", Value)
+        end
+    end.
+
+%%% ---------------------------------------------------------------
+%%% find_project_root/0 — project root discovery
+%%% ---------------------------------------------------------------
+
+find_project_root_finds_cargo_toml_test() ->
+    Root = beamtalk_compiler_port:find_project_root(),
+    ?assert(filelib:is_regular(filename:join(Root, "Cargo.toml"))).

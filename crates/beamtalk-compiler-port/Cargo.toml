@@ -23,5 +23,9 @@ beamtalk-core = { workspace = true }
 # why: encode/decode Erlang External Term Format for compiler port protocol
 eetf = "0.11"
 
+[dev-dependencies]
+# why: property-based testing for compiler port robustness (ADR 0011 Phase 4)
+proptest = { workspace = true }
+
 [lints]
 workspace = true

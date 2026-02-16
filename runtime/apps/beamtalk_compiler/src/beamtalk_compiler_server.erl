@@ -31,6 +31,15 @@
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
+-ifdef(TEST).
+-export([
+    handle_compile_response/1,
+    handle_diagnostics_response/1,
+    handle_version_response/1,
+    flush_port_messages/1
+]).
+-endif.
+
 -record(state, {
     port :: port() | undefined
 }).

@@ -21,7 +21,7 @@ pub use extractor::ClassInfo;
 #[allow(unused_imports)]
 pub use extractor::MethodInfo;
 
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::collections::HashMap;
 use std::fs;
@@ -29,8 +29,33 @@ use tracing::{info, instrument};
 
 use extractor::{collect_inherited_methods, find_source_files, parse_class_info};
 use renderer::{
-    build_sidebar_html, write_class_page, write_css, write_index_page, write_search_js,
+    build_sidebar_html, generate_prose_docs, write_class_page, write_css, write_index_page,
+    write_search_js, write_site_landing_page,
 };
+
+/// Prose documentation pages to render from the docs/ directory.
+const PROSE_PAGES: &[(&str, &str, &str)] = &[
+    (
+        "beamtalk-language-features.md",
+        "language-features.html",
+        "Language Features",
+    ),
+    (
+        "beamtalk-principles.md",
+        "principles.html",
+        "Design Principles",
+    ),
+    (
+        "beamtalk-architecture.md",
+        "architecture.html",
+        "Architecture",
+    ),
+    (
+        "beamtalk-agent-native-development.md",
+        "agent-native-development.html",
+        "Agent-Native Development",
+    ),
+];
 
 /// Generate HTML API documentation.
 ///
@@ -42,10 +67,59 @@ pub fn run(path: &str, output_dir: &str) -> Result<()> {
     let source_path = Utf8PathBuf::from(path);
     let output_path = Utf8PathBuf::from(output_dir);
 
+    generate_api_docs(&source_path, &output_path, "")?;
+
+    Ok(())
+}
+
+/// Generate the full documentation site with landing page, API docs, and prose pages.
+///
+/// Site structure:
+/// - `/` — Landing page with navigation
+/// - `/apidocs/` — API reference (class docs from `.bt` files)
+/// - `/docs/` — Prose documentation pages rendered from markdown
+#[instrument(skip_all, fields(lib_path = %lib_path, docs_path = %docs_path, output = %output_dir))]
+pub fn run_site(lib_path: &str, docs_path: &str, output_dir: &str) -> Result<()> {
+    info!("Generating documentation site");
+    let output_path = Utf8PathBuf::from(output_dir);
+
+    // Create output directory
+    fs::create_dir_all(&output_path)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to create output directory '{output_path}'"))?;
+
+    // 1. Generate API docs in apidocs/ subdirectory
+    let lib_source = Utf8PathBuf::from(lib_path);
+    let apidocs_path = output_path.join("apidocs");
+    generate_api_docs(&lib_source, &apidocs_path, "../")?;
+
+    // 2. Generate prose docs in docs/ subdirectory
+    let docs_source = Utf8PathBuf::from(docs_path);
+    generate_prose_docs(&docs_source, &output_path, PROSE_PAGES)?;
+
+    // 3. Generate landing page
+    write_site_landing_page(&output_path, PROSE_PAGES)?;
+
+    // 4. Write shared CSS to root (prose pages and landing page reference it)
+    write_css(&output_path)?;
+
+    println!("  Site root: {output_path}/");
+    Ok(())
+}
+
+/// Generate API reference docs into the given output directory.
+///
+/// `asset_prefix` is prepended to cross-site navigation links in the sidebar
+/// (e.g., `"../"` when generating into a subdirectory like `apidocs/`).
+fn generate_api_docs(
+    source_path: &Utf8Path,
+    output_path: &Utf8Path,
+    asset_prefix: &str,
+) -> Result<()> {
     // Find .bt source files
-    let source_files = find_source_files(&source_path)?;
+    let source_files = find_source_files(source_path)?;
     if source_files.is_empty() {
-        miette::bail!("No .bt source files found in '{path}'");
+        miette::bail!("No .bt source files found in '{}'", source_path.as_str());
     }
 
     println!("Generating docs for {} file(s)...", source_files.len());
@@ -53,7 +127,7 @@ pub fn run(path: &str, output_dir: &str) -> Result<()> {
     // Parse all source files to extract class info
     let mut classes = Vec::new();
     for file in &source_files {
-        if let Some(class_info) = parse_class_info(&source_path, file)? {
+        if let Some(class_info) = parse_class_info(source_path, file)? {
             classes.push(class_info);
         }
     }
@@ -72,27 +146,27 @@ pub fn run(path: &str, output_dir: &str) -> Result<()> {
         classes.iter().map(|c| (c.name.clone(), c)).collect();
 
     // Create output directory
-    fs::create_dir_all(&output_path)
+    fs::create_dir_all(output_path)
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to create output directory '{output_path}'"))?;
 
     // Generate CSS and JS assets
-    write_css(&output_path)?;
-    write_search_js(&output_path, &classes)?;
+    write_css(output_path)?;
+    write_search_js(output_path, &classes)?;
 
     // Build sidebar HTML (shared across all pages)
-    let sidebar_html = build_sidebar_html(&classes);
+    let sidebar_html = build_sidebar_html(&classes, asset_prefix);
 
     // Generate index page (include README.md from source dir if present, per ADR 0008)
     let readme_path = source_path.join("README.md");
     let readme = fs::read_to_string(&readme_path).ok();
-    write_index_page(&output_path, &classes, readme.as_deref(), &sidebar_html)?;
+    write_index_page(output_path, &classes, readme.as_deref(), &sidebar_html)?;
 
     // Generate per-class pages
     for class in &classes {
         let inherited = collect_inherited_methods(class, &hierarchy, &methods_by_class);
         write_class_page(
-            &output_path,
+            output_path,
             class,
             &inherited,
             &methods_by_class,
@@ -367,5 +441,70 @@ mod tests {
         let child_page = fs::read_to_string(out_dir.join("Child.html")).unwrap();
         // Should link to Parent
         assert!(child_page.contains("Parent.html"));
+    }
+
+    #[test]
+    fn test_generate_site() {
+        let temp = TempDir::new().unwrap();
+        let lib_dir = Utf8PathBuf::from_path_buf(temp.path().join("lib")).unwrap();
+        let docs_dir = Utf8PathBuf::from_path_buf(temp.path().join("docs")).unwrap();
+        let out_dir = Utf8PathBuf::from_path_buf(temp.path().join("site")).unwrap();
+        fs::create_dir_all(&lib_dir).unwrap();
+        fs::create_dir_all(&docs_dir).unwrap();
+
+        fs::write(
+            lib_dir.join("Counter.bt"),
+            "/// A counter.\nActor subclass: Counter\n  increment => 1\n",
+        )
+        .unwrap();
+        fs::write(
+            docs_dir.join("beamtalk-language-features.md"),
+            "# Language Features\n\nBeamtalk syntax overview.",
+        )
+        .unwrap();
+        fs::write(
+            docs_dir.join("beamtalk-principles.md"),
+            "# Design Principles\n\nCore philosophy.",
+        )
+        .unwrap();
+        fs::write(
+            docs_dir.join("beamtalk-architecture.md"),
+            "# Architecture\n\nCompiler pipeline.",
+        )
+        .unwrap();
+        fs::write(
+            docs_dir.join("beamtalk-agent-native-development.md"),
+            "# Agent-Native Development\n\nAI agents.",
+        )
+        .unwrap();
+
+        run_site(lib_dir.as_str(), docs_dir.as_str(), out_dir.as_str()).unwrap();
+
+        // Landing page exists
+        let landing = fs::read_to_string(out_dir.join("index.html")).unwrap();
+        assert!(landing.contains("Beamtalk"));
+        assert!(landing.contains("apidocs/"));
+        assert!(landing.contains("docs/language-features.html"));
+
+        // API docs in subdirectory
+        assert!(out_dir.join("apidocs/index.html").exists());
+        assert!(out_dir.join("apidocs/Counter.html").exists());
+        assert!(out_dir.join("apidocs/style.css").exists());
+
+        // API docs have cross-navigation back to home
+        let api_index = fs::read_to_string(out_dir.join("apidocs/index.html")).unwrap();
+        assert!(api_index.contains("../"));
+
+        // Prose docs
+        assert!(out_dir.join("docs/language-features.html").exists());
+        assert!(out_dir.join("docs/principles.html").exists());
+
+        let prose = fs::read_to_string(out_dir.join("docs/language-features.html")).unwrap();
+        assert!(prose.contains("Language Features"));
+        assert!(prose.contains("../style.css"));
+        assert!(prose.contains("../apidocs/"));
+
+        // Root CSS
+        assert!(out_dir.join("style.css").exists());
     }
 }
