@@ -22,7 +22,7 @@ abstract Object subclass: Boolean
   /// true isBoolean         // => true
   /// false isBoolean        // => true
   /// ```
-  isBoolean => true
+  isBoolean -> Boolean => true
 
   /// Logical AND with lazy evaluation. Evaluates `aBlock` only if receiver is true.
   ///
@@ -31,7 +31,7 @@ abstract Object subclass: Boolean
   /// true and: [false]      // => false
   /// false and: [true]      // => false
   /// ```
-  and: aBlock => self ifTrue: aBlock ifFalse: [false]
+  and: aBlock: Block -> Boolean => self ifTrue: aBlock ifFalse: [false]
 
   /// Logical OR with lazy evaluation. Evaluates `aBlock` only if receiver is false.
   ///
@@ -40,7 +40,7 @@ abstract Object subclass: Boolean
   /// true or: [false]       // => true
   /// false or: [true]       // => true
   /// ```
-  or: aBlock => self ifTrue: [true] ifFalse: aBlock
+  or: aBlock: Block -> Boolean => self ifTrue: [true] ifFalse: aBlock
 
   /// Logical XOR. Returns true if exactly one of receiver and `other` is true.
   ///
@@ -49,4 +49,4 @@ abstract Object subclass: Boolean
   /// true xor: false        // => true
   /// false xor: false       // => false
   /// ```
-  xor: other => self ifTrue: [other not] ifFalse: [other]
+  xor: other: Boolean -> Boolean => self ifTrue: [other not] ifFalse: [other]

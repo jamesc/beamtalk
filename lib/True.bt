@@ -20,7 +20,7 @@ sealed Boolean subclass: True
   /// ```beamtalk
   /// true ifTrue: ["yes"] ifFalse: ["no"]   // => "yes"
   /// ```
-  ifTrue: trueBlock ifFalse: falseBlock => trueBlock value
+  ifTrue: trueBlock: Block ifFalse: falseBlock: Block => trueBlock value
 
   /// If true, evaluate `trueBlock`. Returns block result.
   ///
@@ -28,7 +28,7 @@ sealed Boolean subclass: True
   /// ```beamtalk
   /// true ifTrue: ["yes"]       // => "yes"
   /// ```
-  ifTrue: trueBlock => trueBlock value
+  ifTrue: trueBlock: Block => trueBlock value
 
   /// If false, evaluate `falseBlock`. Returns self (true) since condition is true.
   ///
@@ -36,7 +36,7 @@ sealed Boolean subclass: True
   /// ```beamtalk
   /// true ifFalse: ["no"]       // => true
   /// ```
-  ifFalse: falseBlock => self
+  ifFalse: falseBlock: Block => self
 
   /// Logical NOT. Returns false.
   ///
@@ -44,7 +44,7 @@ sealed Boolean subclass: True
   /// ```beamtalk
   /// true not                   // => false
   /// ```
-  not => false
+  not -> Boolean => false
 
   /// Returns true.
   ///
@@ -52,7 +52,7 @@ sealed Boolean subclass: True
   /// ```beamtalk
   /// true isTrue                // => true
   /// ```
-  isTrue => true
+  isTrue -> Boolean => true
 
   /// Returns false.
   ///
@@ -60,7 +60,7 @@ sealed Boolean subclass: True
   /// ```beamtalk
   /// true isFalse               // => false
   /// ```
-  isFalse => false
+  isFalse -> Boolean => false
 
   /// Human-readable description of the receiver.
   ///
@@ -68,7 +68,7 @@ sealed Boolean subclass: True
   /// ```beamtalk
   /// true describe              // => "true"
   /// ```
-  describe => "true"
+  describe -> String => "true"
 
   /// Return a developer-readable string representation.
   ///
@@ -76,4 +76,4 @@ sealed Boolean subclass: True
   /// ```beamtalk
   /// true printString           // => "true"
   /// ```
-  printString => "true"
+  printString -> String => "true"
