@@ -182,8 +182,8 @@ impl TypeChecker {
 
     /// Infer the type of an expression, emitting diagnostics for invalid sends.
     ///
-    /// `in_abstract_method` suppresses warnings for `self` sends in abstract classes,
-    /// since subclasses may provide the missing methods.
+    /// `in_abstract_method` suppresses warnings for `self` class-side sends in
+    /// abstract classes, since subclasses may provide class-side methods.
     #[allow(clippy::too_many_lines)] // one arm per AST variant — irreducible
     fn infer_expr(
         &mut self,
@@ -275,7 +275,7 @@ impl TypeChecker {
                                     hierarchy,
                                 );
                             }
-                        } else if !in_abstract_method || !Self::is_self_receiver(receiver) {
+                        } else {
                             self.check_instance_selector(
                                 class_name,
                                 &selector_name,
@@ -437,12 +437,7 @@ impl TypeChecker {
                 return InferredType::Dynamic;
             }
 
-            // Skip checking self sends in abstract class method bodies —
-            // subclasses may provide the missing methods (template method pattern)
-            let skip = in_abstract_method && Self::is_self_receiver(receiver);
-            if !skip {
-                self.check_instance_selector(class_name, &selector_name, span, hierarchy);
-            }
+            self.check_instance_selector(class_name, &selector_name, span, hierarchy);
 
             // Infer return type from method info
             if let Some(method) = hierarchy.find_method(class_name, &selector_name) {
