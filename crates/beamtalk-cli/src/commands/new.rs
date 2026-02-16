@@ -27,12 +27,12 @@ pub fn new_project(name: &str) -> Result<()> {
     create_project_structure(&project_path, name)
         .wrap_err_with(|| format!("Failed to create project '{name}'"))?;
 
-    println!("Created beamtalk project '{name}'");
+    println!("Created package '{name}'");
     println!();
     println!("Next steps:");
     println!("  cd {name}");
     println!("  beamtalk build");
-    println!("  beamtalk run");
+    println!("  beamtalk repl");
 
     Ok(())
 }
@@ -43,6 +43,14 @@ fn create_project_structure(path: &Utf8Path, name: &str) -> Result<()> {
     fs::create_dir_all(path.join("src"))
         .into_diagnostic()
         .wrap_err("Failed to create src directory")?;
+
+    fs::create_dir_all(path.join("test"))
+        .into_diagnostic()
+        .wrap_err("Failed to create test directory")?;
+
+    fs::create_dir_all(path.join(".github"))
+        .into_diagnostic()
+        .wrap_err("Failed to create .github directory")?;
 
     // Create beamtalk.toml
     let toml_content = format!(
@@ -62,14 +70,14 @@ version = "0.1.0"
 
     // Create main.bt
     let main_content = format!(
-        r"// Copyright 2026 {name} authors
+        r#"// Copyright 2026 {name} authors
 // SPDX-License-Identifier: Apache-2.0
 
 // Main entry point for {name}
 main := [
-    Transcript show: 'Hello from {name}!'; cr.
+    Transcript show: "Hello from {name}!"; cr.
 ]
-"
+"#
     );
     fs::write(path.join("src").join("main.bt"), main_content)
         .into_diagnostic()
@@ -90,7 +98,7 @@ beamtalk build
 ## Running
 
 ```bash
-beamtalk run
+beamtalk repl
 ```
 "
     );
@@ -100,7 +108,6 @@ beamtalk run
 
     // Create .gitignore
     let gitignore_content = r"# Build outputs
-/build/
 /_build/
 *.beam
 *.core
@@ -115,7 +122,123 @@ beamtalk run
         .into_diagnostic()
         .wrap_err("Failed to create .gitignore")?;
 
+    // Create AGENTS.md
+    write_agents_md(path, name)?;
+
+    // Create .github/copilot-instructions.md
+    write_copilot_instructions(path, name)?;
+
+    // Create .mcp.json
+    let mcp_content = "{\n  \"mcpServers\": {}\n}\n";
+    fs::write(path.join(".mcp.json"), mcp_content)
+        .into_diagnostic()
+        .wrap_err("Failed to create .mcp.json")?;
+
     Ok(())
+}
+
+fn write_agents_md(path: &Utf8Path, name: &str) -> Result<()> {
+    let content = format!(
+        r#"# {name} — Agent Guide
+
+## Project Structure
+
+```
+{name}/
+├── beamtalk.toml    # Package manifest
+├── src/             # Source files (.bt)
+│   └── main.bt      # Entry point
+├── test/            # BUnit test files
+├── _build/          # Build output (generated)
+├── AGENTS.md        # This file
+├── .github/
+│   └── copilot-instructions.md
+├── .mcp.json        # MCP server config
+├── README.md
+└── .gitignore
+```
+
+## Build & Run
+
+```bash
+beamtalk build       # Compile to BEAM bytecode
+beamtalk repl        # Interactive development (auto-loads package)
+beamtalk test        # Run BUnit tests
+```
+
+## Beamtalk Syntax Basics
+
+```beamtalk
+// Variables
+x := 42
+name := "hello"
+
+// Message sends
+x factorial              // unary
+3 + 4                    // binary
+list at: 1 put: "value"  // keyword
+
+// Blocks (closures)
+square := [:x | x * x]
+square value: 5          // => 25
+
+// Classes
+Object subclass: Counter
+  state: count = 0
+
+  increment => self.count := self.count + 1
+  count => self.count
+```
+
+## Language Documentation
+
+- Language features: https://beamtalk.dev/docs/language-features
+- Syntax rationale: https://beamtalk.dev/docs/syntax-rationale
+- Examples: see `src/` directory
+"#
+    );
+    fs::write(path.join("AGENTS.md"), content)
+        .into_diagnostic()
+        .wrap_err("Failed to create AGENTS.md")
+}
+
+fn write_copilot_instructions(path: &Utf8Path, name: &str) -> Result<()> {
+    let content = format!(
+        r"# Copilot Instructions for {name}
+
+This is a [Beamtalk](https://beamtalk.dev) project that compiles to the BEAM virtual machine.
+
+## Key Conventions
+
+- Source files use `.bt` extension and live in `src/`
+- Tests use BUnit (TestCase subclasses) and live in `test/`
+- Build output goes to `_build/` (gitignored)
+- Package manifest is `beamtalk.toml`
+
+## Beamtalk Syntax
+
+- Smalltalk-inspired message passing: `object message`, `object message: arg`
+- Blocks are closures: `[:x | x + 1]`
+- Use `//` for line comments
+- Implicit returns (last expression is the return value)
+- Use `^` only for early returns, never on the last expression
+- Newlines separate statements (no periods)
+
+## Build Commands
+
+```bash
+beamtalk build    # Compile the project
+beamtalk repl     # Start interactive REPL
+beamtalk test     # Run tests
+```
+"
+    );
+    fs::write(
+        path.join(".github").join("copilot-instructions.md"),
+        content,
+    )
+    .into_diagnostic()
+    .wrap_err("Failed to create .github/copilot-instructions.md")
 }
 
 #[cfg(test)]
@@ -259,8 +382,11 @@ mod tests {
         assert!(gitignore_path.exists());
 
         let content = fs::read_to_string(gitignore_path).unwrap();
-        assert!(content.contains("/build/"));
         assert!(content.contains("/_build/"));
+        assert!(
+            !content.contains("/build/"),
+            ".gitignore should not contain /build/"
+        );
         assert!(content.contains("*.beam"));
         assert!(content.contains("*.core"));
     }
@@ -344,5 +470,100 @@ mod tests {
 
         // Restore directory
         std::env::set_current_dir(original_dir).unwrap();
+    }
+
+    /// Uses `#[serial(cwd)]` because it changes the current working directory
+    /// (process-global state) using `std::env::set_current_dir`.
+    #[test]
+    #[serial(cwd)]
+    fn test_new_project_creates_test_directory() {
+        let temp = TempDir::new().unwrap();
+        let project_name = "test_project_testdir";
+
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp.path()).unwrap();
+
+        new_project(project_name).unwrap();
+
+        std::env::set_current_dir(&original_dir).unwrap();
+
+        let test_path = temp.path().join(project_name).join("test");
+        assert!(test_path.exists());
+        assert!(test_path.is_dir());
+    }
+
+    /// Uses `#[serial(cwd)]` because it changes the current working directory
+    /// (process-global state) using `std::env::set_current_dir`.
+    #[test]
+    #[serial(cwd)]
+    fn test_new_project_creates_agents_md() {
+        let temp = TempDir::new().unwrap();
+        let project_name = "test_project_agents";
+
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp.path()).unwrap();
+
+        new_project(project_name).unwrap();
+
+        std::env::set_current_dir(&original_dir).unwrap();
+
+        let agents_path = temp.path().join(project_name).join("AGENTS.md");
+        assert!(agents_path.exists());
+
+        let content = fs::read_to_string(agents_path).unwrap();
+        assert!(content.contains(project_name));
+        assert!(content.contains("beamtalk build"));
+        assert!(content.contains("beamtalk repl"));
+        assert!(content.contains("Syntax"));
+    }
+
+    /// Uses `#[serial(cwd)]` because it changes the current working directory
+    /// (process-global state) using `std::env::set_current_dir`.
+    #[test]
+    #[serial(cwd)]
+    fn test_new_project_creates_copilot_instructions() {
+        let temp = TempDir::new().unwrap();
+        let project_name = "test_project_copilot";
+
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp.path()).unwrap();
+
+        new_project(project_name).unwrap();
+
+        std::env::set_current_dir(&original_dir).unwrap();
+
+        let copilot_path = temp
+            .path()
+            .join(project_name)
+            .join(".github")
+            .join("copilot-instructions.md");
+        assert!(copilot_path.exists());
+
+        let content = fs::read_to_string(copilot_path).unwrap();
+        assert!(content.contains(project_name));
+        assert!(content.contains("Beamtalk"));
+        assert!(content.contains("beamtalk build"));
+    }
+
+    /// Uses `#[serial(cwd)]` because it changes the current working directory
+    /// (process-global state) using `std::env::set_current_dir`.
+    #[test]
+    #[serial(cwd)]
+    fn test_new_project_creates_mcp_json() {
+        let temp = TempDir::new().unwrap();
+        let project_name = "test_project_mcp";
+
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp.path()).unwrap();
+
+        new_project(project_name).unwrap();
+
+        std::env::set_current_dir(&original_dir).unwrap();
+
+        let mcp_path = temp.path().join(project_name).join(".mcp.json");
+        assert!(mcp_path.exists());
+
+        let content = fs::read_to_string(mcp_path).unwrap();
+        assert!(content.contains("mcpServers"));
     }
 }

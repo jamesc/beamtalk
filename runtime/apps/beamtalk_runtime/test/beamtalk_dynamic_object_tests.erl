@@ -207,3 +207,114 @@ dispatch_empty_methods_map_test() ->
     },
     Self = #beamtalk_object{class = 'TestClass', class_mod = beamtalk_dynamic_object, pid = self()},
     {error, _} = beamtalk_dynamic_object:dispatch('anything', [], Self, Fields).
+
+%%====================================================================
+%% BT-623: Additional coverage tests
+%%====================================================================
+
+%% Test handle_cast async dispatch with future resolution
+handle_cast_async_dispatch_test() ->
+    Methods = #{
+        'getValue' => fun(_Self, [], State) ->
+            {reply, maps:get(value, State, 0), State}
+        end
+    },
+    InitState = test_init_state('TestClass', Methods, #{value => 77}),
+    {ok, Pid} = beamtalk_dynamic_object:start_link('TestClass', InitState),
+    %% Start a future to receive the result
+    FuturePid = beamtalk_future:new(),
+    gen_server:cast(Pid, {'getValue', [], FuturePid}),
+    Result = beamtalk_future:await(FuturePid, 1000),
+    ?assertEqual(77, Result),
+    gen_server:stop(Pid).
+
+%% Test handle_cast with error → future rejection
+handle_cast_error_rejects_future_test() ->
+    Methods = #{
+        'crasher' => fun(_Self, [], _State) ->
+            error(intentional_crash)
+        end
+    },
+    InitState = test_init_state('TestClass', Methods),
+    {ok, Pid} = beamtalk_dynamic_object:start_link('TestClass', InitState),
+    FuturePid = beamtalk_future:new(),
+    gen_server:cast(Pid, {'crasher', [], FuturePid}),
+    %% The future should be rejected — await throws {future_rejected, Reason}
+    ?assertThrow({future_rejected, #beamtalk_error{kind = type_error}},
+        beamtalk_future:await(FuturePid, 1000)),
+    gen_server:stop(Pid).
+
+%% Test handle_cast noreply resolves future with nil
+handle_cast_noreply_resolves_nil_test() ->
+    Methods = #{
+        'reset' => fun(_Self, [], State) ->
+            {noreply, maps:put(value, 0, State)}
+        end
+    },
+    InitState = test_init_state('TestClass', Methods, #{value => 42}),
+    {ok, Pid} = beamtalk_dynamic_object:start_link('TestClass', InitState),
+    FuturePid = beamtalk_future:new(),
+    gen_server:cast(Pid, {'reset', [], FuturePid}),
+    Result = beamtalk_future:await(FuturePid, 1000),
+    ?assertEqual(nil, Result),
+    gen_server:stop(Pid).
+
+%% Test start_link/3 with registered name
+start_link_registered_name_test() ->
+    InitState = test_init_state('TestClass', #{}),
+    {ok, Pid} = beamtalk_dynamic_object:start_link(
+        {local, test_registered_dynamic}, 'TestClass', InitState),
+    ?assert(is_process_alive(Pid)),
+    ?assertEqual(Pid, whereis(test_registered_dynamic)),
+    gen_server:stop(Pid).
+
+%% Test state mutation isolation between calls
+state_mutation_isolation_test() ->
+    Methods = #{
+        'increment' => fun(_Self, [], State) ->
+            V = maps:get(value, State, 0),
+            NewState = maps:put(value, V + 1, State),
+            {reply, V + 1, NewState}
+        end,
+        'getValue' => fun(_Self, [], State) ->
+            {reply, maps:get(value, State, 0), State}
+        end
+    },
+    InitState = test_init_state('TestClass', Methods, #{value => 0}),
+    {ok, Pid} = beamtalk_dynamic_object:start_link('TestClass', InitState),
+    ?assertEqual(1, gen_server:call(Pid, {'increment', []})),
+    ?assertEqual(2, gen_server:call(Pid, {'increment', []})),
+    ?assertEqual(2, gen_server:call(Pid, {'getValue', []})),
+    gen_server:stop(Pid).
+
+%% Test doesNotUnderstand handler with multiple args
+dnu_handler_with_args_test() ->
+    Methods = #{
+        'doesNotUnderstand:args:' => fun(_Self, [Sel, Args], State) ->
+            {reply, {caught, Sel, length(Args)}, State}
+        end
+    },
+    Fields = test_init_state('TestClass', Methods),
+    Self = #beamtalk_object{class = 'TestClass', class_mod = beamtalk_dynamic_object, pid = self()},
+    ?assertEqual({reply, {caught, 'add:to:', 2}, Fields},
+                 beamtalk_dynamic_object:dispatch('add:to:', [1, 2], Self, Fields)).
+
+%% Test handle_call noreply returns nil
+handle_call_noreply_returns_nil_test() ->
+    Methods = #{
+        'sideEffect' => fun(_Self, [], State) ->
+            {noreply, maps:put(touched, true, State)}
+        end
+    },
+    InitState = test_init_state('TestClass', Methods),
+    {ok, Pid} = beamtalk_dynamic_object:start_link('TestClass', InitState),
+    Result = gen_server:call(Pid, {'sideEffect', []}),
+    ?assertEqual(nil, Result),
+    gen_server:stop(Pid).
+
+%% Test code_change delegates to hot_reload
+code_change_test() ->
+    InitState = test_init_state('TestClass', #{}),
+    {ok, State} = beamtalk_dynamic_object:init({'TestClass', InitState}),
+    %% code_change should delegate and return {ok, State}
+    {ok, _} = beamtalk_dynamic_object:code_change(undefined, State, []).

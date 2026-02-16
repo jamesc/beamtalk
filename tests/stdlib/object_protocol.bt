@@ -116,3 +116,35 @@ nil yourself
 // Hash values are non-deterministic, keep wildcard
 "hello" hash
 // => _
+
+// ===========================================================================
+// respondsTo: — method existence check (BT-623)
+// ===========================================================================
+
+// Integers respond to +
+42 respondsTo: #+
+// => true
+
+// Integers respond to class (inherited from Object)
+42 respondsTo: #class
+// => true
+
+// Integers do not respond to nonsense
+42 respondsTo: #totallyFakeMethod
+// => false
+
+// Strings respond to size
+"hello" respondsTo: #size
+// => true
+
+// Strings do not respond to nonsense
+"hello" respondsTo: #totallyFakeMethod
+// => false
+
+// nil responds to isNil
+nil respondsTo: #isNil
+// => true
+
+// Booleans respond to ifTrue:ifFalse:
+true respondsTo: #'ifTrue:ifFalse:'
+// => true
