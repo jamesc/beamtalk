@@ -65,9 +65,9 @@ impl CoreErlangGenerator {
             .first()
             .map(|class| spec_codegen::generate_class_specs(class, false))
             .unwrap_or_default();
-        let spec_suffix = spec_codegen::format_spec_attributes(&spec_attrs)
-            .map(|s| format!(",\n     {s}"))
-            .unwrap_or_default();
+        let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
+            .map(|s| docvec![",\n     ", s])
+            .unwrap_or(Document::Nil);
 
         // Module header with exports and attributes
         let module_header = if has_classes {
@@ -77,10 +77,10 @@ impl CoreErlangGenerator {
                     self.module_name
                 ),
                 "\n",
-                format!(
-                    "  attributes ['behaviour' = ['gen_server'], \
-                     'on_load' = [{{'register_class', 0}}]{spec_suffix}]"
-                ),
+                "  attributes ['behaviour' = ['gen_server'], \
+                 'on_load' = [{'register_class', 0}]",
+                spec_suffix,
+                "]",
                 "\n",
             ]
         } else {
@@ -90,7 +90,9 @@ impl CoreErlangGenerator {
                     self.module_name
                 ),
                 "\n",
-                format!("  attributes ['behaviour' = ['gen_server']{spec_suffix}]"),
+                "  attributes ['behaviour' = ['gen_server']",
+                spec_suffix,
+                "]",
                 "\n",
             ]
         };
