@@ -100,6 +100,11 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
     Ok(())
 }
 
+/// Find all `.bt` source files at the given path.
+///
+/// If `path` is a file, returns it (must have `.bt` extension).
+/// If `path` is a directory, searches `src/` subdirectory first, falling back
+/// to the directory itself.
 fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
     let mut files = Vec::new();
 
@@ -137,6 +142,7 @@ fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
     Ok(files)
 }
 
+/// Compile a single `.bt` source file to Core Erlang, printing progress.
 fn compile_file(
     path: &Utf8Path,
     module_name: &str,

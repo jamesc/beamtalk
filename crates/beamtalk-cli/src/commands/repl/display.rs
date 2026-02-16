@@ -14,6 +14,7 @@ use crate::paths::beamtalk_dir;
 
 use super::color;
 
+/// Return the path to the REPL history file, creating the parent directory if needed.
 pub(super) fn history_path() -> Result<PathBuf> {
     let dir = beamtalk_dir()?;
     fs::create_dir_all(&dir).into_diagnostic()?;

@@ -9,7 +9,9 @@ use ecow::EcoString;
 /// A semantic error discovered during analysis.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemanticError {
+    /// The category of semantic error.
     pub kind: SemanticErrorKind,
+    /// Source location where the error was detected.
     pub span: Span,
 }
 
@@ -17,22 +19,39 @@ pub struct SemanticError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SemanticErrorKind {
     /// Variable referenced before definition.
-    UndefinedVariable { name: EcoString },
+    UndefinedVariable {
+        /// The undefined variable name.
+        name: EcoString,
+    },
 
     /// Variable assigned to but never read.
-    UnusedVariable { name: EcoString },
+    UnusedVariable {
+        /// The unused variable name.
+        name: EcoString,
+    },
 
     /// Captured variable mutated in block.
-    MutatedCapture { name: EcoString },
+    MutatedCapture {
+        /// The captured variable name that was mutated.
+        name: EcoString,
+    },
 
     /// Block escapes but has unknown context.
     EscapingBlockUnknownContext,
 
     /// Multiple assignments to same immutable variable.
-    MultipleAssignment { name: EcoString },
+    MultipleAssignment {
+        /// The variable name that was assigned more than once.
+        name: EcoString,
+    },
 
     /// Variable bound multiple times in the same pattern.
-    DuplicatePatternVariable { name: EcoString, first_span: Span },
+    DuplicatePatternVariable {
+        /// The duplicated variable name.
+        name: EcoString,
+        /// Source location of the first binding of this variable.
+        first_span: Span,
+    },
 
     /// Method expects a symbol literal argument but received something else.
     ///

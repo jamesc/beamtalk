@@ -205,34 +205,52 @@ fn compile_stdlib_file(
 /// and the generated builtins module.
 #[allow(clippy::struct_field_names)] // domain names like class_name match the domain model
 struct ClassMeta {
+    /// Erlang module name (e.g., `bt@stdlib@integer`).
     module_name: String,
+    /// Beamtalk class name (e.g., `Integer`).
     class_name: String,
+    /// Name of the superclass, or `"none"` for root classes.
     superclass_name: String,
+    /// Whether the class is sealed (cannot be subclassed).
     is_sealed: bool,
+    /// Whether the class is abstract (cannot be instantiated directly).
     is_abstract: bool,
+    /// Instance state (field) names declared in the class.
     state: Vec<String>,
+    /// Instance method signatures.
     methods: Vec<MethodMeta>,
+    /// Class-side method signatures.
     class_methods: Vec<MethodMeta>,
+    /// Class variable names.
     class_variables: Vec<String>,
 }
 
 /// Metadata for a single method, extracted from the AST.
 struct MethodMeta {
+    /// Message selector (e.g., `"increment"` or `"add:"`).
     selector: String,
+    /// Number of arguments the method accepts.
     arity: usize,
+    /// Method dispatch kind (primary, before, after, around).
     kind: MethodKindMeta,
+    /// Whether this method is sealed (cannot be overridden).
     is_sealed: bool,
 }
 
 /// Simplified method kind for code generation.
 enum MethodKindMeta {
+    /// Standard method dispatch.
     Primary,
+    /// Runs before the primary method.
     Before,
+    /// Runs after the primary method.
     After,
+    /// Wraps the primary method, controlling its execution.
     Around,
 }
 
 impl MethodKindMeta {
+    /// Convert from the AST method kind representation.
     fn from_ast(kind: beamtalk_core::ast::MethodKind) -> Self {
         match kind {
             beamtalk_core::ast::MethodKind::Primary => Self::Primary,
@@ -242,6 +260,7 @@ impl MethodKindMeta {
         }
     }
 
+    /// Return the Rust expression string for this kind (used in codegen output).
     fn to_rust_expr(&self) -> &'static str {
         match self {
             Self::Primary => "MethodKind::Primary",

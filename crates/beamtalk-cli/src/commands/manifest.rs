@@ -17,6 +17,7 @@ use std::fs;
 /// The top-level manifest structure parsed from `beamtalk.toml`.
 #[derive(Debug, Deserialize)]
 pub struct Manifest {
+    /// The `[package]` section of the manifest.
     pub package: PackageManifest,
 }
 
@@ -26,11 +27,15 @@ pub struct Manifest {
 /// Optional fields: `description`, `licenses`.
 #[derive(Debug, Deserialize)]
 pub struct PackageManifest {
+    /// Package name (used for module naming and OTP application ID).
     pub name: String,
+    /// Package version string (e.g. `"0.1.0"`).
     pub version: String,
+    /// Optional human-readable package description.
     #[serde(default)]
     #[allow(dead_code)] // Read by future phases (module naming, .app generation)
     pub description: Option<String>,
+    /// Optional SPDX license identifiers (e.g. `["Apache-2.0"]`).
     #[serde(default)]
     #[allow(dead_code)] // Read by future phases (.app generation, Hex publishing)
     pub licenses: Option<Vec<String>>,

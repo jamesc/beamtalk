@@ -37,6 +37,7 @@ pub fn new_project(name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Create the project directory structure with template files.
 fn create_project_structure(path: &Utf8Path, name: &str) -> Result<()> {
     // Create directories
     fs::create_dir_all(path.join("src"))

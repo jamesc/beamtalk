@@ -8,9 +8,13 @@
 use clap::{Parser, Subcommand};
 use miette::Result;
 
+/// BEAM bytecode compiler integration (Core Erlang → `.beam`).
 pub mod beam_compiler;
+/// CLI subcommand implementations (build, repl, test, etc.).
 mod commands;
+/// Diagnostic formatting for compiler errors and warnings.
 mod diagnostic;
+/// Shared path utilities (`~/.beamtalk/` and workspace directories).
 mod paths;
 
 /// Beamtalk: A Smalltalk-inspired language for the BEAM VM
@@ -22,6 +26,7 @@ struct Cli {
     command: Command,
 }
 
+/// Available CLI subcommands.
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Compile Beamtalk source files to BEAM bytecode
@@ -137,6 +142,7 @@ enum Command {
     },
 }
 
+/// CLI entry point: parse arguments and dispatch to the appropriate subcommand.
 fn main() -> Result<()> {
     // Initialize tracing subscriber only if RUST_LOG is explicitly set
     // This avoids stderr interference with E2E tests

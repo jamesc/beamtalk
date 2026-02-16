@@ -213,6 +213,7 @@ fn compile_fixture(fixture_path: &Utf8Path, output_dir: &Utf8Path) -> Result<Str
     Ok(module_name)
 }
 
+/// Derive a BEAM module name from a fixture file path (e.g. `counter.bt` → `bt@counter`).
 fn fixture_module_name(fixture_path: &Utf8Path) -> Result<String> {
     let stem = fixture_path
         .file_stem()
@@ -417,6 +418,7 @@ fn find_test_files(dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
     Ok(files)
 }
 
+/// Recursively collect `.bt` files from `dir` into `files`.
 fn find_test_files_recursive(dir: &Utf8Path, files: &mut Vec<Utf8PathBuf>) -> Result<()> {
     for entry in fs::read_dir(dir)
         .into_diagnostic()
@@ -548,9 +550,13 @@ fn discover_and_compile_doc_tests(
 
 /// Intermediate result from compiling doc tests for a single class.
 struct CompiledDocTestResult {
+    /// Human-readable name for test output (e.g., `IntegerDocTest`).
     display_name: String,
+    /// `EUnit` wrapper module name for this class's doc tests.
     eunit_module: String,
+    /// Path to the generated `.erl` wrapper file.
     erl_file: Utf8PathBuf,
+    /// Number of `// =>` assertions compiled into tests.
     assertion_count: usize,
 }
 

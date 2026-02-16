@@ -39,19 +39,32 @@ pub fn is_enabled() -> bool {
 }
 
 // ANSI color codes
+
+/// ANSI escape sequence to reset all text attributes.
 pub const RESET: &str = "\x1b[0m";
+/// ANSI escape sequence for bold text.
 pub const BOLD: &str = "\x1b[1m";
+/// ANSI escape sequence for dim (faint) text.
 pub const DIM: &str = "\x1b[2m";
 
+/// ANSI escape sequence for red foreground text.
 pub const RED: &str = "\x1b[31m";
+/// ANSI escape sequence for green foreground text.
 pub const GREEN: &str = "\x1b[32m";
+/// ANSI escape sequence for yellow foreground text.
 pub const YELLOW: &str = "\x1b[33m";
+/// ANSI escape sequence for magenta foreground text.
 pub const MAGENTA: &str = "\x1b[35m";
+/// ANSI escape sequence for cyan foreground text.
 pub const CYAN: &str = "\x1b[36m";
+/// ANSI escape sequence for gray (bright black) foreground text.
 pub const GRAY: &str = "\x1b[90m";
 
+/// ANSI escape sequence for bold blue foreground text.
 pub const BOLD_BLUE: &str = "\x1b[1;34m";
+/// ANSI escape sequence for bold red foreground text.
 pub const BOLD_RED: &str = "\x1b[1;31m";
+/// ANSI escape sequence for bold cyan foreground text.
 pub const BOLD_CYAN: &str = "\x1b[1;36m";
 
 /// Wrap text with color codes if color is enabled.

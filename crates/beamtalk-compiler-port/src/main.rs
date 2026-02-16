@@ -241,11 +241,15 @@ fn error_response(diagnostics: &[String]) -> Term {
     ]))
 }
 
-/// Structured diagnostic info.
+/// Structured diagnostic info returned in compilation responses.
 struct DiagInfo {
+    /// Human-readable diagnostic message.
     message: String,
+    /// Severity level (`"error"` or `"warning"`).
     severity: String,
+    /// Byte offset where the diagnosed span begins.
     start: u32,
+    /// Byte offset where the diagnosed span ends.
     end: u32,
 }
 
