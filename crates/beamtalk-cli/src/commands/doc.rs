@@ -53,10 +53,82 @@ pub fn run(path: &str, output_dir: &str) -> Result<()> {
     let source_path = Utf8PathBuf::from(path);
     let output_path = Utf8PathBuf::from(output_dir);
 
+    generate_api_docs(&source_path, &output_path, "")?;
+
+    Ok(())
+}
+
+/// Generate the full documentation site with landing page, API docs, and prose pages.
+///
+/// Site structure:
+/// - `/` — Landing page with navigation
+/// - `/apidocs/` — API reference (class docs from `.bt` files)
+/// - `/docs/` — Prose documentation pages rendered from markdown
+#[instrument(skip_all, fields(lib_path = %lib_path, docs_path = %docs_path, output = %output_dir))]
+pub fn run_site(lib_path: &str, docs_path: &str, output_dir: &str) -> Result<()> {
+    info!("Generating documentation site");
+    let output_path = Utf8PathBuf::from(output_dir);
+
+    // Create output directory
+    fs::create_dir_all(&output_path)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to create output directory '{output_path}'"))?;
+
+    // 1. Generate API docs in apidocs/ subdirectory
+    let lib_source = Utf8PathBuf::from(lib_path);
+    let apidocs_path = output_path.join("apidocs");
+    generate_api_docs(&lib_source, &apidocs_path, "../")?;
+
+    // 2. Generate prose docs in docs/ subdirectory
+    let docs_source = Utf8PathBuf::from(docs_path);
+    generate_prose_docs(&docs_source, &output_path)?;
+
+    // 3. Generate landing page
+    write_site_landing_page(&output_path)?;
+
+    // 4. Write shared CSS to root (prose pages and landing page reference it)
+    write_css(&output_path)?;
+
+    println!("  Site root: {output_path}/");
+    Ok(())
+}
+
+/// Prose documentation pages to render from the docs/ directory.
+const PROSE_PAGES: &[(&str, &str, &str)] = &[
+    (
+        "beamtalk-language-features.md",
+        "language-features.html",
+        "Language Features",
+    ),
+    (
+        "beamtalk-principles.md",
+        "principles.html",
+        "Design Principles",
+    ),
+    (
+        "beamtalk-architecture.md",
+        "architecture.html",
+        "Architecture",
+    ),
+    (
+        "beamtalk-agent-native-development.md",
+        "agent-native-development.html",
+        "Agent-Native Development",
+    ),
+];
+
+/// Generate API reference docs into the given output directory.
+///
+/// `asset_prefix` is prepended to CSS/JS paths (e.g., `"../"` for subdirectory).
+fn generate_api_docs(
+    source_path: &Utf8Path,
+    output_path: &Utf8Path,
+    asset_prefix: &str,
+) -> Result<()> {
     // Find .bt source files
-    let source_files = find_source_files(&source_path)?;
+    let source_files = find_source_files(source_path)?;
     if source_files.is_empty() {
-        miette::bail!("No .bt source files found in '{path}'");
+        miette::bail!("No .bt source files found in '{}'", source_path.as_str());
     }
 
     println!("Generating docs for {} file(s)...", source_files.len());
@@ -64,7 +136,7 @@ pub fn run(path: &str, output_dir: &str) -> Result<()> {
     // Parse all source files to extract class info
     let mut classes = Vec::new();
     for file in &source_files {
-        if let Some(class_info) = parse_class_info(&source_path, file)? {
+        if let Some(class_info) = parse_class_info(source_path, file)? {
             classes.push(class_info);
         }
     }
@@ -83,27 +155,27 @@ pub fn run(path: &str, output_dir: &str) -> Result<()> {
         classes.iter().map(|c| (c.name.clone(), c)).collect();
 
     // Create output directory
-    fs::create_dir_all(&output_path)
+    fs::create_dir_all(output_path)
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to create output directory '{output_path}'"))?;
 
     // Generate CSS and JS assets
-    write_css(&output_path)?;
-    write_search_js(&output_path, &classes)?;
+    write_css(output_path)?;
+    write_search_js(output_path, &classes)?;
 
     // Build sidebar HTML (shared across all pages)
-    let sidebar_html = build_sidebar_html(&classes);
+    let sidebar_html = build_sidebar_html(&classes, asset_prefix);
 
     // Generate index page (include README.md from source dir if present, per ADR 0008)
     let readme_path = source_path.join("README.md");
     let readme = fs::read_to_string(&readme_path).ok();
-    write_index_page(&output_path, &classes, readme.as_deref(), &sidebar_html)?;
+    write_index_page(output_path, &classes, readme.as_deref(), &sidebar_html)?;
 
     // Generate per-class pages
     for class in &classes {
         let inherited = collect_inherited_methods(class, &hierarchy, &methods_by_class);
         write_class_page(
-            &output_path,
+            output_path,
             class,
             &inherited,
             &methods_by_class,
@@ -119,6 +191,169 @@ pub fn run(path: &str, output_dir: &str) -> Result<()> {
     println!("  Output: {output_path}/");
 
     Ok(())
+}
+
+/// Generate prose documentation pages from markdown files.
+fn generate_prose_docs(docs_source: &Utf8Path, site_root: &Utf8Path) -> Result<()> {
+    let docs_output = site_root.join("docs");
+    fs::create_dir_all(&docs_output)
+        .into_diagnostic()
+        .wrap_err("Failed to create docs/ output directory")?;
+
+    let mut rendered_count = 0;
+    for &(source_file, output_file, title) in PROSE_PAGES {
+        let source = docs_source.join(source_file);
+        if !source.exists() {
+            warn!("Prose doc not found: {source}, skipping");
+            continue;
+        }
+
+        let markdown = fs::read_to_string(&source)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to read '{source}'"))?;
+
+        // Rewrite cross-references to sibling prose docs (.md → .html)
+        let markdown = rewrite_prose_links(&markdown);
+
+        let page_title = format!("{title} — Beamtalk");
+        let mut html = String::new();
+        html.push_str(&page_header(&page_title, Some("../style.css")));
+        html.push_str("<div class=\"page-wrapper\">\n");
+        html.push_str(&prose_nav(output_file));
+        html.push_str("<main class=\"main-content prose-content\">\n");
+        html.push_str("<div class=\"breadcrumb\">");
+        html.push_str("<a href=\"../\">Home</a> &rsaquo; ");
+        html.push_str("<a href=\"../docs/language-features.html\">Docs</a> &rsaquo; ");
+        html.push_str(&html_escape(title));
+        html.push_str("</div>\n");
+        html.push_str(&render_doc(&markdown));
+        html.push_str("</main>\n");
+        html.push_str(&page_footer_simple());
+
+        let out_path = docs_output.join(output_file);
+        fs::write(&out_path, html)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to write {output_file}"))?;
+        debug!("Generated {out_path}");
+        rendered_count += 1;
+    }
+
+    println!("Generated {rendered_count} prose documentation page(s)");
+    Ok(())
+}
+
+/// Build navigation sidebar for prose documentation pages.
+fn prose_nav(active_file: &str) -> String {
+    let mut html = String::new();
+    html.push_str("<nav class=\"sidebar\">\n");
+    html.push_str("<div class=\"sidebar-header\">\n");
+    html.push_str("<h2><a href=\"../\">Beamtalk</a></h2>\n");
+    html.push_str("</div>\n");
+    html.push_str("<ul class=\"sidebar-nav\">\n");
+    html.push_str("<li><a href=\"../apidocs/\">API Reference</a></li>\n");
+
+    for &(_, file, title) in PROSE_PAGES {
+        let active = if file == active_file {
+            " class=\"active\""
+        } else {
+            ""
+        };
+        let _ = writeln!(html, "<li><a href=\"{file}\"{active}>{title}</a></li>");
+    }
+
+    html.push_str("</ul>\n</nav>\n");
+    html
+}
+
+/// Rewrite cross-references between prose docs from `.md` to `.html`.
+///
+/// Prose markdown files contain links like `[principles](beamtalk-principles.md)`.
+/// After rendering, those need to point to the generated `.html` files.
+fn rewrite_prose_links(markdown: &str) -> String {
+    let mut result = markdown.to_string();
+    for &(source_file, output_file, _) in PROSE_PAGES {
+        result = result.replace(source_file, output_file);
+    }
+    result
+}
+
+/// Generate the site landing page at the root.
+fn write_site_landing_page(output_path: &Utf8Path) -> Result<()> {
+    let mut html = String::new();
+    // Landing page has no sidebar, so omit the sidebar toggle button
+    html.push_str(
+        "<!DOCTYPE html>\n\
+         <html lang=\"en\">\n\
+         <head>\n\
+         <meta charset=\"utf-8\">\n\
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+         <title>Beamtalk Documentation</title>\n\
+         <link rel=\"stylesheet\" href=\"style.css\">\n\
+         </head>\n\
+         <body>\n",
+    );
+    html.push_str("<div class=\"page-wrapper landing-wrapper\">\n");
+    html.push_str("<main class=\"main-content landing-content\">\n");
+
+    // Hero section
+    html.push_str("<div class=\"landing-hero\">\n");
+    html.push_str("<h1>Beamtalk</h1>\n");
+    html.push_str("<p class=\"landing-tagline\">A live, interactive Smalltalk-like language for the BEAM VM</p>\n");
+    html.push_str("</div>\n");
+
+    // Navigation cards
+    html.push_str("<div class=\"landing-cards\">\n");
+
+    // API Reference card
+    html.push_str("<a href=\"apidocs/\" class=\"landing-card\">\n");
+    html.push_str("<h2>API Reference</h2>\n");
+    html.push_str("<p>Standard library class documentation — Actor, Block, Integer, String, Collections, and more.</p>\n");
+    html.push_str("</a>\n");
+
+    // Prose docs cards
+    for &(_, file, title) in PROSE_PAGES {
+        let desc = match title {
+            "Language Features" => {
+                "Syntax, semantics, and examples for Beamtalk's message-based programming model."
+            }
+            "Design Principles" => {
+                "The 13 core principles guiding all design and implementation decisions."
+            }
+            "Architecture" => {
+                "Compiler pipeline, runtime, hot code reload, and live development flow."
+            }
+            "Agent-Native Development" => {
+                "Why Beamtalk is uniquely suited as a development environment for AI coding agents."
+            }
+            _ => "",
+        };
+        let _ = writeln!(
+            html,
+            "<a href=\"docs/{file}\" class=\"landing-card\">\n<h2>{title}</h2>\n<p>{desc}</p>\n</a>"
+        );
+    }
+
+    html.push_str("</div>\n");
+
+    // GitHub link
+    html.push_str("<div class=\"landing-links\">\n");
+    html.push_str("<a href=\"https://github.com/jamesc/beamtalk\">GitHub Repository</a>\n");
+    html.push_str("</div>\n");
+
+    html.push_str("</main>\n");
+    html.push_str(&page_footer_simple());
+
+    let index_path = output_path.join("index.html");
+    fs::write(&index_path, html)
+        .into_diagnostic()
+        .wrap_err("Failed to write site index.html")?;
+    debug!("Generated site landing page");
+    Ok(())
+}
+
+/// Simple page footer without search.js (for landing and prose pages).
+fn page_footer_simple() -> String {
+    page_footer_with_search(None)
 }
 
 /// Find all `.bt` source files in a path.
@@ -759,6 +994,101 @@ footer {
   font-size: 0.8rem;
   color: var(--fg-muted);
 }
+
+/* --- Landing page --- */
+.landing-wrapper {
+  justify-content: center;
+}
+
+.landing-content {
+  margin-left: 0;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 3rem 2.5rem;
+}
+
+.landing-hero {
+  text-align: center;
+  margin-bottom: 3rem;
+}
+
+.landing-hero h1 {
+  font-size: 2.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.landing-tagline {
+  font-size: 1.15rem;
+  color: var(--fg-muted);
+}
+
+.landing-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.landing-card {
+  display: block;
+  background: var(--method-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.5rem;
+  text-decoration: none;
+  color: var(--fg);
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+
+.landing-card:hover {
+  box-shadow: var(--shadow);
+  border-color: var(--accent);
+  text-decoration: none;
+}
+
+.landing-card h2 {
+  font-size: 1.1rem;
+  margin-top: 0;
+  margin-bottom: 0.4rem;
+  border-bottom: none;
+  padding-bottom: 0;
+  color: var(--accent);
+}
+
+.landing-card p {
+  font-size: 0.88rem;
+  color: var(--fg-muted);
+  margin-bottom: 0;
+}
+
+.landing-links {
+  text-align: center;
+  margin-top: 1.5rem;
+  font-size: 0.9rem;
+}
+
+/* --- Prose pages --- */
+.prose-content {
+  max-width: 800px;
+}
+
+/* --- Sidebar cross-navigation --- */
+.sidebar-section {
+  padding: 0.5rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.5rem;
+}
+
+.sidebar-home-link, .sidebar-docs-link {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+  padding: 0.2rem 0;
+}
+
+.sidebar-home-link:hover, .sidebar-docs-link:hover {
+  color: var(--accent);
+}
 ";
 
 /// Write CSS stylesheet.
@@ -783,6 +1113,7 @@ fn write_index_page(
 ) -> Result<()> {
     let mut html = String::new();
     html.push_str(&page_header("Beamtalk API Reference", None));
+    html.push_str("<div class=\"page-wrapper\">\n");
     html.push_str(sidebar_html);
     html.push_str("<main class=\"main-content\">\n");
     html.push_str("<div id=\"search-results\" class=\"search-results\"></div>\n");
@@ -842,6 +1173,7 @@ fn write_class_page(
     let title = format!("{} — Beamtalk", class.name);
     let mut html = String::new();
     html.push_str(&page_header(&title, Some("style.css")));
+    html.push_str("<div class=\"page-wrapper\">\n");
     html.push_str(&sidebar_html.replace(
         &format!("\">{}</a>", html_escape(&class.name)),
         &format!("\" class=\"active\">{}</a>", html_escape(&class.name)),
@@ -1031,7 +1363,7 @@ fn method_anchor(signature: &str) -> String {
     result
 }
 
-/// Generate HTML page header with sidebar toggle and search JS.
+/// Generate HTML page header with sidebar toggle.
 fn page_header(title: &str, css_path: Option<&str>) -> String {
     let css = css_path.unwrap_or("style.css");
     format!(
@@ -1045,27 +1377,40 @@ fn page_header(title: &str, css_path: Option<&str>) -> String {
          </head>\n\
          <body>\n\
          <button class=\"sidebar-toggle\" onclick=\"document.querySelector('.sidebar')\
-         .classList.toggle('open')\" aria-label=\"Toggle navigation\">☰</button>\n\
-         <div class=\"page-wrapper\">\n"
+         .classList.toggle('open')\" aria-label=\"Toggle navigation\">☰</button>\n",
     )
 }
 
-/// Generate HTML page footer.
+/// Generate HTML page footer with search.js.
 fn page_footer() -> String {
-    "<footer>Generated by <code>beamtalk doc</code></footer>\n\
-     </div>\n\
-     <script src=\"search.js\"></script>\n\
-     </body>\n\
-     </html>\n"
-        .to_string()
+    page_footer_with_search(Some("search.js"))
+}
+
+/// Generate HTML page footer with optional search.js path.
+fn page_footer_with_search(search_js: Option<&str>) -> String {
+    let script = search_js
+        .map(|js| format!("<script src=\"{js}\"></script>\n"))
+        .unwrap_or_default();
+    format!(
+        "<footer>Generated by <code>beamtalk doc</code></footer>\n\
+         </div>\n\
+         {script}\
+         </body>\n\
+         </html>\n"
+    )
 }
 
 /// Build sidebar HTML with class list navigation.
-fn build_sidebar_html(classes: &[ClassInfo]) -> String {
+///
+/// `asset_prefix` is prepended to cross-site links (e.g., `"../"` when in a subdirectory).
+fn build_sidebar_html(classes: &[ClassInfo], asset_prefix: &str) -> String {
     let mut html = String::new();
     html.push_str("<nav class=\"sidebar\">\n");
     html.push_str("<div class=\"sidebar-header\">\n");
-    html.push_str("<h2><a href=\"index.html\">Beamtalk</a></h2>\n");
+    let _ = writeln!(
+        html,
+        "<h2><a href=\"{asset_prefix}index.html\">Beamtalk</a></h2>"
+    );
     html.push_str(
         "<input type=\"search\" class=\"sidebar-search\" \
          id=\"sidebar-search\" placeholder=\"Search classes…\" \
@@ -1073,6 +1418,21 @@ fn build_sidebar_html(classes: &[ClassInfo]) -> String {
          autocomplete=\"off\">\n",
     );
     html.push_str("</div>\n");
+
+    // Cross-navigation links
+    if !asset_prefix.is_empty() {
+        html.push_str("<div class=\"sidebar-section\">\n");
+        let _ = writeln!(
+            html,
+            "<a href=\"{asset_prefix}\" class=\"sidebar-home-link\">← Home</a>"
+        );
+        let _ = writeln!(
+            html,
+            "<a href=\"{asset_prefix}docs/language-features.html\" class=\"sidebar-docs-link\">Documentation</a>"
+        );
+        html.push_str("</div>\n");
+    }
+
     html.push_str("<ul class=\"sidebar-nav\" id=\"sidebar-nav\">\n");
 
     for class in classes {
@@ -1729,5 +2089,60 @@ mod tests {
         let child_page = fs::read_to_string(out_dir.join("Child.html")).unwrap();
         // Should link to Parent
         assert!(child_page.contains("Parent.html"));
+    }
+
+    #[test]
+    fn test_generate_site() {
+        let temp = TempDir::new().unwrap();
+        let lib_dir = Utf8PathBuf::from_path_buf(temp.path().join("lib")).unwrap();
+        let docs_dir = Utf8PathBuf::from_path_buf(temp.path().join("docs")).unwrap();
+        let out_dir = Utf8PathBuf::from_path_buf(temp.path().join("site")).unwrap();
+        fs::create_dir_all(&lib_dir).unwrap();
+        fs::create_dir_all(&docs_dir).unwrap();
+
+        fs::write(
+            lib_dir.join("Counter.bt"),
+            "/// A counter.\nActor subclass: Counter\n  increment => 1\n",
+        )
+        .unwrap();
+        fs::write(
+            docs_dir.join("beamtalk-language-features.md"),
+            "# Language Features\n\nBeamtalk syntax overview.",
+        )
+        .unwrap();
+        fs::write(
+            docs_dir.join("beamtalk-principles.md"),
+            "# Design Principles\n\nCore philosophy.",
+        )
+        .unwrap();
+
+        run_site(lib_dir.as_str(), docs_dir.as_str(), out_dir.as_str()).unwrap();
+
+        // Landing page exists
+        let landing = fs::read_to_string(out_dir.join("index.html")).unwrap();
+        assert!(landing.contains("Beamtalk"));
+        assert!(landing.contains("apidocs/"));
+        assert!(landing.contains("docs/language-features.html"));
+
+        // API docs in subdirectory
+        assert!(out_dir.join("apidocs/index.html").exists());
+        assert!(out_dir.join("apidocs/Counter.html").exists());
+        assert!(out_dir.join("apidocs/style.css").exists());
+
+        // API docs have cross-navigation back to home
+        let api_index = fs::read_to_string(out_dir.join("apidocs/index.html")).unwrap();
+        assert!(api_index.contains("../"));
+
+        // Prose docs
+        assert!(out_dir.join("docs/language-features.html").exists());
+        assert!(out_dir.join("docs/principles.html").exists());
+
+        let prose = fs::read_to_string(out_dir.join("docs/language-features.html")).unwrap();
+        assert!(prose.contains("Language Features"));
+        assert!(prose.contains("../style.css"));
+        assert!(prose.contains("../apidocs/"));
+
+        // Root CSS
+        assert!(out_dir.join("style.css").exists());
     }
 }

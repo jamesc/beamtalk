@@ -8,6 +8,7 @@ on:
     branches: [main]
     paths:
       - 'lib/**'
+      - 'docs/beamtalk-*.md'
       - 'crates/beamtalk-cli/src/commands/doc.rs'
       - 'crates/beamtalk-core/src/codegen/core_erlang/doc_chunks.rs'
   workflow_dispatch:
@@ -75,8 +76,8 @@ jobs:
       - name: Build standard library
         run: just build-stdlib
 
-      - name: Generate API documentation
-        run: cargo run --bin beamtalk -- doc lib/ --output _site/
+      - name: Generate documentation site
+        run: cargo run --bin beamtalk -- doc lib/ --output _site/ --site --docs-path docs/
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
