@@ -74,7 +74,15 @@ dispatch_test_() ->
           {"BT-283: flattened table invalidation on method add", fun test_flattened_table_invalidation_on_method_add/0},
           {"BT-283: subclass flattened table invalidation on parent change", fun test_subclass_invalidation_on_parent_change/0},
           {"BT-387: out-of-order class registration rebuilds flattened tables", fun test_out_of_order_registration/0},
-          {"BT-429: super finds extension on superclass", fun test_super_finds_extension_on_superclass/0}
+          {"BT-429: super finds extension on superclass", fun test_super_finds_extension_on_superclass/0},
+          %% BT-623: Additional coverage tests
+          {"lookup on non-existent class returns class_not_found", fun test_lookup_nonexistent_class/0},
+          {"super on non-existent class returns error", fun test_super_nonexistent_class/0},
+          {"lookup falls back when defining class gone", fun test_flattened_stale_defining_class/0},
+          {"continue_to_superclass at root returns DNU", fun test_continue_to_superclass_root/0},
+          {"try_flattened_lookup handles dead process", fun test_flattened_lookup_dead_process/0},
+          {"super at Object for unknown method", fun test_super_object_unknown/0},
+          {"lookup with class_not_found in superclass chain", fun test_lookup_missing_superclass_in_chain/0}
          ]
      end
     }.
@@ -557,3 +565,120 @@ test_super_finds_extension_on_superclass() ->
         %% Clean up extension (ignore any error if it's already gone)
         catch ets:delete(beamtalk_extensions, {'Actor', superExtTest})
     end.
+
+%%% ============================================================================
+%%% BT-623: Additional Coverage Tests
+%%% ============================================================================
+
+%% Test lookup on a completely non-existent class
+test_lookup_nonexistent_class() ->
+    State = #{'$beamtalk_class' => 'NoSuchClass'},
+    Self = make_ref(),
+    Result = beamtalk_dispatch:lookup(anyMethod, [], Self, State, 'NoSuchClass'),
+    ?assertMatch({error, #beamtalk_error{kind = class_not_found, class = 'NoSuchClass'}}, Result).
+
+%% Test super on a non-existent class
+test_super_nonexistent_class() ->
+    State = #{'$beamtalk_class' => 'NoSuchClass'},
+    Self = make_ref(),
+    Result = beamtalk_dispatch:super(anyMethod, [], Self, State, 'NoSuchClass'),
+    ?assertMatch({error, #beamtalk_error{kind = class_not_found}}, Result).
+
+%% Test that when flattened table points to a defining class that no longer exists,
+%% dispatch falls back to hierarchy walk
+test_flattened_stale_defining_class() ->
+    %% Create a parent with a method, then a child
+    ParentMethod = fun(_Self, [], State) -> {reply, parent_ok, State} end,
+    {ok, ParentPid} = beamtalk_object_class:start_link('StaleTestParent', #{
+        superclass => none,
+        instance_methods => #{staleMethod => #{block => ParentMethod, arity => 0}},
+        instance_variables => []
+    }),
+
+    ChildMethod = fun(_Self, [], State) -> {reply, child_ok, State} end,
+    {ok, ChildPid} = beamtalk_object_class:start_link('StaleTestChild', #{
+        superclass => 'StaleTestParent',
+        instance_methods => #{childOnly => #{block => ChildMethod, arity => 0}},
+        instance_variables => []
+    }),
+
+    %% Wait for flattened table to build
+    _ = beamtalk_object_class:superclass(ChildPid),
+
+    %% Verify the child's flattened table has the parent method
+    {ok, Flattened} = gen_server:call(ChildPid, get_flattened_methods),
+    ?assert(maps:is_key(staleMethod, Flattened)),
+
+    %% Kill the parent class process (simulates hot reload edge case)
+    gen_server:stop(ParentPid),
+
+    %% Lookup should handle the stale defining class gracefully
+    State = #{'$beamtalk_class' => 'StaleTestChild'},
+    Self = make_ref(),
+    Result = beamtalk_dispatch:lookup(staleMethod, [], Self, State, 'StaleTestChild'),
+    %% Parent class is stopped — hierarchy walk can't find it either, so class_not_found expected
+    ?assertMatch({error, #beamtalk_error{kind = class_not_found}}, Result),
+
+    gen_server:stop(ChildPid).
+
+%% Test continue_to_superclass when class has no module and no superclass (root)
+test_continue_to_superclass_root() ->
+    %% Create a root class with no module and no superclass
+    {ok, RootPid} = beamtalk_object_class:start_link('RootOnlyClass', #{
+        superclass => none,
+        instance_methods => #{},
+        instance_variables => []
+    }),
+
+    State = #{'$beamtalk_class' => 'RootOnlyClass'},
+    Self = make_ref(),
+    Result = beamtalk_dispatch:lookup(anyMethod, [], Self, State, 'RootOnlyClass'),
+    ?assertMatch({error, #beamtalk_error{kind = does_not_understand}}, Result),
+
+    gen_server:stop(RootPid).
+
+%% Test flattened lookup with a dead process
+test_flattened_lookup_dead_process() ->
+    ok = ensure_counter_loaded(),
+
+    %% Create a temporary class, get its pid, then kill it
+    TmpMethod = fun(_Self, [], State) -> {reply, ok, State} end,
+    {ok, TmpPid} = beamtalk_object_class:start_link('TmpDeadClass', #{
+        superclass => none,
+        instance_methods => #{tmpMethod => #{block => TmpMethod, arity => 0}},
+        instance_variables => []
+    }),
+    gen_server:stop(TmpPid),
+
+    %% Lookup on dead class should not crash — returns not_found/error
+    State = #{'$beamtalk_class' => 'TmpDeadClass'},
+    Self = make_ref(),
+    Result = beamtalk_dispatch:lookup(tmpMethod, [], Self, State, 'TmpDeadClass'),
+    ?assertMatch({error, #beamtalk_error{}}, Result).
+
+%% Test super from Object for method that doesn't exist anywhere
+test_super_object_unknown() ->
+    ok = ensure_counter_loaded(),
+    State = #{'$beamtalk_class' => 'Object'},
+    Self = make_ref(),
+    Result = beamtalk_dispatch:super(completelyUnknownMethod, [], Self, State, 'Object'),
+    ?assertMatch({error, #beamtalk_error{}}, Result).
+
+%% Test lookup when superclass in chain is not registered
+test_lookup_missing_superclass_in_chain() ->
+    %% Create a class whose superclass doesn't exist
+    ChildMethod = fun(_Self, [], State) -> {reply, ok, State} end,
+    {ok, ChildPid} = beamtalk_object_class:start_link('OrphanChild', #{
+        superclass => 'GhostParent',
+        instance_methods => #{localMethod => #{block => ChildMethod, arity => 0}},
+        instance_variables => []
+    }),
+
+    State = #{'$beamtalk_class' => 'OrphanChild'},
+    Self = make_ref(),
+    %% Looking up a method not in OrphanChild should fail with class_not_found
+    %% when it tries to walk to the non-existent superclass
+    Result = beamtalk_dispatch:lookup(nonExistentMethod, [], Self, State, 'OrphanChild'),
+    ?assertMatch({error, #beamtalk_error{}}, Result),
+
+    gen_server:stop(ChildPid).

@@ -13,6 +13,26 @@
 /// -3 isNegative     // => true
 /// ```
 abstract Object subclass: Number
+
+  // === Abstract protocol (subclasses must implement) ===
+
+  /// Equality comparison.
+  =:= other -> Boolean => self subclassResponsibility
+
+  /// Less than.
+  < other -> Boolean => self subclassResponsibility
+
+  /// Greater than.
+  > other -> Boolean => self subclassResponsibility
+
+  /// Less than or equal.
+  <= other -> Boolean => self subclassResponsibility
+
+  /// Greater than or equal.
+  >= other -> Boolean => self subclassResponsibility
+
+  // === Shared protocol (implemented in terms of abstract methods) ===
+
   /// Test if the receiver is zero.
   ///
   /// ## Examples

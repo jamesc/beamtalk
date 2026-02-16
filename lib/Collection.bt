@@ -18,6 +18,19 @@
 /// ```
 abstract Object subclass: Collection
 
+  // === Abstract protocol (subclasses must implement) ===
+
+  /// Return the number of elements.
+  size -> Integer => self subclassResponsibility
+
+  /// Iterate over each element, evaluating `block` with each one.
+  do: block: Block -> Nil => self subclassResponsibility
+
+  /// Return a developer-readable string representation.
+  printString -> String => self subclassResponsibility
+
+  // === Shared protocol (implemented in terms of abstract methods) ===
+
   /// Test if the collection has no elements.
   ///
   /// ## Examples
@@ -119,8 +132,3 @@ abstract Object subclass: Collection
 
   /// Return a string representation.
   asString -> String => self printString
-
-  /// Iterate over each element, evaluating `block` with each one.
-  ///
-  /// Subclasses must override this with their own iteration logic.
-  do: block: Block -> Nil => self subclassResponsibility

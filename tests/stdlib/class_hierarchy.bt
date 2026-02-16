@@ -92,3 +92,27 @@ collSubs includes: #Dictionary
 // Float is sealed — always a leaf, allSubclasses returns empty
 Float allSubclasses
 // => []
+
+// ---------------------------------------------------------------------------
+// BT-623: Class identity and class-of queries
+// ---------------------------------------------------------------------------
+
+// class returns the class name for primitives
+42 class
+// => Integer
+
+"hello" class
+// => String
+
+true class
+// => True
+
+nil class
+// => UndefinedObject
+
+3.14 class
+// => Float
+
+// class on a class object returns the metaclass terminal
+Integer class
+// => Metaclass

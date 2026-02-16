@@ -211,7 +211,7 @@ fn generate_class_method_spec(method: &MethodDefinition) -> Option<String> {
 /// Generates all spec attributes for methods in a class definition.
 ///
 /// Returns a vector of spec attribute strings, one per annotated method.
-/// Only primary methods generate specs (not before/after/around advice).
+/// Only primary methods generate specs.
 /// Includes both instance methods and class-side methods.
 pub fn generate_class_specs(class: &ClassDefinition, is_value_type: bool) -> Vec<String> {
     let instance_specs = class
