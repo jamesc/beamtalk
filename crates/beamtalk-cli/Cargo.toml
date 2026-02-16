@@ -41,6 +41,7 @@ sha2.workspace = true
 rand.workspace = true
 base64.workspace = true
 fs2.workspace = true
+# why: temporary files for REPL evaluation and workspace management
 tempfile = "3.14"
 
 [dev-dependencies]

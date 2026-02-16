@@ -80,27 +80,13 @@ impl<'src> Lexer<'src> {
         self.chars.peek().map(|&(_, c)| c)
     }
 
-    /// Peeks at the character after the next one.
-    fn peek_char_second(&self) -> Option<char> {
+    /// Peeks `n+1` characters ahead without consuming (n=0 is same as `peek_char`,
+    /// n=1 returns the second character, n=2 the third, etc.).
+    fn peek_char_n(&self, n: usize) -> Option<char> {
         let mut iter = self.chars.clone();
-        iter.next();
-        iter.next().map(|(_, c)| c)
-    }
-
-    /// Peeks at the third character ahead.
-    fn peek_char_third(&self) -> Option<char> {
-        let mut iter = self.chars.clone();
-        iter.next();
-        iter.next();
-        iter.next().map(|(_, c)| c)
-    }
-
-    /// Peeks at the fourth character ahead.
-    fn peek_char_fourth(&self) -> Option<char> {
-        let mut iter = self.chars.clone();
-        iter.next();
-        iter.next();
-        iter.next();
+        for _ in 0..n {
+            iter.next();
+        }
         iter.next().map(|(_, c)| c)
     }
 
@@ -149,16 +135,16 @@ impl<'src> Lexer<'src> {
                         .push(Trivia::Whitespace(EcoString::from(text)));
                 }
                 Some('/')
-                    if self.peek_char_second() == Some('/')
-                        && self.peek_char_third() == Some('/')
-                        && self.peek_char_fourth() != Some('/') =>
+                    if self.peek_char_n(1) == Some('/')
+                        && self.peek_char_n(2) == Some('/')
+                        && self.peek_char_n(3) != Some('/') =>
                 {
                     self.lex_doc_comment();
                 }
-                Some('/') if self.peek_char_second() == Some('/') => {
+                Some('/') if self.peek_char_n(1) == Some('/') => {
                     self.lex_line_comment();
                 }
-                Some('/') if self.peek_char_second() == Some('*') => {
+                Some('/') if self.peek_char_n(1) == Some('*') => {
                     self.lex_block_comment();
                 }
                 _ => break,
@@ -201,7 +187,7 @@ impl<'src> Lexer<'src> {
         loop {
             match self.peek_char() {
                 None => break, // Unterminated - recover gracefully
-                Some('*') if self.peek_char_second() == Some('/') => {
+                Some('*') if self.peek_char_n(1) == Some('/') => {
                     self.advance(); // *
                     self.advance(); // /
                     break;
@@ -258,14 +244,14 @@ impl<'src> Lexer<'src> {
                         .push(Trivia::Whitespace(EcoString::from(text)));
                 }
                 Some('/')
-                    if self.peek_char_second() == Some('/')
-                        && self.peek_char_third() == Some('/')
-                        && self.peek_char_fourth() != Some('/') =>
+                    if self.peek_char_n(1) == Some('/')
+                        && self.peek_char_n(2) == Some('/')
+                        && self.peek_char_n(3) != Some('/') =>
                 {
                     self.lex_doc_comment();
                     break; // Doc comment ends trailing trivia
                 }
-                Some('/') if self.peek_char_second() == Some('/') => {
+                Some('/') if self.peek_char_n(1) == Some('/') => {
                     self.lex_line_comment();
                     break; // Line comment ends trailing trivia
                 }
@@ -339,23 +325,19 @@ impl<'src> Lexer<'src> {
 
             // Fat arrow (=>) for method definitions, or Erlang comparison operators (ADR 0002)
             '=' => {
-                if self.peek_char_second() == Some('>') {
+                if self.peek_char_n(1) == Some('>') {
                     // Check for `=>/=` — should this be `=> /=`? No, `=>` is only at
                     // method definitions where `/=` wouldn't follow. So `=>` is safe.
                     self.advance(); // =
                     self.advance(); // >
                     TokenKind::FatArrow
-                } else if self.peek_char_second() == Some(':')
-                    && self.peek_char_third() == Some('=')
-                {
+                } else if self.peek_char_n(1) == Some(':') && self.peek_char_n(2) == Some('=') {
                     // `=:=` — strict equality (ADR 0002)
                     self.advance(); // =
                     self.advance(); // :
                     self.advance(); // =
                     TokenKind::BinarySelector(EcoString::from("=:="))
-                } else if self.peek_char_second() == Some('/')
-                    && self.peek_char_third() == Some('=')
-                {
+                } else if self.peek_char_n(1) == Some('/') && self.peek_char_n(2) == Some('=') {
                     // `=/=` — strict inequality (ADR 0002)
                     self.advance(); // =
                     self.advance(); // /
@@ -392,7 +374,7 @@ impl<'src> Lexer<'src> {
         self.advance_while(|c| c.is_ascii_alphanumeric() || c == '_');
 
         // Check if followed by colon (keyword selector)
-        if self.peek_char() == Some(':') && self.peek_char_second() != Some('=') {
+        if self.peek_char() == Some(':') && self.peek_char_n(1) != Some('=') {
             self.advance(); // consume the colon
             let text = self.text_for(self.span_from(start));
             TokenKind::Keyword(EcoString::from(text))
@@ -419,7 +401,7 @@ impl<'src> Lexer<'src> {
 
         // Check for float: decimal point followed by digit
         let is_float = if self.peek_char() == Some('.')
-            && self.peek_char_second().is_some_and(|c| c.is_ascii_digit())
+            && self.peek_char_n(1).is_some_and(|c| c.is_ascii_digit())
         {
             self.advance(); // consume '.'
             self.advance_while(|c| c.is_ascii_digit());
@@ -551,13 +533,13 @@ impl<'src> Lexer<'src> {
                     depth += 1;
                     self.advance();
                 }
-                Some('/') if self.peek_char_second() == Some('/') => {
+                Some('/') if self.peek_char_n(1) == Some('/') => {
                     // Line comment — skip to newline
                     while self.peek_char().is_some_and(|c| c != '\n') {
                         self.advance();
                     }
                 }
-                Some('/') if self.peek_char_second() == Some('*') => {
+                Some('/') if self.peek_char_n(1) == Some('*') => {
                     // Block comment — skip to closing */
                     self.advance(); // /
                     self.advance(); // *
@@ -567,7 +549,7 @@ impl<'src> Lexer<'src> {
                                 let text = self.text_for(self.span_from(string_start));
                                 return Err(TokenKind::Error(EcoString::from(text)));
                             }
-                            Some('*') if self.peek_char_second() == Some('/') => {
+                            Some('*') if self.peek_char_n(1) == Some('/') => {
                                 self.advance(); // *
                                 self.advance(); // /
                                 break;
@@ -792,7 +774,7 @@ impl<'src> Lexer<'src> {
                             return TokenKind::Error(EcoString::from(text));
                         }
                         Some('\'') => {
-                            if self.peek_char_second() == Some('\'') {
+                            if self.peek_char_n(1) == Some('\'') {
                                 self.advance();
                                 self.advance();
                             } else {
@@ -816,7 +798,7 @@ impl<'src> Lexer<'src> {
                 self.advance_while(|c| c.is_ascii_alphanumeric() || c == '_');
                 // Check for trailing colon (keyword symbol like #setValue:)
                 // Also handle multi-keyword symbols like #at:put:
-                if self.peek_char() == Some(':') && self.peek_char_second() != Some('=') {
+                if self.peek_char() == Some(':') && self.peek_char_n(1) != Some('=') {
                     self.advance(); // consume first colon
                     // Continue consuming additional keyword parts (e.g., put: in #at:put:)
                     while self
@@ -824,7 +806,7 @@ impl<'src> Lexer<'src> {
                         .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
                     {
                         self.advance_while(|c| c.is_ascii_alphanumeric() || c == '_');
-                        if self.peek_char() == Some(':') && self.peek_char_second() != Some('=') {
+                        if self.peek_char() == Some(':') && self.peek_char_n(1) != Some('=') {
                             self.advance();
                         } else {
                             break;
@@ -904,8 +886,7 @@ impl<'src> Lexer<'src> {
         let start = self.current_position();
 
         // Handle potential negative number: - followed by digit
-        if self.peek_char() == Some('-')
-            && self.peek_char_second().is_some_and(|c| c.is_ascii_digit())
+        if self.peek_char() == Some('-') && self.peek_char_n(1).is_some_and(|c| c.is_ascii_digit())
         {
             self.advance(); // -
             return self.lex_number_with_prefix(start);
@@ -924,7 +905,7 @@ impl<'src> Lexer<'src> {
 
         // Check for float
         let is_float = if self.peek_char() == Some('.')
-            && self.peek_char_second().is_some_and(|c| c.is_ascii_digit())
+            && self.peek_char_n(1).is_some_and(|c| c.is_ascii_digit())
         {
             self.advance();
             self.advance_while(|c| c.is_ascii_digit());

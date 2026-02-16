@@ -20,7 +20,7 @@ use std::collections::HashMap;
 
 /// Tracks variable definitions across nested scopes.
 #[derive(Debug, Clone)]
-pub struct Scope {
+pub(crate) struct Scope {
     /// Stack of scope levels, each containing variable definitions.
     levels: Vec<ScopeLevel>,
 }
@@ -67,7 +67,7 @@ pub enum BindingKind {
 /// - `type_annotation`: Optional type annotation for gradual typing
 /// - `used`: Whether this binding has been referenced (for unused variable detection)
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Binding {
+pub(crate) struct Binding {
     /// The variable name.
     pub name: String,
     /// Source location where the binding was defined.
@@ -84,7 +84,7 @@ pub struct Binding {
 
 impl Scope {
     /// Creates a new scope tracker with module-level scope (depth 0).
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             levels: vec![ScopeLevel {
                 variables: HashMap::new(),
@@ -93,7 +93,7 @@ impl Scope {
     }
 
     /// Enters a new nested scope.
-    pub fn push(&mut self) {
+    pub(crate) fn push(&mut self) {
         self.levels.push(ScopeLevel {
             variables: HashMap::new(),
         });
@@ -103,7 +103,7 @@ impl Scope {
     ///
     /// Returns `true` if a scope was popped, `false` if already at module level (depth 0).
     /// This method will not panic; attempting to pop the module-level scope is a no-op.
-    pub fn pop(&mut self) -> bool {
+    pub(crate) fn pop(&mut self) -> bool {
         if self.levels.len() > 1 {
             self.levels.pop();
             true
@@ -126,7 +126,7 @@ impl Scope {
     /// # Panics
     /// Never panics. The `expect` is for internal invariant checking only.
     /// The `levels` vec is guaranteed to have at least one element (module scope).
-    pub fn define(&mut self, name: &str, span: Span, kind: BindingKind) {
+    pub(crate) fn define(&mut self, name: &str, span: Span, kind: BindingKind) {
         let depth = self.current_depth();
         let binding = Binding {
             name: name.to_string(),
@@ -148,7 +148,7 @@ impl Scope {
     /// Looks up a variable by name, searching from innermost to outermost scope.
     ///
     /// Returns the variable information if found. Also marks the binding as used.
-    pub fn lookup(&mut self, name: &str) -> Option<&Binding> {
+    pub(crate) fn lookup(&mut self, name: &str) -> Option<&Binding> {
         for level in self.levels.iter_mut().rev() {
             if let Some(var_info) = level.variables.get_mut(name) {
                 var_info.used = true;
@@ -161,7 +161,7 @@ impl Scope {
     /// Looks up a variable by name without marking it as used.
     ///
     /// Returns the variable information if found.
-    pub fn lookup_immut(&self, name: &str) -> Option<&Binding> {
+    pub(crate) fn lookup_immut(&self, name: &str) -> Option<&Binding> {
         for level in self.levels.iter().rev() {
             if let Some(var_info) = level.variables.get(name) {
                 return Some(var_info);
@@ -171,7 +171,7 @@ impl Scope {
     }
 
     /// Returns the current scope depth (0 = module, 1 = class, 2 = method, 3+ = blocks).
-    pub fn current_depth(&self) -> usize {
+    pub(crate) fn current_depth(&self) -> usize {
         self.levels.len() - 1
     }
 
@@ -179,7 +179,7 @@ impl Scope {
     ///
     /// A variable is considered captured if it was defined at a lower depth
     /// than the current scope.
-    pub fn is_captured(&self, name: &str) -> bool {
+    pub(crate) fn is_captured(&self, name: &str) -> bool {
         self.lookup_immut(name)
             .is_some_and(|v| v.depth < self.current_depth())
     }
@@ -192,7 +192,8 @@ impl Scope {
     /// # Panics
     /// Never panics. The `expect` is for internal invariant checking only.
     /// The `levels` vec is guaranteed to have at least one element (module scope).
-    pub fn current_scope_vars(&self) -> impl Iterator<Item = (&str, &Binding)> {
+    #[allow(dead_code)] // Used in tests; planned for future analysis features
+    pub(crate) fn current_scope_vars(&self) -> impl Iterator<Item = (&str, &Binding)> {
         self.levels
             .last()
             .expect("levels should never be empty")
@@ -212,7 +213,7 @@ impl Scope {
     /// # Panics
     /// Never panics. The `expect` is for internal invariant checking only.
     /// The `levels` vec is guaranteed to have at least one element (module scope).
-    pub fn unused_locals(&self) -> Vec<&Binding> {
+    pub(crate) fn unused_locals(&self) -> Vec<&Binding> {
         self.levels
             .last()
             .expect("levels should never be empty")

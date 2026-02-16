@@ -27,6 +27,7 @@
 
 use crate::ast::{Expression, MessageSelector, Module};
 use crate::language_service::{Location, ProjectIndex};
+use crate::semantic_analysis::{ClassHierarchy, InferredType, infer_types};
 use crate::source_analysis::Span;
 use camino::Utf8PathBuf;
 use ecow::EcoString;
@@ -92,13 +93,55 @@ pub fn find_method_definition_cross_file<'a>(
     project_index: &ProjectIndex,
     files: impl IntoIterator<Item = (&'a Utf8PathBuf, &'a Module)>,
 ) -> Option<Location> {
+    find_method_definition_cross_file_with_receiver(selector, None, project_index, files)
+}
+
+/// Receiver-derived context for selector definition resolution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReceiverClassContext {
+    pub class_name: EcoString,
+    pub class_side: bool,
+}
+
+/// Receiver hint captured at a selector call site.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReceiverHint {
+    ClassReference(EcoString),
+    SelfReceiver,
+    SuperReceiver,
+    Expression(Span),
+}
+
+/// Selector lookup result including receiver hint for contextual resolution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectorLookup {
+    pub selector_name: EcoString,
+    pub selector_span: Span,
+    pub receiver_hint: ReceiverHint,
+}
+
+/// Find the definition of a method selector with optional receiver class context.
+#[must_use]
+pub fn find_method_definition_cross_file_with_receiver<'a>(
+    selector: &str,
+    receiver_context: Option<&ReceiverClassContext>,
+    project_index: &ProjectIndex,
+    files: impl IntoIterator<Item = (&'a Utf8PathBuf, &'a Module)>,
+) -> Option<Location> {
     // Find which class defines this selector via the merged hierarchy
     let hierarchy = project_index.hierarchy();
-    let defining_class = find_defining_class(selector, hierarchy)?;
+    let (defining_class, class_side) = receiver_context
+        .and_then(|context| {
+            find_defining_class_from_receiver(selector, context, hierarchy)
+                .map(|class_name| (class_name, Some(context.class_side)))
+        })
+        .or_else(|| {
+            find_defining_class(selector, hierarchy).map(|class_name| (class_name, None))
+        })?;
 
     // Search files for the class definition containing this method
     for (file_path, module) in files {
-        if let Some(span) = find_method_in_module(module, &defining_class, selector) {
+        if let Some(span) = find_method_in_module(module, &defining_class, selector, class_side) {
             return Some(Location::new(file_path.clone(), span));
         }
     }
@@ -106,21 +149,63 @@ pub fn find_method_definition_cross_file<'a>(
     None
 }
 
+/// Resolve receiver class context for a selector lookup at the given offset.
+#[must_use]
+pub fn resolve_receiver_class_context(
+    module: &Module,
+    offset: u32,
+    selector_lookup: &SelectorLookup,
+    hierarchy: &ClassHierarchy,
+) -> Option<ReceiverClassContext> {
+    let class_context = find_class_context(module, offset);
+    let type_map = infer_types(module, hierarchy);
+    match &selector_lookup.receiver_hint {
+        ReceiverHint::ClassReference(name) => Some(ReceiverClassContext {
+            class_name: name.clone(),
+            class_side: true,
+        }),
+        ReceiverHint::SelfReceiver => {
+            class_context
+                .self_class()
+                .map(|(class_name, class_side)| ReceiverClassContext {
+                    class_name,
+                    class_side,
+                })
+        }
+        ReceiverHint::SuperReceiver => {
+            class_context
+                .superclass_name(hierarchy)
+                .map(|(class_name, class_side)| ReceiverClassContext {
+                    class_name,
+                    class_side,
+                })
+        }
+        ReceiverHint::Expression(span) => type_map
+            .get(*span)
+            .and_then(InferredType::as_known)
+            .cloned()
+            .map(|class_name| ReceiverClassContext {
+                class_name,
+                class_side: false,
+            }),
+    }
+}
+
 /// Find which class defines a given selector in the hierarchy.
 ///
 /// Prefers user-defined classes over builtin/stdlib classes to ensure
 /// go-to-definition navigates to user code when a selector is defined
-/// in both user code and stdlib.
-fn find_defining_class(
-    selector: &str,
-    hierarchy: &crate::semantic_analysis::ClassHierarchy,
-) -> Option<EcoString> {
+/// in both user code and stdlib. Ambiguous matches are resolved deterministically
+/// by scanning class names in lexical order.
+fn find_defining_class(selector: &str, hierarchy: &ClassHierarchy) -> Option<EcoString> {
     let mut builtin_match = None;
+    let mut class_names: Vec<&EcoString> = hierarchy.class_names().collect();
+    class_names.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
 
-    for class_name in hierarchy.class_names() {
+    for class_name in class_names {
         for method in hierarchy.all_methods(class_name) {
             if method.selector == selector && method.defined_in == *class_name {
-                if crate::semantic_analysis::ClassHierarchy::is_builtin_class(class_name) {
+                if ClassHierarchy::is_builtin_class(class_name) {
                     // Remember but keep searching for user-defined match
                     if builtin_match.is_none() {
                         builtin_match = Some(class_name.clone());
@@ -135,30 +220,113 @@ fn find_defining_class(
     builtin_match
 }
 
+fn find_defining_class_from_receiver(
+    selector: &str,
+    receiver_context: &ReceiverClassContext,
+    hierarchy: &ClassHierarchy,
+) -> Option<EcoString> {
+    if receiver_context.class_side {
+        hierarchy
+            .find_class_method(receiver_context.class_name.as_str(), selector)
+            .map(|method| method.defined_in)
+    } else {
+        hierarchy
+            .find_method(receiver_context.class_name.as_str(), selector)
+            .map(|method| method.defined_in)
+    }
+}
+
 /// Find a method definition within a module, given the class name and selector.
-fn find_method_in_module(module: &Module, class_name: &str, selector: &str) -> Option<Span> {
+fn find_method_in_module(
+    module: &Module,
+    class_name: &str,
+    selector: &str,
+    class_side: Option<bool>,
+) -> Option<Span> {
     // Search class definitions
     for class in &module.classes {
         if class.name.name == class_name {
-            for method in &class.methods {
-                if method.selector.name() == selector {
-                    return Some(method.span);
+            if class_side != Some(true) {
+                for method in &class.methods {
+                    if method.selector.name() == selector {
+                        return Some(method.span);
+                    }
                 }
             }
-            for method in &class.class_methods {
-                if method.selector.name() == selector {
-                    return Some(method.span);
+            if class_side != Some(false) {
+                for method in &class.class_methods {
+                    if method.selector.name() == selector {
+                        return Some(method.span);
+                    }
                 }
             }
         }
     }
     // Search standalone method definitions (Tonel-style)
     for smd in &module.method_definitions {
-        if smd.class_name.name == class_name && smd.method.selector.name() == selector {
+        if smd.class_name.name == class_name
+            && smd.method.selector.name() == selector
+            && class_side.is_none_or(|expected| expected == smd.is_class_method)
+        {
             return Some(smd.span);
         }
     }
     None
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClassContext<'a> {
+    InstanceMethod(&'a str),
+    ClassMethod(&'a str),
+    StandaloneInstanceMethod(&'a str),
+    StandaloneClassMethod(&'a str),
+    TopLevel,
+}
+
+impl ClassContext<'_> {
+    fn self_class(&self) -> Option<(EcoString, bool)> {
+        match self {
+            Self::InstanceMethod(name) | Self::StandaloneInstanceMethod(name) => {
+                Some((EcoString::from(*name), false))
+            }
+            Self::ClassMethod(name) | Self::StandaloneClassMethod(name) => {
+                Some((EcoString::from(*name), true))
+            }
+            Self::TopLevel => None,
+        }
+    }
+
+    fn superclass_name(&self, hierarchy: &ClassHierarchy) -> Option<(EcoString, bool)> {
+        let (class_name, class_side) = self.self_class()?;
+        hierarchy
+            .get_class(class_name.as_str())
+            .and_then(|info| info.superclass.clone())
+            .map(|super_name| (super_name, class_side))
+    }
+}
+
+fn find_class_context(module: &Module, offset: u32) -> ClassContext<'_> {
+    for class in &module.classes {
+        for method in &class.methods {
+            if offset >= method.span.start() && offset < method.span.end() {
+                return ClassContext::InstanceMethod(class.name.name.as_str());
+            }
+        }
+        for method in &class.class_methods {
+            if offset >= method.span.start() && offset < method.span.end() {
+                return ClassContext::ClassMethod(class.name.name.as_str());
+            }
+        }
+    }
+    for smd in &module.method_definitions {
+        if offset >= smd.method.span.start() && offset < smd.method.span.end() {
+            if smd.is_class_method {
+                return ClassContext::StandaloneClassMethod(smd.class_name.name.as_str());
+            }
+            return ClassContext::StandaloneInstanceMethod(smd.class_name.name.as_str());
+        }
+    }
+    ClassContext::TopLevel
 }
 
 /// Find the selector at a given byte offset in an expression.
@@ -166,6 +334,20 @@ fn find_method_in_module(module: &Module, class_name: &str, selector: &str) -> O
 /// Returns the full selector name and the span of the selector keyword/operator
 /// that the cursor is on.
 pub fn find_selector_in_expr(expr: &Expression, offset: u32) -> Option<(EcoString, Span)> {
+    find_selector_lookup_in_expr(expr, offset)
+        .map(|lookup| (lookup.selector_name, lookup.selector_span))
+}
+
+/// Find selector lookup details at a given byte offset in an expression.
+///
+/// Returns a [`SelectorLookup`] containing:
+/// - full selector name,
+/// - selector span under the cursor, and
+/// - receiver hint used for context-aware method resolution.
+///
+/// Unlike [`find_selector_in_expr`], this API keeps receiver metadata so
+/// callers can resolve class-side/instance-side selector targets.
+pub fn find_selector_lookup_in_expr(expr: &Expression, offset: u32) -> Option<SelectorLookup> {
     let span = expr.span();
     if offset < span.start() || offset >= span.end() {
         return None;
@@ -177,75 +359,36 @@ pub fn find_selector_in_expr(expr: &Expression, offset: u32) -> Option<(EcoStrin
             selector,
             arguments,
             span,
-        } => {
-            // Check receiver first
-            if let Some(result) = find_selector_in_expr(receiver, offset) {
-                return Some(result);
-            }
-            // Check arguments
-            for arg in arguments {
-                if let Some(result) = find_selector_in_expr(arg, offset) {
-                    return Some(result);
-                }
-            }
-            // Check if cursor is on the selector itself
-            if let Some(result) = selector_span_contains(
-                selector,
-                offset,
-                selector_span_for_message_send(receiver.span(), arguments, *span),
-            ) {
-                return Some(result);
-            }
-            None
-        }
+        } => find_selector_lookup_in_message_send(receiver, selector, arguments, *span, offset),
         Expression::Cascade {
             receiver, messages, ..
-        } => {
-            if let Some(result) = find_selector_in_expr(receiver, offset) {
-                return Some(result);
-            }
-            for msg in messages {
-                // Check arguments
-                for arg in &msg.arguments {
-                    if let Some(result) = find_selector_in_expr(arg, offset) {
-                        return Some(result);
-                    }
-                }
-                // Check cascade message selector
-                if let Some(result) = selector_span_contains(
-                    &msg.selector,
-                    offset,
-                    selector_span_for_cascade_message(&msg.arguments, msg.span),
-                ) {
-                    return Some(result);
-                }
-            }
-            None
-        }
+        } => find_selector_lookup_in_cascade(receiver, messages, offset),
         Expression::Assignment { target, value, .. } => {
-            find_selector_in_expr(target, offset).or_else(|| find_selector_in_expr(value, offset))
+            find_selector_lookup_in_expr(target, offset)
+                .or_else(|| find_selector_lookup_in_expr(value, offset))
         }
         Expression::Block(block) => block
             .body
             .iter()
-            .find_map(|e| find_selector_in_expr(e, offset)),
-        Expression::Return { value, .. } => find_selector_in_expr(value, offset),
-        Expression::Parenthesized { expression, .. } => find_selector_in_expr(expression, offset),
-        Expression::FieldAccess { receiver, .. } => find_selector_in_expr(receiver, offset),
-        Expression::Pipe { value, target, .. } => {
-            find_selector_in_expr(value, offset).or_else(|| find_selector_in_expr(target, offset))
+            .find_map(|e| find_selector_lookup_in_expr(e, offset)),
+        Expression::Return { value, .. } => find_selector_lookup_in_expr(value, offset),
+        Expression::Parenthesized { expression, .. } => {
+            find_selector_lookup_in_expr(expression, offset)
         }
+        Expression::FieldAccess { receiver, .. } => find_selector_lookup_in_expr(receiver, offset),
+        Expression::Pipe { value, target, .. } => find_selector_lookup_in_expr(value, offset)
+            .or_else(|| find_selector_lookup_in_expr(target, offset)),
         Expression::Match { value, arms, .. } => {
-            if let Some(result) = find_selector_in_expr(value, offset) {
+            if let Some(result) = find_selector_lookup_in_expr(value, offset) {
                 return Some(result);
             }
             for arm in arms {
                 if let Some(guard) = &arm.guard {
-                    if let Some(result) = find_selector_in_expr(guard, offset) {
+                    if let Some(result) = find_selector_lookup_in_expr(guard, offset) {
                         return Some(result);
                     }
                 }
-                if let Some(result) = find_selector_in_expr(&arm.body, offset) {
+                if let Some(result) = find_selector_lookup_in_expr(&arm.body, offset) {
                     return Some(result);
                 }
             }
@@ -253,20 +396,95 @@ pub fn find_selector_in_expr(expr: &Expression, offset: u32) -> Option<(EcoStrin
         }
         Expression::StringInterpolation { segments, .. } => segments.iter().find_map(|seg| {
             if let crate::ast::StringSegment::Interpolation(expr) = seg {
-                find_selector_in_expr(expr, offset)
+                find_selector_lookup_in_expr(expr, offset)
             } else {
                 None
             }
         }),
         Expression::ListLiteral { elements, tail, .. } => elements
             .iter()
-            .find_map(|e| find_selector_in_expr(e, offset))
-            .or_else(|| tail.as_ref().and_then(|t| find_selector_in_expr(t, offset))),
+            .find_map(|e| find_selector_lookup_in_expr(e, offset))
+            .or_else(|| {
+                tail.as_ref()
+                    .and_then(|t| find_selector_lookup_in_expr(t, offset))
+            }),
         Expression::MapLiteral { pairs, .. } => pairs.iter().find_map(|pair| {
-            find_selector_in_expr(&pair.key, offset)
-                .or_else(|| find_selector_in_expr(&pair.value, offset))
+            find_selector_lookup_in_expr(&pair.key, offset)
+                .or_else(|| find_selector_lookup_in_expr(&pair.value, offset))
         }),
         _ => None,
+    }
+}
+
+fn find_selector_lookup_in_message_send(
+    receiver: &Expression,
+    selector: &MessageSelector,
+    arguments: &[Expression],
+    message_span: Span,
+    offset: u32,
+) -> Option<SelectorLookup> {
+    // Check receiver first
+    if let Some(result) = find_selector_lookup_in_expr(receiver, offset) {
+        return Some(result);
+    }
+    // Check arguments
+    for arg in arguments {
+        if let Some(result) = find_selector_lookup_in_expr(arg, offset) {
+            return Some(result);
+        }
+    }
+    // Check if cursor is on the selector itself
+    if let Some((selector_name, selector_span)) = selector_span_contains(
+        selector,
+        offset,
+        selector_span_for_message_send(receiver.span(), arguments, message_span),
+    ) {
+        return Some(SelectorLookup {
+            selector_name,
+            selector_span,
+            receiver_hint: receiver_hint_for_expr(receiver),
+        });
+    }
+    None
+}
+
+fn find_selector_lookup_in_cascade(
+    receiver: &Expression,
+    messages: &[crate::ast::CascadeMessage],
+    offset: u32,
+) -> Option<SelectorLookup> {
+    if let Some(result) = find_selector_lookup_in_expr(receiver, offset) {
+        return Some(result);
+    }
+    for msg in messages {
+        // Check arguments
+        for arg in &msg.arguments {
+            if let Some(result) = find_selector_lookup_in_expr(arg, offset) {
+                return Some(result);
+            }
+        }
+        // Check cascade message selector
+        if let Some((selector_name, selector_span)) = selector_span_contains(
+            &msg.selector,
+            offset,
+            selector_span_for_cascade_message(&msg.arguments, msg.span),
+        ) {
+            return Some(SelectorLookup {
+                selector_name,
+                selector_span,
+                receiver_hint: receiver_hint_for_expr(receiver),
+            });
+        }
+    }
+    None
+}
+
+fn receiver_hint_for_expr(receiver: &Expression) -> ReceiverHint {
+    match receiver {
+        Expression::ClassReference { name, .. } => ReceiverHint::ClassReference(name.name.clone()),
+        Expression::Identifier(ident) if ident.name == "self" => ReceiverHint::SelfReceiver,
+        Expression::Super(_) => ReceiverHint::SuperReceiver,
+        _ => ReceiverHint::Expression(receiver.span()),
     }
 }
 

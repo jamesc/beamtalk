@@ -55,7 +55,8 @@ impl NameResolver {
 
     /// Returns a reference to the current scope.
     #[must_use]
-    pub fn scope(&self) -> &Scope {
+    #[allow(dead_code)] // Accessor for future analysis phases
+    pub(crate) fn scope(&self) -> &Scope {
         &self.scope
     }
 
@@ -64,7 +65,7 @@ impl NameResolver {
     /// This allows the scope to be passed to other analysis phases (e.g., Analyser)
     /// without duplicating scope construction.
     #[must_use]
-    pub fn into_scope(self) -> Scope {
+    pub(crate) fn into_scope(self) -> Scope {
         self.scope
     }
 

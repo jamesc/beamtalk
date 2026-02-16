@@ -59,6 +59,12 @@
 //! };
 //! # assert_eq!(module.expressions.len(), 1);
 //! ```
+//!
+//! # Builder Pattern Convention
+//!
+//! AST nodes use `new()` for basic construction and `with_*()` for variant
+//! constructors (e.g., `InstanceVariable::with_type()`, `Module::with_classes()`).
+//! Prefer these constructors over manual struct initialization.
 
 use crate::source_analysis::Span;
 use ecow::EcoString;
@@ -1280,6 +1286,41 @@ impl CascadeMessage {
             span,
         }
     }
+}
+
+// --- Shared Kernel: Name Conversions ---
+
+/// Converts a `CamelCase` class name to a `snake_case` Erlang module name.
+///
+/// **DDD Context:** Shared Kernel — used by both Code Generation and Language Service.
+///
+/// Note: Acronyms like `HTTPRouter` become `httprouter` (no underscores within acronyms).
+///
+/// # Examples
+///
+/// ```
+/// use beamtalk_core::ast::to_module_name;
+/// assert_eq!(to_module_name("Counter"), "counter");
+/// assert_eq!(to_module_name("MyCounterActor"), "my_counter_actor");
+/// ```
+pub fn to_module_name(class_name: &str) -> String {
+    let mut result = String::new();
+    let mut prev_was_lowercase = false;
+
+    for ch in class_name.chars() {
+        if ch.is_uppercase() {
+            if prev_was_lowercase {
+                result.push('_');
+            }
+            result.extend(ch.to_lowercase());
+            prev_was_lowercase = false;
+        } else {
+            result.push(ch);
+            prev_was_lowercase = ch.is_lowercase();
+        }
+    }
+
+    result
 }
 
 #[cfg(test)]
