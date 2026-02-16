@@ -230,11 +230,6 @@ fn display_reload_result(response: &ReplResponse, module_name: Option<&str>) {
 /// On compile failure, prints errors but returns an empty list so the REPL
 /// can still start without the package classes.
 fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
-    let manifest_path = project_root.join("beamtalk.toml");
-    if !manifest_path.exists() {
-        return Vec::new();
-    }
-
     // Parse manifest to get package name for summary message
     let Some(project_root_utf8) = camino::Utf8Path::from_path(project_root) else {
         eprintln!("Warning: project path is not valid UTF-8, skipping auto-compile");
@@ -254,7 +249,7 @@ fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
     let options = beamtalk_core::CompilerOptions::default();
     match crate::commands::build::build(project_root_utf8.as_str(), &options) {
         Ok(()) => {
-            let ebin_path = project_root.join("_build").join("dev").join("ebin");
+            let ebin_path = project_root_utf8.join("_build").join("dev").join("ebin");
             // Count .beam files for summary
             let beam_count = std::fs::read_dir(&ebin_path)
                 .map(|entries| {
@@ -271,7 +266,7 @@ fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
                 beam_count,
                 if beam_count == 1 { "module" } else { "modules" }
             );
-            vec![ebin_path]
+            vec![ebin_path.into_std_path_buf()]
         }
         Err(e) => {
             eprintln!("Warning: package compilation failed: {e}");
