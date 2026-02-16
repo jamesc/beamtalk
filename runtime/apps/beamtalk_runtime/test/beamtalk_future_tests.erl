@@ -481,6 +481,122 @@ process_cleanup_when_future_abandoned_test() ->
     Result = beamtalk_future:await(FutureRef),
     ?assertEqual(still_alive, Result).
 
+%%% Additional state transition edge cases
+
+resolve_after_reject_in_rejected_state_test() ->
+    %% Resolve after reject should be silently ignored
+    Future = beamtalk_future:new(),
+    beamtalk_future:reject(Future, first_error),
+    beamtalk_future:resolve(Future, should_be_ignored),
+    
+    %% Should still get the rejection
+    ?assertThrow({future_rejected, first_error}, beamtalk_future:await(Future)).
+
+stray_timeout_in_resolved_state_test() ->
+    %% Timeout messages in resolved state should be ignored
+    Future = beamtalk_future:new(),
+    beamtalk_future:resolve(Future, 42),
+    
+    %% Send a stray timeout message directly to the future process
+    Future ! {timeout, self()},
+    
+    %% Future should still work normally
+    timer:sleep(10),
+    ?assertEqual(42, beamtalk_future:await(Future)).
+
+stray_timeout_in_rejected_state_test() ->
+    %% Timeout messages in rejected state should be ignored
+    Future = beamtalk_future:new(),
+    beamtalk_future:reject(Future, error),
+    
+    %% Send a stray timeout message
+    Future ! {timeout, self()},
+    
+    timer:sleep(10),
+    ?assertThrow({future_rejected, error}, beamtalk_future:await(Future)).
+
+rejected_callback_on_resolved_future_test() ->
+    %% Register a rejected callback on a resolved future — should be ignored
+    Future = beamtalk_future:new(),
+    beamtalk_future:resolve(Future, 42),
+    
+    Parent = self(),
+    beamtalk_future:when_rejected(Future, fun(Reason) ->
+        Parent ! {unexpected_callback, Reason}
+    end),
+    
+    %% Give time for processing
+    timer:sleep(50),
+    
+    %% Callback should NOT fire
+    receive
+        {unexpected_callback, _} -> ?assert(false)
+    after 100 ->
+        ok  % Expected — callback was ignored
+    end.
+
+resolved_callback_on_rejected_future_test() ->
+    %% Register a resolved callback on a rejected future — should be ignored
+    Future = beamtalk_future:new(),
+    beamtalk_future:reject(Future, error),
+    
+    Parent = self(),
+    beamtalk_future:when_resolved(Future, fun(Value) ->
+        Parent ! {unexpected_callback, Value}
+    end),
+    
+    %% Give time for processing
+    timer:sleep(50),
+    
+    %% Callback should NOT fire
+    receive
+        {unexpected_callback, _} -> ?assert(false)
+    after 100 ->
+        ok  % Expected — callback was ignored
+    end.
+
+callback_exception_does_not_crash_future_test() ->
+    %% A callback that throws should not crash the future process
+    Future = beamtalk_future:new(),
+    
+    %% Register a callback that will crash
+    beamtalk_future:when_resolved(Future, fun(_Value) ->
+        error(callback_crash)
+    end),
+    
+    %% Also register a well-behaved callback to verify the future still works
+    Parent = self(),
+    beamtalk_future:when_resolved(Future, fun(Value) ->
+        Parent ! {good_callback, Value}
+    end),
+    
+    %% Resolve — crashing callback runs in separate process
+    beamtalk_future:resolve(Future, 42),
+    
+    %% Good callback should still fire
+    receive
+        {good_callback, Value} -> ?assertEqual(42, Value)
+    after 1000 ->
+        ?assert(false)
+    end,
+    
+    %% Future process should still be alive
+    timer:sleep(50),
+    ?assert(is_process_alive(Future)),
+    
+    %% Subsequent await should work
+    ?assertEqual(42, beamtalk_future:await(Future)).
+
+await_infinity_resolves_test() ->
+    %% await with infinity timeout should not trigger the after clause
+    Future = beamtalk_future:new(),
+    spawn(fun() ->
+        timer:sleep(100),
+        beamtalk_future:resolve(Future, done)
+    end),
+    Result = beamtalk_future:await(Future, infinity),
+    ?assertEqual(done, Result).
+
 await_on_already_resolved_future_multiple_times_test() ->
     %% Test that already resolved future can be awaited multiple times
     Future = beamtalk_future:new(),

@@ -176,7 +176,7 @@ pub fn find_selector_in_expr(expr: &Expression, offset: u32) -> Option<(EcoStrin
             receiver,
             selector,
             arguments,
-            span: _,
+            span,
         } => {
             // Check receiver first
             if let Some(result) = find_selector_in_expr(receiver, offset) {
@@ -189,7 +189,11 @@ pub fn find_selector_in_expr(expr: &Expression, offset: u32) -> Option<(EcoStrin
                 }
             }
             // Check if cursor is on the selector itself
-            if let Some(result) = selector_span_contains(selector, offset) {
+            if let Some(result) = selector_span_contains(
+                selector,
+                offset,
+                selector_span_for_message_send(receiver.span(), arguments, *span),
+            ) {
                 return Some(result);
             }
             None
@@ -208,7 +212,11 @@ pub fn find_selector_in_expr(expr: &Expression, offset: u32) -> Option<(EcoStrin
                     }
                 }
                 // Check cascade message selector
-                if let Some(result) = selector_span_contains(&msg.selector, offset) {
+                if let Some(result) = selector_span_contains(
+                    &msg.selector,
+                    offset,
+                    selector_span_for_cascade_message(&msg.arguments, msg.span),
+                ) {
                     return Some(result);
                 }
             }
@@ -262,22 +270,35 @@ pub fn find_selector_in_expr(expr: &Expression, offset: u32) -> Option<(EcoStrin
     }
 }
 
+fn selector_span_for_message_send(
+    receiver_span: Span,
+    arguments: &[Expression],
+    message_span: Span,
+) -> Span {
+    let start = receiver_span.end();
+    let end = arguments
+        .first()
+        .map_or(message_span.end(), |arg| arg.span().start());
+    Span::new(start, end)
+}
+
+fn selector_span_for_cascade_message(arguments: &[Expression], message_span: Span) -> Span {
+    let end = arguments
+        .first()
+        .map_or(message_span.end(), |arg| arg.span().start());
+    Span::new(message_span.start(), end)
+}
+
 /// Check if cursor offset is within a selector's span, returning full name + span.
-fn selector_span_contains(selector: &MessageSelector, offset: u32) -> Option<(EcoString, Span)> {
+fn selector_span_contains(
+    selector: &MessageSelector,
+    offset: u32,
+    computed_span: Span,
+) -> Option<(EcoString, Span)> {
     match selector {
-        MessageSelector::Unary(name) => {
-            // Unary selectors don't have their own span stored — they're part
-            // of the MessageSend span, just after the receiver. We can't
-            // reliably determine the exact span without source text, so we
-            // skip unary selectors for now (they overlap with identifiers).
-            let _ = name;
-            None
-        }
-        MessageSelector::Binary(op) => {
-            let _ = op;
-            // Binary operators don't have individual spans stored
-            None
-        }
+        MessageSelector::Unary(_) | MessageSelector::Binary(_) => (offset >= computed_span.start()
+            && offset < computed_span.end())
+        .then(|| (selector.name(), computed_span)),
         MessageSelector::Keyword(parts) => {
             // Each keyword part has its own span
             let full_name = selector.name();
@@ -467,5 +488,27 @@ mod tests {
         // Position 0 is on "obj" (receiver), not a selector
         let result = find_selector_in_expr(&module.expressions[0], 0);
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn find_selector_in_unary_message() {
+        let source = "obj size";
+        let module = parse_source(source);
+        // Position 4 is on/near "size"
+        let result = find_selector_in_expr(&module.expressions[0], 4);
+        assert!(result.is_some());
+        let (name, _span) = result.unwrap();
+        assert_eq!(name, "size");
+    }
+
+    #[test]
+    fn find_selector_in_binary_message() {
+        let source = "3 + 4";
+        let module = parse_source(source);
+        // Position 2 is on/near "+"
+        let result = find_selector_in_expr(&module.expressions[0], 2);
+        assert!(result.is_some());
+        let (name, _span) = result.unwrap();
+        assert_eq!(name, "+");
     }
 }

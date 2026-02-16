@@ -37,6 +37,11 @@
 %% Beamtalk class dispatch - implements class methods for the Beamtalk global
 -export([dispatch/3, has_method/1]).
 
+%% Exported for testing
+-ifdef(TEST).
+-export([topo_sort/1]).
+-endif.
+
 %% @doc Start the stdlib initializer as a supervised process.
 %%
 %% This is called by the supervisor after beamtalk_bootstrap completes.
