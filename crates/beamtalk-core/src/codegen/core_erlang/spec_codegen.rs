@@ -18,7 +18,7 @@
 //! 'spec' = [{{'function_name', Arity},
 //!            [{'type', 0, 'fun',
 //!              [{'type', 0, 'product', [ParamTypes...]}
-//!               | [ReturnType]]}]}]
+//!               , ReturnType]}]}]
 //! ```
 //!
 //! ## Type Mapping
@@ -53,7 +53,7 @@ fn type_annotation_to_spec(annotation: &TypeAnnotation) -> String {
         TypeAnnotation::Simple(id) => simple_type_to_spec(id.name.as_str()),
         TypeAnnotation::Union { types, .. } => {
             let type_specs: Vec<String> = types.iter().map(type_annotation_to_spec).collect();
-            format!("{{'type', 0, 'union', [{}]}}", join_with_cons(&type_specs))
+            format!("{{'type', 0, 'union', [{}]}}", join_comma(&type_specs))
         }
         TypeAnnotation::Singleton { name, .. } => {
             format!("{{'atom', 0, '{name}'}}")
@@ -64,9 +64,7 @@ fn type_annotation_to_spec(annotation: &TypeAnnotation) -> String {
         }
         TypeAnnotation::FalseOr { inner, .. } => {
             let inner_spec = type_annotation_to_spec(inner);
-            format!(
-                "{{'type', 0, 'union', [{inner_spec} | [{{'atom', 0, 'false'}}]]}}",
-            )
+            format!("{{'type', 0, 'union', [{inner_spec}, {{'atom', 0, 'false'}}]}}",)
         }
     }
 }
@@ -92,24 +90,9 @@ fn simple_type_to_spec(name: &str) -> String {
     }
 }
 
-/// Joins type spec strings into a Core Erlang cons-cell list.
-///
-/// Core Erlang lists in attributes use cons syntax: `[a | [b | [c]]]`
-fn join_with_cons(specs: &[String]) -> String {
-    match specs.len() {
-        0 => String::new(),
-        1 => specs[0].clone(),
-        _ => {
-            // Build right-nested cons: A | [B | [C]]
-            // Start from rightmost and wrap each level
-            let mut result = format!("[{}]", specs[specs.len() - 1]);
-            for spec in specs[1..specs.len() - 1].iter().rev() {
-                result = format!("[{spec} | {result}]");
-            }
-            // The outermost level doesn't get wrapped (caller wraps in [...])
-            format!("{} | {result}", specs[0])
-        }
-    }
+/// Joins type spec strings into a comma-separated Core Erlang list.
+fn join_comma(specs: &[String]) -> String {
+    specs.join(", ")
 }
 
 /// Generates the spec attribute string for a single method.
@@ -165,15 +148,12 @@ pub fn generate_method_spec(method: &MethodDefinition, is_value_type: bool) -> O
     let product = if param_types.is_empty() {
         "{'type', 0, 'product', []}".to_string()
     } else {
-        format!(
-            "{{'type', 0, 'product', [{}]}}",
-            join_with_cons(&param_types)
-        )
+        format!("{{'type', 0, 'product', [{}]}}", join_comma(&param_types))
     };
 
-    // Full spec: {{'name', arity}, [{'type', 0, 'fun', [Product | [Return]]}]}
+    // Full spec: {{'name', arity}, [{'type', 0, 'fun', [Product, Return]}]}
     Some(format!(
-        "{{'{erlang_name}', {arity}}}, [{{'type', 0, 'fun', [{product} | [{return_spec}]]}}]"
+        "{{'{erlang_name}', {arity}}}, [{{'type', 0, 'fun', [{product}, {return_spec}]}}]"
     ))
 }
 
@@ -300,7 +280,7 @@ mod tests {
         let result = type_annotation_to_spec(&ann);
         assert_eq!(
             result,
-            "{'type', 0, 'union', [{'type', 0, 'integer', []} | [{'atom', 0, 'nil'}]]}"
+            "{'type', 0, 'union', [{'type', 0, 'integer', []}, {'atom', 0, 'nil'}]}"
         );
     }
 
@@ -316,7 +296,7 @@ mod tests {
         let result = type_annotation_to_spec(&ann);
         assert_eq!(
             result,
-            "{'type', 0, 'union', [{'type', 0, 'integer', []} | [{'atom', 0, 'false'}]]}"
+            "{'type', 0, 'union', [{'type', 0, 'integer', []}, {'atom', 0, 'false'}]}"
         );
     }
 
@@ -334,7 +314,7 @@ mod tests {
         let spec = generate_method_spec(&method, false).unwrap();
         assert_eq!(
             spec,
-            "{'getBalance', 0}, [{'type', 0, 'fun', [{'type', 0, 'product', []} | [{'type', 0, 'integer', []}]]}]"
+            "{'getBalance', 0}, [{'type', 0, 'fun', [{'type', 0, 'product', []}, {'type', 0, 'integer', []}]}]"
         );
     }
 
@@ -355,7 +335,7 @@ mod tests {
         let spec = generate_method_spec(&method, false).unwrap();
         assert_eq!(
             spec,
-            "{'deposit:', 1}, [{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'integer', []}]} | [{'type', 0, 'integer', []}]]}]"
+            "{'deposit:', 1}, [{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'integer', []}]}, {'type', 0, 'integer', []}]}]"
         );
     }
 
@@ -511,7 +491,7 @@ mod tests {
     #[test]
     fn value_type_method_with_two_params_generates_correct_cons() {
         // For value types with 2 params: product has 3 types (Self + 2 params)
-        // Must produce [Self | [Param1 | [Param2]]] not [Self | [Param1] | [Param2]]
+        // Must produce [Self, Param1, Param2]
         let method = MethodDefinition::with_return_type(
             MessageSelector::Keyword(vec![
                 KeywordPart::new("at:", span()),
@@ -538,7 +518,7 @@ mod tests {
         // Product must use proper cons nesting
         assert!(
             spec.contains(
-                "{'type', 0, 'map', 'any'} | [{'type', 0, 'atom', []} | [{'type', 0, 'any', []}]]"
+                "{'type', 0, 'map', 'any'}, {'type', 0, 'atom', []}, {'type', 0, 'any', []}"
             ),
             "Product should use proper cons nesting: got {spec}"
         );
@@ -557,7 +537,7 @@ mod tests {
         let result = type_annotation_to_spec(&ann);
         assert_eq!(
             result,
-            "{'type', 0, 'union', [{'type', 0, 'integer', []} | [{'type', 0, 'binary', []} | [{'atom', 0, 'nil'}]]]}"
+            "{'type', 0, 'union', [{'type', 0, 'integer', []}, {'type', 0, 'binary', []}, {'atom', 0, 'nil'}]}"
         );
     }
 }
