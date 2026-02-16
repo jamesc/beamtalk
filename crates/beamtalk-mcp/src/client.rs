@@ -380,7 +380,7 @@ mod tests {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(15_000);
-        let max_attempts = (timeout_ms + 299) / 300;
+        let max_attempts = timeout_ms.div_ceil(300);
 
         for _ in 0..max_attempts {
             if StdTcpStream::connect(format!("127.0.0.1:{port}")).is_ok() {
