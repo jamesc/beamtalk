@@ -128,7 +128,7 @@ raise(#beamtalk_error{} = Error) ->
     Wrapped = beamtalk_exception_handler:wrap(Error),
     error(Wrapped).
 
-%% Internal helper to generate error messages
+%% @doc Generate a human-readable error message from kind, class, and optional selector.
 -spec generate_message(atom(), atom(), atom() | undefined) -> binary().
 generate_message(does_not_understand, Class, undefined) ->
     iolist_to_binary(io_lib:format("~s does not understand message", [Class]));

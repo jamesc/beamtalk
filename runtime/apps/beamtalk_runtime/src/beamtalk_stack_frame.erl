@@ -38,7 +38,8 @@ wrap(Stacktrace) when is_list(Stacktrace) ->
 wrap(_) ->
     [].
 
-%% @private Convert a single Erlang stacktrace entry to a StackFrame tagged map.
+%% @private
+%% @doc Convert a single Erlang stacktrace entry to a StackFrame tagged map.
 -spec wrap_frame(tuple()) -> map().
 wrap_frame({Module, Function, ArityOrArgs, Location}) ->
     Arity = case is_list(ArityOrArgs) of
@@ -109,7 +110,9 @@ module_to_class(Module) when is_atom(Module) ->
 module_to_class(_) ->
     nil.
 
-%% @private Convert snake_case module name to CamelCase class name atom.
+%% @private
+%% @doc Convert snake_case module name to CamelCase class name atom.
+%%
 %% Uses list_to_existing_atom to avoid atom table growth from arbitrary module names.
 -spec snake_to_class(string()) -> atom() | nil.
 snake_to_class(Snake) ->
@@ -119,7 +122,8 @@ snake_to_class(Snake) ->
     catch error:badarg -> nil
     end.
 
-%% @private Capitalize first letter of a string.
+%% @private
+%% @doc Capitalize first letter of a string.
 -spec capitalize(string()) -> string().
 capitalize([]) -> [];
 capitalize([H | T]) when H >= $a, H =< $z -> [H - 32 | T];
@@ -178,7 +182,8 @@ has_method('printString') -> true;
 has_method('describe') -> true;
 has_method(_) -> false.
 
-%% @private Format a StackFrame as a human-readable string.
+%% @private
+%% @doc Format a StackFrame as a human-readable string.
 -spec format_frame(map()) -> binary().
 format_frame(#{class_name := ClassName, function := Function, arity := Arity,
                file := File, line := Line}) ->

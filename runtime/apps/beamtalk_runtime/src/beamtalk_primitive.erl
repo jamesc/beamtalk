@@ -455,7 +455,7 @@ value_type_send(Self, Class, Selector, Args) ->
             end
     end.
 
-%% @private Check if a selector is an instance variable method that should
+%% @doc Check if a selector is an instance variable method that should
 %% raise immutable_value on value types (BT-359).
 -spec is_ivar_method(atom()) -> {true, binary()} | false.
 is_ivar_method('instVarAt:put:') ->
@@ -505,7 +505,7 @@ class_name_to_module(Class) when is_atom(Class) ->
         list_to_atom(ModName)
     end.
 
-%% @private CamelCase string to snake_case string conversion.
+%% @doc CamelCase string to snake_case string conversion.
 -spec camel_to_snake(string()) -> string().
 camel_to_snake(Str) ->
     camel_to_snake(Str, false, []).

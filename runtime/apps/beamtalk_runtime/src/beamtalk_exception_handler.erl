@@ -112,7 +112,8 @@ matches_class(_Other, _Error) ->
     %% Unknown filter type — catch all for safety
     true.
 
-%% @private Match by class name atom with hierarchy-aware matching (BT-475).
+%% @private
+%% @doc Match by class name atom with hierarchy-aware matching (BT-475).
 %%
 %% Derives the error's class from kind_to_class/1, then uses the class
 %% system's superclass chain to check if it matches the requested filter.
@@ -138,7 +139,8 @@ matches_class_name(ClassName, RawError) when not is_map(RawError) ->
 matches_class_name(_ClassName, _Other) ->
     false.
 
-%% @private Strip " class" suffix from metaclass names.
+%% @private
+%% @doc Strip " class" suffix from metaclass names.
 %% e.g., 'RuntimeError class' → 'RuntimeError', 'TypeError' → 'TypeError'
 -spec strip_class_suffix(atom()) -> atom().
 strip_class_suffix(ClassName) ->
@@ -282,6 +284,9 @@ signal(Kind) when is_atom(Kind) ->
     Error = beamtalk_error:new(Kind, 'Exception'),
     beamtalk_error:raise(Error).
 
+%% @doc Raise a new Error exception with the given message.
+%%
+%% Usage: `Exception signal: 'something went wrong'`
 -spec signal_message(term()) -> no_return().
 signal_message(Message) when is_binary(Message) ->
     Error = #beamtalk_error{
@@ -319,7 +324,7 @@ signal_message(Message, ExceptionClass) when is_atom(Message) ->
 signal_message(Message, ExceptionClass) ->
     signal_message(iolist_to_binary(io_lib:format("~p", [Message])), ExceptionClass).
 
-%% @private Raise a new exception from a class instance without a message.
+%% @doc Raise a new exception from a class instance without a message.
 %%
 %% BT-480: Used when signal (no args) is called on a new exception instance
 %% that has $beamtalk_class but no error field yet.

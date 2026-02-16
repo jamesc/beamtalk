@@ -345,15 +345,14 @@ format_error_message(Reason) ->
 
 %%% Internal Helpers
 
-%% @private
-%% Format a rejection reason for display in #Future<rejected: ...>
+%% @doc Format a rejection reason for display in #Future<rejected: ...>.
 -spec format_rejection_reason(term()) -> iolist().
 format_rejection_reason(#beamtalk_error{} = Error) ->
     beamtalk_error:format(Error);
 format_rejection_reason(Reason) ->
     iolist_to_binary(io_lib:format("~p", [Reason])).
 
-%% @private
+%% @doc Format a term as a binary name for use in error messages.
 -spec format_name(term()) -> binary().
 format_name(Name) when is_atom(Name) ->
     atom_to_binary(Name, utf8);
@@ -364,7 +363,7 @@ format_name(Name) when is_list(Name) ->
 format_name(Name) ->
     iolist_to_binary(io_lib:format("~p", [Name])).
 
-%% @private Convert atom or binary to binary.
+%% @doc Convert atom or binary to binary.
 -spec to_binary(atom() | binary()) -> binary().
 to_binary(V) when is_atom(V) -> atom_to_binary(V, utf8);
 to_binary(V) when is_binary(V) -> V.

@@ -129,8 +129,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 %%% Internal Functions
 
-%% @private
-%% Determine if the workspace should terminate due to inactivity.
+%% @doc Determine if the workspace should terminate due to inactivity.
 -spec should_terminate(integer()) -> boolean().
 should_terminate(MaxIdleSeconds) ->
     %% Check if there are any active sessions
@@ -149,8 +148,7 @@ should_terminate(MaxIdleSeconds) ->
             false
     end.
 
-%% @private
-%% Check if there are any active REPL sessions connected.
+%% @doc Check if there are any active REPL sessions connected.
 -spec has_active_sessions() -> boolean().
 has_active_sessions() ->
     %% Check if beamtalk_session_sup exists and has children
