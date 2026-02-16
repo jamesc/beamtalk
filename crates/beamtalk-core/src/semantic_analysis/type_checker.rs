@@ -135,6 +135,7 @@ impl TypeChecker {
             }
             for method in &class.class_methods {
                 let mut method_env = TypeEnv::new();
+                method_env.in_class_method = true;
                 method_env.set("self", InferredType::Known(class.name.name.clone()));
                 Self::set_param_types(&mut method_env, &method.parameters);
                 for expr in &method.body {
@@ -148,6 +149,7 @@ impl TypeChecker {
             let class_name = &standalone.class_name.name;
             let is_abstract = hierarchy.is_abstract(class_name);
             let mut method_env = TypeEnv::new();
+            method_env.in_class_method = standalone.is_class_method;
             method_env.set("self", InferredType::Known(class_name.clone()));
             Self::set_param_types(&mut method_env, &standalone.method.parameters);
             for expr in &standalone.method.body {
@@ -252,7 +254,16 @@ impl TypeChecker {
                             );
                         }
                     } else if let InferredType::Known(ref class_name) = receiver_ty {
-                        if !in_abstract_method || !Self::is_self_receiver(receiver) {
+                        if env.in_class_method && Self::is_self_receiver(receiver) {
+                            if !in_abstract_method {
+                                self.check_class_side_send(
+                                    class_name,
+                                    &selector_name,
+                                    msg.span,
+                                    hierarchy,
+                                );
+                            }
+                        } else if !in_abstract_method || !Self::is_self_receiver(receiver) {
                             self.check_instance_selector(
                                 class_name,
                                 &selector_name,
@@ -370,6 +381,14 @@ impl TypeChecker {
 
         // For instance-side sends on known types
         if let InferredType::Known(ref class_name) = receiver_ty {
+            // In class methods, self sends should check class-side methods
+            if env.in_class_method && Self::is_self_receiver(receiver) {
+                if !in_abstract_method {
+                    return self.check_class_side_send(class_name, &selector_name, span, hierarchy);
+                }
+                return InferredType::Dynamic;
+            }
+
             // Skip checking self sends in abstract class method bodies —
             // subclasses may provide the missing methods (template method pattern)
             let skip = in_abstract_method && Self::is_self_receiver(receiver);
@@ -550,12 +569,15 @@ impl Default for TypeChecker {
 #[derive(Debug, Clone)]
 struct TypeEnv {
     bindings: HashMap<EcoString, InferredType>,
+    /// Whether we're inside a class method body (self refers to class-side).
+    in_class_method: bool,
 }
 
 impl TypeEnv {
     fn new() -> Self {
         Self {
             bindings: HashMap::new(),
+            in_class_method: false,
         }
     }
 
@@ -1156,6 +1178,171 @@ mod tests {
             ty,
             Some(&InferredType::Known("String".into())),
             "infer_types should return correct type map"
+        );
+    }
+
+    // BT-614: Class method self-send tests
+
+    fn make_class_with_class_methods(
+        name: &str,
+        instance_methods: Vec<MethodDefinition>,
+        class_methods: Vec<MethodDefinition>,
+    ) -> ClassDefinition {
+        ClassDefinition {
+            name: ident(name),
+            superclass: Some(ident("Actor")),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: instance_methods,
+            class_methods,
+            class_variables: vec![],
+            doc_comment: None,
+            span: span(),
+        }
+    }
+
+    fn make_method(selector: &str, body: Vec<Expression>) -> MethodDefinition {
+        MethodDefinition {
+            selector: MessageSelector::Unary(selector.into()),
+            parameters: vec![],
+            body,
+            return_type: None,
+            is_sealed: false,
+            kind: MethodKind::Primary,
+            doc_comment: None,
+            span: span(),
+        }
+    }
+
+    #[test]
+    fn test_class_method_self_send_no_false_warning() {
+        // class create => self.instanceCount := ...
+        // class createAndReport => self create  ← should NOT warn
+        let class_def = make_class_with_class_methods(
+            "ClassVarCounter",
+            vec![],
+            vec![
+                make_method("create", vec![int_lit(1)]),
+                make_method(
+                    "createAndReport",
+                    vec![msg_send(
+                        var("self"),
+                        MessageSelector::Unary("create".into()),
+                        vec![],
+                    )],
+                ),
+            ],
+        );
+        let module = make_module_with_classes(vec![], vec![class_def]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "self send to existing class method should not warn, got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn test_class_method_self_send_warns_on_unknown() {
+        // class doStuff => self bogusMethod  ← should warn
+        let class_def = make_class_with_class_methods(
+            "MyClass",
+            vec![],
+            vec![make_method(
+                "doStuff",
+                vec![msg_send(
+                    var("self"),
+                    MessageSelector::Unary("bogusMethod".into()),
+                    vec![],
+                )],
+            )],
+        );
+        let module = make_module_with_classes(vec![], vec![class_def]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert_eq!(
+            checker.diagnostics().len(),
+            1,
+            "should warn about unknown class method"
+        );
+        assert!(
+            checker.diagnostics()[0].message.contains("bogusMethod"),
+            "warning should mention 'bogusMethod': {}",
+            checker.diagnostics()[0].message
+        );
+    }
+
+    #[test]
+    fn test_instance_method_self_send_no_regression() {
+        // instance method: greet => self increment  ← should NOT warn if increment exists
+        let class_def = make_class_with_class_methods(
+            "Counter",
+            vec![
+                make_method("increment", vec![int_lit(1)]),
+                make_method(
+                    "greet",
+                    vec![msg_send(
+                        var("self"),
+                        MessageSelector::Unary("increment".into()),
+                        vec![],
+                    )],
+                ),
+            ],
+            vec![],
+        );
+        let module = make_module_with_classes(vec![], vec![class_def]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "instance method self send should not regress, got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn test_cascade_in_class_method_checks_class_side() {
+        // class doStuff => self create; getCount  ← both class methods, no warning
+        let class_def = make_class_with_class_methods(
+            "ClassVarCounter",
+            vec![],
+            vec![
+                make_method("create", vec![int_lit(1)]),
+                make_method("getCount", vec![int_lit(0)]),
+                make_method(
+                    "doStuff",
+                    vec![Expression::Cascade {
+                        receiver: Box::new(var("self")),
+                        messages: vec![
+                            CascadeMessage::new(
+                                MessageSelector::Unary("create".into()),
+                                vec![],
+                                span(),
+                            ),
+                            CascadeMessage::new(
+                                MessageSelector::Unary("getCount".into()),
+                                vec![],
+                                span(),
+                            ),
+                        ],
+                        span: span(),
+                    }],
+                ),
+            ],
+        );
+        let module = make_module_with_classes(vec![], vec![class_def]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "cascade self sends to class methods should not warn, got: {:?}",
+            checker.diagnostics()
         );
     }
 }
