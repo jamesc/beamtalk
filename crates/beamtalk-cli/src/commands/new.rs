@@ -123,8 +123,23 @@ beamtalk run
         .wrap_err("Failed to create .gitignore")?;
 
     // Create AGENTS.md
-    let agents_content = format!(
-        r#"# {name} — Agent Guide
+    write_agents_md(path, name)?;
+
+    // Create .github/copilot-instructions.md
+    write_copilot_instructions(path, name)?;
+
+    // Create .mcp.json
+    let mcp_content = "{\n  \"mcpServers\": {}\n}\n";
+    fs::write(path.join(".mcp.json"), mcp_content)
+        .into_diagnostic()
+        .wrap_err("Failed to create .mcp.json")?;
+
+    Ok(())
+}
+
+fn write_agents_md(path: &Utf8Path, name: &str) -> Result<()> {
+    let content = format!(
+        r"# {name} — Agent Guide
 
 ## Project Structure
 
@@ -180,15 +195,16 @@ Object subclass: Counter
 - Language features: https://beamtalk.dev/docs/language-features
 - Syntax rationale: https://beamtalk.dev/docs/syntax-rationale
 - Examples: see `src/` directory
-"#
+"
     );
-    fs::write(path.join("AGENTS.md"), agents_content)
+    fs::write(path.join("AGENTS.md"), content)
         .into_diagnostic()
-        .wrap_err("Failed to create AGENTS.md")?;
+        .wrap_err("Failed to create AGENTS.md")
+}
 
-    // Create .github/copilot-instructions.md
-    let copilot_content = format!(
-        r#"# Copilot Instructions for {name}
+fn write_copilot_instructions(path: &Utf8Path, name: &str) -> Result<()> {
+    let content = format!(
+        r"# Copilot Instructions for {name}
 
 This is a [Beamtalk](https://beamtalk.dev) project that compiles to the BEAM virtual machine.
 
@@ -215,25 +231,14 @@ beamtalk build    # Compile the project
 beamtalk repl     # Start interactive REPL
 beamtalk test     # Run tests
 ```
-"#
+"
     );
     fs::write(
         path.join(".github").join("copilot-instructions.md"),
-        copilot_content,
+        content,
     )
     .into_diagnostic()
-    .wrap_err("Failed to create .github/copilot-instructions.md")?;
-
-    // Create .mcp.json
-    let mcp_content = r#"{
-  "mcpServers": {}
-}
-"#;
-    fs::write(path.join(".mcp.json"), mcp_content)
-        .into_diagnostic()
-        .wrap_err("Failed to create .mcp.json")?;
-
-    Ok(())
+    .wrap_err("Failed to create .github/copilot-instructions.md")
 }
 
 #[cfg(test)]
@@ -378,7 +383,10 @@ mod tests {
 
         let content = fs::read_to_string(gitignore_path).unwrap();
         assert!(content.contains("/_build/"));
-        assert!(!content.contains("/build/"), ".gitignore should not contain /build/");
+        assert!(
+            !content.contains("/build/"),
+            ".gitignore should not contain /build/"
+        );
         assert!(content.contains("*.beam"));
         assert!(content.contains("*.core"));
     }
