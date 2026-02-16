@@ -12,7 +12,10 @@
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--export([start_link/1, get_port/0, handle_client/2, parse_request/1, safe_to_existing_atom/1]).
+-export([start_link/1, get_port/0, get_nonce/0, handle_client/2, parse_request/1, safe_to_existing_atom/1]).
+-ifdef(TEST).
+-export([generate_nonce/0]).
+-endif.
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -27,7 +30,9 @@
 -record(state, {
     listen_socket :: gen_tcp:socket(),
     port :: inet:port_number(),
-    acceptor_pid :: pid() | undefined
+    acceptor_pid :: pid() | undefined,
+    workspace_id :: binary() | undefined,
+    nonce :: binary()
 }).
 
 %%% Public API
@@ -47,12 +52,20 @@ start_link(Port) when is_integer(Port) ->
 get_port() ->
     gen_server:call(?MODULE, get_port).
 
+%% @doc Get the nonce for this server instance.
+%% Used for stale port file detection (BT-611).
+-spec get_nonce() -> {ok, binary()}.
+get_nonce() ->
+    gen_server:call(?MODULE, get_nonce).
+
 %%% gen_server callbacks
 
 %% @private
 init(Config) ->
     Port = maps:get(port, Config),
     WorkspaceId = maps:get(workspace_id, Config, undefined),
+    %% Generate a random nonce for stale port file detection (BT-611)
+    Nonce = generate_nonce(),
     %% SECURITY: Bind to loopback only (127.0.0.1) so that only local
     %% processes can connect. No authentication is performed — the loopback
     %% restriction is the sole access control, matching the security model of
@@ -66,11 +79,13 @@ init(Config) ->
         {ok, ListenSocket} ->
             %% Discover actual bound port (important when Port=0 for OS-assigned ephemeral port)
             {ok, ActualPort} = inet:port(ListenSocket),
-            %% Write port file so CLI can discover the actual port
-            write_port_file(WorkspaceId, ActualPort),
+            %% Write port file so CLI can discover the actual port and nonce
+            write_port_file(WorkspaceId, ActualPort, Nonce),
             %% Start acceptor process
             {ok, AcceptorPid} = start_acceptor(ListenSocket),
-            {ok, #state{listen_socket = ListenSocket, port = ActualPort, acceptor_pid = AcceptorPid}};
+            {ok, #state{listen_socket = ListenSocket, port = ActualPort,
+                        acceptor_pid = AcceptorPid, workspace_id = WorkspaceId,
+                        nonce = Nonce}};
         {error, Reason} ->
             {stop, {listen_failed, Reason}}
     end.
@@ -78,6 +93,8 @@ init(Config) ->
 %% @private
 handle_call(get_port, _From, State) ->
     {reply, {ok, State#state.port}, State};
+handle_call(get_nonce, _From, State) ->
+    {reply, {ok, State#state.nonce}, State};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
@@ -91,6 +108,13 @@ handle_info({'DOWN', _Ref, process, AcceptorPid, Reason}, State = #state{accepto
     ?LOG_WARNING("REPL acceptor died: ~p, restarting", [Reason]),
     {ok, NewAcceptorPid} = start_acceptor(ListenSocket),
     {noreply, State#state{acceptor_pid = NewAcceptorPid}};
+
+handle_info(shutdown_requested, State) ->
+    %% TCP shutdown endpoint (BT-611): initiate OTP-level graceful teardown.
+    %% This runs in the gen_server process after the TCP response was sent.
+    ?LOG_INFO("Executing TCP-requested shutdown", #{}),
+    init:stop(),
+    {noreply, State};
 
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -111,10 +135,10 @@ code_change(_OldVsn, State, _Extra) ->
 %% @doc Write the actual bound port to a file in the workspace directory.
 %% This is needed when port=0 is used (OS assigns ephemeral port) so the
 %% CLI can discover the actual port after BEAM startup.
--spec write_port_file(binary() | undefined, inet:port_number()) -> ok.
-write_port_file(undefined, _Port) ->
+-spec write_port_file(binary() | undefined, inet:port_number(), binary()) -> ok.
+write_port_file(undefined, _Port, _Nonce) ->
     ok;
-write_port_file(WorkspaceId, Port) ->
+write_port_file(WorkspaceId, Port, Nonce) ->
     case beamtalk_platform:home_dir() of
         false ->
             ?LOG_WARNING("HOME/USERPROFILE not set; skipping port file write for workspace ~p",
@@ -125,9 +149,11 @@ write_port_file(WorkspaceId, Port) ->
                                           binary_to_list(WorkspaceId), "port"]),
             case filelib:ensure_dir(PortFilePath) of
                 ok ->
-                    case file:write_file(PortFilePath, integer_to_list(Port)) of
+                    %% Format: PORT\nNONCE (two lines for stale detection, BT-611)
+                    Content = [integer_to_list(Port), "\n", binary_to_list(Nonce)],
+                    case file:write_file(PortFilePath, Content) of
                         ok ->
-                            ?LOG_DEBUG("Wrote port file: ~s (port ~p)", [PortFilePath, Port]),
+                            ?LOG_DEBUG("Wrote port file: ~s (port ~p, nonce ~s)", [PortFilePath, Port, Nonce]),
                             ok;
                         {error, Reason} ->
                             ?LOG_WARNING("Failed to write port file ~s: ~p",
@@ -140,6 +166,17 @@ write_port_file(WorkspaceId, Port) ->
                     ok
             end
     end.
+
+%%% Nonce Generation
+
+%% @private
+%% @doc Generate a random nonce for stale port file detection (BT-611).
+%% Returns a 16-character hex string.
+-spec generate_nonce() -> binary().
+generate_nonce() ->
+    Bytes = crypto:strong_rand_bytes(8),
+    list_to_binary(lists:flatten(
+        [io_lib:format("~2.16.0b", [B]) || <<B>> <= Bytes])).
 
 %%% Acceptor Process
 
@@ -618,6 +655,40 @@ handle_op(<<"docs">>, Params, Msg, _SessionPid) ->
             end
     end;
 
+handle_op(<<"health">>, _Params, Msg, _SessionPid) ->
+    %% Health probe — returns workspace_id and nonce for stale detection (BT-611).
+    %% No authentication required (read-only, equivalent to filesystem info).
+    {ok, Nonce} = get_nonce(),
+    WorkspaceId = case beamtalk_workspace_meta:get_metadata() of
+        {ok, Meta} -> maps:get(workspace_id, Meta, <<>>);
+        {error, _} -> <<>>
+    end,
+    Base = beamtalk_repl_protocol:base_response(Msg),
+    jsx:encode(Base#{<<"workspace_id">> => WorkspaceId,
+                     <<"nonce">> => Nonce,
+                     <<"status">> => [<<"done">>]});
+
+handle_op(<<"shutdown">>, Params, Msg, _SessionPid) ->
+    %% Graceful shutdown — cookie-authenticated (BT-611).
+    %% Triggers init:stop() for OTP-level supervisor tree teardown.
+    ProvidedCookie = maps:get(<<"cookie">>, Params, <<>>),
+    NodeCookie = atom_to_binary(erlang:get_cookie(), utf8),
+    case ProvidedCookie of
+        NodeCookie ->
+            ?LOG_INFO("Shutdown requested via TCP protocol", #{}),
+            %% Schedule shutdown via gen_server handle_info after TCP response is sent.
+            %% Using send_after to the registered server ensures init:stop() runs
+            %% only after the response has been flushed to the client socket.
+            erlang:send_after(100, ?MODULE, shutdown_requested),
+            beamtalk_repl_protocol:encode_status(ok, Msg,
+                fun beamtalk_repl_json:term_to_json/1);
+        _ ->
+            ?LOG_WARNING("Shutdown rejected: invalid cookie", #{}),
+            beamtalk_repl_protocol:encode_error(
+                {auth_error, <<"Invalid cookie">>}, Msg,
+                fun beamtalk_repl_json:format_error_message/1)
+    end;
+
 handle_op(Op, _Params, Msg, _SessionPid) ->
     beamtalk_repl_protocol:encode_error(
         {unknown_op, Op}, Msg, fun beamtalk_repl_json:format_error_message/1).
@@ -637,6 +708,8 @@ handle_op(Op, _Params, Msg, _SessionPid) ->
     {list_modules} |
     {unload_module, string()} |
     {get_docs, binary(), binary() | undefined} |
+    {health} |
+    {shutdown, string()} |
     {error, term()}.
 parse_request(Data) when is_binary(Data) ->
     try
@@ -684,7 +757,8 @@ parse_request(Data) when is_binary(Data) ->
     {eval, string()} | {clear_bindings} | {get_bindings} |
     {load_file, string()} | {list_actors} | {list_modules} |
     {kill_actor, string()} | {unload_module, string()} |
-    {get_docs, binary(), binary() | undefined} | {error, term()}.
+    {get_docs, binary(), binary() | undefined} |
+    {health} | {shutdown, string()} | {error, term()}.
 op_to_request(<<"eval">>, Map) ->
     Code = maps:get(<<"code">>, Map, <<>>),
     {eval, binary_to_list(Code)};
@@ -709,6 +783,11 @@ op_to_request(<<"docs">>, Map) ->
     ClassName = maps:get(<<"class">>, Map, <<>>),
     Selector = maps:get(<<"selector">>, Map, undefined),
     {get_docs, ClassName, Selector};
+op_to_request(<<"health">>, _Map) ->
+    {health};
+op_to_request(<<"shutdown">>, Map) ->
+    Cookie = maps:get(<<"cookie">>, Map, <<>>),
+    {shutdown, binary_to_list(Cookie)};
 op_to_request(Op, _Map) ->
     {error, {unknown_op, Op}}.
 
