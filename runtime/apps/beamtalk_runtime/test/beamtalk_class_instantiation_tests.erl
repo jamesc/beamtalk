@@ -128,7 +128,9 @@ test_new_compiled() ->
     code:ensure_loaded('bt@stdlib@dictionary'),
     Result = beamtalk_class_instantiation:handle_new(
         [], 'Dictionary', 'bt@stdlib@dictionary', #{}, [], undefined, self()),
-    ?assertMatch({ok, _, _}, Result).
+    ?assertMatch({ok, _, _}, Result),
+    {ok, Obj, _} = Result,
+    cleanup_if_process(Obj).
 
 test_new_compiled_non_constructible() ->
     %% Integer's new/0 raises instantiation_error
@@ -142,7 +144,9 @@ test_new_compiled_with_map() ->
     code:ensure_loaded('bt@stdlib@dictionary'),
     Result = beamtalk_class_instantiation:handle_new(
         [#{}], 'Dictionary', 'bt@stdlib@dictionary', #{}, [], undefined, self()),
-    ?assertMatch({ok, _, _}, Result).
+    ?assertMatch({ok, _, _}, Result),
+    {ok, Obj, _} = Result,
+    cleanup_if_process(Obj).
 
 test_new_compiled_multi_args_constructible() ->
     %% Compiled class that is constructible but gets multiple args → type_error
@@ -230,3 +234,9 @@ ensure_counter_loaded() ->
         _Pid ->
             ok
     end.
+
+%% Stop process if result is a beamtalk_object with a pid
+cleanup_if_process(#beamtalk_object{pid = Pid}) when is_pid(Pid) ->
+    gen_server:stop(Pid);
+cleanup_if_process(_) ->
+    ok.
