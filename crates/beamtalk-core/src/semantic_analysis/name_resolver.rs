@@ -380,17 +380,16 @@ impl NameResolver {
     /// first unreachable expression only (avoids diagnostic spam).
     fn resolve_body(&mut self, body: &[Expression]) {
         let mut saw_return = false;
+        let mut warned = false;
 
         for expr in body {
-            if saw_return {
-                // First unreachable expression after early return — warn and stop
+            if saw_return && !warned {
+                // First unreachable expression after early return — warn once
                 let mut diag =
                     Diagnostic::warning("Unreachable code after early return", expr.span());
                 diag.hint = Some("Code after an early return (^) will never execute".into());
                 self.diagnostics.push(diag);
-                // Still resolve this unreachable expression for other diagnostics (undefined vars, etc.)
-                self.resolve_expression(expr);
-                break;
+                warned = true;
             }
 
             self.resolve_expression(expr);
