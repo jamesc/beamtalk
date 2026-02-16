@@ -25,7 +25,7 @@ abstract Object subclass: Collection
   /// #() isEmpty                  // => true
   /// #(1) isEmpty                 // => false
   /// ```
-  isEmpty => self size =:= 0
+  isEmpty -> Boolean => self size =:= 0
 
   /// Test if the collection has at least one element.
   ///
@@ -34,7 +34,7 @@ abstract Object subclass: Collection
   /// #(1) isNotEmpty              // => true
   /// #() isNotEmpty               // => false
   /// ```
-  isNotEmpty => self isEmpty not
+  isNotEmpty -> Boolean => self isEmpty not
 
   /// Test if the collection contains the given element.
   ///
@@ -46,7 +46,7 @@ abstract Object subclass: Collection
   /// #(1, 2, 3) includes: 2      // => true
   /// #(1, 2, 3) includes: 9      // => false
   /// ```
-  includes: element => @primitive "includes:"
+  includes: element -> Boolean => @primitive "includes:"
 
   /// Reduce the collection with an accumulator.
   ///
@@ -57,7 +57,7 @@ abstract Object subclass: Collection
   /// ```beamtalk
   /// #(1, 2, 3) inject: 0 into: [:sum :x | sum + x]  // => 6
   /// ```
-  inject: initial into: block => @primitive "inject:into:"
+  inject: initial into: block: Block => @primitive "inject:into:"
 
   /// Collect results of evaluating `block` on each element.
   ///
@@ -65,7 +65,7 @@ abstract Object subclass: Collection
   /// ```beamtalk
   /// #(1, 2, 3) collect: [:x | x * 2]  // => #(2, 4, 6)
   /// ```
-  collect: block => @primitive "collect:"
+  collect: block: Block => @primitive "collect:"
 
   /// Select elements for which `block` returns true.
   ///
@@ -73,7 +73,7 @@ abstract Object subclass: Collection
   /// ```beamtalk
   /// #(1, 2, 3, 4) select: [:x | x > 2]  // => #(3, 4)
   /// ```
-  select: block => @primitive "select:"
+  select: block: Block => @primitive "select:"
 
   /// Reject elements for which `block` returns true.
   ///
@@ -81,7 +81,7 @@ abstract Object subclass: Collection
   /// ```beamtalk
   /// #(1, 2, 3, 4) reject: [:x | x > 2]  // => #(1, 2)
   /// ```
-  reject: block => @primitive "reject:"
+  reject: block: Block => @primitive "reject:"
 
   /// Find the first element for which `block` returns true.
   ///
@@ -91,7 +91,7 @@ abstract Object subclass: Collection
   /// ```beamtalk
   /// #(1, 2, 3) detect: [:x | x > 1]     // => 2
   /// ```
-  detect: block => @primitive "detect:"
+  detect: block: Block => @primitive "detect:"
 
   /// Find the first element matching `block`, or evaluate `noneBlock` if none.
   ///
@@ -99,7 +99,7 @@ abstract Object subclass: Collection
   /// ```beamtalk
   /// #(1, 2) detect: [:x | x > 5] ifNone: [0]  // => 0
   /// ```
-  detect: block ifNone: noneBlock => @primitive "detect:ifNone:"
+  detect: block: Block ifNone: noneBlock: Block => @primitive "detect:ifNone:"
 
   /// Test if any element satisfies `block`.
   ///
@@ -107,7 +107,7 @@ abstract Object subclass: Collection
   /// ```beamtalk
   /// #(1, 2, 3) anySatisfy: [:x | x > 2]  // => true
   /// ```
-  anySatisfy: block => @primitive "anySatisfy:"
+  anySatisfy: block: Block -> Boolean => @primitive "anySatisfy:"
 
   /// Test if all elements satisfy `block`.
   ///
@@ -115,12 +115,12 @@ abstract Object subclass: Collection
   /// ```beamtalk
   /// #(2, 4, 6) allSatisfy: [:x | x isEven]  // => true
   /// ```
-  allSatisfy: block => @primitive "allSatisfy:"
+  allSatisfy: block: Block -> Boolean => @primitive "allSatisfy:"
 
   /// Return a string representation.
-  asString => self printString
+  asString -> String => self printString
 
   /// Iterate over each element, evaluating `block` with each one.
   ///
   /// Subclasses must override this with their own iteration logic.
-  do: block => self subclassResponsibility
+  do: block: Block => self subclassResponsibility
