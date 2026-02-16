@@ -69,18 +69,18 @@ The core compilation path — `beamtalk build`, `beamtalk new`, `beamtalk test` 
 1. **Add Windows CI job** — `windows-latest` in GitHub Actions, running `cargo test`, `cargo clippy`, and `beamtalk build` on a test project.
 2. **Add macOS CI job** — `macos-latest` to catch regressions (macOS works today via Unix compatibility, but without CI, regressions go undetected).
 3. **Fix unguarded Unix code** — Wrap `find_beam_pid_by_node()` with `#[cfg(unix)]` and add Windows fallback
-3. **Portable path handling** — Replace any hardcoded `/` root checks with `std::path` methods or `Path::has_root()`
-4. **No bash dependency for compilation** — The `beamtalk build` command must not require bash. The embedded compiler port (ADR 0022) already avoids shell scripts for compilation.
+4. **Portable path handling** — Replace any hardcoded `/` root checks with `std::path` methods or `Path::has_root()`
+5. **No bash dependency for compilation** — The `beamtalk build` command must not require bash. The embedded compiler port (ADR 0022) already avoids shell scripts for compilation.
 
 **Tier 2 (near-term): Workspace and REPL work on Windows**
 
 The interactive development experience — `beamtalk repl`, workspace management — should work:
 
-1. **Implement Windows process management** — Replace `ps`/signal usage with Windows-compatible alternatives:
-   - Use `tasklist` for process enumeration or the `sysinfo` crate
-   - Use `taskkill` or Rust's `Child::kill()` for process termination
-   - Use Windows API (`OpenProcess` + `GetExitCodeProcess`) for process existence checks
-2. **Fix `stop_workspace()` on Windows** — Currently returns an error; implement actual process termination
+1. **TCP-first workspace management** — Replace `ps`/signal/`/proc` usage with TCP-based alternatives (see Process Management Strategy below):
+   - TCP health probes for liveness checking
+   - TCP shutdown messages for graceful termination
+   - Minimal `#[cfg]`-guarded force-kill for hung workspaces
+2. **Fix `stop_workspace()` on Windows** — Currently returns an error; implement TCP shutdown + force-kill fallback
 3. **Fix Erlang runtime Windows issues** — Replace `HOME` with `USERPROFILE`, fix `/` root detection in compiler port
 
 **Tier 3 (deferred): Full parity including development tooling**
@@ -100,39 +100,45 @@ Scripts, benchmarks, and development tooling:
 
 ### Process management strategy
 
-The biggest portability challenge is process management for workspaces. Workspaces already expose TCP ports for REPL and MCP client connections. The recommended approach is **TCP-first workspace management**:
+The biggest portability challenge is process management for workspaces. Workspaces already expose TCP ports for REPL and MCP client connections, and the non-Unix fallback for `is_node_running()` already uses TCP probes (line 315-327 in `workspace/mod.rs`). The recommended approach extends this to **TCP-first workspace management**:
 
 1. **Liveness checking** — TCP health probe to workspace port (replaces `ps` + `/proc` + `kill -0` polling)
-2. **Graceful shutdown** — TCP shutdown message (replaces `kill` signal)
-3. **Workspace discovery** — Port file in `~/.beamtalk/workspaces/` (already implemented)
-4. **Force-kill (fallback only)** — Minimal `#[cfg]`-guarded OS code for hung workspaces that don't respond to TCP
+2. **Graceful shutdown** — TCP shutdown message with cookie authentication (replaces `kill` signal). Must use the same cookie auth as WebSocket connections (ADR 0020) to prevent local privilege escalation.
+3. **Workspace discovery** — Port file in `~/.beamtalk/workspaces/` (already implemented). Port files should include a nonce verified on connection to detect stale entries.
+4. **Force-kill (fallback only)** — OS-specific code for hung workspaces that don't respond to TCP. On Windows, `TerminateProcess` requires handle permissions and wait-for-termination — consider the `sysinfo` crate if edge cases proliferate.
 
 ```rust
-// TCP-first: ~20 lines of portable code replaces ~145 lines of OS-specific code
+// TCP-first: portable liveness and shutdown
 fn is_workspace_running(port: u16) -> bool {
     TcpStream::connect_timeout(&addr, Duration::from_secs(1)).is_ok()
 }
 
-fn stop_workspace(port: u16) -> Result<()> {
-    // Send shutdown message over TCP (graceful)
-    // Fall back to OS kill only if TCP times out
+fn stop_workspace(port: u16, cookie: &str) -> Result<()> {
+    // Send authenticated shutdown message over TCP (graceful)
+    // Wait for process exit with timeout
+    // Fall back to OS force-kill only if TCP shutdown times out
 }
 
-// Only this needs #[cfg] guards:
+// Force-kill needs #[cfg] guards:
 #[cfg(unix)]
 fn force_kill(pid: u32) -> Result<()> { /* kill -9 */ }
 #[cfg(windows)]
-fn force_kill(pid: u32) -> Result<()> { /* TerminateProcess */ }
+fn force_kill(pid: u32) -> Result<()> { /* TerminateProcess + handle mgmt */ }
 ```
 
-This approach:
-- Eliminates ~145 lines of `ps`/`kill`/`/proc` platform-specific code
-- Aligns with REPL client and MCP server (already TCP-based)
-- Enables future remote workspace management (SSH, Docker, cloud)
-- Supports ADR 0017 (browser connectivity) and ADR 0024 (IDE tooling)
-- Keeps force-kill as the only OS-specific operation (~10 lines of `#[cfg]` code)
+**Tradeoffs:**
+- ✅ Eliminates most `ps`/`kill`/`/proc` platform-specific code
+- ✅ Aligns with REPL client and MCP server (already TCP-based)
+- ✅ Enables future remote workspace management (SSH, Docker, cloud)
+- ⚠️ **Observability loss** — TCP probes detect "port open" vs "port closed" but cannot detect a live-but-unresponsive BEAM process (e.g., hung in NIF). The current `ps`/`/proc` approach can. This is an acceptable tradeoff for portability — a hung workspace that doesn't respond to TCP also won't respond to REPL or MCP clients.
+- ⚠️ **Port file reliability** — Port files become the primary workspace discovery mechanism. Stale port files (from crashed workspaces) need handling: connect + nonce verification, with cleanup on failure.
 
 ## Prior Art
+
+### Pharo (Smalltalk)
+Full cross-platform support (Windows, macOS, Linux, ARM). The OpenSmalltalk VM abstracts OS differences — the same Pharo image runs unchanged on any supported platform. Platform-specific code is isolated in VM plugins and FFI bindings; application-level Smalltalk code is entirely portable.
+
+**Relevant:** Pharo's "portable image on cross-platform VM" model parallels Beamtalk's architecture — portable `.beam` bytecode on cross-platform BEAM VM. In both cases, the runtime VM handles portability; the issue is tooling around it (build scripts, process management).
 
 ### Gleam
 Full Windows support from early on. Rust compiler is inherently portable. Uses `std::process::Command` for `erl`/`erlc` invocation (works cross-platform if Erlang is in PATH). CI runs on Windows. Ships Windows binaries via GitHub releases.
@@ -162,7 +168,7 @@ Erlang itself has excellent Windows support — prebuilt Windows installers, `we
 Can download a binary or `cargo install beamtalk`, run `beamtalk new myapp`, `beamtalk build`, and `beamtalk repl` — the full workflow works. No WSL, no bash, no Unix tools required beyond Erlang/OTP.
 
 ### Linux/macOS developer (improved)
-macOS: TCP-first workspace management eliminates all `/proc` degradation — stale-node detection works reliably. No other changes. Linux: no change.
+macOS: TCP-first workspace management eliminates `/proc` degradation — stale-node detection works reliably via TCP probes instead of process-level checks. Other macOS quirks (Gatekeeper quarantine on downloaded binaries, different signal handling in `open_port`) may need individual fixes but are not systematic. Linux: no change.
 
 ### CI/CD operator
 Windows and macOS CI jobs catch regressions early. Cross-platform matrix ensures releases work everywhere.
@@ -209,7 +215,7 @@ All features, all platforms, all at once. No tiers.
 ### Alternative: Cross-platform process library (sysinfo crate)
 Use the `sysinfo` crate for remaining OS-level operations (force-kill), replacing manual `#[cfg]` code.
 
-**Deferred, not rejected:** `sysinfo` may simplify the force-kill fallback but adds a dependency for ~10 lines of `#[cfg]` code. Evaluate if the force-kill logic becomes more complex than expected.
+**Deferred, likely needed:** `sysinfo` handles Windows `TerminateProcess` edge cases (handle permissions, access denied, wait-for-termination) that would otherwise require significant `#[cfg]` code. The "~10 lines" estimate for manual force-kill is optimistic — proper Windows error handling could reach 40-50 lines. Adopt `sysinfo` if force-kill complexity exceeds a single function.
 
 ### Rejected: ProcessManager trait abstraction (superseded by TCP-first)
 Originally proposed abstracting all process operations behind a `ProcessManager` trait with Unix and Windows implementations. TCP-first management eliminates the need for most trait methods (`is_running`, `find_pid_by_name`, `terminate`). Only `force_terminate` needs platform-specific code, which doesn't justify a trait.
@@ -218,7 +224,7 @@ Originally proposed abstracting all process operations behind a `ProcessManager`
 
 ### Positive
 - Beamtalk runs on Windows — compiler, build, REPL, workspace management
-- macOS fully supported — TCP-first eliminates all `/proc` degradation
+- macOS improved — TCP-first eliminates `/proc` degradation; remaining quirks (Gatekeeper, signal handling) addressed individually
 - CI catches Windows and macOS regressions automatically
 - Matches peer language expectations (Gleam, Elixir, Erlang all support Windows)
 - TCP-first workspace management means most code is platform-agnostic, reducing `#[cfg]` surface
@@ -245,13 +251,14 @@ Originally proposed abstracting all process operations behind a `ProcessManager`
 - Fix `HOME` → `USERPROFILE` fallback in `beamtalk_workspace_meta.erl`
 - Verify `beamtalk build` and `beamtalk new` work in Windows CI
 - Add Windows binary to GitHub release workflow
-- **macOS note:** After TCP-first workspace management (Phase 2), macOS has zero known platform-specific issues — all `/proc` degradation is eliminated. macOS CI ensures this stays true.
+- **macOS note:** After TCP-first workspace management (Phase 2), macOS `/proc` degradation is eliminated. macOS CI ensures no new platform-specific regressions.
+- **CI matrix strategy:** Run fast checks (clippy, rustfmt, unit tests) on all platforms; run slow tests (E2E, stdlib) only on Linux to limit CI time. Windows runners are ~2x slower than Linux.
 
 ### Phase 2: TCP-first workspace management
 - Add TCP health endpoint to workspace (probe port for liveness)
 - Add TCP shutdown message to workspace protocol (graceful stop)
 - Replace `ps`/`kill -0`/`/proc` checks with TCP probes in `is_node_running()`, `find_beam_pid_by_node()`, `wait_for_process_exit()`
-- Add minimal `#[cfg]`-guarded force-kill for hung workspaces (~10 lines)
+- Add `#[cfg]`-guarded force-kill for hung workspaces (consider `sysinfo` crate if Windows edge cases exceed a single function)
 - `stop_workspace()` works on Windows via TCP shutdown + force-kill fallback
 - `beamtalk repl` works on Windows
 
@@ -263,10 +270,16 @@ Originally proposed abstracting all process operations behind a `ProcessManager`
 
 **Affected components:** `beamtalk-cli` (process management, paths), runtime (Erlang build hooks, path handling), CI (workflow matrix), Justfile, documentation.
 
+**Affected test suites:** `workspace/mod.rs` tests (18+ workspace management tests), `paths.rs` tests (PPID/session tests), `beam_compiler.rs` tests (23 compiler tests), `beamtalk_workspace_meta_tests.erl` (18 metadata tests), `beamtalk_compiler_port_tests.erl` (8 port tests). All must pass on Windows and macOS CI.
+
 **Estimated size:** L (across all three phases)
+
+## Migration Path
+
+Not applicable. This is an infrastructure enhancement — no existing user code, APIs, or language semantics change. All modifications are internal to the toolchain (CI configuration, build scripts, `#[cfg]` guards in workspace management).
 
 ## References
 - Prior art: [Gleam Windows support](https://gleam.run), [Erlang Windows install](https://www.erlang.org/downloads)
-- Related ADRs: ADR 0004 (workspaces — process management), ADR 0017 (browser connectivity — assumes Unix host, Windows changes scope), ADR 0020 (connection security — TCP choice aids portability), ADR 0022 (embedded compiler — already portable), ADR 0024 (IDE tooling — workspace dependency affects Windows IDE experience)
+- Related ADRs: ADR 0004 (persistent workspaces — architecture affected by TCP-first), ADR 0017 (browser connectivity — originally assumed Unix host, but ADR 0022 eliminated the Unix socket daemon; **Proposed**), ADR 0020 (connection security — TCP shutdown must use same cookie auth; **Proposed**), ADR 0022 (embedded compiler — already portable, solved Unix socket dependency), ADR 0024 (IDE tooling — workspace dependency affects Windows IDE experience)
 - Rust cross-platform patterns: [`#[cfg]` attributes](https://doc.rust-lang.org/reference/conditional-compilation.html), [`sysinfo` crate](https://crates.io/crates/sysinfo)
 - Platform-specific code inventory: `workspace/mod.rs` (31 `#[cfg]` guards), `beam_compiler.rs`, `paths.rs`, `repl/mod.rs`
