@@ -128,6 +128,10 @@ pub fn compute_hover(
 enum HoverClassContext<'a> {
     InstanceMethod(&'a ClassDefinition),
     ClassMethod(&'a ClassDefinition),
+    /// Inside a standalone instance method (`Counter >> method => ...`).
+    StandaloneInstanceMethod(&'a str),
+    /// Inside a standalone class method (`Counter class >> method => ...`).
+    StandaloneClassMethod(&'a str),
     TopLevel,
 }
 
@@ -143,6 +147,14 @@ fn find_hover_class_context(module: &Module, offset: u32) -> HoverClassContext<'
             if offset >= method.span.start() && offset < method.span.end() {
                 return HoverClassContext::ClassMethod(class);
             }
+        }
+    }
+    for smd in &module.method_definitions {
+        if offset >= smd.method.span.start() && offset < smd.method.span.end() {
+            if smd.is_class_method {
+                return HoverClassContext::StandaloneClassMethod(&smd.class_name.name);
+            }
+            return HoverClassContext::StandaloneInstanceMethod(&smd.class_name.name);
         }
     }
     HoverClassContext::TopLevel
@@ -464,6 +476,15 @@ fn self_hover_info(span: Span, context: &HoverClassContext<'_>) -> HoverInfo {
                     class.name.name
                 ),
             )
+        }
+        HoverClassContext::StandaloneInstanceMethod(name) => {
+            HoverInfo::new(format!("self: `{name}`"), span)
+                .with_documentation(format!("Reference to the current `{name}` instance"))
+        }
+        HoverClassContext::StandaloneClassMethod(name) => {
+            HoverInfo::new(format!("self: `{name} class`"), span).with_documentation(format!(
+                "Reference to the `{name}` class object (class-side method)"
+            ))
         }
         HoverClassContext::TopLevel => {
             HoverInfo::new("Keyword: `self` (current receiver)".to_string(), span)
@@ -801,6 +822,50 @@ mod tests {
         assert!(
             hover.contents.contains("Type: String"),
             "Should show inferred type String, got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_self_in_standalone_instance_method() {
+        let source = "Counter >> increment => self.count := self.count + 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0;
+
+        let self_offset = source.find("self.count").unwrap();
+        let pos = Position::from_offset(source, self_offset).unwrap();
+        let hover = compute_hover(&module, source, pos, &hierarchy);
+        assert!(
+            hover.is_some(),
+            "Should find hover for self in standalone method"
+        );
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("self: `Counter`"),
+            "Should show 'self: Counter', got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_self_in_standalone_class_method() {
+        let source = "Counter class >> withInitial: n => self new: #{count => n}";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0;
+
+        let self_offset = source.find("self new:").unwrap();
+        let pos = Position::from_offset(source, self_offset).unwrap();
+        let hover = compute_hover(&module, source, pos, &hierarchy);
+        assert!(
+            hover.is_some(),
+            "Should find hover for self in standalone class method"
+        );
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("self: `Counter class`"),
+            "Should show 'self: Counter class', got: {}",
             hover.contents
         );
     }
