@@ -57,7 +57,7 @@ just build          # Build everything (Rust + Erlang + stdlib)
 just test           # Run Rust tests + Erlang runtime + stdlib tests
 just test-stdlib    # Compiled language feature tests (part of `just test`)
 just test-e2e       # REPL integration tests (slow, full language validation)
-just ci             # Full CI: build, lint, test, test-stdlib, test-e2e
+just ci             # Full CI: build, lint, test, test-stdlib, test-integration, test-mcp, test-e2e
 
 just fmt            # Format all code
 just fmt-check      # Check formatting without changing files

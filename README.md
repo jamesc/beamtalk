@@ -35,8 +35,8 @@ config := #{#host => "localhost", #port => 8080}
 | **Actors everywhere** | Every object is a BEAM process with fault isolation |
 | **Async by default** | Message sends return futures; no blocking |
 | **Full reflection** | Inspect any actor's state, mailbox, and methods at runtime |
-| **BEAM interop** | Call Erlang/Elixir libraries; deploy to existing infrastructure |
-| **Supervision built-in** | Declarative fault tolerance with restart strategies |
+| **Runs on BEAM** | Compiles to Core Erlang; deploy to existing OTP infrastructure |
+| **Testing built-in** | SUnit-style TestCase framework with `beamtalk test` |
 
 ---
 
@@ -50,8 +50,8 @@ Every Beamtalk object is a BEAM process with its own state and mailbox:
 Actor subclass: Counter
   state: value = 0
 
-  increment => self.value += 1
-  decrement => self.value -= 1
+  increment => self.value := self.value + 1
+  decrement => self.value := self.value - 1
   getValue => ^self.value
 ```
 
@@ -65,47 +65,45 @@ result := agent analyze: data
 
 // Wait when you need the value
 value := result await
-
-// Or use continuations
-agent analyze: data
-  whenResolved: [:value | self process: value]
-  whenRejected: [:error | self handle: error]
 ```
 
 ### Pattern Matching
 
-Erlang-inspired pattern matching for clean message handling:
+Match expressions with pattern arms:
 
 ```beamtalk
-handle: {#ok, value} => self process: value
-handle: {#error, reason} => self logError: reason
-handle: _ => self handleUnknown
+status match: [
+  #ok -> "success"
+  #error -> "failure"
+  _ -> "unknown"
+]
+
+// Variable binding in patterns
+42 match: [n -> n + 1]  // => 43
 ```
 
-### Declarative Supervision
+### Collections
 
-OTP supervision trees as language-level constructs:
+Rich collection types written in Beamtalk itself:
 
 ```beamtalk
-Supervisor subclass: WebApp
-  children: [
-    {DatabasePool, scale: 10},
-    HTTPRouter spawn,
-    MetricsCollector spawn
-  ]
-  strategy: #oneForOne
+list := #(1, 2, 3)
+list collect: [:x | x * 2]    // => #(2, 4, 6)
+
+dict := #{#name => "Alice", #age => 30}
+dict at: #name                 // => Alice
 ```
 
-### Live Patching
+### Live Code Reloading
 
-Hot-reload with dedicated syntax:
+Redefine methods on running actors — state is preserved:
 
 ```beamtalk
-// Update running actors instantly
-patch Agent >> processMessage: msg {
-  Telemetry emit: #messageReceived
-  ^super processMessage: msg
-}
+// In the REPL: redefine a method on a running class
+Counter >> increment => self.value := self.value + 10
+
+// Existing actors immediately use the new code
+c increment  // now adds 10 instead of 1
 ```
 
 ---
@@ -117,7 +115,7 @@ Beamtalk is purpose-built for multi-agent AI systems:
 - **Every actor is a BEAM process** — millions of concurrent isolated agents
 - **Live inspection** — query actor state, methods, and capabilities at runtime
 - **Hot-reload** — edit agent behavior while they run, no restart needed
-- **Fault tolerance** — actors crash and restart cleanly via OTP supervision
+- **Fault tolerance** — actors crash independently; isolation via BEAM processes
 - **Distributed** — spread actors across BEAM clusters transparently
 
 ```beamtalk
@@ -135,7 +133,6 @@ researcher respondsTo: #plan: // => true
 Researcher methods            // => #(analyze:, plan:, query:, ...)
 
 // Hot-reload: redefine behavior mid-run, takes effect on next message
-// (proposed syntax — see agent-native development doc for design details)
 Researcher >> plan: prompt =>
   Transcript show: "Planning: ", prompt.
   ^super plan: prompt
@@ -151,6 +148,7 @@ See [Agent-Native Development](docs/beamtalk-agent-native-development.md) for th
 
 - **Rust** (latest stable)
 - **Erlang/OTP 26+** with `erlc` on PATH
+- **Node.js LTS** (optional) — for building the VS Code extension
 
 ### Build & Run
 
@@ -243,10 +241,7 @@ Loaded Hello
 
 ```text
 > :load examples/counter.bt
-Loaded
-
-> :reload
-Reloaded
+Loaded Counter
 ```
 
 ---
@@ -261,6 +256,10 @@ Reloaded
 - **VS Code** — With the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)  
 - **Rust** (latest stable) — For building the compiler  
 - **Erlang/OTP 26+** — With `erlc` on PATH
+
+#### Optional Dependencies
+
+- **Node.js LTS + npm** — For building the VS Code extension (`editors/vscode/`)
 
 #### Required Environment Variables
 
@@ -582,23 +581,23 @@ BEAMTALK_NODE_NAME=beamtalk_custom@localhost
 - ✅ **REPL** — Interactive evaluation with variable persistence
 - ✅ **Lexer & Parser** — Full expression parsing with error recovery
 - ✅ **Core Erlang codegen** — Compiles to BEAM bytecode via `erlc`
-- ✅ **Actors** — Spawn actors with state, send async messages
+- ✅ **Actors** — Spawn actors with state, send async messages, futures with `await`
+- ✅ **Field assignments** — Actor state mutations via `:=`
+- ✅ **Method dispatch** — Full message routing (unary, binary, keyword)
+- ✅ **Pattern matching** — `match:` expressions with literal and variable patterns
+- ✅ **Hot code reloading** — Redefine classes/methods on running actors via `>>`
+- ✅ **Standard library** — Boolean, Block, Integer, Float, String, Character, Collections
+- ✅ **Collections** — List, Dictionary, Set, Tuple, Association
+- ✅ **Class system** — Inheritance, `super`, `sealed`, class-side methods, abstract classes
 - ✅ **Cascades** — Multiple messages to same receiver
 - ✅ **Map literals** — `#{key => value}` syntax with Dictionary codegen
-- ✅ **Class definitions** — AST support for class and method definitions
-- ✅ **Standard library** — Boolean, Block, Integer, String, Collections
-
-### In Progress
-
-- 🔄 **Field assignments** — Actor state mutations
-- 🔄 **Method dispatch** — Full message routing
-- 🔄 **Supervision trees** — Declarative fault tolerance
+- ✅ **LSP** — Language server with completions, hover, go-to-definition, diagnostics
+- ✅ **Testing** — SUnit-style TestCase framework (`beamtalk test`)
 
 ### Planned
 
-- 📋 **LSP** — Language server for IDE integration
+- 📋 **Supervision trees** — OTP supervision as language-level constructs
 - 📋 **Live browser** — Smalltalk-style class browser (Phoenix `LiveView`)
-- 📋 **Hot patching** — Edit running actors in place
 
 ---
 
@@ -612,7 +611,7 @@ BEAMTALK_NODE_NAME=beamtalk_custom@localhost
 - [Design Principles](docs/beamtalk-principles.md) — 13 core principles guiding all decisions
 - [Language Features](docs/beamtalk-language-features.md) — Syntax, semantics, and examples
 - [Syntax Rationale](docs/beamtalk-syntax-rationale.md) — Why we keep/change Smalltalk conventions
-- [Object Model](docs/beamtalk-object-model.md) — How Smalltalk objects map to BEAM
+- [Object Model](docs/ADR/0005-beam-object-model-pragmatic-hybrid.md) — How Smalltalk objects map to BEAM
 
 ### Architecture
 
@@ -645,11 +644,12 @@ Foundational classes implementing "everything is a message":
 | `Actor` | Base class for all actors |
 | `Block` | First-class closures |
 | `True` / `False` | Boolean control flow |
-| `Integer` | Arbitrary precision arithmetic |
-| `String` | UTF-8 text operations |
-| `Array` / `List` | Ordered collections |
+| `Integer` / `Float` | Numeric types |
+| `String` / `Character` | UTF-8 text and characters |
+| `List` / `Tuple` | Ordered collections |
 | `Set` / `Dictionary` | Unordered collections |
 | `Nil` | Null object pattern |
+| `TestCase` | SUnit-style test framework |
 
 See [lib/README.md](lib/README.md) for full documentation.
 
@@ -661,12 +661,15 @@ See [lib/README.md](lib/README.md) for full documentation.
 beamtalk/
 ├── crates/
 │   ├── beamtalk-core/       # Lexer, parser, AST, codegen
-│   └── beamtalk-cli/        # Command-line interface & REPL
+│   ├── beamtalk-cli/        # Command-line interface & REPL
+│   └── beamtalk-lsp/        # Language server (LSP)
 ├── lib/                      # Standard library (.bt files)
 ├── runtime/                  # Erlang runtime (actors, REPL backend)
+├── test/                     # BUnit test cases (TestCase classes)
+├── tests/                    # Stdlib & E2E tests
 ├── docs/                     # Design documents
 ├── examples/                 # Example programs
-└── test-package-compiler/    # Snapshot tests for compiler
+└── editors/vscode/           # VS Code extension
 ```
 
 The compiler is written in **Rust** and generates **Core Erlang**, which compiles to BEAM bytecode via `erlc`.
