@@ -93,6 +93,41 @@ parse_request_op_unknown_test() ->
     Request = <<"{\"op\": \"foobar\"}">>,
     ?assertMatch({error, {unknown_op, <<"foobar">>}}, beamtalk_repl_server:parse_request(Request)).
 
+%%% Health and shutdown protocol tests (BT-611)
+
+parse_request_op_health_test() ->
+    Request = <<"{\"op\": \"health\"}">>,
+    ?assertEqual({health}, beamtalk_repl_server:parse_request(Request)).
+
+parse_request_op_shutdown_test() ->
+    Request = <<"{\"op\": \"shutdown\", \"cookie\": \"my_secret_cookie\"}">>,
+    ?assertEqual({shutdown, "my_secret_cookie"}, beamtalk_repl_server:parse_request(Request)).
+
+parse_request_op_shutdown_no_cookie_test() ->
+    Request = <<"{\"op\": \"shutdown\"}">>,
+    ?assertEqual({shutdown, ""}, beamtalk_repl_server:parse_request(Request)).
+
+%%% Nonce generation tests (BT-611)
+
+generate_nonce_returns_binary_test() ->
+    Nonce = beamtalk_repl_server:generate_nonce(),
+    ?assert(is_binary(Nonce)),
+    %% 8 random bytes → 16 hex chars
+    ?assertEqual(16, byte_size(Nonce)).
+
+generate_nonce_is_unique_test() ->
+    Nonce1 = beamtalk_repl_server:generate_nonce(),
+    Nonce2 = beamtalk_repl_server:generate_nonce(),
+    ?assertNotEqual(Nonce1, Nonce2).
+
+generate_nonce_is_hex_test() ->
+    Nonce = beamtalk_repl_server:generate_nonce(),
+    %% Verify all characters are hex digits
+    IsHex = lists:all(
+        fun(C) -> (C >= $0 andalso C =< $9) orelse (C >= $a andalso C =< $f) end,
+        binary_to_list(Nonce)),
+    ?assert(IsHex).
+
 %%% Response formatting tests
 
 format_response_integer_test() ->
