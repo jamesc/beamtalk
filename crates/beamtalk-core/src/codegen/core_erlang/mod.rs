@@ -857,13 +857,14 @@ impl CoreErlangGenerator {
             let class_pid_var = self.fresh_var("ClassPid");
             let class_mod_var = self.fresh_var("ClassModName");
             let state_var = self.current_state_var();
+            let error_doc = self.class_not_found_error_doc(class_name);
 
             Ok(docvec![
                 format!("case call 'maps':'find'('{class_name}', {state_var}) of "),
                 "<{'ok', _BindingVal}> when 'true' -> _BindingVal ",
                 "<'error'> when 'true' -> ",
                 format!("case call 'beamtalk_class_registry':'whereis_class'('{class_name}') of "),
-                "<'undefined'> when 'true' -> 'nil' ",
+                error_doc,
                 format!("<{class_pid_var}> when 'true' -> "),
                 format!(
                     "let {class_mod_var} = call 'beamtalk_object_class':'module_name'({class_pid_var}) in "
@@ -878,10 +879,11 @@ impl CoreErlangGenerator {
             // ADR 0019 Phase 4: No persistent_term fallback — use class registry only.
             let class_pid_var = self.fresh_var("ClassPid");
             let class_mod_var = self.fresh_var("ClassModName");
+            let error_doc = self.class_not_found_error_doc(class_name);
 
             Ok(docvec![
                 format!("case call 'beamtalk_class_registry':'whereis_class'('{class_name}') of "),
-                "<'undefined'> when 'true' -> 'nil' ",
+                error_doc,
                 format!("<{class_pid_var}> when 'true' -> "),
                 format!(
                     "let {class_mod_var} = call 'beamtalk_object_class':'module_name'({class_pid_var}) in "
@@ -894,10 +896,11 @@ impl CoreErlangGenerator {
         } else {
             let class_pid_var = self.fresh_var("ClassPid");
             let class_mod_var = self.fresh_var("ClassModName");
+            let error_doc = self.class_not_found_error_doc(class_name);
 
             Ok(docvec![
                 format!("case call 'beamtalk_class_registry':'whereis_class'('{class_name}') of "),
-                "<'undefined'> when 'true' -> 'nil' ",
+                error_doc,
                 format!("<{class_pid_var}> when 'true' -> "),
                 format!(
                     "let {class_mod_var} = call 'beamtalk_object_class':'module_name'({class_pid_var}) in "
@@ -908,6 +911,26 @@ impl CoreErlangGenerator {
                 "end",
             ])
         }
+    }
+
+    /// Generates Core Erlang code that raises a `class_not_found` error for undefined classes.
+    ///
+    /// Returns the document fragment for the `<'undefined'>` case branch.
+    fn class_not_found_error_doc(&mut self, class_name: &str) -> Document<'static> {
+        let err0_var = self.fresh_var("CnfErr");
+        let err1_var = self.fresh_var("CnfErr");
+        let hint = format!("Define {class_name} with: Object subclass: {class_name}");
+        let hint_binary = Self::binary_string_literal(&hint);
+
+        docvec![
+            format!(
+                "<'undefined'> when 'true' -> let {err0_var} = call 'beamtalk_error':'new'('class_not_found', '{class_name}') in "
+            ),
+            format!(
+                "let {err1_var} = call 'beamtalk_error':'with_hint'({err0_var}, {hint_binary}) in "
+            ),
+            format!("call 'beamtalk_error':'raise'({err1_var}) "),
+        ]
     }
 
     /// Generates code for field access (e.g., self.value).

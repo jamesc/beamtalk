@@ -292,10 +292,11 @@ pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> Analysis
     let mut type_checker = TypeChecker::new();
     type_checker.check_module(module, &result.class_hierarchy);
     result.diagnostics.extend(type_checker.take_diagnostics());
+    let type_map = type_checker.take_type_map();
 
     // Phase 3: Block Context Analysis (captures, mutations, context determination)
-    // Receive scope from NameResolver - no need to re-build it
-    let mut analyser = Analyser::with_scope(scope);
+    // Receive scope from NameResolver and TypeMap from TypeChecker
+    let mut analyser = Analyser::with_scope(scope, type_map);
 
     analyser.analyse_module(module);
     result.diagnostics.extend(analyser.result.diagnostics);
@@ -812,21 +813,24 @@ struct Analyser {
     result: AnalysisResult,
     scope: scope::Scope,
     method_validators: method_validators::MethodValidatorRegistry,
+    type_map: TypeMap,
 }
 
 impl Analyser {
-    /// Creates a new analyser with an existing scope from `NameResolver`.
+    /// Creates a new analyser with an existing scope from `NameResolver`
+    /// and a `TypeMap` from `TypeChecker`.
     ///
     /// This constructor receives the scope built by `NameResolver`, eliminating
     /// duplicate scope construction. The scope already contains:
     /// - Built-in identifiers (true, false, nil)
     /// - Known REPL variables (if any)
     /// - All variable bindings from name resolution
-    fn with_scope(scope: scope::Scope) -> Self {
+    fn with_scope(scope: scope::Scope, type_map: TypeMap) -> Self {
         Self {
             result: AnalysisResult::new(),
             scope,
             method_validators: method_validators::MethodValidatorRegistry::new(),
+            type_map,
         }
     }
 
@@ -915,7 +919,8 @@ impl Analyser {
                 match target.as_ref() {
                     Identifier(id) => {
                         // Define in scope for capture tracking (even though diagnostics are in NameResolver)
-                        if self.scope.lookup(&id.name).is_none() {
+                        // Use lookup_immut: assigning to a variable is not a "read"
+                        if self.scope.lookup_immut(&id.name).is_none() {
                             self.scope.define(&id.name, id.span, BindingKind::Local);
                         }
                     }
@@ -945,7 +950,8 @@ impl Analyser {
 
                 // Run method-specific validators (reuse selector_str to avoid extra allocation)
                 if let Some(validator) = self.method_validators.get(&selector_str) {
-                    let diagnostics = validator.validate(selector, arguments, *span);
+                    let receiver_type = self.type_map.get(receiver.span());
+                    let diagnostics = validator.validate(selector, arguments, receiver_type, *span);
                     self.result.diagnostics.extend(diagnostics);
                 }
 
@@ -988,8 +994,13 @@ impl Analyser {
 
                     // Run method-specific validators for cascade messages
                     if let Some(validator) = self.method_validators.get(&selector_str) {
-                        let diagnostics =
-                            validator.validate(&msg.selector, &msg.arguments, msg.span);
+                        let receiver_type = self.type_map.get(receiver.span());
+                        let diagnostics = validator.validate(
+                            &msg.selector,
+                            &msg.arguments,
+                            receiver_type,
+                            msg.span,
+                        );
                         self.result.diagnostics.extend(diagnostics);
                     }
 
@@ -1193,13 +1204,14 @@ impl Analyser {
         match expr {
             Identifier(id) => {
                 // Check if this is a captured variable
-                if let Some(var_info) = self.scope.lookup(&id.name) {
+                let binding_info = self.scope.lookup_immut(&id.name).map(|b| b.defined_at);
+                if let Some(defined_at) = binding_info {
                     if self.scope.is_captured(&id.name) {
                         // Only add if not already in captures list
                         if !captures.iter().any(|c| c.name == id.name) {
                             captures.push(CapturedVar {
                                 name: id.name.clone(),
-                                defined_at: var_info.defined_at,
+                                defined_at,
                             });
                         }
                     }
@@ -1339,9 +1351,10 @@ enum ExprContext {
 mod tests {
     use super::*;
     use crate::ast::{
-        BinarySegment, Block, BlockParameter, Expression, Identifier, Literal, MessageSelector,
+        BinarySegment, Block, BlockParameter, ClassDefinition, Expression, Identifier, Literal,
+        MessageSelector, MethodDefinition, StateDeclaration,
     };
-    use crate::source_analysis::Span;
+    use crate::source_analysis::{Severity, Span};
 
     fn test_span() -> Span {
         Span::new(0, 0)
@@ -3043,5 +3056,560 @@ mod tests {
             result.diagnostics
         );
         assert!(abstract_errors[0].message.contains("Shape"));
+    }
+
+    // --- Self misuse diagnostic tests (BT-595) ---
+
+    #[test]
+    fn test_self_outside_method_gives_specialized_error() {
+        // Using self at module top level should give a specialized message
+        let self_expr = Expression::Identifier(Identifier::new("self", Span::new(0, 4)));
+        let module = Module::new(vec![self_expr], test_span());
+        let result = analyse(&module);
+
+        let self_errors: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("self"))
+            .collect();
+        assert_eq!(self_errors.len(), 1);
+        assert!(
+            self_errors[0]
+                .message
+                .contains("self can only be used inside a method body")
+        );
+        // Should NOT say "Undefined variable: self"
+        assert!(!self_errors[0].message.contains("Undefined variable"));
+    }
+
+    #[test]
+    fn test_self_inside_method_no_error() {
+        // self inside a method body should work fine
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![StateDeclaration {
+                name: Identifier::new("value", test_span()),
+                type_annotation: None,
+                default_value: None,
+                span: test_span(),
+            }],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("getValue".into()),
+                parameters: vec![],
+                body: vec![Expression::FieldAccess {
+                    receiver: Box::new(Expression::Identifier(Identifier::new(
+                        "self",
+                        test_span(),
+                    ))),
+                    field: Identifier::new("value", test_span()),
+                    span: test_span(),
+                }],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let self_errors: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("self"))
+            .collect();
+        assert!(self_errors.is_empty());
+    }
+
+    // --- Unused variable warning tests (BT-595) ---
+
+    #[test]
+    fn test_unused_variable_in_method_warns() {
+        // Method with unused local: getValue => x := 42. self.value
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![StateDeclaration {
+                name: Identifier::new("value", test_span()),
+                type_annotation: None,
+                default_value: None,
+                span: test_span(),
+            }],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("getValue".into()),
+                parameters: vec![],
+                body: vec![
+                    Expression::Assignment {
+                        target: Box::new(Expression::Identifier(Identifier::new(
+                            "x",
+                            Span::new(10, 11),
+                        ))),
+                        value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
+                        span: test_span(),
+                    },
+                    Expression::FieldAccess {
+                        receiver: Box::new(Expression::Identifier(Identifier::new(
+                            "self",
+                            test_span(),
+                        ))),
+                        field: Identifier::new("value", test_span()),
+                        span: test_span(),
+                    },
+                ],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused variable"))
+            .collect();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("`x`"));
+        assert_eq!(warnings[0].severity, Severity::Warning);
+        assert!(warnings[0].hint.is_some());
+        assert!(warnings[0].hint.as_ref().unwrap().contains("_x"));
+    }
+
+    #[test]
+    fn test_used_variable_no_warning() {
+        // Method where variable is used: getValue => x := 42. x
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("getValue".into()),
+                parameters: vec![],
+                body: vec![
+                    Expression::Assignment {
+                        target: Box::new(Expression::Identifier(Identifier::new("x", test_span()))),
+                        value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
+                        span: test_span(),
+                    },
+                    Expression::Identifier(Identifier::new("x", test_span())),
+                ],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused variable"))
+            .collect();
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_underscore_prefixed_variable_no_warning() {
+        // Method with _x := 42 should not warn
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("doSomething".into()),
+                parameters: vec![],
+                body: vec![Expression::Assignment {
+                    target: Box::new(Expression::Identifier(Identifier::new("_x", test_span()))),
+                    value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
+                    span: test_span(),
+                }],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused variable"))
+            .collect();
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_unused_parameter_no_warning() {
+        // Method parameters should not warn even if unused
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart {
+                    keyword: "setValue:".into(),
+                    span: test_span(),
+                }]),
+                parameters: vec![crate::ast::ParameterDefinition {
+                    name: Identifier::new("newValue", test_span()),
+                    type_annotation: None,
+                }],
+                body: vec![Expression::Literal(Literal::Integer(0), test_span())],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused variable"))
+            .collect();
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_unused_variable_in_class_method_warns() {
+        // Class method with unused local: class create => x := 42. nil
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![],
+            class_methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("create".into()),
+                parameters: vec![],
+                body: vec![
+                    Expression::Assignment {
+                        target: Box::new(Expression::Identifier(Identifier::new(
+                            "temp",
+                            Span::new(10, 14),
+                        ))),
+                        value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
+                        span: test_span(),
+                    },
+                    Expression::Identifier(Identifier::new("nil", test_span())),
+                ],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused variable"))
+            .collect();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("`temp`"));
+    }
+
+    #[test]
+    fn test_block_parameter_no_unused_warning() {
+        // Block parameters should not warn: getValue => [:x | x]
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("getValue".into()),
+                parameters: vec![],
+                body: vec![Expression::Block(Block::new(
+                    vec![BlockParameter::new("x", test_span())],
+                    vec![Expression::Identifier(Identifier::new("x", test_span()))],
+                    test_span(),
+                ))],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused variable"))
+            .collect();
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_pattern_variable_no_unused_warning() {
+        // Pattern variables in match arms should not warn:
+        // getValue => x match: { 1 -> #one }
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("getValue".into()),
+                parameters: vec![],
+                body: vec![Expression::Match {
+                    value: Box::new(Expression::Literal(Literal::Integer(1), test_span())),
+                    arms: vec![MatchArm::new(
+                        Pattern::Variable(Identifier::new("result", test_span())),
+                        Expression::Identifier(Identifier::new("result", test_span())),
+                        test_span(),
+                    )],
+                    span: test_span(),
+                }],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused variable"))
+            .collect();
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_unused_variable_in_nested_block_warns() {
+        // Unused variable declared inside a nested block should warn:
+        // getValue => [unused := 42]
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("getValue".into()),
+                parameters: vec![],
+                body: vec![Expression::Block(Block::new(
+                    vec![],
+                    vec![Expression::Assignment {
+                        target: Box::new(Expression::Identifier(Identifier::new(
+                            "unused",
+                            Span::new(10, 16),
+                        ))),
+                        value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
+                        span: test_span(),
+                    }],
+                    test_span(),
+                ))],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused variable"))
+            .collect();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("`unused`"));
+    }
+
+    #[test]
+    fn test_variable_used_via_closure_no_warning() {
+        // Variable defined at method scope, used inside a block:
+        // getValue => x := 1. [x]
+        // The block reads x, so no unused warning.
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("getValue".into()),
+                parameters: vec![],
+                body: vec![
+                    Expression::Assignment {
+                        target: Box::new(Expression::Identifier(Identifier::new(
+                            "x",
+                            Span::new(10, 11),
+                        ))),
+                        value: Box::new(Expression::Literal(Literal::Integer(1), test_span())),
+                        span: test_span(),
+                    },
+                    Expression::Block(Block::new(
+                        vec![],
+                        vec![Expression::Identifier(Identifier::new("x", test_span()))],
+                        test_span(),
+                    )),
+                ],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused variable"))
+            .collect();
+        // x is used via closure in the block
+        assert!(warnings.is_empty());
     }
 }

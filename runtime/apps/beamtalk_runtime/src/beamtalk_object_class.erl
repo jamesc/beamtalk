@@ -251,7 +251,11 @@ class_display_name(ClassName) ->
 %% Dispatches messages to the class gen_server, translating the Beamtalk
 %% message protocol ({Selector, Args}) to the class process message format.
 %% Unwraps {ok, Value} / {error, Error} results for seamless integration.
--spec class_send(pid(), atom(), list()) -> term().
+-spec class_send(pid() | undefined, atom(), list()) -> term().
+class_send(undefined, Selector, _Args) ->
+    Error0 = beamtalk_error:new(class_not_found, unknown),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    beamtalk_error:raise(Error1);
 class_send(ClassPid, 'new', []) ->
     unwrap_class_call(gen_server:call(ClassPid, {new, []}));
 class_send(ClassPid, 'new:', [Map]) ->
