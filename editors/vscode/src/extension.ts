@@ -43,6 +43,7 @@ function fileExists(pathLike: string): boolean {
 function resolveServerPath(context: vscode.ExtensionContext): ResolvedServerPath {
   const config = vscode.workspace.getConfiguration("beamtalk");
   const override = config.get<string>("server.path", "").trim();
+  let warning: string | undefined;
 
   // 1. Explicit user override
   // The old default was "beamtalk-lsp" (bare PATH lookup). Treat that the
@@ -71,18 +72,10 @@ function resolveServerPath(context: vscode.ExtensionContext): ResolvedServerPath
       return { serverPath: withPlatformExecutable(resolved) };
     }
 
-    const warning =
+    warning =
       `Configured beamtalk.server.path does not exist: ${override}. ` +
       "Falling back to bundled beamtalk-lsp.";
-
-    const legacyOverrides = new Set(["dist/beamtalk-lsp", "./dist/beamtalk-lsp"]);
-    if (!legacyOverrides.has(override)) {
-      // Path-like override was invalid: warn and fall through to bundled/PATH.
-      return { serverPath: "", warning };
-    }
-
-    // Legacy local-dev override from old workflows. Fall through to bundled/PATH.
-    return { serverPath: "", warning };
+    // Path-like override was invalid: warn and fall through to bundled/PATH.
   }
 
   // 2. Bundled binary
@@ -93,11 +86,11 @@ function resolveServerPath(context: vscode.ExtensionContext): ResolvedServerPath
     `beamtalk-lsp${ext}`
   );
   if (fs.existsSync(bundled)) {
-    return { serverPath: bundled };
+    return { serverPath: bundled, warning };
   }
 
   // 3. Fall back to PATH
-  return { serverPath: "beamtalk-lsp" };
+  return { serverPath: "beamtalk-lsp", warning };
 }
 
 /** Creates the LSP client and starts it. */
