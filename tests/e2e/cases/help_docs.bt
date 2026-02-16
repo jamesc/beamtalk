@@ -20,3 +20,15 @@
 // :help with an unknown method — should show helpful error
 :help Integer nonExistentMethod
 // => ERROR: Integer does not understand nonExistentMethod
+
+// :help Metaclass — should show metaclass documentation (BT-618)
+:help Metaclass
+// => == Metaclass ==_
+
+// :help Metaclass with a known class-side method (BT-618)
+:help Metaclass spawn
+// => Metaclass >> spawn_
+
+// :help Metaclass with unknown method — should show error (BT-618)
+:help Metaclass nonExistentMethod
+// => ERROR: Metaclass does not understand nonExistentMethod
