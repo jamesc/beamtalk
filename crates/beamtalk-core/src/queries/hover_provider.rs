@@ -259,12 +259,12 @@ fn method_declaration_selector_hover_info(method: &MethodDefinition, span: Span)
 }
 
 fn method_signature(method: &MethodDefinition) -> String {
-    let mut signature = selector_with_parameters(&method.selector, &method.parameters);
+    let base = selector_with_parameters(&method.selector, &method.parameters);
     if let Some(return_type) = &method.return_type {
-        signature.push_str(" -> ");
-        signature.push_str(&type_annotation_label(return_type));
+        format!("{base} -> {}", type_annotation_label(return_type))
+    } else {
+        base
     }
-    signature
 }
 
 fn selector_with_parameters(

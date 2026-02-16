@@ -33,7 +33,7 @@ use tower_lsp::lsp_types::{
 use tower_lsp::{Client, LanguageServer};
 use tracing::debug;
 
-const DIAGNOSTIC_DEBOUNCE_MS: u64 = 150;
+const DIAGNOSTIC_DEBOUNCE_DURATION: Duration = Duration::from_millis(150);
 
 /// LSP backend wrapping `SimpleLanguageService`.
 pub struct Backend {
@@ -175,7 +175,7 @@ impl LanguageServer for Backend {
                 *entry
             };
 
-            tokio::time::sleep(Duration::from_millis(DIAGNOSTIC_DEBOUNCE_MS)).await;
+            tokio::time::sleep(DIAGNOSTIC_DEBOUNCE_DURATION).await;
 
             let is_latest = {
                 let generations = self
