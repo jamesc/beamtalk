@@ -43,6 +43,20 @@ e := LocalMutationActor spawn
 (e countDownFrom: 3) await
 // => 3
 
+// === whileFalse: with local mutation ===
+h := LocalMutationActor spawn
+// => #Actor<LocalMutationActor,_>
+
+(h countUpWithWhileFalseFrom: 3) await
+// => 3
+
+// === to:by:do: with local mutation ===
+i := LocalMutationActor spawn
+// => #Actor<LocalMutationActor,_>
+
+(i sumEvens: 10) await
+// => 30
+
 // === Mixed local + field mutation in do: ===
 f := LocalMutationActor spawn
 // => #Actor<LocalMutationActor,_>

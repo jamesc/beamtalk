@@ -1029,12 +1029,20 @@ impl CoreErlangGenerator {
             }
         }
 
-        // Check for to:do: with literal block
-        if selector_name == "to:do:"
+        // Check for to:do: or to:by:do: with literal block
+        if (selector_name == "to:do:"
             && arguments.len() == 2
-            && matches!(&arguments[1], Expression::Block(_))
+            && matches!(&arguments[1], Expression::Block(_)))
+            || (selector_name == "to:by:do:"
+                && arguments.len() == 3
+                && matches!(&arguments[2], Expression::Block(_)))
         {
-            let Expression::Block(body_block) = &arguments[1] else {
+            let body_block_expr = if selector_name == "to:do:" {
+                &arguments[1]
+            } else {
+                &arguments[2]
+            };
+            let Expression::Block(body_block) = body_block_expr else {
                 return None;
             };
 

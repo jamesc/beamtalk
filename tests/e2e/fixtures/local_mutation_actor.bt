@@ -52,6 +52,22 @@ Actor subclass: LocalMutationActor
     ].
     ^steps
 
+  // Local mutation in whileFalse:
+  countUpWithWhileFalseFrom: n =>
+    counter := 0.
+    [counter >= n] whileFalse: [
+      counter := counter + 1
+    ].
+    ^counter
+
+  // Local mutation in to:by:do:
+  sumEvens: n =>
+    total := 0.
+    2 to: n by: 2 do: [:i |
+      total := total + i
+    ].
+    ^total
+
   // Mixed local + field mutation
   processWithTracking: items =>
     localCount := 0.
