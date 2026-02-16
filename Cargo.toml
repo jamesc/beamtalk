@@ -53,6 +53,9 @@ fs2 = "0.4"
 ctrlc = "3"
 libc = "0.2"
 
+# Markdown rendering
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+
 # Line editing
 rustyline = { version = "17", features = ["derive"] }
 

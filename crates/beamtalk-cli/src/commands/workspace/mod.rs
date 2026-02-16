@@ -681,6 +681,7 @@ fn build_detached_node_command(
 /// fallback — normal operation uses TCP probes for liveness/shutdown.
 /// On non-Unix, returns sentinel PID 0 (force-kill uses `taskkill` with PID
 /// from OS-level process tracking).
+#[cfg_attr(not(unix), allow(clippy::unnecessary_wraps))]
 fn find_beam_pid_by_node(node_name: &str) -> Result<(u32, Option<u64>)> {
     #[cfg(unix)]
     {
@@ -1157,6 +1158,7 @@ fn resolve_workspace_id(name_or_id: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use serial_test::serial;
     use std::fs;
 
@@ -1269,8 +1271,10 @@ mod tests {
     fn test_different_paths_produce_different_workspace_ids() {
         // Verifies worktree isolation: different project paths (as with git worktrees)
         // produce different workspace IDs, ensuring separate workspaces per worktree.
-        let id1 = generate_workspace_id(Path::new("/")).unwrap();
-        let id2 = generate_workspace_id(Path::new("/tmp")).unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        let parent = cwd.parent().expect("cwd should have a parent");
+        let id1 = generate_workspace_id(&cwd).unwrap();
+        let id2 = generate_workspace_id(parent).unwrap();
         assert_ne!(
             id1, id2,
             "Different paths must produce different workspace IDs"
@@ -1862,10 +1866,12 @@ mod tests {
     // Unix-only: uses `ps` for PID verification in some tests.
 
     /// Guard that kills a BEAM node by PID when dropped, preventing orphans.
+    #[cfg(unix)]
     struct NodeGuard {
         pid: u32,
     }
 
+    #[cfg(unix)]
     impl Drop for NodeGuard {
         fn drop(&mut self) {
             let _ = force_kill_process(self.pid);
@@ -1873,6 +1879,7 @@ mod tests {
     }
 
     /// Locate BEAM directories needed to start a workspace node.
+    #[cfg(unix)]
     fn beam_dirs_for_tests() -> (PathBuf, PathBuf, PathBuf, PathBuf, PathBuf) {
         let runtime_dir = beamtalk_cli::repl_startup::find_runtime_dir()
             .expect("Cannot find runtime dir — run from repo root or set BEAMTALK_RUNTIME_DIR");

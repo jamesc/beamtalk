@@ -263,6 +263,7 @@ fn parse_test_file(content: &str) -> ParsedTestFile {
 /// Manages the BEAM process for tests.
 struct ProcessManager {
     beam_process: Option<Child>,
+    #[cfg_attr(not(unix), allow(dead_code))]
     cover_enabled: bool,
 }
 
