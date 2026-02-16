@@ -1157,6 +1157,7 @@ fn resolve_workspace_id(name_or_id: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use serial_test::serial;
     use std::fs;
 
@@ -1862,10 +1863,12 @@ mod tests {
     // Unix-only: uses `ps` for PID verification in some tests.
 
     /// Guard that kills a BEAM node by PID when dropped, preventing orphans.
+    #[cfg(unix)]
     struct NodeGuard {
         pid: u32,
     }
 
+    #[cfg(unix)]
     impl Drop for NodeGuard {
         fn drop(&mut self) {
             let _ = force_kill_process(self.pid);
@@ -1873,6 +1876,7 @@ mod tests {
     }
 
     /// Locate BEAM directories needed to start a workspace node.
+    #[cfg(unix)]
     fn beam_dirs_for_tests() -> (PathBuf, PathBuf, PathBuf, PathBuf, PathBuf) {
         let runtime_dir = beamtalk_cli::repl_startup::find_runtime_dir()
             .expect("Cannot find runtime dir — run from repo root or set BEAMTALK_RUNTIME_DIR");
