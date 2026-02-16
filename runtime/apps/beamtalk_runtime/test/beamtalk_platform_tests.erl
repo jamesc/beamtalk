@@ -22,13 +22,17 @@ home_dir_returns_string_test() ->
 %% Test fallback to USERPROFILE when HOME is unset
 home_dir_falls_back_to_userprofile_test() ->
     OrigHome = os:getenv("HOME"),
+    OrigUserProfile = os:getenv("USERPROFILE"),
     os:unsetenv("HOME"),
     os:putenv("USERPROFILE", "/mock/user/profile"),
     try
         ?assertEqual("/mock/user/profile", beamtalk_platform:home_dir())
     after
         %% Restore original state
-        os:unsetenv("USERPROFILE"),
+        case OrigUserProfile of
+            false -> os:unsetenv("USERPROFILE");
+            UP    -> os:putenv("USERPROFILE", UP)
+        end,
         case OrigHome of
             false -> ok;
             Val   -> os:putenv("HOME", Val)
