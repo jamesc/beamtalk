@@ -586,12 +586,27 @@ pub fn start_detached_node(
     })?;
 
     // With -detached, the spawn() returns immediately and the real BEAM node
-    // runs independently. We need to wait a bit for it to start up.
-    // The compiler app (ADR 0022) adds ~500ms to startup.
-    std::thread::sleep(Duration::from_millis(2000));
-
-    // Find the BEAM process by node name
-    let (pid, start_time) = find_beam_pid_by_node(&node_name)?;
+    // runs independently. We need to wait for it to start up.
+    // The compiler app (ADR 0022) adds ~500ms to startup, and under load
+    // (e.g., parallel integration tests) it can take longer.
+    // Retry PID discovery instead of a single fixed sleep.
+    let mut last_err = None;
+    let pid_found = 'retry: {
+        for attempt in 0..10 {
+            if attempt > 0 {
+                std::thread::sleep(Duration::from_millis(500));
+            } else {
+                // Initial delay before first attempt
+                std::thread::sleep(Duration::from_millis(2000));
+            }
+            match find_beam_pid_by_node(&node_name) {
+                Ok(result) => break 'retry result,
+                Err(e) => last_err = Some(e),
+            }
+        }
+        return Err(last_err.unwrap_or_else(|| miette!("PID discovery failed")));
+    };
+    let (pid, start_time) = pid_found;
 
     // Read actual port from port file (written by beamtalk_repl_server after binding).
     // This is essential when port=0 is used (OS assigns ephemeral port).
@@ -1114,6 +1129,7 @@ fn resolve_workspace_id(name_or_id: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::fs;
 
     /// Helper to create a unique test workspace ID and clean up after.
@@ -1858,6 +1874,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     #[ignore = "integration test — requires Erlang/OTP runtime"]
+    #[serial(workspace_integration)]
     fn test_start_detached_node_integration() {
         let tw = TestWorkspace::new("integ_start");
         let project_path = std::env::current_dir().unwrap();
@@ -1917,6 +1934,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     #[ignore = "integration test — requires Erlang/OTP runtime"]
+    #[serial(workspace_integration)]
     fn test_is_node_running_true_then_false_integration() {
         let tw = TestWorkspace::new("integ_running");
         let project_path = std::env::current_dir().unwrap();
@@ -1961,6 +1979,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     #[ignore = "integration test — requires Erlang/OTP runtime"]
+    #[serial(workspace_integration)]
     fn test_get_or_start_workspace_lifecycle_integration() {
         let tw = TestWorkspace::new("integ_lifecycle");
         let project_path = std::env::current_dir().unwrap();
@@ -2041,6 +2060,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     #[ignore = "integration test — requires Erlang/OTP runtime"]
+    #[serial(workspace_integration)]
     fn test_list_workspaces_running_node_integration() {
         let tw = TestWorkspace::new("integ_list_running");
         let project_path = std::env::current_dir().unwrap();
@@ -2085,6 +2105,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     #[ignore = "integration test — requires Erlang/OTP runtime"]
+    #[serial(workspace_integration)]
     fn test_list_workspaces_stale_cleanup_integration() {
         let tw = TestWorkspace::new("integ_list_stale");
         let project_path = std::env::current_dir().unwrap();
@@ -2128,6 +2149,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     #[ignore = "integration test — requires Erlang/OTP runtime"]
+    #[serial(workspace_integration)]
     fn test_workspace_status_running_integration() {
         let tw = TestWorkspace::new("integ_ws_status");
         let project_path = std::env::current_dir().unwrap();
@@ -2167,6 +2189,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     #[ignore = "integration test — requires Erlang/OTP runtime"]
+    #[serial(workspace_integration)]
     fn test_stop_workspace_graceful_timeout_integration() {
         let tw = TestWorkspace::new("integ_stop_graceful");
         let project_path = std::env::current_dir().unwrap();
@@ -2211,6 +2234,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     #[ignore = "integration test — requires Erlang/OTP runtime"]
+    #[serial(workspace_integration)]
     fn test_stop_workspace_force_integration() {
         let tw = TestWorkspace::new("integ_stop_force");
         let project_path = std::env::current_dir().unwrap();
@@ -2258,6 +2282,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     #[ignore = "integration test — requires Erlang/OTP runtime"]
+    #[serial(workspace_integration)]
     fn test_stop_workspace_not_running_integration() {
         let tw = TestWorkspace::new("integ_stop_notrun");
         let project_path = std::env::current_dir().unwrap();
