@@ -219,6 +219,12 @@ mod tests {
     }
 
     #[test]
+    fn test_module_matches_class_package_subdirectory() {
+        // bt@my_app@util@math should match class Math (rsplit_once on last @)
+        assert!(module_matches_class("bt@my_app@util@math", "Math"));
+    }
+
+    #[test]
     fn test_module_matches_class_no_match() {
         assert!(!module_matches_class("bt@other", "Counter"));
     }
