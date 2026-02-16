@@ -128,7 +128,7 @@ jobs:
             rust-target: aarch64-unknown-linux-gnu
             vsce-target: linux-arm64
             cross: true
-          - os: macos-latest
+          - os: macos-13
             rust-target: x86_64-apple-darwin
             vsce-target: darwin-x64
           - os: macos-latest
@@ -214,6 +214,7 @@ jobs:
           ln -sf ../../LICENSE LICENSE
           npx --yes @vscode/vsce package --target ${{ matrix.vsce-target }} --out ../../beamtalk-${{ matrix.vsce-target }}.vsix
           rm -f LICENSE
+          rm -rf bin
 
       - name: Upload VSIX
         uses: actions/upload-artifact@v6
@@ -244,4 +245,9 @@ jobs:
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
-          npx --yes @vscode/vsce publish --packagePath *.vsix
+          npx --yes @vscode/vsce publish --packagePath \
+            beamtalk-linux-x64.vsix \
+            beamtalk-linux-arm64.vsix \
+            beamtalk-darwin-x64.vsix \
+            beamtalk-darwin-arm64.vsix \
+            beamtalk-win32-x64.vsix

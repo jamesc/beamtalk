@@ -25,6 +25,8 @@ function resolveServerPath(context: vscode.ExtensionContext): string {
   const override = config.get<string>("server.path", "");
 
   // 1. Explicit user override
+  // The old default was "beamtalk-lsp" (bare PATH lookup). Treat that the
+  // same as empty so existing configs migrate to the bundled binary.
   if (override && override !== "beamtalk-lsp") {
     return override;
   }
