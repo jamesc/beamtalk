@@ -178,4 +178,21 @@ primitive_send_unwrap_test() ->
 primitive_send_as_string_test() ->
     ?assertEqual(<<"{a, b}">>, beamtalk_primitive:send({a, b}, 'asString', [])).
 
+%%% ============================================================================
+%%% do/2 Tests — iterate tuple elements
+%%% ============================================================================
+
+do_iterates_elements_test() ->
+    Self = self(),
+    beamtalk_tuple_ops:do({a, b, c}, fun(X) -> Self ! X end),
+    ?assertEqual(a, receive Msg1 -> Msg1 after 100 -> timeout end),
+    ?assertEqual(b, receive Msg2 -> Msg2 after 100 -> timeout end),
+    ?assertEqual(c, receive Msg3 -> Msg3 after 100 -> timeout end).
+
+do_returns_nil_test() ->
+    ?assertEqual(nil, beamtalk_tuple_ops:do({1, 2, 3}, fun(_) -> ok end)).
+
+do_empty_tuple_test() ->
+    ?assertEqual(nil, beamtalk_tuple_ops:do({}, fun(_) -> ok end)).
+
 
