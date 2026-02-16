@@ -2977,3 +2977,34 @@ fn test_string_interpolation_integer_expression() {
         "Should dispatch printString on integer. Got:\n{code}"
     );
 }
+
+#[test]
+fn test_as_type_erasure() {
+    // `x asType: Integer` should erase to just the receiver `x`
+    let mut generator = CoreErlangGenerator::new("test");
+    let receiver = Expression::Identifier(Identifier::new("x", Span::new(0, 1)));
+    let selector = MessageSelector::Keyword(vec![KeywordPart::new("asType:", Span::new(2, 9))]);
+    let arguments = vec![Expression::ClassReference {
+        name: Identifier::new("Integer", Span::new(10, 17)),
+        span: Span::new(10, 17),
+    }];
+
+    let doc = generator
+        .generate_message_send(&receiver, &selector, &arguments)
+        .unwrap();
+    let output = doc.to_pretty_string();
+    // asType: should be erased — no dispatch, no beamtalk_message_dispatch
+    assert!(
+        !output.contains("beamtalk_message_dispatch"),
+        "asType: should be erased, not dispatched. Got: {output}"
+    );
+    assert!(
+        !output.contains("asType"),
+        "asType: should not appear in generated code. Got: {output}"
+    );
+    // The output should just be the variable reference
+    assert!(
+        output.contains('x') || output.contains("_x"),
+        "asType: should generate only the receiver expression. Got: {output}"
+    );
+}

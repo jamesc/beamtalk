@@ -1708,4 +1708,69 @@ mod tests {
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("Duplicate method"));
     }
+
+    // --- Typed class inheritance tests (BT-587) ---
+
+    #[test]
+    fn typed_class_is_typed() {
+        let mut class = make_class_with_sealed_method("StrictCounter", "Actor", "increment", false);
+        class.is_typed = true;
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let info = hierarchy.get_class("StrictCounter").unwrap();
+        assert!(info.is_typed, "explicitly typed class should be typed");
+    }
+
+    #[test]
+    fn typed_class_inheritance() {
+        // Parent is typed, child inherits typed
+        let mut parent = make_class_with_sealed_method("TypedParent", "Actor", "method", false);
+        parent.is_typed = true;
+
+        let child = make_class_with_sealed_method("UntypedChild", "TypedParent", "method", false);
+
+        let module = Module {
+            classes: vec![parent, child],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+
+        assert!(
+            hierarchy.get_class("TypedParent").unwrap().is_typed,
+            "parent should be typed"
+        );
+        assert!(
+            hierarchy.get_class("UntypedChild").unwrap().is_typed,
+            "child of typed class should inherit typed"
+        );
+    }
+
+    #[test]
+    fn non_typed_class_not_inherited() {
+        // Parent is NOT typed, child should not be typed
+        let parent = make_class_with_sealed_method("Parent", "Actor", "method", false);
+        let child = make_class_with_sealed_method("Child", "Parent", "method", false);
+
+        let module = Module {
+            classes: vec![parent, child],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+
+        assert!(!hierarchy.get_class("Parent").unwrap().is_typed);
+        assert!(!hierarchy.get_class("Child").unwrap().is_typed);
+    }
 }

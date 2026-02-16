@@ -3932,4 +3932,62 @@ Actor subclass: Counter
         let (_module, _diagnostics) = crate::source_analysis::parse(tokens);
         // Success = no panic/stack overflow
     }
+
+    #[test]
+    fn parse_typed_class() {
+        let module = parse_ok(
+            "typed Actor subclass: StrictCounter
+  state: value: Integer = 0
+
+  increment -> Integer => self.value := self.value + 1",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+
+        assert!(!class.is_abstract);
+        assert!(!class.is_sealed);
+        assert!(class.is_typed);
+        assert_eq!(class.name.name, "StrictCounter");
+        assert_eq!(class.state.len(), 1);
+        assert_eq!(class.methods.len(), 1);
+    }
+
+    #[test]
+    fn parse_typed_sealed_class() {
+        let module = parse_ok(
+            "typed sealed Actor subclass: ImmutablePoint
+  state: x: Integer = 0
+  state: y: Integer = 0",
+        );
+
+        let class = &module.classes[0];
+        assert!(class.is_typed);
+        assert!(class.is_sealed);
+        assert_eq!(class.name.name, "ImmutablePoint");
+    }
+
+    #[test]
+    fn parse_abstract_typed_class() {
+        let module = parse_ok(
+            "abstract typed Actor subclass: Shape
+  area -> Float => ^0.0",
+        );
+
+        let class = &module.classes[0];
+        assert!(class.is_abstract);
+        assert!(class.is_typed);
+        assert_eq!(class.name.name, "Shape");
+    }
+
+    #[test]
+    fn parse_non_typed_class_defaults_false() {
+        let module = parse_ok(
+            "Actor subclass: Counter
+  state: value = 0",
+        );
+
+        let class = &module.classes[0];
+        assert!(!class.is_typed);
+    }
 }
