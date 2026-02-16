@@ -26,6 +26,7 @@ struct ClassInfo {
     methods: Vec<MethodInfo>,
     class_methods: Vec<MethodInfo>,
     source_file: Option<String>,
+    source_root: Option<String>,
 }
 
 /// Information about a documented method.
@@ -56,7 +57,7 @@ pub fn run(path: &str, output_dir: &str) -> Result<()> {
     // Parse all source files to extract class info
     let mut classes = Vec::new();
     for file in &source_files {
-        if let Some(class_info) = parse_class_info(file)? {
+        if let Some(class_info) = parse_class_info(&source_path, file)? {
             classes.push(class_info);
         }
     }
@@ -145,7 +146,7 @@ fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
 }
 
 /// Parse a `.bt` source file and extract class documentation info.
-fn parse_class_info(path: &Utf8Path) -> Result<Option<ClassInfo>> {
+fn parse_class_info(root: &Utf8Path, path: &Utf8Path) -> Result<Option<ClassInfo>> {
     let source = fs::read_to_string(path)
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to read '{path}'"))?;
@@ -166,12 +167,16 @@ fn parse_class_info(path: &Utf8Path) -> Result<Option<ClassInfo>> {
         return Ok(None);
     };
 
-    let source_file = path.file_name().map(String::from);
+    let source_file = path
+        .strip_prefix(root)
+        .ok()
+        .map(|p| p.as_str().to_string())
+        .or_else(|| path.file_name().map(String::from));
 
     let make_method_info = |m: &beamtalk_core::ast::MethodDefinition| {
         let line_number = {
             let offset = m.span.start() as usize;
-            source[..offset].matches('\n').count() + 1
+            source[..offset].lines().count() + 1
         };
         MethodInfo {
             signature: format_signature(&m.selector, &m.parameters),
@@ -190,6 +195,7 @@ fn parse_class_info(path: &Utf8Path) -> Result<Option<ClassInfo>> {
         methods,
         class_methods,
         source_file,
+        source_root: Some(root.as_str().to_string()),
     }))
 }
 
@@ -938,18 +944,19 @@ fn write_class_methods(
     _all_classes: &HashMap<String, &ClassInfo>,
 ) {
     let source = class.source_file.as_deref();
+    let root = class.source_root.as_deref();
 
     if !class.class_methods.is_empty() {
         html.push_str("<h2>Class Methods</h2>\n");
         for method in &class.class_methods {
-            write_method_html_with_source(html, method, source);
+            write_method_html_with_source(html, method, source, root);
         }
     }
 
     if !class.methods.is_empty() {
         html.push_str("<h2>Instance Methods</h2>\n");
         for method in &class.methods {
-            write_method_html_with_source(html, method, source);
+            write_method_html_with_source(html, method, source, root);
         }
     }
 }
@@ -984,7 +991,7 @@ fn write_method_html(
     method: &MethodInfo,
     _all_classes: &HashMap<String, &ClassInfo>,
 ) {
-    write_method_html_with_source(html, method, None);
+    write_method_html_with_source(html, method, None, None);
 }
 
 /// Render a method with a source file link.
@@ -992,6 +999,7 @@ fn write_method_html_with_source(
     html: &mut String,
     method: &MethodInfo,
     source_file: Option<&str>,
+    source_root: Option<&str>,
 ) {
     let anchor = method_anchor(&method.signature);
     let _ = writeln!(html, "<div class=\"method\" id=\"{anchor}\">");
@@ -1003,10 +1011,11 @@ fn write_method_html_with_source(
     );
 
     if let (Some(file), Some(line)) = (source_file, method.line_number) {
+        let root = source_root.unwrap_or("lib");
         let _ = writeln!(
             html,
             "<a class=\"source-link\" \
-             href=\"https://github.com/jamesc/beamtalk/blob/main/lib/{file}#L{line}\" \
+             href=\"https://github.com/jamesc/beamtalk/blob/main/{root}/{file}#L{line}\" \
              title=\"View source\">source</a>",
         );
     }
@@ -1081,6 +1090,7 @@ fn build_sidebar_html(classes: &[ClassInfo]) -> String {
     html.push_str(
         "<input type=\"search\" class=\"sidebar-search\" \
          id=\"sidebar-search\" placeholder=\"Search classes…\" \
+         aria-label=\"Search classes\" \
          autocomplete=\"off\">\n",
     );
     html.push_str("</div>\n");
@@ -1264,7 +1274,7 @@ function initSearch(index) {
     if (matches.length === 0) {
       resultsDiv.className = 'search-results active';
       resultsDiv.innerHTML = '<h2>Search Results</h2><p>No results for "' +
-        q.replace(/</g,'&lt;') + '"</p>';
+        esc(q) + '"</p>';
       return;
     }
 
@@ -1544,7 +1554,7 @@ mod tests {
         )
         .unwrap();
 
-        let info = parse_class_info(&file).unwrap().unwrap();
+        let info = parse_class_info(&dir, &file).unwrap().unwrap();
         assert_eq!(info.name, "Counter");
         assert_eq!(info.superclass.as_deref(), Some("Actor"));
         assert!(info.doc_comment.unwrap().contains("simple counter"));
@@ -1559,7 +1569,7 @@ mod tests {
         let file = dir.join("empty.bt");
         fs::write(&file, "x := 42\n").unwrap();
 
-        let info = parse_class_info(&file).unwrap();
+        let info = parse_class_info(&dir, &file).unwrap();
         assert!(info.is_none());
     }
 
@@ -1623,6 +1633,7 @@ mod tests {
             }],
             class_methods: vec![],
             source_file: None,
+            source_root: None,
         };
         let child = ClassInfo {
             name: "Child".into(),
@@ -1631,6 +1642,7 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             source_file: None,
+            source_root: None,
         };
 
         let hierarchy: HashMap<String, String> = [("Child".into(), "Parent".into())].into();
