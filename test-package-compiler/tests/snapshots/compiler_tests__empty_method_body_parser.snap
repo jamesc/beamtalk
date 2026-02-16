@@ -74,32 +74,26 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        Return {
-                            value: FieldAccess {
-                                receiver: Identifier(
-                                    Identifier {
-                                        name: "self",
-                                        span: Span {
-                                            start: 244,
-                                            end: 248,
-                                        },
-                                    },
-                                ),
-                                field: Identifier {
-                                    name: "value",
+                        FieldAccess {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "self",
                                     span: Span {
-                                        start: 249,
-                                        end: 254,
+                                        start: 243,
+                                        end: 247,
                                     },
                                 },
+                            ),
+                            field: Identifier {
+                                name: "value",
                                 span: Span {
-                                    start: 244,
-                                    end: 254,
+                                    start: 248,
+                                    end: 253,
                                 },
                             },
                             span: Span {
                                 start: 243,
-                                end: 254,
+                                end: 253,
                             },
                         },
                     ],
@@ -109,7 +103,7 @@ Module {
                     doc_comment: None,
                     span: Span {
                         start: 231,
-                        end: 254,
+                        end: 253,
                     },
                 },
             ],
@@ -125,8 +119,8 @@ Module {
                     kind: Primary,
                     doc_comment: None,
                     span: Span {
-                        start: 258,
-                        end: 263,
+                        start: 257,
+                        end: 262,
                     },
                 },
             ],
@@ -134,7 +128,7 @@ Module {
             doc_comment: None,
             span: Span {
                 start: 166,
-                end: 263,
+                end: 262,
             },
         },
     ],
@@ -142,7 +136,7 @@ Module {
     expressions: [],
     span: Span {
         start: 166,
-        end: 277,
+        end: 276,
     },
     leading_comments: [
         Comment {

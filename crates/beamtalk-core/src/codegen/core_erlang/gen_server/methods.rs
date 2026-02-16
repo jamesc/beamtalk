@@ -122,7 +122,7 @@ impl CoreErlangGenerator {
         if method.body.is_empty() {
             // Empty method body returns self (the actor object reference)
             let state = self.current_state_var();
-            return Ok(Document::String(format!("{{'reply', Self, {state}}}")));
+            return Ok(docvec!["{'reply', Self, ", state, "}"]);
         }
 
         let mut docs: Vec<Document<'static>> = Vec::new();
@@ -330,9 +330,7 @@ impl CoreErlangGenerator {
         if block.body.is_empty() {
             // Empty method body returns self (the actor object reference)
             let final_state = self.current_state_var();
-            return Ok(Document::String(format!(
-                "{{'reply', Self, {final_state}}}"
-            )));
+            return Ok(docvec!["{'reply', Self, ", final_state, "}"]);
         }
 
         let mut docs: Vec<Document<'static>> = Vec::new();

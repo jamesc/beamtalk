@@ -11,4 +11,4 @@ Actor subclass: EmptyMethodActor
   doNothing =>
 
   // Non-empty method for comparison
-  getValue => ^self.value
+  getValue => self.value

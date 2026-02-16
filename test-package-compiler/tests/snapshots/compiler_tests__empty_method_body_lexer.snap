@@ -13,11 +13,10 @@ Token { kind: Identifier("doNothing"), span: Span { start: 215, end: 224 }, lead
 Token { kind: FatArrow, span: Span { start: 225, end: 227 }, leading_trivia: [], trailing_trivia: [] }
 Token { kind: Identifier("getValue"), span: Span { start: 231, end: 239 }, leading_trivia: [Whitespace("\n\n  ")], trailing_trivia: [Whitespace(" ")] }
 Token { kind: FatArrow, span: Span { start: 240, end: 242 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Caret, span: Span { start: 243, end: 244 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("self"), span: Span { start: 244, end: 248 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Period, span: Span { start: 248, end: 249 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("value"), span: Span { start: 249, end: 254 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("class"), span: Span { start: 258, end: 263 }, leading_trivia: [Whitespace("\n\n  ")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("classEmpty"), span: Span { start: 264, end: 274 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: FatArrow, span: Span { start: 275, end: 277 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Eof, span: Span { start: 278, end: 278 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
+Token { kind: Identifier("self"), span: Span { start: 243, end: 247 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 247, end: 248 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("value"), span: Span { start: 248, end: 253 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("class"), span: Span { start: 257, end: 262 }, leading_trivia: [Whitespace("\n\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("classEmpty"), span: Span { start: 263, end: 273 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 274, end: 276 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 277, end: 277 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

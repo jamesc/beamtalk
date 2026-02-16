@@ -9,6 +9,6 @@ Actor subclass: EmptyActor
 
   doNothing =>
 
-  getValue => ^self.value
+  getValue => self.value
 
   class classEmpty =>

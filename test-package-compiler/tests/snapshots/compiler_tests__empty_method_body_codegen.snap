@@ -125,7 +125,7 @@ module 'empty_method_body' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_c
         <'doNothing'> when 'true' ->
             {'reply', Self, State}
         <'getValue'> when 'true' ->
-            let _ReturnValue = call 'maps':'get'('value', State) in {'reply', _ReturnValue, State}
+            let _Result = call 'maps':'get'('value', State) in {'reply', _Result, State}
         <OtherSelector> when 'true' ->
             %% BT-229/ADR 0005: Check extension registry before hierarchy walk
             let ExtLookup = try call 'beamtalk_extensions':'lookup'('EmptyActor', OtherSelector)
