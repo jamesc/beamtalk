@@ -176,11 +176,14 @@ impl SimpleLanguageService {
     /// Finds a method selector at a given byte offset in a module.
     ///
     /// Searches expressions, class method bodies, and standalone method definitions.
-    fn find_selector_at_offset(module: &Module, offset: u32) -> Option<(ecow::EcoString, Span)> {
+    fn find_selector_at_offset(
+        module: &Module,
+        offset: u32,
+    ) -> Option<crate::queries::definition_provider::SelectorLookup> {
         // Check top-level expressions
         for expr in &module.expressions {
             if let Some(result) =
-                crate::queries::definition_provider::find_selector_in_expr(expr, offset)
+                crate::queries::definition_provider::find_selector_lookup_in_expr(expr, offset)
             {
                 return Some(result);
             }
@@ -190,7 +193,9 @@ impl SimpleLanguageService {
             for method in class.methods.iter().chain(class.class_methods.iter()) {
                 for expr in &method.body {
                     if let Some(result) =
-                        crate::queries::definition_provider::find_selector_in_expr(expr, offset)
+                        crate::queries::definition_provider::find_selector_lookup_in_expr(
+                            expr, offset,
+                        )
                     {
                         return Some(result);
                     }
@@ -201,7 +206,7 @@ impl SimpleLanguageService {
         for smd in &module.method_definitions {
             for expr in &smd.method.body {
                 if let Some(result) =
-                    crate::queries::definition_provider::find_selector_in_expr(expr, offset)
+                    crate::queries::definition_provider::find_selector_lookup_in_expr(expr, offset)
                 {
                     return Some(result);
                 }
@@ -494,11 +499,19 @@ impl LanguageService for SimpleLanguageService {
         let offset = position.to_byte_offset(&file_data.source)?;
 
         // 1. Try selector-based go-to-definition (cursor on a method keyword)
-        if let Some((selector_name, _span)) =
+        if let Some(selector_lookup) =
             Self::find_selector_at_offset(&file_data.module, offset.get())
         {
-            return crate::queries::definition_provider::find_method_definition_cross_file(
-                &selector_name,
+            let receiver_context =
+                crate::queries::definition_provider::resolve_receiver_class_context(
+                    &file_data.module,
+                    offset.get(),
+                    &selector_lookup,
+                    self.project_index.hierarchy(),
+                );
+            return crate::queries::definition_provider::find_method_definition_cross_file_with_receiver(
+                selector_lookup.selector_name.as_str(),
+                receiver_context.as_ref(),
                 &self.project_index,
                 self.files.iter().map(|(path, data)| (path, &data.module)),
             );
@@ -527,11 +540,11 @@ impl LanguageService for SimpleLanguageService {
         };
 
         // 1. Try selector-based references (cursor on a method keyword)
-        if let Some((selector_name, _span)) =
+        if let Some(selector_lookup) =
             Self::find_selector_at_offset(&file_data.module, offset.get())
         {
             return crate::queries::references_provider::find_selector_references(
-                &selector_name,
+                selector_lookup.selector_name.as_str(),
                 self.files.iter().map(|(path, data)| (path, &data.module)),
             );
         }
@@ -812,6 +825,83 @@ mod tests {
         assert!(def.is_some());
         let loc = def.unwrap();
         assert_eq!(loc.file, file_a);
+    }
+
+    #[test]
+    fn goto_definition_method_uses_inferred_receiver_class_context() {
+        let mut service = SimpleLanguageService::new();
+        let file_foo = Utf8PathBuf::from("foo.bt");
+        let file_bar = Utf8PathBuf::from("bar.bt");
+        let file_calls = Utf8PathBuf::from("calls.bt");
+
+        service.update_file(
+            file_foo.clone(),
+            "Object subclass: Foo\n  ping => 1".to_string(),
+        );
+        service.update_file(
+            file_bar.clone(),
+            "Object subclass: Bar\n  ping => 2".to_string(),
+        );
+        service.update_file(
+            file_calls.clone(),
+            "x := Foo new\nx ping\ny := Bar new\ny ping".to_string(),
+        );
+
+        let first = service.goto_definition(&file_calls, Position::new(1, 2));
+        assert!(first.is_some());
+        assert_eq!(first.unwrap().file, file_foo);
+
+        let second = service.goto_definition(&file_calls, Position::new(3, 2));
+        assert!(second.is_some());
+        assert_eq!(second.unwrap().file, file_bar);
+    }
+
+    #[test]
+    fn goto_definition_method_uses_receiver_class_side_context() {
+        let mut service = SimpleLanguageService::new();
+        let file_foo = Utf8PathBuf::from("foo.bt");
+        let file_bar = Utf8PathBuf::from("bar.bt");
+        let file_calls = Utf8PathBuf::from("calls.bt");
+
+        service.update_file(
+            file_foo.clone(),
+            "Object subclass: Foo\n  class ping => 1".to_string(),
+        );
+        service.update_file(
+            file_bar.clone(),
+            "Object subclass: Bar\n  class ping => 2".to_string(),
+        );
+        service.update_file(file_calls.clone(), "Foo ping\nBar ping".to_string());
+
+        let first = service.goto_definition(&file_calls, Position::new(0, 4));
+        assert!(first.is_some());
+        assert_eq!(first.unwrap().file, file_foo);
+
+        let second = service.goto_definition(&file_calls, Position::new(1, 4));
+        assert!(second.is_some());
+        assert_eq!(second.unwrap().file, file_bar);
+    }
+
+    #[test]
+    fn goto_definition_method_ambiguous_without_receiver_is_deterministic() {
+        let mut service = SimpleLanguageService::new();
+        let file_alpha = Utf8PathBuf::from("alpha.bt");
+        let file_zed = Utf8PathBuf::from("zed.bt");
+        let file_calls = Utf8PathBuf::from("calls.bt");
+
+        service.update_file(
+            file_alpha.clone(),
+            "Object subclass: Alpha\n  ping => 1".to_string(),
+        );
+        service.update_file(
+            file_zed.clone(),
+            "Object subclass: Zed\n  ping => 2".to_string(),
+        );
+        service.update_file(file_calls.clone(), "unknown ping".to_string());
+
+        let def = service.goto_definition(&file_calls, Position::new(0, 8));
+        assert!(def.is_some());
+        assert_eq!(def.unwrap().file, file_alpha);
     }
 
     #[test]
