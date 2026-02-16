@@ -298,69 +298,36 @@ fn read_proc_start_time(pid: u32) -> Option<u64> {
 }
 
 /// Check if a BEAM node is actually running (handle stale node.info files).
+///
+/// Uses TCP health probe (cross-platform) to verify the workspace is alive.
+/// If the workspace has a nonce, validates it against the port file nonce
+/// to detect stale entries (PID reuse after crash).
 pub fn is_node_running(info: &NodeInfo) -> bool {
-    // Check if PID exists and is a BEAM process
-    #[cfg(unix)]
-    {
-        use std::process::Command;
-        let output = Command::new("ps")
-            .args(["-p", &info.pid.to_string(), "-o", "comm="])
-            .output();
-
-        if let Ok(output) = output {
-            if output.status.success() {
-                let comm = String::from_utf8_lossy(&output.stdout);
-                if !(comm.contains("beam") || comm.contains("erl")) {
-                    return false;
-                }
-                // PID is a BEAM process — now verify start_time if available
-                if let Some(expected_start_time) = info.start_time {
-                    #[cfg(target_os = "linux")]
-                    {
-                        if let Some(actual_start_time) = read_proc_start_time(info.pid) {
-                            return actual_start_time == expected_start_time;
-                        }
-                        // Can't read /proc on Linux — conservatively treat as not running
-                        return false;
-                    }
-                    // On non-Linux Unix (macOS/BSD), /proc is unavailable so
-                    // skip the start_time check and trust the PID/BEAM check.
-                    #[cfg(not(target_os = "linux"))]
-                    {
-                        let _ = expected_start_time;
-                        return true;
-                    }
-                }
-                // No start_time stored (old node.info format) — skip check
-                return true;
+    match tcp_health_probe(info.port) {
+        Ok(response) => {
+            // If we have a nonce, verify it matches to detect stale port files
+            if let Some(ref expected_nonce) = info.nonce {
+                response.nonce == *expected_nonce
+            } else {
+                // No nonce stored (old node.info format) — trust the probe
+                true
             }
         }
+        Err(_) => false,
     }
-
-    #[cfg(not(unix))]
-    {
-        // On non-Unix, fall back to TCP connection check
-        use std::net::TcpStream;
-        use std::time::Duration;
-
-        let addr = format!("127.0.0.1:{}", info.port);
-        if let Ok(sock_addr) = addr.parse() {
-            if TcpStream::connect_timeout(&sock_addr, Duration::from_millis(1000)).is_ok() {
-                return true;
-            }
-        }
-    }
-
-    false
 }
 
 /// Response from a TCP health probe (BT-611).
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)] // consumed by BT-612 (replace process management with TCP)
 pub struct HealthProbeResponse {
+    /// Workspace identifier reported by the running node.
+    #[allow(dead_code)] // deserialized for protocol completeness; used in Debug output
     pub workspace_id: String,
+    /// Nonce for stale detection — compared against port file nonce.
     pub nonce: String,
+    /// Status information from the workspace.
     #[serde(default)]
+    #[allow(dead_code)] // deserialized for protocol completeness; used in Debug output
     pub status: Vec<String>,
 }
 
@@ -369,7 +336,6 @@ pub struct HealthProbeResponse {
 /// Connects to the workspace's TCP port, sends a `{"op":"health"}` message,
 /// and returns the parsed response containing `workspace_id` and `nonce`.
 /// The nonce can be compared against the port file nonce to detect stale entries.
-#[allow(dead_code)] // consumed by BT-612 (replace process management with TCP)
 pub fn tcp_health_probe(port: u16) -> Result<HealthProbeResponse> {
     let addr: std::net::SocketAddr = format!("127.0.0.1:{port}")
         .parse()
@@ -404,7 +370,6 @@ pub fn tcp_health_probe(port: u16) -> Result<HealthProbeResponse> {
 /// Connects to the workspace's TCP port, sends a cookie-authenticated
 /// `{"op":"shutdown","cookie":"..."}` message, and waits for acknowledgement.
 /// The workspace will call `init:stop()` for OTP-level graceful teardown.
-#[allow(dead_code)] // consumed by BT-612 (replace process management with TCP)
 pub fn tcp_send_shutdown(port: u16, cookie: &str) -> Result<()> {
     let addr: std::net::SocketAddr = format!("127.0.0.1:{port}")
         .parse()
@@ -712,42 +677,45 @@ fn build_detached_node_command(
 
 /// Find the PID of a BEAM process by its node name.
 ///
-/// On Unix, uses `ps` to scan for BEAM processes. On Windows, falls back to
-/// a TCP probe against the REPL port (PID tracking is not supported).
-#[cfg(unix)]
+/// On Unix, uses `ps` to scan for BEAM processes. Only needed for force-kill
+/// fallback — normal operation uses TCP probes for liveness/shutdown.
+/// On non-Unix, returns sentinel PID 0 (force-kill uses `taskkill` with PID
+/// from OS-level process tracking).
 fn find_beam_pid_by_node(node_name: &str) -> Result<(u32, Option<u64>)> {
-    let output = Command::new("ps")
-        .args(["-eo", "pid,command"])
-        .output()
-        .into_diagnostic()?;
+    #[cfg(unix)]
+    {
+        let output = Command::new("ps")
+            .args(["-eo", "pid,command"])
+            .output()
+            .into_diagnostic()?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for line in stdout.lines() {
-        if line.contains("beam.smp") && line.contains(node_name) {
-            let pid_str = line
-                .split_whitespace()
-                .next()
-                .ok_or_else(|| miette!("Failed to parse PID from ps output"))?;
-            let pid: u32 = pid_str.parse().into_diagnostic()?;
-            #[cfg(target_os = "linux")]
-            let start_time = read_proc_start_time(pid);
-            #[cfg(not(target_os = "linux"))]
-            let start_time = None;
-            return Ok((pid, start_time));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            if line.contains("beam.smp") && line.contains(node_name) {
+                let pid_str = line
+                    .split_whitespace()
+                    .next()
+                    .ok_or_else(|| miette!("Failed to parse PID from ps output"))?;
+                let pid: u32 = pid_str.parse().into_diagnostic()?;
+                #[cfg(target_os = "linux")]
+                let start_time = read_proc_start_time(pid);
+                #[cfg(not(target_os = "linux"))]
+                let start_time = None;
+                return Ok((pid, start_time));
+            }
         }
+
+        Err(miette!("Could not find BEAM process for node {node_name}"))
     }
 
-    Err(miette!("Could not find BEAM process for node {node_name}"))
-}
-
-/// On Windows, we cannot use `ps` to find BEAM processes. Instead, return a
-/// sentinel PID (0) with no start_time. The caller relies on TCP port probing
-/// (via `read_port_file`) to verify the workspace is running.
-#[cfg(not(unix))]
-fn find_beam_pid_by_node(_node_name: &str) -> Result<(u32, Option<u64>)> {
-    // Windows: PID tracking not supported; return sentinel.
-    // Workspace liveness is verified via TCP port probe instead.
-    Ok((0, None))
+    #[cfg(not(unix))]
+    {
+        let _ = node_name;
+        // Windows: PID tracking via ps not available; return sentinel.
+        // Workspace liveness is verified via TCP probe instead.
+        // Force-kill on Windows uses taskkill with PID from node.info.
+        Ok((0, None))
+    }
 }
 
 /// Get or start a workspace node for the current directory.
@@ -895,41 +863,39 @@ pub fn list_workspaces() -> Result<Vec<WorkspaceSummary>> {
     Ok(summaries)
 }
 
-/// Poll until a process exits or timeout is reached.
+/// Poll until a workspace exits or timeout is reached.
 ///
-/// Uses `kill -0` to check process liveness without sending a signal.
-/// Returns `Ok(())` if the process exits within `timeout_secs`, or an error
-/// suggesting `--force` if it doesn't.
-#[cfg(unix)]
-fn wait_for_process_exit(pid: u32, timeout_secs: u64) -> Result<()> {
+/// Uses a lightweight TCP connect probe to check liveness (cross-platform).
+/// Returns `Ok(())` if the workspace stops responding within `timeout_secs`,
+/// or an error suggesting `--force` if it doesn't.
+fn wait_for_workspace_exit(port: u16, timeout_secs: u64) -> Result<()> {
     let interval = Duration::from_millis(100);
     let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{port}")
+        .parse()
+        .map_err(|e| miette!("Invalid address: {e}"))?;
 
     while std::time::Instant::now() < deadline {
-        let status = Command::new("kill")
-            .args(["-0", &pid.to_string()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-
-        match status {
-            Ok(s) if !s.success() => return Ok(()), // Process no longer exists
-            Err(_) => return Ok(()),                // kill command failed = process gone
-            _ => std::thread::sleep(interval),
+        // Lightweight connect-only probe (no JSON exchange).
+        // Connection refused = port released = process exited.
+        if TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_err() {
+            return Ok(());
         }
+        std::thread::sleep(interval);
     }
 
     Err(miette!(
-        "Process {} did not exit within {}s. Try --force to send SIGKILL.",
-        pid,
+        "Workspace on port {} did not exit within {}s. Try --force.",
+        port,
         timeout_secs
     ))
 }
 
 /// Stop a workspace by name or ID.
 ///
-/// Attempts graceful shutdown by killing the BEAM process PID.
-/// Cleans up `node.info` after stopping.
+/// Uses TCP shutdown (graceful OTP teardown via `init:stop()`) as primary
+/// mechanism. Falls back to OS-level force-kill if `force` is true or if
+/// graceful shutdown times out.
 pub fn stop_workspace(name_or_id: &str, force: bool) -> Result<()> {
     // Resolve workspace ID
     let workspace_id = resolve_workspace_id(name_or_id)?;
@@ -942,42 +908,60 @@ pub fn stop_workspace(name_or_id: &str, force: bool) -> Result<()> {
 
     match node_info {
         Some(info) if is_node_running(&info) => {
-            if !force {
-                eprintln!(
-                    "Stopping workspace '{}' (PID {})...",
-                    workspace_id, info.pid
-                );
-            }
-
-            // Kill the BEAM process
-            #[cfg(unix)]
-            {
-                let signal = if force { "KILL" } else { "TERM" };
-                let status = Command::new("kill")
-                    .args([&format!("-{signal}"), &info.pid.to_string()])
-                    .status()
-                    .into_diagnostic()?;
-
-                if !status.success() {
+            if force {
+                // Force-kill: skip graceful shutdown, go straight to OS kill.
+                // On Windows PID may be 0 (sentinel) — fall back to graceful.
+                if info.pid == 0 {
                     return Err(miette!(
-                        "Failed to stop workspace '{}' (PID {})",
-                        workspace_id,
-                        info.pid
+                        "Force-kill is not available (process ID unknown). \
+                         Use graceful shutdown instead (omit --force)."
                     ));
                 }
+                force_kill_process(info.pid)?;
+                // Brief wait for process to actually exit
+                let _ = wait_for_workspace_exit(info.port, 2);
+            } else {
+                eprintln!(
+                    "Stopping workspace '{workspace_id}' (port {})...",
+                    info.port
+                );
 
-                // Wait for process to actually exit before cleaning up
-                wait_for_process_exit(info.pid, if force { 2 } else { 5 })?;
+                // Try graceful TCP shutdown first
+                let cookie = read_workspace_cookie(&workspace_id)?;
+                match tcp_send_shutdown(info.port, &cookie) {
+                    Ok(()) => {
+                        // Wait for the workspace to actually exit
+                        if wait_for_workspace_exit(info.port, 5).is_err() {
+                            // Graceful shutdown acknowledged but process didn't exit
+                            // Fall back to force-kill (if PID available)
+                            if info.pid == 0 {
+                                return Err(miette!(
+                                    "Graceful shutdown timed out. Cannot force-kill \
+                                     (process ID unknown). Please manually stop \
+                                     the BEAM process or retry."
+                                ));
+                            }
+                            eprintln!("Graceful shutdown timed out, force-killing...");
+                            force_kill_process(info.pid)?;
+                        }
+                    }
+                    Err(e) => {
+                        // TCP shutdown failed (e.g. connection refused, auth error)
+                        // Fall back to force-kill (if PID available)
+                        if info.pid == 0 {
+                            return Err(miette!(
+                                "TCP shutdown failed ({e}). Cannot force-kill \
+                                 (process ID unknown). Please manually stop \
+                                 the BEAM process or retry."
+                            ));
+                        }
+                        eprintln!("TCP shutdown failed ({e}), force-killing...");
+                        force_kill_process(info.pid)?;
+                    }
+                }
             }
 
-            #[cfg(not(unix))]
-            {
-                return Err(miette!(
-                    "Stopping workspaces is only supported on Unix systems"
-                ));
-            }
-
-            // Clean up node.info only after process has exited
+            // Clean up node.info after process has exited
             cleanup_stale_node_info(&workspace_id)?;
 
             println!("Workspace '{workspace_id}' stopped");
@@ -985,6 +969,50 @@ pub fn stop_workspace(name_or_id: &str, force: bool) -> Result<()> {
         }
         _ => Err(miette!("Workspace '{}' is not running", workspace_id)),
     }
+}
+
+/// Force-kill a process by PID.
+///
+/// Cross-platform: uses `kill -9` on Unix, `taskkill /F /PID` on Windows.
+/// Used as fallback when TCP graceful shutdown fails or times out.
+fn force_kill_process(pid: u32) -> Result<()> {
+    // PID 0 is sentinel for Windows when PID tracking is unavailable
+    if pid == 0 {
+        return Err(miette!(
+            "Cannot force-kill: process ID unavailable. \
+             Try stopping gracefully (without --force)."
+        ));
+    }
+
+    #[cfg(unix)]
+    {
+        let status = Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .into_diagnostic()?;
+
+        if !status.success() {
+            return Err(miette!("Failed to kill process {pid}"));
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        let status = Command::new("taskkill")
+            .args(["/F", "/PID", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .into_diagnostic()?;
+
+        if !status.success() {
+            return Err(miette!("Failed to kill process {pid}"));
+        }
+    }
+
+    Ok(())
 }
 
 /// Detailed status information for a workspace.
@@ -1831,28 +1859,20 @@ mod tests {
     //
     // These tests spawn real BEAM nodes and are `#[ignore]` by default.
     // Run them with: `just test-integration` or `cargo test -- --ignored`
-    // Unix-only: uses `kill` and `ps` commands.
+    // Unix-only: uses `ps` for PID verification in some tests.
 
     /// Guard that kills a BEAM node by PID when dropped, preventing orphans.
-    #[cfg(unix)]
     struct NodeGuard {
         pid: u32,
     }
 
-    #[cfg(unix)]
     impl Drop for NodeGuard {
         fn drop(&mut self) {
-            // Send SIGKILL (detached BEAM nodes ignore SIGTERM)
-            let _ = Command::new("kill")
-                .args(["-9", &self.pid.to_string()])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
+            let _ = force_kill_process(self.pid);
         }
     }
 
     /// Locate BEAM directories needed to start a workspace node.
-    #[cfg(unix)]
     fn beam_dirs_for_tests() -> (PathBuf, PathBuf, PathBuf, PathBuf, PathBuf) {
         let runtime_dir = beamtalk_cli::repl_startup::find_runtime_dir()
             .expect("Cannot find runtime dir — run from repo root or set BEAMTALK_RUNTIME_DIR");
@@ -1966,8 +1986,8 @@ mod tests {
         let _ = Command::new("kill")
             .args(["-9", &node_info.pid.to_string()])
             .status();
-        // Wait for process to exit
-        let _ = wait_for_process_exit(node_info.pid, 5);
+        // Wait for process to exit (TCP probe will fail once process is dead)
+        let _ = wait_for_workspace_exit(node_info.port, 5);
 
         // False case: node has been killed
         assert!(
@@ -2025,8 +2045,8 @@ mod tests {
         assert_eq!(id2, tw.id);
         assert_eq!(info2.pid, info1.pid, "should return same PID");
 
-        // Step 3: Stop the node (force=true since detached BEAM nodes ignore SIGTERM)
-        stop_workspace(&tw.id, true).expect("stop should succeed");
+        // Step 3: Stop the node gracefully via TCP shutdown
+        stop_workspace(&tw.id, false).expect("graceful stop should succeed");
         assert!(
             !is_node_running(&info1),
             "node should not be running after stop"
@@ -2130,7 +2150,7 @@ mod tests {
         let _ = Command::new("kill")
             .args(["-9", &node_info.pid.to_string()])
             .status();
-        let _ = wait_for_process_exit(node_info.pid, 5);
+        let _ = wait_for_workspace_exit(node_info.port, 5);
 
         // list_workspaces should detect stale node.info and report Stopped
         let workspaces = list_workspaces().unwrap();
@@ -2190,7 +2210,7 @@ mod tests {
     #[cfg(unix)]
     #[ignore = "integration test — requires Erlang/OTP runtime"]
     #[serial(workspace_integration)]
-    fn test_stop_workspace_graceful_timeout_integration() {
+    fn test_stop_workspace_graceful_integration() {
         let tw = TestWorkspace::new("integ_stop_graceful");
         let project_path = std::env::current_dir().unwrap();
         let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
@@ -2211,23 +2231,19 @@ mod tests {
         .expect("start_detached_node should succeed");
         let _guard = NodeGuard { pid: node_info.pid };
 
-        // Graceful stop (force=false) sends SIGTERM which detached BEAM ignores,
-        // so it should return a timeout error suggesting --force
+        // Graceful stop (force=false) uses TCP shutdown + init:stop(),
+        // which should succeed for detached BEAM nodes
         let result = stop_workspace(&tw.id, false);
         assert!(
-            result.is_err(),
-            "Graceful stop should fail for detached BEAM (ignores SIGTERM)"
-        );
-        let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("--force") || err.contains("did not exit"),
-            "Error should suggest --force, got: {err}"
+            result.is_ok(),
+            "Graceful TCP shutdown should succeed, got: {:?}",
+            result.err()
         );
 
-        // Node should still be running after failed graceful stop
+        // Node should no longer be running after graceful stop
         assert!(
-            is_node_running(&node_info),
-            "Node should still be running after failed graceful stop"
+            !is_node_running(&node_info),
+            "Node should not be running after graceful stop"
         );
     }
 
