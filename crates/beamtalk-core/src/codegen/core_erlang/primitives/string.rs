@@ -20,7 +20,7 @@ pub(crate) fn generate_string_bif(selector: &str, params: &[String]) -> Option<D
         // Search, splitting, replace, substring, padding
         "includes:" | "startsWith:" | "endsWith:" | "indexOf:" | "split:" | "splitOn:"
         | "repeat:" | "lines" | "words" | "replaceAll:with:" | "replaceFirst:with:" | "take:"
-        | "drop:" | "padLeft:" | "padRight:" | "padLeft:with:" => {
+        | "drop:" | "padLeft:" | "padRight:" | "padLeft:with:" | "padRight:with:" => {
             generate_string_search_bif(selector, params)
         }
         // Testing, conversion, iteration, streaming
@@ -145,12 +145,19 @@ fn generate_string_search_bif(selector: &str, params: &[String]) -> Option<Docum
             p0.to_string(),
             ", 'trailing'))",
         ]),
-        "padLeft:with:" => {
+        "padLeft:with:" | "padRight:with:" => {
             let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            let dir = if selector == "padLeft:with:" {
+                "'leading'"
+            } else {
+                "'trailing'"
+            };
             Some(docvec![
                 "call 'unicode':'characters_to_binary'(call 'string':'pad'(Self, ",
                 p0.to_string(),
-                ", 'leading', ",
+                ", ",
+                dir,
+                ", ",
                 p1.to_string(),
                 "))",
             ])
