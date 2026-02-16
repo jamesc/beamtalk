@@ -106,7 +106,7 @@ beamtalk build examples/counter.bt
 diff build/counter.core build/failing.core
 
 # 4. Add codegen debug output
-# Edit src/codegen/core_erlang/expressions.rs
+# Edit crates/beamtalk-core/src/codegen/core_erlang/expressions.rs
 dbg!(&expr);
 // Rebuild and check output
 ```
@@ -130,7 +130,7 @@ beamtalk repl --foreground
 > c class
 > c respondsTo: #increment
 
-# 4. Inspect Erlang process state
+# 5. Inspect Erlang process state
 # In separate terminal:
 erl -name debug@127.0.0.1 -setcookie beamtalk
 (debug@127.0.0.1)1> nodes().
