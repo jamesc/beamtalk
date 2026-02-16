@@ -1102,7 +1102,6 @@ fn build_sidebar_html(classes: &[ClassInfo]) -> String {
 fn write_hierarchy_tree(html: &mut String, classes: &[ClassInfo]) {
     // Build parent → children map
     let mut children: HashMap<String, Vec<&str>> = HashMap::new();
-    let mut has_parent = std::collections::HashSet::new();
 
     for class in classes {
         if let Some(ref superclass) = class.superclass {
@@ -1110,7 +1109,6 @@ fn write_hierarchy_tree(html: &mut String, classes: &[ClassInfo]) {
                 .entry(superclass.clone())
                 .or_default()
                 .push(&class.name);
-            has_parent.insert(class.name.as_str());
         }
     }
 
