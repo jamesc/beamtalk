@@ -10,7 +10,7 @@ Proposed (2026-02-16)
 Beamtalk is developed and tested exclusively on Linux (Ubuntu in CI, devcontainers for development). There is no Windows CI, no macOS CI, no Windows testing, and several components use Unix-specific or Linux-specific system calls and tools. A developer on Windows cannot reliably build or run Beamtalk today, and macOS has degraded behavior in workspace management.
 
 This matters because:
-1. **Developer reach** — Windows is ~45% of developer desktops, macOS ~30%. Supporting only Linux limits adoption to a fraction of developers.
+1. **Developer reach** — Windows is ~45% of developer desktops, macOS ~30% (as of 2025, per Stack Overflow Developer Survey). Supporting only Linux limits adoption to a fraction of developers.
 2. **macOS degradation** — 6 `#[cfg(target_os = "linux")]` guards use `/proc` filesystem for process start-time verification. On macOS, these fall back to skipping stale-node detection, meaning a macOS developer could connect to a wrong/stale workspace without warning. TCP-first workspace management (see Decision) eliminates this entire category of macOS issues.
 3. **Peer expectation** — Gleam, Elixir, and Erlang all have first-class Windows and macOS support. A BEAM language that only tests on Linux is an outlier.
 4. **CI gaps** — Without Windows or macOS CI, regressions can silently break cross-platform compatibility even for code that should be portable.
@@ -38,15 +38,15 @@ Several components have no Windows path at all:
 
 | Component | Issue | File(s) |
 |-----------|-------|---------|
-| `find_beam_pid_by_node()` | Calls `ps` without `#[cfg]` guard | `workspace/mod.rs:573` |
-| `wait_for_process_exit()` | Unix-only, uses signal probing | `workspace/mod.rs:737-761` |
-| `stop_workspace()` | Returns error on Windows | `workspace/mod.rs:787-812` |
-| `/proc` start-time tracking | Linux-only, degrades silently on macOS | `workspace/mod.rs:262,293,586` |
-| REPL Unix guard | `#[cfg(unix)]` in REPL module | `repl/mod.rs:941` |
+| `find_beam_pid_by_node()` | Calls `ps` without `#[cfg]` guard | `crates/beamtalk-cli/src/commands/workspace/mod.rs:573` |
+| `wait_for_process_exit()` | Unix-only, uses signal probing | `crates/beamtalk-cli/src/commands/workspace/mod.rs:737-761` |
+| `stop_workspace()` | Returns error on Windows | `crates/beamtalk-cli/src/commands/workspace/mod.rs:787-812` |
+| `/proc` start-time tracking | Linux-only, degrades silently on macOS | `crates/beamtalk-cli/src/commands/workspace/mod.rs:262,293,586` |
+| REPL Unix guard | `#[cfg(unix)]` in REPL module | `crates/beamtalk-cli/src/commands/repl/mod.rs:941` |
 | rebar3 pre-hook | `bash -c ./compile.sh` | `runtime/rebar.config:21` |
-| Test fixture compilation | Bash script | `test_fixtures/compile.sh` |
-| Home directory fallback | `os:getenv("HOME", "/tmp")` | `beamtalk_workspace_meta.erl:173` |
-| Project root detection | Hardcoded `/` root check | `beamtalk_compiler_port.erl:153` |
+| Test fixture compilation | Bash script | `runtime/apps/beamtalk_runtime/test_fixtures/compile.sh` |
+| Home directory fallback | `os:getenv("HOME", "/tmp")` | `runtime/apps/beamtalk_workspace/src/beamtalk_workspace_meta.erl:173` |
+| Project root detection | Hardcoded `/` root check | `runtime/apps/beamtalk_compiler/src/beamtalk_compiler_port.erl:153` |
 | Justfile | `set shell := ["bash", "-uc"]` | `Justfile:9` |
 | CI workflows | Ubuntu-only, bash commands | `.github/workflows/ci.yml` |
 
