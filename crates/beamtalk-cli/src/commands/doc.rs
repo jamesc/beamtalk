@@ -1173,13 +1173,11 @@ fn write_search_js(output_dir: &Utf8Path, classes: &[ClassInfo]) -> Result<()> {
             .doc_comment
             .as_ref()
             .and_then(|d| d.lines().next())
-            .unwrap_or("")
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"");
+            .unwrap_or("");
         index_entries.push(format!(
             "{{\"t\":\"class\",\"n\":\"{}\",\"s\":\"{}\",\"u\":\"{}.html\"}}",
             json_escape(&class.name),
-            json_escape(&summary),
+            json_escape(summary),
             class.name,
         ));
 
@@ -1356,8 +1354,10 @@ fn hl_comment(chars: &[char], i: usize, out: &mut String) -> Option<usize> {
         while j + 1 < len && !(chars[j] == '*' && chars[j + 1] == '/') {
             j += 1;
         }
-        if j + 1 < len {
+        if j + 1 < len && chars[j] == '*' && chars[j + 1] == '/' {
             j += 2;
+        } else {
+            j = len;
         }
     } else {
         return None;
@@ -1383,6 +1383,9 @@ fn hl_string(chars: &[char], i: usize, out: &mut String) -> Option<usize> {
     while j < len && chars[j] != quote {
         if chars[j] == '\\' {
             j += 1;
+            if j >= len {
+                break;
+            }
         }
         j += 1;
     }
