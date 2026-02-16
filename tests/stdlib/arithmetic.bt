@@ -16,13 +16,33 @@
 5 * 6
 // => 30
 
-// Basic division (returns float)
+// ===========================================================================
+// DIVISION
+// ===========================================================================
+
+// Float division
 20 / 4
 // => 5.0
 
-// Integer division (returns float)
+// Float division with remainder
 7 / 2
 // => 3.5
+
+// Integer division (truncating toward zero)
+10 div: 3
+// => 3
+
+// Integer division (exact)
+42 div: 7
+// => 6
+
+// Integer division (negative, truncates toward zero)
+-7 div: 2
+// => -3
+
+// Integer division (negative divisor)
+7 div: -2
+// => -3
 
 // Multiple operations (left to right precedence for same operator)
 2 + 3 + 4
