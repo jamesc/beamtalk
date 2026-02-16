@@ -150,13 +150,18 @@ impl Analyser {
                         }
                     };
                     mutations.push(Mutation { kind, span: *span });
-                } else if let FieldAccess { field, .. } = target.as_ref() {
+                } else if let FieldAccess {
+                    receiver, field, ..
+                } = target.as_ref()
+                {
                     mutations.push(Mutation {
                         kind: MutationKind::Field {
                             name: field.name.clone(),
                         },
                         span: *span,
                     });
+                    // Receiver is evaluated; track captures within it.
+                    self.collect_captures_and_mutations(receiver, captures, mutations);
                 }
 
                 // Recurse into value

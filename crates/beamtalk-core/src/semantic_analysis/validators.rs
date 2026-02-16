@@ -37,6 +37,11 @@ pub(crate) fn check_abstract_instantiation(
             }
         }
     }
+    for standalone in &module.method_definitions {
+        for expr in &standalone.method.body {
+            check_abstract_in_expr(expr, hierarchy, diagnostics);
+        }
+    }
 }
 
 /// Returns true if the selector name is an instantiation method (spawn, new, etc.)
