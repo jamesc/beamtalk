@@ -34,7 +34,9 @@ pub fn next_msg_id() -> String {
 /// response reading. Higher-level clients wrap this to add typed
 /// response parsing and domain-specific methods.
 pub struct ProtocolClient {
+    /// The underlying TCP stream for writing requests.
     stream: TcpStream,
+    /// Buffered reader for the TCP stream, used for reading responses.
     reader: BufReader<TcpStream>,
 }
 

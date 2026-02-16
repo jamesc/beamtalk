@@ -58,6 +58,13 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
 
     // Compile each file to Core Erlang
     let mut core_files = Vec::new();
+    // Determine the source root for computing relative module paths
+    let src_dir = project_root.join("src");
+    let source_root = if src_dir.exists() {
+        Some(src_dir)
+    } else {
+        None
+    };
     for file in &source_files {
         let stem = file
             .file_stem()
@@ -71,11 +78,17 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
             );
         }
 
-        // ADR 0016: User code modules use bt@ prefix with snake_case normalization
-        let module_name = format!(
-            "bt@{}",
-            beamtalk_core::codegen::core_erlang::to_module_name(stem)
-        );
+        // ADR 0026: Package mode uses bt@{package}@{relative_path} naming
+        // ADR 0016: Single-file mode uses bt@{module} naming
+        let module_name = if let Some(ref pkg) = pkg_manifest {
+            let relative_module = compute_relative_module(file, source_root.as_deref())?;
+            format!("bt@{}@{}", pkg.name, relative_module)
+        } else {
+            format!(
+                "bt@{}",
+                beamtalk_core::codegen::core_erlang::to_module_name(stem)
+            )
+        };
         let core_file = build_dir.join(format!("{module_name}.core"));
 
         compile_file(file, &module_name, &core_file, options)?;
@@ -100,6 +113,11 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
     Ok(())
 }
 
+/// Find all `.bt` source files at the given path.
+///
+/// If `path` is a file, returns it (must have `.bt` extension).
+/// If `path` is a directory, searches `src/` subdirectory first, falling back
+/// to the directory itself.
 fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
     let mut files = Vec::new();
 
@@ -118,18 +136,7 @@ fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
             path.to_path_buf()
         };
 
-        for entry in fs::read_dir(&search_dir)
-            .into_diagnostic()
-            .wrap_err_with(|| format!("Failed to read directory '{search_dir}'"))?
-        {
-            let entry = entry.into_diagnostic()?;
-            let entry_path = Utf8PathBuf::from_path_buf(entry.path())
-                .map_err(|_| miette::miette!("Non-UTF-8 path"))?;
-
-            if entry_path.extension() == Some("bt") {
-                files.push(entry_path);
-            }
-        }
+        collect_bt_files_recursive(&search_dir, &mut files)?;
     } else {
         miette::bail!("Path '{}' does not exist", path);
     }
@@ -137,6 +144,72 @@ fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
     Ok(files)
 }
 
+/// Recursively collect all `.bt` files from a directory tree.
+///
+/// Symlinks are skipped to avoid potential infinite recursion from circular links.
+fn collect_bt_files_recursive(dir: &Utf8Path, files: &mut Vec<Utf8PathBuf>) -> Result<()> {
+    for entry in fs::read_dir(dir)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read directory '{dir}'"))?
+    {
+        let entry = entry.into_diagnostic()?;
+        let file_type = entry.file_type().into_diagnostic()?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        let entry_path = Utf8PathBuf::from_path_buf(entry.path())
+            .map_err(|_| miette::miette!("Non-UTF-8 path"))?;
+
+        if file_type.is_dir() {
+            collect_bt_files_recursive(&entry_path, files)?;
+        } else if file_type.is_file() && entry_path.extension() == Some("bt") {
+            files.push(entry_path);
+        }
+    }
+    Ok(())
+}
+
+/// Compute the relative module path from a source file.
+///
+/// When `source_root` is provided (i.e., a `src/` directory exists), computes
+/// the path relative to it. Subdirectories become `@` segments.
+///
+/// Examples:
+/// - `src/counter.bt` → `counter`
+/// - `src/util/math.bt` → `util@math`
+///
+/// Falls back to the file stem when no source root is available.
+fn compute_relative_module(file: &Utf8Path, source_root: Option<&Utf8Path>) -> Result<String> {
+    if let Some(root) = source_root {
+        if let Ok(relative) = file.strip_prefix(root) {
+            let without_ext = relative.with_extension("");
+            let segments: Vec<String> = without_ext
+                .components()
+                .map(|c| {
+                    let segment = c.as_str();
+                    // Validate each path segment
+                    if !segment
+                        .chars()
+                        .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+                    {
+                        miette::bail!(
+                            "Invalid directory name '{}' in source path '{}': must contain only alphanumeric characters and underscores",
+                            segment,
+                            file
+                        );
+                    }
+                    Ok(beamtalk_core::codegen::core_erlang::to_module_name(segment))
+                })
+                .collect::<Result<_>>()?;
+            return Ok(segments.join("@"));
+        }
+    }
+    // Fallback: use file stem
+    let stem = file.file_stem().unwrap_or("unknown");
+    Ok(beamtalk_core::codegen::core_erlang::to_module_name(stem))
+}
+
+/// Compile a single `.bt` source file to Core Erlang, printing progress.
 fn compile_file(
     path: &Utf8Path,
     module_name: &str,
@@ -350,5 +423,169 @@ mod tests {
             error_msg.contains("Failed to parse manifest"),
             "Expected error to mention manifest parse failure, got: {error_msg}"
         );
+    }
+
+    #[test]
+    fn test_find_source_files_recursive() {
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        let src_path = project_path.join("src");
+        let util_path = src_path.join("util");
+        fs::create_dir_all(&util_path).unwrap();
+
+        write_test_file(&src_path.join("main.bt"), "main := [1].");
+        write_test_file(&util_path.join("math.bt"), "math := [2].");
+
+        let files = find_source_files(&project_path).unwrap();
+        assert_eq!(files.len(), 2);
+        assert!(files.iter().any(|f| f.file_name() == Some("main.bt")));
+        assert!(files.iter().any(|f| f.file_name() == Some("math.bt")));
+    }
+
+    #[test]
+    fn test_find_source_files_deeply_nested() {
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        let src_path = project_path.join("src");
+        let deep_path = src_path.join("a").join("b").join("c");
+        fs::create_dir_all(&deep_path).unwrap();
+
+        write_test_file(&deep_path.join("deep.bt"), "deep := [42].");
+
+        let files = find_source_files(&project_path).unwrap();
+        assert_eq!(files.len(), 1);
+        assert!(files[0].as_str().contains('a'));
+    }
+
+    #[test]
+    fn test_compute_relative_module_flat() {
+        let root = Utf8Path::new("/project/src");
+        let file = Utf8Path::new("/project/src/counter.bt");
+        assert_eq!(
+            compute_relative_module(file, Some(root)).unwrap(),
+            "counter"
+        );
+    }
+
+    #[test]
+    fn test_compute_relative_module_subdirectory() {
+        let root = Utf8Path::new("/project/src");
+        let file = Utf8Path::new("/project/src/util/math.bt");
+        assert_eq!(
+            compute_relative_module(file, Some(root)).unwrap(),
+            "util@math"
+        );
+    }
+
+    #[test]
+    fn test_compute_relative_module_deep_subdirectory() {
+        let root = Utf8Path::new("/project/src");
+        let file = Utf8Path::new("/project/src/a/b/c.bt");
+        assert_eq!(compute_relative_module(file, Some(root)).unwrap(), "a@b@c");
+    }
+
+    #[test]
+    fn test_compute_relative_module_camel_case() {
+        let root = Utf8Path::new("/project/src");
+        let file = Utf8Path::new("/project/src/MyCounter.bt");
+        assert_eq!(
+            compute_relative_module(file, Some(root)).unwrap(),
+            "my_counter"
+        );
+    }
+
+    #[test]
+    fn test_compute_relative_module_no_root() {
+        let file = Utf8Path::new("/project/counter.bt");
+        assert_eq!(compute_relative_module(file, None).unwrap(), "counter");
+    }
+
+    #[test]
+    fn test_compute_relative_module_invalid_dir_name() {
+        let root = Utf8Path::new("/project/src");
+        let file = Utf8Path::new("/project/src/my-dir/counter.bt");
+        let result = compute_relative_module(file, Some(root));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_build_with_manifest_generates_package_module_name() {
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        let src_path = project_path.join("src");
+        write_test_file(&src_path.join("counter.bt"), "counter := [42].");
+        write_test_file(
+            &project_path.join("beamtalk.toml"),
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
+        );
+
+        let result = build(project_path.as_str(), &default_options());
+
+        if let Err(e) = result {
+            let error_msg = format!("{e:?}");
+            if error_msg.contains("escript not found") {
+                // Verify the .core file was generated with package-qualified name
+                let core_file = project_path.join("build/bt@my_app@counter.core");
+                assert!(
+                    core_file.exists(),
+                    "Expected package-qualified .core file at {core_file}"
+                );
+                return;
+            }
+            panic!("Build failed with unexpected error: {e:?}");
+        }
+    }
+
+    #[test]
+    fn test_build_without_manifest_preserves_bt_prefix() {
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        let src_path = project_path.join("src");
+        write_test_file(&src_path.join("counter.bt"), "counter := [42].");
+        // No beamtalk.toml
+
+        let result = build(project_path.as_str(), &default_options());
+
+        if let Err(e) = result {
+            let error_msg = format!("{e:?}");
+            if error_msg.contains("escript not found") {
+                let core_file = project_path.join("build/bt@counter.core");
+                assert!(
+                    core_file.exists(),
+                    "Expected bt@counter.core file at {core_file}"
+                );
+                return;
+            }
+            panic!("Build failed with unexpected error: {e:?}");
+        }
+    }
+
+    #[test]
+    fn test_build_with_manifest_subdirectory() {
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        let src_path = project_path.join("src");
+        let util_path = src_path.join("util");
+        fs::create_dir_all(&util_path).unwrap();
+        write_test_file(&util_path.join("math.bt"), "math := [42].");
+        write_test_file(
+            &project_path.join("beamtalk.toml"),
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
+        );
+
+        let result = build(project_path.as_str(), &default_options());
+
+        if let Err(e) = result {
+            let error_msg = format!("{e:?}");
+            if error_msg.contains("escript not found") {
+                let core_file = project_path.join("build/bt@my_app@util@math.core");
+                assert!(
+                    core_file.exists(),
+                    "Expected package-qualified .core file at {core_file}"
+                );
+                return;
+            }
+            panic!("Build failed with unexpected error: {e:?}");
+        }
     }
 }

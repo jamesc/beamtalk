@@ -256,19 +256,28 @@ impl ReplResponse {
 /// Actor information from the REPL.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ActorInfo {
+    /// Erlang process identifier as a string (e.g., `"<0.173.0>"`).
     pub pid: String,
+    /// Beamtalk class name of the actor (e.g., `"Counter"`).
     pub class: String,
+    /// Source module the actor was compiled from.
     pub module: String,
+    /// Unix timestamp (seconds) when the actor was spawned.
     pub spawned_at: i64,
 }
 
 /// Module information from the REPL.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ModuleInfo {
+    /// Module name (e.g., `"Counter"`).
     pub name: String,
+    /// Path to the `.bt` source file that defined this module.
     pub source_file: String,
+    /// Number of live actors currently running from this module.
     pub actor_count: u32,
+    /// Unix timestamp (seconds) when the module was last loaded.
     pub load_time: i64,
+    /// Human-readable relative time since load (e.g., `"2m ago"`).
     pub time_ago: String,
 }
 

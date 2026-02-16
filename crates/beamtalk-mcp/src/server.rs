@@ -23,7 +23,9 @@ use crate::client::ReplClient;
 /// MCP server backed by a beamtalk REPL connection.
 #[derive(Clone)]
 pub struct BeamtalkMcp {
+    /// Shared REPL client used by all tool handlers.
     client: Arc<ReplClient>,
+    /// Router that dispatches incoming MCP tool calls to handler methods.
     tool_router: ToolRouter<Self>,
 }
 
@@ -39,6 +41,7 @@ fn error_result(msg: impl Into<String>) -> CallToolResult {
 
 // --- Tool parameter types ---
 
+/// Parameters for the `evaluate` MCP tool.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct EvaluateParams {
     /// Beamtalk expression to evaluate.
@@ -46,6 +49,7 @@ pub struct EvaluateParams {
     pub code: String,
 }
 
+/// Parameters for the `complete` MCP tool.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct CompleteParams {
     /// Partial input to complete.
@@ -53,6 +57,7 @@ pub struct CompleteParams {
     pub code: String,
 }
 
+/// Parameters for the `load_file` MCP tool.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct LoadFileParams {
     /// Path to a .bt source file to load.
@@ -60,6 +65,7 @@ pub struct LoadFileParams {
     pub path: String,
 }
 
+/// Parameters for the `inspect` MCP tool.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct InspectParams {
     /// Actor PID to inspect (e.g. "<0.123.0>").
@@ -67,6 +73,7 @@ pub struct InspectParams {
     pub actor: String,
 }
 
+/// Parameters for the `reload_module` MCP tool.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct ReloadModuleParams {
     /// Module name to reload.
@@ -74,6 +81,7 @@ pub struct ReloadModuleParams {
     pub module: String,
 }
 
+/// Parameters for the `docs` MCP tool.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct DocsParams {
     /// Class name to get documentation for.
@@ -96,6 +104,7 @@ impl BeamtalkMcp {
         }
     }
 
+    /// Evaluate a beamtalk expression in the live REPL.
     #[tool(
         description = "Evaluate a beamtalk expression in the live REPL. Returns the result value and any stdout output. Use this to interact with beamtalk objects, call methods, spawn actors, and explore the live system."
     )]
@@ -133,6 +142,7 @@ impl BeamtalkMcp {
         Ok(CallToolResult::success(parts))
     }
 
+    /// Get autocompletion suggestions for partial beamtalk input.
     #[tool(
         description = "Get autocompletion suggestions for partial beamtalk input. Returns a list of possible completions."
     )]
@@ -161,6 +171,7 @@ impl BeamtalkMcp {
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
+    /// Load a `.bt` source file into the workspace.
     #[tool(
         description = "Load a .bt source file into the workspace. Compiles the file and makes its classes available. Returns the list of loaded classes."
     )]
@@ -198,6 +209,7 @@ impl BeamtalkMcp {
         Ok(CallToolResult::success(parts))
     }
 
+    /// Inspect a running actor's state by PID.
     #[tool(
         description = "Inspect a running actor's state. Provide the actor's PID (e.g. \"<0.123.0>\") to see its current state as structured data."
     )]
@@ -229,6 +241,7 @@ impl BeamtalkMcp {
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
+    /// List all running actors in the workspace.
     #[tool(
         description = "List all running actors in the workspace. Returns each actor's PID, class, and module."
     )]
@@ -258,6 +271,7 @@ impl BeamtalkMcp {
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
+    /// List all loaded modules in the workspace.
     #[tool(
         description = "List all loaded modules in the workspace. Returns each module's name, source file, actor count, and when it was loaded."
     )]
@@ -292,6 +306,7 @@ impl BeamtalkMcp {
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
+    /// Get current variable bindings in the REPL session.
     #[tool(
         description = "Get current variable bindings in the REPL session. Shows all variables and their values."
     )]
@@ -317,6 +332,7 @@ impl BeamtalkMcp {
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
+    /// Hot-reload a module, migrating running actors to the new code.
     #[tool(
         description = "Hot-reload a module. Recompiles and reloads the module, migrating any running actors to the new code. Returns the number of affected actors and any migration failures."
     )]
@@ -351,6 +367,7 @@ impl BeamtalkMcp {
         Ok(CallToolResult::success(parts))
     }
 
+    /// Get documentation for a beamtalk class or method.
     #[tool(
         description = "Get documentation for a beamtalk class or method. Provide a class name and optionally a method selector."
     )]
@@ -379,6 +396,7 @@ impl BeamtalkMcp {
 
 #[tool_handler]
 impl ServerHandler for BeamtalkMcp {
+    /// Return server metadata and capabilities advertised to MCP clients.
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             instructions: Some(

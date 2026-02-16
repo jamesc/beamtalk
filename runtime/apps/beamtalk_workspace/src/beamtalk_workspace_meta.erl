@@ -170,9 +170,15 @@ init(InitialMetadata) ->
     end,
     
     %% Compute metadata path
-    Home = os:getenv("HOME", "/tmp"),
-    MetadataPath = filename:join([Home, ".beamtalk", "workspaces", 
-                                  binary_to_list(WorkspaceId), "metadata.json"]),
+    MetadataPath = case beamtalk_platform:home_dir() of
+        false ->
+            CacheDir = filename:basedir(user_cache, "beamtalk"),
+            filename:join([CacheDir, "workspaces",
+                           binary_to_list(WorkspaceId), "metadata.json"]);
+        Home ->
+            filename:join([Home, ".beamtalk", "workspaces", 
+                           binary_to_list(WorkspaceId), "metadata.json"])
+    end,
     
     State = #state{
         workspace_id = WorkspaceId,

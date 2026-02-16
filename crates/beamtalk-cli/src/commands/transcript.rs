@@ -122,6 +122,7 @@ struct TranscriptClient {
 }
 
 impl TranscriptClient {
+    /// Connect to the workspace backend at the given port.
     fn connect(port: u16) -> Result<Self> {
         let inner = ProtocolClient::connect(port, Some(Duration::from_millis(READ_TIMEOUT_MS)))?;
         Ok(Self { inner })
@@ -170,6 +171,7 @@ struct TranscriptCursor {
 }
 
 impl TranscriptCursor {
+    /// Create a new cursor initialized with the given buffer snapshot.
     fn new(initial_buffer: &[String]) -> Self {
         Self {
             last_entries: initial_buffer.to_vec(),

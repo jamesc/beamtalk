@@ -210,9 +210,9 @@ setup_file_logger(WorkspaceId) ->
 
 %% @private
 do_setup_file_logger(WorkspaceId) ->
-    case os:getenv("HOME") of
+    case beamtalk_platform:home_dir() of
         false ->
-            ?LOG_WARNING("HOME not set; skipping file logger",
+            ?LOG_WARNING("HOME/USERPROFILE not set; skipping file logger",
                          #{workspace_id => WorkspaceId}),
             ok;
         Home ->

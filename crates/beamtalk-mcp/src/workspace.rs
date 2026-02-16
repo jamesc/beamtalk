@@ -82,6 +82,7 @@ pub fn discover_any_port() -> Option<u16> {
     None
 }
 
+/// Encode a byte slice as a lowercase hexadecimal string.
 fn hex_encode(bytes: &[u8]) -> String {
     use std::fmt::Write;
     bytes

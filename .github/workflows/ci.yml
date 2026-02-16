@@ -188,7 +188,7 @@ jobs:
         run: just build-stdlib
 
       - name: Generate Erlang coverage (unit + E2E + stdlib)
-        run: just coverage-combined
+        run: just coverage-all
 
       - name: Rust Coverage Summary
         id: rust_coverage

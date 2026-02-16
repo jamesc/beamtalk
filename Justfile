@@ -5,8 +5,9 @@
 # Run `just` to see all available recipes
 # Run `just <recipe>` to execute a specific task
 
-# Use bash for all commands
+# Use bash on Unix and PowerShell on Windows for all commands
 set shell := ["bash", "-uc"]
+set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 
 # Default recipe (list all tasks)
 default:
@@ -19,8 +20,11 @@ default:
 # Run local CI checks (build, lint, unit, integration & E2E tests)
 ci: build lint test test-stdlib test-integration test-mcp test-e2e
 
-# Full clean and rebuild everything
-clean-all: clean clean-erlang
+# Clean all build artifacts (Rust, Erlang, VS Code, caches, examples)
+clean: clean-rust clean-erlang clean-vscode
+    @rm -rf runtime/_build 2>/dev/null || true
+    @rm -rf target/llvm-cov 2>/dev/null || true
+    @rm -rf examples/build 2>/dev/null || true
     @echo "✅ All build artifacts cleaned"
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -57,7 +61,7 @@ build-erlang:
     @cd runtime && rebar3 compile 2>&1 | grep -v "===>" || true
     @echo "✅ Erlang build complete"
 
-# Build standard library (lib/*.bt → BEAM)
+# Build standard library (lib/*.bt → BEAM, incremental — skips if up to date)
 build-stdlib: build-rust build-erlang
     @echo "🔨 Building standard library..."
     @cargo run --bin beamtalk --quiet -- build-stdlib
@@ -324,7 +328,7 @@ coverage-stdlib: build-stdlib
 
 # Generate combined Erlang coverage (eunit + E2E + stdlib)
 # Runs eunit with --cover, then E2E with cover, then stdlib with cover, then merges all into one report.
-coverage-combined: coverage-runtime coverage-e2e coverage-stdlib
+coverage-all: coverage-runtime coverage-e2e coverage-stdlib
     #!/usr/bin/env bash
     set -euo pipefail
     cd runtime
@@ -399,7 +403,7 @@ coverage-runtime-open:
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Clean Rust build artifacts (works with Docker volume mounts)
-clean:
+clean-rust:
     @echo "🧹 Cleaning Rust artifacts..."
     @if [ -d target ]; then find target -mindepth 1 -maxdepth 1 -exec rm -rf {} +; fi 2>/dev/null || true
     @echo "  ✅ Cleaned target/"
@@ -410,13 +414,12 @@ clean-erlang:
     cd runtime && rebar3 clean
     @echo "  ✅ Cleaned runtime/_build/"
 
-# Deep clean (removes repo-local caches, coverage, examples)
-deep-clean: clean clean-erlang
-    @echo "🧹 Deep cleaning repo artifacts..."
-    @rm -rf runtime/_build 2>/dev/null || true
-    @rm -rf target/llvm-cov 2>/dev/null || true
-    @rm -rf examples/build 2>/dev/null || true
-    @echo "  ✅ Deep clean complete"
+# Clean VS Code extension build artifacts
+clean-vscode:
+    @echo "🧹 Cleaning VS Code extension artifacts..."
+    @rm -rf editors/vscode/out 2>/dev/null || true
+    @rm -rf editors/vscode/node_modules 2>/dev/null || true
+    @echo "  ✅ Cleaned editors/vscode/{out,node_modules}/"
 
 # Purge global Cargo cache (affects all Rust projects!)
 purge-cargo-cache:
@@ -515,7 +518,7 @@ check-tools:
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Prepare for release (run all checks)
-pre-release: clean-all ci coverage
+pre-release: clean ci coverage
     @echo "✅ Pre-release checks passed"
 
 # Install beamtalk to PREFIX (default: /usr/local)
@@ -603,6 +606,16 @@ dist-vscode:
         echo "   Install node/npm: https://github.com/nvm-sh/nvm"
         exit 1
     fi
+    # Bundle beamtalk-lsp binary if a release build exists
+    LSP_BIN="target/release/beamtalk-lsp"
+    if [ -f "${LSP_BIN}" ]; then
+        mkdir -p editors/vscode/bin
+        cp "${LSP_BIN}" editors/vscode/bin/beamtalk-lsp
+        chmod +x editors/vscode/bin/beamtalk-lsp
+        echo "   Bundled beamtalk-lsp ($(du -h editors/vscode/bin/beamtalk-lsp | cut -f1))"
+    else
+        echo "   ⚠️  No release build found — extension will use PATH"
+    fi
     cd editors/vscode
     npm install --quiet
     npm run compile
@@ -610,7 +623,51 @@ dist-vscode:
     ln -sf ../../LICENSE LICENSE
     npx --yes @vscode/vsce package --out ../../dist/beamtalk.vsix
     rm -f LICENSE
+    rm -rf bin
     echo "✅ VS Code extension: dist/beamtalk.vsix"
+
+# Build VS Code extension for a specific platform target
+# Usage: just dist-vscode-platform linux-x64
+dist-vscode-platform target:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📦 Building VS Code extension for {{target}}..."
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "❌ npm not found (needed for VS Code extension)"
+        exit 1
+    fi
+    # Determine binary name
+    case "{{target}}" in
+        win32-*) BIN_NAME="beamtalk-lsp.exe" ;;
+        *)       BIN_NAME="beamtalk-lsp" ;;
+    esac
+    # Map vsce target to Rust target triple
+    case "{{target}}" in
+        linux-x64)    RUST_TARGET="x86_64-unknown-linux-gnu" ;;
+        linux-arm64)  RUST_TARGET="aarch64-unknown-linux-gnu" ;;
+        darwin-x64)   RUST_TARGET="x86_64-apple-darwin" ;;
+        darwin-arm64) RUST_TARGET="aarch64-apple-darwin" ;;
+        win32-x64)    RUST_TARGET="x86_64-pc-windows-msvc" ;;
+        *) echo "❌ Unknown target: {{target}}"; exit 1 ;;
+    esac
+    LSP_BIN="target/${RUST_TARGET}/release/${BIN_NAME}"
+    if [ ! -f "${LSP_BIN}" ]; then
+        echo "❌ Binary not found: ${LSP_BIN}"
+        echo "   Build first: cargo build --release --bin beamtalk-lsp --target ${RUST_TARGET}"
+        exit 1
+    fi
+    mkdir -p editors/vscode/bin
+    cp "${LSP_BIN}" "editors/vscode/bin/${BIN_NAME}"
+    chmod +x "editors/vscode/bin/${BIN_NAME}"
+    echo "   Bundled ${BIN_NAME} ($(du -h editors/vscode/bin/${BIN_NAME} | cut -f1))"
+    cd editors/vscode
+    npm install --quiet
+    npm run compile
+    ln -sf ../../LICENSE LICENSE
+    npx --yes @vscode/vsce package --target "{{target}}" --out "../../dist/beamtalk-{{target}}.vsix"
+    rm -f LICENSE
+    rm -rf bin
+    echo "✅ VS Code extension: dist/beamtalk-{{target}}.vsix"
 
 # Create a distributable install in dist/
 dist: build-release build-stdlib
@@ -632,6 +689,11 @@ dist: build-release build-stdlib
 docs:
     @echo "📚 Generating Rust documentation..."
     cargo doc --workspace --no-deps --open
+
+# Generate stdlib API documentation (HTML)
+docs-api:
+    @echo "📚 Generating stdlib API documentation..."
+    cargo run --bin beamtalk -- doc lib/ --output docs/api/
 
 # Check documentation for broken links
 docs-check:

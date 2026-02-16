@@ -7,8 +7,8 @@
 //!
 //! Compiles all `lib/*.bt` files through the normal pipeline with `--stdlib-mode`
 //! and outputs `.beam` files to `runtime/apps/beamtalk_stdlib/ebin/`.
-//! Always performs a full rebuild since source file mtime does not reflect
-//! compiler or codegen changes.
+//! Uses incremental builds: skips compilation if all outputs are newer than
+//! all inputs (source files, compiler binary, and runtime `.beam` files).
 //!
 //! Part of ADR 0007 (Compilable Stdlib with Primitive Injection).
 
@@ -17,6 +17,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::fmt::Write;
 use std::fs;
+use std::time::SystemTime;
 use tracing::{debug, info, instrument};
 
 /// Default path to stdlib source files (relative to project root).
@@ -29,7 +30,7 @@ const STDLIB_EBIN_DIR: &str = "runtime/apps/beamtalk_stdlib/ebin";
 ///
 /// Finds all `.bt` files in `lib/`, compiles them with stdlib mode enabled,
 /// and writes `.beam` files to `runtime/apps/beamtalk_stdlib/ebin/`.
-/// Always performs a full rebuild to ensure correctness after compiler changes.
+/// Skips the build if all outputs are newer than all inputs (incremental).
 #[instrument(skip_all)]
 pub fn build_stdlib() -> Result<()> {
     info!("Starting stdlib build");
@@ -46,6 +47,12 @@ pub fn build_stdlib() -> Result<()> {
 
     if source_files.is_empty() {
         println!("No .bt source files found in '{lib_dir}'");
+        return Ok(());
+    }
+
+    // Incremental build: skip if all outputs are newer than all inputs
+    if is_stdlib_up_to_date(&ebin_dir, &source_files) {
+        println!("Stdlib up to date (skipped)");
         return Ok(());
     }
 
@@ -144,6 +151,106 @@ fn clean_ebin_dir(ebin_dir: &Utf8Path) -> Result<()> {
     Ok(())
 }
 
+/// Check if the stdlib build is up to date (all outputs newer than all inputs).
+///
+/// Inputs: `lib/*.bt` source files, the compiler binary (`current_exe`), and
+/// runtime `.beam` files in `runtime/_build/default/lib/beamtalk_runtime/ebin/`.
+/// Output: the `ebin/` directory modification time.
+///
+/// Returns `false` (needs rebuild) if any input is missing or any error occurs.
+fn is_stdlib_up_to_date(ebin_dir: &Utf8Path, source_files: &[Utf8PathBuf]) -> bool {
+    // Must have .beam files already
+    let Ok(entries) = fs::read_dir(ebin_dir) else {
+        return false;
+    };
+    let beam_count = entries
+        .filter_map(Result::ok)
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "beam"))
+        .count();
+    if beam_count == 0 {
+        return false;
+    }
+
+    // Detect deleted/renamed source files: beam count should match source count
+    if beam_count != source_files.len() {
+        info!(
+            beam_count,
+            source_count = source_files.len(),
+            "Beam/source count mismatch — forcing rebuild"
+        );
+        return false;
+    }
+
+    // Get the oldest .beam output mtime
+    let Some(oldest_output) = oldest_mtime_in_dir(ebin_dir, "beam") else {
+        return false;
+    };
+
+    // Check source files
+    for src in source_files {
+        match fs::metadata(src.as_std_path()).and_then(|m| m.modified()) {
+            Ok(t) if t > oldest_output => {
+                info!(file = %src, "Source newer than stdlib output");
+                return false;
+            }
+            Err(_) => return false,
+            _ => {}
+        }
+    }
+
+    // Check compiler binary — if we can't locate it, force rebuild to be safe
+    match std::env::current_exe() {
+        Ok(exe) => match fs::metadata(&exe).and_then(|m| m.modified()) {
+            Ok(t) if t > oldest_output => {
+                info!("Compiler binary newer than stdlib output");
+                return false;
+            }
+            Err(_) => return false,
+            _ => {}
+        },
+        Err(_) => return false,
+    }
+
+    // Check runtime .beam files — if directory missing, force rebuild
+    let runtime_ebin = "runtime/_build/default/lib/beamtalk_runtime/ebin";
+    let Ok(entries) = fs::read_dir(runtime_ebin) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        if entry.path().extension().is_some_and(|ext| ext == "beam") {
+            match entry.metadata().and_then(|m| m.modified()) {
+                Ok(t) if t > oldest_output => {
+                    info!("Runtime .beam newer than stdlib output");
+                    return false;
+                }
+                Err(_) => return false,
+                _ => {}
+            }
+        }
+    }
+
+    info!("Stdlib is up to date");
+    true
+}
+
+/// Find the oldest modification time of files with the given extension in a directory.
+fn oldest_mtime_in_dir(dir: &Utf8Path, ext: &str) -> Option<SystemTime> {
+    let mut oldest: Option<SystemTime> = None;
+    let entries = fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        if entry.path().extension().is_some_and(|e| e == ext) {
+            if let Ok(mtime) = entry.metadata().and_then(|m| m.modified()) {
+                oldest = Some(match oldest {
+                    Some(prev) if mtime < prev => mtime,
+                    Some(prev) => prev,
+                    None => mtime,
+                });
+            }
+        }
+    }
+    oldest
+}
+
 /// Find all `.bt` files in the stdlib source directory.
 fn find_stdlib_files(lib_dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
     let mut files = Vec::new();
@@ -205,35 +312,54 @@ fn compile_stdlib_file(
 /// and the generated builtins module.
 #[allow(clippy::struct_field_names)] // domain names like class_name match the domain model
 struct ClassMeta {
+    /// Erlang module name (e.g., `bt@stdlib@integer`).
     module_name: String,
+    /// Beamtalk class name (e.g., `Integer`).
     class_name: String,
+    /// Name of the superclass, or `"none"` for root classes.
     superclass_name: String,
+    /// Whether the class is sealed (cannot be subclassed).
     is_sealed: bool,
+    /// Whether the class is abstract (cannot be instantiated directly).
     is_abstract: bool,
+    /// Whether the class has the explicit `typed` modifier.
     is_typed: bool,
+    /// Instance state (field) names declared in the class.
     state: Vec<String>,
+    /// Instance method signatures.
     methods: Vec<MethodMeta>,
+    /// Class-side method signatures.
     class_methods: Vec<MethodMeta>,
+    /// Class variable names.
     class_variables: Vec<String>,
 }
 
 /// Metadata for a single method, extracted from the AST.
 struct MethodMeta {
+    /// Message selector (e.g., `"increment"` or `"add:"`).
     selector: String,
+    /// Number of arguments the method accepts.
     arity: usize,
+    /// Method dispatch kind (primary, before, after, around).
     kind: MethodKindMeta,
+    /// Whether this method is sealed (cannot be overridden).
     is_sealed: bool,
 }
 
 /// Simplified method kind for code generation.
 enum MethodKindMeta {
+    /// Standard method dispatch.
     Primary,
+    /// Runs before the primary method.
     Before,
+    /// Runs after the primary method.
     After,
+    /// Wraps the primary method, controlling its execution.
     Around,
 }
 
 impl MethodKindMeta {
+    /// Convert from the AST method kind representation.
     fn from_ast(kind: beamtalk_core::ast::MethodKind) -> Self {
         match kind {
             beamtalk_core::ast::MethodKind::Primary => Self::Primary,
@@ -243,6 +369,7 @@ impl MethodKindMeta {
         }
     }
 
+    /// Return the Rust expression string for this kind (used in codegen output).
     fn to_rust_expr(&self) -> &'static str {
         match self {
             Self::Primary => "MethodKind::Primary",

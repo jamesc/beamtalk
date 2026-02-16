@@ -150,28 +150,42 @@ impl ReplResponse {
     }
 }
 
+/// Information about a running actor, deserialized from REPL JSON.
 #[derive(Debug, Deserialize)]
 struct ActorInfo {
+    /// Erlang process identifier string (e.g., `<0.123.0>`).
     pid: String,
+    /// Beamtalk class name of the actor (e.g., `Counter`).
     class: String,
+    /// BEAM module backing the actor.
     module: String,
+    /// Unix timestamp when the actor was spawned.
     #[allow(dead_code)] // deserialized from JSON, available for future use
     spawned_at: i64,
 }
 
+/// Information about a loaded module, deserialized from REPL JSON.
 #[derive(Debug, Deserialize)]
 struct ModuleInfo {
+    /// Module name as registered in the BEAM node.
     name: String,
+    /// Path to the source `.bt` file that defined this module.
     source_file: String,
+    /// Number of actors currently running from this module.
     actor_count: u32,
+    /// Unix timestamp when the module was loaded.
     #[allow(dead_code)] // deserialized from JSON, available for future use
     load_time: i64,
+    /// Human-readable relative time since load (e.g., `2 minutes ago`).
     time_ago: String,
 }
 
+/// Information about an active REPL session, deserialized from REPL JSON.
 #[derive(Debug, Deserialize)]
 struct SessionInfo {
+    /// Unique session identifier.
     id: String,
+    /// Unix timestamp when the session was created.
     #[allow(dead_code)] // deserialized from JSON, available for future use
     created_at: Option<i64>,
 }
@@ -209,6 +223,10 @@ fn display_reload_result(response: &ReplResponse, module_name: Option<&str>) {
     }
 }
 
+/// Start the interactive REPL session.
+///
+/// Connects to (or spawns) a workspace BEAM node, then enters the
+/// read-eval-print loop using rustyline for line editing and history.
 #[expect(
     clippy::too_many_lines,
     reason = "REPL main loop handles many commands"
@@ -915,6 +933,7 @@ mod tests {
         assert!(err_msg.contains("does not contain a valid runtime"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn beam_child_guard_kills_process_on_drop() {
         use std::process::Command;
@@ -938,18 +957,15 @@ mod tests {
 
         // Verify the process is no longer running
         // On Unix, kill -0 returns success if process exists, failure if it doesn't
-        #[cfg(unix)]
-        {
-            let result = Command::new("kill")
-                .args(["-0", &pid.to_string()])
-                .output()
-                .expect("Failed to run kill -0");
-            // kill -0 returns exit code 0 if process exists, non-zero if it doesn't
-            assert!(
-                !result.status.success(),
-                "Process should have been killed (kill -0 should fail)"
-            );
-        }
+        let result = Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .output()
+            .expect("Failed to run kill -0");
+        // kill -0 returns exit code 0 if process exists, non-zero if it doesn't
+        assert!(
+            !result.status.success(),
+            "Process should have been killed (kill -0 should fail)"
+        );
     }
 
     #[test]

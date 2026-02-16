@@ -151,10 +151,12 @@ pub(super) fn connect_with_retries(port: u16) -> Result<ReplClient> {
 
 /// Guard to ensure BEAM child process is killed on drop.
 pub(super) struct BeamChildGuard {
+    /// The managed BEAM child process.
     pub(super) child: Child,
 }
 
 impl Drop for BeamChildGuard {
+    /// Kill the BEAM child process and reap it to prevent zombies.
     fn drop(&mut self) {
         let _ = self.child.kill();
         // Wait to reap the process and prevent zombies
@@ -219,9 +221,10 @@ pub(super) fn read_port_from_child(child: &mut Child) -> Result<u16> {
     ))
 }
 
-/// Default REPL port: 0 means the OS assigns an available ephemeral port.
-/// This eliminates port conflicts between multiple workspaces or other services.
-/// Use `BEAMTALK_REPL_PORT` env var or `--port` flag to override.
+/// Default REPL port (`0` = OS-assigned ephemeral port).
+///
+/// Using `0` eliminates port conflicts between multiple workspaces or other
+/// services. Override with the `BEAMTALK_REPL_PORT` env var or `--port` flag.
 pub(super) const DEFAULT_REPL_PORT: u16 = 0;
 
 /// Resolve the REPL port from CLI arg and environment variable.
