@@ -31,7 +31,7 @@ pub(crate) fn check_abstract_instantiation(
         check_abstract_in_expr(expr, hierarchy, diagnostics);
     }
     for class in &module.classes {
-        for method in &class.methods {
+        for method in class.methods.iter().chain(class.class_methods.iter()) {
             for expr in &method.body {
                 check_abstract_in_expr(expr, hierarchy, diagnostics);
             }
