@@ -3076,4 +3076,103 @@ mod tests {
             .collect();
         assert!(shadow_warnings.is_empty());
     }
+
+    #[test]
+    fn test_block_match_pattern_var_not_treated_as_capture() {
+        // BT-655: A block containing a match expression where the pattern variable
+        // has the same name as an outer variable should NOT treat the pattern
+        // variable as a captured variable.
+        //
+        // Code equivalent:
+        //   x := 0
+        //   [:val | val match: [x -> x]]
+        //
+        // The `x` in the match arm pattern and body refers to the pattern-bound
+        // variable, not the outer `x`. It should NOT appear in block captures.
+        let outer_x = Expression::Assignment {
+            target: Box::new(Expression::Identifier(Identifier::new("x", test_span()))),
+            value: Box::new(Expression::Literal(Literal::Integer(0), test_span())),
+            span: test_span(),
+        };
+
+        let block_span = Span::new(100, 200);
+        let match_expr = Expression::Match {
+            value: Box::new(Expression::Identifier(Identifier::new("val", test_span()))),
+            arms: vec![MatchArm::new(
+                Pattern::Variable(Identifier::new("x", test_span())),
+                Expression::Identifier(Identifier::new("x", test_span())),
+                test_span(),
+            )],
+            span: test_span(),
+        };
+
+        let block = Block::new(
+            vec![BlockParameter::new("val", test_span())],
+            vec![match_expr],
+            block_span,
+        );
+
+        let module = Module::new(vec![outer_x, Expression::Block(block)], test_span());
+
+        let result = analyse(&module);
+
+        let block_info = result.block_info.get(&block_span).unwrap();
+        // The pattern variable `x` should NOT be in captures,
+        // even though an outer variable `x` exists.
+        assert!(
+            block_info.captures.is_empty(),
+            "Pattern variable 'x' should not be treated as a capture, but found: {:?}",
+            block_info
+                .captures
+                .iter()
+                .map(|c| &c.name)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_block_match_captures_real_outer_variable() {
+        // Counterpart to the above test: when a match arm body references a
+        // variable that is NOT a pattern variable, it SHOULD be captured.
+        //
+        // Code equivalent:
+        //   y := 42
+        //   [:val | val match: [x -> y]]
+        //
+        // Here `y` in the match body is genuinely captured from outer scope.
+        let outer_y = Expression::Assignment {
+            target: Box::new(Expression::Identifier(Identifier::new("y", test_span()))),
+            value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
+            span: test_span(),
+        };
+
+        let block_span = Span::new(100, 200);
+        let match_expr = Expression::Match {
+            value: Box::new(Expression::Identifier(Identifier::new("val", test_span()))),
+            arms: vec![MatchArm::new(
+                Pattern::Variable(Identifier::new("x", test_span())),
+                Expression::Identifier(Identifier::new("y", test_span())),
+                test_span(),
+            )],
+            span: test_span(),
+        };
+
+        let block = Block::new(
+            vec![BlockParameter::new("val", test_span())],
+            vec![match_expr],
+            block_span,
+        );
+
+        let module = Module::new(vec![outer_y, Expression::Block(block)], test_span());
+
+        let result = analyse(&module);
+
+        let block_info = result.block_info.get(&block_span).unwrap();
+        assert_eq!(
+            block_info.captures.len(),
+            1,
+            "Should capture outer variable 'y'"
+        );
+        assert_eq!(block_info.captures[0].name, "y");
+    }
 }
