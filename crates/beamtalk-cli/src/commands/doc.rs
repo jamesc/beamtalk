@@ -304,8 +304,10 @@ fn class_link(name: &str, classes: &HashMap<String, &ClassInfo>) -> String {
 ///
 /// Uses `pulldown-cmark` for full `CommonMark` + GFM table support.
 /// Beamtalk code blocks get syntax highlighting via `highlight_beamtalk()`.
+///
+/// Raw HTML events are escaped to prevent injection from doc comments.
 fn render_doc(doc: &str) -> String {
-    use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+    use pulldown_cmark::{CodeBlockKind, CowStr, Event, Options, Parser, Tag, TagEnd};
 
     let options =
         Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_HEADING_ATTRIBUTES;
@@ -316,44 +318,45 @@ fn render_doc(doc: &str) -> String {
     let mut in_beamtalk_code = false;
     let mut in_code_block = false;
 
-    for event in parser {
-        match event {
-            Event::Start(Tag::CodeBlock(kind)) => {
-                let lang = match &kind {
-                    CodeBlockKind::Fenced(lang) => lang.as_ref(),
-                    CodeBlockKind::Indented => "",
-                };
-                in_beamtalk_code = lang.is_empty() || lang == "beamtalk";
-                in_code_block = true;
-                code_text.clear();
-                let css_class = if in_beamtalk_code {
-                    " class=\"language-beamtalk\""
-                } else {
-                    ""
-                };
-                let _ = write!(html, "<pre><code{css_class}>");
-            }
-            Event::End(TagEnd::CodeBlock) => {
-                if in_beamtalk_code {
-                    html.push_str(&highlight_beamtalk(&code_text));
-                } else {
-                    html.push_str(&html_escape(&code_text));
-                }
-                html.push_str("</code></pre>\n");
-                in_code_block = false;
-                code_text.clear();
-            }
-            Event::Text(text) if in_code_block => {
-                code_text.push_str(&text);
-            }
-            _ if in_code_block => {}
-            other => {
-                // For all non-code-block events, use pulldown-cmark's HTML renderer
-                pulldown_cmark::html::push_html(&mut html, std::iter::once(other));
-            }
+    // Transform events in a single pass so push_html preserves formatter state
+    // (table header/body context, list nesting, etc.).
+    let events = parser.filter_map(|event| match event {
+        Event::Start(Tag::CodeBlock(kind)) => {
+            let lang = match &kind {
+                CodeBlockKind::Fenced(lang) => lang.as_ref(),
+                CodeBlockKind::Indented => "",
+            };
+            in_beamtalk_code = lang.is_empty() || lang == "beamtalk";
+            in_code_block = true;
+            code_text.clear();
+            let css_class = if in_beamtalk_code {
+                " class=\"language-beamtalk\""
+            } else {
+                ""
+            };
+            Some(Event::Html(CowStr::from(format!("<pre><code{css_class}>"))))
         }
-    }
+        Event::End(TagEnd::CodeBlock) => {
+            let body = if in_beamtalk_code {
+                highlight_beamtalk(&code_text)
+            } else {
+                html_escape(&code_text)
+            };
+            in_code_block = false;
+            code_text.clear();
+            Some(Event::Html(CowStr::from(format!("{body}</code></pre>\n"))))
+        }
+        Event::Text(text) if in_code_block => {
+            code_text.push_str(&text);
+            None
+        }
+        // Sanitize raw HTML from doc comments to prevent injection
+        Event::Html(raw) | Event::InlineHtml(raw) => Some(Event::Text(raw)),
+        _ if in_code_block => None,
+        other => Some(other),
+    });
 
+    pulldown_cmark::html::push_html(&mut html, events);
     html
 }
 
@@ -1604,6 +1607,7 @@ mod tests {
         assert!(html.contains("</table>"));
         // Table renders with header and body rows
         assert!(html.contains("<thead>"));
+        assert!(html.contains("<th>"));
         assert!(html.contains("<tbody>"));
     }
 
@@ -1625,6 +1629,13 @@ mod tests {
         let html = render_doc("- one\n- two");
         assert!(html.contains("<ul>"));
         assert!(html.contains("<li>one</li>"));
+    }
+
+    #[test]
+    fn test_render_doc_sanitizes_raw_html() {
+        let html = render_doc("<script>alert('xss')</script>");
+        assert!(!html.contains("<script>"));
+        assert!(html.contains("&lt;script&gt;"));
     }
 
     #[test]
