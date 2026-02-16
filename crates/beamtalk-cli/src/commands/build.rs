@@ -43,8 +43,8 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
     let build_dir = project_root.join("build");
 
     // Look for package manifest
-    let manifest = manifest::find_manifest(&project_root)?;
-    if let Some(ref pkg) = manifest {
+    let pkg_manifest = manifest::find_manifest(&project_root)?;
+    if let Some(ref pkg) = pkg_manifest {
         info!(name = %pkg.name, version = %pkg.version, "Found package manifest");
         debug!(?pkg, "Package manifest details");
     } else {
@@ -344,6 +344,11 @@ mod tests {
         );
 
         let result = build(project_path.as_str(), &default_options());
-        assert!(result.is_err());
+        let err = result.expect_err("Expected build to fail due to malformed manifest");
+        let error_msg = format!("{err:?}");
+        assert!(
+            error_msg.contains("Failed to parse manifest"),
+            "Expected error to mention manifest parse failure, got: {error_msg}"
+        );
     }
 }
