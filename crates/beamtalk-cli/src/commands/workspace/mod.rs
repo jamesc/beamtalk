@@ -909,7 +909,14 @@ pub fn stop_workspace(name_or_id: &str, force: bool) -> Result<()> {
     match node_info {
         Some(info) if is_node_running(&info) => {
             if force {
-                // Force-kill: skip graceful shutdown, go straight to OS kill
+                // Force-kill: skip graceful shutdown, go straight to OS kill.
+                // On Windows PID may be 0 (sentinel) — fall back to graceful.
+                if info.pid == 0 {
+                    return Err(miette!(
+                        "Force-kill is not available (process ID unknown). \
+                         Use graceful shutdown instead (omit --force)."
+                    ));
+                }
                 force_kill_process(info.pid)?;
                 // Brief wait for process to actually exit
                 let _ = wait_for_workspace_exit(info.port, 2);
@@ -925,15 +932,29 @@ pub fn stop_workspace(name_or_id: &str, force: bool) -> Result<()> {
                     Ok(()) => {
                         // Wait for the workspace to actually exit
                         if wait_for_workspace_exit(info.port, 5).is_err() {
-                            // Graceful shutdown acknowledged but process didn't exit in time
-                            // Fall back to force-kill
+                            // Graceful shutdown acknowledged but process didn't exit
+                            // Fall back to force-kill (if PID available)
+                            if info.pid == 0 {
+                                return Err(miette!(
+                                    "Graceful shutdown timed out. Cannot force-kill \
+                                     (process ID unknown). Please manually stop \
+                                     the BEAM process or retry."
+                                ));
+                            }
                             eprintln!("Graceful shutdown timed out, force-killing...");
                             force_kill_process(info.pid)?;
                         }
                     }
                     Err(e) => {
                         // TCP shutdown failed (e.g. connection refused, auth error)
-                        // Fall back to force-kill
+                        // Fall back to force-kill (if PID available)
+                        if info.pid == 0 {
+                            return Err(miette!(
+                                "TCP shutdown failed ({e}). Cannot force-kill \
+                                 (process ID unknown). Please manually stop \
+                                 the BEAM process or retry."
+                            ));
+                        }
                         eprintln!("TCP shutdown failed ({e}), force-killing...");
                         force_kill_process(info.pid)?;
                     }
