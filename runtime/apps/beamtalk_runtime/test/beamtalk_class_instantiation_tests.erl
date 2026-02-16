@@ -77,13 +77,17 @@ test_spawn_too_many_args() ->
 test_spawn_no_args() ->
     ok = ensure_counter_loaded(),
     Result = beamtalk_class_instantiation:handle_spawn([], 'Counter', 'bt@counter', false),
-    ?assertMatch({ok, #beamtalk_object{class = 'Counter'}}, Result).
+    ?assertMatch({ok, #beamtalk_object{class = 'Counter'}}, Result),
+    {ok, Obj} = Result,
+    gen_server:stop(Obj#beamtalk_object.pid).
 
 test_spawn_with_arg() ->
     ok = ensure_counter_loaded(),
     InitArgs = #{value => 10},
     Result = beamtalk_class_instantiation:handle_spawn([InitArgs], 'Counter', 'bt@counter', false),
-    ?assertMatch({ok, #beamtalk_object{class = 'Counter'}}, Result).
+    ?assertMatch({ok, #beamtalk_object{class = 'Counter'}}, Result),
+    {ok, Obj} = Result,
+    gen_server:stop(Obj#beamtalk_object.pid).
 
 %%====================================================================
 %% handle_new tests (dynamic classes)
