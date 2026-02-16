@@ -14,6 +14,25 @@ new_creates_error_with_kind_and_class_test() ->
     ?assertEqual(undefined, Error#beamtalk_error.hint),
     ?assertEqual(#{}, Error#beamtalk_error.details).
 
+%%% Test: Create error with new/3
+new3_creates_error_with_selector_test() ->
+    Error = beamtalk_error:new(does_not_understand, 'Integer', 'foo'),
+    ?assertEqual(does_not_understand, Error#beamtalk_error.kind),
+    ?assertEqual('Integer', Error#beamtalk_error.class),
+    ?assertEqual('foo', Error#beamtalk_error.selector),
+    ?assertEqual(undefined, Error#beamtalk_error.hint),
+    ?assertEqual(<<"Integer does not understand 'foo'">>, Error#beamtalk_error.message).
+
+%%% Test: Create error with new/4
+new4_creates_error_with_selector_and_hint_test() ->
+    Hint = <<"Check spelling">>,
+    Error = beamtalk_error:new(does_not_understand, 'Integer', 'foo', Hint),
+    ?assertEqual(does_not_understand, Error#beamtalk_error.kind),
+    ?assertEqual('Integer', Error#beamtalk_error.class),
+    ?assertEqual('foo', Error#beamtalk_error.selector),
+    ?assertEqual(Hint, Error#beamtalk_error.hint),
+    ?assertEqual(<<"Integer does not understand 'foo'">>, Error#beamtalk_error.message).
+
 %%% Test: with_selector/2 adds selector and updates message
 with_selector_adds_selector_test() ->
     Error0 = beamtalk_error:new(does_not_understand, 'Integer'),

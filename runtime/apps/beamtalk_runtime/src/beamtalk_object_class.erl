@@ -77,25 +77,12 @@
     is_constructible/1,
     add_before/3,
     add_after/3,
-    super_dispatch/3,
     class_name/1,
     module_name/1,
     create_subclass/3,
     class_send/3,
     set_class_var/3,
     update_class/2
-]).
-
-%% Deprecated re-exports — callers should migrate to beamtalk_class_registry (BT-576)
--export([
-    whereis_class/1,
-    all_classes/0,
-    is_class_object/1,
-    is_class_name/1,
-    class_display_name/1,
-    class_object_tag/1,
-    inherits_from/2,
-    ensure_hierarchy_table/0
 ]).
 
 %% gen_server callbacks
@@ -176,18 +163,6 @@ update_class(ClassName, ClassInfo) ->
             gen_server:call(Pid, {update_class, ClassInfo})
     end.
 
-%% @doc Look up a class by name.
-%% @deprecated Use {@link beamtalk_class_registry:whereis_class/1} instead (BT-576).
--spec whereis_class(class_name()) -> pid() | undefined.
-whereis_class(ClassName) ->
-    beamtalk_class_registry:whereis_class(ClassName).
-
-%% @doc Get all class processes.
-%% @deprecated Use {@link beamtalk_class_registry:all_classes/0} instead (BT-576).
--spec all_classes() -> [pid()].
-all_classes() ->
-    beamtalk_class_registry:all_classes().
-
 %% @doc Set a class variable on a class by name.
 -spec set_class_var(class_name(), atom(), term()) -> term().
 set_class_var(ClassName, Name, Value) ->
@@ -228,24 +203,6 @@ class_name(ClassPid) ->
 module_name(ClassPid) ->
     gen_server:call(ClassPid, module_name).
 
-%% @doc Check if a value is a class object (BT-246).
-%% @deprecated Use {@link beamtalk_class_registry:is_class_object/1} instead (BT-576).
--spec is_class_object(term()) -> boolean().
-is_class_object(Value) ->
-    beamtalk_class_registry:is_class_object(Value).
-
-%% @doc Check if an atom class name represents a class object (ends with " class").
-%% @deprecated Use {@link beamtalk_class_registry:is_class_name/1} instead (BT-576).
--spec is_class_name(atom()) -> boolean().
-is_class_name(ClassName) ->
-    beamtalk_class_registry:is_class_name(ClassName).
-
-%% @doc Strip " class" suffix from a class object name to get the display name.
-%% @deprecated Use {@link beamtalk_class_registry:class_display_name/1} instead (BT-576).
--spec class_display_name(atom()) -> binary().
-class_display_name(ClassName) ->
-    beamtalk_class_registry:class_display_name(ClassName).
-
 %% @doc Send a message to a class object synchronously (BT-246 / ADR 0013 Phase 1).
 %%
 %% Dispatches messages to the class gen_server, translating the Beamtalk
@@ -253,9 +210,8 @@ class_display_name(ClassName) ->
 %% Unwraps {ok, Value} / {error, Error} results for seamless integration.
 -spec class_send(pid() | undefined, atom(), list()) -> term().
 class_send(undefined, Selector, _Args) ->
-    Error0 = beamtalk_error:new(class_not_found, unknown),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    beamtalk_error:raise(Error1);
+    Error = beamtalk_error:new(class_not_found, unknown, Selector),
+    beamtalk_error:raise(Error);
 class_send(ClassPid, 'new', []) ->
     unwrap_class_call(gen_server:call(ClassPid, {new, []}));
 class_send(ClassPid, 'new:', [Map]) ->
@@ -304,30 +260,14 @@ class_send(ClassPid, Selector, Args) ->
         {ok, Result} -> Result;
         {error, not_found} ->
             ClassName = gen_server:call(ClassPid, class_name),
-            Error0 = beamtalk_error:new(does_not_understand, ClassName),
-            Error1 = beamtalk_error:with_selector(Error0, Selector),
-            Error2 = beamtalk_error:with_hint(Error1, <<"Class does not understand this message">>),
-            beamtalk_error:raise(Error2);
+            Error = beamtalk_error:new(
+                does_not_understand,
+                ClassName,
+                Selector,
+                <<"Class does not understand this message">>),
+            beamtalk_error:raise(Error);
         Other -> unwrap_class_call(Other)
     end.
-
-%% @doc Convert a class name atom to a class object tag (BT-246).
-%% @deprecated Use {@link beamtalk_class_registry:class_object_tag/1} instead (BT-576).
--spec class_object_tag(atom()) -> atom().
-class_object_tag(ClassName) ->
-    beamtalk_class_registry:class_object_tag(ClassName).
-
-%% @doc Check if a class inherits from a given ancestor.
-%% @deprecated Use {@link beamtalk_class_registry:inherits_from/2} instead (BT-576).
--spec inherits_from(class_name() | none, class_name()) -> boolean().
-inherits_from(ClassName, Ancestor) ->
-    beamtalk_class_registry:inherits_from(ClassName, Ancestor).
-
-%% @doc Ensure the class hierarchy ETS table exists.
-%% @deprecated Use {@link beamtalk_class_registry:ensure_hierarchy_table/0} instead (BT-576).
--spec ensure_hierarchy_table() -> ok.
-ensure_hierarchy_table() ->
-    beamtalk_class_registry:ensure_hierarchy_table().
 
 %% @doc Get a compiled method object.
 %%
@@ -417,45 +357,6 @@ add_before(ClassPid, Selector, Fun) ->
 -spec add_after(pid(), selector(), fun()) -> ok.
 add_after(ClassPid, Selector, Fun) ->
     gen_server:call(ClassPid, {add_after, Selector, Fun}).
-
-%% @doc Super dispatch - invoke a method from the superclass chain.
-%%
-%% @deprecated Use {@link beamtalk_dispatch:super/5} instead (ADR 0006).
-%% This function is retained for backward compatibility with existing compiled
-%% modules. New codegen uses beamtalk_dispatch:super/5 directly.
-%%
-%% Returns `{reply, Result, NewState}` to match the actor dispatch protocol.
--spec super_dispatch(map(), selector(), list()) -> {reply, term(), map()} | {error, term()}.
-super_dispatch(State, Selector, Args) ->
-    %% Extract the current class from state
-    case beamtalk_tagged_map:class_of(State) of
-        undefined ->
-            Error0 = beamtalk_error:new(internal_error, unknown),
-            Error1 = beamtalk_error:with_selector(Error0, Selector),
-            ClassKey = beamtalk_tagged_map:class_key(),
-            Hint = iolist_to_binary(io_lib:format("State map missing '~p' field", [ClassKey])),
-            Error = beamtalk_error:with_hint(Error1, Hint),
-            {error, Error};
-        CurrentClass ->
-            %% Look up the current class process
-            case beamtalk_class_registry:whereis_class(CurrentClass) of
-                undefined ->
-                    Error0 = beamtalk_error:new(class_not_found, CurrentClass),
-                    Error = beamtalk_error:with_selector(Error0, Selector),
-                    {error, Error};
-                ClassPid ->
-                    %% Get the superclass
-                    case superclass(ClassPid) of
-                        none ->
-                            Error0 = beamtalk_error:new(no_superclass, CurrentClass),
-                            Error = beamtalk_error:with_selector(Error0, Selector),
-                            {error, Error};
-                        Superclass ->
-                            %% Find and invoke in superclass chain
-                            find_and_invoke_super_method(Superclass, Selector, Args, State)
-                    end
-            end
-    end.
 
 %% @doc Create a dynamic subclass at runtime.
 %%
@@ -830,7 +731,7 @@ handle_call({initialize, _Args}, _From, #class_state{} = State) ->
 handle_call(get_flattened_class_methods, _From, #class_state{flattened_class_methods = Flattened} = State) ->
     {reply, {ok, Flattened}, State};
 
-%% Internal query for super_dispatch - get the class's behavior module
+%% Internal query used by reflective method lookup to get behavior module
 handle_call(get_module, _From, #class_state{module = Module} = State) ->
     {reply, Module, State};
 
@@ -878,9 +779,8 @@ handle_cast(Msg, #class_state{flattened_methods = Flattened} = State) ->
                     {noreply, State};
                 _ ->
                     %% Unknown message
-                    Error0 = beamtalk_error:new(does_not_understand, State#class_state.name),
-                    Error1 = beamtalk_error:with_selector(Error0, Selector),
-                    FuturePid ! {reject, Error1},
+                    Error = beamtalk_error:new(does_not_understand, State#class_state.name, Selector),
+                    FuturePid ! {reject, Error},
                     {noreply, State}
             end;
         _ ->
@@ -958,77 +858,6 @@ notify_instances(_ClassName, _NewMethods) ->
     %% this will broadcast method table updates to running instances.
     %% For now, this is a no-op.
     ok.
-
-%% @private
-%% @doc Find and invoke a method in the superclass chain.
-%% Recursively walks up the inheritance hierarchy until the method is found.
-%% Returns {reply, Result, NewState} matching the actor dispatch protocol.
--spec find_and_invoke_super_method(class_name(), selector(), list(), map()) ->
-    {reply, term(), map()} | {error, term()}.
-find_and_invoke_super_method(ClassName, Selector, Args, State) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined ->
-            Error0 = beamtalk_error:new(class_not_found, ClassName),
-            Error = beamtalk_error:with_selector(Error0, Selector),
-            {error, Error};
-        ClassPid ->
-            %% Get class info via API calls
-            case get_class_method_info(ClassPid, Selector) of
-                {ok, Module, MethodInfo} ->
-                    %% Found the method - invoke it (returns {reply, Result, NewState})
-                    invoke_super_method(Module, Selector, MethodInfo, Args, State);
-                method_not_found ->
-                    %% Method not found in this class, try superclass
-                    case superclass(ClassPid) of
-                        none ->
-                            %% Reached root, method not found
-                            StateClassName = beamtalk_tagged_map:class_of(State, ClassName),
-                            Error0 = beamtalk_error:new(does_not_understand, StateClassName),
-                            Error = beamtalk_error:with_selector(Error0, Selector),
-                            {error, Error};
-                        Superclass ->
-                            %% Recursively search in superclass
-                            find_and_invoke_super_method(Superclass, Selector, Args, State)
-                    end
-            end
-    end.
-
-%% @private
-%% @doc Get method info for a selector from a class process.
--spec get_class_method_info(pid(), selector()) ->
-    {ok, atom(), method_info()} | method_not_found.
-get_class_method_info(ClassPid, Selector) ->
-    case gen_server:call(ClassPid, {method, Selector}) of
-        nil ->
-            method_not_found;
-        MethodObj ->
-            %% Extract module from class state (need to add a query for this)
-            %% For now, we'll need to get it via another call
-            Module = gen_server:call(ClassPid, get_module),
-            MethodInfo = maps:get('__method_info__', MethodObj),
-            {ok, Module, MethodInfo}
-    end.
-
-%% @private
-%% @doc Invoke a method found in the superclass.
-%% Returns {reply, Result, NewState} matching the actor dispatch protocol.
--spec invoke_super_method(atom(), selector(), method_info(), list(), map()) ->
-    {reply, term(), map()}.
-invoke_super_method(Module, Selector, MethodInfo, Args, State) ->
-    case maps:find(block, MethodInfo) of
-        {ok, Block} ->
-            %% Runtime block available (from live development) - call it
-            %% Blocks don't have state, so return state unchanged
-            Result = apply(Block, Args),
-            {reply, Result, State};
-        error ->
-            %% No runtime block, must call the compiled module
-            %% Construct Self object reference for dispatch/4 (BT-161)
-            Self = beamtalk_actor:make_self(State),
-            %% Call the module's dispatch function with the selector
-            %% This returns {reply, Result, NewState} - pass through as-is
-            Module:dispatch(Selector, Args, Self, State)
-    end.
 
 %% @private
 %% @doc Build flattened method table by walking hierarchy and merging methods.
