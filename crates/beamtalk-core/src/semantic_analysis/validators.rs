@@ -21,7 +21,8 @@ use ecow::EcoString;
 /// BT-105: Check for attempts to instantiate abstract classes.
 ///
 /// Walks all expressions looking for `MessageSend` where the receiver is an
-/// identifier matching an abstract class and the selector is `spawn` or `spawnWith:`.
+/// identifier matching an abstract class and the selector is an instantiation
+/// method (`spawn`, `spawnWith:`, `new`, or `new:`).
 pub(crate) fn check_abstract_instantiation(
     module: &Module,
     hierarchy: &ClassHierarchy,
