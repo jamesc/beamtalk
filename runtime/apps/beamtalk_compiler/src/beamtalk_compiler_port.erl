@@ -150,11 +150,15 @@ find_project_root() ->
     Cwd = filename:absname(""),
     find_project_root(Cwd).
 
-find_project_root("/") ->
-    %% Fallback to cwd
-    filename:absname("");
 find_project_root(Dir) ->
-    case filelib:is_regular(filename:join(Dir, "Cargo.toml")) of
-        true -> Dir;
-        false -> find_project_root(filename:dirname(Dir))
+    %% Check if we've reached the filesystem root (portable: works on "/" and "C:\")
+    case filename:dirname(Dir) of
+        Dir ->
+            %% dirname(Dir) == Dir means we're at the root — fallback to cwd
+            filename:absname("");
+        Parent ->
+            case filelib:is_regular(filename:join(Dir, "Cargo.toml")) of
+                true -> Dir;
+                false -> find_project_root(Parent)
+            end
     end.

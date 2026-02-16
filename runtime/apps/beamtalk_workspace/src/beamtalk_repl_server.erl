@@ -115,9 +115,9 @@ code_change(_OldVsn, State, _Extra) ->
 write_port_file(undefined, _Port) ->
     ok;
 write_port_file(WorkspaceId, Port) ->
-    case os:getenv("HOME") of
+    case beamtalk_platform:home_dir() of
         false ->
-            ?LOG_WARNING("HOME not set; skipping port file write for workspace ~p",
+            ?LOG_WARNING("HOME/USERPROFILE not set; skipping port file write for workspace ~p",
                            [WorkspaceId]),
             ok;
         Home ->
