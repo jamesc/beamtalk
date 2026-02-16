@@ -495,7 +495,7 @@ Projects scaffolded before this ADR already have:
 - ✅ `src/` directory with `main.bt` — no change needed
 - ❌ Build output in `build/` — will move to `_build/dev/ebin/`
 - ❌ No `.app` file — will be generated automatically
-- ❌ Missing `AGENTS.md`, `.github/copilot-instructions.md`, `.mcp.json` — can be generated with a future `beamtalk init` command
+- ❌ Missing `AGENTS.md`, GitHub Copilot instructions (`.github/copilot-instructions.md`), `.mcp.json` — can be generated with a future `beamtalk init` command
 
 **Migration steps:**
 1. Delete old `build/` directory
