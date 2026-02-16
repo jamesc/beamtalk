@@ -20,7 +20,7 @@ Object subclass: StackFrame
   /// ```beamtalk
   /// frame method   // => #dispatch
   /// ```
-  method => @primitive "method"
+  method -> Symbol => @primitive "method"
 
   /// Return the Beamtalk class name, or nil if not a Beamtalk class.
   ///
@@ -28,7 +28,7 @@ Object subclass: StackFrame
   /// ```beamtalk
   /// frame receiverClass   // => Counter
   /// ```
-  receiverClass => @primitive "receiverClass"
+  receiverClass -> String => @primitive "receiverClass"
 
   /// Return the function arity (number of arguments).
   ///
@@ -36,7 +36,7 @@ Object subclass: StackFrame
   /// ```beamtalk
   /// frame arguments   // => 4
   /// ```
-  arguments => @primitive "arguments"
+  arguments -> Integer => @primitive "arguments"
 
   /// Return the source location as "file:line", or nil if unavailable.
   ///
@@ -44,7 +44,7 @@ Object subclass: StackFrame
   /// ```beamtalk
   /// frame sourceLocation   // => "counter.erl:42"
   /// ```
-  sourceLocation => @primitive "sourceLocation"
+  sourceLocation -> String => @primitive "sourceLocation"
 
   /// Return the Erlang module name as a string, or nil.
   ///
@@ -52,7 +52,7 @@ Object subclass: StackFrame
   /// ```beamtalk
   /// frame moduleName   // => "counter"
   /// ```
-  moduleName => @primitive "moduleName"
+  moduleName -> String => @primitive "moduleName"
 
   /// Return the source line number, or nil if unavailable.
   ///
@@ -60,7 +60,7 @@ Object subclass: StackFrame
   /// ```beamtalk
   /// frame line   // => 42
   /// ```
-  line => @primitive "line"
+  line -> Integer => @primitive "line"
 
   /// Return the source file path as a string, or nil if unavailable.
   ///
@@ -68,7 +68,7 @@ Object subclass: StackFrame
   /// ```beamtalk
   /// frame file   // => "counter.erl"
   /// ```
-  file => @primitive "file"
+  file -> String => @primitive "file"
 
   /// Return a human-readable string representation.
   ///
@@ -76,4 +76,4 @@ Object subclass: StackFrame
   /// ```beamtalk
   /// frame printString   // => "Counter>>dispatch/4 (counter.erl:42)"
   /// ```
-  printString => @primitive "printString"
+  printString -> String => @primitive "printString"

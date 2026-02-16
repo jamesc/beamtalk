@@ -18,7 +18,7 @@ Object subclass: Exception
   /// ```beamtalk
   /// [1 / 0] on: Exception do: [:e | e message]
   /// ```
-  message => @primitive "message"
+  message -> String => @primitive "message"
 
   /// Return the actionable hint string, or nil if none.
   ///
@@ -26,7 +26,7 @@ Object subclass: Exception
   /// ```beamtalk
   /// [1 / 0] on: Exception do: [:e | e hint]
   /// ```
-  hint => @primitive "hint"
+  hint -> String => @primitive "hint"
 
   /// Return the error kind as a symbol.
   ///
@@ -34,7 +34,7 @@ Object subclass: Exception
   /// ```beamtalk
   /// [1 / 0] on: Exception do: [:e | e kind]
   /// ```
-  kind => @primitive "kind"
+  kind -> Symbol => @primitive "kind"
 
   /// Return the message selector that triggered the error, or nil.
   ///
@@ -42,7 +42,7 @@ Object subclass: Exception
   /// ```beamtalk
   /// [42 unknownMsg] on: Exception do: [:e | e selector]
   /// ```
-  selector => @primitive "selector"
+  selector -> Symbol => @primitive "selector"
 
   /// Return the class name where the error occurred.
   ///
@@ -50,7 +50,7 @@ Object subclass: Exception
   /// ```beamtalk
   /// [42 unknownMsg] on: Exception do: [:e | e errorClass]
   /// ```
-  errorClass => @primitive "errorClass"
+  errorClass -> String => @primitive "errorClass"
 
   /// Return a developer-readable string representation of the error.
   ///
@@ -58,7 +58,7 @@ Object subclass: Exception
   /// ```beamtalk
   /// [42 unknownMsg] on: Exception do: [:e | e printString]
   /// ```
-  printString => @primitive "printString"
+  printString -> String => @primitive "printString"
 
   /// Return the stack trace as a list of StackFrame objects (BT-107).
   ///
@@ -69,7 +69,7 @@ Object subclass: Exception
   /// ```beamtalk
   /// [1 / 0] on: Exception do: [:e | e stackTrace]
   /// ```
-  stackTrace => @primitive "stackTrace"
+  stackTrace -> List => @primitive "stackTrace"
 
   /// Human-readable description of the receiver.
   ///
@@ -77,7 +77,7 @@ Object subclass: Exception
   /// ```beamtalk
   /// [42 unknownMsg] on: Exception do: [:e | e describe]
   /// ```
-  describe => self printString
+  describe -> String => self printString
 
   /// Raise this exception.
   ///
@@ -93,4 +93,4 @@ Object subclass: Exception
   /// ```beamtalk
   /// Exception signal: "something went wrong"
   /// ```
-  signal: msg => @primitive "signal:"
+  signal: msg: String => @primitive "signal:"

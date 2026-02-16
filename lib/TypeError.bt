@@ -16,4 +16,4 @@ Error subclass: TypeError
   /// ```beamtalk
   /// TypeError describe   // => "a TypeError"
   /// ```
-  describe => "a TypeError"
+  describe -> String => "a TypeError"

@@ -17,4 +17,4 @@ Error subclass: InstantiationError
   /// ```beamtalk
   /// InstantiationError describe   // => "an InstantiationError"
   /// ```
-  describe => "an InstantiationError"
+  describe -> String => "an InstantiationError"

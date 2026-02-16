@@ -17,4 +17,4 @@ Exception subclass: Error
   /// ```beamtalk
   /// Error describe   // => "an Error"
   /// ```
-  describe => "an Error"
+  describe -> String => "an Error"

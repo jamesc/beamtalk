@@ -15,15 +15,15 @@
 
 Object subclass: TestCase
   // Lifecycle methods — override in subclasses for test fixtures
-  setUp => nil
-  tearDown => nil
+  setUp -> Nil => nil
+  tearDown -> Nil => nil
 
   // Core assertions — @primitive methods implemented in beamtalk_test_case.erl
-  assert: condition => @primitive "assert:"
-  assert: actual equals: expected => @primitive "assert:equals:"
-  deny: condition => @primitive "deny:"
-  should: block raise: errorKind => @primitive "should:raise:"
-  fail: message => @primitive "fail:"
+  assert: condition: Object -> Nil => @primitive "assert:"
+  assert: actual: Object equals: expected: Object -> Nil => @primitive "assert:equals:"
+  deny: condition: Object -> Nil => @primitive "deny:"
+  should: block: Block raise: errorKind: Object -> Nil => @primitive "should:raise:"
+  fail: message: String -> Nil => @primitive "fail:"
 
   // Class-side methods for running tests interactively (BT-440)
   class runAll => @primitive "runAll"

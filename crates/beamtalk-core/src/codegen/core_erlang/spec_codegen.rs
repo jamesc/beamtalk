@@ -52,15 +52,11 @@ fn type_annotation_to_spec(annotation: &TypeAnnotation) -> String {
     match annotation {
         TypeAnnotation::Simple(id) => simple_type_to_spec(id.name.as_str()),
         TypeAnnotation::Union { types, .. } => {
-            let type_specs: Vec<String> =
-                types.iter().map(type_annotation_to_spec).collect();
-            format!(
-                "{{'type', 0, 'union', [{}]}}",
-                join_with_cons(&type_specs)
-            )
+            let type_specs: Vec<String> = types.iter().map(type_annotation_to_spec).collect();
+            format!("{{'type', 0, 'union', [{}]}}", join_with_cons(&type_specs))
         }
         TypeAnnotation::Singleton { name, .. } => {
-            format!("{{'atom', 0, '{}'}}", name)
+            format!("{{'atom', 0, '{name}'}}")
         }
         TypeAnnotation::Generic { base, .. } => {
             // Generic types (e.g., Collection<Integer>) map to their base type
@@ -69,8 +65,7 @@ fn type_annotation_to_spec(annotation: &TypeAnnotation) -> String {
         TypeAnnotation::FalseOr { inner, .. } => {
             let inner_spec = type_annotation_to_spec(inner);
             format!(
-                "{{'type', 0, 'union', [{} | [{{'atom', 0, 'false'}}]]}}",
-                inner_spec
+                "{{'type', 0, 'union', [{inner_spec} | [{{'atom', 0, 'false'}}]]}}",
             )
         }
     }
@@ -79,17 +74,15 @@ fn type_annotation_to_spec(annotation: &TypeAnnotation) -> String {
 /// Maps a simple Beamtalk type name to its Core Erlang abstract type representation.
 fn simple_type_to_spec(name: &str) -> String {
     match name {
-        "Integer" => "{'type', 0, 'integer', []}".to_string(),
+        "Integer" | "Character" => "{'type', 0, 'integer', []}".to_string(),
         "Float" => "{'type', 0, 'float', []}".to_string(),
         "Number" => "{'type', 0, 'number', []}".to_string(),
         "String" => "{'type', 0, 'binary', []}".to_string(),
         "Boolean" => "{'type', 0, 'boolean', []}".to_string(),
         "Symbol" => "{'type', 0, 'atom', []}".to_string(),
-        "Character" => "{'type', 0, 'integer', []}".to_string(),
         "List" => "{'type', 0, 'list', []}".to_string(),
         "Tuple" => "{'type', 0, 'tuple', 'any'}".to_string(),
-        "Dictionary" => "{'type', 0, 'map', 'any'}".to_string(),
-        "Set" => "{'type', 0, 'map', 'any'}".to_string(),
+        "Dictionary" | "Set" => "{'type', 0, 'map', 'any'}".to_string(),
         "Nil" | "UndefinedObject" => "{'atom', 0, 'nil'}".to_string(),
         "True" => "{'atom', 0, 'true'}".to_string(),
         "False" => "{'atom', 0, 'false'}".to_string(),
@@ -107,9 +100,14 @@ fn join_with_cons(specs: &[String]) -> String {
         0 => String::new(),
         1 => specs[0].clone(),
         _ => {
-            let last = &specs[specs.len() - 1];
-            let rest: Vec<String> = specs[..specs.len() - 1].to_vec();
-            format!("{} | [{}]", rest.join(" | [") + &"]".repeat(rest.len() - 1), last)
+            // Build right-nested cons: A | [B | [C]]
+            // Start from rightmost and wrap each level
+            let mut result = format!("[{}]", specs[specs.len() - 1]);
+            for spec in specs[1..specs.len() - 1].iter().rev() {
+                result = format!("[{spec} | {result}]");
+            }
+            // The outermost level doesn't get wrapped (caller wraps in [...])
+            format!("{} | {result}", specs[0])
         }
     }
 }
@@ -121,12 +119,12 @@ fn join_with_cons(specs: &[String]) -> String {
 ///
 /// For actor methods, the `dispatch_arity` is the selector arity (no Self/State params).
 /// For value type methods, the arity includes the Self parameter.
-pub fn generate_method_spec(
-    method: &MethodDefinition,
-    is_value_type: bool,
-) -> Option<String> {
+pub fn generate_method_spec(method: &MethodDefinition, is_value_type: bool) -> Option<String> {
     let has_any_annotation = method.return_type.is_some()
-        || method.parameters.iter().any(|p| p.type_annotation.is_some());
+        || method
+            .parameters
+            .iter()
+            .any(|p| p.type_annotation.is_some());
 
     if !has_any_annotation {
         return None;
@@ -143,18 +141,18 @@ pub fn generate_method_spec(
     }
 
     for param in &method.parameters {
-        let type_spec = param
-            .type_annotation
-            .as_ref()
-            .map_or_else(|| "{'type', 0, 'any', []}".to_string(), type_annotation_to_spec);
+        let type_spec = param.type_annotation.as_ref().map_or_else(
+            || "{'type', 0, 'any', []}".to_string(),
+            type_annotation_to_spec,
+        );
         param_types.push(type_spec);
     }
 
     // Build return type
-    let return_spec = method
-        .return_type
-        .as_ref()
-        .map_or_else(|| "{'type', 0, 'any', []}".to_string(), type_annotation_to_spec);
+    let return_spec = method.return_type.as_ref().map_or_else(
+        || "{'type', 0, 'any', []}".to_string(),
+        type_annotation_to_spec,
+    );
 
     // Function arity for spec
     let arity = if is_value_type {
@@ -183,18 +181,14 @@ pub fn generate_method_spec(
 ///
 /// Returns a vector of spec attribute strings, one per annotated method.
 /// Only primary methods generate specs (not before/after/around advice).
-pub fn generate_class_specs(
-    class: &ClassDefinition,
-    is_value_type: bool,
-) -> Vec<String> {
+pub fn generate_class_specs(class: &ClassDefinition, is_value_type: bool) -> Vec<String> {
     class
         .methods
         .iter()
         .filter(|m| m.kind == MethodKind::Primary)
         .filter_map(|m| {
-            generate_method_spec(m, is_value_type).map(|spec| {
-                format!("'spec' =\n        [{{{spec}}}]")
-            })
+            generate_method_spec(m, is_value_type)
+                .map(|spec| format!("'spec' =\n        [{{{spec}}}]"))
         })
         .collect()
 }
@@ -318,10 +312,7 @@ mod tests {
 
     #[test]
     fn false_or_type_maps_correctly() {
-        let ann = TypeAnnotation::false_or(
-            TypeAnnotation::simple("Integer", span()),
-            span(),
-        );
+        let ann = TypeAnnotation::false_or(TypeAnnotation::simple("Integer", span()), span());
         let result = type_annotation_to_spec(&ann);
         assert_eq!(
             result,
@@ -515,5 +506,58 @@ mod tests {
         let result = format_spec_attributes(&specs).unwrap();
         assert!(result.contains("spec1"));
         assert!(result.contains("spec2"));
+    }
+
+    #[test]
+    fn value_type_method_with_two_params_generates_correct_cons() {
+        // For value types with 2 params: product has 3 types (Self + 2 params)
+        // Must produce [Self | [Param1 | [Param2]]] not [Self | [Param1] | [Param2]]
+        let method = MethodDefinition::with_return_type(
+            MessageSelector::Keyword(vec![
+                KeywordPart::new("at:", span()),
+                KeywordPart::new("put:", span()),
+            ]),
+            vec![
+                ParameterDefinition::with_type(
+                    Identifier::new("key", span()),
+                    TypeAnnotation::simple("Symbol", span()),
+                ),
+                ParameterDefinition::with_type(
+                    Identifier::new("value", span()),
+                    TypeAnnotation::simple("Object", span()),
+                ),
+            ],
+            vec![],
+            TypeAnnotation::simple("Object", span()),
+            span(),
+        );
+
+        let spec = generate_method_spec(&method, true).unwrap();
+        // Arity = 3 (Self + 2 params)
+        assert!(spec.contains("{'at:put:', 3}"));
+        // Product must use proper cons nesting
+        assert!(
+            spec.contains(
+                "{'type', 0, 'map', 'any'} | [{'type', 0, 'atom', []} | [{'type', 0, 'any', []}]]"
+            ),
+            "Product should use proper cons nesting: got {spec}"
+        );
+    }
+
+    #[test]
+    fn three_element_union_generates_correct_cons() {
+        let ann = TypeAnnotation::union(
+            vec![
+                TypeAnnotation::simple("Integer", span()),
+                TypeAnnotation::simple("String", span()),
+                TypeAnnotation::simple("Nil", span()),
+            ],
+            span(),
+        );
+        let result = type_annotation_to_spec(&ann);
+        assert_eq!(
+            result,
+            "{'type', 0, 'union', [{'type', 0, 'integer', []} | [{'type', 0, 'binary', []} | [{'atom', 0, 'nil'}]]]}"
+        );
     }
 }
