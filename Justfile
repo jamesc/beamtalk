@@ -600,31 +600,17 @@ uninstall PREFIX="/usr/local":
 dist-vscode:
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "📦 Building VS Code extension..."
-    if ! command -v npm >/dev/null 2>&1; then
-        echo "❌ npm not found (needed for VS Code extension)"
-        echo "   Install node/npm: https://github.com/nvm-sh/nvm"
-        exit 1
-    fi
-    # Bundle beamtalk-lsp binary if a release build exists
-    LSP_BIN="target/release/beamtalk-lsp"
-    if [ -f "${LSP_BIN}" ]; then
-        mkdir -p editors/vscode/bin
-        cp "${LSP_BIN}" editors/vscode/bin/beamtalk-lsp
-        chmod +x editors/vscode/bin/beamtalk-lsp
-        echo "   Bundled beamtalk-lsp ($(du -h editors/vscode/bin/beamtalk-lsp | cut -f1))"
-    else
-        echo "   ⚠️  No release build found — extension will use PATH"
-    fi
-    cd editors/vscode
-    npm install --quiet
-    npm run compile
-    # Symlink repo LICENSE for vsce packaging
-    ln -sf ../../LICENSE LICENSE
-    npx --yes @vscode/vsce package --out ../../dist/beamtalk.vsix
-    rm -f LICENSE
-    rm -rf bin
-    echo "✅ VS Code extension: dist/beamtalk.vsix"
+    # Auto-detect host platform for vsce --target
+    ARCH="$(uname -m)"
+    OS="$(uname -s)"
+    case "${OS}-${ARCH}" in
+        Linux-x86_64)   TARGET="linux-x64" ;;
+        Linux-aarch64)  TARGET="linux-arm64" ;;
+        Darwin-x86_64)  TARGET="darwin-x64" ;;
+        Darwin-arm64)   TARGET="darwin-arm64" ;;
+        *)              echo "❌ Unsupported platform: ${OS}-${ARCH}"; exit 1 ;;
+    esac
+    just dist-vscode-platform "${TARGET}"
 
 # Build VS Code extension for a specific platform target
 # Usage: just dist-vscode-platform linux-x64
@@ -679,7 +665,7 @@ dist: build-release build-stdlib
     just dist-vscode
     echo "✅ Distribution ready in dist/"
     echo "   Run: dist/bin/beamtalk repl"
-    echo "   VS Code extension: dist/beamtalk.vsix"
+    echo "   VS Code extension: dist/beamtalk-*.vsix"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Documentation
