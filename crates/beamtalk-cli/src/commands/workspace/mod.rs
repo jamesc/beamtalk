@@ -66,9 +66,8 @@ pub use storage::{
 #[cfg(test)]
 mod tests {
     use super::lifecycle::{WorkspaceStatus, find_workspace_by_project_path, resolve_workspace_id};
-    use super::process::wait_for_workspace_exit;
     #[cfg(unix)]
-    use super::process::{force_kill_process, start_detached_node};
+    use super::process::{force_kill_process, start_detached_node, wait_for_workspace_exit};
     #[cfg(target_os = "linux")]
     use super::storage::read_proc_start_time;
     use super::storage::{
