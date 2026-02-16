@@ -101,6 +101,7 @@ beamtalk run
     // Create .gitignore
     let gitignore_content = r"# Build outputs
 /build/
+/_build/
 *.beam
 *.core
 
@@ -259,6 +260,7 @@ mod tests {
 
         let content = fs::read_to_string(gitignore_path).unwrap();
         assert!(content.contains("/build/"));
+        assert!(content.contains("/_build/"));
         assert!(content.contains("*.beam"));
         assert!(content.contains("*.core"));
     }
