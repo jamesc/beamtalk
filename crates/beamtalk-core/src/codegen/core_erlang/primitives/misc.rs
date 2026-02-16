@@ -6,8 +6,8 @@
 //! **DDD Context:** Compilation — Code Generation
 //!
 //! Contains BIF generators for smaller primitive classes:
-//! File, Exception, Symbol, Tuple, Object, Association, Set,
-//! CompiledMethod, TestCase, Stream, StackFrame.
+//! `File`, `Exception`, `Symbol`, `Tuple`, `Object`, `Association`, `Set`,
+//! `CompiledMethod`, `TestCase`, `Stream`, `StackFrame`.
 
 use super::super::document::Document;
 use super::{binary_bif, ops_dispatch};
@@ -126,10 +126,7 @@ pub(crate) fn generate_stack_frame_bif(
 /// Symbol primitive implementations (BT-273).
 ///
 /// Symbols are Erlang atoms — interned, immutable identifiers.
-pub(crate) fn generate_symbol_bif(
-    selector: &str,
-    params: &[String],
-) -> Option<Document<'static>> {
+pub(crate) fn generate_symbol_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     match selector {
         // Comparison (ADR 0002: Erlang operators)
         "=:=" => binary_bif("=:=", params),
@@ -207,10 +204,7 @@ pub(crate) fn generate_tuple_bif(selector: &str, params: &[String]) -> Option<Do
 /// Object primitive implementations (BT-335).
 ///
 /// Object is the root class — methods here are inherited by all objects.
-pub(crate) fn generate_object_bif(
-    selector: &str,
-    params: &[String],
-) -> Option<Document<'static>> {
+pub(crate) fn generate_object_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     match selector {
         // Association creation: `self -> value` creates an Association tagged map
         "->" => {
@@ -441,10 +435,7 @@ pub(crate) fn generate_test_case_bif(
 ///
 /// Class-side constructors delegate to `beamtalk_stream` module.
 /// Instance methods delegate to `beamtalk_stream` module with Self as first arg.
-pub(crate) fn generate_stream_bif(
-    selector: &str,
-    params: &[String],
-) -> Option<Document<'static>> {
+pub(crate) fn generate_stream_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     let p0 = params.first().map_or("_Arg0", String::as_str);
     match selector {
         // Class-side constructors

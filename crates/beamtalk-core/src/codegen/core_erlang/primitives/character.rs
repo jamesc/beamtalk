@@ -20,9 +20,7 @@ pub(crate) fn generate_character_bif(
     let p0 = params.first().map_or("_Arg0", String::as_str);
     match selector {
         // Comparison — direct integer comparison (ADR 0002: Erlang operators)
-        "=:=" | "/=" | "=/=" | "<" | ">" | "<=" | ">=" => {
-            generate_comparison_bif(selector, params)
-        }
+        "=:=" | "/=" | "=/=" | "<" | ">" | "<=" | ">=" => generate_comparison_bif(selector, params),
         // Conversion
         "asInteger" => Some(Document::Str("Self")),
         "asString" => Some(Document::Str("call 'beamtalk_character':'as_string'(Self)")),

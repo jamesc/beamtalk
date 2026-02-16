@@ -132,8 +132,7 @@ impl CoreErlangGenerator {
         // BT-586: Generate spec attributes from type annotations
         let spec_attrs = spec_codegen::generate_class_specs(class, true);
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
-            .map(|s| docvec![",\n     ", s])
-            .unwrap_or(Document::Nil);
+            .map_or(Document::Nil, |s| docvec![",\n     ", s]);
 
         // Module header
         let module_name = self.module_name.clone();

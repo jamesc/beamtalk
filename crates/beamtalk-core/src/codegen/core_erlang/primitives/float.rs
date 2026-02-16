@@ -17,9 +17,7 @@ pub(crate) fn generate_float_bif(selector: &str, params: &[String]) -> Option<Do
         "*" => binary_bif("*", params),
         "/" => binary_bif("/", params),
         // Comparison (ADR 0002: Erlang operators)
-        "=:=" | "/=" | "=/=" | "<" | ">" | "<=" | ">=" => {
-            generate_comparison_bif(selector, params)
-        }
+        "=:=" | "/=" | "=/=" | "<" | ">" | "<=" | ">=" => generate_comparison_bif(selector, params),
         // Rounding
         "rounded" => Some(Document::Str("call 'erlang':'round'(Self)")),
         "ceiling" => Some(Document::Str("call 'erlang':'ceil'(Self)")),

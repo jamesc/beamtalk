@@ -43,7 +43,7 @@
 //! | Union | `union(...)` |
 //! | Singleton `#foo` | atom `foo` |
 
-use super::document::{join, Document};
+use super::document::{Document, join};
 use crate::ast::{ClassDefinition, MethodDefinition, MethodKind, TypeAnnotation};
 use crate::docvec;
 
@@ -260,10 +260,7 @@ pub fn format_spec_attributes(specs: &[Document<'static>]) -> Option<Document<'s
     if specs.is_empty() {
         return None;
     }
-    Some(join(
-        specs.to_vec(),
-        &Document::Str(",\n     "),
-    ))
+    Some(join(specs.to_vec(), &Document::Str(",\n     ")))
 }
 
 #[cfg(test)]
@@ -279,7 +276,7 @@ mod tests {
         Span::new(0, 0)
     }
 
-    fn render(doc: Document<'_>) -> String {
+    fn render(doc: &Document<'_>) -> String {
         doc.to_pretty_string()
     }
 
@@ -287,7 +284,7 @@ mod tests {
     fn integer_type_maps_correctly() {
         let ann = TypeAnnotation::simple("Integer", span());
         assert_eq!(
-            render(type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann)),
             "{'type', 0, 'integer', []}"
         );
     }
@@ -296,7 +293,7 @@ mod tests {
     fn string_type_maps_to_binary() {
         let ann = TypeAnnotation::simple("String", span());
         assert_eq!(
-            render(type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann)),
             "{'type', 0, 'binary', []}"
         );
     }
@@ -305,7 +302,7 @@ mod tests {
     fn float_type_maps_correctly() {
         let ann = TypeAnnotation::simple("Float", span());
         assert_eq!(
-            render(type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann)),
             "{'type', 0, 'float', []}"
         );
     }
@@ -314,7 +311,7 @@ mod tests {
     fn boolean_type_maps_correctly() {
         let ann = TypeAnnotation::simple("Boolean", span());
         assert_eq!(
-            render(type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann)),
             "{'type', 0, 'boolean', []}"
         );
     }
@@ -323,7 +320,7 @@ mod tests {
     fn symbol_type_maps_to_atom() {
         let ann = TypeAnnotation::simple("Symbol", span());
         assert_eq!(
-            render(type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann)),
             "{'type', 0, 'atom', []}"
         );
     }
@@ -331,14 +328,14 @@ mod tests {
     #[test]
     fn nil_maps_to_atom_nil() {
         let ann = TypeAnnotation::simple("Nil", span());
-        assert_eq!(render(type_annotation_to_spec(&ann)), "{'atom', 0, 'nil'}");
+        assert_eq!(render(&type_annotation_to_spec(&ann)), "{'atom', 0, 'nil'}");
     }
 
     #[test]
     fn true_maps_to_atom_true() {
         let ann = TypeAnnotation::simple("True", span());
         assert_eq!(
-            render(type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann)),
             "{'atom', 0, 'true'}"
         );
     }
@@ -347,7 +344,7 @@ mod tests {
     fn false_maps_to_atom_false() {
         let ann = TypeAnnotation::simple("False", span());
         assert_eq!(
-            render(type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann)),
             "{'atom', 0, 'false'}"
         );
     }
@@ -356,7 +353,7 @@ mod tests {
     fn list_type_maps_correctly() {
         let ann = TypeAnnotation::simple("List", span());
         assert_eq!(
-            render(type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann)),
             "{'type', 0, 'list', []}"
         );
     }
@@ -365,7 +362,7 @@ mod tests {
     fn dictionary_maps_to_map() {
         let ann = TypeAnnotation::simple("Dictionary", span());
         assert_eq!(
-            render(type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann)),
             "{'type', 0, 'map', 'any'}"
         );
     }
@@ -374,7 +371,7 @@ mod tests {
     fn tuple_maps_correctly() {
         let ann = TypeAnnotation::simple("Tuple", span());
         assert_eq!(
-            render(type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann)),
             "{'type', 0, 'tuple', 'any'}"
         );
     }
@@ -383,7 +380,7 @@ mod tests {
     fn custom_class_maps_to_any() {
         let ann = TypeAnnotation::simple("Counter", span());
         assert_eq!(
-            render(type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann)),
             "{'type', 0, 'any', []}"
         );
     }
@@ -397,7 +394,7 @@ mod tests {
             ],
             span(),
         );
-        let result = render(type_annotation_to_spec(&ann));
+        let result = render(&type_annotation_to_spec(&ann));
         assert_eq!(
             result,
             "{'type', 0, 'union', [{'type', 0, 'integer', []}, {'atom', 0, 'nil'}]}"
@@ -408,7 +405,7 @@ mod tests {
     fn singleton_type_maps_to_atom() {
         let ann = TypeAnnotation::singleton("north", span());
         assert_eq!(
-            render(type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann)),
             "{'atom', 0, 'north'}"
         );
     }
@@ -416,7 +413,7 @@ mod tests {
     #[test]
     fn false_or_type_maps_correctly() {
         let ann = TypeAnnotation::false_or(TypeAnnotation::simple("Integer", span()), span());
-        let result = render(type_annotation_to_spec(&ann));
+        let result = render(&type_annotation_to_spec(&ann));
         assert_eq!(
             result,
             "{'type', 0, 'union', [{'type', 0, 'integer', []}, {'atom', 0, 'false'}]}"
@@ -433,7 +430,7 @@ mod tests {
             span(),
         );
 
-        let spec = render(generate_method_spec(&method, false).unwrap());
+        let spec = render(&generate_method_spec(&method, false).unwrap());
         assert_eq!(
             spec,
             "{'getBalance', 0}, [{'type', 0, 'fun', [{'type', 0, 'product', []}, {'type', 0, 'integer', []}]}]"
@@ -453,7 +450,7 @@ mod tests {
             span(),
         );
 
-        let spec = render(generate_method_spec(&method, false).unwrap());
+        let spec = render(&generate_method_spec(&method, false).unwrap());
         assert_eq!(
             spec,
             "{'deposit:', 1}, [{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'integer', []}]}, {'type', 0, 'integer', []}]}]"
@@ -482,7 +479,7 @@ mod tests {
             span(),
         );
 
-        let spec = render(generate_method_spec(&method, false).unwrap());
+        let spec = render(&generate_method_spec(&method, false).unwrap());
         assert!(spec.contains("'any'"));
         assert!(spec.contains("'integer'"));
     }
@@ -497,7 +494,7 @@ mod tests {
             span(),
         );
 
-        let spec = render(generate_method_spec(&method, true).unwrap());
+        let spec = render(&generate_method_spec(&method, true).unwrap());
         assert!(spec.contains("{'size', 1}"));
         assert!(spec.contains("'map', 'any'"));
     }
@@ -524,7 +521,7 @@ mod tests {
             span(),
         );
 
-        let spec = render(generate_method_spec(&method, false).unwrap());
+        let spec = render(&generate_method_spec(&method, false).unwrap());
         assert!(spec.contains("'transfer:to:'"));
         assert!(spec.contains("'integer'"));
         assert!(spec.contains("'binary'"));
@@ -550,7 +547,7 @@ mod tests {
             span(),
         );
 
-        let spec = render(generate_method_spec(&method, false).unwrap());
+        let spec = render(&generate_method_spec(&method, false).unwrap());
         assert!(spec.contains("'union'"));
         assert!(spec.contains("'integer'"));
         assert!(spec.contains("'nil'"));
@@ -560,7 +557,7 @@ mod tests {
     fn block_type_maps_to_fun() {
         let ann = TypeAnnotation::simple("Block", span());
         assert_eq!(
-            render(type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann)),
             "{'type', 0, 'fun', []}"
         );
     }
@@ -569,7 +566,7 @@ mod tests {
     fn number_type_maps_correctly() {
         let ann = TypeAnnotation::simple("Number", span());
         assert_eq!(
-            render(type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann)),
             "{'type', 0, 'number', []}"
         );
     }
@@ -578,7 +575,7 @@ mod tests {
     fn character_maps_to_integer() {
         let ann = TypeAnnotation::simple("Character", span());
         assert_eq!(
-            render(type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann)),
             "{'type', 0, 'integer', []}"
         );
     }
@@ -587,7 +584,7 @@ mod tests {
     fn set_maps_to_map() {
         let ann = TypeAnnotation::simple("Set", span());
         assert_eq!(
-            render(type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann)),
             "{'type', 0, 'map', 'any'}"
         );
     }
@@ -600,7 +597,7 @@ mod tests {
     #[test]
     fn format_spec_attributes_single() {
         let specs = vec![Document::Str("'spec' =\n        [{{spec}}]")];
-        let result = render(format_spec_attributes(&specs).unwrap());
+        let result = render(&format_spec_attributes(&specs).unwrap());
         assert_eq!(result, "'spec' =\n        [{{spec}}]");
     }
 
@@ -610,7 +607,7 @@ mod tests {
             Document::Str("'spec' =\n        [{{spec1}}]"),
             Document::Str("'spec' =\n        [{{spec2}}]"),
         ];
-        let result = render(format_spec_attributes(&specs).unwrap());
+        let result = render(&format_spec_attributes(&specs).unwrap());
         assert!(result.contains("spec1"));
         assert!(result.contains("spec2"));
     }
@@ -637,7 +634,7 @@ mod tests {
             span(),
         );
 
-        let spec = render(generate_method_spec(&method, true).unwrap());
+        let spec = render(&generate_method_spec(&method, true).unwrap());
         assert!(spec.contains("{'at:put:', 3}"));
         assert!(
             spec.contains(
@@ -657,7 +654,7 @@ mod tests {
             ],
             span(),
         );
-        let result = render(type_annotation_to_spec(&ann));
+        let result = render(&type_annotation_to_spec(&ann));
         assert_eq!(
             result,
             "{'type', 0, 'union', [{'type', 0, 'integer', []}, {'type', 0, 'binary', []}, {'atom', 0, 'nil'}]}"
@@ -677,7 +674,7 @@ mod tests {
             span(),
         );
 
-        let spec = render(generate_class_method_spec(&method).unwrap());
+        let spec = render(&generate_class_method_spec(&method).unwrap());
         assert!(
             spec.contains("{'class_from:', 3}"),
             "Expected class_ prefix and arity 3 (ClassSelf + ClassVars + 1 param), got: {spec}"

@@ -10,10 +10,7 @@ use super::{binary_bif, generate_comparison_bif, power_bif};
 use crate::docvec;
 
 /// Integer primitive implementations.
-pub(crate) fn generate_integer_bif(
-    selector: &str,
-    params: &[String],
-) -> Option<Document<'static>> {
+pub(crate) fn generate_integer_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     match selector {
         // Arithmetic — direct Erlang BIF
         "+" => binary_bif("+", params),
@@ -23,9 +20,7 @@ pub(crate) fn generate_integer_bif(
         "%" => binary_bif("rem", params),
         "**" => power_bif(params),
         // Comparison (ADR 0002: Erlang operators)
-        "=:=" | "/=" | "=/=" | "<" | ">" | "<=" | ">=" => {
-            generate_comparison_bif(selector, params)
-        }
+        "=:=" | "/=" | "=/=" | "<" | ">" | "<=" | ">=" => generate_comparison_bif(selector, params),
         // Conversion
         "asString" | "printString" => {
             Some(Document::Str("call 'erlang':'integer_to_binary'(Self)"))

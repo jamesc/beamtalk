@@ -10,15 +10,10 @@ use super::generate_comparison_bif;
 use crate::docvec;
 
 /// String primitive implementations.
-pub(crate) fn generate_string_bif(
-    selector: &str,
-    params: &[String],
-) -> Option<Document<'static>> {
+pub(crate) fn generate_string_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     match selector {
         // Comparison (ADR 0002: Erlang operators)
-        "=:=" | "/=" | "=/=" | "<" | ">" | "<=" | ">=" => {
-            generate_comparison_bif(selector, params)
-        }
+        "=:=" | "/=" | "=/=" | "<" | ">" | "<=" | ">=" => generate_comparison_bif(selector, params),
         // Concatenation, length, access, case, whitespace, reverse
         "++" | "length" | "at:" | "uppercase" | "lowercase" | "capitalize" | "trim"
         | "trimLeft" | "trimRight" | "reverse" => generate_string_transform_bif(selector, params),
