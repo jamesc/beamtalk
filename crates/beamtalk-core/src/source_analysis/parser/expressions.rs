@@ -53,13 +53,22 @@ impl Parser {
     ///
     /// Entry point for expression parsing. Handles all precedence levels.
     pub(super) fn parse_expression(&mut self) -> Expression {
+        // Guard against stack overflow from deeply nested input
+        if let Err(error) = self.enter_nesting(self.current_token().span()) {
+            return error;
+        }
+
         // Check for return statement first
         if self.match_token(&TokenKind::Caret) {
-            return self.parse_return();
+            let result = self.parse_return();
+            self.leave_nesting();
+            return result;
         }
 
         // Try to parse assignment or regular expression
-        self.parse_assignment()
+        let result = self.parse_assignment();
+        self.leave_nesting();
+        result
     }
 
     /// Parses a return statement.
@@ -94,7 +103,12 @@ impl Parser {
                 };
             }
 
+            // Guard recursive call against stack overflow
+            if let Err(error) = self.enter_nesting(expr.span()) {
+                return error;
+            }
             let value = Box::new(self.parse_assignment());
+            self.leave_nesting();
             let span = expr.span().merge(value.span());
             return Expression::Assignment {
                 target: Box::new(expr),
@@ -450,6 +464,11 @@ impl Parser {
     /// Token sequence example for `"Hello, {name}!"`:
     /// - `StringStart("Hello, ")` → expression tokens → `StringEnd("!")`
     fn parse_string_interpolation(&mut self) -> Expression {
+        // Guard against stack overflow from deeply nested interpolations
+        if let Err(error) = self.enter_nesting(self.current_token().span()) {
+            return error;
+        }
+
         let start_token = self.advance();
         let start_span = start_token.span();
         let TokenKind::StringStart(first_text) = start_token.into_kind() else {
@@ -486,6 +505,7 @@ impl Parser {
                         segments.push(StringSegment::Literal(text));
                     }
                     let span = start_span.merge(end_token.span());
+                    self.leave_nesting();
                     return Expression::StringInterpolation { segments, span };
                 }
                 _ => {
@@ -494,6 +514,7 @@ impl Parser {
                         "Unterminated string interpolation",
                         start_span,
                     ));
+                    self.leave_nesting();
                     return Expression::Error {
                         message: "Unterminated string interpolation".into(),
                         span: start_span,
@@ -719,7 +740,13 @@ impl Parser {
     /// - integer, float, string, symbol, character — literal
     /// - `{p1, p2, ...}` — tuple
     fn parse_pattern(&mut self) -> Pattern {
-        match self.current_kind() {
+        // Guard against stack overflow from deeply nested tuple patterns
+        let span = self.current_token().span();
+        if self.enter_nesting(span).is_err() {
+            return Pattern::Wildcard(span);
+        }
+
+        let result = match self.current_kind() {
             // Wildcard: `_`
             TokenKind::Identifier(name) if name.as_str() == "_" => {
                 let span = self.advance().span();
@@ -800,7 +827,10 @@ impl Parser {
                 ));
                 Pattern::Wildcard(span)
             }
-        }
+        };
+
+        self.leave_nesting();
+        result
     }
 
     /// Parses a tuple pattern: `{p1, p2, ...}`
