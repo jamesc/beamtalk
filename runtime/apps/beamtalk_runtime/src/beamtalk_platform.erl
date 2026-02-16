@@ -14,10 +14,18 @@
 %% @doc Return the user's home directory, or `false` if unavailable.
 %%
 %% Checks `HOME` first (Unix, WSL, Git Bash on Windows), then falls back
-%% to `USERPROFILE` (native Windows).
+%% to `USERPROFILE` (native Windows). Empty strings are treated as unset.
 -spec home_dir() -> string() | false.
 home_dir() ->
-    case os:getenv("HOME") of
-        false -> os:getenv("USERPROFILE");
-        Home  -> Home
-    end.
+    normalize_env(
+        case os:getenv("HOME") of
+            false -> os:getenv("USERPROFILE");
+            Home  -> Home
+        end
+    ).
+
+%% @private Treat empty env var values as unset.
+-spec normalize_env(string() | false) -> string() | false.
+normalize_env(false) -> false;
+normalize_env("")    -> false;
+normalize_env(Val)   -> Val.

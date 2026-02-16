@@ -5,16 +5,31 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
-%% Test that home_dir/0 returns a non-empty string on systems where HOME is set
+%% Test that home_dir/0 returns expected value based on environment
 home_dir_returns_string_test() ->
     Result = beamtalk_platform:home_dir(),
-    %% On Unix dev machines HOME is always set
-    case os:getenv("HOME") of
+    Home = os:getenv("HOME"),
+    UserProfile = os:getenv("USERPROFILE"),
+    case Home of
         false ->
-            %% If HOME not set, should fall back to USERPROFILE or return false
-            ok;
+            case UserProfile of
+                false ->
+                    ?assertEqual(false, Result);
+                _UP ->
+                    ?assertEqual(UserProfile, Result)
+            end;
+        "" ->
+            %% Empty HOME treated as unset, should fall back
+            case UserProfile of
+                false ->
+                    ?assertEqual(false, Result);
+                "" ->
+                    ?assertEqual(false, Result);
+                _UP ->
+                    ?assertEqual(UserProfile, Result)
+            end;
         _Home ->
-            ?assertNotEqual(false, Result),
+            ?assertEqual(Home, Result),
             ?assert(is_list(Result)),
             ?assert(length(Result) > 0)
     end.

@@ -5,7 +5,7 @@
 # Run `just` to see all available recipes
 # Run `just <recipe>` to execute a specific task
 
-# Use bash for all commands
+# Use bash on Unix and PowerShell on Windows for all commands
 set shell := ["bash", "-uc"]
 set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 

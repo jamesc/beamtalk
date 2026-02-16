@@ -19,16 +19,16 @@ main([]) ->
 
     %% Ensure beamtalk binary is built
     CargoCmd = case os:type() of
-        {win32, _} -> "cargo.exe build --bin beamtalk --quiet";
-        _          -> "cargo build --bin beamtalk --quiet 2>/dev/null"
+        {win32, _} -> "cargo.exe build --bin beamtalk --quiet 2>&1";
+        _          -> "cargo build --bin beamtalk --quiet 2>&1"
     end,
-    os:cmd(CargoCmd),
+    CargoOutput = os:cmd(CargoCmd),
 
     %% Verify the binary exists
     case filelib:is_regular(Beamtalk) of
         true -> ok;
         false ->
-            io:format(standard_error, "beamtalk binary not found at ~s (cargo build may have failed)~n", [Beamtalk]),
+            io:format(standard_error, "beamtalk binary not found at ~s (cargo build may have failed)~nCargo output:~n~s~n", [Beamtalk, CargoOutput]),
             halt(1)
     end,
 
@@ -88,5 +88,13 @@ copy_to_build_dirs(RepoRoot, SrcFile, FileName) ->
     Dirs = filelib:wildcard(Pattern),
     lists:foreach(fun(Dir) ->
         Dest = filename:join(Dir, FileName),
-        file:copy(SrcFile, Dest)
+        case file:copy(SrcFile, Dest) of
+            {ok, _BytesCopied} ->
+                ok;
+            {error, Reason} ->
+                io:format(standard_error,
+                          "Failed to copy ~s to ~s: ~p~n",
+                          [SrcFile, Dest, Reason]),
+                halt(1)
+        end
     end, Dirs).
