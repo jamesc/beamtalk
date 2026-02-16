@@ -24,6 +24,7 @@ Module {
             ),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: [],
             methods: [
                 MethodDefinition {
@@ -79,6 +80,7 @@ Module {
             ),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: [],
             methods: [
                 MethodDefinition {
@@ -134,6 +136,7 @@ Module {
             ),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: [],
             methods: [
                 MethodDefinition {

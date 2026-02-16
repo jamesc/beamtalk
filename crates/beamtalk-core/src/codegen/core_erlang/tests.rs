@@ -1981,6 +1981,7 @@ fn test_class_registration_generation() {
         superclass: Some(Identifier::new("Actor", Span::new(0, 5))),
         is_abstract: false,
         is_sealed: false,
+        is_typed: false,
         state: vec![StateDeclaration {
             name: Identifier::new("value", Span::new(0, 5)),
             default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 1))),
@@ -2160,6 +2161,7 @@ fn test_multiple_classes_registration() {
             superclass: Some(Identifier::new("Actor", Span::new(0, 5))),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![StateDeclaration {
                 name: Identifier::new(field, Span::new(0, field_len)),
                 default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 1))),
@@ -2489,6 +2491,7 @@ fn test_is_actor_class_direct_actor_subclass() {
         superclass: Some(Identifier::new("Actor", Span::new(0, 0))),
         is_abstract: false,
         is_sealed: false,
+        is_typed: false,
         state: vec![],
         methods: vec![],
         class_methods: vec![],
@@ -2514,6 +2517,7 @@ fn test_is_actor_class_object_subclass_is_value_type() {
         superclass: Some(Identifier::new("Object", Span::new(0, 0))),
         is_abstract: false,
         is_sealed: false,
+        is_typed: false,
         state: vec![],
         methods: vec![],
         class_methods: vec![],
@@ -2541,6 +2545,7 @@ fn test_is_actor_class_multi_level_inheritance() {
         superclass: Some(Identifier::new("Actor", Span::new(0, 0))),
         is_abstract: false,
         is_sealed: false,
+        is_typed: false,
         state: vec![],
         methods: vec![],
         class_methods: vec![],
@@ -2553,6 +2558,7 @@ fn test_is_actor_class_multi_level_inheritance() {
         superclass: Some(Identifier::new("Counter", Span::new(0, 0))),
         is_abstract: false,
         is_sealed: false,
+        is_typed: false,
         state: vec![],
         methods: vec![],
         class_methods: vec![],
@@ -2598,6 +2604,7 @@ fn test_is_actor_class_unknown_superclass_defaults_to_actor() {
         superclass: Some(Identifier::new("Counter", Span::new(0, 0))),
         is_abstract: false,
         is_sealed: false,
+        is_typed: false,
         state: vec![],
         methods: vec![],
         class_methods: vec![],
@@ -2624,6 +2631,7 @@ fn test_is_actor_class_collection_subclass_is_value_type() {
         superclass: Some(Identifier::new("Collection", Span::new(0, 0))),
         is_abstract: false,
         is_sealed: false,
+        is_typed: false,
         state: vec![],
         methods: vec![],
         class_methods: vec![],
@@ -2654,6 +2662,7 @@ fn test_is_actor_class_integer_subclass_is_value_type() {
         superclass: Some(Identifier::new("Integer", Span::new(0, 0))),
         is_abstract: false,
         is_sealed: false,
+        is_typed: false,
         state: vec![],
         methods: vec![],
         class_methods: vec![],
@@ -2683,6 +2692,7 @@ fn test_is_actor_class_root_class_is_value_type() {
         superclass: None,
         is_abstract: true,
         is_sealed: false,
+        is_typed: false,
         state: vec![],
         methods: vec![],
         class_methods: vec![],
@@ -2965,5 +2975,36 @@ fn test_string_interpolation_integer_expression() {
     assert!(
         code.contains("'printString'"),
         "Should dispatch printString on integer. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_as_type_erasure() {
+    // `x asType: Integer` should erase to just the receiver `x`
+    let mut generator = CoreErlangGenerator::new("test");
+    let receiver = Expression::Identifier(Identifier::new("x", Span::new(0, 1)));
+    let selector = MessageSelector::Keyword(vec![KeywordPart::new("asType:", Span::new(2, 9))]);
+    let arguments = vec![Expression::ClassReference {
+        name: Identifier::new("Integer", Span::new(10, 17)),
+        span: Span::new(10, 17),
+    }];
+
+    let doc = generator
+        .generate_message_send(&receiver, &selector, &arguments)
+        .unwrap();
+    let output = doc.to_pretty_string();
+    // asType: should be erased — no dispatch, no beamtalk_message_dispatch
+    assert!(
+        !output.contains("beamtalk_message_dispatch"),
+        "asType: should be erased, not dispatched. Got: {output}"
+    );
+    assert!(
+        !output.contains("asType"),
+        "asType: should not appear in generated code. Got: {output}"
+    );
+    // The output should just be the variable reference
+    assert!(
+        output.contains('x') || output.contains("_x"),
+        "asType: should generate only the receiver expression. Got: {output}"
     );
 }

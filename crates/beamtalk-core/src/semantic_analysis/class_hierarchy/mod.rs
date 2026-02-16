@@ -76,6 +76,9 @@ pub struct ClassInfo {
     pub is_sealed: bool,
     /// Whether this class is abstract.
     pub is_abstract: bool,
+    /// Whether this class has the explicit `typed` modifier.
+    /// Use `ClassHierarchy::is_typed()` to check inherited typed status.
+    pub is_typed: bool,
     /// State (instance variable) names.
     pub state: Vec<EcoString>,
     /// Methods defined directly on this class (instance-side).
@@ -151,6 +154,20 @@ impl ClassHierarchy {
     #[must_use]
     pub fn is_abstract(&self, name: &str) -> bool {
         self.classes.get(name).is_some_and(|info| info.is_abstract)
+    }
+
+    /// Returns true if the named class requires type annotations (typed modifier
+    /// on itself or any ancestor). Walks the superclass chain on demand.
+    #[must_use]
+    pub fn is_typed(&self, name: &str) -> bool {
+        if self.classes.get(name).is_some_and(|info| info.is_typed) {
+            return true;
+        }
+        self.superclass_chain(name).iter().any(|s| {
+            self.classes
+                .get(s.as_str())
+                .is_some_and(|info| info.is_typed)
+        })
     }
 
     /// Returns the ordered superclass chain for a class (excluding the class itself).
@@ -591,6 +608,7 @@ impl ClassHierarchy {
                 superclass: class.superclass.as_ref().map(|s| s.name.clone()),
                 is_sealed: class.is_sealed,
                 is_abstract: class.is_abstract,
+                is_typed: class.is_typed,
                 state: class.state.iter().map(|s| s.name.name.clone()).collect(),
                 methods: class
                     .methods
@@ -887,6 +905,7 @@ mod tests {
             superclass: Some(Identifier::new(superclass, test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![StateDeclaration {
                 name: Identifier::new("count", test_span()),
                 type_annotation: None,
@@ -1034,6 +1053,7 @@ mod tests {
             superclass: Some(Identifier::new(superclass, test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: crate::ast::MessageSelector::Unary(method_name.into()),
@@ -1218,6 +1238,7 @@ mod tests {
                 superclass: Some("B".into()),
                 is_sealed: false,
                 is_abstract: false,
+                is_typed: false,
                 state: vec![],
                 methods: vec![builtin_method("methodA", 0, "A")],
                 class_methods: vec![],
@@ -1231,6 +1252,7 @@ mod tests {
                 superclass: Some("A".into()),
                 is_sealed: false,
                 is_abstract: false,
+                is_typed: false,
                 state: vec![],
                 methods: vec![builtin_method("methodB", 0, "B")],
                 class_methods: vec![],
@@ -1256,6 +1278,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: crate::ast::MessageSelector::Unary("baseMethod".into()),
@@ -1277,6 +1300,7 @@ mod tests {
             superclass: Some(Identifier::new("Base", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: crate::ast::MessageSelector::Unary("derivedMethod".into()),
@@ -1342,6 +1366,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![
                 MethodDefinition {
@@ -1395,6 +1420,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![],
             class_methods: vec![
@@ -1445,6 +1471,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![
                 MethodDefinition {
@@ -1494,6 +1521,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![
                 MethodDefinition {
@@ -1543,6 +1571,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![
                 MethodDefinition {
@@ -1593,6 +1622,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![
                 MethodDefinition {
@@ -1642,6 +1672,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![
                 MethodDefinition {
@@ -1682,5 +1713,94 @@ mod tests {
 
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("Duplicate method"));
+    }
+
+    // --- Typed class inheritance tests (BT-587) ---
+
+    #[test]
+    fn typed_class_is_typed() {
+        let mut class = make_class_with_sealed_method("StrictCounter", "Actor", "increment", false);
+        class.is_typed = true;
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        assert!(
+            hierarchy.is_typed("StrictCounter"),
+            "explicitly typed class should be typed"
+        );
+    }
+
+    #[test]
+    fn typed_class_inheritance() {
+        // Parent is typed, child inherits typed
+        let mut parent = make_class_with_sealed_method("TypedParent", "Actor", "method", false);
+        parent.is_typed = true;
+
+        let child = make_class_with_sealed_method("UntypedChild", "TypedParent", "method", false);
+
+        let module = Module {
+            classes: vec![parent, child],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+
+        assert!(hierarchy.is_typed("TypedParent"), "parent should be typed");
+        assert!(
+            hierarchy.is_typed("UntypedChild"),
+            "child of typed class should inherit typed"
+        );
+    }
+
+    #[test]
+    fn typed_class_inheritance_reverse_order() {
+        // Child defined BEFORE typed parent — should still inherit typed
+        let mut parent = make_class_with_sealed_method("TypedParent", "Actor", "method", false);
+        parent.is_typed = true;
+
+        let child = make_class_with_sealed_method("UntypedChild", "TypedParent", "method", false);
+
+        // Note: child comes first in the vec! (reverse definition order)
+        let module = Module {
+            classes: vec![child, parent],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+
+        assert!(hierarchy.is_typed("TypedParent"), "parent should be typed");
+        assert!(
+            hierarchy.is_typed("UntypedChild"),
+            "child of typed class should inherit typed even when defined before parent"
+        );
+    }
+
+    #[test]
+    fn non_typed_class_not_inherited() {
+        // Parent is NOT typed, child should not be typed
+        let parent = make_class_with_sealed_method("Parent", "Actor", "method", false);
+        let child = make_class_with_sealed_method("Child", "Parent", "method", false);
+
+        let module = Module {
+            classes: vec![parent, child],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+
+        assert!(!hierarchy.is_typed("Parent"));
+        assert!(!hierarchy.is_typed("Child"));
     }
 }
