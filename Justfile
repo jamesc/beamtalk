@@ -20,8 +20,11 @@ default:
 # Run local CI checks (build, lint, unit, integration & E2E tests)
 ci: build lint test test-stdlib test-integration test-mcp test-e2e
 
-# Full clean and rebuild everything
-clean-all: clean clean-erlang
+# Clean all build artifacts (Rust, Erlang, VS Code, caches, examples)
+clean: clean-rust clean-erlang clean-vscode
+    @rm -rf runtime/_build 2>/dev/null || true
+    @rm -rf target/llvm-cov 2>/dev/null || true
+    @rm -rf examples/build 2>/dev/null || true
     @echo "✅ All build artifacts cleaned"
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -58,7 +61,7 @@ build-erlang:
     @cd runtime && rebar3 compile 2>&1 | grep -v "===>" || true
     @echo "✅ Erlang build complete"
 
-# Build standard library (lib/*.bt → BEAM)
+# Build standard library (lib/*.bt → BEAM, incremental — skips if up to date)
 build-stdlib: build-rust build-erlang
     @echo "🔨 Building standard library..."
     @cargo run --bin beamtalk --quiet -- build-stdlib
@@ -325,7 +328,7 @@ coverage-stdlib: build-stdlib
 
 # Generate combined Erlang coverage (eunit + E2E + stdlib)
 # Runs eunit with --cover, then E2E with cover, then stdlib with cover, then merges all into one report.
-coverage-combined: coverage-runtime coverage-e2e coverage-stdlib
+coverage-all: coverage-runtime coverage-e2e coverage-stdlib
     #!/usr/bin/env bash
     set -euo pipefail
     cd runtime
@@ -400,7 +403,7 @@ coverage-runtime-open:
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Clean Rust build artifacts (works with Docker volume mounts)
-clean:
+clean-rust:
     @echo "🧹 Cleaning Rust artifacts..."
     @if [ -d target ]; then find target -mindepth 1 -maxdepth 1 -exec rm -rf {} +; fi 2>/dev/null || true
     @echo "  ✅ Cleaned target/"
@@ -411,13 +414,12 @@ clean-erlang:
     cd runtime && rebar3 clean
     @echo "  ✅ Cleaned runtime/_build/"
 
-# Deep clean (removes repo-local caches, coverage, examples)
-deep-clean: clean clean-erlang
-    @echo "🧹 Deep cleaning repo artifacts..."
-    @rm -rf runtime/_build 2>/dev/null || true
-    @rm -rf target/llvm-cov 2>/dev/null || true
-    @rm -rf examples/build 2>/dev/null || true
-    @echo "  ✅ Deep clean complete"
+# Clean VS Code extension build artifacts
+clean-vscode:
+    @echo "🧹 Cleaning VS Code extension artifacts..."
+    @rm -rf editors/vscode/out 2>/dev/null || true
+    @rm -rf editors/vscode/node_modules 2>/dev/null || true
+    @echo "  ✅ Cleaned editors/vscode/{out,node_modules}/"
 
 # Purge global Cargo cache (affects all Rust projects!)
 purge-cargo-cache:
@@ -516,7 +518,7 @@ check-tools:
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Prepare for release (run all checks)
-pre-release: clean-all ci coverage
+pre-release: clean ci coverage
     @echo "✅ Pre-release checks passed"
 
 # Install beamtalk to PREFIX (default: /usr/local)

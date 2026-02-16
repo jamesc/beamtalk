@@ -1695,7 +1695,7 @@ just test-runtime            # Erlang runtime tests only
 
 # Advanced
 just test-all                # All tests (unit + stdlib + E2E + runtime)
-just clean                   # Clean build artifacts (works with Docker volumes)
+just clean                   # Clean all build artifacts (Rust, Erlang, VS Code)
 just coverage                # Generate coverage reports
 just fuzz [DURATION]         # Fuzz parser for crash safety (default: 60s, needs nightly)
 ```
