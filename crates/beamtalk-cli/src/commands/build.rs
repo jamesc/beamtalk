@@ -9,6 +9,8 @@ use miette::{Context, IntoDiagnostic, Result};
 use std::fs;
 use tracing::{debug, error, info, instrument};
 
+use super::manifest;
+
 /// Build beamtalk source files.
 ///
 /// This command compiles .bt files to .beam bytecode via Core Erlang.
@@ -39,6 +41,16 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
 
     // Create build directory relative to project root
     let build_dir = project_root.join("build");
+
+    // Look for package manifest
+    let manifest = manifest::find_manifest(&project_root)?;
+    if let Some(ref pkg) = manifest {
+        info!(name = %pkg.name, version = %pkg.version, "Found package manifest");
+        debug!(?pkg, "Package manifest details");
+    } else {
+        debug!("No beamtalk.toml found, using default behavior");
+    }
+
     debug!("Creating build directory: {}", build_dir);
     std::fs::create_dir_all(&build_dir)
         .into_diagnostic()
