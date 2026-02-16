@@ -401,6 +401,18 @@ dispatch_signal_raises_test() ->
             ?assertEqual(does_not_understand, Inner#beamtalk_error.kind)
     end.
 
+dispatch_signal_colon_raises_test() ->
+    Ex = make_test_exception(),
+    try
+        beamtalk_exception_handler:dispatch('signal:', [<<"custom msg">>], Ex),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(signal, Inner#beamtalk_error.kind),
+            ?assertEqual(<<"custom msg">>, Inner#beamtalk_error.message),
+            ?assertEqual('RuntimeError', Inner#beamtalk_error.class)
+    end.
+
 dispatch_unknown_selector_raises_test() ->
     Ex = make_test_exception(),
     try

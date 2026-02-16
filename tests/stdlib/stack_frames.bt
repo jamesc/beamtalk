@@ -43,3 +43,27 @@
 // StackFrame printString returns a String
 [42 noSuchMethod] on: Exception do: [:e | (e stackTrace first printString) class]
 // => String
+
+// StackFrame describe returns same as printString
+[42 noSuchMethod] on: Exception do: [:e | (e stackTrace first describe) class]
+// => String
+
+// StackFrame line returns Integer or nil
+[42 noSuchMethod] on: Exception do: [:e | (e stackTrace first line) class]
+// => _
+
+// StackFrame file returns String or nil
+[42 noSuchMethod] on: Exception do: [:e | (e stackTrace first file) class]
+// => _
+
+// StackFrame moduleName returns a String or nil
+[42 noSuchMethod] on: Exception do: [:e | (e stackTrace first moduleName) class]
+// => _
+
+// StackFrame receiverClass from does_not_understand
+[42 noSuchMethod] on: Exception do: [:e | (e stackTrace first receiverClass) class]
+// => _
+
+// StackFrame sourceLocation returns a String or nil
+[42 noSuchMethod] on: Exception do: [:e | (e stackTrace first sourceLocation) class]
+// => _
