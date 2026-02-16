@@ -605,6 +605,7 @@ BEAMTALK_NODE_NAME=beamtalk_custom@localhost
 ## Documentation
 
 📚 **[Documentation Index](docs/README.md)** — Start here for a guided tour
+🌐 **[API Reference](https://jamesc.github.io/beamtalk/)** — Standard library API docs (auto-generated)
 
 ### Core Documents
 
