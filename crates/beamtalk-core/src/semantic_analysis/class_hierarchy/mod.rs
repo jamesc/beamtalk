@@ -638,7 +638,31 @@ impl ClassHierarchy {
             self.classes.insert(class.name.name.clone(), class_info);
         }
 
+        self.propagate_typed_inheritance();
+
         diagnostics
+    }
+
+    /// Propagates `is_typed` through superclass chains (order-independent).
+    ///
+    /// After all classes are registered, this ensures that subclasses of typed
+    /// classes inherit the `is_typed` flag regardless of definition order.
+    fn propagate_typed_inheritance(&mut self) {
+        let class_names: Vec<EcoString> = self.classes.keys().cloned().collect();
+        for name in &class_names {
+            if self.classes.get(name).is_some_and(|info| info.is_typed) {
+                continue;
+            }
+            let inherited = self
+                .superclass_chain(name)
+                .iter()
+                .any(|s| self.classes.get(s).is_some_and(|info| info.is_typed));
+            if inherited {
+                if let Some(info) = self.classes.get_mut(name) {
+                    info.is_typed = true;
+                }
+            }
+        }
     }
 }
 
@@ -1752,6 +1776,34 @@ mod tests {
         assert!(
             hierarchy.get_class("UntypedChild").unwrap().is_typed,
             "child of typed class should inherit typed"
+        );
+    }
+
+    #[test]
+    fn typed_class_inheritance_reverse_order() {
+        // Child defined BEFORE typed parent — should still inherit typed
+        let mut parent = make_class_with_sealed_method("TypedParent", "Actor", "method", false);
+        parent.is_typed = true;
+
+        let child = make_class_with_sealed_method("UntypedChild", "TypedParent", "method", false);
+
+        // Note: child comes first in the vec! (reverse definition order)
+        let module = Module {
+            classes: vec![child, parent],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+
+        assert!(
+            hierarchy.get_class("TypedParent").unwrap().is_typed,
+            "parent should be typed"
+        );
+        assert!(
+            hierarchy.get_class("UntypedChild").unwrap().is_typed,
+            "child of typed class should inherit typed even when defined before parent"
         );
     }
 

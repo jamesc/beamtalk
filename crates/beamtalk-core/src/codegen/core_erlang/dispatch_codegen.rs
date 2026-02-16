@@ -93,10 +93,7 @@ impl CoreErlangGenerator {
         // Compile-time type assertion: `expr asType: SomeClass` (ADR 0025 Phase 2b)
         // Erased at codegen — generates only the receiver expression (zero runtime cost)
         if let MessageSelector::Keyword(parts) = selector {
-            if parts.len() == 1
-                && parts[0].keyword == "asType:"
-                && arguments.len() == 1
-            {
+            if parts.len() == 1 && parts[0].keyword == "asType:" && arguments.len() == 1 {
                 return self.expression_doc(receiver);
             }
         }
