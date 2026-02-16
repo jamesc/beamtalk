@@ -18,8 +18,8 @@ echo "minimal failing code" > test.bt
 beamtalk build test.bt
 
 # 4. Add debug output in relevant layer
-# For parser: add dbg!(&ast) in source_analysis/parser/mod.rs
-# For codegen: add dbg!(&expr) in codegen/core_erlang/
+# For parser: add dbg!(&ast) in crates/beamtalk-core/src/source_analysis/parser/mod.rs
+# For codegen: add dbg!(&expr) in crates/beamtalk-core/src/codegen/core_erlang/
 ```
 
 ## Runtime Errors
@@ -33,17 +33,16 @@ cat build/module_name.core | less
 # - Pattern matches (case ... of)
 # - Error calls (call 'erlang':'error')
 
-# 2. Test in Erlang shell directly
-cd build
-erl
-1> c(module_name).
-2> module_name:function_name(Args).
+# 2. Test generated BEAM in Erlang shell
+# Single-file build outputs to ./build with bt@ prefix
+erl -pa build
+1> 'bt@module_name':function_name(Args).
 
 # 3. Enable Erlang debug traces
-3> dbg:tracer().
-4> dbg:p(all, c).
-5> dbg:tpl(module_name, '_', []).
-6> module_name:function_name(Args).
+2> dbg:tracer().
+3> dbg:p(all, c).
+4> dbg:tpl('bt@module_name', '_', []).
+5> 'bt@module_name':function_name(Args).
 ```
 
 ## Test Failures
@@ -120,10 +119,13 @@ beamtalk repl
 > Beamtalk allClasses
 > Beamtalk classNamed: #Counter
 
-# 2. Enable verbose mode
-beamtalk repl --verbose
+# 2. Enable CLI diagnostics for the REPL
+RUST_LOG=beamtalk=debug beamtalk repl
 
-# 3. Check actor state
+# 3. Run the node in the foreground (no daemonization)
+beamtalk repl --foreground
+
+# 4. Check actor state
 > c := Counter spawn
 > c class
 > c respondsTo: #increment
@@ -142,14 +144,15 @@ erl -name debug@127.0.0.1 -setcookie beamtalk
 # 1. Profile compilation
 time beamtalk build large_file.bt
 
-# 2. Profile runtime
-beamtalk repl
-> :timer.tc(fun() -> Counter spawn end).
+# 2. Profile runtime (connect Erlang shell to running node)
+# Start REPL in one terminal, then in another:
+erl -remsh beamtalk@localhost -name profiler@localhost
+1> timer:tc(fun() -> 'bt@counter':spawn() end).
 {TimeInMicroseconds, Result}
 
-# 3. Check memory usage
-> observer:start().
-# Memory tab, see allocation by process
+# 3. Check memory usage (Observer in Erlang shell)
+1> observer:start().
+% Use the Memory tab to see allocation by process
 
 # 4. Flame graphs (advanced)
 # Enable Erlang profiling
