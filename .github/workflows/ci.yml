@@ -34,7 +34,47 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  # ─── Fast checks on all platforms ──────────────────────────────────────
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build Rust
+        run: cargo build --all-targets --quiet
+
+      - name: Clippy
+        run: cargo clippy --all-targets --quiet -- -D warnings
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Test Rust (unit + integration)
+        run: cargo test --all-targets
+
+  # ─── Full test suite on Linux only (requires Erlang/OTP) ──────────────
+  test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -44,8 +84,6 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
 
       - name: Install Erlang/OTP
         uses: erlef/setup-beam@v1
@@ -87,12 +125,6 @@ jobs:
 
       - name: Build standard library
         run: just build-stdlib
-
-      - name: Clippy
-        run: just clippy
-
-      - name: Format check
-        run: just fmt-check
 
       - name: Check for Erlang changes
         id: erlang-changes
