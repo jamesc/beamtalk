@@ -1305,3 +1305,112 @@ ensure_error_callback_module() ->
     {ok, _, Bin} = compile:forms(Forms),
     {module, _} = code:load_binary(beamtalk_actor_tests_error_callback, "test", Bin),
     ok.
+
+%%% ============================================================================
+%%% Actor Lifecycle Tests (async_send/sync_send wrappers)
+%%% ============================================================================
+
+async_send_is_alive_on_live_actor_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    Future = beamtalk_future:new(),
+    beamtalk_actor:async_send(Counter, isAlive, [], Future),
+    Result = beamtalk_future:await(Future),
+    ?assertEqual(true, Result),
+    gen_server:stop(Counter).
+
+async_send_is_alive_on_dead_actor_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    gen_server:stop(Counter),
+    timer:sleep(10),
+    Future = beamtalk_future:new(),
+    beamtalk_actor:async_send(Counter, isAlive, [], Future),
+    Result = beamtalk_future:await(Future),
+    ?assertEqual(false, Result).
+
+async_send_stop_live_actor_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    Future = beamtalk_future:new(),
+    beamtalk_actor:async_send(Counter, stop, [], Future),
+    Result = beamtalk_future:await(Future),
+    ?assertEqual(ok, Result),
+    timer:sleep(10),
+    ?assertNot(is_process_alive(Counter)).
+
+async_send_stop_dead_actor_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    gen_server:stop(Counter),
+    timer:sleep(10),
+    Future = beamtalk_future:new(),
+    beamtalk_actor:async_send(Counter, stop, [], Future),
+    Result = beamtalk_future:await(Future),
+    ?assertEqual(ok, Result).
+
+async_send_to_dead_actor_rejects_future_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    gen_server:stop(Counter),
+    timer:sleep(10),
+    Future = beamtalk_future:new(),
+    beamtalk_actor:async_send(Counter, increment, [], Future),
+    %% Future should be rejected with actor_dead error
+    ?assertThrow({future_rejected, _}, beamtalk_future:await(Future, 500)).
+
+%%% ============================================================================
+%%% terminate/2 Tests
+%%% ============================================================================
+
+terminate_returns_ok_test() ->
+    State = #{
+        '$beamtalk_class' => 'TestActor',
+        '__methods__' => #{}
+    },
+    ?assertEqual(ok, beamtalk_actor:terminate(normal, State)),
+    ?assertEqual(ok, beamtalk_actor:terminate(shutdown, State)),
+    ?assertEqual(ok, beamtalk_actor:terminate({error, reason}, State)).
+
+%%% ============================================================================
+%%% make_self/1 Tests
+%%% ============================================================================
+
+make_self_creates_object_ref_test() ->
+    State = #{
+        '$beamtalk_class' => 'Counter',
+        '__methods__' => #{}
+    },
+    Self = beamtalk_actor:make_self(State),
+    ?assertMatch(#beamtalk_object{class = 'Counter'}, Self).
+
+%%% ============================================================================
+%%% sync_send Tests
+%%% ============================================================================
+
+sync_send_is_alive_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    ?assertEqual(true, beamtalk_actor:sync_send(Counter, isAlive, [])),
+    gen_server:stop(Counter),
+    timer:sleep(10),
+    ?assertEqual(false, beamtalk_actor:sync_send(Counter, isAlive, [])).
+
+sync_send_stop_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    ?assertEqual(ok, beamtalk_actor:sync_send(Counter, stop, [])),
+    timer:sleep(10),
+    ?assertNot(is_process_alive(Counter)).
+
+sync_send_stop_dead_actor_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    gen_server:stop(Counter),
+    timer:sleep(10),
+    ?assertEqual(ok, beamtalk_actor:sync_send(Counter, stop, [])).
+
+sync_send_monitor_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    Ref = beamtalk_actor:sync_send(Counter, monitor, []),
+    ?assert(is_reference(Ref)),
+    gen_server:stop(Counter).
+
+sync_send_to_dead_actor_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    gen_server:stop(Counter),
+    timer:sleep(10),
+    Result = beamtalk_actor:sync_send(Counter, getValue, []),
+    ?assertMatch({error, #beamtalk_error{kind = actor_dead}}, Result).
