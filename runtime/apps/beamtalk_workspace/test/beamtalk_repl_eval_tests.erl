@@ -641,10 +641,10 @@ compile_expr_noproc_test() ->
     Result = beamtalk_repl_eval:compile_expression_via_port("1+2", test_mod, #{}),
     ?assertMatch({error, _}, Result).
 
-compile_expr_timeout_test() ->
+compile_expr_noproc_with_env_test() ->
     %% compile_expression_via_port calls beamtalk_compiler which isn't started,
-    %% so it hits exit:{noproc, _}. To test timeout, we'd need a mock.
-    %% Instead, verify the function handles missing compiler gracefully.
+    %% so it hits exit:{noproc, _} rather than the timeout path.
+    %% This test verifies the function handles a missing compiler gracefully.
     Result = beamtalk_repl_eval:compile_expression_via_port("hello", test_mod2, #{x => 1}),
     ?assertMatch({error, _}, Result).
 

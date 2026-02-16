@@ -273,19 +273,18 @@ struct ProcessManager {
 /// polls for a signal file to trigger graceful shutdown with cover export.
 /// The non-cover path delegates to the shared `repl_startup` module (BT-390)
 /// so the E2E startup matches production exactly.
-fn beam_eval_cmd(cover: bool, ebin: &str, signal: &str, export: &str) -> String {
+fn beam_eval_cmd(
+    cover: bool,
+    ebin: &str,
+    workspace_ebin: &str,
+    signal: &str,
+    export: &str,
+) -> String {
     if cover {
         // Cover mode wraps instrumentation BEFORE starting the workspace.
         // Cover-compiling must happen before the workspace supervisor spawns
         // the acceptor process, otherwise spawned closures use uninstrumented code.
-        // Derive workspace ebin from runtime ebin path (sibling OTP app).
-        let workspace_ebin = ebin.replace("beamtalk_runtime/ebin", "beamtalk_workspace/ebin");
         let prelude = repl_startup::startup_prelude(REPL_PORT);
-        // Split the prelude at the supervisor start — we need cover before that
-        // The prelude has ensure_all_started and then start_link. We need cover
-        // after ensure_all_started but before start_link.
-        // Actually, we need to instrument after the apps are loaded but before
-        // the supervisor spawns processes. Start cover before the prelude entirely.
         format!(
             "cover:start(), \
              case cover:compile_beam_directory(\"{ebin}\") of \
@@ -293,7 +292,7 @@ fn beam_eval_cmd(cover: bool, ebin: &str, signal: &str, export: &str) -> String 
                  _ -> ok \
              end, \
              case cover:compile_beam_directory(\"{workspace_ebin}\") of \
-                 {{error, R2}} -> io:format(standard_error, \"Cover compile workspace failed: ~p~n\", [R2]); \
+                 {{error, R2}} -> io:format(standard_error, \"Cover compile workspace failed: ~p~n\", [R2]), halt(1); \
                  _ -> ok \
              end, \
              {prelude}, \
@@ -380,6 +379,10 @@ impl ProcessManager {
                 .runtime_ebin
                 .to_str()
                 .expect("ebin path must be UTF-8"),
+            paths
+                .workspace_ebin
+                .to_str()
+                .expect("workspace ebin path must be UTF-8"),
             cover_signal_path
                 .to_str()
                 .expect("signal path must be UTF-8"),

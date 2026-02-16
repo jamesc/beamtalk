@@ -1277,9 +1277,9 @@ tcp_integration_test_() ->
           %% BT-523: gen_server callback tests
           {"get port", fun() -> tcp_get_port_test(Port) end},
           {"get nonce", fun() -> tcp_get_nonce_test(Port) end},
-          {"unknown gen_server call", fun() -> tcp_unknown_call_test() end},
-          {"gen_server cast", fun() -> tcp_cast_test() end},
-          {"gen_server info unknown", fun() -> tcp_info_unknown_test2() end},
+          {"unknown gen_server call", fun() -> tcp_unknown_call_check() end},
+          {"gen_server cast", fun() -> tcp_cast_check() end},
+          {"gen_server info unknown", fun() -> tcp_info_unknown_check2() end},
           {"health op", fun() -> tcp_health_op_test(Port) end},
           {"start_link integer port", fun() -> tcp_start_link_integer_test() end},
           %% BT-523: session ID uniqueness test
@@ -1690,32 +1690,25 @@ tcp_get_nonce_test(_Port) ->
     ?assert(is_binary(Nonce)),
     ?assertEqual(16, byte_size(Nonce)).
 
-tcp_unknown_call_test() ->
+tcp_unknown_call_check() ->
     %% Covers handle_call(_Request, _From, State) clause (line 106-108)
-    %% Only runs inside the TCP fixture where the server is registered
-    case whereis(beamtalk_repl_server) of
-        undefined -> ok;  %% Skip when run outside fixture
-        _ ->
-            Result = gen_server:call(beamtalk_repl_server, some_unknown_request),
-            ?assertEqual({error, unknown_request}, Result)
-    end.
+    Pid = whereis(beamtalk_repl_server),
+    ?assert(is_pid(Pid)),
+    Result = gen_server:call(beamtalk_repl_server, some_unknown_request),
+    ?assertEqual({error, unknown_request}, Result).
 
-tcp_cast_test() ->
+tcp_cast_check() ->
     %% Covers handle_cast(_Msg, State) clause (line 112)
-    case whereis(beamtalk_repl_server) of
-        undefined -> ok;
-        _ ->
-            ok = gen_server:cast(beamtalk_repl_server, some_unknown_message)
-    end.
+    Pid = whereis(beamtalk_repl_server),
+    ?assert(is_pid(Pid)),
+    ok = gen_server:cast(beamtalk_repl_server, some_unknown_message).
 
-tcp_info_unknown_test2() ->
+tcp_info_unknown_check2() ->
     %% Covers handle_info(_Info, State) catch-all clause (line 129)
-    case whereis(beamtalk_repl_server) of
-        undefined -> ok;
-        _ ->
-            beamtalk_repl_server ! some_random_message,
-            timer:sleep(50)
-    end.
+    Pid = whereis(beamtalk_repl_server),
+    ?assert(is_pid(Pid)),
+    beamtalk_repl_server ! some_random_message,
+    timer:sleep(50).
 
 tcp_health_op_test(Port) ->
     %% Covers handle_op(<<"health">>, ...) which exercises get_nonce/0 (lines 714-725)
@@ -2254,9 +2247,12 @@ write_port_file_with_workspace_test() ->
     Result = beamtalk_repl_server:write_port_file(<<"test_ws_627">>, 9999, <<"abc123">>),
     ?assertEqual(ok, Result),
     %% Clean up if file was created
-    Home = os:getenv("HOME"),
-    PortFile = filename:join([Home, ".beamtalk", "workspaces", "test_ws_627", "port"]),
-    file:delete(PortFile).
+    case beamtalk_platform:home_dir() of
+        false -> ok;
+        Home ->
+            PortFile = filename:join([Home, ".beamtalk", "workspaces", "test_ws_627", "port"]),
+            file:delete(PortFile)
+    end.
 
 %% ===================================================================
 %% gen_server callback direct tests (BT-627)
