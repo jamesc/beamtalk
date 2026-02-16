@@ -340,7 +340,7 @@ struct MethodMeta {
     selector: String,
     /// Number of arguments the method accepts.
     arity: usize,
-    /// Method dispatch kind (primary, before, after, around).
+    /// Method dispatch kind.
     kind: MethodKindMeta,
     /// Whether this method is sealed (cannot be overridden).
     is_sealed: bool,
@@ -354,10 +354,10 @@ enum MethodKindMeta {
 
 impl MethodKindMeta {
     /// Convert from the AST method kind representation.
-    fn from_ast(_kind: beamtalk_core::ast::MethodKind) -> Self {
-        // Only Primary is currently produced by the parser.
-        // Before/After/Around are reserved for future use.
-        Self::Primary
+    fn from_ast(kind: beamtalk_core::ast::MethodKind) -> Self {
+        match kind {
+            beamtalk_core::ast::MethodKind::Primary => Self::Primary,
+        }
     }
 
     /// Return the Rust expression string for this kind (used in codegen output).
