@@ -65,6 +65,7 @@ tokio = { version = "1", features = ["full"] }
 
 # Testing
 insta = { version = "1", features = ["yaml"] }
+proptest = "1"
 
 [workspace.lints.rust]
 missing_debug_implementations = "warn"
