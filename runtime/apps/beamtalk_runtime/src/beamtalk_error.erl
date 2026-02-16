@@ -14,6 +14,8 @@
 
 -export([
     new/2,
+    new/3,
+    new/4,
     with_message/2,
     with_selector/2,
     with_hint/2,
@@ -44,6 +46,16 @@ new(Kind, Class) ->
         hint = undefined,
         details = #{}
     }.
+
+%% @doc Create a new error with kind, class, and selector.
+-spec new(atom(), atom(), atom()) -> #beamtalk_error{}.
+new(Kind, Class, Selector) ->
+    with_selector(new(Kind, Class), Selector).
+
+%% @doc Create a new error with kind, class, selector, and hint.
+-spec new(atom(), atom(), atom(), binary()) -> #beamtalk_error{}.
+new(Kind, Class, Selector, Hint) ->
+    with_hint(new(Kind, Class, Selector), Hint).
 
 %% @doc Set the message on an existing error.
 %%

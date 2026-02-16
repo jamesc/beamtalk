@@ -63,11 +63,10 @@ dispatch_test_() ->
           {"dispatch errors are always 2-tuples", fun test_error_tuple_shape/0},
           {"super finds inherited reflection method", fun test_super_finds_inherited/0},
           {"responds_to existing method", fun test_responds_to_existing_method/0},
-          {"responds_to missing method", fun test_responds_to_missing_method/0},
-          {"responds_to nonexistent class", fun test_responds_to_nonexistent_class/0},
-          {"responds_to inherited method", fun test_responds_to_inherited_method/0},
-          {"invoke_with_combinations delegates", fun test_invoke_with_combinations_delegates/0},
-          {"extension error propagation", fun test_extension_error_propagation/0},
+           {"responds_to missing method", fun test_responds_to_missing_method/0},
+           {"responds_to nonexistent class", fun test_responds_to_nonexistent_class/0},
+           {"responds_to inherited method", fun test_responds_to_inherited_method/0},
+           {"extension error propagation", fun test_extension_error_propagation/0},
           {"responds_to extension method", fun test_responds_to_extension_method/0},
           {"BT-283: flattened table performance", fun test_flattened_table_performance/0},
           {"BT-283: flattened table memory overhead", fun test_flattened_table_memory_overhead/0},
@@ -323,20 +322,6 @@ test_responds_to_inherited_method() ->
     ok = ensure_counter_loaded(),
     %% 'class' is defined in Object (inherited through Actor -> Counter)
     ?assert(beamtalk_dispatch:responds_to(class, 'Counter')).
-
-%% Test invoke_with_combinations delegates to lookup (placeholder implementation)
-test_invoke_with_combinations_delegates() ->
-    ok = ensure_counter_loaded(),
-
-    State = #{
-        '$beamtalk_class' => 'Counter',
-        'value' => 0
-    },
-    Self = make_ref(),
-
-    %% invoke_with_combinations should behave same as lookup (TODO: combinations not implemented)
-    Result = beamtalk_dispatch:invoke_with_combinations(increment, [], Self, State, 'Counter'),
-    ?assertMatch({reply, _Result, _NewState}, Result).
 
 %% Test extension method error propagation
 test_extension_error_propagation() ->
