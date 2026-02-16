@@ -18,6 +18,12 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "commands": [
+      {
+        "command": "beamtalk.restartServer",
+        "title": "Beamtalk: Restart Language Server"
+      }
+    ],
     "languages": [
       {
         "id": "beamtalk",
@@ -41,6 +47,12 @@
           "type": "string",
           "default": "",
           "description": "Override path to the beamtalk-lsp binary. Leave empty to use the bundled server."
+        },
+        "beamtalk.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "Trace communication between VS Code and the Beamtalk language server."
         }
       }
     }

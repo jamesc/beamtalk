@@ -91,6 +91,12 @@ impl LanguageServer for Backend {
     /// Called after the client acknowledges initialization.
     async fn initialized(&self, _: InitializedParams) {
         debug!("beamtalk-lsp initialized");
+        self.client
+            .log_message(
+                tower_lsp::lsp_types::MessageType::INFO,
+                "Beamtalk language server ready",
+            )
+            .await;
     }
 
     /// Handles a graceful shutdown request from the client.
