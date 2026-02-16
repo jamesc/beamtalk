@@ -74,7 +74,6 @@ impl Parser {
                 superclass,
                 is_abstract,
                 is_sealed,
-                is_typed,
                 Vec::new(),
                 Vec::new(),
                 start,
@@ -109,11 +108,11 @@ impl Parser {
             superclass,
             is_abstract,
             is_sealed,
-            is_typed,
             state,
             methods,
             span,
         );
+        class_def.is_typed = is_typed;
         class_def.class_methods = class_methods;
         class_def.class_variables = class_variables;
         class_def.doc_comment = doc_comment;

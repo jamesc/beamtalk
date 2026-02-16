@@ -1420,12 +1420,11 @@ mod tests {
     #[test]
     fn test_typed_class_warns_on_missing_param_annotation() {
         // typed class with untyped parameter
-        let class_def = ClassDefinition::with_modifiers(
+        let mut class_def = ClassDefinition::with_modifiers(
             ident("StrictCounter"),
             Some(ident("Actor")),
             false,
             false,
-            true, // is_typed
             vec![],
             vec![MethodDefinition::new(
                 MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
@@ -1435,6 +1434,7 @@ mod tests {
             )],
             span(),
         );
+        class_def.is_typed = true;
         let module = make_module_with_classes(vec![], vec![class_def]);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
@@ -1444,19 +1444,22 @@ mod tests {
             .iter()
             .filter(|d| d.message.contains("Missing type annotation for parameter"))
             .collect();
-        assert_eq!(warnings.len(), 1, "should warn about untyped param `amount`");
+        assert_eq!(
+            warnings.len(),
+            1,
+            "should warn about untyped param `amount`"
+        );
         assert!(warnings[0].message.contains("amount"));
     }
 
     #[test]
     fn test_typed_class_warns_on_missing_return_type() {
         // typed class with method missing return type
-        let class_def = ClassDefinition::with_modifiers(
+        let mut class_def = ClassDefinition::with_modifiers(
             ident("StrictCounter"),
             Some(ident("Actor")),
             false,
             false,
-            true, // is_typed
             vec![],
             vec![MethodDefinition::new(
                 MessageSelector::Unary("increment".into()),
@@ -1466,6 +1469,7 @@ mod tests {
             )],
             span(),
         );
+        class_def.is_typed = true;
         let module = make_module_with_classes(vec![], vec![class_def]);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
@@ -1481,12 +1485,11 @@ mod tests {
     #[test]
     fn test_typed_class_no_warning_when_fully_annotated() {
         // typed class with fully annotated method
-        let class_def = ClassDefinition::with_modifiers(
+        let mut class_def = ClassDefinition::with_modifiers(
             ident("StrictCounter"),
             Some(ident("Actor")),
             false,
             false,
-            true, // is_typed
             vec![],
             vec![MethodDefinition::with_return_type(
                 MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
@@ -1500,6 +1503,7 @@ mod tests {
             )],
             span(),
         );
+        class_def.is_typed = true;
         let module = make_module_with_classes(vec![], vec![class_def]);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
@@ -1523,7 +1527,6 @@ mod tests {
             Some(ident("Actor")),
             false,
             false,
-            false, // NOT typed
             vec![],
             vec![MethodDefinition::new(
                 MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
@@ -1551,12 +1554,11 @@ mod tests {
     #[test]
     fn test_typed_class_skips_primitive_methods() {
         // typed class with @primitive method — no warnings
-        let class_def = ClassDefinition::with_modifiers(
+        let mut class_def = ClassDefinition::with_modifiers(
             ident("StrictInteger"),
             Some(ident("Object")),
             false,
             false,
-            true, // is_typed
             vec![],
             vec![MethodDefinition::new(
                 MessageSelector::Binary("+".into()),
@@ -1570,6 +1572,7 @@ mod tests {
             )],
             span(),
         );
+        class_def.is_typed = true;
         let module = make_module_with_classes(vec![], vec![class_def]);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
