@@ -190,6 +190,11 @@ fn walk_module_expressions(
             }
         }
     }
+    for standalone in &module.method_definitions {
+        for expr in &standalone.method.body {
+            walk_expression(expr, hierarchy, diagnostics, visitor);
+        }
+    }
 }
 
 /// Recursively walks an expression tree, calling `visitor` on each node
@@ -531,6 +536,18 @@ pub(crate) fn check_empty_method_bodies(module: &Module, diagnostics: &mut Vec<D
                     Some("Add an expression after `=>`, or remove the method if unneeded".into());
                 diagnostics.push(diag);
             }
+        }
+    }
+    for standalone in &module.method_definitions {
+        if standalone.method.body.is_empty() {
+            let selector = standalone.method.selector.name();
+            let mut diag = Diagnostic::warning(
+                format!("Method `{selector}` has an empty body and will return `self`"),
+                standalone.method.span,
+            );
+            diag.hint =
+                Some("Add an expression after `=>`, or remove the method if unneeded".into());
+            diagnostics.push(diag);
         }
     }
 }
