@@ -12,6 +12,7 @@
 *.erl text eol=lf
 *.hrl text eol=lf
 *.core text eol=lf
+*.app.src text eol=lf
 
 # Shell scripts
 *.sh text eol=lf
