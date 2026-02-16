@@ -216,11 +216,30 @@ impl Analyser {
             Match { value, arms, .. } => {
                 self.collect_captures_and_mutations(value, captures, mutations);
                 for arm in arms {
-                    // Analyze guard if present
+                    // Extract pattern-bound variable names so we can exclude them
+                    // from captures. Without this, a pattern variable with the same
+                    // name as an outer-scope variable would be incorrectly treated
+                    // as a captured variable (BT-655).
+                    let (bindings, _) =
+                        crate::semantic_analysis::extract_pattern_bindings(&arm.pattern);
+                    let pattern_names: std::collections::HashSet<&str> =
+                        bindings.iter().map(|b| b.name.as_str()).collect();
+
+                    // Collect this arm's captures separately so we can filter them
+                    let mut arm_captures = Vec::new();
                     if let Some(guard) = &arm.guard {
-                        self.collect_captures_and_mutations(guard, captures, mutations);
+                        self.collect_captures_and_mutations(guard, &mut arm_captures, mutations);
                     }
-                    self.collect_captures_and_mutations(&arm.body, captures, mutations);
+                    self.collect_captures_and_mutations(&arm.body, &mut arm_captures, mutations);
+
+                    // Only keep captures that aren't pattern-bound variables
+                    for cap in arm_captures {
+                        if !pattern_names.contains(cap.name.as_str())
+                            && !captures.iter().any(|c| c.name == cap.name)
+                        {
+                            captures.push(cap);
+                        }
+                    }
                 }
             }
 
