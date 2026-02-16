@@ -20,6 +20,7 @@
 
 -export([start/2, stop/1]).
 
+%% @private
 %% @doc Start the workspace application and register actor spawn callback.
 -spec start(application:start_type(), term()) -> {ok, pid()} | {error, term()}.
 start(_StartType, _StartArgs) ->
@@ -31,6 +32,7 @@ start(_StartType, _StartArgs) ->
     %% Start the workspace supervisor tree
     beamtalk_workspace_app_sup:start_link().
 
+%% @private
 %% @doc Stop the workspace application and unregister actor spawn callback.
 -spec stop(term()) -> ok.
 stop(_State) ->

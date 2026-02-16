@@ -182,8 +182,8 @@ migrate_fields(OldState, NewInstanceVars, Module) ->
             OldState
     end.
 
-%% @doc Try to trigger code_change for a single actor via sys:change_code/4.
 %% @private
+%% @doc Try to trigger code_change for a single actor via sys:change_code/4.
 -spec try_change_code(pid(), atom(), term()) -> ok | {error, term()}.
 try_change_code(Pid, Module, Extra) ->
     try
