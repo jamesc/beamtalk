@@ -64,7 +64,17 @@ fn truncated_expression() -> impl Strategy<Value = String> {
         if len <= 1 {
             Just(s).boxed()
         } else {
-            (1..len).prop_map(move |cut| s[..cut].to_string()).boxed()
+            (1..len)
+                .prop_map(move |cut| {
+                    // Find nearest char boundary to avoid panicking on multi-byte chars
+                    let safe_cut = s.floor_char_boundary(cut);
+                    if safe_cut == 0 {
+                        s.clone()
+                    } else {
+                        s[..safe_cut].to_string()
+                    }
+                })
+                .boxed()
         }
     })
 }
@@ -181,6 +191,14 @@ fn module_has_error_nodes(module: &Module) -> bool {
                     .class_methods
                     .iter()
                     .any(|m| m.body.iter().any(has_error_node))
+                || cls
+                    .state
+                    .iter()
+                    .any(|s| s.default_value.as_ref().is_some_and(has_error_node))
+                || cls
+                    .class_variables
+                    .iter()
+                    .any(|s| s.default_value.as_ref().is_some_and(has_error_node))
         })
         || module
             .method_definitions
