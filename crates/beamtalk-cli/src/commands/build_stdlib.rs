@@ -350,32 +350,20 @@ struct MethodMeta {
 enum MethodKindMeta {
     /// Standard method dispatch.
     Primary,
-    /// Runs before the primary method.
-    Before,
-    /// Runs after the primary method.
-    After,
-    /// Wraps the primary method, controlling its execution.
-    Around,
 }
 
 impl MethodKindMeta {
     /// Convert from the AST method kind representation.
-    fn from_ast(kind: beamtalk_core::ast::MethodKind) -> Self {
-        match kind {
-            beamtalk_core::ast::MethodKind::Primary => Self::Primary,
-            beamtalk_core::ast::MethodKind::Before => Self::Before,
-            beamtalk_core::ast::MethodKind::After => Self::After,
-            beamtalk_core::ast::MethodKind::Around => Self::Around,
-        }
+    fn from_ast(_kind: beamtalk_core::ast::MethodKind) -> Self {
+        // Only Primary is currently produced by the parser.
+        // Before/After/Around are reserved for future use.
+        Self::Primary
     }
 
     /// Return the Rust expression string for this kind (used in codegen output).
     fn to_rust_expr(&self) -> &'static str {
         match self {
             Self::Primary => "MethodKind::Primary",
-            Self::Before => "MethodKind::Before",
-            Self::After => "MethodKind::After",
-            Self::Around => "MethodKind::Around",
         }
     }
 }

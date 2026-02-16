@@ -357,23 +357,15 @@ impl StateDeclaration {
     }
 }
 
-/// The kind of method (primary, before, after, around).
+/// The kind of method.
 ///
-/// Method combinations (from CLOS/Dylan) allow cross-cutting concerns:
-/// - **Before** methods run before the primary method
-/// - **After** methods run after the primary method
-/// - **Around** methods wrap the primary method
+/// Currently only Primary methods exist. Additional kinds (e.g., AOP-style
+/// before/after/around) may be added in the future if needed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum MethodKind {
     /// A normal/primary method.
     #[default]
     Primary,
-    /// A before method - runs before the primary method.
-    Before,
-    /// An after method - runs after the primary method.
-    After,
-    /// An around method - wraps the primary method.
-    Around,
 }
 
 /// A method parameter definition with optional type annotation.
