@@ -74,7 +74,7 @@ function resolveServerPath(context: vscode.ExtensionContext): ResolvedServerPath
 
     warning =
       `Configured beamtalk.server.path does not exist: ${override}. ` +
-      "Falling back to bundled beamtalk-lsp.";
+      "Falling back to bundled beamtalk-lsp (or PATH if bundled binary is missing).";
     // Path-like override was invalid: warn and fall through to bundled/PATH.
   }
 
