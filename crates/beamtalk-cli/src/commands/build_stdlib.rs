@@ -340,7 +340,7 @@ struct MethodMeta {
     selector: String,
     /// Number of arguments the method accepts.
     arity: usize,
-    /// Method dispatch kind (primary, before, after, around).
+    /// Method dispatch kind.
     kind: MethodKindMeta,
     /// Whether this method is sealed (cannot be overridden).
     is_sealed: bool,
@@ -350,12 +350,6 @@ struct MethodMeta {
 enum MethodKindMeta {
     /// Standard method dispatch.
     Primary,
-    /// Runs before the primary method.
-    Before,
-    /// Runs after the primary method.
-    After,
-    /// Wraps the primary method, controlling its execution.
-    Around,
 }
 
 impl MethodKindMeta {
@@ -363,9 +357,6 @@ impl MethodKindMeta {
     fn from_ast(kind: beamtalk_core::ast::MethodKind) -> Self {
         match kind {
             beamtalk_core::ast::MethodKind::Primary => Self::Primary,
-            beamtalk_core::ast::MethodKind::Before => Self::Before,
-            beamtalk_core::ast::MethodKind::After => Self::After,
-            beamtalk_core::ast::MethodKind::Around => Self::Around,
         }
     }
 
@@ -373,9 +364,6 @@ impl MethodKindMeta {
     fn to_rust_expr(&self) -> &'static str {
         match self {
             Self::Primary => "MethodKind::Primary",
-            Self::Before => "MethodKind::Before",
-            Self::After => "MethodKind::After",
-            Self::Around => "MethodKind::Around",
         }
     }
 }

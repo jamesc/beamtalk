@@ -781,7 +781,6 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::MethodKind;
     use crate::source_analysis::lex_with_eof;
 
     /// Helper to parse a string and check for errors.
@@ -1988,52 +1987,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_before_method() {
-        let module = parse_ok(
-            "Actor subclass: Agent
-  before processMessage => Telemetry log: \"processing\"",
-        );
-
-        assert_eq!(module.classes.len(), 1);
-        let class = &module.classes[0];
-        assert_eq!(class.methods.len(), 1);
-
-        let method = &class.methods[0];
-        assert_eq!(method.kind, crate::ast::MethodKind::Before);
-        assert_eq!(method.selector.name(), "processMessage");
-    }
-
-    #[test]
-    fn parse_after_method() {
-        let module = parse_ok(
-            "Actor subclass: Counter
-  after increment => self.observers notify",
-        );
-
-        assert_eq!(module.classes.len(), 1);
-        let class = &module.classes[0];
-        assert_eq!(class.methods.len(), 1);
-
-        let method = &class.methods[0];
-        assert_eq!(method.kind, crate::ast::MethodKind::After);
-    }
-
-    #[test]
-    fn parse_around_method() {
-        let module = parse_ok(
-            "Actor subclass: Cached
-  around calculate => self.cache ifNil: [self.cache := self proceed]",
-        );
-
-        assert_eq!(module.classes.len(), 1);
-        let class = &module.classes[0];
-        assert_eq!(class.methods.len(), 1);
-
-        let method = &class.methods[0];
-        assert_eq!(method.kind, crate::ast::MethodKind::Around);
-    }
-
-    #[test]
     fn parse_return_type_unary() {
         let module = parse_ok(
             "Actor subclass: Counter
@@ -2239,23 +2192,18 @@ mod tests {
   state: name: String
 
   increment => self.value := self.value + 1
-  decrement => self.value := self.value - 1
-
-  before increment => Telemetry log: \"incrementing\"
-  after increment => self notifyObservers",
+  decrement => self.value := self.value - 1",
         );
 
         assert_eq!(module.classes.len(), 1);
         let class = &module.classes[0];
 
         assert_eq!(class.state.len(), 2);
-        assert_eq!(class.methods.len(), 4);
+        assert_eq!(class.methods.len(), 2);
 
         // Check method kinds
         assert_eq!(class.methods[0].kind, crate::ast::MethodKind::Primary);
         assert_eq!(class.methods[1].kind, crate::ast::MethodKind::Primary);
-        assert_eq!(class.methods[2].kind, crate::ast::MethodKind::Before);
-        assert_eq!(class.methods[3].kind, crate::ast::MethodKind::After);
     }
 
     #[test]
@@ -3216,63 +3164,6 @@ sealed Object subclass: Point
         assert_eq!(
             module.classes[0].doc_comment.as_deref(),
             Some("A sealed value type.")
-        );
-    }
-
-    #[test]
-    fn parse_doc_comment_on_before_method() {
-        let module = parse_ok(
-            "Actor subclass: Counter
-  state: value = 0
-
-  /// Logging before increment.
-  before increment => Transcript show: \"incrementing\"",
-        );
-
-        assert_eq!(module.classes.len(), 1);
-        let method = &module.classes[0].methods[0];
-        assert_eq!(method.kind, MethodKind::Before);
-        assert_eq!(
-            method.doc_comment.as_deref(),
-            Some("Logging before increment.")
-        );
-    }
-
-    #[test]
-    fn parse_doc_comment_on_after_method() {
-        let module = parse_ok(
-            "Actor subclass: Counter
-  state: value = 0
-
-  /// Logging after increment.
-  after increment => Transcript show: \"done\"",
-        );
-
-        assert_eq!(module.classes.len(), 1);
-        let method = &module.classes[0].methods[0];
-        assert_eq!(method.kind, MethodKind::After);
-        assert_eq!(
-            method.doc_comment.as_deref(),
-            Some("Logging after increment.")
-        );
-    }
-
-    #[test]
-    fn parse_doc_comment_on_around_method() {
-        let module = parse_ok(
-            "Actor subclass: Counter
-  state: value = 0
-
-  /// Wrapping around increment.
-  around increment => self.value := self.value + 1",
-        );
-
-        assert_eq!(module.classes.len(), 1);
-        let method = &module.classes[0].methods[0];
-        assert_eq!(method.kind, MethodKind::Around);
-        assert_eq!(
-            method.doc_comment.as_deref(),
-            Some("Wrapping around increment.")
         );
     }
 
