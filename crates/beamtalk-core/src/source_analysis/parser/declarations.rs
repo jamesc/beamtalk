@@ -4,7 +4,7 @@
 //! Declaration parsing for Beamtalk.
 //!
 //! This module handles parsing of top-level declarations including:
-//! - Class definitions with modifiers (`abstract`, `sealed`)
+//! - Class definitions with modifiers (`abstract`, `sealed`, `typed`)
 //! - State (field) declarations with types and default values
 //! - Method definitions with advice modifiers (`before`, `after`, `around`)
 
@@ -25,7 +25,7 @@ impl Parser {
     ///
     /// Syntax:
     /// ```text
-    /// abstract? sealed? <Superclass> subclass: <ClassName>
+    /// abstract? sealed? typed? <Superclass> subclass: <ClassName>
     ///   state: fieldName = defaultValue
     ///   state: fieldName: TypeName = defaultValue
     ///
