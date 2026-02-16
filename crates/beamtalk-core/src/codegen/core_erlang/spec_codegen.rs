@@ -53,7 +53,7 @@ fn type_annotation_to_spec(annotation: &TypeAnnotation) -> String {
         TypeAnnotation::Simple(id) => simple_type_to_spec(id.name.as_str()),
         TypeAnnotation::Union { types, .. } => {
             let type_specs: Vec<String> = types.iter().map(type_annotation_to_spec).collect();
-            format!("{{'type', 0, 'union', [{}]}}", join_comma(&type_specs))
+            format!("{{'type', 0, 'union', [{}]}}", join_with_cons(&type_specs))
         }
         TypeAnnotation::Singleton { name, .. } => {
             format!("{{'atom', 0, '{name}'}}")
@@ -91,7 +91,7 @@ fn simple_type_to_spec(name: &str) -> String {
 }
 
 /// Joins type spec strings into a comma-separated Core Erlang list.
-fn join_comma(specs: &[String]) -> String {
+fn join_with_cons(specs: &[String]) -> String {
     specs.join(", ")
 }
 
@@ -148,7 +148,10 @@ pub fn generate_method_spec(method: &MethodDefinition, is_value_type: bool) -> O
     let product = if param_types.is_empty() {
         "{'type', 0, 'product', []}".to_string()
     } else {
-        format!("{{'type', 0, 'product', [{}]}}", join_comma(&param_types))
+        format!(
+            "{{'type', 0, 'product', [{}]}}",
+            join_with_cons(&param_types)
+        )
     };
 
     // Full spec: {{'name', arity}, [{'type', 0, 'fun', [Product, Return]}]}

@@ -25,7 +25,7 @@ sealed Number subclass: Integer
   /// 3 + 4         // => 7
   /// -1 + 1        // => 0
   /// ```
-  + other => @primitive "+"
+  + other: Number -> Integer => @primitive "+"
 
   /// Subtract an integer from the receiver.
   ///
@@ -34,7 +34,7 @@ sealed Number subclass: Integer
   /// 10 - 3        // => 7
   /// 0 - 5         // => -5
   /// ```
-  - other => @primitive "-"
+  - other: Number -> Integer => @primitive "-"
 
   /// Multiply the receiver by an integer.
   ///
@@ -43,7 +43,7 @@ sealed Number subclass: Integer
   /// 6 * 7         // => 42
   /// -3 * 4        // => -12
   /// ```
-  * other => @primitive "*"
+  * other: Number -> Integer => @primitive "*"
 
   /// Divide the receiver by an integer (integer division).
   ///
@@ -52,7 +52,7 @@ sealed Number subclass: Integer
   /// 10 / 3        // => 3
   /// 42 / 7        // => 6
   /// ```
-  / other => @primitive "/"
+  / other: Number -> Integer => @primitive "/"
 
   /// Remainder after integer division.
   ///
@@ -61,7 +61,7 @@ sealed Number subclass: Integer
   /// 17 % 5        // => 2
   /// 10 % 3        // => 1
   /// ```
-  % other => @primitive "%"
+  % other: Number -> Integer => @primitive "%"
 
   /// Raise the receiver to a power.
   ///
@@ -70,7 +70,7 @@ sealed Number subclass: Integer
   /// 2 ** 10       // => 1024
   /// 3 ** 3        // => 27
   /// ```
-  ** other => @primitive "**"
+  ** other: Number -> Integer => @primitive "**"
 
   /// Test strict equality with another integer.
   ///
@@ -79,7 +79,7 @@ sealed Number subclass: Integer
   /// 42 =:= 42       // => true
   /// 1 =:= 2         // => false
   /// ```
-  =:= other => @primitive "=:="
+  =:= other: Number -> Boolean => @primitive "=:="
 
   /// Test inequality with another integer.
   ///
@@ -88,7 +88,7 @@ sealed Number subclass: Integer
   /// 1 /= 2        // => true
   /// 42 /= 42      // => false
   /// ```
-  /= other => @primitive "/="
+  /= other: Number -> Boolean => @primitive "/="
 
   /// Test if the receiver is less than another integer.
   ///
@@ -97,7 +97,7 @@ sealed Number subclass: Integer
   /// 1 < 2         // => true
   /// 5 < 3         // => false
   /// ```
-  < other => @primitive "<"
+  < other: Number -> Boolean => @primitive "<"
 
   /// Test if the receiver is greater than another integer.
   ///
@@ -106,7 +106,7 @@ sealed Number subclass: Integer
   /// 5 > 3         // => true
   /// 1 > 2         // => false
   /// ```
-  > other => @primitive ">"
+  > other: Number -> Boolean => @primitive ">"
 
   /// Test if the receiver is less than or equal to another integer.
   ///
@@ -115,7 +115,7 @@ sealed Number subclass: Integer
   /// 1 <= 2        // => true
   /// 3 <= 3        // => true
   /// ```
-  <= other => @primitive "<="
+  <= other: Number -> Boolean => @primitive "<="
 
   /// Test if the receiver is greater than or equal to another integer.
   ///
@@ -124,7 +124,7 @@ sealed Number subclass: Integer
   /// 5 >= 3        // => true
   /// 3 >= 3        // => true
   /// ```
-  >= other => @primitive ">="
+  >= other: Number -> Boolean => @primitive ">="
 
   /// Negate the receiver.
   ///
@@ -133,7 +133,7 @@ sealed Number subclass: Integer
   /// 5 negated     // => -5
   /// -3 negated    // => 3
   /// ```
-  negated => 0 - self
+  negated -> Integer => 0 - self
 
   /// Absolute value of the receiver.
   ///
@@ -142,7 +142,7 @@ sealed Number subclass: Integer
   /// -42 abs       // => 42
   /// 7 abs         // => 7
   /// ```
-  abs => (self < 0) ifTrue: [self negated] ifFalse: [self]
+  abs -> Integer => (self < 0) ifTrue: [self negated] ifFalse: [self]
 
   /// Test if the receiver is even.
   ///
@@ -151,7 +151,7 @@ sealed Number subclass: Integer
   /// 4 isEven      // => true
   /// 7 isEven      // => false
   /// ```
-  isEven => (self % 2) =:= 0
+  isEven -> Boolean => (self % 2) =:= 0
 
   /// Test if the receiver is odd.
   ///
@@ -160,7 +160,7 @@ sealed Number subclass: Integer
   /// 7 isOdd       // => true
   /// 4 isOdd       // => false
   /// ```
-  isOdd => (self % 2) /= 0
+  isOdd -> Boolean => (self % 2) /= 0
 
   /// Return the smaller of the receiver and `other`.
   ///
@@ -169,7 +169,7 @@ sealed Number subclass: Integer
   /// 3 min: 7      // => 3
   /// 10 min: 2     // => 2
   /// ```
-  min: other => (self < other) ifTrue: [self] ifFalse: [other]
+  min: other: Number -> Integer => (self < other) ifTrue: [self] ifFalse: [other]
 
   /// Return the larger of the receiver and `other`.
   ///
@@ -178,7 +178,7 @@ sealed Number subclass: Integer
   /// 3 max: 7      // => 7
   /// 10 max: 2     // => 10
   /// ```
-  max: other => (self > other) ifTrue: [self] ifFalse: [other]
+  max: other: Number -> Integer => (self > other) ifTrue: [self] ifFalse: [other]
 
   /// Evaluate `block` the receiver number of times.
   ///
@@ -186,7 +186,7 @@ sealed Number subclass: Integer
   /// ```beamtalk
   /// 3 timesRepeat: [Transcript show: "hi"]
   /// ```
-  timesRepeat: block => @intrinsic timesRepeat
+  timesRepeat: block: Block -> Nil => @intrinsic timesRepeat
 
   /// Iterate from the receiver to `end`, evaluating `block` with each value.
   ///
@@ -194,7 +194,7 @@ sealed Number subclass: Integer
   /// ```beamtalk
   /// 1 to: 3 do: [:i | Transcript show: i]
   /// ```
-  to: end do: block => @intrinsic toDo
+  to: end do: block: Block -> Nil => @intrinsic toDo
 
   /// Iterate from the receiver to `end` by `step`, evaluating `block` with each value.
   ///
@@ -202,7 +202,7 @@ sealed Number subclass: Integer
   /// ```beamtalk
   /// 1 to: 10 by: 3 do: [:i | Transcript show: i]
   /// ```
-  to: end by: step do: block => @intrinsic toByDo
+  to: end by: step do: block: Block -> Nil => @intrinsic toByDo
 
   /// Convert the receiver to a Float.
   ///
@@ -210,7 +210,7 @@ sealed Number subclass: Integer
   /// ```beamtalk
   /// 42 asFloat    // => 42.0
   /// ```
-  asFloat => @primitive "asFloat"
+  asFloat -> Float => @primitive "asFloat"
 
   /// Convert the receiver to its String representation.
   ///
@@ -218,7 +218,7 @@ sealed Number subclass: Integer
   /// ```beamtalk
   /// 42 asString   // => "42"
   /// ```
-  asString => @primitive "asString"
+  asString -> String => @primitive "asString"
 
   /// Return a developer-readable string representation.
   ///
@@ -226,7 +226,7 @@ sealed Number subclass: Integer
   /// ```beamtalk
   /// 42 printString  // => "42"
   /// ```
-  printString => @primitive "printString"
+  printString -> String => @primitive "printString"
 
   /// Human-readable description of the receiver.
   ///
@@ -234,7 +234,7 @@ sealed Number subclass: Integer
   /// ```beamtalk
   /// 42 describe   // => "42"
   /// ```
-  describe => self asString
+  describe -> String => self asString
 
   /// Bitwise AND with another integer.
   ///
@@ -242,7 +242,7 @@ sealed Number subclass: Integer
   /// ```beamtalk
   /// 12 bitAnd: 10   // => 8
   /// ```
-  bitAnd: other => @primitive "bitAnd:"
+  bitAnd: other: Integer -> Integer => @primitive "bitAnd:"
 
   /// Bitwise OR with another integer.
   ///
@@ -250,7 +250,7 @@ sealed Number subclass: Integer
   /// ```beamtalk
   /// 12 bitOr: 10    // => 14
   /// ```
-  bitOr: other => @primitive "bitOr:"
+  bitOr: other: Integer -> Integer => @primitive "bitOr:"
 
   /// Bitwise XOR with another integer.
   ///
@@ -258,7 +258,7 @@ sealed Number subclass: Integer
   /// ```beamtalk
   /// 12 bitXor: 10   // => 6
   /// ```
-  bitXor: other => @primitive "bitXor:"
+  bitXor: other: Integer -> Integer => @primitive "bitXor:"
 
   /// Bit shift the receiver by `n` positions. Positive shifts left, negative shifts right.
   ///
@@ -267,7 +267,7 @@ sealed Number subclass: Integer
   /// 1 bitShift: 4   // => 16
   /// 16 bitShift: -2 // => 4
   /// ```
-  bitShift: n => @primitive "bitShift:"
+  bitShift: n: Integer -> Integer => @primitive "bitShift:"
 
   /// Bitwise complement of the receiver.
   ///
@@ -275,7 +275,7 @@ sealed Number subclass: Integer
   /// ```beamtalk
   /// 0 bitNot        // => -1
   /// ```
-  bitNot => @primitive "bitNot"
+  bitNot -> Integer => @primitive "bitNot"
 
   /// Factorial of the receiver. Raises an error for negative integers.
   ///
@@ -284,7 +284,7 @@ sealed Number subclass: Integer
   /// 5 factorial     // => 120
   /// 0 factorial     // => 1
   /// ```
-  factorial => (self < 0) ifTrue: [self error: "Factorial is undefined for negative integers"] ifFalse: [(self =:= 0) ifTrue: [1] ifFalse: [self * (self - 1) factorial]]
+  factorial -> Integer => (self < 0) ifTrue: [self error: "Factorial is undefined for negative integers"] ifFalse: [(self =:= 0) ifTrue: [1] ifFalse: [self * (self - 1) factorial]]
 
   /// Greatest common divisor of the receiver and `other`.
   ///
@@ -293,7 +293,7 @@ sealed Number subclass: Integer
   /// 12 gcd: 8       // => 4
   /// 7 gcd: 5        // => 1
   /// ```
-  gcd: other => (other =:= 0) ifTrue: [self abs] ifFalse: [other gcd: (self % other)]
+  gcd: other: Integer -> Integer => (other =:= 0) ifTrue: [self abs] ifFalse: [other gcd: (self % other)]
 
   /// Least common multiple of the receiver and `other`.
   ///
@@ -302,7 +302,7 @@ sealed Number subclass: Integer
   /// 4 lcm: 6        // => 12
   /// 3 lcm: 5        // => 15
   /// ```
-  lcm: other => (self gcd: other) =:= 0 ifTrue: [0] ifFalse: [(((self abs) / (self gcd: other)) rounded) * (other abs)]
+  lcm: other: Integer -> Integer => (self gcd: other) =:= 0 ifTrue: [0] ifFalse: [(((self abs) / (self gcd: other)) rounded) * (other abs)]
 
   /// Test if the codepoint is a Unicode letter.
   ///
@@ -311,7 +311,7 @@ sealed Number subclass: Integer
   /// 65 isLetter     // => true
   /// 48 isLetter     // => false
   /// ```
-  isLetter => @primitive "isLetter"
+  isLetter -> Boolean => @primitive "isLetter"
 
   /// Test if the codepoint is a Unicode digit.
   ///
@@ -320,7 +320,7 @@ sealed Number subclass: Integer
   /// 48 isDigit      // => true
   /// 65 isDigit      // => false
   /// ```
-  isDigit => @primitive "isDigit"
+  isDigit -> Boolean => @primitive "isDigit"
 
   /// Test if the codepoint is an uppercase letter.
   ///
@@ -329,7 +329,7 @@ sealed Number subclass: Integer
   /// 65 isUppercase  // => true
   /// 97 isUppercase  // => false
   /// ```
-  isUppercase => @primitive "isUppercase"
+  isUppercase -> Boolean => @primitive "isUppercase"
 
   /// Test if the codepoint is a lowercase letter.
   ///
@@ -338,7 +338,7 @@ sealed Number subclass: Integer
   /// 97 isLowercase  // => true
   /// 65 isLowercase  // => false
   /// ```
-  isLowercase => @primitive "isLowercase"
+  isLowercase -> Boolean => @primitive "isLowercase"
 
   /// Test if the codepoint is a whitespace character.
   ///
@@ -347,4 +347,4 @@ sealed Number subclass: Integer
   /// 32 isWhitespace // => true
   /// 65 isWhitespace // => false
   /// ```
-  isWhitespace => @primitive "isWhitespace"
+  isWhitespace -> Boolean => @primitive "isWhitespace"

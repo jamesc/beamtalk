@@ -20,7 +20,7 @@ abstract Object subclass: Number
   /// 0 isZero          // => true
   /// 5 isZero          // => false
   /// ```
-  isZero => self =:= 0
+  isZero -> Boolean => self =:= 0
 
   /// Test if the receiver is positive (greater than zero).
   ///
@@ -30,7 +30,7 @@ abstract Object subclass: Number
   /// -3 isPositive     // => false
   /// 0 isPositive      // => false
   /// ```
-  isPositive => self > 0
+  isPositive -> Boolean => self > 0
 
   /// Test if the receiver is negative (less than zero).
   ///
@@ -39,7 +39,7 @@ abstract Object subclass: Number
   /// -3 isNegative     // => true
   /// 5 isNegative      // => false
   /// ```
-  isNegative => self < 0
+  isNegative -> Boolean => self < 0
 
   /// Return 1 for positive, -1 for negative, 0 for zero.
   ///
@@ -49,7 +49,7 @@ abstract Object subclass: Number
   /// -7 sign           // => -1
   /// 0 sign            // => 0
   /// ```
-  sign => (self > 0) ifTrue: [1] ifFalse: [(self < 0) ifTrue: [-1] ifFalse: [0]]
+  sign -> Integer => (self > 0) ifTrue: [1] ifFalse: [(self < 0) ifTrue: [-1] ifFalse: [0]]
 
   /// Test if the receiver is between `min` and `max` (inclusive).
   ///
@@ -58,4 +58,4 @@ abstract Object subclass: Number
   /// 5 between: 1 and: 10   // => true
   /// 15 between: 1 and: 10  // => false
   /// ```
-  between: min and: max => (self >= min) and: [self <= max]
+  between: min and: max -> Boolean => (self >= min) and: [self <= max]
