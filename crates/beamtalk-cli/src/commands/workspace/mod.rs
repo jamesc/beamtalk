@@ -681,6 +681,7 @@ fn build_detached_node_command(
 /// fallback — normal operation uses TCP probes for liveness/shutdown.
 /// On non-Unix, returns sentinel PID 0 (force-kill uses `taskkill` with PID
 /// from OS-level process tracking).
+#[cfg_attr(not(unix), allow(clippy::unnecessary_wraps))]
 fn find_beam_pid_by_node(node_name: &str) -> Result<(u32, Option<u64>)> {
     #[cfg(unix)]
     {
