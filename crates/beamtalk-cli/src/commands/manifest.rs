@@ -50,14 +50,7 @@ pub fn parse_manifest(path: &Utf8Path) -> Result<PackageManifest> {
         .wrap_err_with(|| format!("Failed to parse manifest '{path}'"))?;
 
     if let Err(e) = validate_package_name(&manifest.package.name) {
-        let msg = format!("Invalid package name '{}': {e}", manifest.package.name);
-        let suggestion = suggest_package_name(&manifest.package.name);
-        let full_msg = if let Some(ref s) = suggestion {
-            format!("{msg} (try '{s}')")
-        } else {
-            msg
-        };
-        miette::bail!("{full_msg}");
+        miette::bail!("{}", format_name_error(&manifest.package.name, &e));
     }
 
     Ok(manifest.package)
@@ -77,6 +70,15 @@ pub fn find_manifest(project_root: &Utf8Path) -> Result<Option<PackageManifest>>
         parse_manifest(&manifest_path).map(Some)
     } else {
         Ok(None)
+    }
+}
+
+/// Format a package name validation error with an optional suggestion.
+pub fn format_name_error(name: &str, error: &PackageNameError) -> String {
+    let msg = format!("Invalid package name '{name}': {error}");
+    match suggest_package_name(name) {
+        Some(s) => format!("{msg} (try '{s}')"),
+        None => msg,
     }
 }
 
@@ -197,14 +199,17 @@ pub fn validate_package_name(name: &str) -> Result<(), PackageNameError> {
 pub fn suggest_package_name(name: &str) -> Option<String> {
     // Insert underscores before uppercase letters (CamelCase → snake_case)
     let mut expanded = String::new();
-    for (i, c) in name.chars().enumerate() {
-        if c.is_ascii_uppercase() && i > 0 {
-            let prev = name.as_bytes()[i - 1];
-            if prev.is_ascii_lowercase() || prev.is_ascii_digit() {
-                expanded.push('_');
+    let mut prev_char: Option<char> = None;
+    for c in name.chars() {
+        if c.is_ascii_uppercase() {
+            if let Some(p) = prev_char {
+                if p.is_ascii_lowercase() || p.is_ascii_digit() {
+                    expanded.push('_');
+                }
             }
         }
         expanded.push(c);
+        prev_char = Some(c);
     }
 
     let suggested: String = expanded
@@ -624,5 +629,13 @@ version = "0.1.0"
     #[test]
     fn test_suggest_already_valid_returns_none() {
         assert_eq!(suggest_package_name("my_app"), None);
+    }
+
+    #[test]
+    fn test_suggest_unicode_does_not_panic() {
+        // Non-ASCII input should not panic despite char/byte index mismatch
+        let _ = suggest_package_name("café");
+        let _ = suggest_package_name("über_app");
+        let _ = suggest_package_name("日本語");
     }
 }

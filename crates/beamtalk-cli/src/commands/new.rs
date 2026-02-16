@@ -7,19 +7,13 @@ use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::fs;
 
-use super::manifest::{suggest_package_name, validate_package_name};
+use super::manifest::{format_name_error, validate_package_name};
 
 /// Create a new beamtalk project.
 pub fn new_project(name: &str) -> Result<()> {
     // Validate package name before creating anything
     if let Err(e) = validate_package_name(name) {
-        let msg = format!("Package name '{name}' is invalid — {e}");
-        let suggestion = suggest_package_name(name);
-        if let Some(ref s) = suggestion {
-            miette::bail!("{msg} (try '{s}')");
-        } else {
-            miette::bail!("{msg}");
-        }
+        miette::bail!("{}", format_name_error(name, &e));
     }
 
     let project_path = Utf8PathBuf::from(name);
@@ -326,7 +320,7 @@ mod tests {
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
-            err.contains("invalid"),
+            err.contains("Invalid"),
             "error should mention invalid: {err}"
         );
 
