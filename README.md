@@ -36,7 +36,7 @@ config := #{#host => "localhost", #port => 8080}
 | **Async by default** | Message sends return futures; no blocking |
 | **Full reflection** | Inspect any actor's state, mailbox, and methods at runtime |
 | **Runs on BEAM** | Compiles to Core Erlang; deploy to existing OTP infrastructure |
-| **Testing built-in** | SUnit-style TestCase framework with `beamtalk test` |
+| **Testing built-in** | SUnit-style `TestCase` framework with `beamtalk test` |
 
 ---
 
@@ -602,7 +602,7 @@ BEAMTALK_NODE_NAME=beamtalk_custom@localhost
 - ✅ **Cascades** — Multiple messages to same receiver
 - ✅ **Map literals** — `#{key => value}` syntax with Dictionary codegen
 - ✅ **LSP** — Language server with completions, hover, go-to-definition, diagnostics
-- ✅ **Testing** — SUnit-style TestCase framework (`beamtalk test`)
+- ✅ **Testing** — SUnit-style `TestCase` framework (`beamtalk test`)
 
 ### Planned
 
