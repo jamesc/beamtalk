@@ -691,13 +691,15 @@ handle_op(<<"docs">>, Params, Msg, _SessionPid) ->
                                 make_class_not_found_error(ClassName), Msg, fun beamtalk_repl_json:format_error_message/1);
                         {error, {method_not_found, _, _}} ->
                             NameBin = to_binary(ClassName),
+                            SelectorAtom = binary_to_atom(SelectorBin, utf8),
                             Err0 = beamtalk_error:new(does_not_understand, ClassName),
-                            Err1 = beamtalk_error:with_message(Err0,
+                            Err1 = beamtalk_error:with_selector(Err0, SelectorAtom),
+                            Err2 = beamtalk_error:with_message(Err1,
                                 iolist_to_binary([NameBin, <<" does not understand ">>, SelectorBin])),
-                            Err2 = beamtalk_error:with_hint(Err1,
+                            Err3 = beamtalk_error:with_hint(Err2,
                                 iolist_to_binary([<<"Use :help ">>, NameBin, <<" to see available methods.">>])),
                             beamtalk_repl_protocol:encode_error(
-                                Err2, Msg, fun beamtalk_repl_json:format_error_message/1)
+                                Err3, Msg, fun beamtalk_repl_json:format_error_message/1)
                     end
             end
     end;
@@ -1067,17 +1069,19 @@ ensure_structured_error(#beamtalk_error{} = Err) -> Err;
 ensure_structured_error(#{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}) -> Err;
 ensure_structured_error({eval_error, _Class, #{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}}) -> Err;
 ensure_structured_error({eval_error, _Class, #beamtalk_error{} = Err}) -> Err;
-ensure_structured_error({eval_error, Class, Reason}) ->
-    Err0 = beamtalk_error:new(internal_error, 'REPL'),
-    beamtalk_error:with_message(Err0,
-        iolist_to_binary([<<"Evaluation error: ">>, atom_to_binary(Class, utf8), <<": ">>,
-            format_name(Reason)]));
+ensure_structured_error({eval_error, _Class, Reason}) ->
+    %% Delegate to /1 for known tuple patterns; fall back to generic wrapper.
+    ensure_structured_error(Reason);
 ensure_structured_error({compile_error, Msg}) when is_binary(Msg) ->
     Err0 = beamtalk_error:new(compile_error, 'Compiler'),
     beamtalk_error:with_message(Err0, Msg);
 ensure_structured_error({compile_error, Msg}) when is_list(Msg) ->
     Err0 = beamtalk_error:new(compile_error, 'Compiler'),
     beamtalk_error:with_message(Err0, list_to_binary(Msg));
+ensure_structured_error({compile_error, Reason}) ->
+    Err0 = beamtalk_error:new(compile_error, 'Compiler'),
+    beamtalk_error:with_message(Err0,
+        iolist_to_binary([<<"Compile error: ">>, format_name(Reason)]));
 ensure_structured_error({undefined_variable, Name}) ->
     Err0 = beamtalk_error:new(undefined_variable, 'REPL'),
     beamtalk_error:with_message(Err0,
@@ -1115,9 +1119,19 @@ ensure_structured_error(Reason) ->
 
 %% @private
 %% @doc Ensure an error reason is structured, with exception class context.
+%% Delegates known tuple patterns to ensure_structured_error/1 to preserve
+%% specific error kinds, only falling back to generic wrapper for unknown terms.
 -spec ensure_structured_error(term(), atom()) -> #beamtalk_error{}.
 ensure_structured_error(#beamtalk_error{} = Err, _Class) -> Err;
 ensure_structured_error(#{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}, _Class) -> Err;
+ensure_structured_error({compile_error, _} = Reason, _Class) -> ensure_structured_error(Reason);
+ensure_structured_error({eval_error, _, _} = Reason, _Class) -> ensure_structured_error(Reason);
+ensure_structured_error({undefined_variable, _} = Reason, _Class) -> ensure_structured_error(Reason);
+ensure_structured_error({file_not_found, _} = Reason, _Class) -> ensure_structured_error(Reason);
+ensure_structured_error({read_error, _} = Reason, _Class) -> ensure_structured_error(Reason);
+ensure_structured_error({load_error, _} = Reason, _Class) -> ensure_structured_error(Reason);
+ensure_structured_error({parse_error, _} = Reason, _Class) -> ensure_structured_error(Reason);
+ensure_structured_error({invalid_request, _} = Reason, _Class) -> ensure_structured_error(Reason);
 ensure_structured_error(Reason, Class) ->
     Err0 = beamtalk_error:new(internal_error, 'REPL'),
     beamtalk_error:with_message(Err0,
