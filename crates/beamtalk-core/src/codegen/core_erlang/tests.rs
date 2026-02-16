@@ -730,8 +730,8 @@ fn test_generate_repl_module_with_times_repeat_mutation() {
         "Should use arity-2 repeat function (I, StateAcc). Got:\n{code}"
     );
     assert!(
-        code.contains("maps':'put'('count'"),
-        "Should update 'count' in StateAcc. Got:\n{code}"
+        code.contains("maps':'put'('__local__count'"),
+        "Should update '__local__count' in StateAcc. Got:\n{code}"
     );
 }
 
@@ -801,8 +801,8 @@ fn test_generate_repl_module_with_to_do_mutation() {
         "Should use arity-2 loop function (I, StateAcc). Got:\n{code}"
     );
     assert!(
-        code.contains("maps':'put'('total'"),
-        "Should update 'total' in StateAcc. Got:\n{code}"
+        code.contains("maps':'put'('__local__total'"),
+        "Should update '__local__total' in StateAcc. Got:\n{code}"
     );
 }
 
