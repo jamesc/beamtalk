@@ -905,6 +905,37 @@ mod tests {
     }
 
     #[test]
+    fn goto_definition_method_with_self_receiver_resolves_in_class() {
+        let mut service = SimpleLanguageService::new();
+        let file_foo = Utf8PathBuf::from("foo.bt");
+
+        service.update_file(
+            file_foo.clone(),
+            "Object subclass: Foo\n  ping => self other\n  other => 1".to_string(),
+        );
+
+        let def = service.goto_definition(&file_foo, Position::new(1, 15));
+        assert!(def.is_some());
+        assert_eq!(def.unwrap().file, file_foo);
+    }
+
+    #[test]
+    fn goto_definition_method_with_super_receiver_resolves_in_superclass() {
+        let mut service = SimpleLanguageService::new();
+        let file_hierarchy = Utf8PathBuf::from("hierarchy.bt");
+
+        service.update_file(
+            file_hierarchy.clone(),
+            "Object subclass: Foo\n  other => 1\nFoo subclass: Bar\n  ping => super other"
+                .to_string(),
+        );
+
+        let def = service.goto_definition(&file_hierarchy, Position::new(3, 16));
+        assert!(def.is_some());
+        assert_eq!(def.unwrap().file, file_hierarchy);
+    }
+
+    #[test]
     fn find_references_selector_cross_file_unary() {
         let mut service = SimpleLanguageService::new();
         let file_a = Utf8PathBuf::from("a.bt");

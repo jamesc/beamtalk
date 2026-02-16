@@ -339,6 +339,14 @@ pub fn find_selector_in_expr(expr: &Expression, offset: u32) -> Option<(EcoStrin
 }
 
 /// Find selector lookup details at a given byte offset in an expression.
+///
+/// Returns a [`SelectorLookup`] containing:
+/// - full selector name,
+/// - selector span under the cursor, and
+/// - receiver hint used for context-aware method resolution.
+///
+/// Unlike [`find_selector_in_expr`], this API keeps receiver metadata so
+/// callers can resolve class-side/instance-side selector targets.
 pub fn find_selector_lookup_in_expr(expr: &Expression, offset: u32) -> Option<SelectorLookup> {
     let span = expr.span();
     if offset < span.start() || offset >= span.end() {
