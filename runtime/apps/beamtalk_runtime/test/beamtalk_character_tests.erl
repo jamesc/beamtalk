@@ -160,6 +160,24 @@ print_string_basic_test() ->
     ?assertEqual(<<"$0">>, beamtalk_character:print_string($0)).
 
 %%% ============================================================================
+%%% as_string/1 and print_string/1 Edge Cases
+%%% ============================================================================
+
+%% Negative and out-of-range codepoints raise function_clause
+%% (guards reject them — no matching clause exists)
+as_string_negative_test() ->
+    ?assertError(function_clause, beamtalk_character:as_string(-1)).
+
+as_string_out_of_range_test() ->
+    ?assertError(function_clause, beamtalk_character:as_string(16#110000)).
+
+print_string_negative_test() ->
+    ?assertError(function_clause, beamtalk_character:print_string(-1)).
+
+print_string_out_of_range_test() ->
+    ?assertError(function_clause, beamtalk_character:print_string(16#110000)).
+
+%%% ============================================================================
 %%% value/1 Tests
 %%% ============================================================================
 

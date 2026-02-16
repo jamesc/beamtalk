@@ -301,10 +301,11 @@ index_of_not_found_test() ->
 
 each_with_index_test() ->
     Self = self(),
-    beamtalk_list_ops:each_with_index([a, b, c], fun(Elem, Idx) -> Self ! {Elem, Idx} end),
-    ?assertEqual({a, 1}, receive M1 -> M1 after 100 -> timeout end),
-    ?assertEqual({b, 2}, receive M2 -> M2 after 100 -> timeout end),
-    ?assertEqual({c, 3}, receive M3 -> M3 after 100 -> timeout end).
+    Ref = make_ref(),
+    beamtalk_list_ops:each_with_index([a, b, c], fun(Elem, Idx) -> Self ! {Ref, Elem, Idx} end),
+    ?assertEqual({a, 1}, receive {Ref, Elem1, Idx1} -> {Elem1, Idx1} after 100 -> timeout end),
+    ?assertEqual({b, 2}, receive {Ref, Elem2, Idx2} -> {Elem2, Idx2} after 100 -> timeout end),
+    ?assertEqual({c, 3}, receive {Ref, Elem3, Idx3} -> {Elem3, Idx3} after 100 -> timeout end).
 
 each_with_index_returns_nil_test() ->
     ?assertEqual(nil, beamtalk_list_ops:each_with_index([1, 2], fun(_, _) -> ok end)).
