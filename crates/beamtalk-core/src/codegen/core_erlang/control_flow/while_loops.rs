@@ -8,6 +8,8 @@
 //! Generates code for `whileTrue:` and `whileFalse:` loop constructs
 //! with both pure and state-threading variants.
 
+use std::fmt::Write;
+
 use super::super::document::Document;
 use super::super::intrinsics::validate_block_arity_exact;
 use super::super::{CoreErlangGenerator, Result, block_analysis};
@@ -94,37 +96,64 @@ impl CoreErlangGenerator {
             self.repl_loop_mutated = true;
         }
 
-        // Generate: letrec 'while'/1 = fun (StateAcc) ->
-        //     let _CondFun = <condition> in
-        //     case apply _CondFun (StateAcc) of
-        //       'true' -> <body with state threading>
-        //                 apply 'while'/1 (StateAcc')
-        //       'false' -> StateAcc
-        //     end
-        // in apply 'while'/1 (State)
+        // BT-598: Compute threaded locals for actor methods
+        let threaded_locals = self.compute_threaded_locals_for_loop(body, Some(condition));
 
         let cond_var = self.fresh_temp_var("CondFun");
 
-        let mut docs: Vec<Document<'static>> = vec![docvec![
-            "letrec 'while'/1 = fun (StateAcc) -> ",
-            format!("let {cond_var} = fun (StateAcc) -> "),
-        ]];
+        // BT-598: Pack threaded locals into state before starting the loop
+        let initial_state = self.current_state_var();
+        let mut init_state_code = initial_state.clone();
+        let mut pack_prefix = String::new();
+        if !threaded_locals.is_empty() {
+            let mut current = initial_state;
+            for var_name in &threaded_locals {
+                let packed_var = self.fresh_temp_var("Packed");
+                let core_var = self
+                    .lookup_var(var_name)
+                    .cloned()
+                    .unwrap_or_else(|| Self::to_core_erlang_var(var_name));
+                let key = Self::local_state_key(var_name);
+                let _ = write!(
+                    pack_prefix,
+                    "let {packed_var} = call 'maps':'put'('{key}', {core_var}, {current}) in "
+                );
+                current = packed_var;
+            }
+            init_state_code = current;
+        }
+
+        let mut docs: Vec<Document<'static>> = vec![
+            Document::String(pack_prefix),
+            docvec!["letrec 'while'/1 = fun (StateAcc) -> "],
+        ];
+
+        // BT-598: At the start of each loop iteration, read threaded locals from StateAcc.
+        // Use push_scope so bindings don't leak to caller after the letrec.
+        self.push_scope();
+        for var_name in &threaded_locals {
+            let core_var = Self::to_core_erlang_var(var_name);
+            let key = Self::local_state_key(var_name);
+            self.bind_var(var_name, &core_var);
+            docs.push(Document::String(format!(
+                "let {core_var} = call 'maps':'get'('{key}', StateAcc) in "
+            )));
+        }
+
+        docs.push(docvec![format!("let {cond_var} = fun (StateAcc) -> "),]);
 
         // Save and override loop/body context while generating the condition
         let prev_in_loop_body = self.in_loop_body;
         let prev_state_version = self.state_version();
-        self.in_loop_body = true; // Enable StateAcc lookup for condition
-        self.set_state_version(0); // Ensure we refer to plain StateAcc inside the fun
+        self.in_loop_body = true;
+        self.set_state_version(0);
 
-        // Extract block body from condition expression
         if let Expression::Block(cond_block) = condition {
             docs.push(self.generate_block_body(cond_block)?);
         } else {
-            // Fallback: generate as expression (shouldn't happen for whileTrue:)
             docs.push(self.generate_expression(condition)?);
         }
 
-        // Restore prior context so nested loops/conditions behave correctly
         self.in_loop_body = prev_in_loop_body;
         self.set_state_version(prev_state_version);
 
@@ -133,7 +162,6 @@ impl CoreErlangGenerator {
             "<'true'> when 'true' -> ",
         ]);
 
-        // True case: execute body and recurse
         let (body_doc, final_state_version) = self.generate_while_body_with_threading(body, &[])?;
         docs.push(body_doc);
         let final_state_var = if final_state_version == 0 {
@@ -142,18 +170,18 @@ impl CoreErlangGenerator {
             format!("StateAcc{final_state_version}")
         };
 
-        // BT-483: Return {Result, State} tuple
-        // False case: loop terminated, return {nil, StateAcc}
         docs.push(docvec![
             format!(" apply 'while'/1 ({final_state_var}) "),
             "<'false'> when 'true' -> {'nil', StateAcc} ",
             "end ",
         ]);
 
-        // Initial call
-        let prev_state = self.current_state_var();
+        // Pop scope to restore original bindings (before the letrec)
+        self.pop_scope();
+
+        // Initial call with packed state
         docs.push(Document::String(format!(
-            "in apply 'while'/1 ({prev_state})"
+            "in apply 'while'/1 ({init_state_code})"
         )));
 
         Ok(Document::Vec(docs))
@@ -296,20 +324,56 @@ impl CoreErlangGenerator {
             self.repl_loop_mutated = true;
         }
 
-        // Same as while_true but with false/true swapped in the case
+        // BT-598: Compute threaded locals for actor methods
+        let threaded_locals = self.compute_threaded_locals_for_loop(body, Some(condition));
 
         let cond_var = self.fresh_temp_var("CondFun");
 
-        let mut docs: Vec<Document<'static>> = vec![docvec![
-            "letrec 'while'/1 = fun (StateAcc) -> ",
-            format!("let {cond_var} = fun (StateAcc) -> "),
-        ]];
+        // BT-598: Pack threaded locals into state before starting the loop
+        let initial_state = self.current_state_var();
+        let mut init_state_code = initial_state.clone();
+        let mut pack_prefix = String::new();
+        if !threaded_locals.is_empty() {
+            let mut current = initial_state;
+            for var_name in &threaded_locals {
+                let packed_var = self.fresh_temp_var("Packed");
+                let core_var = self
+                    .lookup_var(var_name)
+                    .cloned()
+                    .unwrap_or_else(|| Self::to_core_erlang_var(var_name));
+                let key = Self::local_state_key(var_name);
+                let _ = write!(
+                    pack_prefix,
+                    "let {packed_var} = call 'maps':'put'('{key}', {core_var}, {current}) in "
+                );
+                current = packed_var;
+            }
+            init_state_code = current;
+        }
+
+        let mut docs: Vec<Document<'static>> = vec![
+            Document::String(pack_prefix),
+            docvec!["letrec 'while'/1 = fun (StateAcc) -> "],
+        ];
+
+        // BT-598: At the start of each loop iteration, read threaded locals from StateAcc.
+        self.push_scope();
+        for var_name in &threaded_locals {
+            let core_var = Self::to_core_erlang_var(var_name);
+            let key = Self::local_state_key(var_name);
+            self.bind_var(var_name, &core_var);
+            docs.push(Document::String(format!(
+                "let {core_var} = call 'maps':'get'('{key}', StateAcc) in "
+            )));
+        }
+
+        docs.push(docvec![format!("let {cond_var} = fun (StateAcc) -> "),]);
 
         // Save and override loop/body context while generating the condition
         let prev_in_loop_body = self.in_loop_body;
         let prev_state_version = self.state_version();
-        self.in_loop_body = true; // Enable StateAcc lookup for condition
-        self.set_state_version(0); // Ensure we refer to plain StateAcc inside the fun
+        self.in_loop_body = true;
+        self.set_state_version(0);
 
         if let Expression::Block(cond_block) = condition {
             docs.push(self.generate_block_body(cond_block)?);
@@ -317,7 +381,6 @@ impl CoreErlangGenerator {
             docs.push(self.generate_expression(condition)?);
         }
 
-        // Restore prior context so nested loops/conditions behave correctly
         self.in_loop_body = prev_in_loop_body;
         self.set_state_version(prev_state_version);
 
@@ -335,18 +398,18 @@ impl CoreErlangGenerator {
             format!("StateAcc{final_state_version}")
         };
 
-        // BT-483: Return {Result, State} tuple
-        // TRUE case: loop terminated, return {nil, StateAcc}
         docs.push(docvec![
             format!(" apply 'while'/1 ({final_state_var}) "),
             "<'true'> when 'true' -> {'nil', StateAcc} ",
             "end ",
         ]);
 
-        // Initial call
-        let prev_state = self.current_state_var();
+        // Pop scope to restore original bindings
+        self.pop_scope();
+
+        // Initial call with packed state
         docs.push(Document::String(format!(
-            "in apply 'while'/1 ({prev_state})"
+            "in apply 'while'/1 ({init_state_code})"
         )));
 
         Ok(Document::Vec(docs))

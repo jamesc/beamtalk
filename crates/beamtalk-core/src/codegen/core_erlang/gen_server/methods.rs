@@ -133,6 +133,7 @@ impl CoreErlangGenerator {
         for (i, expr) in method.body.iter().enumerate() {
             let is_last = i == method.body.len() - 1;
             let is_field_assignment = Self::is_field_assignment(expr);
+            let is_local_assignment = Self::is_local_var_assignment(expr);
 
             // Check for early return
             if let Expression::Return { value, .. } = expr {
@@ -217,6 +218,63 @@ impl CoreErlangGenerator {
                 // Field assignment not at end: generate WITHOUT closing the value
                 let doc = self.generate_field_assignment_open(expr)?;
                 docs.push(doc);
+            } else if is_local_assignment {
+                // BT-598: Local variable assignment in method body
+                if let Expression::Assignment { target, value, .. } = expr {
+                    if let Expression::Block(block) = value.as_ref() {
+                        Self::validate_stored_closure(block, format!("{:?}", expr.span()))?;
+                    }
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        let var_name = &id.name;
+                        let core_var = self
+                            .lookup_var(var_name)
+                            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+
+                        // BT-598: If RHS is control flow with mutations, it returns
+                        // {Result, State} — unpack and update state variable.
+                        if self.control_flow_has_mutations(value) {
+                            let tuple_var = self.fresh_temp_var("Tuple");
+                            let next_version = self.state_version() + 1;
+                            let new_state = if next_version == 1 {
+                                "State1".to_string()
+                            } else {
+                                format!("State{next_version}")
+                            };
+                            let value_str = self.expression_doc(value)?;
+                            let mut doc_parts: Vec<Document<'static>> = vec![docvec![
+                                format!("let {tuple_var} = "),
+                                value_str,
+                                format!(
+                                    " in let {core_var} = call 'erlang':'element'(1, {tuple_var}) \
+                                     in let {new_state} = call 'erlang':'element'(2, {tuple_var}) in "
+                                ),
+                            ]];
+                            let _ = self.next_state_var();
+                            self.bind_var(var_name, &core_var);
+
+                            // Extract threaded locals from updated state
+                            if let Some(threaded_vars) = Self::get_control_flow_threaded_vars(value)
+                            {
+                                for var in &threaded_vars {
+                                    let tv_core = self.lookup_var(var).map_or_else(
+                                        || Self::to_core_erlang_var(var),
+                                        String::clone,
+                                    );
+                                    doc_parts.push(Document::String(format!(
+                                        "let {tv_core} = call 'maps':'get'('{}', {new_state}) in ",
+                                        Self::local_state_key(var)
+                                    )));
+                                }
+                            }
+                            docs.push(Document::Vec(doc_parts));
+                        } else {
+                            let value_str = self.expression_doc(value)?;
+                            self.bind_var(var_name, &core_var);
+                            let doc = docvec![format!("let {core_var} = "), value_str, " in ",];
+                            docs.push(doc);
+                        }
+                    }
+                }
             } else if self.control_flow_has_mutations(expr) {
                 // BT-483: Control flow that threads state returns {Result, State} tuple.
                 // Extract State for subsequent expressions.
@@ -228,13 +286,26 @@ impl CoreErlangGenerator {
                     format!("State{next_version}")
                 };
                 let expr_str = self.expression_doc(expr)?;
-                let doc = docvec![
+                let mut doc_parts: Vec<Document<'static>> = vec![docvec![
                     format!("let {tuple_var} = "),
                     expr_str,
                     format!(" in let {new_state} = call 'erlang':'element'(2, {tuple_var}) in "),
-                ];
-                docs.push(doc);
+                ]];
                 let _ = self.next_state_var();
+
+                // BT-598: Extract threaded locals from the updated state
+                if let Some(threaded_vars) = Self::get_control_flow_threaded_vars(expr) {
+                    for var in &threaded_vars {
+                        let core_var = self
+                            .lookup_var(var)
+                            .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                        doc_parts.push(Document::String(format!(
+                            "let {core_var} = call 'maps':'get'('{}', {new_state}) in ",
+                            Self::local_state_key(var)
+                        )));
+                    }
+                }
+                docs.push(Document::Vec(doc_parts));
             } else {
                 // Regular intermediate expression: wrap in let to discard value
                 let tmp_var = self.fresh_temp_var("seq");
@@ -353,24 +424,90 @@ impl CoreErlangGenerator {
 
                     if let Expression::Identifier(id) = target.as_ref() {
                         let var_name = &id.name;
-                        // Reuse existing Core Erlang variable if already bound (e.g. parameter),
-                        // otherwise create a new one following Core Erlang conventions.
                         let core_var = self
                             .lookup_var(var_name)
                             .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-                        // Generate: let VarName = <value> in ...
-                        // Note: we delay updating the binding until after generating the RHS
-                        // so that the RHS sees the prior value (for rebinding cases).
-                        let value_str = self.expression_doc(value)?;
-                        // Now update the variable binding to point at the (possibly shadowing) let-bound var.
-                        self.bind_var(var_name, &core_var);
-                        let doc = docvec![format!("let {core_var} = "), value_str, " in ",];
-                        docs.push(doc);
+
+                        // BT-598: If RHS is control flow with mutations, it returns
+                        // {Result, State} — unpack and update state variable.
+                        if self.control_flow_has_mutations(value) {
+                            let tuple_var = self.fresh_temp_var("Tuple");
+                            let next_version = self.state_version() + 1;
+                            let new_state = if next_version == 1 {
+                                "State1".to_string()
+                            } else {
+                                format!("State{next_version}")
+                            };
+                            let value_str = self.expression_doc(value)?;
+                            let mut doc_parts: Vec<Document<'static>> = vec![docvec![
+                                format!("let {tuple_var} = "),
+                                value_str,
+                                format!(
+                                    " in let {core_var} = call 'erlang':'element'(1, {tuple_var}) \
+                                     in let {new_state} = call 'erlang':'element'(2, {tuple_var}) in "
+                                ),
+                            ]];
+                            let _ = self.next_state_var();
+                            self.bind_var(var_name, &core_var);
+
+                            // Extract threaded locals from updated state
+                            if let Some(threaded_vars) = Self::get_control_flow_threaded_vars(value)
+                            {
+                                for var in &threaded_vars {
+                                    let tv_core = self.lookup_var(var).map_or_else(
+                                        || Self::to_core_erlang_var(var),
+                                        String::clone,
+                                    );
+                                    doc_parts.push(Document::String(format!(
+                                        "let {tv_core} = call 'maps':'get'('{}', {new_state}) in ",
+                                        Self::local_state_key(var)
+                                    )));
+                                }
+                            }
+                            docs.push(Document::Vec(doc_parts));
+                        } else {
+                            let value_str = self.expression_doc(value)?;
+                            self.bind_var(var_name, &core_var);
+                            let doc = docvec![format!("let {core_var} = "), value_str, " in ",];
+                            docs.push(doc);
+                        }
                     }
                 }
             } else if let Some(threaded_vars) = Self::get_control_flow_threaded_vars(expr) {
-                // whileTrue:/whileFalse:/timesRepeat: with mutations - need to rebind threaded vars after loop
-                if threaded_vars.len() == 1 {
+                // Control flow with local variable threading - need to rebind threaded vars after loop
+                if self.control_flow_has_mutations(expr) {
+                    // BT-598: Control flow with mutations returns {Result, State} tuple.
+                    // Threaded locals are packed into the State map.
+                    // Extract State, then extract each threaded local from it.
+                    let tuple_var = self.fresh_temp_var("Tuple");
+                    let next_version = self.state_version() + 1;
+                    let new_state = if next_version == 1 {
+                        "State1".to_string()
+                    } else {
+                        format!("State{next_version}")
+                    };
+                    let expr_str = self.expression_doc(expr)?;
+                    let mut doc_parts: Vec<Document<'static>> = vec![docvec![
+                        format!("let {tuple_var} = "),
+                        expr_str,
+                        format!(
+                            " in let {new_state} = call 'erlang':'element'(2, {tuple_var}) in "
+                        ),
+                    ]];
+                    let _ = self.next_state_var();
+
+                    // Extract each threaded local from the updated state
+                    for var in &threaded_vars {
+                        let core_var = self
+                            .lookup_var(var)
+                            .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                        doc_parts.push(Document::String(format!(
+                            "let {core_var} = call 'maps':'get'('{}', {new_state}) in ",
+                            Self::local_state_key(var)
+                        )));
+                    }
+                    docs.push(Document::Vec(doc_parts));
+                } else if threaded_vars.len() == 1 {
                     let var = &threaded_vars[0];
                     let core_var = self
                         .lookup_var(var)

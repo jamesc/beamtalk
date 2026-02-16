@@ -28,7 +28,7 @@ mod list_ops;
 mod while_loops;
 
 use super::document::Document;
-use super::{CoreErlangGenerator, Result};
+use super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::Expression;
 use crate::docvec;
 
@@ -67,12 +67,53 @@ impl CoreErlangGenerator {
                     format!("let {val_var} = "),
                     value_code,
                     format!(
-                        " in let {new_state} = call 'maps':'put'('{}', {val_var}, {current_state}) in",
-                        id.name
+                        " in let {new_state} = call 'maps':'put'('{}', {val_var}, {current_state}) in ",
+                        Self::local_state_key(&id.name)
                     ),
                 ]);
             }
         }
         Ok(Document::Nil)
+    }
+
+    /// BT-598: Compute local variables that need threading through a loop's `StateAcc`.
+    /// Returns the sorted list of local vars that are both read and written in the block
+    /// (excluding block parameters). For actor methods only; returns empty for REPL mode.
+    pub(super) fn compute_threaded_locals_for_loop(
+        &self,
+        body: &crate::ast::Block,
+        condition: Option<&Expression>,
+    ) -> Vec<String> {
+        if self.is_repl_mode || self.context != CodeGenContext::Actor {
+            return Vec::new();
+        }
+
+        let analysis = block_analysis::analyze_block(body);
+        let block_params: std::collections::HashSet<String> =
+            body.parameters.iter().map(|p| p.name.to_string()).collect();
+
+        // Include reads from condition block if provided
+        let mut all_reads = analysis.local_reads.clone();
+        if let Some(Expression::Block(cond_block)) = condition {
+            let cond_analysis = block_analysis::analyze_block(cond_block);
+            all_reads = all_reads
+                .union(&cond_analysis.local_reads)
+                .cloned()
+                .collect();
+        }
+
+        all_reads
+            .intersection(&analysis.local_writes)
+            .filter(|v| !block_params.contains(*v))
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
+    /// BT-598: Returns the state map key for a local variable.
+    /// Uses a `__local__` prefix to prevent collision with actor field names.
+    pub(super) fn local_state_key(var_name: &str) -> String {
+        format!("__local__{var_name}")
     }
 }

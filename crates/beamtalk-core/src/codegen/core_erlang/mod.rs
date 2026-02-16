@@ -642,9 +642,12 @@ impl CoreErlangGenerator {
         format!("ClassVars{}", self.class_var_version)
     }
 
-    /// BT-153/BT-245: Check if mutation threading should be used for a block.
+    /// BT-153/BT-245/BT-598: Check if mutation threading should be used for a block.
     /// In REPL mode, local variable mutations trigger threading.
-    /// In module mode, field writes OR self-sends trigger threading.
+    /// In actor module mode, field writes, self-sends, OR local variable
+    /// mutations trigger threading. Local vars are threaded through the state accumulator
+    /// map alongside fields.
+    /// In value type module mode, only field writes trigger threading (no state map).
     pub(super) fn needs_mutation_threading(
         &self,
         analysis: &block_analysis::BlockMutationAnalysis,
@@ -652,8 +655,12 @@ impl CoreErlangGenerator {
         if self.is_repl_mode {
             // REPL: both local vars and fields need threading
             analysis.has_mutations()
+        } else if self.context == CodeGenContext::Actor {
+            // BT-598: Actor methods: field writes, self-sends,
+            // OR local variable mutations all need threading
+            analysis.has_state_effects() || !analysis.local_writes.is_empty()
         } else {
-            // Module: field writes or self-sends (which may mutate state) need threading
+            // Value types: field writes or self-sends only
             analysis.has_state_effects()
         }
     }
@@ -1022,12 +1029,20 @@ impl CoreErlangGenerator {
             }
         }
 
-        // Check for to:do: with literal block
-        if selector_name == "to:do:"
+        // Check for to:do: or to:by:do: with literal block
+        if (selector_name == "to:do:"
             && arguments.len() == 2
-            && matches!(&arguments[1], Expression::Block(_))
+            && matches!(&arguments[1], Expression::Block(_)))
+            || (selector_name == "to:by:do:"
+                && arguments.len() == 3
+                && matches!(&arguments[2], Expression::Block(_)))
         {
-            let Expression::Block(body_block) = &arguments[1] else {
+            let body_block_expr = if selector_name == "to:do:" {
+                &arguments[1]
+            } else {
+                &arguments[2]
+            };
+            let Expression::Block(body_block) = body_block_expr else {
                 return None;
             };
 

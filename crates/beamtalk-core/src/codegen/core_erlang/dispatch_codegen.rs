@@ -774,6 +774,7 @@ impl CoreErlangGenerator {
                     selector.as_str(),
                     "whileTrue:"
                         | "whileFalse:"
+                        | "timesRepeat:"
                         | "to:do:"
                         | "to:by:do:"
                         | "do:"

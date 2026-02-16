@@ -8,6 +8,8 @@
 //! Generates code for list iteration constructs: `do:`, `collect:`,
 //! `select:`, `reject:`, and `inject:into:`.
 
+use std::fmt::Write;
+
 use super::super::document::Document;
 use super::super::intrinsics::validate_block_arity_exact;
 use super::super::{CoreErlangGenerator, Result, block_analysis};
@@ -56,6 +58,9 @@ impl CoreErlangGenerator {
             self.repl_loop_mutated = true;
         }
 
+        // BT-598: Determine which local variables need threading through the loop.
+        let threaded_locals = self.compute_threaded_locals_for_loop(body, None);
+
         // BT-524: Add is_list guard for non-list collection types.
         // Convert non-list receivers to a list via beamtalk_collection_ops:to_list/1
         // so that state mutations are properly threaded through lists:foldl.
@@ -66,6 +71,70 @@ impl CoreErlangGenerator {
         let lambda_var = self.fresh_temp_var("temp");
         let item_param = body.parameters.first().map_or("_", |p| p.name.as_str());
         let item_var = Self::to_core_erlang_var(item_param);
+
+        // BT-598: Before the foldl, pack threaded locals into the StateAcc map
+        let initial_state = self.current_state_var();
+        let mut init_state_code = initial_state.clone();
+        if !threaded_locals.is_empty() && !self.is_repl_mode {
+            // Pack local vars into a copy of State for the initial accumulator
+            let mut pack_prefix = String::new();
+            let mut current = initial_state.clone();
+            for (idx, var_name) in threaded_locals.iter().enumerate() {
+                let packed_var = self.fresh_temp_var("Packed");
+                let core_var = self
+                    .lookup_var(var_name)
+                    .cloned()
+                    .unwrap_or_else(|| Self::to_core_erlang_var(var_name));
+                let key = Self::local_state_key(var_name);
+                let _ = write!(
+                    pack_prefix,
+                    "let {packed_var} = call 'maps':'put'('{key}', {core_var}, {current}) in "
+                );
+                current.clone_from(&packed_var);
+                if idx == threaded_locals.len() - 1 {
+                    init_state_code = packed_var;
+                }
+            }
+            // Prepend packing code
+            let mut pre_docs: Vec<Document<'static>> = vec![Document::String(pack_prefix)];
+            pre_docs.push(docvec![
+                format!("let {list_var} = "),
+                recv_code,
+                format!(
+                    " in let {safe_list_var} = case call 'erlang':'is_list'({list_var}) of \
+                     <'true'> when 'true' -> {list_var} \
+                     <'false'> when 'true' -> \
+                     call 'beamtalk_collection_ops':'to_list'({list_var}) end \
+                     in let {lambda_var} = fun ({item_var}, StateAcc) -> "
+                ),
+            ]);
+
+            let body_doc = self.generate_list_do_body_with_threading(body, &item_var)?;
+            pre_docs.push(body_doc);
+
+            // BT-598: After foldl, extract threaded locals and rebind them
+            let fold_result = self.fresh_temp_var("FoldResult");
+            let mut post_code = format!(
+                " in let {fold_result} = call 'lists':'foldl'({lambda_var}, {init_state_code}, {safe_list_var}) in "
+            );
+            // Extract locals from the fold result (which is the final StateAcc)
+            for var_name in &threaded_locals {
+                let core_var = self
+                    .lookup_var(var_name)
+                    .cloned()
+                    .unwrap_or_else(|| Self::to_core_erlang_var(var_name));
+                let key = Self::local_state_key(var_name);
+                let _ = write!(
+                    post_code,
+                    "let {core_var} = call 'maps':'get'('{key}', {fold_result}) in "
+                );
+            }
+            // Extract the clean state (with locals still in it, but that's harmless)
+            let _ = write!(post_code, "{{'nil', {fold_result}}}");
+            pre_docs.push(Document::String(post_code));
+
+            return Ok(Document::Vec(pre_docs));
+        }
 
         let mut docs: Vec<Document<'static>> = vec![docvec![
             format!("let {list_var} = "),
@@ -82,9 +151,6 @@ impl CoreErlangGenerator {
         // Generate body with state threading
         let body_doc = self.generate_list_do_body_with_threading(body, &item_var)?;
         docs.push(body_doc);
-
-        // Capture current state before the foldl call
-        let initial_state = self.current_state_var();
 
         // BT-483: Return {Result, State} tuple — do: returns nil as result
         let fold_result = self.fresh_temp_var("FoldResult");
@@ -116,12 +182,28 @@ impl CoreErlangGenerator {
         self.in_loop_body = true;
 
         let mut docs: Vec<Document<'static>> = Vec::new();
+        let mut has_mutations = false;
+
+        // BT-598: At the start of each foldl iteration, read threaded locals from StateAcc.
+        // This ensures that local variables resolve to their loop-accumulated values,
+        // not the stale outer-scope let-bound values.
+        let threaded = self.compute_threaded_locals_for_loop(body, None);
+        for var_name in &threaded {
+            let core_var = Self::to_core_erlang_var(var_name);
+            let key = Self::local_state_key(var_name);
+            // Rebind in the loop scope so identifier lookup uses the StateAcc value
+            self.bind_var(var_name, &core_var);
+            docs.push(Document::String(format!(
+                "let {core_var} = call 'maps':'get'('{key}', StateAcc) in "
+            )));
+        }
 
         // Generate the body expression(s), threading state through assignments
         for (i, expr) in body.body.iter().enumerate() {
             let is_last = i == body.body.len() - 1;
 
             if Self::is_field_assignment(expr) {
+                has_mutations = true;
                 // Field assignment - already writes "let _Val = ... in let StateAcc{n} = ... in "
                 let doc = self.generate_field_assignment_open(expr)?;
                 docs.push(doc);
@@ -131,6 +213,7 @@ impl CoreErlangGenerator {
                     docs.push(Document::String(self.current_state_var()));
                 }
             } else if self.is_actor_self_send(expr) {
+                has_mutations = true;
                 // BT-245: Self-sends may mutate state — thread state through dispatch
                 let doc = self.generate_self_dispatch_open(expr)?;
                 docs.push(doc);
@@ -138,16 +221,32 @@ impl CoreErlangGenerator {
                 if is_last {
                     docs.push(Document::String(self.current_state_var()));
                 }
+            } else if Self::is_local_var_assignment(expr) {
+                has_mutations = true;
+                // BT-598: Local variable mutation — thread through StateAcc map
+                let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
+                docs.push(assign_doc);
+
+                if is_last {
+                    // Last expression: close with the final state variable
+                    docs.push(Document::String(format!(" {}", self.current_state_var())));
+                }
             } else {
                 // Non-assignment expression
                 if i > 0 {
-                    // Sequence with previous expression using let _ = ... in
+                    // Previous expression or mutation left scope open, wrap to discard value
                     docs.push(Document::Str("let _ = "));
                 }
                 let doc = self.generate_expression(expr)?;
                 docs.push(doc);
 
-                if !is_last {
+                if is_last && has_mutations {
+                    // Return final state after non-assignment last expression
+                    docs.push(Document::String(format!(
+                        " in {}",
+                        self.current_state_var()
+                    )));
+                } else if !is_last {
                     docs.push(Document::Str(" in "));
                 }
             }
@@ -329,6 +428,9 @@ impl CoreErlangGenerator {
             self.repl_loop_mutated = true;
         }
 
+        // BT-598: Determine which local variables need threading through the loop.
+        let threaded_locals = self.compute_threaded_locals_for_loop(body, None);
+
         // BT-524: Add is_list guard for non-list collection types.
         // Convert non-list receivers to a list via beamtalk_collection_ops:to_list/1
         // so that state mutations are properly threaded through lists:foldl.
@@ -339,41 +441,82 @@ impl CoreErlangGenerator {
         let init_code = self.expression_doc(initial)?;
         let lambda_var = self.fresh_temp_var("temp");
 
+        // BT-598: Pack threaded locals into StateAcc before foldl
+        let initial_state = self.current_state_var();
+        let mut init_state_code = initial_state.clone();
+        let mut pack_prefix = String::new();
+        if !threaded_locals.is_empty() && !self.is_repl_mode {
+            let mut current = initial_state.clone();
+            for var_name in &threaded_locals {
+                let packed_var = self.fresh_temp_var("Packed");
+                let core_var = self
+                    .lookup_var(var_name)
+                    .cloned()
+                    .unwrap_or_else(|| Self::to_core_erlang_var(var_name));
+                let key = Self::local_state_key(var_name);
+                let _ = write!(
+                    pack_prefix,
+                    "let {packed_var} = call 'maps':'put'('{key}', {core_var}, {current}) in "
+                );
+                current = packed_var;
+            }
+            init_state_code = current;
+        }
+
         let acc_state_var = self.fresh_temp_var("AccSt");
-        let mut docs: Vec<Document<'static>> = vec![docvec![
-            format!("let {list_var} = "),
-            recv_code,
-            format!(
-                " in let {safe_list_var} = case call 'erlang':'is_list'({list_var}) of \
-                 <'true'> when 'true' -> {list_var} \
-                 <'false'> when 'true' -> \
-                 call 'beamtalk_collection_ops':'to_list'({list_var}) end \
-                 in let {init_var} = "
-            ),
-            init_code,
-            format!(
-                " in let {lambda_var} = fun (Item, {acc_state_var}) -> \
-                 let Acc = call 'erlang':'element'(1, {acc_state_var}) in \
-                 let StateAcc = call 'erlang':'element'(2, {acc_state_var}) in "
-            ),
-        ]];
+        let mut docs: Vec<Document<'static>> = vec![
+            Document::String(pack_prefix),
+            docvec![
+                format!("let {list_var} = "),
+                recv_code,
+                format!(
+                    " in let {safe_list_var} = case call 'erlang':'is_list'({list_var}) of \
+                     <'true'> when 'true' -> {list_var} \
+                     <'false'> when 'true' -> \
+                     call 'beamtalk_collection_ops':'to_list'({list_var}) end \
+                     in let {init_var} = "
+                ),
+                init_code,
+                format!(
+                    " in let {lambda_var} = fun (Item, {acc_state_var}) -> \
+                     let Acc = call 'erlang':'element'(1, {acc_state_var}) in \
+                     let StateAcc = call 'erlang':'element'(2, {acc_state_var}) in "
+                ),
+            ],
+        ];
 
         // Generate body with state threading
         let body_doc = self.generate_list_inject_body_with_threading(body)?;
         docs.push(body_doc);
 
         // BT-483: Return {Result, State} tuple — inject:into: returns accumulator as result
-        let initial_state = self.current_state_var();
         let result_var = self.fresh_temp_var("temp");
         let acc_out = self.fresh_temp_var("AccOut");
         let state_out = self.fresh_temp_var("StOut");
 
-        docs.push(Document::String(format!(
-            " in let {result_var} = call 'lists':'foldl'({lambda_var}, {{{init_var}, {initial_state}}}, {safe_list_var}) \
+        let mut post_code = format!(
+            " in let {result_var} = call 'lists':'foldl'({lambda_var}, {{{init_var}, {init_state_code}}}, {safe_list_var}) \
              in let {acc_out} = call 'erlang':'element'(1, {result_var}) \
-             in let {state_out} = call 'erlang':'element'(2, {result_var}) \
-             in {{{acc_out}, {state_out}}}"
-        )));
+             in let {state_out} = call 'erlang':'element'(2, {result_var}) in "
+        );
+
+        // BT-598: Extract threaded locals from the final state
+        if !threaded_locals.is_empty() && !self.is_repl_mode {
+            for var_name in &threaded_locals {
+                let core_var = self
+                    .lookup_var(var_name)
+                    .cloned()
+                    .unwrap_or_else(|| Self::to_core_erlang_var(var_name));
+                let key = Self::local_state_key(var_name);
+                let _ = write!(
+                    post_code,
+                    "let {core_var} = call 'maps':'get'('{key}', {state_out}) in "
+                );
+            }
+        }
+
+        let _ = write!(post_code, "{{{acc_out}, {state_out}}}");
+        docs.push(Document::String(post_code));
 
         Ok(Document::Vec(docs))
     }
@@ -401,6 +544,17 @@ impl CoreErlangGenerator {
         self.in_loop_body = true;
 
         let mut docs: Vec<Document<'static>> = Vec::new();
+
+        // BT-598: At the start of each foldl iteration, read threaded locals from StateAcc.
+        let threaded = self.compute_threaded_locals_for_loop(body, None);
+        for var_name in &threaded {
+            let core_var = Self::to_core_erlang_var(var_name);
+            let key = Self::local_state_key(var_name);
+            self.bind_var(var_name, &core_var);
+            docs.push(Document::String(format!(
+                "let {core_var} = call 'maps':'get'('{key}', StateAcc) in "
+            )));
+        }
 
         // Generate the body expression(s), threading state through assignments
         let mut has_mutations = false;
@@ -434,10 +588,21 @@ impl CoreErlangGenerator {
                         docs.push(Document::String(format!("{{'nil', {final_state}}}")));
                     }
                 }
+            } else if Self::is_local_var_assignment(expr) {
+                has_mutations = true;
+                // BT-598: Local variable mutation — thread through StateAcc map
+                let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
+                docs.push(assign_doc);
+
+                if is_last {
+                    // inject:into: last expression should be the accumulator value
+                    let final_state = self.current_state_var();
+                    docs.push(Document::String(format!(" {{_Val, {final_state}}}")));
+                }
             } else {
                 // Non-assignment expression
-                if i > 0 && !has_mutations {
-                    // Previous expression was not a field assignment, so we need to sequence
+                if i > 0 && !is_last {
+                    // Sequence with previous expression using let _ = ... in
                     docs.push(Document::Str("let _ = "));
                 }
 
