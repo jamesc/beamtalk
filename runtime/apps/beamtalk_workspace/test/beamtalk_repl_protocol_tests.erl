@@ -64,6 +64,18 @@ decode_new_format_info_test() ->
     ?assertEqual(<<"info">>, element(2, Msg)),
     ?assertEqual(#{<<"symbol">> => <<"Counter">>}, element(5, Msg)).
 
+decode_new_format_health_test() ->
+    {ok, Msg} = beamtalk_repl_protocol:decode(
+        <<"{\"op\": \"health\"}">>),
+    ?assertEqual(<<"health">>, beamtalk_repl_protocol:get_op(Msg)),
+    ?assertEqual(#{}, beamtalk_repl_protocol:get_params(Msg)).
+
+decode_new_format_shutdown_test() ->
+    {ok, Msg} = beamtalk_repl_protocol:decode(
+        <<"{\"op\": \"shutdown\", \"cookie\": \"secret123\"}">>),
+    ?assertEqual(<<"shutdown">>, beamtalk_repl_protocol:get_op(Msg)),
+    ?assertEqual(#{<<"cookie">> => <<"secret123">>}, beamtalk_repl_protocol:get_params(Msg)).
+
 %%% Legacy format decode tests
 
 decode_legacy_eval_test() ->

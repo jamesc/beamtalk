@@ -8,26 +8,32 @@
 //! Delegates all IDE operations to `SimpleLanguageService` + `ProjectIndex`.
 //! Maps between LSP protocol types and beamtalk language service types.
 
+use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use beamtalk_core::language_service::{
     CompletionKind, DocumentSymbolKind, LanguageService, Position as BtPosition,
     SimpleLanguageService,
 };
+use beamtalk_core::semantic_analysis::ClassHierarchy;
 use beamtalk_core::source_analysis::{Severity, Span};
 use camino::Utf8PathBuf;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
     DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DocumentSymbolParams, DocumentSymbolResponse, Documentation,
-    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams,
-    HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, MarkupContent,
-    MarkupKind, OneOf, Range, ReferenceParams, ServerCapabilities, SymbolKind,
-    TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentSymbolParams,
+    DocumentSymbolResponse, Documentation, GotoDefinitionParams, GotoDefinitionResponse, Hover,
+    HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
+    InitializedParams, MarkupContent, MarkupKind, OneOf, Range, ReferenceParams,
+    ServerCapabilities, SymbolKind, TextDocumentSyncCapability, TextDocumentSyncKind,
+    TextDocumentSyncOptions, TextDocumentSyncSaveOptions, Url,
 };
 use tower_lsp::{Client, LanguageServer};
 use tracing::debug;
+
+const DIAGNOSTIC_DEBOUNCE_DURATION: Duration = Duration::from_millis(150);
 
 /// LSP backend wrapping `SimpleLanguageService`.
 pub struct Backend {
@@ -35,6 +41,10 @@ pub struct Backend {
     client: Client,
     /// The underlying language service, protected by a mutex for concurrent access.
     service: Mutex<SimpleLanguageService>,
+    /// Last known LSP document version by file path.
+    versions: Mutex<HashMap<Utf8PathBuf, i32>>,
+    /// Monotonic generation counter used to debounce `didChange` diagnostics per URI.
+    diagnostic_generation: Mutex<HashMap<Url, u64>>,
 }
 
 impl Backend {
@@ -43,7 +53,15 @@ impl Backend {
         Self {
             client,
             service: Mutex::new(SimpleLanguageService::new()),
+            versions: Mutex::new(HashMap::new()),
+            diagnostic_generation: Mutex::new(HashMap::new()),
         }
+    }
+
+    fn file_version_for_uri(&self, uri: &Url) -> Option<i32> {
+        let path = uri_to_path(uri)?;
+        let versions = self.versions.lock().expect("versions lock poisoned");
+        versions.get(&path).copied()
     }
 
     /// Publishes diagnostics for a file after every change.
@@ -59,8 +77,9 @@ impl Backend {
                 .map(|d| to_lsp_diagnostic(&d, source.as_deref()))
                 .collect()
         };
+        let version = self.file_version_for_uri(uri);
         self.client
-            .publish_diagnostics(uri.clone(), diagnostics, None)
+            .publish_diagnostics(uri.clone(), diagnostics, version)
             .await;
     }
 }
@@ -71,8 +90,13 @@ impl LanguageServer for Backend {
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::FULL,
+                text_document_sync: Some(TextDocumentSyncCapability::Options(
+                    TextDocumentSyncOptions {
+                        open_close: Some(true),
+                        change: Some(TextDocumentSyncKind::FULL),
+                        save: Some(TextDocumentSyncSaveOptions::Supported(true)),
+                        ..Default::default()
+                    },
                 )),
                 completion_provider: Some(CompletionOptions {
                     trigger_characters: Some(vec![".".into(), ":".into()]),
@@ -91,6 +115,12 @@ impl LanguageServer for Backend {
     /// Called after the client acknowledges initialization.
     async fn initialized(&self, _: InitializedParams) {
         debug!("beamtalk-lsp initialized");
+        self.client
+            .log_message(
+                tower_lsp::lsp_types::MessageType::INFO,
+                "Beamtalk language server ready",
+            )
+            .await;
     }
 
     /// Handles a graceful shutdown request from the client.
@@ -106,6 +136,13 @@ impl LanguageServer for Backend {
                 let mut svc = self.service.lock().expect("service lock poisoned");
                 svc.update_file(path, params.text_document.text);
             }
+            {
+                let mut versions = self.versions.lock().expect("versions lock poisoned");
+                versions.insert(
+                    uri_to_path(&uri).expect("path already checked"),
+                    params.text_document.version,
+                );
+            }
             self.publish_diagnostics(&uri).await;
         }
     }
@@ -120,7 +157,37 @@ impl LanguageServer for Backend {
                 let mut svc = self.service.lock().expect("service lock poisoned");
                 svc.update_file(path, change.text);
             }
-            self.publish_diagnostics(&uri).await;
+            {
+                let mut versions = self.versions.lock().expect("versions lock poisoned");
+                versions.insert(
+                    uri_to_path(&uri).expect("path already checked"),
+                    params.text_document.version,
+                );
+            }
+
+            let generation = {
+                let mut generations = self
+                    .diagnostic_generation
+                    .lock()
+                    .expect("diagnostic_generation lock poisoned");
+                let entry = generations.entry(uri.clone()).or_insert(0);
+                *entry += 1;
+                *entry
+            };
+
+            tokio::time::sleep(DIAGNOSTIC_DEBOUNCE_DURATION).await;
+
+            let is_latest = {
+                let generations = self
+                    .diagnostic_generation
+                    .lock()
+                    .expect("diagnostic_generation lock poisoned");
+                generations.get(&uri).copied() == Some(generation)
+            };
+
+            if is_latest {
+                self.publish_diagnostics(&uri).await;
+            }
         }
     }
 
@@ -132,8 +199,26 @@ impl LanguageServer for Backend {
                 let mut svc = self.service.lock().expect("service lock poisoned");
                 svc.remove_file(&path);
             }
+            {
+                let mut versions = self.versions.lock().expect("versions lock poisoned");
+                versions.remove(&path);
+            }
+            {
+                let mut generations = self
+                    .diagnostic_generation
+                    .lock()
+                    .expect("diagnostic_generation lock poisoned");
+                generations.remove(&uri);
+            }
             self.client.publish_diagnostics(uri, Vec::new(), None).await;
         }
+    }
+
+    /// Handles save notifications and republishes diagnostics.
+    async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        let uri = params.text_document.uri;
+        debug!(uri = %uri, "did_save");
+        self.publish_diagnostics(&uri).await;
     }
 
     /// Returns completion items for the cursor position.
@@ -199,7 +284,11 @@ impl LanguageServer for Backend {
             let mut value = h.contents.to_string();
             if let Some(doc) = h.documentation {
                 value.push_str("\n\n");
-                value.push_str(&doc);
+                value.push_str(&format_hover_documentation(&doc));
+            }
+            if let Some(stdlib_note) = stdlib_hover_policy_note(&svc, &value) {
+                value.push_str("\n\n");
+                value.push_str(&stdlib_note);
             }
             Hover {
                 contents: HoverContents::Markup(MarkupContent {
@@ -303,6 +392,92 @@ impl LanguageServer for Backend {
             Ok(Some(DocumentSymbolResponse::Nested(lsp_symbols)))
         }
     }
+}
+
+/// Formats hover documentation for compact display in editor hovers.
+///
+/// VS Code controls hover font sizes, so we demote markdown heading levels
+/// to reduce visual dominance of large section titles like `## Examples`.
+fn format_hover_documentation(doc: &str) -> String {
+    doc.lines()
+        .map(|line| {
+            if let Some(rest) = line.strip_prefix("### ") {
+                return format!("##### {rest}");
+            }
+            if let Some(rest) = line.strip_prefix("## ") {
+                return format!("#### {rest}");
+            }
+            if let Some(rest) = line.strip_prefix("# ") {
+                return format!("### {rest}");
+            }
+            line.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Adds an LSP-only stdlib profile note for class/method hovers.
+///
+/// This is intentionally editor policy (not compiler behavior): when hover
+/// resolves to a built-in/stdlib class, show sealed/abstract traits so users
+/// can better understand completion/diagnostic confidence.
+fn stdlib_hover_policy_note(
+    service: &SimpleLanguageService,
+    hover_markdown: &str,
+) -> Option<String> {
+    let class_name = extract_hover_class_name(hover_markdown)?;
+    if !ClassHierarchy::is_builtin_class(class_name) {
+        return None;
+    }
+
+    let class = service.project_index().hierarchy().get_class(class_name)?;
+    let mut traits = Vec::new();
+    if class.is_sealed {
+        traits.push("sealed");
+    }
+    if class.is_abstract {
+        traits.push("abstract");
+    }
+
+    if traits.is_empty() {
+        return None;
+    }
+
+    let mut lines = vec![format!(
+        "**Stdlib Profile:** `{class_name}` is {}.",
+        traits.join(" + ")
+    )];
+    if class.is_sealed {
+        lines.push("- Method surface is closed to subclass overrides.".to_string());
+    }
+    if class.is_abstract {
+        lines.push("- Defines protocol to be implemented by concrete subclasses.".to_string());
+    }
+    if class.is_sealed && hover_markdown.contains("Method: `") {
+        lines.push("- Confidence: high (static, sealed stdlib dispatch).".to_string());
+    }
+
+    Some(lines.join("\n"))
+}
+
+/// Extract class name from hover markdown generated by beamtalk-core.
+///
+/// Supports:
+/// - Class hovers: `Class: `Integer` ...`
+/// - Resolved method hovers: `Resolved on `Integer` (defined in ... )`
+fn extract_hover_class_name(hover_markdown: &str) -> Option<&str> {
+    if let Some(name) = extract_backticked_after(hover_markdown, "Class: `") {
+        return Some(name);
+    }
+    extract_backticked_after(hover_markdown, "Resolved on `")
+}
+
+/// Returns the first backticked segment after a marker prefix.
+fn extract_backticked_after<'a>(text: &'a str, marker: &str) -> Option<&'a str> {
+    let start = text.find(marker)? + marker.len();
+    let rest = &text[start..];
+    let end = rest.find('`')?;
+    Some(&rest[..end])
 }
 
 // --- Type conversion helpers ---
@@ -465,5 +640,93 @@ fn to_lsp_symbol(
         range,
         selection_range: range,
         children: Some(children),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use beamtalk_core::language_service::HoverInfo;
+    use camino::Utf8PathBuf;
+
+    #[test]
+    fn extract_hover_class_name_from_class_hover() {
+        let text = "Class: `Integer` (module `integer`)";
+        assert_eq!(extract_hover_class_name(text), Some("Integer"));
+    }
+
+    #[test]
+    fn extract_hover_class_name_from_resolved_method_hover() {
+        let text =
+            "Method: `+` (instance-side, arity: 1)\n\nResolved on `Integer` (defined in `Integer`)";
+        assert_eq!(extract_hover_class_name(text), Some("Integer"));
+    }
+
+    #[test]
+    fn stdlib_policy_note_for_sealed_class() {
+        let service = SimpleLanguageService::new();
+        let note = stdlib_hover_policy_note(&service, "Class: `Integer` (module `integer`)");
+        assert!(note.is_some());
+        let note = note.unwrap();
+        assert!(note.contains("Stdlib Profile"));
+        assert!(note.contains("sealed"));
+    }
+
+    #[test]
+    fn stdlib_policy_note_ignores_non_builtin_classes() {
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("user.bt");
+        service.update_file(
+            file,
+            "Object subclass: Counter\n  increment => 1".to_string(),
+        );
+
+        let note = stdlib_hover_policy_note(&service, "Class: `Counter` (module `counter`)");
+        assert!(note.is_none());
+    }
+
+    #[test]
+    fn stdlib_policy_note_for_abstract_class() {
+        let service = SimpleLanguageService::new();
+        let note = stdlib_hover_policy_note(&service, "Class: `Boolean` (module `boolean`)");
+        assert!(note.is_some());
+        let note = note.unwrap();
+        assert!(note.contains("abstract"));
+    }
+
+    #[test]
+    fn stdlib_policy_note_marks_high_confidence_for_sealed_method_hover() {
+        let service = SimpleLanguageService::new();
+        let hover =
+            "Method: `+` (instance-side, arity: 1)\n\nResolved on `Integer` (defined in `Integer`)";
+        let note = stdlib_hover_policy_note(&service, hover);
+        assert!(note.is_some());
+        let note = note.unwrap();
+        assert!(note.contains("Confidence: high"));
+        assert!(note.contains("sealed stdlib dispatch"));
+    }
+
+    #[test]
+    fn stdlib_policy_note_does_not_mark_high_confidence_for_class_hover() {
+        let service = SimpleLanguageService::new();
+        let note = stdlib_hover_policy_note(&service, "Class: `Integer` (module `integer`)");
+        assert!(note.is_some());
+        assert!(!note.unwrap().contains("Confidence: high"));
+    }
+
+    #[test]
+    fn policy_note_works_for_resolved_method_hover_markdown() {
+        let service = SimpleLanguageService::new();
+        let hover = HoverInfo::new("Method: `+` (instance-side, arity: 1)", Span::new(0, 1))
+            .with_documentation("Resolved on `Integer` (defined in `Integer`)");
+        let markdown = format!(
+            "{}\n\n{}",
+            hover.contents,
+            format_hover_documentation(hover.documentation.as_deref().unwrap_or_default())
+        );
+
+        let note = stdlib_hover_policy_note(&service, &markdown);
+        assert!(note.is_some());
+        assert!(note.unwrap().contains("Integer"));
     }
 }

@@ -55,6 +55,31 @@ build-lsp:
     @cargo build -p beamtalk-lsp --quiet
     @echo "✅ LSP server built: target/debug/beamtalk-lsp"
 
+# Build VS Code extension for local development (debug LSP, no .vsix packaging)
+build-vscode: build-lsp
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🔨 Building VS Code extension for local development..."
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "❌ npm not found (needed for VS Code extension)"
+        exit 1
+    fi
+    if [ ! -f target/debug/beamtalk-lsp ]; then
+        echo "❌ Debug LSP binary not found at target/debug/beamtalk-lsp"
+        echo "   Build first: just build-lsp"
+        exit 1
+    fi
+    mkdir -p editors/vscode/bin
+    TMP_BIN="editors/vscode/bin/.beamtalk-lsp.tmp.$$"
+    cp target/debug/beamtalk-lsp "${TMP_BIN}"
+    chmod +x "${TMP_BIN}"
+    mv -f "${TMP_BIN}" editors/vscode/bin/beamtalk-lsp
+    echo "   Bundled debug beamtalk-lsp ($(du -h editors/vscode/bin/beamtalk-lsp | cut -f1))"
+    cd editors/vscode
+    npm install --quiet
+    npm run compile
+    echo "✅ VS Code extension built for local install from editors/vscode"
+
 # Build Erlang runtime
 build-erlang:
     @echo "🔨 Building Erlang runtime..."
@@ -647,15 +672,16 @@ dist-vscode-platform target:
         exit 1
     fi
     mkdir -p editors/vscode/bin
-    cp "${LSP_BIN}" "editors/vscode/bin/${BIN_NAME}"
-    chmod +x "editors/vscode/bin/${BIN_NAME}"
+    TMP_BIN="editors/vscode/bin/.${BIN_NAME}.tmp.$$"
+    cp "${LSP_BIN}" "${TMP_BIN}"
+    chmod +x "${TMP_BIN}"
+    mv -f "${TMP_BIN}" "editors/vscode/bin/${BIN_NAME}"
     echo "   Bundled ${BIN_NAME} ($(du -h editors/vscode/bin/${BIN_NAME} | cut -f1))"
     cd editors/vscode
     npm install --quiet
     npm run compile
-    ln -sf ../../LICENSE LICENSE
+    mkdir -p ../../dist
     npx --yes @vscode/vsce package --target "{{target}}" --out "../../dist/beamtalk-{{target}}.vsix"
-    rm -f LICENSE
     rm -rf bin
     echo "✅ VS Code extension: dist/beamtalk-{{target}}.vsix"
 
