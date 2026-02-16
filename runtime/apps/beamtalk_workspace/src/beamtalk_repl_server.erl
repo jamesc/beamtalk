@@ -420,7 +420,6 @@ handle_op(<<"reload">>, Params, Msg, SessionPid) ->
     ModuleBin = maps:get(<<"module">>, Params, <<>>),
     case maps:get(<<"path">>, Params, undefined) of
         undefined when ModuleBin =/= <<>> ->
-            ModuleStr = binary_to_list(ModuleBin),
             case safe_to_existing_atom(ModuleBin) of
                 {ok, ModuleAtom} ->
                     {ok, Tracker} = beamtalk_repl_shell:get_module_tracker(SessionPid),
@@ -428,21 +427,37 @@ handle_op(<<"reload">>, Params, Msg, SessionPid) ->
                         {ok, Info} ->
                             case beamtalk_repl_modules:get_source_file(Info) of
                                 undefined ->
+                                    Err0 = beamtalk_error:new(no_source_file, 'Module'),
+                                    Err1 = beamtalk_error:with_message(Err0,
+                                        iolist_to_binary([<<"No source file recorded for module: ">>,
+                                                          ModuleBin])),
+                                    Err2 = beamtalk_error:with_hint(Err1,
+                                        <<"Use :load <path> to load it first.">>),
                                     beamtalk_repl_protocol:encode_error(
-                                        {no_source_file, ModuleStr}, Msg,
+                                        Err2, Msg,
                                         fun beamtalk_repl_json:format_error_message/1);
                                 SourcePath ->
                                     do_reload(SourcePath, ModuleAtom, Msg, SessionPid)
                             end;
                         {error, not_found} ->
+                            Err0 = beamtalk_error:new(module_not_loaded, 'Module'),
+                            Err1 = beamtalk_error:with_message(Err0,
+                                iolist_to_binary([<<"Module not loaded: ">>, ModuleBin])),
+                            Err2 = beamtalk_error:with_hint(Err1,
+                                <<"Use :load <path> to load it first.">>),
                             beamtalk_repl_protocol:encode_error(
-                                {module_not_loaded, ModuleStr}, Msg,
+                                Err2, Msg,
                                 fun beamtalk_repl_json:format_error_message/1)
                     end;
                 {error, badarg} ->
                     %% Atom doesn't exist — module was never loaded
+                    Err0 = beamtalk_error:new(module_not_loaded, 'Module'),
+                    Err1 = beamtalk_error:with_message(Err0,
+                        iolist_to_binary([<<"Module not loaded: ">>, ModuleBin])),
+                    Err2 = beamtalk_error:with_hint(Err1,
+                        <<"Use :load <path> to load it first.">>),
                     beamtalk_repl_protocol:encode_error(
-                        {module_not_loaded, ModuleStr}, Msg,
+                        Err2, Msg,
                         fun beamtalk_repl_json:format_error_message/1)
             end;
         undefined ->
