@@ -9,6 +9,8 @@ use miette::{Context, IntoDiagnostic, Result};
 use std::fs;
 use tracing::{debug, error, info, instrument};
 
+use super::manifest;
+
 /// Build beamtalk source files.
 ///
 /// This command compiles .bt files to .beam bytecode via Core Erlang.
@@ -39,6 +41,16 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
 
     // Create build directory relative to project root
     let build_dir = project_root.join("build");
+
+    // Look for package manifest
+    let pkg_manifest = manifest::find_manifest(&project_root)?;
+    if let Some(ref pkg) = pkg_manifest {
+        info!(name = %pkg.name, version = %pkg.version, "Found package manifest");
+        debug!(?pkg, "Package manifest details");
+    } else {
+        debug!("No beamtalk.toml found, using default behavior");
+    }
+
     debug!("Creating build directory: {}", build_dir);
     std::fs::create_dir_all(&build_dir)
         .into_diagnostic()
@@ -295,5 +307,48 @@ mod tests {
             }
             panic!("Build failed with unexpected error: {e:?}");
         }
+    }
+
+    #[test]
+    fn test_build_with_manifest() {
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        let src_path = project_path.join("src");
+        write_test_file(&src_path.join("main.bt"), "main := [42].");
+        write_test_file(
+            &project_path.join("beamtalk.toml"),
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
+        );
+
+        let result = build(project_path.as_str(), &default_options());
+
+        if let Err(e) = result {
+            let error_msg = format!("{e:?}");
+            if error_msg.contains("escript not found") {
+                eprintln!("Skipping test - escript not installed in CI environment");
+                return;
+            }
+            panic!("Build failed with unexpected error: {e:?}");
+        }
+    }
+
+    #[test]
+    fn test_build_with_malformed_manifest() {
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        let src_path = project_path.join("src");
+        write_test_file(&src_path.join("main.bt"), "main := [42].");
+        write_test_file(
+            &project_path.join("beamtalk.toml"),
+            "this is not valid toml {{{{",
+        );
+
+        let result = build(project_path.as_str(), &default_options());
+        let err = result.expect_err("Expected build to fail due to malformed manifest");
+        let error_msg = format!("{err:?}");
+        assert!(
+            error_msg.contains("Failed to parse manifest"),
+            "Expected error to mention manifest parse failure, got: {error_msg}"
+        );
     }
 }
