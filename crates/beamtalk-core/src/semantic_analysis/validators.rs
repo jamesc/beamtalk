@@ -27,21 +27,7 @@ pub(crate) fn check_abstract_instantiation(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    for expr in &module.expressions {
-        check_abstract_in_expr(expr, hierarchy, diagnostics);
-    }
-    for class in &module.classes {
-        for method in class.methods.iter().chain(class.class_methods.iter()) {
-            for expr in &method.body {
-                check_abstract_in_expr(expr, hierarchy, diagnostics);
-            }
-        }
-    }
-    for standalone in &module.method_definitions {
-        for expr in &standalone.method.body {
-            check_abstract_in_expr(expr, hierarchy, diagnostics);
-        }
-    }
+    walk_module_expressions(module, hierarchy, diagnostics, visit_abstract_instantiation);
 }
 
 /// Returns true if the selector name is an instantiation method (spawn, new, etc.)
@@ -49,7 +35,11 @@ fn is_instantiation_selector(name: &str) -> bool {
     matches!(name, "spawn" | "spawnWith:" | "new" | "new:")
 }
 
-fn check_abstract_in_expr(
+/// Visitor for abstract class instantiation checks (BT-105).
+///
+/// Called by `walk_expression` on each expression node; the walker handles
+/// recursive traversal, so this function only inspects the current node.
+fn visit_abstract_instantiation(
     expr: &Expression,
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
@@ -58,10 +48,9 @@ fn check_abstract_in_expr(
         Expression::MessageSend {
             receiver,
             selector,
-            arguments,
             span,
+            ..
         } => {
-            // Check if receiver is a class reference or identifier matching an abstract class
             let receiver_name = match receiver.as_ref() {
                 Expression::Identifier(Identifier { name, .. }) => Some(name.as_str()),
                 Expression::ClassReference { name, .. } => Some(name.name.as_str()),
@@ -78,27 +67,10 @@ fn check_abstract_in_expr(
                     ));
                 }
             }
-
-            // Recurse into receiver and arguments
-            check_abstract_in_expr(receiver, hierarchy, diagnostics);
-            for arg in arguments {
-                check_abstract_in_expr(arg, hierarchy, diagnostics);
-            }
-        }
-        Expression::Block(block) => {
-            for e in &block.body {
-                check_abstract_in_expr(e, hierarchy, diagnostics);
-            }
-        }
-        Expression::Assignment { value, .. } | Expression::Return { value, .. } => {
-            check_abstract_in_expr(value, hierarchy, diagnostics);
         }
         Expression::Cascade {
             receiver, messages, ..
         } => {
-            check_abstract_in_expr(receiver, hierarchy, diagnostics);
-
-            // BT-105: Check cascade messages for abstract class instantiation
             let receiver_name = match receiver.as_ref() {
                 Expression::Identifier(Identifier { name, .. }) => Some(name.as_str()),
                 Expression::ClassReference { name, .. } => Some(name.name.as_str()),
@@ -116,45 +88,6 @@ fn check_abstract_in_expr(
                         ));
                     }
                 }
-            }
-
-            for msg in messages {
-                for arg in &msg.arguments {
-                    check_abstract_in_expr(arg, hierarchy, diagnostics);
-                }
-            }
-        }
-        Expression::Parenthesized { expression, .. } => {
-            check_abstract_in_expr(expression, hierarchy, diagnostics);
-        }
-        Expression::FieldAccess { receiver, .. } => {
-            check_abstract_in_expr(receiver, hierarchy, diagnostics);
-        }
-        Expression::Pipe { value, target, .. } => {
-            check_abstract_in_expr(value, hierarchy, diagnostics);
-            check_abstract_in_expr(target, hierarchy, diagnostics);
-        }
-        Expression::Match { value, arms, .. } => {
-            check_abstract_in_expr(value, hierarchy, diagnostics);
-            for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    check_abstract_in_expr(guard, hierarchy, diagnostics);
-                }
-                check_abstract_in_expr(&arm.body, hierarchy, diagnostics);
-            }
-        }
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                check_abstract_in_expr(&pair.key, hierarchy, diagnostics);
-                check_abstract_in_expr(&pair.value, hierarchy, diagnostics);
-            }
-        }
-        Expression::ListLiteral { elements, tail, .. } => {
-            for elem in elements {
-                check_abstract_in_expr(elem, hierarchy, diagnostics);
-            }
-            if let Some(t) = tail {
-                check_abstract_in_expr(t, hierarchy, diagnostics);
             }
         }
         _ => {}
