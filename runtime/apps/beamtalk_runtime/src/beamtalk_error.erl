@@ -3,6 +3,8 @@
 
 %%% @doc Error construction and formatting helpers.
 %%%
+%%% **DDD Context:** Runtime — Error Handling
+%%%
 %%% This module provides helper functions for creating and formatting
 %%% beamtalk_error records. All runtime errors should use these helpers
 %%% to ensure consistent error messages and structure.

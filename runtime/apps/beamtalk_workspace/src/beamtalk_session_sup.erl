@@ -3,6 +3,8 @@
 
 %%% @doc Session supervisor for workspace
 %%%
+%%% **DDD Context:** Workspace
+%%%
 %%% Supervises REPL session shell processes.
 %%% Each REPL connection creates one session process that maintains
 %%% bindings and evaluation state for that specific connection.

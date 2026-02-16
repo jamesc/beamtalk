@@ -2,6 +2,8 @@
 %% SPDX-License-Identifier: Apache-2.0
 
 %%% @doc Per-class gen_server for Beamtalk class objects.
+%%%
+%%% **DDD Context:** Object System
 %%
 %% Each class in Beamtalk is a first-class object - a process that holds
 %% metadata and responds to messages. This follows Smalltalk's philosophy

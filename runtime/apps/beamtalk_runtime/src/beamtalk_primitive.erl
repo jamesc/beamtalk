@@ -3,6 +3,8 @@
 
 %%% @doc Primitive type dispatch and reflection.
 %%%
+%%% **DDD Context:** Object System
+%%%
 %%% This module provides uniform dispatch and class identity for primitive types
 %%% (integers, strings, etc.) that are not actors. It enables reflection operations
 %%% like `42 class` to return `'Integer'`.

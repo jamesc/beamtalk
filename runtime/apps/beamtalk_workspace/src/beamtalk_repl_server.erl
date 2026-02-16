@@ -3,6 +3,8 @@
 
 %%% @doc TCP server and client handling for Beamtalk REPL
 %%%
+%%% **DDD Context:** REPL
+%%%
 %%% This module handles TCP connections, client communication, and
 %%% dispatching REPL protocol messages via beamtalk_repl_protocol.
 
@@ -415,32 +417,47 @@ handle_op(<<"load-file">>, Params, Msg, SessionPid) ->
     end;
 
 handle_op(<<"reload">>, Params, Msg, SessionPid) ->
-    Module = binary_to_list(maps:get(<<"module">>, Params, <<>>)),
+    ModuleBin = maps:get(<<"module">>, Params, <<>>),
     case maps:get(<<"path">>, Params, undefined) of
-        undefined when Module =/= [] ->
-            %% Use list_to_existing_atom to prevent atom table exhaustion
-            case catch list_to_existing_atom(Module) of
-                ModuleAtom when is_atom(ModuleAtom) ->
+        undefined when ModuleBin =/= <<>> ->
+            case safe_to_existing_atom(ModuleBin) of
+                {ok, ModuleAtom} ->
                     {ok, Tracker} = beamtalk_repl_shell:get_module_tracker(SessionPid),
                     case beamtalk_repl_modules:get_module_info(ModuleAtom, Tracker) of
                         {ok, Info} ->
                             case beamtalk_repl_modules:get_source_file(Info) of
                                 undefined ->
+                                    Err0 = beamtalk_error:new(no_source_file, 'Module'),
+                                    Err1 = beamtalk_error:with_message(Err0,
+                                        iolist_to_binary([<<"No source file recorded for module: ">>,
+                                                          ModuleBin])),
+                                    Err2 = beamtalk_error:with_hint(Err1,
+                                        <<"Use :load <path> to load it first.">>),
                                     beamtalk_repl_protocol:encode_error(
-                                        {no_source_file, Module}, Msg,
+                                        Err2, Msg,
                                         fun beamtalk_repl_json:format_error_message/1);
                                 SourcePath ->
                                     do_reload(SourcePath, ModuleAtom, Msg, SessionPid)
                             end;
                         {error, not_found} ->
+                            Err0 = beamtalk_error:new(module_not_loaded, 'Module'),
+                            Err1 = beamtalk_error:with_message(Err0,
+                                iolist_to_binary([<<"Module not loaded: ">>, ModuleBin])),
+                            Err2 = beamtalk_error:with_hint(Err1,
+                                <<"Use :load <path> to load it first.">>),
                             beamtalk_repl_protocol:encode_error(
-                                {module_not_loaded, Module}, Msg,
+                                Err2, Msg,
                                 fun beamtalk_repl_json:format_error_message/1)
                     end;
-                _ ->
+                {error, badarg} ->
                     %% Atom doesn't exist — module was never loaded
+                    Err0 = beamtalk_error:new(module_not_loaded, 'Module'),
+                    Err1 = beamtalk_error:with_message(Err0,
+                        iolist_to_binary([<<"Module not loaded: ">>, ModuleBin])),
+                    Err2 = beamtalk_error:with_hint(Err1,
+                        <<"Use :load <path> to load it first.">>),
                     beamtalk_repl_protocol:encode_error(
-                        {module_not_loaded, Module}, Msg,
+                        Err2, Msg,
                         fun beamtalk_repl_json:format_error_message/1)
             end;
         undefined ->
@@ -462,61 +479,65 @@ handle_op(<<"actors">>, _Params, Msg, _SessionPid) ->
 
 handle_op(<<"inspect">>, Params, Msg, _SessionPid) ->
     PidStr = binary_to_list(maps:get(<<"actor">>, Params, <<>>)),
-    try
-        Pid = list_to_pid(PidStr),
-        case is_known_actor(Pid) of
-            false ->
-                beamtalk_repl_protocol:encode_error(
-                    {unknown_actor, PidStr}, Msg, fun beamtalk_repl_json:format_error_message/1);
-            true ->
-                case is_process_alive(Pid) of
-                    true ->
-                        %% Get actor state via sys:get_state
-                        try
-                            State = sys:get_state(Pid, 5000),
-                            InspectStr = case State of
-                                M when is_map(M) ->
-                                    case beamtalk_tagged_map:is_tagged(M) of
-                                        true -> beamtalk_reflection:inspect_string(M);
-                                        false -> beamtalk_primitive:print_string(M)
-                                    end;
-                                _ ->
-                                    iolist_to_binary(io_lib:format("~p", [State]))
-                            end,
-                            beamtalk_repl_protocol:encode_inspect(
-                                InspectStr, Msg)
-                        catch
-                            _:_ ->
-                                beamtalk_repl_protocol:encode_error(
-                                    {inspect_failed, PidStr}, Msg, fun beamtalk_repl_json:format_error_message/1)
-                        end;
-                    false ->
-                        beamtalk_repl_protocol:encode_error(
-                            {actor_not_alive, PidStr}, Msg, fun beamtalk_repl_json:format_error_message/1)
-                end
-        end
-    catch
-        _:_ ->
+    PidBin = list_to_binary(PidStr),
+    case validate_actor_pid(PidStr) of
+        {error, Reason} ->
+            Err0 = beamtalk_error:new(Reason, 'Actor'),
+            Err1 = beamtalk_error:with_message(Err0,
+                iolist_to_binary([<<"Invalid actor PID: ">>, PidBin])),
+            Err2 = beamtalk_error:with_hint(Err1,
+                <<"Use :actors to list valid actor PIDs.">>),
             beamtalk_repl_protocol:encode_error(
-                {invalid_pid, PidStr}, Msg, fun beamtalk_repl_json:format_error_message/1)
+                Err2, Msg, fun beamtalk_repl_json:format_error_message/1);
+        {ok, Pid} ->
+            case is_process_alive(Pid) of
+                true ->
+                    %% Get actor state via sys:get_state
+                    try
+                        State = sys:get_state(Pid, 5000),
+                        InspectStr = case State of
+                            M when is_map(M) ->
+                                case beamtalk_tagged_map:is_tagged(M) of
+                                    true -> beamtalk_reflection:inspect_string(M);
+                                    false -> beamtalk_primitive:print_string(M)
+                                end;
+                            _ ->
+                                iolist_to_binary(io_lib:format("~p", [State]))
+                        end,
+                        beamtalk_repl_protocol:encode_inspect(
+                            InspectStr, Msg)
+                    catch
+                        _:_ ->
+                            Err3 = beamtalk_error:new(inspect_failed, 'Actor'),
+                            Err4 = beamtalk_error:with_message(Err3,
+                                iolist_to_binary([<<"Failed to inspect actor: ">>, PidBin])),
+                            beamtalk_repl_protocol:encode_error(
+                                Err4, Msg, fun beamtalk_repl_json:format_error_message/1)
+                    end;
+                false ->
+                    Err3 = beamtalk_error:new(actor_not_alive, 'Actor'),
+                    Err4 = beamtalk_error:with_message(Err3,
+                        iolist_to_binary([<<"Actor is not alive: ">>, PidBin])),
+                    beamtalk_repl_protocol:encode_error(
+                        Err4, Msg, fun beamtalk_repl_json:format_error_message/1)
+            end
     end;
 
 handle_op(<<"kill">>, Params, Msg, _SessionPid) ->
     PidStr = binary_to_list(maps:get(<<"actor">>, Params, maps:get(<<"pid">>, Params, <<>>))),
-    try
-        Pid = list_to_pid(PidStr),
-        case is_known_actor(Pid) of
-            false ->
-                beamtalk_repl_protocol:encode_error(
-                    {unknown_actor, PidStr}, Msg, fun beamtalk_repl_json:format_error_message/1);
-            true ->
-                exit(Pid, kill),
-                beamtalk_repl_protocol:encode_status(ok, Msg, fun beamtalk_repl_json:term_to_json/1)
-        end
-    catch
-        _:_ ->
+    case validate_actor_pid(PidStr) of
+        {error, Reason} ->
+            PidBin = list_to_binary(PidStr),
+            Err0 = beamtalk_error:new(Reason, 'Actor'),
+            Err1 = beamtalk_error:with_message(Err0,
+                iolist_to_binary([<<"Invalid actor PID: ">>, PidBin])),
+            Err2 = beamtalk_error:with_hint(Err1,
+                <<"Use :actors to list valid actor PIDs.">>),
             beamtalk_repl_protocol:encode_error(
-                {invalid_pid, PidStr}, Msg, fun beamtalk_repl_json:format_error_message/1)
+                Err2, Msg, fun beamtalk_repl_json:format_error_message/1);
+        {ok, Pid} ->
+            exit(Pid, kill),
+            beamtalk_repl_protocol:encode_status(ok, Msg, fun beamtalk_repl_json:term_to_json/1)
     end;
 
 handle_op(<<"modules">>, _Params, Msg, SessionPid) ->
@@ -846,11 +867,17 @@ resolve_module_atoms(undefined, Classes) ->
     lists:filtermap(fun(ClassMap) ->
         case maps:get(name, ClassMap, "") of
             "" -> false;
-            Name ->
-                case catch list_to_existing_atom(Name) of
-                    Atom when is_atom(Atom) -> {true, Atom};
-                    _ -> false
-                end
+            Name when is_list(Name) ->
+                case safe_to_existing_atom(list_to_binary(Name)) of
+                    {ok, Atom} -> {true, Atom};
+                    {error, badarg} -> false
+                end;
+            Name when is_binary(Name) ->
+                case safe_to_existing_atom(Name) of
+                    {ok, Atom} -> {true, Atom};
+                    {error, badarg} -> false
+                end;
+            _ -> false
         end
     end, Classes).
 
@@ -866,6 +893,21 @@ base_protocol_response(Msg) ->
     M0 = #{},
     M1 = case Id of undefined -> M0; _ -> M0#{<<"id">> => Id} end,
     case Session of undefined -> M1; _ -> M1#{<<"session">> => Session} end.
+
+%% @private
+%% @doc Validate a PID string refers to a known Beamtalk actor.
+%% Consolidates PID parsing + registry lookup used by inspect/kill operations.
+-spec validate_actor_pid(string()) -> {ok, pid()} | {error, invalid_pid | unknown_actor}.
+validate_actor_pid(PidStr) ->
+    try
+        Pid = list_to_pid(PidStr),
+        case is_known_actor(Pid) of
+            true -> {ok, Pid};
+            false -> {error, unknown_actor}
+        end
+    catch
+        _:_ -> {error, invalid_pid}
+    end.
 
 %% @private
 %% @doc Check whether a PID belongs to a registered Beamtalk actor.

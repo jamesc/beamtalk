@@ -3,6 +3,8 @@
 
 %%% @doc Per-workspace supervisor
 %%%
+%%% **DDD Context:** Workspace
+%%%
 %%% This supervisor manages all components of a persistent workspace:
 %%% - Actor registry (workspace-wide actor tracking)
 %%% - REPL TCP server for client connections  

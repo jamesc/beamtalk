@@ -3,6 +3,8 @@
 
 %%% @doc Dynamic Object Behavior for Interpreter-Based Classes
 %%%
+%%% **DDD Context:** Object System
+%%%
 %%% This module implements a gen_server behavior for dynamically created
 %%% Beamtalk classes. Unlike compiled classes which generate optimized
 %%% Erlang code, dynamic classes store methods as closures and dispatch
