@@ -25,8 +25,10 @@ pub struct Scope {
     levels: Vec<ScopeLevel>,
 }
 
+/// A single level in the scope stack, holding variable bindings at that depth.
 #[derive(Debug, Clone)]
 struct ScopeLevel {
+    /// Variables defined at this scope level, keyed by name.
     variables: HashMap<String, Binding>,
 }
 
@@ -66,11 +68,17 @@ pub enum BindingKind {
 /// - `used`: Whether this binding has been referenced (for unused variable detection)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Binding {
+    /// The variable name.
     pub name: String,
+    /// Source location where the binding was defined.
     pub defined_at: Span,
+    /// Scope depth (0 = module, 1 = class, 2 = method, 3+ = blocks).
     pub depth: usize,
+    /// The kind of binding (local, parameter, field, etc.).
     pub kind: BindingKind,
+    /// Optional type annotation for gradual typing.
     pub type_annotation: Option<TypeAnnotation>,
+    /// Whether this binding has been referenced (for unused variable detection).
     pub used: bool,
 }
 

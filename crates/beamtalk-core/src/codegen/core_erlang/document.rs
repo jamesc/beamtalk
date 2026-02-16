@@ -48,13 +48,19 @@ pub enum Document<'a> {
     /// A group that can be rendered flat or broken across lines.
     Group(Box<Document<'a>>),
     /// A break point — rendered as given string when flat, newline when broken.
-    Break { broken: &'a str, unbroken: &'a str },
+    Break {
+        /// Text emitted when the group is rendered in broken (multi-line) mode.
+        broken: &'a str,
+        /// Text emitted when the group is rendered in flat (single-line) mode.
+        unbroken: &'a str,
+    },
     /// Empty document.
     Nil,
 }
 
 /// Coerce a value into a `Document`.
 pub trait Documentable<'a> {
+    /// Converts this value into a `Document`.
     fn to_doc(self) -> Document<'a>;
 }
 
@@ -196,6 +202,7 @@ pub fn concat<'a>(docs: impl IntoIterator<Item = Document<'a>>) -> Document<'a> 
 
 // --- Rendering ---
 
+/// Rendering mode for break/group layout decisions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
     /// All breaks render as their unbroken string (flat).
@@ -219,6 +226,7 @@ impl Document<'_> {
         output
     }
 
+    /// Recursively renders this document into the output string.
     fn render_to(&self, output: &mut String, indent: isize, mode: Mode) {
         match self {
             Document::Str(s) => output.push_str(s),
@@ -255,6 +263,7 @@ impl Document<'_> {
     }
 }
 
+/// Writes `indent` spaces to the output string.
 fn write_indent(output: &mut String, indent: isize) {
     for _ in 0..indent {
         output.push(' ');

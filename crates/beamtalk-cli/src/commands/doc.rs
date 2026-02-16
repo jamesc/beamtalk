@@ -20,16 +20,23 @@ use tracing::{debug, info, instrument, warn};
 
 /// Information about a documented class.
 struct ClassInfo {
+    /// The class name (e.g., `Counter`).
     name: String,
+    /// The superclass name, if any (e.g., `Actor`).
     superclass: Option<String>,
+    /// The class-level doc comment extracted from source.
     doc_comment: Option<String>,
+    /// Instance methods defined on the class.
     methods: Vec<MethodInfo>,
+    /// Class-side methods defined on the class.
     class_methods: Vec<MethodInfo>,
 }
 
 /// Information about a documented method.
 struct MethodInfo {
+    /// The formatted method signature (e.g., `at: index put: value`).
     signature: String,
+    /// The method-level doc comment extracted from source.
     doc_comment: Option<String>,
 }
 

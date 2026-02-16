@@ -21,8 +21,11 @@
 //! beamtalk-mcp
 //! ```
 
+/// Async TCP client for communicating with a running beamtalk REPL.
 mod client;
+/// MCP server implementation that exposes REPL operations as tools.
 mod server;
+/// Workspace discovery for locating a running REPL server's port.
 mod workspace;
 
 use std::sync::Arc;
@@ -47,6 +50,7 @@ struct Args {
     workspace_id: Option<String>,
 }
 
+/// Entry point: parse CLI args, connect to the REPL, and start the MCP server.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Log to stderr (stdout is the MCP stdio transport)
