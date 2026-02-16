@@ -145,18 +145,24 @@ fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
 }
 
 /// Recursively collect all `.bt` files from a directory tree.
+///
+/// Symlinks are skipped to avoid potential infinite recursion from circular links.
 fn collect_bt_files_recursive(dir: &Utf8Path, files: &mut Vec<Utf8PathBuf>) -> Result<()> {
     for entry in fs::read_dir(dir)
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to read directory '{dir}'"))?
     {
         let entry = entry.into_diagnostic()?;
+        let file_type = entry.file_type().into_diagnostic()?;
+        if file_type.is_symlink() {
+            continue;
+        }
         let entry_path = Utf8PathBuf::from_path_buf(entry.path())
             .map_err(|_| miette::miette!("Non-UTF-8 path"))?;
 
-        if entry_path.is_dir() {
+        if file_type.is_dir() {
             collect_bt_files_recursive(&entry_path, files)?;
-        } else if entry_path.extension() == Some("bt") {
+        } else if file_type.is_file() && entry_path.extension() == Some("bt") {
             files.push(entry_path);
         }
     }
