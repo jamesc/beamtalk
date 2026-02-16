@@ -319,10 +319,10 @@ pub fn is_node_running(info: &NodeInfo) -> bool {
         use std::time::Duration;
 
         let addr = format!("127.0.0.1:{}", info.port);
-        if let Some(Ok(_)) =
-            TcpStream::connect_timeout(&addr.parse().ok()?, Duration::from_millis(1000)).ok()
-        {
-            return true;
+        if let Ok(sock_addr) = addr.parse() {
+            if TcpStream::connect_timeout(&sock_addr, Duration::from_millis(1000)).is_ok() {
+                return true;
+            }
         }
     }
 
@@ -569,6 +569,10 @@ fn build_detached_node_command(
 }
 
 /// Find the PID of a BEAM process by its node name.
+///
+/// On Unix, uses `ps` to scan for BEAM processes. On Windows, falls back to
+/// a TCP probe against the REPL port (PID tracking is not supported).
+#[cfg(unix)]
 fn find_beam_pid_by_node(node_name: &str) -> Result<(u32, Option<u64>)> {
     let output = Command::new("ps")
         .args(["-eo", "pid,command"])
@@ -592,6 +596,16 @@ fn find_beam_pid_by_node(node_name: &str) -> Result<(u32, Option<u64>)> {
     }
 
     Err(miette!("Could not find BEAM process for node {node_name}"))
+}
+
+/// On Windows, we cannot use `ps` to find BEAM processes. Instead, return a
+/// sentinel PID (0) with no start_time. The caller relies on TCP port probing
+/// (via `read_port_file`) to verify the workspace is running.
+#[cfg(not(unix))]
+fn find_beam_pid_by_node(_node_name: &str) -> Result<(u32, Option<u64>)> {
+    // Windows: PID tracking not supported; return sentinel.
+    // Workspace liveness is verified via TCP port probe instead.
+    Ok((0, None))
 }
 
 /// Get or start a workspace node for the current directory.

@@ -7,6 +7,7 @@
 
 # Use bash for all commands
 set shell := ["bash", "-uc"]
+set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 
 # Default recipe (list all tasks)
 default:
