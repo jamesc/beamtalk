@@ -308,4 +308,42 @@ mod tests {
             panic!("Build failed with unexpected error: {e:?}");
         }
     }
+
+    #[test]
+    fn test_build_with_manifest() {
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        let src_path = project_path.join("src");
+        write_test_file(&src_path.join("main.bt"), "main := [42].");
+        write_test_file(
+            &project_path.join("beamtalk.toml"),
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
+        );
+
+        let result = build(project_path.as_str(), &default_options());
+
+        if let Err(e) = result {
+            let error_msg = format!("{e:?}");
+            if error_msg.contains("escript not found") {
+                println!("Skipping test - escript not installed in CI environment");
+                return;
+            }
+            panic!("Build failed with unexpected error: {e:?}");
+        }
+    }
+
+    #[test]
+    fn test_build_with_malformed_manifest() {
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        let src_path = project_path.join("src");
+        write_test_file(&src_path.join("main.bt"), "main := [42].");
+        write_test_file(
+            &project_path.join("beamtalk.toml"),
+            "this is not valid toml {{{{",
+        );
+
+        let result = build(project_path.as_str(), &default_options());
+        assert!(result.is_err());
+    }
 }
