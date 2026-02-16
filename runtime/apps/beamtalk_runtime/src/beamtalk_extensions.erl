@@ -215,7 +215,8 @@ has(Class, Selector) when is_atom(Class), is_atom(Selector) ->
 %%% Internal Helpers
 %%% ============================================================================
 
-%% @private Group conflict records by class and selector
+%% @private
+%% @doc Group conflict records by class and selector.
 -spec group_conflicts(list()) -> [{term(), [atom()]}].
 group_conflicts(Conflicts) ->
     Dict = lists:foldl(

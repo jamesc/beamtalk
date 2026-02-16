@@ -110,8 +110,7 @@ format_module_info(#module_info{name = Name, source_file = Source, load_time = L
         time_ago => TimeAgo
     }.
 
-%% @private
-%% Format elapsed time as human-readable string.
+%% @doc Format elapsed time as a human-readable string (e.g., "5m ago").
 -spec format_time_ago(integer()) -> string().
 format_time_ago(Secs) when Secs < 60 ->
     io_lib:format("~ps ago", [Secs]);

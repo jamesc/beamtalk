@@ -292,7 +292,7 @@ discover_test_methods(FlatMethods) ->
     end, [], FlatMethods),
     lists:sort(TestMethods).
 
-%% Discover test methods from module exports (BIF fallback path).
+%% @doc Discover test methods from module exports (BIF fallback path).
 -spec discover_test_methods_from_module(atom()) -> [atom()].
 discover_test_methods_from_module(Module) ->
     Exports = Module:module_info(exports),
@@ -330,7 +330,7 @@ resolve_module(ClassName) ->
             end
     end.
 
-%% Convert CamelCase class name to snake_case module name component.
+%% @doc Convert CamelCase class name to snake_case module name component.
 %% Matches the Rust to_module_name() convention.
 -spec class_name_to_snake(string()) -> string().
 class_name_to_snake(Name) ->
@@ -398,7 +398,7 @@ run_test_method(ClassName, Module, MethodName, FlatMethods) ->
             {fail, MethodName, SetupMsg}
     end.
 
-%% Check for setUp/tearDown methods, using FlatMethods map or module exports.
+%% @doc Check for setUp/tearDown methods, using FlatMethods map or module exports.
 -spec check_lifecycle_methods(atom(), map() | none) -> {boolean(), boolean()}.
 check_lifecycle_methods(_Module, FlatMethods) when is_map(FlatMethods) ->
     {maps:is_key(setUp, FlatMethods), maps:is_key(tearDown, FlatMethods)};

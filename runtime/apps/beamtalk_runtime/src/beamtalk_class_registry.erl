@@ -147,6 +147,7 @@ direct_subclasses(ClassName) ->
 all_subclasses(ClassName) ->
     lists:sort(all_subclasses_acc([ClassName], [])).
 
+%% @doc Accumulator helper for all_subclasses/1; walks hierarchy depth-first.
 -spec all_subclasses_acc([class_name()], [class_name()]) -> [class_name()].
 all_subclasses_acc([], Acc) ->
     Acc;

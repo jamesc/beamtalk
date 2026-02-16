@@ -287,7 +287,8 @@ encode_docs(DocText, Msg) ->
 
 %%% Internal functions
 
-%% @private Decode a parsed JSON map into a protocol message.
+%% @private
+%% @doc Decode a parsed JSON map into a protocol message.
 -spec decode_map(map()) -> {ok, protocol_msg()} | {error, term()}.
 decode_map(#{<<"op">> := Op} = Map) ->
     %% New protocol format
@@ -311,7 +312,8 @@ decode_map(#{<<"type">> := Type} = Map) ->
 decode_map(_) ->
     {error, {invalid_request, missing_op_or_type}}.
 
-%% @private Translate legacy type+fields to op+params.
+%% @private
+%% @doc Translate legacy type+fields to op+params.
 -spec legacy_to_op(binary(), map()) -> {binary(), map()}.
 legacy_to_op(<<"eval">>, Map) ->
     Code = maps:get(<<"expression">>, Map, <<>>),
@@ -336,7 +338,7 @@ legacy_to_op(<<"kill">>, Map) ->
 legacy_to_op(Type, _Map) ->
     {Type, #{}}.
 
-%% @private Build base response map with id/session fields.
+%% @doc Build base response map with id and session fields.
 -spec base_response(protocol_msg()) -> map().
 base_response(#protocol_msg{id = Id, session = Session}) ->
     M0 = #{},
@@ -349,7 +351,8 @@ base_response(#protocol_msg{id = Id, session = Session}) ->
         _ -> M1#{<<"session">> => Session}
     end.
 
-%% @private Parse JSON binary to map.
+%% @private
+%% @doc Parse a JSON binary into a decoded term.
 -spec parse_json(binary()) -> {ok, term()} | {error, term()}.
 parse_json(Data) ->
     try
@@ -359,7 +362,8 @@ parse_json(Data) ->
         _:_ -> {error, not_json}
     end.
 
-%% @private Convert a term to binary for use as JSON key.
+%% @private
+%% @doc Convert a term to binary for use as a JSON key.
 -spec to_binary(term()) -> binary().
 to_binary(Name) when is_atom(Name) ->
     atom_to_binary(Name, utf8);
@@ -370,13 +374,15 @@ to_binary(Name) when is_list(Name) ->
 to_binary(Name) ->
     list_to_binary(io_lib:format("~p", [Name])).
 
-%% @private Add output field to response map only when non-empty.
+%% @private
+%% @doc Add output field to response map only when non-empty.
 -spec maybe_add_output(map(), binary()) -> map().
 maybe_add_output(Map, <<>>) -> Map;
 maybe_add_output(Map, Output) when is_binary(Output) ->
     Map#{<<"output">> => Output}.
 
-%% @private Add warnings field to response map only when non-empty.
+%% @private
+%% @doc Add warnings field to response map only when non-empty.
 -spec maybe_add_warnings(map(), [binary()]) -> map().
 maybe_add_warnings(Map, []) -> Map;
 maybe_add_warnings(Map, Warnings) ->

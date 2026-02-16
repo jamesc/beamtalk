@@ -210,8 +210,10 @@ impl TypeChecker {
             // Class references are the class itself (class-side receiver)
             Expression::ClassReference { name, .. } => InferredType::Known(name.name.clone()),
 
-            // Field access — we don't know field types
-            Expression::FieldAccess { .. } => InferredType::Dynamic,
+            // Field access, primitives, errors — no type info available
+            Expression::FieldAccess { .. }
+            | Expression::Primitive { .. }
+            | Expression::Error { .. } => InferredType::Dynamic,
 
             // Message sends — the core of type checking
             Expression::MessageSend {
@@ -352,9 +354,22 @@ impl TypeChecker {
                 InferredType::Known("String".into())
             }
 
-            // Super, Primitive, Error — Dynamic
-            Expression::Super(_) | Expression::Primitive { .. } | Expression::Error { .. } => {
-                InferredType::Dynamic
+            // Super — resolve to parent class type for method validation
+            Expression::Super(_) => {
+                // Look up current class from 'self' type, then find parent
+                if let Some(InferredType::Known(class_name)) = env.get("self") {
+                    if let Some(class_info) = hierarchy.get_class(&class_name) {
+                        if let Some(ref parent) = class_info.superclass {
+                            InferredType::Known(parent.clone())
+                        } else {
+                            InferredType::Dynamic
+                        }
+                    } else {
+                        InferredType::Dynamic
+                    }
+                } else {
+                    InferredType::Dynamic
+                }
             }
         };
 
@@ -379,9 +394,10 @@ impl TypeChecker {
         let selector_name = selector.name();
 
         // Infer argument types (for side effects / variable tracking)
-        for arg in arguments {
-            self.infer_expr(arg, hierarchy, env, in_abstract_method);
-        }
+        let arg_types: Vec<InferredType> = arguments
+            .iter()
+            .map(|arg| self.infer_expr(arg, hierarchy, env, in_abstract_method))
+            .collect();
 
         // Handle asType: compile-time type assertion (ADR 0025 Phase 2b)
         // `expr asType: SomeClass` asserts expr is SomeClass, returns Known(SomeClass)
@@ -390,6 +406,19 @@ impl TypeChecker {
                 return InferredType::Known(name.name.clone());
             }
             return receiver_ty;
+        }
+
+        // Validate binary operand types when both sides are known
+        // Only check if the receiver type actually defines the operator (avoids
+        // duplicate warnings when the selector is already unknown).
+        if let MessageSelector::Binary(op) = selector {
+            if let (InferredType::Known(recv_ty), Some(InferredType::Known(arg_ty))) =
+                (&receiver_ty, arg_types.first())
+            {
+                if hierarchy.resolves_selector(recv_ty, &selector_name) {
+                    self.check_binary_operand_types(recv_ty, op, arg_ty, span);
+                }
+            }
         }
 
         // If receiver is a class reference, check class-side methods
@@ -488,35 +517,7 @@ impl TypeChecker {
         }
     }
 
-    /// Emit a warning diagnostic for an unknown selector.
-    fn emit_unknown_selector_warning(
-        &mut self,
-        class_name: &EcoString,
-        selector: &str,
-        span: Span,
-        hierarchy: &ClassHierarchy,
-        is_class_side: bool,
-    ) {
-        let side = if is_class_side { " class" } else { "" };
-        let message: EcoString =
-            format!("{class_name}{side} does not understand '{selector}'").into();
-
-        let mut diag = Diagnostic::warning(message, span);
-
-        // Try to suggest similar selectors
-        if let Some(suggestion) =
-            Self::find_similar_selector(class_name, selector, hierarchy, is_class_side)
-        {
-            diag.hint = Some(format!("Did you mean '{suggestion}'?").into());
-        }
-
-        self.diagnostics.push(diag);
-    }
-
-    /// Checks that a method in a `typed` class has full type annotations.
-    ///
-    /// Emits warnings for missing parameter type annotations and return types.
-    /// Skips primitive/intrinsic methods (their bodies are runtime-provided).
+    /// Check that methods in typed classes have proper type annotations.
     fn check_typed_method_annotations(
         &mut self,
         method: &crate::ast::MethodDefinition,
@@ -555,6 +556,84 @@ impl TypeChecker {
                 method.span,
             ));
         }
+    }
+
+    /// Validate binary message operand types for arithmetic and string concatenation.
+    ///
+    /// When both receiver and argument types are known, checks that the argument type
+    /// is compatible with the operator. Only emits warnings (not errors) to allow
+    /// for dynamic dispatch.
+    fn check_binary_operand_types(
+        &mut self,
+        receiver_ty: &EcoString,
+        operator: &str,
+        arg_ty: &EcoString,
+        span: Span,
+    ) {
+        let is_numeric = |ty: &str| ty == "Integer" || ty == "Float" || ty == "Number";
+        let is_arithmetic = matches!(operator, "+" | "-" | "*" | "/");
+        let is_comparison = matches!(operator, "<" | ">" | "<=" | ">=");
+
+        // Arithmetic operators on numeric types require numeric arguments
+        if is_arithmetic && is_numeric(receiver_ty) && !is_numeric(arg_ty) {
+            let mut diag = Diagnostic::warning(
+                format!("`{operator}` on {receiver_ty} expects a numeric argument, got {arg_ty}"),
+                span,
+            );
+            diag.hint = Some("Arithmetic operators require Integer or Float operands".into());
+            self.diagnostics.push(diag);
+            return;
+        }
+
+        // String concatenation with ++ expects a String argument
+        if operator == "++"
+            && receiver_ty.as_str() == "String"
+            && arg_ty.as_str() != "String"
+            && arg_ty.as_str() != "Symbol"
+        {
+            let mut diag = Diagnostic::warning(
+                format!("`++` on String expects a String argument, got {arg_ty}"),
+                span,
+            );
+            diag.hint = Some("Convert the argument to String first".into());
+            self.diagnostics.push(diag);
+            return;
+        }
+
+        // Comparison operators on numeric types require numeric arguments
+        if is_comparison && is_numeric(receiver_ty) && !is_numeric(arg_ty) {
+            let mut diag = Diagnostic::warning(
+                format!("`{operator}` on {receiver_ty} expects a numeric argument, got {arg_ty}"),
+                span,
+            );
+            diag.hint = Some("Comparison operators require compatible types".into());
+            self.diagnostics.push(diag);
+        }
+    }
+
+    /// Emit a warning diagnostic for an unknown selector.
+    fn emit_unknown_selector_warning(
+        &mut self,
+        class_name: &EcoString,
+        selector: &str,
+        span: Span,
+        hierarchy: &ClassHierarchy,
+        is_class_side: bool,
+    ) {
+        let side = if is_class_side { " class" } else { "" };
+        let message: EcoString =
+            format!("{class_name}{side} does not understand '{selector}'").into();
+
+        let mut diag = Diagnostic::warning(message, span);
+
+        // Try to suggest similar selectors
+        if let Some(suggestion) =
+            Self::find_similar_selector(class_name, selector, hierarchy, is_class_side)
+        {
+            diag.hint = Some(format!("Did you mean '{suggestion}'?").into());
+        }
+
+        self.diagnostics.push(diag);
     }
 
     /// Find a similar selector for "did you mean" hints.
@@ -1410,6 +1489,322 @@ mod tests {
             "cascade self sends to class methods should not warn, got: {:?}",
             checker.diagnostics()
         );
+    }
+
+    // --- Super type inference tests (BT-596) ---
+
+    #[test]
+    fn test_super_infers_parent_class_type() {
+        // class Child < Parent; method: reset => super reset
+        // super should infer as Parent type, not Dynamic
+        let parent = ClassDefinition {
+            name: ident("Parent"),
+            superclass: Some(ident("Object")),
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("reset".into()),
+                parameters: vec![],
+                body: vec![int_lit(0)],
+                return_type: None,
+                is_sealed: false,
+                kind: MethodKind::Primary,
+                doc_comment: None,
+                span: span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: span(),
+        };
+
+        let super_span = Span::new(100, 105);
+        let msg_span = Span::new(100, 115);
+        let child = ClassDefinition {
+            name: ident("Child"),
+            superclass: Some(ident("Parent")),
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("reset".into()),
+                parameters: vec![],
+                body: vec![Expression::MessageSend {
+                    receiver: Box::new(Expression::Super(super_span)),
+                    selector: MessageSelector::Unary("reset".into()),
+                    arguments: vec![],
+                    span: msg_span,
+                }],
+                return_type: None,
+                is_sealed: false,
+                kind: MethodKind::Primary,
+                doc_comment: None,
+                span: span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: span(),
+        };
+
+        let module = make_module_with_classes(vec![], vec![parent, child]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let type_map = infer_types(&module, &hierarchy);
+
+        // super should be inferred as Parent (not Dynamic)
+        let ty = type_map.get(super_span);
+        assert_eq!(
+            ty,
+            Some(&InferredType::Known("Parent".into())),
+            "super should infer as parent class type"
+        );
+    }
+
+    #[test]
+    fn test_super_unknown_selector_warns() {
+        // class Child < Parent; method: test => super nonExistent
+        // Should warn because Parent doesn't have nonExistent
+        let parent = ClassDefinition {
+            name: ident("Parent"),
+            superclass: Some(ident("Object")),
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("reset".into()),
+                parameters: vec![],
+                body: vec![int_lit(0)],
+                return_type: None,
+                is_sealed: false,
+                kind: MethodKind::Primary,
+                doc_comment: None,
+                span: span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: span(),
+        };
+
+        let child = ClassDefinition {
+            name: ident("Child"),
+            superclass: Some(ident("Parent")),
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("test".into()),
+                parameters: vec![],
+                body: vec![msg_send(
+                    Expression::Super(span()),
+                    MessageSelector::Unary("nonExistent".into()),
+                    vec![],
+                )],
+                return_type: None,
+                is_sealed: false,
+                kind: MethodKind::Primary,
+                doc_comment: None,
+                span: span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: span(),
+        };
+
+        let module = make_module_with_classes(vec![], vec![parent, child]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        let warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "should warn about unknown super selector"
+        );
+        assert!(
+            warnings[0].message.contains("Parent"),
+            "warning should reference parent class"
+        );
+    }
+
+    // --- Binary operand type validation tests (BT-596) ---
+
+    #[test]
+    fn test_integer_plus_string_warns() {
+        // 42 + "hello" — type mismatch
+        let module = make_module(vec![msg_send(
+            int_lit(42),
+            MessageSelector::Binary("+".into()),
+            vec![str_lit("hello")],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        let type_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("expects a numeric argument"))
+            .collect();
+        assert_eq!(type_warnings.len(), 1);
+        assert!(type_warnings[0].message.contains("Integer"));
+        assert!(type_warnings[0].message.contains("String"));
+    }
+
+    #[test]
+    fn test_integer_plus_integer_no_warning() {
+        // 42 + 1 — valid
+        let module = make_module(vec![msg_send(
+            int_lit(42),
+            MessageSelector::Binary("+".into()),
+            vec![int_lit(1)],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        let type_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("expects a numeric"))
+            .collect();
+        assert!(type_warnings.is_empty());
+    }
+
+    #[test]
+    fn test_string_plus_integer_warns_unknown_selector() {
+        // "hello" + 42 — String doesn't define +, so we get unknown selector (not operand type)
+        let module = make_module(vec![msg_send(
+            str_lit("hello"),
+            MessageSelector::Binary("+".into()),
+            vec![int_lit(42)],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        // String doesn't define +, so we get "does not understand" (not operand type warning)
+        let warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("String"));
+    }
+
+    #[test]
+    fn test_string_concat_no_operand_warning() {
+        // "hello" ++ " world" — valid String concatenation
+        let module = make_module(vec![msg_send(
+            str_lit("hello"),
+            MessageSelector::Binary("++".into()),
+            vec![str_lit(" world")],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        let type_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("expects a"))
+            .collect();
+        assert!(type_warnings.is_empty());
+    }
+
+    #[test]
+    fn test_string_concat_integer_warns() {
+        // "hello" ++ 42 — wrong type for string concat
+        let module = make_module(vec![msg_send(
+            str_lit("hello"),
+            MessageSelector::Binary("++".into()),
+            vec![int_lit(42)],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        let type_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("expects a String argument"))
+            .collect();
+        assert_eq!(type_warnings.len(), 1);
+    }
+
+    #[test]
+    fn test_dynamic_type_skips_operand_check() {
+        // x + 42 — x is dynamic, no warning
+        let module = make_module(vec![msg_send(
+            var("x"),
+            MessageSelector::Binary("+".into()),
+            vec![int_lit(42)],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        let type_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("expects a"))
+            .collect();
+        assert!(type_warnings.is_empty());
+    }
+
+    #[test]
+    fn test_comparison_integer_vs_string_warns() {
+        // 42 < "hello" — type mismatch for comparison
+        let module = make_module(vec![msg_send(
+            int_lit(42),
+            MessageSelector::Binary("<".into()),
+            vec![str_lit("hello")],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        let type_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("expects a numeric argument"))
+            .collect();
+        assert_eq!(type_warnings.len(), 1);
+    }
+
+    #[test]
+    fn test_binary_operand_warnings_are_warnings_not_errors() {
+        // All operand type diagnostics should be warnings
+        let module = make_module(vec![msg_send(
+            int_lit(42),
+            MessageSelector::Binary("+".into()),
+            vec![str_lit("hello")],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        for diag in checker.diagnostics() {
+            if diag.message.contains("expects a") {
+                assert_eq!(
+                    diag.severity,
+                    crate::source_analysis::Severity::Warning,
+                    "operand type diagnostics should be warnings"
+                );
+            }
+        }
     }
 
     // ---- Typed class tests (BT-587) ----

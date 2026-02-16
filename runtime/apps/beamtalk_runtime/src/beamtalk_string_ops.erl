@@ -201,7 +201,8 @@ is_alpha(Str) when is_binary(Str) ->
 %%% Internal Functions
 %%% ============================================================================
 
-%% @private Grapheme-aware substring search.
+%% @private
+%% @doc Grapheme-aware substring search.
 -spec index_of_graphemes([string:grapheme_cluster()], [string:grapheme_cluster()], integer()) ->
           integer() | nil.
 index_of_graphemes([], _SubGs, _Idx) ->
@@ -213,6 +214,7 @@ index_of_graphemes(StrGs, SubGs, Idx) ->
     end.
 
 %% @private
+%% @doc Return the Nth grapheme (1-based) from a UTF-8 binary.
 -spec get_nth_grapheme(binary(), pos_integer()) -> {ok, binary()} | error.
 get_nth_grapheme(Str, N) ->
     get_nth_grapheme(Str, N, 1).

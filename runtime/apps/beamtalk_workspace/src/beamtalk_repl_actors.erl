@@ -92,7 +92,8 @@ on_actor_spawned(RegistryPid, ActorPid, ClassName, ModuleName) ->
             {error, {registry_failed, Reason}}
     end.
 
-%% @private Register actor with the REPL actor registry (gen_server:call).
+%% @doc Register actor with the REPL actor registry (gen_server:call).
+%% Returns ok on success, or {error, Reason} if registration fails.
 -spec try_register_actor(pid(), pid(), atom(), atom()) -> ok | {error, term()}.
 try_register_actor(RegistryPid, ActorPid, ClassName, ModuleName) ->
     try
@@ -106,7 +107,7 @@ try_register_actor(RegistryPid, ActorPid, ClassName, ModuleName) ->
             {error, {Kind, Reason}}
     end.
 
-%% @private Register actor with workspace_meta (gen_server:cast).
+%% @doc Register actor with workspace_meta (gen_server:cast).
 %% Logs a warning if workspace_meta is not running, but does not fail
 %% since the actor is already tracked by the registry.
 -spec try_register_workspace_meta(pid(), atom()) -> ok.

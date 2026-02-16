@@ -123,6 +123,7 @@ class_info() ->
 %%% ============================================================================
 
 %% @private
+%% @doc Initialize the TranscriptStream gen_server with the given buffer size.
 -spec init([max_buffer()]) -> {ok, state()} | {stop, term()}.
 init([MaxBuffer]) when is_integer(MaxBuffer), MaxBuffer > 0 ->
     SelfRef = {beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, self()},
@@ -137,6 +138,7 @@ init([MaxBuffer]) ->
     {stop, {invalid_max_buffer, MaxBuffer}}.
 
 %% @private
+%% @doc Handle synchronous calls: recent, clear, and unknown selectors.
 -spec handle_call(term(), {pid(), term()}, state()) ->
     {reply, term(), state()}.
 handle_call(recent, _From, #state{buffer = Buffer} = State) ->
@@ -153,6 +155,7 @@ handle_call(Request, _From, State) ->
     {reply, {error, Error1}, State}.
 
 %% @private
+%% @doc Handle asynchronous casts: show:, cr, subscribe, unsubscribe.
 -spec handle_cast(term(), state()) -> {noreply, state()}.
 %% Actor protocol: {Selector, Args, FuturePid} from beamtalk_actor:async_send/4
 handle_cast({'show:', [Value], FuturePid}, #state{self_ref = SelfRef} = State) when is_pid(FuturePid) ->
@@ -207,6 +210,7 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 %% @private
+%% @doc Handle monitor DOWN messages to remove dead subscribers.
 -spec handle_info(term(), state()) -> {noreply, state()}.
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
     {noreply, remove_subscriber(Pid, State)};
@@ -214,6 +218,7 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 %% @private
+%% @doc Clean up on termination (no-op).
 -spec terminate(term(), state()) -> ok.
 terminate(_Reason, _State) ->
     ok.
