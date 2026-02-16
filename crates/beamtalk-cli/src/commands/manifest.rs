@@ -470,6 +470,27 @@ version = "0.1.0"
         assert!(err.contains("reserved"), "should mention reserved: {err}");
     }
 
+    #[test]
+    fn test_parse_manifest_rejects_erlang_app_name() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "crypto"
+version = "0.1.0"
+"#,
+        );
+
+        let result = parse_manifest(&path.join("beamtalk.toml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("Erlang"),
+            "should mention Erlang conflict: {err}"
+        );
+    }
+
     // --- Package name validation tests ---
 
     #[test]
