@@ -3,6 +3,8 @@
 
 //! Parsing infrastructure for Beamtalk source code.
 //!
+//! **DDD Context:** Source Analysis
+//!
 //! This module contains the lexer, parser, and AST definitions.
 //!
 //! # Lexical Analysis

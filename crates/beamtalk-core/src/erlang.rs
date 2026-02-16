@@ -3,6 +3,8 @@
 
 //! Core Erlang code generation for Beamtalk.
 //!
+//! **DDD Context:** Compilation (Shared Kernel)
+//!
 //! **NOTE**: This module is a compatibility re-export wrapper. The actual
 //! implementation has been moved to `crate::codegen::core_erlang` as part
 //! of the refactoring in BT-64.
@@ -74,5 +76,8 @@
 // Re-export the actual implementation from codegen::core_erlang
 pub use crate::codegen::core_erlang::{
     CodeGenError, CodegenOptions, Result, generate, generate_module, generate_repl_expression,
-    generate_test_expression, primitive_bindings, to_module_name,
+    generate_test_expression, primitive_bindings,
 };
+
+// Re-export from Shared Kernel (ast.rs) — not from codegen
+pub use crate::ast::to_module_name;
