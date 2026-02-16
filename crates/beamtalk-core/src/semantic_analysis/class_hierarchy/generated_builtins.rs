@@ -435,6 +435,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "-".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "*".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "/".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: None },
+                MethodInfo { selector: "div:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "%".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "**".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "=:=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: None },

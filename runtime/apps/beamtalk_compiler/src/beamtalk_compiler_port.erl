@@ -19,6 +19,14 @@
     close/1
 ]).
 
+-ifdef(TEST).
+-export([
+    handle_response/1,
+    find_compiler_binary/0,
+    find_project_root/0
+]).
+-endif.
+
 -include_lib("kernel/include/logger.hrl").
 
 %% @doc Open a port to the compiler binary.
