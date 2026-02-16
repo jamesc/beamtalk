@@ -109,6 +109,7 @@ _rel/
 # Build outputs
 /build/
 /lib/build/
+/docs/api/
 *.backup
 *.crashdump
 _bt_stdlib_*.txt

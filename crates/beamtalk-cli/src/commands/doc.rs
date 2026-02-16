@@ -30,6 +30,8 @@ struct ClassInfo {
     methods: Vec<MethodInfo>,
     /// Class-side methods defined on the class.
     class_methods: Vec<MethodInfo>,
+    source_file: Option<String>,
+    source_root: Option<String>,
 }
 
 /// Information about a documented method.
@@ -38,6 +40,7 @@ struct MethodInfo {
     signature: String,
     /// The method-level doc comment extracted from source.
     doc_comment: Option<String>,
+    line_number: Option<usize>,
 }
 
 /// Generate HTML API documentation.
@@ -61,7 +64,7 @@ pub fn run(path: &str, output_dir: &str) -> Result<()> {
     // Parse all source files to extract class info
     let mut classes = Vec::new();
     for file in &source_files {
-        if let Some(class_info) = parse_class_info(file)? {
+        if let Some(class_info) = parse_class_info(&source_path, file)? {
             classes.push(class_info);
         }
     }
@@ -84,18 +87,28 @@ pub fn run(path: &str, output_dir: &str) -> Result<()> {
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to create output directory '{output_path}'"))?;
 
-    // Generate CSS
+    // Generate CSS and JS assets
     write_css(&output_path)?;
+    write_search_js(&output_path, &classes)?;
+
+    // Build sidebar HTML (shared across all pages)
+    let sidebar_html = build_sidebar_html(&classes);
 
     // Generate index page (include README.md from source dir if present, per ADR 0008)
     let readme_path = source_path.join("README.md");
     let readme = fs::read_to_string(&readme_path).ok();
-    write_index_page(&output_path, &classes, readme.as_deref())?;
+    write_index_page(&output_path, &classes, readme.as_deref(), &sidebar_html)?;
 
     // Generate per-class pages
     for class in &classes {
         let inherited = collect_inherited_methods(class, &hierarchy, &methods_by_class);
-        write_class_page(&output_path, class, &inherited, &methods_by_class)?;
+        write_class_page(
+            &output_path,
+            class,
+            &inherited,
+            &methods_by_class,
+            &sidebar_html,
+        )?;
     }
 
     info!(
@@ -140,7 +153,7 @@ fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
 }
 
 /// Parse a `.bt` source file and extract class documentation info.
-fn parse_class_info(path: &Utf8Path) -> Result<Option<ClassInfo>> {
+fn parse_class_info(root: &Utf8Path, path: &Utf8Path) -> Result<Option<ClassInfo>> {
     let source = fs::read_to_string(path)
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to read '{path}'"))?;
@@ -161,23 +174,26 @@ fn parse_class_info(path: &Utf8Path) -> Result<Option<ClassInfo>> {
         return Ok(None);
     };
 
-    let methods = class
-        .methods
-        .iter()
-        .map(|m| MethodInfo {
-            signature: format_signature(&m.selector, &m.parameters),
-            doc_comment: m.doc_comment.clone(),
-        })
-        .collect();
+    let source_file = path
+        .strip_prefix(root)
+        .ok()
+        .map(|p| p.as_str().to_string())
+        .or_else(|| path.file_name().map(String::from));
 
-    let class_methods = class
-        .class_methods
-        .iter()
-        .map(|m| MethodInfo {
+    let make_method_info = |m: &beamtalk_core::ast::MethodDefinition| {
+        let line_number = {
+            let offset = m.span.start() as usize;
+            source[..offset].lines().count() + 1
+        };
+        MethodInfo {
             signature: format_signature(&m.selector, &m.parameters),
             doc_comment: m.doc_comment.clone(),
-        })
-        .collect();
+            line_number: Some(line_number),
+        }
+    };
+
+    let methods = class.methods.iter().map(&make_method_info).collect();
+    let class_methods = class.class_methods.iter().map(&make_method_info).collect();
 
     Ok(Some(ClassInfo {
         name: class.name.name.to_string(),
@@ -185,6 +201,8 @@ fn parse_class_info(path: &Utf8Path) -> Result<Option<ClassInfo>> {
         doc_comment: class.doc_comment.clone(),
         methods,
         class_methods,
+        source_file,
+        source_root: Some(root.as_str().to_string()),
     }))
 }
 
@@ -284,29 +302,44 @@ fn class_link(name: &str, classes: &HashMap<String, &ClassInfo>) -> String {
 
 /// Render markdown doc comment as HTML.
 ///
-/// For now, does basic line-based rendering: paragraphs, code blocks,
+/// Supports paragraphs, code blocks (with syntax highlighting for beamtalk),
 /// headings, and inline code.
 fn render_doc(doc: &str) -> String {
     let mut html = String::new();
     let mut in_code_block = false;
+    let mut code_lang = String::new();
+    let mut code_lines = Vec::new();
     let mut paragraph = String::new();
 
     for line in doc.lines() {
         if line.starts_with("```") {
             if in_code_block {
+                let code = code_lines.join("\n");
+                if code_lang.is_empty() || code_lang == "beamtalk" {
+                    html.push_str(&highlight_beamtalk(&code));
+                } else {
+                    html.push_str(&html_escape(&code));
+                }
                 html.push_str("</code></pre>\n");
                 in_code_block = false;
+                code_lines.clear();
+                code_lang.clear();
             } else {
                 flush_paragraph(&mut paragraph, &mut html);
-                html.push_str("<pre><code>");
+                code_lang = line.trim_start_matches('`').trim().to_string();
+                let css_class = if code_lang.is_empty() || code_lang == "beamtalk" {
+                    " class=\"language-beamtalk\""
+                } else {
+                    ""
+                };
+                let _ = write!(html, "<pre><code{css_class}>");
                 in_code_block = true;
             }
             continue;
         }
 
         if in_code_block {
-            html.push_str(&html_escape(line));
-            html.push('\n');
+            code_lines.push(line.to_string());
             continue;
         }
 
@@ -328,6 +361,12 @@ fn render_doc(doc: &str) -> String {
     }
 
     if in_code_block {
+        let code = code_lines.join("\n");
+        if code_lang.is_empty() || code_lang == "beamtalk" {
+            html.push_str(&highlight_beamtalk(&code));
+        } else {
+            html.push_str(&html_escape(&code));
+        }
         html.push_str("</code></pre>\n");
     }
     flush_paragraph(&mut paragraph, &mut html);
@@ -374,117 +413,379 @@ fn render_inline(text: &str) -> String {
 /// CSS stylesheet content for generated documentation.
 const CSS_STYLESHEET: &str = r":root {
   --bg: #ffffff;
-  --fg: #1a1a2e;
-  --accent: #4361ee;
-  --border: #dee2e6;
-  --code-bg: #f5f5f5;
-  --method-bg: #fafbfc;
+  --fg: #1e1e2e;
+  --fg-muted: #6c6f85;
+  --accent: #1e66f5;
+  --accent-hover: #1443a6;
+  --accent-bg: #eff4fc;
+  --border: #dce0e8;
+  --code-bg: #f5f5f7;
+  --method-bg: #fafbfd;
+  --sidebar-bg: #f8f9fb;
+  --sidebar-w: 260px;
+  --header-h: 56px;
+  --shadow: 0 1px 3px rgba(0,0,0,0.08);
+  --radius: 8px;
+
+  /* Syntax highlighting */
+  --hl-keyword: #8839ef;
+  --hl-string: #40a02b;
+  --hl-number: #fe640b;
+  --hl-comment: #9ca0b0;
+  --hl-selector: #1e66f5;
+  --hl-symbol: #df8e1d;
+  --hl-class: #ea76cb;
+  --hl-self: #d20f39;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1e2e;
+    --fg: #cdd6f4;
+    --fg-muted: #a6adc8;
+    --accent: #89b4fa;
+    --accent-hover: #b4d0fb;
+    --accent-bg: #313244;
+    --border: #45475a;
+    --code-bg: #313244;
+    --method-bg: #24273a;
+    --sidebar-bg: #181825;
+    --shadow: 0 1px 3px rgba(0,0,0,0.3);
+
+    --hl-keyword: #cba6f7;
+    --hl-string: #a6e3a1;
+    --hl-number: #fab387;
+    --hl-comment: #6c7086;
+    --hl-selector: #89b4fa;
+    --hl-symbol: #f9e2af;
+    --hl-class: #f5c2e7;
+    --hl-self: #f38ba8;
+  }
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
   color: var(--fg);
   background: var(--bg);
-  line-height: 1.6;
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 2rem;
+  line-height: 1.65;
 }
 
+/* --- Layout --- */
+.page-wrapper {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  width: var(--sidebar-w);
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border);
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  overflow-y: auto;
+  padding: 1.25rem 0;
+  z-index: 10;
+  transition: transform 0.2s;
+}
+
+.sidebar-header {
+  padding: 0 1.25rem 1rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.75rem;
+}
+
+.sidebar-header h2 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.sidebar-header h2 a {
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.sidebar-search {
+  display: block;
+  width: 100%;
+  margin-top: 0.6rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  background: var(--bg);
+  color: var(--fg);
+  outline: none;
+}
+
+.sidebar-search:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-bg);
+}
+
+.sidebar-nav { list-style: none; }
+
+.sidebar-nav li {
+  margin: 0;
+}
+
+.sidebar-nav a {
+  display: block;
+  padding: 0.3rem 1.25rem;
+  font-size: 0.88rem;
+  color: var(--fg);
+  text-decoration: none;
+  border-left: 3px solid transparent;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.sidebar-nav a:hover {
+  background: var(--accent-bg);
+}
+
+.sidebar-nav a.active {
+  background: var(--accent-bg);
+  border-left-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.main-content {
+  margin-left: var(--sidebar-w);
+  flex: 1;
+  max-width: 900px;
+  padding: 2rem 2.5rem;
+}
+
+/* Mobile toggle */
+.sidebar-toggle {
+  display: none;
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 20;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  font-size: 1.2rem;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  color: var(--fg);
+}
+
+@media (max-width: 768px) {
+  .sidebar {
+    transform: translateX(-100%);
+  }
+  .sidebar.open {
+    transform: translateX(0);
+    box-shadow: 4px 0 20px rgba(0,0,0,0.15);
+  }
+  .sidebar-toggle { display: block; }
+  .main-content {
+    margin-left: 0;
+    padding: 2rem 1.25rem;
+    padding-top: 3.5rem;
+  }
+}
+
+/* --- Typography --- */
 a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
+a:hover { color: var(--accent-hover); text-decoration: underline; }
 
 h1 {
-  font-size: 2rem;
+  font-size: 1.75rem;
+  font-weight: 700;
   margin-bottom: 0.5rem;
-  border-bottom: 2px solid var(--accent);
-  padding-bottom: 0.5rem;
+  letter-spacing: -0.02em;
 }
 
-h2 { font-size: 1.4rem; margin-top: 2rem; margin-bottom: 0.5rem; }
-h3 { font-size: 1.15rem; margin-top: 1.5rem; margin-bottom: 0.3rem; }
-h4 { font-size: 1rem; margin-top: 1rem; margin-bottom: 0.3rem; color: #555; }
+h2 {
+  font-size: 1.3rem;
+  font-weight: 600;
+  margin-top: 2.5rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
 
+h3 { font-size: 1.1rem; font-weight: 600; margin-top: 1.5rem; margin-bottom: 0.4rem; }
+h4 { font-size: 0.95rem; font-weight: 600; margin-top: 1rem; margin-bottom: 0.3rem; color: var(--fg-muted); }
 p { margin-bottom: 0.75rem; }
 
 code {
-  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
-  font-size: 0.9em;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 0.87em;
   background: var(--code-bg);
-  padding: 0.15em 0.35em;
-  border-radius: 3px;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
 }
 
 pre {
   background: var(--code-bg);
-  padding: 1rem;
-  border-radius: 6px;
+  padding: 1rem 1.25rem;
+  border-radius: var(--radius);
   overflow-x: auto;
   margin-bottom: 1rem;
   border: 1px solid var(--border);
+  line-height: 1.5;
 }
 
 pre code { background: none; padding: 0; font-size: 0.85em; }
 
-.breadcrumb { font-size: 0.9rem; color: #666; margin-bottom: 1rem; }
-.class-doc { margin-bottom: 2rem; }
-.superclass { color: #666; font-size: 0.95rem; margin-bottom: 1rem; }
+/* --- Breadcrumb --- */
+.breadcrumb { font-size: 0.85rem; color: var(--fg-muted); margin-bottom: 0.75rem; }
+.breadcrumb a { color: var(--fg-muted); }
+.breadcrumb a:hover { color: var(--accent); }
 
+/* --- Class page --- */
+.class-doc { margin-bottom: 2rem; }
+
+.superclass {
+  display: inline-block;
+  font-size: 0.9rem;
+  color: var(--fg-muted);
+  margin-bottom: 1rem;
+  background: var(--accent-bg);
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+}
+
+/* --- Methods --- */
 .method {
   background: var(--method-bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 1rem;
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
   margin-bottom: 0.75rem;
+  transition: box-shadow 0.15s;
+}
+
+.method:hover { box-shadow: var(--shadow); }
+.method:target { border-left: 3px solid var(--accent); }
+
+.method-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .method-signature {
-  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
-  font-size: 1rem;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 0.95rem;
   font-weight: 600;
   color: var(--accent);
 }
 
-.method-doc { margin-top: 0.5rem; color: #444; }
+.source-link {
+  font-size: 0.78rem;
+  color: var(--fg-muted);
+  margin-left: auto;
+}
+
+.method-doc { margin-top: 0.5rem; color: var(--fg); }
 .method-doc p { margin-bottom: 0.5rem; }
 
+/* --- TOC --- */
+.toc { margin-bottom: 2rem; }
+.toc ul { list-style: none; column-count: 2; column-gap: 2rem; }
+.toc li { margin-bottom: 0.25rem; font-family: monospace; font-size: 0.87rem; }
+.toc .label {
+  display: inline-block;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--fg-muted);
+  background: var(--code-bg);
+  padding: 0.1em 0.4em;
+  border-radius: 3px;
+  margin-right: 0.3rem;
+  vertical-align: middle;
+}
+
+/* --- Class list (index) --- */
 .class-list {
   list-style: none;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 0.6rem;
 }
 
 .class-list li {
   background: var(--method-bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.6rem 1rem;
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  transition: box-shadow 0.15s;
 }
 
-.class-list li a { font-weight: 500; }
+.class-list li:hover { box-shadow: var(--shadow); }
+.class-list li a { font-weight: 600; }
 
 .class-list .class-summary {
   display: block;
-  font-size: 0.85rem;
-  color: #666;
+  font-size: 0.83rem;
+  color: var(--fg-muted);
   margin-top: 0.2rem;
 }
 
-.inherited-section { opacity: 0.85; }
-.inherited-section .method { background: transparent; border-style: dashed; }
-.toc { margin-bottom: 2rem; }
-.toc ul { list-style: none; column-count: 2; column-gap: 1rem; }
-.toc li { margin-bottom: 0.2rem; font-family: monospace; font-size: 0.9rem; }
+/* --- Hierarchy tree --- */
+.hierarchy-tree { margin-bottom: 2rem; }
+.hierarchy-tree ul {
+  list-style: none;
+  padding-left: 1.5rem;
+  border-left: 2px solid var(--border);
+}
+.hierarchy-tree > ul { border-left: none; padding-left: 0; }
+.hierarchy-tree li { margin: 0.2rem 0; font-size: 0.9rem; }
+.hierarchy-tree a { font-weight: 500; }
 
+/* --- Inherited --- */
+.inherited-section { margin-top: 2rem; }
+.inherited-section .method {
+  background: transparent;
+  border-style: dashed;
+  opacity: 0.85;
+}
+
+/* --- Search results --- */
+.search-results {
+  display: none;
+  margin-bottom: 2rem;
+}
+.search-results.active { display: block; }
+.search-results h2 { border-bottom: none; margin-top: 0; }
+.search-result-item {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.search-result-item:last-child { border-bottom: none; }
+.search-result-class { font-weight: 600; }
+.search-result-method { font-family: monospace; font-size: 0.88rem; }
+
+/* --- Syntax highlighting --- */
+.hl-keyword { color: var(--hl-keyword); font-weight: 600; }
+.hl-string { color: var(--hl-string); }
+.hl-number { color: var(--hl-number); }
+.hl-comment { color: var(--hl-comment); font-style: italic; }
+.hl-selector { color: var(--hl-selector); }
+.hl-symbol { color: var(--hl-symbol); }
+.hl-class { color: var(--hl-class); }
+.hl-self { color: var(--hl-self); font-weight: 600; }
+
+/* --- Footer --- */
 footer {
   margin-top: 3rem;
   padding-top: 1rem;
   border-top: 1px solid var(--border);
   font-size: 0.8rem;
-  color: #888;
+  color: var(--fg-muted);
 }
 ";
 
@@ -506,9 +807,13 @@ fn write_index_page(
     output_dir: &Utf8Path,
     classes: &[ClassInfo],
     readme: Option<&str>,
+    sidebar_html: &str,
 ) -> Result<()> {
     let mut html = String::new();
     html.push_str(&page_header("Beamtalk API Reference", None));
+    html.push_str(sidebar_html);
+    html.push_str("<main class=\"main-content\">\n");
+    html.push_str("<div id=\"search-results\" class=\"search-results\"></div>\n");
 
     html.push_str("<h1>Beamtalk API Reference</h1>\n");
 
@@ -520,7 +825,10 @@ fn write_index_page(
         html.push_str("<p>Standard library classes and API documentation.</p>\n");
     }
 
-    html.push_str("<h2>Classes</h2>\n");
+    // Class hierarchy tree
+    write_hierarchy_tree(&mut html, classes);
+
+    html.push_str("<h2>All Classes</h2>\n");
     html.push_str("<ul class=\"class-list\">\n");
 
     for class in classes {
@@ -540,6 +848,7 @@ fn write_index_page(
     }
 
     html.push_str("</ul>\n");
+    html.push_str("</main>\n");
     html.push_str(&page_footer());
 
     let index_path = output_dir.join("index.html");
@@ -556,16 +865,23 @@ fn write_class_page(
     class: &ClassInfo,
     inherited: &[(&str, &[MethodInfo])],
     all_classes: &HashMap<String, &ClassInfo>,
+    sidebar_html: &str,
 ) -> Result<()> {
     let title = format!("{} — Beamtalk", class.name);
     let mut html = String::new();
     html.push_str(&page_header(&title, Some("style.css")));
+    html.push_str(&sidebar_html.replace(
+        &format!("\">{}</a>", html_escape(&class.name)),
+        &format!("\" class=\"active\">{}</a>", html_escape(&class.name)),
+    ));
+    html.push_str("<main class=\"main-content\">\n");
 
     write_class_header(&mut html, class, all_classes);
     write_class_toc(&mut html, class);
     write_class_methods(&mut html, class, all_classes);
     write_inherited_methods(&mut html, inherited, all_classes);
 
+    html.push_str("</main>\n");
     html.push_str(&page_footer());
 
     let class_path = output_dir.join(format!("{}.html", class.name));
@@ -628,23 +944,26 @@ fn write_class_toc(html: &mut String, class: &ClassInfo) {
     html.push_str("</ul>\n</div>\n");
 }
 
-/// Write class and instance method sections.
+/// Write class and instance method sections with source links.
 fn write_class_methods(
     html: &mut String,
     class: &ClassInfo,
-    all_classes: &HashMap<String, &ClassInfo>,
+    _all_classes: &HashMap<String, &ClassInfo>,
 ) {
+    let source = class.source_file.as_deref();
+    let root = class.source_root.as_deref();
+
     if !class.class_methods.is_empty() {
         html.push_str("<h2>Class Methods</h2>\n");
         for method in &class.class_methods {
-            write_method_html(html, method, all_classes);
+            write_method_html_with_source(html, method, source, root);
         }
     }
 
     if !class.methods.is_empty() {
         html.push_str("<h2>Instance Methods</h2>\n");
         for method in &class.methods {
-            write_method_html(html, method, all_classes);
+            write_method_html_with_source(html, method, source, root);
         }
     }
 }
@@ -673,19 +992,42 @@ fn write_inherited_methods(
     html.push_str("</div>\n");
 }
 
-/// Render a single method's HTML.
+/// Render a single method's HTML, with optional source link.
 fn write_method_html(
     html: &mut String,
     method: &MethodInfo,
     _all_classes: &HashMap<String, &ClassInfo>,
 ) {
+    write_method_html_with_source(html, method, None, None);
+}
+
+/// Render a method with a source file link.
+fn write_method_html_with_source(
+    html: &mut String,
+    method: &MethodInfo,
+    source_file: Option<&str>,
+    source_root: Option<&str>,
+) {
     let anchor = method_anchor(&method.signature);
     let _ = writeln!(html, "<div class=\"method\" id=\"{anchor}\">");
+    html.push_str("<div class=\"method-header\">\n");
     let _ = writeln!(
         html,
-        "<div class=\"method-signature\">{}</div>",
+        "<span class=\"method-signature\">{}</span>",
         html_escape(&method.signature)
     );
+
+    if let (Some(file), Some(line)) = (source_file, method.line_number) {
+        let root = source_root.unwrap_or("lib");
+        let _ = writeln!(
+            html,
+            "<a class=\"source-link\" \
+             href=\"https://github.com/jamesc/beamtalk/blob/main/{root}/{file}#L{line}\" \
+             title=\"View source\">source</a>",
+        );
+    }
+
+    html.push_str("</div>\n");
 
     if let Some(ref doc) = method.doc_comment {
         html.push_str("<div class=\"method-doc\">\n");
@@ -717,7 +1059,7 @@ fn method_anchor(signature: &str) -> String {
     result
 }
 
-/// Generate HTML page header.
+/// Generate HTML page header with sidebar toggle and search JS.
 fn page_header(title: &str, css_path: Option<&str>) -> String {
     let css = css_path.unwrap_or("style.css");
     format!(
@@ -729,16 +1071,437 @@ fn page_header(title: &str, css_path: Option<&str>) -> String {
          <title>{title}</title>\n\
          <link rel=\"stylesheet\" href=\"{css}\">\n\
          </head>\n\
-         <body>\n"
+         <body>\n\
+         <button class=\"sidebar-toggle\" onclick=\"document.querySelector('.sidebar')\
+         .classList.toggle('open')\" aria-label=\"Toggle navigation\">☰</button>\n\
+         <div class=\"page-wrapper\">\n"
     )
 }
 
 /// Generate HTML page footer.
 fn page_footer() -> String {
     "<footer>Generated by <code>beamtalk doc</code></footer>\n\
+     </div>\n\
+     <script src=\"search.js\"></script>\n\
      </body>\n\
      </html>\n"
         .to_string()
+}
+
+/// Build sidebar HTML with class list navigation.
+fn build_sidebar_html(classes: &[ClassInfo]) -> String {
+    let mut html = String::new();
+    html.push_str("<nav class=\"sidebar\">\n");
+    html.push_str("<div class=\"sidebar-header\">\n");
+    html.push_str("<h2><a href=\"index.html\">Beamtalk</a></h2>\n");
+    html.push_str(
+        "<input type=\"search\" class=\"sidebar-search\" \
+         id=\"sidebar-search\" placeholder=\"Search classes…\" \
+         aria-label=\"Search classes\" \
+         autocomplete=\"off\">\n",
+    );
+    html.push_str("</div>\n");
+    html.push_str("<ul class=\"sidebar-nav\" id=\"sidebar-nav\">\n");
+
+    for class in classes {
+        let _ = writeln!(
+            html,
+            "<li><a href=\"{name}.html\">{name}</a></li>",
+            name = html_escape(&class.name),
+        );
+    }
+
+    html.push_str("</ul>\n</nav>\n");
+    html
+}
+
+/// Write class hierarchy tree on the index page.
+fn write_hierarchy_tree(html: &mut String, classes: &[ClassInfo]) {
+    // Build parent → children map
+    let mut children: HashMap<String, Vec<&str>> = HashMap::new();
+
+    for class in classes {
+        if let Some(ref superclass) = class.superclass {
+            children
+                .entry(superclass.clone())
+                .or_default()
+                .push(&class.name);
+        }
+    }
+
+    // Sort children alphabetically
+    for v in children.values_mut() {
+        v.sort_unstable();
+    }
+
+    // Find roots (classes without a parent in our set)
+    let class_names: std::collections::HashSet<&str> =
+        classes.iter().map(|c| c.name.as_str()).collect();
+    let mut roots: Vec<&str> = classes
+        .iter()
+        .filter(|c| {
+            c.superclass
+                .as_ref()
+                .is_none_or(|s| !class_names.contains(s.as_str()))
+        })
+        .map(|c| c.name.as_str())
+        .collect();
+    roots.sort_unstable();
+
+    if roots.is_empty() {
+        return;
+    }
+
+    html.push_str("<div class=\"hierarchy-tree\">\n");
+    html.push_str("<h2>Class Hierarchy</h2>\n");
+    html.push_str("<ul>\n");
+    for root in &roots {
+        write_hierarchy_node(html, root, &children);
+    }
+    html.push_str("</ul>\n</div>\n");
+}
+
+/// Recursively write a hierarchy tree node.
+fn write_hierarchy_node(html: &mut String, name: &str, children: &HashMap<String, Vec<&str>>) {
+    let _ = write!(
+        html,
+        "<li><a href=\"{name}.html\">{name}</a>",
+        name = html_escape(name),
+    );
+
+    if let Some(kids) = children.get(name) {
+        html.push_str("\n<ul>\n");
+        for kid in kids {
+            write_hierarchy_node(html, kid, children);
+        }
+        html.push_str("</ul>\n");
+    }
+
+    html.push_str("</li>\n");
+}
+
+/// Generate search JavaScript and write search.js file.
+fn write_search_js(output_dir: &Utf8Path, classes: &[ClassInfo]) -> Result<()> {
+    // Build search index as JSON
+    let mut index_entries = Vec::new();
+    for class in classes {
+        // Add class entry
+        let summary = class
+            .doc_comment
+            .as_ref()
+            .and_then(|d| d.lines().next())
+            .unwrap_or("");
+        index_entries.push(format!(
+            "{{\"t\":\"class\",\"n\":\"{}\",\"s\":\"{}\",\"u\":\"{}.html\"}}",
+            json_escape(&class.name),
+            json_escape(summary),
+            class.name,
+        ));
+
+        // Add method entries
+        for method in class.class_methods.iter().chain(class.methods.iter()) {
+            let anchor = method_anchor(&method.signature);
+            index_entries.push(format!(
+                "{{\"t\":\"method\",\"n\":\"{}\",\"c\":\"{}\",\"u\":\"{}.html#{}\"}}",
+                json_escape(&method.signature),
+                json_escape(&class.name),
+                class.name,
+                anchor,
+            ));
+        }
+    }
+
+    let index_json = format!("[{}]", index_entries.join(","));
+
+    let js = format!(
+        "{SEARCH_JS_TEMPLATE}\nvar searchIndex = {index_json};\ninitSearch(searchIndex);\n"
+    );
+
+    let js_path = output_dir.join("search.js");
+    fs::write(&js_path, js)
+        .into_diagnostic()
+        .wrap_err("Failed to write search.js")?;
+    debug!("Generated {}", js_path);
+    Ok(())
+}
+
+/// Escape string for JSON embedding.
+fn json_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
+}
+
+/// Client-side search JavaScript.
+const SEARCH_JS_TEMPLATE: &str = r#"
+function initSearch(index) {
+  var searchInput = document.getElementById('sidebar-search');
+  var navList = document.getElementById('sidebar-nav');
+  var resultsDiv = document.getElementById('search-results');
+  if (!searchInput) return;
+
+  var originalNav = navList ? navList.innerHTML : '';
+
+  searchInput.addEventListener('input', function() {
+    var q = this.value.toLowerCase().trim();
+
+    // Filter sidebar nav
+    if (navList) {
+      if (!q) {
+        navList.innerHTML = originalNav;
+      } else {
+        var items = navList.querySelectorAll('li');
+        for (var i = 0; i < items.length; i++) {
+          var text = items[i].textContent.toLowerCase();
+          items[i].style.display = text.indexOf(q) !== -1 ? '' : 'none';
+        }
+      }
+    }
+
+    // Show search results in main content (if on index page)
+    if (!resultsDiv) return;
+    if (!q) {
+      resultsDiv.className = 'search-results';
+      resultsDiv.innerHTML = '';
+      return;
+    }
+
+    var matches = [];
+    for (var i = 0; i < index.length && matches.length < 30; i++) {
+      var entry = index[i];
+      var name = (entry.n || '').toLowerCase();
+      var cls = (entry.c || '').toLowerCase();
+      if (name.indexOf(q) !== -1 || cls.indexOf(q) !== -1) {
+        matches.push(entry);
+      }
+    }
+
+    if (matches.length === 0) {
+      resultsDiv.className = 'search-results active';
+      resultsDiv.innerHTML = '<h2>Search Results</h2><p>No results for "' +
+        esc(q) + '"</p>';
+      return;
+    }
+
+    var html = '<h2>Search Results</h2>';
+    for (var i = 0; i < matches.length; i++) {
+      var m = matches[i];
+      if (m.t === 'class') {
+        html += '<div class="search-result-item">' +
+          '<a class="search-result-class" href="' + m.u + '">' + esc(m.n) + '</a>' +
+          (m.s ? ' — ' + esc(m.s) : '') + '</div>';
+      } else {
+        html += '<div class="search-result-item">' +
+          '<a href="' + m.u + '"><span class="search-result-class">' + esc(m.c) +
+          '</span> › <span class="search-result-method">' + esc(m.n) + '</span></a></div>';
+      }
+    }
+    resultsDiv.className = 'search-results active';
+    resultsDiv.innerHTML = html;
+  });
+
+  // Keyboard shortcut: / to focus search
+  document.addEventListener('keydown', function(e) {
+    if (e.key === '/' && document.activeElement !== searchInput) {
+      e.preventDefault();
+      searchInput.focus();
+    }
+  });
+}
+
+function esc(s) {
+  var d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+"#;
+
+/// Syntax-highlight Beamtalk source code.
+///
+/// Applies HTML span tags for keywords, strings, numbers, comments,
+/// selectors, symbols, class names, and `self`.
+fn highlight_beamtalk(code: &str) -> String {
+    let mut result = String::new();
+    let chars: Vec<char> = code.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+
+    while i < len {
+        if let Some(new_i) = hl_comment(&chars, i, &mut result) {
+            i = new_i;
+        } else if let Some(new_i) = hl_string(&chars, i, &mut result) {
+            i = new_i;
+        } else if let Some(new_i) = hl_symbol(&chars, i, &mut result) {
+            i = new_i;
+        } else if let Some(new_i) = hl_number(&chars, i, &mut result) {
+            i = new_i;
+        } else if let Some(new_i) = hl_word(&chars, i, &mut result) {
+            i = new_i;
+        } else {
+            match chars[i] {
+                '&' => result.push_str("&amp;"),
+                '<' => result.push_str("&lt;"),
+                '>' => result.push_str("&gt;"),
+                '"' => result.push_str("&quot;"),
+                c => result.push(c),
+            }
+            i += 1;
+        }
+    }
+
+    result
+}
+
+/// Highlight line or block comments. Returns new index if matched.
+fn hl_comment(chars: &[char], i: usize, out: &mut String) -> Option<usize> {
+    let len = chars.len();
+    if i + 1 >= len || chars[i] != '/' {
+        return None;
+    }
+
+    let mut j = i;
+    if chars[i + 1] == '/' {
+        while j < len && chars[j] != '\n' {
+            j += 1;
+        }
+    } else if chars[i + 1] == '*' {
+        j += 2;
+        while j + 1 < len && !(chars[j] == '*' && chars[j + 1] == '/') {
+            j += 1;
+        }
+        if j + 1 < len && chars[j] == '*' && chars[j + 1] == '/' {
+            j += 2;
+        } else {
+            j = len;
+        }
+    } else {
+        return None;
+    }
+
+    let text: String = chars[i..j].iter().collect();
+    let _ = write!(
+        out,
+        "<span class=\"hl-comment\">{}</span>",
+        html_escape(&text)
+    );
+    Some(j)
+}
+
+/// Highlight string literals. Returns new index if matched.
+fn hl_string(chars: &[char], i: usize, out: &mut String) -> Option<usize> {
+    if chars[i] != '\'' && chars[i] != '"' {
+        return None;
+    }
+    let quote = chars[i];
+    let len = chars.len();
+    let mut j = i + 1;
+    while j < len && chars[j] != quote {
+        if chars[j] == '\\' {
+            j += 1;
+            if j >= len {
+                break;
+            }
+        }
+        j += 1;
+    }
+    if j < len {
+        j += 1;
+    }
+    let s: String = chars[i..j].iter().collect();
+    let _ = write!(out, "<span class=\"hl-string\">{}</span>", html_escape(&s));
+    Some(j)
+}
+
+/// Highlight symbol literals (#name). Returns new index if matched.
+fn hl_symbol(chars: &[char], i: usize, out: &mut String) -> Option<usize> {
+    let len = chars.len();
+    if chars[i] != '#' || i + 1 >= len || !(chars[i + 1].is_alphabetic() || chars[i + 1] == '_') {
+        return None;
+    }
+    let mut j = i + 1;
+    while j < len && (chars[j].is_alphanumeric() || chars[j] == '_' || chars[j] == ':') {
+        j += 1;
+    }
+    let sym: String = chars[i..j].iter().collect();
+    let _ = write!(
+        out,
+        "<span class=\"hl-symbol\">{}</span>",
+        html_escape(&sym)
+    );
+    Some(j)
+}
+
+/// Highlight numeric literals. Returns new index if matched.
+fn hl_number(chars: &[char], i: usize, out: &mut String) -> Option<usize> {
+    let len = chars.len();
+    let is_neg = chars[i] == '-'
+        && i + 1 < len
+        && chars[i + 1].is_ascii_digit()
+        && (i == 0 || !chars[i - 1].is_alphanumeric());
+
+    if !chars[i].is_ascii_digit() && !is_neg {
+        return None;
+    }
+
+    let mut j = i;
+    if chars[j] == '-' {
+        j += 1;
+    }
+    while j < len && (chars[j].is_ascii_digit() || chars[j] == '.') {
+        j += 1;
+    }
+    let num: String = chars[i..j].iter().collect();
+    let _ = write!(
+        out,
+        "<span class=\"hl-number\">{}</span>",
+        html_escape(&num)
+    );
+    Some(j)
+}
+
+/// Highlight identifiers, keywords, and class names. Returns new index if matched.
+fn hl_word(chars: &[char], i: usize, out: &mut String) -> Option<usize> {
+    if !chars[i].is_alphabetic() && chars[i] != '_' {
+        return None;
+    }
+    let len = chars.len();
+    let mut j = i;
+    while j < len && (chars[j].is_alphanumeric() || chars[j] == '_') {
+        j += 1;
+    }
+    let word: String = chars[i..j].iter().collect();
+
+    match word.as_str() {
+        "self" => {
+            let _ = write!(out, "<span class=\"hl-self\">{word}</span>");
+        }
+        "true" | "false" | "nil" | "super" | "sealed" => {
+            let _ = write!(
+                out,
+                "<span class=\"hl-keyword\">{}</span>",
+                html_escape(&word)
+            );
+        }
+        "subclass" | "state" | "ifTrue" | "ifFalse" | "ifNil" | "ifNotNil" | "whileTrue"
+        | "whileFalse" | "timesRepeat" => {
+            let _ = write!(
+                out,
+                "<span class=\"hl-selector\">{}</span>",
+                html_escape(&word)
+            );
+        }
+        _ if word.starts_with(|c: char| c.is_uppercase()) => {
+            let _ = write!(
+                out,
+                "<span class=\"hl-class\">{}</span>",
+                html_escape(&word)
+            );
+        }
+        _ => out.push_str(&html_escape(&word)),
+    }
+    Some(j)
 }
 
 #[cfg(test)]
@@ -798,7 +1561,7 @@ mod tests {
         )
         .unwrap();
 
-        let info = parse_class_info(&file).unwrap().unwrap();
+        let info = parse_class_info(&dir, &file).unwrap().unwrap();
         assert_eq!(info.name, "Counter");
         assert_eq!(info.superclass.as_deref(), Some("Actor"));
         assert!(info.doc_comment.unwrap().contains("simple counter"));
@@ -813,7 +1576,7 @@ mod tests {
         let file = dir.join("empty.bt");
         fs::write(&file, "x := 42\n").unwrap();
 
-        let info = parse_class_info(&file).unwrap();
+        let info = parse_class_info(&dir, &file).unwrap();
         assert!(info.is_none());
     }
 
@@ -847,8 +1610,9 @@ mod tests {
     #[test]
     fn test_render_doc_code_block() {
         let html = render_doc("Example:\n```beamtalk\n3 + 4\n```");
-        assert!(html.contains("<pre><code>"));
-        assert!(html.contains("3 + 4"));
+        assert!(html.contains("<pre><code class=\"language-beamtalk\">"));
+        // Content is syntax-highlighted, so check for the number spans
+        assert!(html.contains("hl-number"));
     }
 
     #[test]
@@ -872,8 +1636,11 @@ mod tests {
             methods: vec![MethodInfo {
                 signature: "parentMethod".into(),
                 doc_comment: None,
+                line_number: None,
             }],
             class_methods: vec![],
+            source_file: None,
+            source_root: None,
         };
         let child = ClassInfo {
             name: "Child".into(),
@@ -881,6 +1648,8 @@ mod tests {
             doc_comment: None,
             methods: vec![],
             class_methods: vec![],
+            source_file: None,
+            source_root: None,
         };
 
         let hierarchy: HashMap<String, String> = [("Child".into(), "Parent".into())].into();
@@ -912,6 +1681,7 @@ mod tests {
         assert!(out_dir.join("index.html").exists());
         assert!(out_dir.join("Counter.html").exists());
         assert!(out_dir.join("style.css").exists());
+        assert!(out_dir.join("search.js").exists());
 
         // Verify content
         let index = fs::read_to_string(out_dir.join("index.html")).unwrap();

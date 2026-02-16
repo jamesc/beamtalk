@@ -7,8 +7,8 @@
 //!
 //! Compiles all `lib/*.bt` files through the normal pipeline with `--stdlib-mode`
 //! and outputs `.beam` files to `runtime/apps/beamtalk_stdlib/ebin/`.
-//! Always performs a full rebuild since source file mtime does not reflect
-//! compiler or codegen changes.
+//! Uses incremental builds: skips compilation if all outputs are newer than
+//! all inputs (source files, compiler binary, and runtime `.beam` files).
 //!
 //! Part of ADR 0007 (Compilable Stdlib with Primitive Injection).
 
@@ -17,6 +17,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::fmt::Write;
 use std::fs;
+use std::time::SystemTime;
 use tracing::{debug, info, instrument};
 
 /// Default path to stdlib source files (relative to project root).
@@ -29,7 +30,7 @@ const STDLIB_EBIN_DIR: &str = "runtime/apps/beamtalk_stdlib/ebin";
 ///
 /// Finds all `.bt` files in `lib/`, compiles them with stdlib mode enabled,
 /// and writes `.beam` files to `runtime/apps/beamtalk_stdlib/ebin/`.
-/// Always performs a full rebuild to ensure correctness after compiler changes.
+/// Skips the build if all outputs are newer than all inputs (incremental).
 #[instrument(skip_all)]
 pub fn build_stdlib() -> Result<()> {
     info!("Starting stdlib build");
@@ -46,6 +47,12 @@ pub fn build_stdlib() -> Result<()> {
 
     if source_files.is_empty() {
         println!("No .bt source files found in '{lib_dir}'");
+        return Ok(());
+    }
+
+    // Incremental build: skip if all outputs are newer than all inputs
+    if is_stdlib_up_to_date(&ebin_dir, &source_files) {
+        println!("Stdlib up to date (skipped)");
         return Ok(());
     }
 
@@ -144,6 +151,106 @@ fn clean_ebin_dir(ebin_dir: &Utf8Path) -> Result<()> {
     Ok(())
 }
 
+/// Check if the stdlib build is up to date (all outputs newer than all inputs).
+///
+/// Inputs: `lib/*.bt` source files, the compiler binary (`current_exe`), and
+/// runtime `.beam` files in `runtime/_build/default/lib/beamtalk_runtime/ebin/`.
+/// Output: the `ebin/` directory modification time.
+///
+/// Returns `false` (needs rebuild) if any input is missing or any error occurs.
+fn is_stdlib_up_to_date(ebin_dir: &Utf8Path, source_files: &[Utf8PathBuf]) -> bool {
+    // Must have .beam files already
+    let Ok(entries) = fs::read_dir(ebin_dir) else {
+        return false;
+    };
+    let beam_count = entries
+        .filter_map(Result::ok)
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "beam"))
+        .count();
+    if beam_count == 0 {
+        return false;
+    }
+
+    // Detect deleted/renamed source files: beam count should match source count
+    if beam_count != source_files.len() {
+        info!(
+            beam_count,
+            source_count = source_files.len(),
+            "Beam/source count mismatch — forcing rebuild"
+        );
+        return false;
+    }
+
+    // Get the oldest .beam output mtime
+    let Some(oldest_output) = oldest_mtime_in_dir(ebin_dir, "beam") else {
+        return false;
+    };
+
+    // Check source files
+    for src in source_files {
+        match fs::metadata(src.as_std_path()).and_then(|m| m.modified()) {
+            Ok(t) if t > oldest_output => {
+                info!(file = %src, "Source newer than stdlib output");
+                return false;
+            }
+            Err(_) => return false,
+            _ => {}
+        }
+    }
+
+    // Check compiler binary — if we can't locate it, force rebuild to be safe
+    match std::env::current_exe() {
+        Ok(exe) => match fs::metadata(&exe).and_then(|m| m.modified()) {
+            Ok(t) if t > oldest_output => {
+                info!("Compiler binary newer than stdlib output");
+                return false;
+            }
+            Err(_) => return false,
+            _ => {}
+        },
+        Err(_) => return false,
+    }
+
+    // Check runtime .beam files — if directory missing, force rebuild
+    let runtime_ebin = "runtime/_build/default/lib/beamtalk_runtime/ebin";
+    let Ok(entries) = fs::read_dir(runtime_ebin) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        if entry.path().extension().is_some_and(|ext| ext == "beam") {
+            match entry.metadata().and_then(|m| m.modified()) {
+                Ok(t) if t > oldest_output => {
+                    info!("Runtime .beam newer than stdlib output");
+                    return false;
+                }
+                Err(_) => return false,
+                _ => {}
+            }
+        }
+    }
+
+    info!("Stdlib is up to date");
+    true
+}
+
+/// Find the oldest modification time of files with the given extension in a directory.
+fn oldest_mtime_in_dir(dir: &Utf8Path, ext: &str) -> Option<SystemTime> {
+    let mut oldest: Option<SystemTime> = None;
+    let entries = fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        if entry.path().extension().is_some_and(|e| e == ext) {
+            if let Ok(mtime) = entry.metadata().and_then(|m| m.modified()) {
+                oldest = Some(match oldest {
+                    Some(prev) if mtime < prev => mtime,
+                    Some(prev) => prev,
+                    None => mtime,
+                });
+            }
+        }
+    }
+    oldest
+}
+
 /// Find all `.bt` files in the stdlib source directory.
 fn find_stdlib_files(lib_dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
     let mut files = Vec::new();
@@ -215,6 +322,8 @@ struct ClassMeta {
     is_sealed: bool,
     /// Whether the class is abstract (cannot be instantiated directly).
     is_abstract: bool,
+    /// Whether the class has the explicit `typed` modifier.
+    is_typed: bool,
     /// Instance state (field) names declared in the class.
     state: Vec<String>,
     /// Instance method signatures.
@@ -336,6 +445,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         superclass_name: class.superclass_name().to_string(),
         is_sealed: class.is_sealed,
         is_abstract: class.is_abstract,
+        is_typed: class.is_typed,
         state,
         methods,
         class_methods,
@@ -541,10 +651,12 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
          \x20           name: \"{name}\".into(),\n\
          \x20           superclass: {superclass},\n\
          \x20           is_sealed: {sealed},\n\
-         \x20           is_abstract: {abstract_},\n",
+         \x20           is_abstract: {abstract_},\n\
+         \x20           is_typed: {typed},\n",
         name = meta.class_name,
         sealed = meta.is_sealed,
         abstract_ = meta.is_abstract,
+        typed = meta.is_typed,
     );
 
     // State
@@ -756,6 +868,7 @@ mod tests {
             superclass_name: "Actor".to_string(),
             is_sealed: false,
             is_abstract: false,
+            is_typed: false,
             state: vec!["count".to_string()],
             methods: vec![
                 MethodMeta {
@@ -816,6 +929,7 @@ mod tests {
             superclass_name: "none".to_string(),
             is_sealed: false,
             is_abstract: true,
+            is_typed: false,
             state: vec![],
             methods: vec![],
             class_methods: vec![],
@@ -845,6 +959,7 @@ mod tests {
                 superclass_name: "Object".to_string(),
                 is_sealed: false,
                 is_abstract: false,
+                is_typed: false,
                 state: vec![],
                 methods: vec![],
                 class_methods: vec![],
@@ -856,6 +971,7 @@ mod tests {
                 superclass_name: "Object".to_string(),
                 is_sealed: true,
                 is_abstract: false,
+                is_typed: false,
                 state: vec![],
                 methods: vec![],
                 class_methods: vec![],
