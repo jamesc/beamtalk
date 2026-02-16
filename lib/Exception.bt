@@ -26,7 +26,7 @@ Object subclass: Exception
   /// ```beamtalk
   /// [1 / 0] on: Exception do: [:e | e hint]
   /// ```
-  hint -> String => @primitive "hint"
+  hint -> String | Nil => @primitive "hint"
 
   /// Return the error kind as a symbol.
   ///
@@ -42,7 +42,7 @@ Object subclass: Exception
   /// ```beamtalk
   /// [42 unknownMsg] on: Exception do: [:e | e selector]
   /// ```
-  selector -> Symbol => @primitive "selector"
+  selector -> Symbol | Nil => @primitive "selector"
 
   /// Return the class name where the error occurred.
   ///

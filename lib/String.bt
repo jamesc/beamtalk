@@ -195,7 +195,7 @@ sealed Object subclass: String
   /// "hello" indexOf: "ell"      // => 2
   /// "hello" indexOf: "xyz"      // => nil
   /// ```
-  indexOf: substring: String -> Integer => @primitive "indexOf:"
+  indexOf: substring: String -> Integer | Nil => @primitive "indexOf:"
 
   /// Split the string by a separator.
   ///

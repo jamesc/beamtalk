@@ -28,7 +28,7 @@ Object subclass: StackFrame
   /// ```beamtalk
   /// frame receiverClass   // => Counter
   /// ```
-  receiverClass -> String => @primitive "receiverClass"
+  receiverClass -> String | Nil => @primitive "receiverClass"
 
   /// Return the function arity (number of arguments).
   ///
@@ -44,7 +44,7 @@ Object subclass: StackFrame
   /// ```beamtalk
   /// frame sourceLocation   // => "counter.erl:42"
   /// ```
-  sourceLocation -> String => @primitive "sourceLocation"
+  sourceLocation -> String | Nil => @primitive "sourceLocation"
 
   /// Return the Erlang module name as a string, or nil.
   ///
@@ -52,7 +52,7 @@ Object subclass: StackFrame
   /// ```beamtalk
   /// frame moduleName   // => "counter"
   /// ```
-  moduleName -> String => @primitive "moduleName"
+  moduleName -> String | Nil => @primitive "moduleName"
 
   /// Return the source line number, or nil if unavailable.
   ///
@@ -60,7 +60,7 @@ Object subclass: StackFrame
   /// ```beamtalk
   /// frame line   // => 42
   /// ```
-  line -> Integer => @primitive "line"
+  line -> Integer | Nil => @primitive "line"
 
   /// Return the source file path as a string, or nil if unavailable.
   ///
@@ -68,7 +68,7 @@ Object subclass: StackFrame
   /// ```beamtalk
   /// frame file   // => "counter.erl"
   /// ```
-  file -> String => @primitive "file"
+  file -> String | Nil => @primitive "file"
 
   /// Return a human-readable string representation.
   ///

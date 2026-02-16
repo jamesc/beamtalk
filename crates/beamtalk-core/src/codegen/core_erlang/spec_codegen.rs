@@ -160,20 +160,78 @@ pub fn generate_method_spec(method: &MethodDefinition, is_value_type: bool) -> O
     ))
 }
 
+/// Generates the spec attribute string for a class-side method.
+///
+/// Class methods have two implicit parameters (`ClassSelf`, `ClassVars`)
+/// and use the `class_{selector}` naming convention.
+fn generate_class_method_spec(method: &MethodDefinition) -> Option<String> {
+    let has_any_annotation = method.return_type.is_some()
+        || method
+            .parameters
+            .iter()
+            .any(|p| p.type_annotation.is_some());
+
+    if !has_any_annotation {
+        return None;
+    }
+
+    let erlang_name = format!("class_{}", method.selector.to_erlang_atom());
+
+    // Class methods have ClassSelf (any) and ClassVars (map) as implicit params
+    let mut param_types: Vec<String> = vec![
+        "{'type', 0, 'any', []}".to_string(),    // ClassSelf
+        "{'type', 0, 'map', 'any'}".to_string(), // ClassVars
+    ];
+
+    for param in &method.parameters {
+        let type_spec = param.type_annotation.as_ref().map_or_else(
+            || "{'type', 0, 'any', []}".to_string(),
+            type_annotation_to_spec,
+        );
+        param_types.push(type_spec);
+    }
+
+    let return_spec = method.return_type.as_ref().map_or_else(
+        || "{'type', 0, 'any', []}".to_string(),
+        type_annotation_to_spec,
+    );
+
+    let arity = method.parameters.len() + 2; // +2 for ClassSelf, ClassVars
+
+    let product = format!(
+        "{{'type', 0, 'product', [{}]}}",
+        join_with_cons(&param_types)
+    );
+
+    Some(format!(
+        "{{'{erlang_name}', {arity}}}, [{{'type', 0, 'fun', [{product}, {return_spec}]}}]"
+    ))
+}
+
 /// Generates all spec attributes for methods in a class definition.
 ///
 /// Returns a vector of spec attribute strings, one per annotated method.
 /// Only primary methods generate specs (not before/after/around advice).
+/// Includes both instance methods and class-side methods.
 pub fn generate_class_specs(class: &ClassDefinition, is_value_type: bool) -> Vec<String> {
-    class
+    let instance_specs = class
         .methods
         .iter()
         .filter(|m| m.kind == MethodKind::Primary)
         .filter_map(|m| {
             generate_method_spec(m, is_value_type)
                 .map(|spec| format!("'spec' =\n        [{{{spec}}}]"))
-        })
-        .collect()
+        });
+
+    let class_specs = class
+        .class_methods
+        .iter()
+        .filter(|m| m.kind == MethodKind::Primary)
+        .filter_map(|m| {
+            generate_class_method_spec(m).map(|spec| format!("'spec' =\n        [{{{spec}}}]"))
+        });
+
+    instance_specs.chain(class_specs).collect()
 }
 
 /// Formats spec attributes for inclusion in the module `attributes [...]` list.
@@ -542,5 +600,42 @@ mod tests {
             result,
             "{'type', 0, 'union', [{'type', 0, 'integer', []}, {'type', 0, 'binary', []}, {'atom', 0, 'nil'}]}"
         );
+    }
+
+    #[test]
+    fn class_method_spec_includes_class_self_and_class_vars() {
+        // class sealed from: start: Integer -> Stream
+        let method = MethodDefinition::with_return_type(
+            MessageSelector::Keyword(vec![KeywordPart::new("from:", span())]),
+            vec![ParameterDefinition::with_type(
+                Identifier::new("start", span()),
+                TypeAnnotation::simple("Integer", span()),
+            )],
+            vec![],
+            TypeAnnotation::simple("Stream", span()),
+            span(),
+        );
+
+        let spec = generate_class_method_spec(&method).unwrap();
+        // Name should be class_from:
+        assert!(
+            spec.contains("{'class_from:', 3}"),
+            "Expected class_ prefix and arity 3 (ClassSelf + ClassVars + 1 param), got: {spec}"
+        );
+        // Should have 3 params: any (ClassSelf), map (ClassVars), integer (start)
+        assert!(spec.contains("'any'"));
+        assert!(spec.contains("'map'"));
+        assert!(spec.contains("'integer'"));
+    }
+
+    #[test]
+    fn class_method_without_annotations_returns_none() {
+        let method = MethodDefinition::new(
+            MessageSelector::Unary("create".into()),
+            vec![],
+            vec![],
+            span(),
+        );
+        assert!(generate_class_method_spec(&method).is_none());
     }
 }
