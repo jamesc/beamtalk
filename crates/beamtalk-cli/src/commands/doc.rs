@@ -119,7 +119,8 @@ const PROSE_PAGES: &[(&str, &str, &str)] = &[
 
 /// Generate API reference docs into the given output directory.
 ///
-/// `asset_prefix` is prepended to CSS/JS paths (e.g., `"../"` for subdirectory).
+/// `asset_prefix` is prepended to cross-site navigation links in the sidebar
+/// (e.g., `"../"` when generating into a subdirectory like `apidocs/`).
 fn generate_api_docs(
     source_path: &Utf8Path,
     output_path: &Utf8Path,
@@ -200,13 +201,23 @@ fn generate_prose_docs(docs_source: &Utf8Path, site_root: &Utf8Path) -> Result<(
         .into_diagnostic()
         .wrap_err("Failed to create docs/ output directory")?;
 
+    // Verify all prose docs exist before generating (avoid broken navigation)
+    let missing: Vec<&str> = PROSE_PAGES
+        .iter()
+        .filter(|&&(source_file, _, _)| !docs_source.join(source_file).exists())
+        .map(|&(source_file, _, _)| source_file)
+        .collect();
+    if !missing.is_empty() {
+        miette::bail!(
+            "Missing prose docs in '{}': {}",
+            docs_source.as_str(),
+            missing.join(", ")
+        );
+    }
+
     let mut rendered_count = 0;
     for &(source_file, output_file, title) in PROSE_PAGES {
         let source = docs_source.join(source_file);
-        if !source.exists() {
-            warn!("Prose doc not found: {source}, skipping");
-            continue;
-        }
 
         let markdown = fs::read_to_string(&source)
             .into_diagnostic()
@@ -2113,6 +2124,16 @@ mod tests {
         fs::write(
             docs_dir.join("beamtalk-principles.md"),
             "# Design Principles\n\nCore philosophy.",
+        )
+        .unwrap();
+        fs::write(
+            docs_dir.join("beamtalk-architecture.md"),
+            "# Architecture\n\nCompiler pipeline.",
+        )
+        .unwrap();
+        fs::write(
+            docs_dir.join("beamtalk-agent-native-development.md"),
+            "# Agent-Native Development\n\nAI agents.",
         )
         .unwrap();
 
