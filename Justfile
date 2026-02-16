@@ -17,8 +17,8 @@ default:
 # Quick Commands (CI equivalents)
 # ═══════════════════════════════════════════════════════════════════════════
 
-# On Unix: includes E2E tests (require process management for REPL lifecycle)
-# On Windows: runs portable subset (build, lint, unit, stdlib, integration, MCP)
+# On Unix: full CI including E2E tests (requires REPL process lifecycle management)
+# On Windows: portable subset — skips E2E (no REPL process lifecycle yet)
 # Run local CI checks (build, lint, test)
 [unix]
 ci: build lint test test-stdlib test-integration test-mcp test-e2e

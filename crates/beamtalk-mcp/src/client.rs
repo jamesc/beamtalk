@@ -297,24 +297,50 @@ mod tests {
     use std::sync::LazyLock;
     use std::time::Duration;
 
+    /// Managed REPL workspace for integration tests.
+    /// Holds the workspace ID so we can stop it on Drop.
+    struct ReplWorkspace {
+        port: u16,
+        workspace_id: Option<String>,
+    }
+
+    impl Drop for ReplWorkspace {
+        fn drop(&mut self) {
+            // Stop workspace explicitly to avoid port leaks on CI
+            if let Some(ref ws_id) = self.workspace_id {
+                let bin_name = format!("beamtalk{}", std::env::consts::EXE_SUFFIX);
+                if let Some(bin) = find_binary(&bin_name) {
+                    let _ = Command::new(bin)
+                        .args(["workspace", "stop", ws_id])
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .status();
+                }
+            }
+        }
+    }
+
+    /// Walk up from cwd to find a binary in target/debug/.
+    fn find_binary(name: &str) -> Option<std::path::PathBuf> {
+        let mut dir = std::env::current_dir().ok()?;
+        loop {
+            let candidate = dir.join("target/debug").join(name);
+            if candidate.exists() {
+                return Some(candidate);
+            }
+            if !dir.pop() {
+                return None;
+            }
+        }
+    }
+
     /// Port of the auto-started REPL workspace for integration tests.
     /// Starts `beamtalk repl --port 0` once, discovers the ephemeral port.
-    /// The workspace node runs detached and auto-cleans up when idle.
-    static REPL_PORT: LazyLock<u16> = LazyLock::new(|| {
-        // Find the beamtalk binary (walk up to workspace root)
-        let bin = std::env::current_dir()
-            .ok()
-            .and_then(|d| {
-                let mut dir = d.as_path();
-                loop {
-                    let candidate = dir.join("target/debug/beamtalk");
-                    if candidate.exists() {
-                        return Some(candidate);
-                    }
-                    dir = dir.parent()?;
-                }
-            })
-            .expect("Could not find target/debug/beamtalk — run `cargo build` first");
+    /// The workspace is stopped when the test process exits.
+    static REPL: LazyLock<ReplWorkspace> = LazyLock::new(|| {
+        let bin_name = format!("beamtalk{}", std::env::consts::EXE_SUFFIX);
+        let bin = find_binary(&bin_name)
+            .unwrap_or_else(|| panic!("Could not find target/debug/{bin_name} — run `cargo build` first"));
 
         // Start REPL with stdin=null so it exits after workspace startup.
         // The workspace node remains alive as a detached BEAM process.
@@ -343,15 +369,27 @@ mod tests {
                 );
             });
 
-        // Wait for TCP readiness
-        for _ in 0..20 {
+        // Extract workspace ID from stdout for cleanup
+        let workspace_id = stdout.lines().find_map(|line| {
+            line.strip_prefix("  Workspace: ")
+                .map(|rest| rest.split_whitespace().next().unwrap_or(rest).to_string())
+        });
+
+        // Wait for TCP readiness (15s default, configurable)
+        let timeout_ms: u64 = std::env::var("BEAMTALK_REPL_STARTUP_TIMEOUT_MS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(15_000);
+        let max_attempts = (timeout_ms + 299) / 300;
+
+        for _ in 0..max_attempts {
             if StdTcpStream::connect(format!("127.0.0.1:{port}")).is_ok() {
                 eprintln!("MCP tests: REPL workspace ready on port {port}");
-                return port;
+                return ReplWorkspace { port, workspace_id };
             }
             std::thread::sleep(Duration::from_millis(300));
         }
-        panic!("REPL reported port {port} but TCP connect failed after 6s");
+        panic!("REPL reported port {port} but TCP connect failed after {timeout_ms}ms");
     });
 
     /// Get the port of the shared REPL, starting it if needed.
@@ -362,7 +400,7 @@ mod tests {
                 return p;
             }
         }
-        *REPL_PORT
+        REPL.port
     }
 
     #[tokio::test]
