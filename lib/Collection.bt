@@ -123,4 +123,4 @@ abstract Object subclass: Collection
   /// Iterate over each element, evaluating `block` with each one.
   ///
   /// Subclasses must override this with their own iteration logic.
-  do: block: Block => self subclassResponsibility
+  do: block: Block -> Nil => self subclassResponsibility

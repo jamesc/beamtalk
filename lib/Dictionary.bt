@@ -105,7 +105,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1, #b => 2} do: [:v | Transcript show: v]
   /// ```
-  do: block: Block => @primitive "do:"
+  do: block: Block -> Nil => @primitive "do:"
 
   /// Iterate over each key-value pair, evaluating `block` with key and value.
   ///
@@ -113,7 +113,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1} keysAndValuesDo: [:k :v | Transcript show: k]
   /// ```
-  keysAndValuesDo: block: Block => @primitive "keysAndValuesDo:"
+  keysAndValuesDo: block: Block -> Nil => @primitive "keysAndValuesDo:"
 
   /// Return a string representation using Beamtalk syntax.
   ///

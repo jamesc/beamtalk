@@ -131,7 +131,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 42 hash
   /// ```
-  hash => @intrinsic hash
+  hash -> Integer => @intrinsic hash
 
   /// Test if the receiver responds to the given selector.
   ///

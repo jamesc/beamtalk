@@ -131,7 +131,7 @@ sealed Collection subclass: List
   /// ```beamtalk
   /// #(1, 2, 3) do: [:x | Transcript show: x]
   /// ```
-  do: block: Block => @primitive "do:"
+  do: block: Block -> Nil => @primitive "do:"
 
   /// Collect results of evaluating `block` on each element.
   ///
@@ -260,7 +260,7 @@ sealed Collection subclass: List
   /// ```beamtalk
   /// #("a", "b") eachWithIndex: [:item :i | Transcript show: i]
   /// ```
-  eachWithIndex: block: Block => @primitive "eachWithIndex:"
+  eachWithIndex: block: Block -> Nil => @primitive "eachWithIndex:"
 
   /// Combine two lists element-wise into a list of pairs.
   ///

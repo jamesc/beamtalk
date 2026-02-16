@@ -111,7 +111,7 @@ sealed Collection subclass: Set
   /// ```beamtalk
   /// (Set new add: 1) do: [:x | Transcript show: x]
   /// ```
-  do: block: Block => @primitive "do:"
+  do: block: Block -> Nil => @primitive "do:"
 
   /// Return a developer-readable string representation.
   ///

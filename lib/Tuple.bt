@@ -93,4 +93,4 @@ sealed Collection subclass: Tuple
   /// ```beamtalk
   /// (Tuple new: #(1, 2, 3)) do: [:x | Transcript show: x]
   /// ```
-  do: block: Block => @primitive "do:"
+  do: block: Block -> Nil => @primitive "do:"

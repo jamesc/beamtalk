@@ -54,7 +54,7 @@ sealed Object subclass: Block
   /// ```beamtalk
   /// x := 0. [x < 3] whileTrue: [x := x + 1]
   /// ```
-  whileTrue: bodyBlock: Block => @intrinsic whileTrue
+  whileTrue: bodyBlock: Block -> Nil => @intrinsic whileTrue
 
   /// Repeatedly evaluate `bodyBlock` while the receiver evaluates to false.
   ///
@@ -62,7 +62,7 @@ sealed Object subclass: Block
   /// ```beamtalk
   /// x := 0. [x >= 3] whileFalse: [x := x + 1]
   /// ```
-  whileFalse: bodyBlock: Block => @intrinsic whileFalse
+  whileFalse: bodyBlock: Block -> Nil => @intrinsic whileFalse
 
   /// Evaluate the block repeatedly forever (until an exception is raised).
   ///
@@ -70,7 +70,7 @@ sealed Object subclass: Block
   /// ```beamtalk
   /// [self processNextMessage] repeat
   /// ```
-  repeat => @intrinsic repeat
+  repeat -> Nil => @intrinsic repeat
 
   /// Evaluate the block; if an exception of class `exClass` is raised, evaluate `handler`.
   ///
