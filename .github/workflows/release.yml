@@ -117,7 +117,7 @@ jobs:
 
   # ─── Full distribution (macOS x86_64) ──────────────────────────────────
   macos-x86_64:
-    runs-on: macos-13
+    runs-on: macos-15-intel
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
@@ -363,6 +363,10 @@ jobs:
         run: |
           ./target/release/beamtalk.exe build-stdlib
 
+      - name: Smoke test
+        run: ./target/release/beamtalk.exe --version
+        shell: bash
+
       - name: Package zip
         id: package
         shell: bash
@@ -380,15 +384,23 @@ jobs:
           # OTP application ebin directories
           for app in beamtalk_runtime beamtalk_workspace beamtalk_compiler jsx; do
             SRC="runtime/_build/default/lib/${app}/ebin"
+            if [ ! -d "${SRC}" ] || ! ls "${SRC}"/*.beam 1>/dev/null 2>&1; then
+              echo "❌ No .beam files found in ${SRC}. Erlang build may have failed."
+              exit 1
+            fi
             mkdir -p "${STAGING}/lib/beamtalk/lib/${app}/ebin"
-            cp "${SRC}"/*.beam "${STAGING}/lib/beamtalk/lib/${app}/ebin/" 2>/dev/null || true
+            cp "${SRC}"/*.beam "${STAGING}/lib/beamtalk/lib/${app}/ebin/"
             cp "${SRC}"/*.app "${STAGING}/lib/beamtalk/lib/${app}/ebin/" 2>/dev/null || true
           done
 
           # Stdlib
           STDLIB_SRC="runtime/apps/beamtalk_stdlib/ebin"
+          if [ ! -d "${STDLIB_SRC}" ] || ! ls "${STDLIB_SRC}"/*.beam 1>/dev/null 2>&1; then
+            echo "❌ No stdlib .beam files found in ${STDLIB_SRC}. Stdlib build may have failed."
+            exit 1
+          fi
           mkdir -p "${STAGING}/lib/beamtalk/lib/beamtalk_stdlib/ebin"
-          cp "${STDLIB_SRC}"/*.beam "${STAGING}/lib/beamtalk/lib/beamtalk_stdlib/ebin/" 2>/dev/null || true
+          cp "${STDLIB_SRC}"/*.beam "${STAGING}/lib/beamtalk/lib/beamtalk_stdlib/ebin/"
           cp "${STDLIB_SRC}"/*.app "${STAGING}/lib/beamtalk/lib/beamtalk_stdlib/ebin/" 2>/dev/null || true
 
           # Create zip (from inside staging dir so paths are relative)
