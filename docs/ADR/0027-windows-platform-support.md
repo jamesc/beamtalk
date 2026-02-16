@@ -66,7 +66,7 @@ Several components have no Windows path at all:
 
 The core compilation path — `beamtalk build`, `beamtalk new`, `beamtalk test` — must work on Windows. This means:
 
-1. **Add Windows and macOS CI jobs** — `windows-latest` and `macos-latest` in GitHub Actions, running `cargo test`, `cargo clippy`, and `beamtalk build` on a test project
+1. **Add Windows CI job** — `windows-latest` in GitHub Actions, running `cargo test`, `cargo clippy`, and `beamtalk build` on a test project. macOS is expected to work via Unix compatibility (existing `#[cfg]` fallbacks degrade gracefully) but is not formally tested — add macOS CI as future work if issues are reported.
 2. **Fix unguarded Unix code** — Wrap `find_beam_pid_by_node()` with `#[cfg(unix)]` and add Windows fallback
 3. **Portable path handling** — Replace any hardcoded `/` root checks with `std::path` methods or `Path::has_root()`
 4. **No bash dependency for compilation** — The `beamtalk build` command must not require bash. The embedded compiler port (ADR 0022) already avoids shell scripts for compilation.
@@ -99,32 +99,37 @@ Scripts, benchmarks, and development tooling:
 
 ### Process management strategy
 
-The biggest portability challenge is process management for workspaces. The approach:
+The biggest portability challenge is process management for workspaces. Workspaces already expose TCP ports for REPL and MCP client connections. The recommended approach is **TCP-first workspace management**:
+
+1. **Liveness checking** — TCP health probe to workspace port (replaces `ps` + `/proc` + `kill -0` polling)
+2. **Graceful shutdown** — TCP shutdown message (replaces `kill` signal)
+3. **Workspace discovery** — Port file in `~/.beamtalk/workspaces/` (already implemented)
+4. **Force-kill (fallback only)** — Minimal `#[cfg]`-guarded OS code for hung workspaces that don't respond to TCP
 
 ```rust
-// Abstract process operations behind a trait
-pub trait ProcessManager {
-    fn is_running(&self, pid: u32) -> bool;
-    fn find_pid_by_name(&self, name: &str) -> Option<u32>;
-    fn terminate(&self, pid: u32) -> Result<()>;
-    fn force_terminate(&self, pid: u32) -> Result<()>;
+// TCP-first: ~20 lines of portable code replaces ~145 lines of OS-specific code
+fn is_workspace_running(port: u16) -> bool {
+    TcpStream::connect_timeout(&addr, Duration::from_secs(1)).is_ok()
 }
 
-// Platform implementations
+fn stop_workspace(port: u16) -> Result<()> {
+    // Send shutdown message over TCP (graceful)
+    // Fall back to OS kill only if TCP times out
+}
+
+// Only this needs #[cfg] guards:
 #[cfg(unix)]
-mod unix {
-    // Uses signal probing, ps, Unix signals
-}
-
+fn force_kill(pid: u32) -> Result<()> { /* kill -9 */ }
 #[cfg(windows)]
-mod windows {
-    // Uses OpenProcess, tasklist/taskkill or sysinfo crate
-}
+fn force_kill(pid: u32) -> Result<()> { /* TerminateProcess */ }
 ```
 
-This keeps platform-specific code isolated and testable.
-
-**Note:** Workspaces already use TCP for REPL communication (not Unix sockets). An alternative to the `ProcessManager` trait is to lean on TCP-based health probes for liveness checks and shutdown messages for termination, reducing the surface area of platform-specific process management code. Evaluate this during Tier 2 implementation — TCP probes may eliminate the need for `find_pid_by_name()` entirely.
+This approach:
+- Eliminates ~145 lines of `ps`/`kill`/`/proc` platform-specific code
+- Aligns with REPL client and MCP server (already TCP-based)
+- Enables future remote workspace management (SSH, Docker, cloud)
+- Supports ADR 0017 (browser connectivity) and ADR 0024 (IDE tooling)
+- Keeps force-kill as the only OS-specific operation (~10 lines of `#[cfg]` code)
 
 ## Prior Art
 
@@ -143,7 +148,7 @@ Works on Windows via Erlang/OTP's Windows support. `mix` (Elixir's build tool) i
 ### Rust (Cargo)
 Exemplary cross-platform support. Uses `#[cfg(target_os)]` extensively. Has `std::process::Command` that handles path differences. CI matrix includes `windows-latest`, `macos-latest`, `ubuntu-latest`.
 
-**Adopted:** `#[cfg]` attribute pattern, CI matrix strategy, `ProcessManager` trait abstraction.
+**Adopted:** `#[cfg]` attribute pattern, CI matrix strategy, TCP-first workspace management.
 
 ### Erlang/OTP
 Erlang itself has excellent Windows support — prebuilt Windows installers, `werl` (Windows Erlang shell), proper Windows service support. `rebar3` works on Windows but some plugins assume Unix tools. The BEAM VM is fully portable.
@@ -162,7 +167,7 @@ No regressions. Platform-specific code is behind `#[cfg]` guards. CI still runs 
 Windows CI job catches regressions early. Cross-platform matrix ensures releases work everywhere.
 
 ### Contributor
-New `#[cfg]` patterns to follow when adding process management code. `ProcessManager` trait provides a clear abstraction. Must test on Windows CI (automatic via matrix).
+New `#[cfg]` patterns to follow when adding process management code. TCP-first approach means most workspace management code is platform-agnostic. Only force-kill remains OS-specific. Must test on Windows CI (automatic via matrix).
 
 ## Steelman Analysis
 
@@ -172,7 +177,7 @@ New `#[cfg]` patterns to follow when adding process management code. `ProcessMan
 - 🎩 **Smalltalk developer**: "Pharo runs everywhere — Windows, macOS, Linux. A Smalltalk-inspired language should meet that bar. Platform lock-in contradicts the philosophy of accessible, interactive development."
 - ⚙️ **BEAM veteran**: "Erlang has had Windows support since the 90s. A BEAM language that doesn't run on Windows is leaving capability on the table."
 - 🏭 **Operator**: "Cross-platform means I can develop on Windows and deploy on Linux — standard workflow. The tiered approach means I get compilation support immediately without waiting for full workspace parity."
-- 🎨 **Language designer**: "Tiered rollout is pragmatic — ship the portable parts now, fix the hard parts later. The `ProcessManager` trait creates a clean abstraction boundary."
+- 🎨 **Language designer**: "Tiered rollout is pragmatic — ship the portable parts now, fix the hard parts later. TCP-first workspace management means most code is platform-agnostic with only force-kill needing `#[cfg]`."
 
 ### Option B: Linux-only, recommend WSL on Windows
 
@@ -186,7 +191,7 @@ New `#[cfg]` patterns to follow when adding process management code. `ProcessMan
 
 1. **Reach vs maintenance** — Windows support doubles the platform-specific test surface but reaches ~45% more developers. The tiered approach mitigates this by only adding Windows code where strictly necessary.
 2. **WSL adequacy** — For experienced developers, WSL is fine. For newcomers, "install WSL first" is a friction point that competitors (Gleam, Elixir) don't have.
-3. **Process management complexity** — The workspace/REPL code has the most Unix assumptions. A `ProcessManager` trait adds abstraction but also indirection.
+3. **Process management complexity** — The workspace/REPL code has the most Unix assumptions. TCP-first management eliminates most platform-specific code, but force-kill and process startup still need `#[cfg]` guards.
 
 ## Alternatives Considered
 
@@ -201,14 +206,12 @@ All features, all platforms, all at once. No tiers.
 **Rejected because:** The workspace process management code needs significant work (signal replacements, Windows API integration). Blocking the portable parts (compiler, build) on the hard parts (workspace) delays value delivery. Ship what works now, iterate on the rest.
 
 ### Alternative: Cross-platform process library (sysinfo crate)
-Use the `sysinfo` crate for all process management, replacing both Unix-specific tools and needing Windows alternatives.
+Use the `sysinfo` crate for remaining OS-level operations (force-kill), replacing manual `#[cfg]` code.
 
-**Deferred, not rejected:** `sysinfo` is a good candidate for the `ProcessManager` implementation but adds a dependency. Evaluate during Tier 2 implementation — it may be simpler than manual Windows API calls. Keep the `ProcessManager` trait so the implementation can be swapped.
+**Deferred, not rejected:** `sysinfo` may simplify the force-kill fallback but adds a dependency for ~10 lines of `#[cfg]` code. Evaluate if the force-kill logic becomes more complex than expected.
 
-### Alternative: TCP-based workspace management
-Use TCP health probes for liveness checking and TCP shutdown messages for termination, eliminating most OS-level process management. The workspace already uses TCP for REPL communication.
-
-**Deferred, not rejected:** This approach would simplify cross-platform support significantly by avoiding `ps`/signal/Windows API differences. However, it requires the workspace to be responsive to TCP — if a workspace hangs, TCP won't help and OS-level process termination is still needed as a fallback. Evaluate alongside `sysinfo` during Tier 2.
+### Rejected: ProcessManager trait abstraction (superseded by TCP-first)
+Originally proposed abstracting all process operations behind a `ProcessManager` trait with Unix and Windows implementations. TCP-first management eliminates the need for most trait methods (`is_running`, `find_pid_by_name`, `terminate`). Only `force_terminate` needs platform-specific code, which doesn't justify a trait.
 
 ## Consequences
 
@@ -216,8 +219,9 @@ Use TCP health probes for liveness checking and TCP shutdown messages for termin
 - Beamtalk runs on Windows — compiler, build, REPL, workspace management
 - CI catches Windows regressions automatically
 - Matches peer language expectations (Gleam, Elixir, Erlang all support Windows)
-- `ProcessManager` trait creates clean abstraction for platform-specific process code
+- TCP-first workspace management means most code is platform-agnostic, reducing `#[cfg]` surface
 - Tiered approach delivers value incrementally
+- TCP foundation enables future remote workspace management (SSH, Docker, cloud)
 
 ### Negative
 - Maintenance burden increases — `#[cfg]` branches need testing on both platforms
@@ -233,18 +237,20 @@ Use TCP health probes for liveness checking and TCP shutdown messages for termin
 ## Implementation
 
 ### Phase 1: CI and compiler portability
-- Add `windows-latest` and `macos-latest` jobs to `.github/workflows/ci.yml` running `cargo test` and `cargo clippy`
+- Add `windows-latest` job to `.github/workflows/ci.yml` running `cargo test` and `cargo clippy`
 - Fix `find_beam_pid_by_node()` — add `#[cfg(unix)]` guard with Windows fallback
 - Fix `/` root check in `beamtalk_compiler_port.erl` — use `filename:pathtype/1`
 - Fix `HOME` → `USERPROFILE` fallback in `beamtalk_workspace_meta.erl`
-- Verify `beamtalk build` and `beamtalk new` work in Windows and macOS CI
-- Add Windows and macOS binaries to GitHub release workflow
+- Verify `beamtalk build` and `beamtalk new` work in Windows CI
+- Add Windows binary to GitHub release workflow
+- **macOS note:** macOS expected to work via existing Unix `#[cfg]` guards. Add macOS CI as future work if issues are reported.
 
-### Phase 2: Process management abstraction
-- Create `ProcessManager` trait with platform implementations
-- Replace scattered process utility calls with trait methods
-- Implement Windows process management (evaluate `sysinfo` crate vs direct Windows API)
-- `stop_workspace()` works on Windows
+### Phase 2: TCP-first workspace management
+- Add TCP health endpoint to workspace (probe port for liveness)
+- Add TCP shutdown message to workspace protocol (graceful stop)
+- Replace `ps`/`kill -0`/`/proc` checks with TCP probes in `is_node_running()`, `find_beam_pid_by_node()`, `wait_for_process_exit()`
+- Add minimal `#[cfg]`-guarded force-kill for hung workspaces (~10 lines)
+- `stop_workspace()` works on Windows via TCP shutdown + force-kill fallback
 - `beamtalk repl` works on Windows
 
 ### Phase 3: Build script portability
