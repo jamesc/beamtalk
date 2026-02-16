@@ -76,7 +76,7 @@ impl CoreErlangGenerator {
         // Check if the class explicitly defines new/new: methods
         // (e.g., Object.bt defines `new => @primitive basicNew`)
         // If so, skip auto-generating constructors to avoid duplicate definitions
-        // Only check Primary methods — advice (before/after/around) shouldn't suppress auto-generation
+        // Only check Primary methods
         let has_explicit_new = class.methods.iter().any(|m| {
             m.kind == MethodKind::Primary
                 && matches!(&m.selector, MessageSelector::Unary(name) if name.as_str() == "new")
@@ -98,7 +98,7 @@ impl CoreErlangGenerator {
         // Add instance method exports (each takes Self as first parameter)
         for method in &class.methods {
             // All methods in a class are instance methods in Beamtalk
-            // MethodKind is about method combination (Primary, Before, After, Around)
+            // MethodKind indicates the method type (currently only Primary)
             let arity = method.parameters.len() + 1; // +1 for Self parameter
             let mangled = method.selector.to_erlang_atom();
             exports.push(format!("'{mangled}'/{arity}"));

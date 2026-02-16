@@ -942,47 +942,6 @@ FileNotFound signal: path
 
 ---
 
-## Method Combinations (Dylan/CLOS-inspired)
-
-Cross-cutting concerns via before/after/around methods.
-
-```
-// Primary method
-Agent >> processMessage: msg =>
-  self.model generate: msg
-
-// Before - runs first
-Agent >> before processMessage: msg =>
-  Telemetry emit: #messageReceived with: msg
-
-// After - runs last
-Agent >> after processMessage: msg =>
-  self.messageCount := self.messageCount + 1
-
-// Around - wraps
-Agent >> around processMessage: msg =>
-  | start result |
-  start := Time now
-  result := self proceed  // Call next in chain
-  Metrics record: #duration value: (Time now - start)
-  ^result
-```
-
-### Execution Order
-```
-around (enter) → before → primary → after → around (exit)
-```
-
-### Use Cases
-
-| Combination | Use Case |
-|-------------|----------|
-| `before` | Validation, logging, authorization |
-| `after` | Notification, cleanup, metrics |
-| `around` | Timing, transactions, caching |
-
----
-
 ## Smalltalk + BEAM Mapping
 
 | Smalltalk/Newspeak Concept | Beamtalk/BEAM Mapping |

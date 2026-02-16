@@ -6,7 +6,7 @@
 //! This module handles parsing of top-level declarations including:
 //! - Class definitions with modifiers (`abstract`, `sealed`, `typed`)
 //! - State (field) declarations with types and default values
-//! - Method definitions with advice modifiers (`before`, `after`, `around`)
+//! - Method definitions with optional `sealed` modifier
 
 use crate::ast::{
     ClassDefinition, Expression, Identifier, KeywordPart, MessageSelector, MethodDefinition,
@@ -30,9 +30,6 @@ impl Parser {
     ///   state: fieldName: TypeName = defaultValue
     ///
     ///   methodName => body
-    ///   before methodName => body
-    ///   after methodName => body
-    ///   around methodName => body
     ///   sealed methodName => body
     /// ```
     pub(super) fn parse_class_definition(&mut self) -> ClassDefinition {
@@ -222,15 +219,15 @@ impl Parser {
     /// - An identifier followed directly by `=>` (unary method)
     /// - A binary selector followed by identifier and `=>` (binary method)
     /// - Keywords followed by identifiers and eventually `=>` (keyword method)
-    /// - `before`, `after`, `around`, `sealed` followed by one of the above
+    /// - `sealed` followed by one of the above
     pub(super) fn is_at_method_definition(&self) -> bool {
         let mut offset = 0;
 
-        // Skip optional modifiers: before, after, around, sealed, class
+        // Skip optional modifiers: sealed, class
         // Note: `class` is only a modifier when followed by a method selector,
         // not when followed by `=>` (which makes it a method named `class`).
         while let Some(TokenKind::Identifier(name)) = self.peek_at(offset) {
-            if matches!(name.as_str(), "before" | "after" | "around" | "sealed") {
+            if matches!(name.as_str(), "sealed") {
                 offset += 1;
             } else if name == "class" {
                 // Only treat as modifier if next token is not `=>`
@@ -573,14 +570,11 @@ impl Parser {
     /// - `methodName => body`
     /// - `+ other => body`
     /// - `at: index put: value => body`
-    /// - `before methodName => body`
-    /// - `after methodName => body`
-    /// - `around methodName => body`
     /// - `sealed methodName => body`
     fn parse_method_definition(&mut self) -> Option<MethodDefinition> {
         let start = self.current_token().span();
         let doc_comment = self.collect_doc_comment();
-        let mut method_kind = MethodKind::Primary;
+        let method_kind = MethodKind::Primary;
         let mut method_is_sealed = false;
         let mut _is_class_method = false;
 
@@ -594,18 +588,6 @@ impl Parser {
                         break;
                     }
                     _is_class_method = true;
-                    self.advance();
-                }
-                "before" => {
-                    method_kind = MethodKind::Before;
-                    self.advance();
-                }
-                "after" => {
-                    method_kind = MethodKind::After;
-                    self.advance();
-                }
-                "around" => {
-                    method_kind = MethodKind::Around;
                     self.advance();
                 }
                 "sealed" => {

@@ -29,7 +29,7 @@ pub struct MethodInfo {
     pub selector: EcoString,
     /// Number of arguments.
     pub arity: usize,
-    /// Method kind (Primary, Before, After, Around).
+    /// Method kind.
     pub kind: MethodKind,
     /// Class that defines this method.
     pub defined_in: EcoString,
@@ -41,25 +41,16 @@ pub struct MethodInfo {
 }
 
 impl MethodInfo {
-    /// Returns `true` if this is a Before, After, or Around advice method.
-    #[must_use]
-    pub fn is_advice(&self) -> bool {
-        matches!(
-            self.kind,
-            MethodKind::Before | MethodKind::After | MethodKind::Around
-        )
-    }
-
     /// Returns `true` if `self` (a subclass method) can override `ancestor`.
     ///
-    /// A primary method cannot override a sealed primary method with the same selector.
-    /// Advice methods are never overrides. Different selectors are never overrides.
+    /// A method cannot override a sealed method with the same selector.
+    /// Different selectors are never overrides.
     #[must_use]
     pub fn can_override(&self, ancestor: &MethodInfo) -> bool {
         if self.selector != ancestor.selector {
             return false;
         }
-        !(ancestor.is_sealed && self.kind == MethodKind::Primary)
+        !ancestor.is_sealed
     }
 }
 
@@ -278,13 +269,8 @@ impl ClassHierarchy {
             }
             if let Some(info) = self.classes.get(name.as_str()) {
                 for method in &info.methods {
-                    if method.kind == MethodKind::Primary {
-                        if !seen_selectors.contains_key(&method.selector) {
-                            seen_selectors.insert(method.selector.clone(), methods.len());
-                            methods.push(method.clone());
-                        }
-                    } else {
-                        // Before/After/Around methods are always collected
+                    if !seen_selectors.contains_key(&method.selector) {
+                        seen_selectors.insert(method.selector.clone(), methods.len());
                         methods.push(method.clone());
                     }
                 }
@@ -453,10 +439,7 @@ impl ClassHierarchy {
             }
             if let Some(info) = self.classes.get(name.as_str()) {
                 for method in &info.methods {
-                    if method.selector.as_str() == selector
-                        && method.is_sealed
-                        && !method.is_advice()
-                    {
+                    if method.selector.as_str() == selector && method.is_sealed {
                         return Some((info.name.clone(), method.clone()));
                     }
                 }
@@ -512,8 +495,6 @@ impl ClassHierarchy {
     /// Check for duplicate methods within a list of methods.
     ///
     /// Methods are considered duplicates based on their `(selector, kind)` tuple.
-    /// Advice methods (Before, After, Around) may share selectors with Primary
-    /// methods, but not with other advice methods of the same kind.
     fn check_duplicate_methods(
         methods: &[crate::ast::MethodDefinition],
         class_name: &EcoString,
@@ -569,12 +550,9 @@ impl ClassHierarchy {
                 }
             }
 
-            // Check sealed method override enforcement (advice methods are not overrides)
+            // Check sealed method override enforcement
             if let Some(ref superclass) = class.superclass {
                 for method in &class.methods {
-                    if method.kind != MethodKind::Primary {
-                        continue;
-                    }
                     let selector = method.selector.name();
                     if let Some((sealed_class, _)) =
                         self.find_sealed_method_in_ancestors(superclass.name.as_str(), &selector)
@@ -666,30 +644,6 @@ mod tests {
     }
 
     // --- Value object method tests ---
-
-    #[test]
-    fn method_info_is_advice() {
-        let primary = builtin_method("foo", 0, "Test");
-        assert!(!primary.is_advice());
-
-        let before = MethodInfo {
-            kind: MethodKind::Before,
-            ..builtin_method("foo", 0, "Test")
-        };
-        assert!(before.is_advice());
-
-        let after = MethodInfo {
-            kind: MethodKind::After,
-            ..builtin_method("foo", 0, "Test")
-        };
-        assert!(after.is_advice());
-
-        let around = MethodInfo {
-            kind: MethodKind::Around,
-            ..builtin_method("foo", 0, "Test")
-        };
-        assert!(around.is_advice());
-    }
 
     #[test]
     fn method_info_can_override_non_sealed() {
@@ -1136,24 +1090,6 @@ mod tests {
     }
 
     #[test]
-    fn before_method_on_sealed_method_allowed() {
-        // Parent defines sealed primary method, child adds a before advice — not an override
-        let parent = make_class_with_sealed_method("Parent", "Actor", "frozen", true);
-        let mut child = make_class_with_sealed_method("Child", "Parent", "frozen", false);
-        child.methods[0].kind = MethodKind::Before;
-
-        let module = Module {
-            classes: vec![parent, child],
-            method_definitions: Vec::new(),
-            expressions: vec![],
-            span: test_span(),
-            leading_comments: vec![],
-        };
-        let (_, diags) = ClassHierarchy::build(&module);
-        assert!(diags.is_empty());
-    }
-
-    #[test]
     fn builtin_sealed_method_override_rejected() {
         // Object's respondsTo: is sealed in builtins — user class cannot override it
         let child = make_class_with_sealed_method("MyObj", "Object", "respondsTo:", false);
@@ -1511,208 +1447,6 @@ mod tests {
         let (_, diags) = ClassHierarchy::build(&module);
 
         assert!(diags.is_empty());
-    }
-
-    #[test]
-    fn advice_method_same_selector_as_primary_allowed() {
-        // A Before advice and a Primary method with the same selector should NOT be flagged
-        let class = ClassDefinition {
-            name: Identifier::new("Counter", test_span()),
-            superclass: Some(Identifier::new("Actor", test_span())),
-            is_abstract: false,
-            is_sealed: false,
-            is_typed: false,
-            state: vec![],
-            methods: vec![
-                MethodDefinition {
-                    selector: crate::ast::MessageSelector::Unary("increment".into()),
-                    parameters: vec![],
-                    body: vec![],
-                    return_type: None,
-                    is_sealed: false,
-                    kind: MethodKind::Primary,
-                    doc_comment: None,
-                    span: Span::new(10, 20),
-                },
-                MethodDefinition {
-                    selector: crate::ast::MessageSelector::Unary("increment".into()),
-                    parameters: vec![],
-                    body: vec![],
-                    return_type: None,
-                    is_sealed: false,
-                    kind: MethodKind::Before,
-                    doc_comment: None,
-                    span: Span::new(30, 40),
-                },
-            ],
-            class_methods: vec![],
-            class_variables: vec![],
-            doc_comment: None,
-            span: test_span(),
-        };
-
-        let module = Module {
-            classes: vec![class],
-            method_definitions: Vec::new(),
-            expressions: vec![],
-            span: test_span(),
-            leading_comments: vec![],
-        };
-        let (_, diags) = ClassHierarchy::build(&module);
-
-        // No duplicate error — advice methods can share selector with primary
-        assert!(diags.is_empty());
-    }
-
-    #[test]
-    fn duplicate_before_advice_detected() {
-        let class = ClassDefinition {
-            name: Identifier::new("Counter", test_span()),
-            superclass: Some(Identifier::new("Actor", test_span())),
-            is_abstract: false,
-            is_sealed: false,
-            is_typed: false,
-            state: vec![],
-            methods: vec![
-                MethodDefinition {
-                    selector: crate::ast::MessageSelector::Unary("increment".into()),
-                    parameters: vec![],
-                    body: vec![],
-                    return_type: None,
-                    is_sealed: false,
-                    kind: MethodKind::Before,
-                    doc_comment: None,
-                    span: Span::new(10, 20),
-                },
-                MethodDefinition {
-                    selector: crate::ast::MessageSelector::Unary("increment".into()),
-                    parameters: vec![],
-                    body: vec![],
-                    return_type: None,
-                    is_sealed: false,
-                    kind: MethodKind::Before,
-                    doc_comment: None,
-                    span: Span::new(30, 40),
-                },
-            ],
-            class_methods: vec![],
-            class_variables: vec![],
-            doc_comment: None,
-            span: test_span(),
-        };
-
-        let module = Module {
-            classes: vec![class],
-            method_definitions: Vec::new(),
-            expressions: vec![],
-            span: test_span(),
-            leading_comments: vec![],
-        };
-        let (_, diags) = ClassHierarchy::build(&module);
-
-        assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("Duplicate method"));
-        assert!(diags[0].message.contains("`increment`"));
-    }
-
-    #[test]
-    fn duplicate_after_advice_detected() {
-        let class = ClassDefinition {
-            name: Identifier::new("Counter", test_span()),
-            superclass: Some(Identifier::new("Actor", test_span())),
-            is_abstract: false,
-            is_sealed: false,
-            is_typed: false,
-            state: vec![],
-            methods: vec![
-                MethodDefinition {
-                    selector: crate::ast::MessageSelector::Unary("increment".into()),
-                    parameters: vec![],
-                    body: vec![],
-                    return_type: None,
-                    is_sealed: false,
-                    kind: MethodKind::After,
-                    doc_comment: None,
-                    span: Span::new(10, 20),
-                },
-                MethodDefinition {
-                    selector: crate::ast::MessageSelector::Unary("increment".into()),
-                    parameters: vec![],
-                    body: vec![],
-                    return_type: None,
-                    is_sealed: false,
-                    kind: MethodKind::After,
-                    doc_comment: None,
-                    span: Span::new(30, 40),
-                },
-            ],
-            class_methods: vec![],
-            class_variables: vec![],
-            doc_comment: None,
-            span: test_span(),
-        };
-
-        let module = Module {
-            classes: vec![class],
-            method_definitions: Vec::new(),
-            expressions: vec![],
-            span: test_span(),
-            leading_comments: vec![],
-        };
-        let (_, diags) = ClassHierarchy::build(&module);
-
-        assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("Duplicate method"));
-    }
-
-    #[test]
-    fn duplicate_around_advice_detected() {
-        let class = ClassDefinition {
-            name: Identifier::new("Counter", test_span()),
-            superclass: Some(Identifier::new("Actor", test_span())),
-            is_abstract: false,
-            is_sealed: false,
-            is_typed: false,
-            state: vec![],
-            methods: vec![
-                MethodDefinition {
-                    selector: crate::ast::MessageSelector::Unary("increment".into()),
-                    parameters: vec![],
-                    body: vec![],
-                    return_type: None,
-                    is_sealed: false,
-                    kind: MethodKind::Around,
-                    doc_comment: None,
-                    span: Span::new(10, 20),
-                },
-                MethodDefinition {
-                    selector: crate::ast::MessageSelector::Unary("increment".into()),
-                    parameters: vec![],
-                    body: vec![],
-                    return_type: None,
-                    is_sealed: false,
-                    kind: MethodKind::Around,
-                    doc_comment: None,
-                    span: Span::new(30, 40),
-                },
-            ],
-            class_methods: vec![],
-            class_variables: vec![],
-            doc_comment: None,
-            span: test_span(),
-        };
-
-        let module = Module {
-            classes: vec![class],
-            method_definitions: Vec::new(),
-            expressions: vec![],
-            span: test_span(),
-            leading_comments: vec![],
-        };
-        let (_, diags) = ClassHierarchy::build(&module);
-
-        assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("Duplicate method"));
     }
 
     // --- Typed class inheritance tests (BT-587) ---
