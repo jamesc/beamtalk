@@ -1271,8 +1271,10 @@ mod tests {
     fn test_different_paths_produce_different_workspace_ids() {
         // Verifies worktree isolation: different project paths (as with git worktrees)
         // produce different workspace IDs, ensuring separate workspaces per worktree.
-        let id1 = generate_workspace_id(Path::new("/")).unwrap();
-        let id2 = generate_workspace_id(Path::new("/tmp")).unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        let parent = cwd.parent().expect("cwd should have a parent");
+        let id1 = generate_workspace_id(&cwd).unwrap();
+        let id2 = generate_workspace_id(parent).unwrap();
         assert_ne!(
             id1, id2,
             "Different paths must produce different workspace IDs"
