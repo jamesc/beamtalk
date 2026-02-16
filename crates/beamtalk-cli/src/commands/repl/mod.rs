@@ -45,6 +45,7 @@
 //! {"id": "msg-001", "error": "Undefined variable: foo", "status": ["done", "error"]}
 //! ```
 
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use miette::{IntoDiagnostic, Result};
@@ -223,6 +224,58 @@ fn display_reload_result(response: &ReplResponse, module_name: Option<&str>) {
     }
 }
 
+/// Auto-compile a package if `beamtalk.toml` is present in the project root.
+///
+/// Returns a list of extra code paths to add to the workspace node.
+/// On compile failure, prints errors but returns an empty list so the REPL
+/// can still start without the package classes.
+fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
+    // Parse manifest to get package name for summary message
+    let Some(project_root_utf8) = camino::Utf8Path::from_path(project_root) else {
+        eprintln!("Warning: project path is not valid UTF-8, skipping auto-compile");
+        return Vec::new();
+    };
+
+    let pkg_manifest = match crate::commands::manifest::find_manifest(project_root_utf8) {
+        Ok(Some(pkg)) => pkg,
+        Ok(None) => return Vec::new(),
+        Err(e) => {
+            eprintln!("Warning: failed to parse beamtalk.toml: {e}");
+            eprintln!("Starting REPL without package classes.");
+            return Vec::new();
+        }
+    };
+
+    let options = beamtalk_core::CompilerOptions::default();
+    match crate::commands::build::build(project_root_utf8.as_str(), &options) {
+        Ok(()) => {
+            let ebin_path = project_root_utf8.join("_build").join("dev").join("ebin");
+            // Count .beam files for summary
+            let beam_count = std::fs::read_dir(&ebin_path)
+                .map(|entries| {
+                    entries
+                        .filter_map(std::result::Result::ok)
+                        .filter(|e| e.path().extension().is_some_and(|ext| ext == "beam"))
+                        .count()
+                })
+                .unwrap_or(0);
+            println!(
+                "Compiled {} v{} ({} {})",
+                pkg_manifest.name,
+                pkg_manifest.version,
+                beam_count,
+                if beam_count == 1 { "module" } else { "modules" }
+            );
+            vec![ebin_path.into_std_path_buf()]
+        }
+        Err(e) => {
+            eprintln!("Warning: package compilation failed: {e}");
+            eprintln!("Starting REPL without package classes.");
+            Vec::new()
+        }
+    }
+}
+
 /// Start the interactive REPL session.
 ///
 /// Connects to (or spawns) a workspace BEAM node, then enters the
@@ -286,6 +339,9 @@ pub fn run(
             );
         }
 
+        // Auto-compile package if beamtalk.toml is present (BT-606)
+        let extra_code_paths = auto_compile_package(&project_root);
+
         let (node_info, is_new, workspace_id) = workspace::get_or_start_workspace(
             &project_root,
             workspace_name,
@@ -295,6 +351,7 @@ pub fn run(
             &paths.jsx_ebin,
             &paths.compiler_ebin,
             &paths.stdlib_ebin,
+            &extra_code_paths,
             !persistent, // auto_cleanup is opposite of persistent flag
             timeout,
         )?;

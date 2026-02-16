@@ -425,6 +425,7 @@ pub fn start_detached_node(
     jsx_beam_dir: &Path,
     compiler_beam_dir: &Path,
     stdlib_beam_dir: &Path,
+    extra_code_paths: &[PathBuf],
     auto_cleanup: bool,
     max_idle_seconds: Option<u64>,
 ) -> Result<NodeInfo> {
@@ -471,6 +472,7 @@ pub fn start_detached_node(
         jsx_beam_dir,
         compiler_beam_dir,
         stdlib_beam_dir,
+        extra_code_paths,
         &eval_cmd,
         &project_path,
     );
@@ -536,6 +538,7 @@ fn build_detached_node_command(
     jsx_beam_dir: &Path,
     compiler_beam_dir: &Path,
     stdlib_beam_dir: &Path,
+    extra_code_paths: &[PathBuf],
     eval_cmd: &str,
     project_root: &Path,
 ) -> Command {
@@ -545,7 +548,7 @@ fn build_detached_node_command(
         ("-sname", node_name.to_string())
     };
 
-    let args = vec![
+    let mut args = vec![
         "-detached".to_string(),
         "-noshell".to_string(),
         node_flag.to_string(),
@@ -562,9 +565,16 @@ fn build_detached_node_command(
         compiler_beam_dir.to_str().unwrap_or("").to_string(),
         "-pa".to_string(),
         stdlib_beam_dir.to_str().unwrap_or("").to_string(),
-        "-eval".to_string(),
-        eval_cmd.to_string(),
     ];
+
+    // Add extra code paths (e.g. package ebin from auto-compile)
+    for path in extra_code_paths {
+        args.push("-pa".to_string());
+        args.push(path.to_str().unwrap_or("").to_string());
+    }
+
+    args.push("-eval".to_string());
+    args.push(eval_cmd.to_string());
 
     let mut cmd = Command::new("erl");
     cmd.args(&args)
@@ -628,6 +638,7 @@ pub fn get_or_start_workspace(
     jsx_beam_dir: &Path,
     compiler_beam_dir: &Path,
     stdlib_beam_dir: &Path,
+    extra_code_paths: &[PathBuf],
     auto_cleanup: bool,
     max_idle_seconds: Option<u64>,
 ) -> Result<(NodeInfo, bool, String)> {
@@ -654,6 +665,7 @@ pub fn get_or_start_workspace(
         jsx_beam_dir,
         compiler_beam_dir,
         stdlib_beam_dir,
+        extra_code_paths,
         auto_cleanup,
         max_idle_seconds,
     )?;
@@ -1735,6 +1747,7 @@ mod tests {
             &jsx,
             &compiler,
             &stdlib,
+            &[],
             false,
             Some(60),
         )
@@ -1793,6 +1806,7 @@ mod tests {
             &jsx,
             &compiler,
             &stdlib,
+            &[],
             false,
             Some(60),
         )
@@ -1838,6 +1852,7 @@ mod tests {
             &jsx,
             &compiler,
             &stdlib,
+            &[],
             false,
             Some(60),
         )
@@ -1857,6 +1872,7 @@ mod tests {
             &jsx,
             &compiler,
             &stdlib,
+            &[],
             false,
             Some(60),
         )
@@ -1882,6 +1898,7 @@ mod tests {
             &jsx,
             &compiler,
             &stdlib,
+            &[],
             false,
             Some(60),
         )
@@ -1913,6 +1930,7 @@ mod tests {
             &jsx,
             &compiler,
             &stdlib,
+            &[],
             false,
             Some(60),
         )
@@ -1956,6 +1974,7 @@ mod tests {
             &jsx,
             &compiler,
             &stdlib,
+            &[],
             false,
             Some(60),
         )
@@ -1998,6 +2017,7 @@ mod tests {
             &jsx,
             &compiler,
             &stdlib,
+            &[],
             false,
             Some(60),
         )
@@ -2036,6 +2056,7 @@ mod tests {
             &jsx,
             &compiler,
             &stdlib,
+            &[],
             false,
             Some(60),
         )
@@ -2079,6 +2100,7 @@ mod tests {
             &jsx,
             &compiler,
             &stdlib,
+            &[],
             false,
             Some(60),
         )
