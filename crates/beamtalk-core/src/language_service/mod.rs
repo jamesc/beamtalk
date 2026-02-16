@@ -794,4 +794,42 @@ mod tests {
         assert!(refs.iter().any(|r| r.file == file_a));
         assert!(refs.iter().any(|r| r.file == file_b));
     }
+
+    #[test]
+    fn goto_definition_cross_file_method_unary() {
+        let mut service = SimpleLanguageService::new();
+        let file_a = Utf8PathBuf::from("a.bt");
+        let file_b = Utf8PathBuf::from("b.bt");
+
+        service.update_file(
+            file_a.clone(),
+            "Object subclass: Foo\n  bar => 1".to_string(),
+        );
+        // Cursor on unary selector "bar"
+        service.update_file(file_b.clone(), "x bar".to_string());
+
+        let def = service.goto_definition(&file_b, Position::new(0, 2));
+        assert!(def.is_some());
+        let loc = def.unwrap();
+        assert_eq!(loc.file, file_a);
+    }
+
+    #[test]
+    fn find_references_selector_cross_file_unary() {
+        let mut service = SimpleLanguageService::new();
+        let file_a = Utf8PathBuf::from("a.bt");
+        let file_b = Utf8PathBuf::from("b.bt");
+
+        service.update_file(
+            file_a.clone(),
+            "Object subclass: Foo\n  bar => 1".to_string(),
+        );
+        // Cursor on unary selector "bar"
+        service.update_file(file_b.clone(), "x bar".to_string());
+
+        let refs = service.find_references(&file_b, Position::new(0, 2));
+        assert!(refs.len() >= 2);
+        assert!(refs.iter().any(|r| r.file == file_a));
+        assert!(refs.iter().any(|r| r.file == file_b));
+    }
 }
