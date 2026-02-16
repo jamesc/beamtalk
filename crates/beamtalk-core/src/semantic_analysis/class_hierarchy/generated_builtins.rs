@@ -765,6 +765,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "padLeft:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "padRight:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "padLeft:with:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: None },
+                MethodInfo { selector: "padRight:with:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "isEmpty".into(), arity: 0, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "isNotEmpty".into(), arity: 0, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "isBlank".into(), arity: 0, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: None },
