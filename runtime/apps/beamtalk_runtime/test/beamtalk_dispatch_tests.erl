@@ -616,7 +616,7 @@ test_flattened_stale_defining_class() ->
     State = #{'$beamtalk_class' => 'StaleTestChild'},
     Self = make_ref(),
     Result = beamtalk_dispatch:lookup(staleMethod, [], Self, State, 'StaleTestChild'),
-    %% Either finds via hierarchy walk or returns DNU — both are valid
+    %% Parent class is stopped — hierarchy walk can't find it either, so DNU expected
     ?assertMatch({error, #beamtalk_error{}}, Result),
 
     gen_server:stop(ChildPid).
