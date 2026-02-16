@@ -76,6 +76,9 @@ pub struct ClassInfo {
     pub is_sealed: bool,
     /// Whether this class is abstract.
     pub is_abstract: bool,
+    /// Whether this class requires type annotations on methods.
+    /// Inherited: subclasses of a typed class are also typed.
+    pub is_typed: bool,
     /// State (instance variable) names.
     pub state: Vec<EcoString>,
     /// Methods defined directly on this class (instance-side).
@@ -586,11 +589,20 @@ impl ClassHierarchy {
                 &mut diagnostics,
             );
 
+            // Determine is_typed: explicit modifier OR inherited from superclass
+            let is_typed = class.is_typed
+                || class
+                    .superclass
+                    .as_ref()
+                    .and_then(|s| self.classes.get(s.name.as_str()))
+                    .is_some_and(|info| info.is_typed);
+
             let class_info = ClassInfo {
                 name: class.name.name.clone(),
                 superclass: class.superclass.as_ref().map(|s| s.name.clone()),
                 is_sealed: class.is_sealed,
                 is_abstract: class.is_abstract,
+                is_typed,
                 state: class.state.iter().map(|s| s.name.name.clone()).collect(),
                 methods: class
                     .methods
@@ -887,6 +899,7 @@ mod tests {
             superclass: Some(Identifier::new(superclass, test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![StateDeclaration {
                 name: Identifier::new("count", test_span()),
                 type_annotation: None,
@@ -1034,6 +1047,7 @@ mod tests {
             superclass: Some(Identifier::new(superclass, test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: crate::ast::MessageSelector::Unary(method_name.into()),
@@ -1218,6 +1232,7 @@ mod tests {
                 superclass: Some("B".into()),
                 is_sealed: false,
                 is_abstract: false,
+                is_typed: false,
                 state: vec![],
                 methods: vec![builtin_method("methodA", 0, "A")],
                 class_methods: vec![],
@@ -1231,6 +1246,7 @@ mod tests {
                 superclass: Some("A".into()),
                 is_sealed: false,
                 is_abstract: false,
+                is_typed: false,
                 state: vec![],
                 methods: vec![builtin_method("methodB", 0, "B")],
                 class_methods: vec![],
@@ -1256,6 +1272,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: crate::ast::MessageSelector::Unary("baseMethod".into()),
@@ -1277,6 +1294,7 @@ mod tests {
             superclass: Some(Identifier::new("Base", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: crate::ast::MessageSelector::Unary("derivedMethod".into()),
@@ -1342,6 +1360,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![
                 MethodDefinition {
@@ -1395,6 +1414,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![],
             class_methods: vec![
@@ -1445,6 +1465,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![
                 MethodDefinition {
@@ -1494,6 +1515,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![
                 MethodDefinition {
@@ -1543,6 +1565,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![
                 MethodDefinition {
@@ -1593,6 +1616,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![
                 MethodDefinition {
@@ -1642,6 +1666,7 @@ mod tests {
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: vec![
                 MethodDefinition {

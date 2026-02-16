@@ -802,6 +802,7 @@ mod tests {
                 superclass: Some(ident("Actor")),
                 is_abstract: false,
                 is_sealed: false,
+                is_typed: false,
                 state: vec![],
                 methods: vec![MethodDefinition {
                     selector: MessageSelector::Unary("increment".into()),
@@ -1042,6 +1043,7 @@ mod tests {
                 superclass: Some(ident("Object")),
                 is_abstract: false,
                 is_sealed: false,
+                is_typed: false,
                 state: vec![],
                 methods: vec![MethodDefinition {
                     selector: MessageSelector::Unary("greet".into()),
@@ -1193,6 +1195,7 @@ mod tests {
             superclass: Some(ident("Actor")),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state: vec![],
             methods: instance_methods,
             class_methods,

@@ -40,14 +40,18 @@ impl Parser {
         let doc_comment = self.collect_doc_comment();
         let mut is_abstract = false;
         let mut is_sealed = false;
+        let mut is_typed = false;
 
-        // Parse optional modifiers: abstract, sealed
+        // Parse optional modifiers: abstract, sealed, typed
         while let TokenKind::Identifier(name) = self.current_kind() {
             if name == "abstract" {
                 is_abstract = true;
                 self.advance();
             } else if name == "sealed" {
                 is_sealed = true;
+                self.advance();
+            } else if name == "typed" {
+                is_typed = true;
                 self.advance();
             } else {
                 break;
@@ -70,6 +74,7 @@ impl Parser {
                 superclass,
                 is_abstract,
                 is_sealed,
+                is_typed,
                 Vec::new(),
                 Vec::new(),
                 start,
@@ -104,6 +109,7 @@ impl Parser {
             superclass,
             is_abstract,
             is_sealed,
+            is_typed,
             state,
             methods,
             span,

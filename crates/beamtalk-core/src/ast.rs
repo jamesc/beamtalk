@@ -198,6 +198,8 @@ pub struct ClassDefinition {
     pub is_abstract: bool,
     /// Whether this is a sealed class (cannot be subclassed).
     pub is_sealed: bool,
+    /// Whether this is a typed class (requires type annotations on methods).
+    pub is_typed: bool,
     /// Instance variable declarations.
     pub state: Vec<StateDeclaration>,
     /// Method definitions.
@@ -227,6 +229,7 @@ impl ClassDefinition {
             superclass: Some(superclass),
             is_abstract: false,
             is_sealed: false,
+            is_typed: false,
             state,
             methods,
             class_methods: Vec::new(),
@@ -243,6 +246,7 @@ impl ClassDefinition {
         superclass: Option<Identifier>,
         is_abstract: bool,
         is_sealed: bool,
+        is_typed: bool,
         state: Vec<StateDeclaration>,
         methods: Vec<MethodDefinition>,
         span: Span,
@@ -252,6 +256,7 @@ impl ClassDefinition {
             superclass,
             is_abstract,
             is_sealed,
+            is_typed,
             state,
             methods,
             class_methods: Vec::new(),

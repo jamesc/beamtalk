@@ -64,6 +64,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
             superclass: Some("Object".into()),
             is_sealed: true,
             is_abstract: false,
+            is_typed: false,
             state: vec![],
             methods: vec![],
             class_methods: vec![],

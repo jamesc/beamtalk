@@ -665,10 +665,12 @@ impl Parser {
     pub(super) fn is_at_class_definition(&self) -> bool {
         let mut offset = 0;
 
-        // Skip optional `abstract` or `sealed` modifiers
+        // Skip optional `abstract`, `sealed`, or `typed` modifiers
         while let Some(kind) = self.peek_at(offset) {
             match kind {
-                TokenKind::Identifier(name) if name == "abstract" || name == "sealed" => {
+                TokenKind::Identifier(name)
+                    if name == "abstract" || name == "sealed" || name == "typed" =>
+                {
                     offset += 1;
                 }
                 _ => break,
