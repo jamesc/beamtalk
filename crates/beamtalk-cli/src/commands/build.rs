@@ -325,7 +325,7 @@ mod tests {
         if let Err(e) = result {
             let error_msg = format!("{e:?}");
             if error_msg.contains("escript not found") {
-                println!("Skipping test - escript not installed in CI environment");
+                eprintln!("Skipping test - escript not installed in CI environment");
                 return;
             }
             panic!("Build failed with unexpected error: {e:?}");
