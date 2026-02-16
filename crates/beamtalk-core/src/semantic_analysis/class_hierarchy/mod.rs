@@ -76,8 +76,8 @@ pub struct ClassInfo {
     pub is_sealed: bool,
     /// Whether this class is abstract.
     pub is_abstract: bool,
-    /// Whether this class requires type annotations on methods.
-    /// Inherited: subclasses of a typed class are also typed.
+    /// Whether this class has the explicit `typed` modifier.
+    /// Use `ClassHierarchy::is_typed()` to check inherited typed status.
     pub is_typed: bool,
     /// State (instance variable) names.
     pub state: Vec<EcoString>,
@@ -154,6 +154,20 @@ impl ClassHierarchy {
     #[must_use]
     pub fn is_abstract(&self, name: &str) -> bool {
         self.classes.get(name).is_some_and(|info| info.is_abstract)
+    }
+
+    /// Returns true if the named class requires type annotations (typed modifier
+    /// on itself or any ancestor). Walks the superclass chain on demand.
+    #[must_use]
+    pub fn is_typed(&self, name: &str) -> bool {
+        if self.classes.get(name).is_some_and(|info| info.is_typed) {
+            return true;
+        }
+        self.superclass_chain(name).iter().any(|s| {
+            self.classes
+                .get(s.as_str())
+                .is_some_and(|info| info.is_typed)
+        })
     }
 
     /// Returns the ordered superclass chain for a class (excluding the class itself).
@@ -589,20 +603,12 @@ impl ClassHierarchy {
                 &mut diagnostics,
             );
 
-            // Determine is_typed: explicit modifier OR inherited from superclass
-            let is_typed = class.is_typed
-                || class
-                    .superclass
-                    .as_ref()
-                    .and_then(|s| self.classes.get(s.name.as_str()))
-                    .is_some_and(|info| info.is_typed);
-
             let class_info = ClassInfo {
                 name: class.name.name.clone(),
                 superclass: class.superclass.as_ref().map(|s| s.name.clone()),
                 is_sealed: class.is_sealed,
                 is_abstract: class.is_abstract,
-                is_typed,
+                is_typed: class.is_typed,
                 state: class.state.iter().map(|s| s.name.name.clone()).collect(),
                 methods: class
                     .methods
@@ -638,31 +644,7 @@ impl ClassHierarchy {
             self.classes.insert(class.name.name.clone(), class_info);
         }
 
-        self.propagate_typed_inheritance();
-
         diagnostics
-    }
-
-    /// Propagates `is_typed` through superclass chains (order-independent).
-    ///
-    /// After all classes are registered, this ensures that subclasses of typed
-    /// classes inherit the `is_typed` flag regardless of definition order.
-    fn propagate_typed_inheritance(&mut self) {
-        let class_names: Vec<EcoString> = self.classes.keys().cloned().collect();
-        for name in &class_names {
-            if self.classes.get(name).is_some_and(|info| info.is_typed) {
-                continue;
-            }
-            let inherited = self
-                .superclass_chain(name)
-                .iter()
-                .any(|s| self.classes.get(s).is_some_and(|info| info.is_typed));
-            if inherited {
-                if let Some(info) = self.classes.get_mut(name) {
-                    info.is_typed = true;
-                }
-            }
-        }
     }
 }
 
@@ -1748,8 +1730,10 @@ mod tests {
             leading_comments: vec![],
         };
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let info = hierarchy.get_class("StrictCounter").unwrap();
-        assert!(info.is_typed, "explicitly typed class should be typed");
+        assert!(
+            hierarchy.is_typed("StrictCounter"),
+            "explicitly typed class should be typed"
+        );
     }
 
     #[test]
@@ -1769,12 +1753,9 @@ mod tests {
         };
         let (hierarchy, _) = ClassHierarchy::build(&module);
 
+        assert!(hierarchy.is_typed("TypedParent"), "parent should be typed");
         assert!(
-            hierarchy.get_class("TypedParent").unwrap().is_typed,
-            "parent should be typed"
-        );
-        assert!(
-            hierarchy.get_class("UntypedChild").unwrap().is_typed,
+            hierarchy.is_typed("UntypedChild"),
             "child of typed class should inherit typed"
         );
     }
@@ -1797,12 +1778,9 @@ mod tests {
         };
         let (hierarchy, _) = ClassHierarchy::build(&module);
 
+        assert!(hierarchy.is_typed("TypedParent"), "parent should be typed");
         assert!(
-            hierarchy.get_class("TypedParent").unwrap().is_typed,
-            "parent should be typed"
-        );
-        assert!(
-            hierarchy.get_class("UntypedChild").unwrap().is_typed,
+            hierarchy.is_typed("UntypedChild"),
             "child of typed class should inherit typed even when defined before parent"
         );
     }
@@ -1822,7 +1800,7 @@ mod tests {
         };
         let (hierarchy, _) = ClassHierarchy::build(&module);
 
-        assert!(!hierarchy.get_class("Parent").unwrap().is_typed);
-        assert!(!hierarchy.get_class("Child").unwrap().is_typed);
+        assert!(!hierarchy.is_typed("Parent"));
+        assert!(!hierarchy.is_typed("Child"));
     }
 }

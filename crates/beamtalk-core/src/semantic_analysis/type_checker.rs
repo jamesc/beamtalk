@@ -127,10 +127,7 @@ impl TypeChecker {
             let is_abstract = class.is_abstract || hierarchy.is_abstract(&class.name.name);
 
             // Determine if this class requires type annotations (typed modifier or inherited)
-            let is_typed = class.is_typed
-                || hierarchy
-                    .get_class(&class.name.name)
-                    .is_some_and(|info| info.is_typed);
+            let is_typed = hierarchy.is_typed(&class.name.name);
 
             for method in &class.methods {
                 let mut method_env = TypeEnv::new();
