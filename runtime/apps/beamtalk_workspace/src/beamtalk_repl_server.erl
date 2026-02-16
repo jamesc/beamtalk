@@ -420,6 +420,7 @@ handle_op(<<"reload">>, Params, Msg, SessionPid) ->
     ModuleBin = maps:get(<<"module">>, Params, <<>>),
     case maps:get(<<"path">>, Params, undefined) of
         undefined when ModuleBin =/= <<>> ->
+            ModuleStr = binary_to_list(ModuleBin),
             case safe_to_existing_atom(ModuleBin) of
                 {ok, ModuleAtom} ->
                     {ok, Tracker} = beamtalk_repl_shell:get_module_tracker(SessionPid),
@@ -428,20 +429,20 @@ handle_op(<<"reload">>, Params, Msg, SessionPid) ->
                             case beamtalk_repl_modules:get_source_file(Info) of
                                 undefined ->
                                     beamtalk_repl_protocol:encode_error(
-                                        {no_source_file, binary_to_list(ModuleBin)}, Msg,
+                                        {no_source_file, ModuleStr}, Msg,
                                         fun beamtalk_repl_json:format_error_message/1);
                                 SourcePath ->
                                     do_reload(SourcePath, ModuleAtom, Msg, SessionPid)
                             end;
                         {error, not_found} ->
                             beamtalk_repl_protocol:encode_error(
-                                {module_not_loaded, binary_to_list(ModuleBin)}, Msg,
+                                {module_not_loaded, ModuleStr}, Msg,
                                 fun beamtalk_repl_json:format_error_message/1)
                     end;
                 {error, badarg} ->
                     %% Atom doesn't exist — module was never loaded
                     beamtalk_repl_protocol:encode_error(
-                        {module_not_loaded, binary_to_list(ModuleBin)}, Msg,
+                        {module_not_loaded, ModuleStr}, Msg,
                         fun beamtalk_repl_json:format_error_message/1)
             end;
         undefined ->
