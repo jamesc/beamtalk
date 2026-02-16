@@ -372,8 +372,9 @@ handle_protocol_request(Msg, SessionPid) ->
                 stack => lists:sublist(Stack, 5),
                 op => Op
             }),
+            WrappedReason = ensure_structured_error(Reason, Class),
             beamtalk_repl_protocol:encode_error(
-                {eval_error, Class, Reason}, Msg, fun beamtalk_repl_json:format_error_message/1)
+                WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1)
     end.
 
 %% @private
@@ -381,16 +382,20 @@ handle_op(<<"eval">>, Params, Msg, SessionPid) ->
     Code = binary_to_list(maps:get(<<"code">>, Params, <<>>)),
     case Code of
         [] ->
+            Err = beamtalk_error:new(empty_expression, 'REPL'),
+            Err1 = beamtalk_error:with_message(Err, <<"Empty expression">>),
+            Err2 = beamtalk_error:with_hint(Err1, <<"Enter an expression to evaluate.">>),
             beamtalk_repl_protocol:encode_error(
-                empty_expression, Msg, fun beamtalk_repl_json:format_error_message/1);
+                Err2, Msg, fun beamtalk_repl_json:format_error_message/1);
         _ ->
             case beamtalk_repl_shell:eval(SessionPid, Code) of
                 {ok, Result, Output, Warnings} ->
                     beamtalk_repl_protocol:encode_result(
                         Result, Msg, fun beamtalk_repl_json:term_to_json/1, Output, Warnings);
                 {error, ErrorReason, Output, Warnings} ->
+                    WrappedReason = ensure_structured_error(ErrorReason),
                     beamtalk_repl_protocol:encode_error(
-                        ErrorReason, Msg, fun beamtalk_repl_json:format_error_message/1, Output, Warnings)
+                        WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1, Output, Warnings)
             end
     end;
 
@@ -412,8 +417,9 @@ handle_op(<<"load-file">>, Params, Msg, SessionPid) ->
         {ok, Classes} ->
             beamtalk_repl_protocol:encode_loaded(Classes, Msg, fun beamtalk_repl_json:term_to_json/1);
         {error, Reason} ->
+            WrappedReason = ensure_structured_error(Reason),
             beamtalk_repl_protocol:encode_error(
-                Reason, Msg, fun beamtalk_repl_json:format_error_message/1)
+                WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1)
     end;
 
 handle_op(<<"reload">>, Params, Msg, SessionPid) ->
@@ -461,8 +467,13 @@ handle_op(<<"reload">>, Params, Msg, SessionPid) ->
                         fun beamtalk_repl_json:format_error_message/1)
             end;
         undefined ->
+            Err0 = beamtalk_error:new(missing_argument, 'REPL'),
+            Err1 = beamtalk_error:with_message(Err0,
+                <<"Missing module name for reload">>),
+            Err2 = beamtalk_error:with_hint(Err1,
+                <<"Usage: :reload <ModuleName> or :reload (to reload last file)">>),
             beamtalk_repl_protocol:encode_error(
-                {missing_module_name, reload}, Msg, fun beamtalk_repl_json:format_error_message/1);
+                Err2, Msg, fun beamtalk_repl_json:format_error_message/1);
         Path ->
             PathStr = binary_to_list(Path),
             do_reload(PathStr, undefined, Msg, SessionPid)
@@ -558,8 +569,13 @@ handle_op(<<"unload">>, Params, Msg, SessionPid) ->
     ModuleBin = maps:get(<<"module">>, Params, <<>>),
     case ModuleBin of
         <<>> ->
+            Err0 = beamtalk_error:new(missing_argument, 'Module'),
+            Err1 = beamtalk_error:with_message(Err0,
+                <<"Missing module name for unload">>),
+            Err2 = beamtalk_error:with_hint(Err1,
+                <<"Usage: :unload <ModuleName>">>),
             beamtalk_repl_protocol:encode_error(
-                {invalid_module, missing}, Msg, fun beamtalk_repl_json:format_error_message/1);
+                Err2, Msg, fun beamtalk_repl_json:format_error_message/1);
         _ ->
             case safe_to_existing_atom(ModuleBin) of
                 {error, badarg} ->
@@ -612,8 +628,12 @@ handle_op(<<"clone">>, _Params, Msg, _SessionPid) ->
             beamtalk_repl_protocol:encode_result(
                 NewSessionId, Msg, fun beamtalk_repl_json:term_to_json/1);
         {error, Reason} ->
+            Err0 = beamtalk_error:new(session_error, 'REPL'),
+            Err1 = beamtalk_error:with_message(Err0,
+                iolist_to_binary([<<"Failed to create session: ">>,
+                    io_lib:format("~p", [Reason])])),
             beamtalk_repl_protocol:encode_error(
-                {session_creation_failed, Reason}, Msg, fun beamtalk_repl_json:format_error_message/1)
+                Err1, Msg, fun beamtalk_repl_json:format_error_message/1)
     end;
 
 handle_op(<<"close">>, _Params, Msg, _SessionPid) ->
@@ -650,7 +670,7 @@ handle_op(<<"docs">>, Params, Msg, _SessionPid) ->
     case safe_to_existing_atom(ClassBin) of
         {error, badarg} ->
             beamtalk_repl_protocol:encode_error(
-                {class_not_found, ClassBin}, Msg, fun beamtalk_repl_json:format_error_message/1);
+                make_class_not_found_error(ClassBin), Msg, fun beamtalk_repl_json:format_error_message/1);
         {ok, ClassName} ->
             Selector = maps:get(<<"selector">>, Params, undefined),
             case Selector of
@@ -660,7 +680,7 @@ handle_op(<<"docs">>, Params, Msg, _SessionPid) ->
                             beamtalk_repl_protocol:encode_docs(DocText, Msg);
                         {error, {class_not_found, _}} ->
                             beamtalk_repl_protocol:encode_error(
-                                {class_not_found, ClassName}, Msg, fun beamtalk_repl_json:format_error_message/1)
+                                make_class_not_found_error(ClassName), Msg, fun beamtalk_repl_json:format_error_message/1)
                     end;
                 SelectorBin ->
                     case beamtalk_repl_docs:format_method_doc(ClassName, SelectorBin) of
@@ -668,10 +688,16 @@ handle_op(<<"docs">>, Params, Msg, _SessionPid) ->
                             beamtalk_repl_protocol:encode_docs(DocText, Msg);
                         {error, {class_not_found, _}} ->
                             beamtalk_repl_protocol:encode_error(
-                                {class_not_found, ClassName}, Msg, fun beamtalk_repl_json:format_error_message/1);
+                                make_class_not_found_error(ClassName), Msg, fun beamtalk_repl_json:format_error_message/1);
                         {error, {method_not_found, _, _}} ->
+                            NameBin = to_binary(ClassName),
+                            Err0 = beamtalk_error:new(does_not_understand, ClassName),
+                            Err1 = beamtalk_error:with_message(Err0,
+                                iolist_to_binary([NameBin, <<" does not understand ">>, SelectorBin])),
+                            Err2 = beamtalk_error:with_hint(Err1,
+                                iolist_to_binary([<<"Use :help ">>, NameBin, <<" to see available methods.">>])),
                             beamtalk_repl_protocol:encode_error(
-                                {method_not_found, ClassName, SelectorBin}, Msg, fun beamtalk_repl_json:format_error_message/1)
+                                Err2, Msg, fun beamtalk_repl_json:format_error_message/1)
                     end
             end
     end;
@@ -705,14 +731,20 @@ handle_op(<<"shutdown">>, Params, Msg, _SessionPid) ->
                 fun beamtalk_repl_json:term_to_json/1);
         _ ->
             ?LOG_WARNING("Shutdown rejected: invalid cookie", #{}),
+            Err0 = beamtalk_error:new(auth_error, 'REPL'),
+            Err1 = beamtalk_error:with_message(Err0, <<"Invalid cookie">>),
+            Err2 = beamtalk_error:with_hint(Err1, <<"Provide the correct node cookie for shutdown.">>),
             beamtalk_repl_protocol:encode_error(
-                {auth_error, <<"Invalid cookie">>}, Msg,
+                Err2, Msg,
                 fun beamtalk_repl_json:format_error_message/1)
     end;
 
 handle_op(Op, _Params, Msg, _SessionPid) ->
+    Err0 = beamtalk_error:new(unknown_op, 'REPL'),
+    Err1 = beamtalk_error:with_message(Err0,
+        iolist_to_binary([<<"Unknown operation: ">>, Op])),
     beamtalk_repl_protocol:encode_error(
-        {unknown_op, Op}, Msg, fun beamtalk_repl_json:format_error_message/1).
+        Err1, Msg, fun beamtalk_repl_json:format_error_message/1).
 
 %%% Protocol Parsing and Formatting
 
@@ -827,8 +859,9 @@ do_reload(Path, ModuleAtom, Msg, SessionPid) ->
                 trigger_actor_code_change(ModuleAtom, Classes),
             beamtalk_repl_json:encode_reloaded(Classes, ActorCount, MigrationFailures, Msg);
         {error, Reason} ->
+            WrappedReason = ensure_structured_error(Reason),
             beamtalk_repl_protocol:encode_error(
-                Reason, Msg, fun beamtalk_repl_json:format_error_message/1)
+                WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1)
     end.
 
 %% @private
@@ -1023,3 +1056,95 @@ safe_to_existing_atom(Bin) when is_binary(Bin) ->
         error:badarg -> {error, badarg}
     end;
 safe_to_existing_atom(_) -> {error, badarg}.
+
+%% @private
+%% @doc Ensure an error reason is a structured #beamtalk_error{} record.
+%% If already structured (or a wrapped exception), passes through unchanged.
+%% Handles known bare tuple error patterns from the compile pipeline.
+%% Otherwise wraps the raw term in an internal_error.
+-spec ensure_structured_error(term()) -> #beamtalk_error{}.
+ensure_structured_error(#beamtalk_error{} = Err) -> Err;
+ensure_structured_error(#{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}) -> Err;
+ensure_structured_error({eval_error, _Class, #{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}}) -> Err;
+ensure_structured_error({eval_error, _Class, #beamtalk_error{} = Err}) -> Err;
+ensure_structured_error({eval_error, Class, Reason}) ->
+    Err0 = beamtalk_error:new(internal_error, 'REPL'),
+    beamtalk_error:with_message(Err0,
+        iolist_to_binary([<<"Evaluation error: ">>, atom_to_binary(Class, utf8), <<": ">>,
+            format_name(Reason)]));
+ensure_structured_error({compile_error, Msg}) when is_binary(Msg) ->
+    Err0 = beamtalk_error:new(compile_error, 'Compiler'),
+    beamtalk_error:with_message(Err0, Msg);
+ensure_structured_error({compile_error, Msg}) when is_list(Msg) ->
+    Err0 = beamtalk_error:new(compile_error, 'Compiler'),
+    beamtalk_error:with_message(Err0, list_to_binary(Msg));
+ensure_structured_error({undefined_variable, Name}) ->
+    Err0 = beamtalk_error:new(undefined_variable, 'REPL'),
+    beamtalk_error:with_message(Err0,
+        iolist_to_binary([<<"Undefined variable: ">>, format_name(Name)]));
+ensure_structured_error({file_not_found, Path}) ->
+    Err0 = beamtalk_error:new(file_not_found, 'File'),
+    beamtalk_error:with_message(Err0,
+        iolist_to_binary([<<"File not found: ">>, format_name(Path)]));
+ensure_structured_error({read_error, Reason}) ->
+    Err0 = beamtalk_error:new(io_error, 'File'),
+    beamtalk_error:with_message(Err0,
+        iolist_to_binary([<<"Failed to read file: ">>, format_name(Reason)]));
+ensure_structured_error({load_error, Reason}) ->
+    Err0 = beamtalk_error:new(io_error, 'File'),
+    beamtalk_error:with_message(Err0,
+        iolist_to_binary([<<"Failed to load bytecode: ">>, format_name(Reason)]));
+ensure_structured_error({parse_error, Details}) ->
+    Err0 = beamtalk_error:new(compile_error, 'Compiler'),
+    beamtalk_error:with_message(Err0,
+        iolist_to_binary([<<"Parse error: ">>, format_name(Details)]));
+ensure_structured_error({invalid_request, Reason}) ->
+    Err0 = beamtalk_error:new(internal_error, 'REPL'),
+    beamtalk_error:with_message(Err0,
+        iolist_to_binary([<<"Invalid request: ">>, format_name(Reason)]));
+ensure_structured_error(empty_expression) ->
+    Err0 = beamtalk_error:new(empty_expression, 'REPL'),
+    beamtalk_error:with_message(Err0, <<"Empty expression">>);
+ensure_structured_error(timeout) ->
+    Err0 = beamtalk_error:new(timeout, 'REPL'),
+    beamtalk_error:with_message(Err0, <<"Request timed out">>);
+ensure_structured_error(Reason) ->
+    Err0 = beamtalk_error:new(internal_error, 'REPL'),
+    beamtalk_error:with_message(Err0,
+        iolist_to_binary(io_lib:format("~p", [Reason]))).
+
+%% @private
+%% @doc Ensure an error reason is structured, with exception class context.
+-spec ensure_structured_error(term(), atom()) -> #beamtalk_error{}.
+ensure_structured_error(#beamtalk_error{} = Err, _Class) -> Err;
+ensure_structured_error(#{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}, _Class) -> Err;
+ensure_structured_error(Reason, Class) ->
+    Err0 = beamtalk_error:new(internal_error, 'REPL'),
+    beamtalk_error:with_message(Err0,
+        iolist_to_binary([atom_to_binary(Class, utf8), <<": ">>,
+            io_lib:format("~p", [Reason])])).
+
+%% @private
+%% @doc Build a structured class_not_found error.
+-spec make_class_not_found_error(atom() | binary()) -> #beamtalk_error{}.
+make_class_not_found_error(ClassName) ->
+    NameBin = to_binary(ClassName),
+    Err0 = beamtalk_error:new(class_not_found, 'REPL'),
+    Err1 = beamtalk_error:with_message(Err0,
+        iolist_to_binary([<<"Unknown class: ">>, NameBin])),
+    beamtalk_error:with_hint(Err1,
+        <<"Use :modules to see loaded classes.">>).
+
+%% @private
+%% @doc Convert an atom or binary to binary.
+-spec to_binary(atom() | binary()) -> binary().
+to_binary(A) when is_atom(A) -> atom_to_binary(A, utf8);
+to_binary(B) when is_binary(B) -> B.
+
+%% @private
+%% @doc Format a name for error messages.
+-spec format_name(term()) -> binary().
+format_name(Name) when is_atom(Name) -> atom_to_binary(Name, utf8);
+format_name(Name) when is_binary(Name) -> Name;
+format_name(Name) when is_list(Name) -> list_to_binary(Name);
+format_name(Name) -> iolist_to_binary(io_lib:format("~p", [Name])).
