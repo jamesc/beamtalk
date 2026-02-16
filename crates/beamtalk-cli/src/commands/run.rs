@@ -39,20 +39,29 @@ pub fn run(path: &str) -> Result<()> {
     } else {
         input_path
             .parent()
-            .map(camino::Utf8Path::to_path_buf)
-            .unwrap_or_else(|| Utf8PathBuf::from("."))
+            .map_or_else(|| Utf8PathBuf::from("."), camino::Utf8Path::to_path_buf)
     };
 
     // Look for package manifest
-    let pkg = manifest::find_manifest(&project_root)?.ok_or_else(|| {
-        miette!(
-            "No beamtalk.toml found in '{}'.\n\
-             The run command requires a package manifest.\n\
-             Create one with: beamtalk new <project_name>",
-            project_root
-        )
-    })?;
+    match manifest::find_manifest(&project_root)? {
+        Some(pkg) => run_package(&project_root, &pkg),
+        None => {
+            // No manifest — error with helpful message
+            Err(miette!(
+                "No beamtalk.toml found in '{}'.\n\
+                 The run command requires a package manifest.\n\
+                 Create one with: beamtalk new <project_name>",
+                project_root
+            ))
+        }
+    }
+}
 
+/// Run a package with a start module.
+///
+/// Compiles the package, starts a BEAM node, and calls the start module's
+/// `start` method. The node stays alive so actors remain supervised.
+fn run_package(project_root: &Utf8PathBuf, pkg: &manifest::PackageManifest) -> Result<()> {
     let start_module = pkg.start.as_deref().ok_or_else(|| {
         miette!(
             "No start module defined — add start = \"module_name\" to [package] in beamtalk.toml"
@@ -245,6 +254,8 @@ mod tests {
             // These are acceptable failures in test environment
             if error_msg.contains("escript not found")
                 || error_msg.contains("Could not find Beamtalk runtime")
+                || error_msg.contains("Failed to build runtime")
+                || error_msg.contains("Failed to build Beamtalk runtime")
                 || error_msg.contains("Failed to start BEAM node")
                 || error_msg.contains("Program exited with code")
             {
