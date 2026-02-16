@@ -465,11 +465,7 @@ pub fn run(
                             continue;
                         }
                         _ if line.starts_with(":help ") || line.starts_with(":h ") => {
-                            let args = if line.starts_with(":help ") {
-                                line.strip_prefix(":help ").unwrap().trim()
-                            } else {
-                                line.strip_prefix(":h ").unwrap().trim()
-                            };
+                            let args = extract_command_arg(line, ":help ", Some(":h "));
 
                             if args.is_empty() {
                                 print_help();
@@ -522,11 +518,7 @@ pub fn run(
                             continue;
                         }
                         _ if line.starts_with(":load ") || line.starts_with(":l ") => {
-                            let path = if line.starts_with(":load ") {
-                                line.strip_prefix(":load ").unwrap().trim()
-                            } else {
-                                line.strip_prefix(":l ").unwrap().trim()
-                            };
+                            let path = extract_command_arg(line, ":load ", Some(":l "));
 
                             if path.is_empty() {
                                 eprintln!("Usage: :load <path>");
@@ -554,11 +546,7 @@ pub fn run(
                             continue;
                         }
                         _ if line.starts_with(":reload ") || line.starts_with(":r ") => {
-                            let module_name = if line.starts_with(":reload ") {
-                                line.strip_prefix(":reload ").unwrap().trim()
-                            } else {
-                                line.strip_prefix(":r ").unwrap().trim()
-                            };
+                            let module_name = extract_command_arg(line, ":reload ", Some(":r "));
                             match client.reload_module(module_name) {
                                 Ok(response) => {
                                     display_reload_result(&response, Some(module_name));
@@ -637,7 +625,7 @@ pub fn run(
                             continue;
                         }
                         _ if line.starts_with(":unload ") => {
-                            let module_name = line.strip_prefix(":unload ").unwrap().trim();
+                            let module_name = extract_command_arg(line, ":unload ", None);
                             if module_name.is_empty() {
                                 eprintln!("Usage: :unload <module>");
                                 continue;
@@ -658,7 +646,7 @@ pub fn run(
                             continue;
                         }
                         _ if line.starts_with(":kill ") => {
-                            let pid_str = line.strip_prefix(":kill ").unwrap().trim();
+                            let pid_str = extract_command_arg(line, ":kill ", None);
                             if pid_str.is_empty() {
                                 eprintln!("Usage: :kill <pid>");
                                 continue;
@@ -701,7 +689,7 @@ pub fn run(
                             continue;
                         }
                         _ if line.starts_with(":inspect ") => {
-                            let pid_str = line.strip_prefix(":inspect ").unwrap().trim();
+                            let pid_str = extract_command_arg(line, ":inspect ", None);
                             if pid_str.is_empty() {
                                 eprintln!("Usage: :inspect <pid>");
                                 continue;
@@ -827,6 +815,21 @@ pub fn run(
     }
 
     Ok(())
+}
+
+/// Extracts the argument from a REPL command with long and optional short forms.
+///
+/// Returns the trimmed argument string, or an empty string if the command
+/// doesn't match either prefix.
+fn extract_command_arg<'a>(
+    line: &'a str,
+    long_prefix: &str,
+    short_prefix: Option<&str>,
+) -> &'a str {
+    line.strip_prefix(long_prefix)
+        .or_else(|| short_prefix.and_then(|s| line.strip_prefix(s)))
+        .unwrap_or("")
+        .trim()
 }
 
 #[cfg(test)]
@@ -1234,5 +1237,53 @@ mod tests {
         unsafe { std::env::remove_var("BEAMTALK_NODE_NAME") };
 
         assert_eq!(result, Some("clinode@localhost".to_string()));
+    }
+
+    #[test]
+    fn extract_command_arg_long_prefix() {
+        assert_eq!(
+            extract_command_arg(":load foo.bt", ":load ", Some(":l ")),
+            "foo.bt"
+        );
+    }
+
+    #[test]
+    fn extract_command_arg_short_prefix() {
+        assert_eq!(
+            extract_command_arg(":l foo.bt", ":load ", Some(":l ")),
+            "foo.bt"
+        );
+    }
+
+    #[test]
+    fn extract_command_arg_trims_whitespace() {
+        assert_eq!(
+            extract_command_arg(":load   foo.bt  ", ":load ", Some(":l ")),
+            "foo.bt"
+        );
+    }
+
+    #[test]
+    fn extract_command_arg_no_short_prefix() {
+        assert_eq!(
+            extract_command_arg(":unload counter", ":unload ", None),
+            "counter"
+        );
+    }
+
+    #[test]
+    fn extract_command_arg_no_match_returns_empty() {
+        assert_eq!(extract_command_arg(":other cmd", ":load ", Some(":l ")), "");
+    }
+
+    #[test]
+    fn extract_command_arg_empty_argument() {
+        // Command with trailing space but no argument
+        assert_eq!(extract_command_arg(":load ", ":load ", Some(":l ")), "");
+    }
+
+    #[test]
+    fn extract_command_arg_whitespace_only_argument() {
+        assert_eq!(extract_command_arg(":inspect   ", ":inspect ", None), "");
     }
 }
