@@ -44,7 +44,7 @@
 [42 noSuchMethod] on: Exception do: [:e | (e stackTrace first printString) class]
 // => String
 
-// StackFrame describe returns same as printString
+// StackFrame describe returns a String
 [42 noSuchMethod] on: Exception do: [:e | (e stackTrace first describe) class]
 // => String
 
