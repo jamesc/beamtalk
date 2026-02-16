@@ -638,8 +638,12 @@ dist-vscode-platform target:
     esac
     LSP_BIN="target/${RUST_TARGET}/release/${BIN_NAME}"
     if [ ! -f "${LSP_BIN}" ]; then
-        echo "❌ Binary not found: ${LSP_BIN}"
-        echo "   Build first: cargo build --release --bin beamtalk-lsp --target ${RUST_TARGET}"
+        # Fall back to default target path (when built without --target flag)
+        LSP_BIN="target/release/${BIN_NAME}"
+    fi
+    if [ ! -f "${LSP_BIN}" ]; then
+        echo "❌ Binary not found at target/${RUST_TARGET}/release/${BIN_NAME} or target/release/${BIN_NAME}"
+        echo "   Build first: cargo build --release --bin beamtalk-lsp"
         exit 1
     fi
     mkdir -p editors/vscode/bin
