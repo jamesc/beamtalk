@@ -1,7 +1,7 @@
 # ADR 0026: Package Definition and Project Manifest
 
 ## Status
-Proposed (2026-02-15)
+Accepted (2026-02-16)
 
 ## Context
 
