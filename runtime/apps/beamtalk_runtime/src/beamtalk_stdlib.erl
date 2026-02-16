@@ -135,11 +135,11 @@ find_stdlib_ebin() ->
         Dir -> Dir
     end.
 
+%% @private
 %% @doc Ensure a class is registered after module loading.
 %%
 %% If on_load already ran but the class process was killed (e.g., during
 %% test teardown), call register_class/0 again to recreate it.
-%% @private
 -spec ensure_class_registered(module(), atom()) -> ok.
 ensure_class_registered(Mod, ClassName) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
