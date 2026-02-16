@@ -103,9 +103,14 @@ Scripts, benchmarks, and development tooling:
 The biggest portability challenge is process management for workspaces. Workspaces already expose TCP ports for REPL and MCP client connections, and the non-Unix fallback for `is_node_running()` already uses TCP probes (line 315-327 in `workspace/mod.rs`). The recommended approach extends this to **TCP-first workspace management**:
 
 1. **Liveness checking** — TCP health probe to workspace port (replaces `ps` + `/proc` + `kill -0` polling)
-2. **Graceful shutdown** — TCP shutdown message with cookie authentication (replaces `kill` signal). Must use the same cookie auth as WebSocket connections (ADR 0020) to prevent local privilege escalation.
+2. **Graceful shutdown** — TCP shutdown message with cookie authentication triggers `init:stop()` on the workspace's OTP application. This ensures OTP supervision trees shut down cleanly, running all `terminate/2` callbacks. Must use the same cookie auth as WebSocket connections (ADR 0020) to prevent local privilege escalation.
 3. **Workspace discovery** — Port file in `~/.beamtalk/workspaces/` (already implemented). Port files should include a nonce verified on connection to detect stale entries.
-4. **Force-kill (fallback only)** — OS-specific code for hung workspaces that don't respond to TCP. On Windows, `TerminateProcess` requires handle permissions and wait-for-termination — consider the `sysinfo` crate if edge cases proliferate.
+4. **Force-kill (break glass only)** — OS-specific code for workspaces that don't respond to TCP shutdown within a timeout. This is a last resort for truly hung BEAM processes (e.g., stuck in NIF, crash loop before TCP listener starts). On Windows, `TerminateProcess` requires handle permissions — use `sysinfo` crate if edge cases proliferate.
+
+**Why OTP-level shutdown matters:** `init:stop()` gives the BEAM a chance to flush state, persist data, and run cleanup callbacks. This is critical for future persistence features (workspace state, actor snapshots, session history). An OS-level kill (`kill -9`, `TerminateProcess`) bypasses all of this and risks data loss. By making OTP shutdown the primary path and OS kill the rare fallback, we get:
+- Clean shutdown on all platforms (no `#[cfg]` needed for the happy path)
+- Safe foundation for persistence features
+- Force-kill only for the "break glass" scenario (~5% of shutdowns)
 
 ```rust
 // TCP-first: portable liveness and shutdown
@@ -114,23 +119,26 @@ fn is_workspace_running(port: u16) -> bool {
 }
 
 fn stop_workspace(port: u16, cookie: &str) -> Result<()> {
-    // Send authenticated shutdown message over TCP (graceful)
-    // Wait for process exit with timeout
-    // Fall back to OS force-kill only if TCP shutdown times out
+    // 1. Send authenticated shutdown message over TCP
+    //    → workspace calls init:stop() → OTP terminate callbacks run
+    // 2. Wait for process exit with timeout (TCP disconnect or port probe)
+    // 3. Only if timeout expires: OS force-kill (break glass)
 }
 
-// Force-kill needs #[cfg] guards:
+// Only force-kill needs #[cfg] guards — and it's rarely invoked:
 #[cfg(unix)]
 fn force_kill(pid: u32) -> Result<()> { /* kill -9 */ }
 #[cfg(windows)]
-fn force_kill(pid: u32) -> Result<()> { /* TerminateProcess + handle mgmt */ }
+fn force_kill(pid: u32) -> Result<()> { /* TerminateProcess via sysinfo */ }
 ```
 
 **Tradeoffs:**
 - ✅ Eliminates most `ps`/`kill`/`/proc` platform-specific code
+- ✅ OTP-level shutdown is cross-platform with no `#[cfg]` needed
+- ✅ Safe foundation for persistence (flush state before exit)
 - ✅ Aligns with REPL client and MCP server (already TCP-based)
 - ✅ Enables future remote workspace management (SSH, Docker, cloud)
-- ⚠️ **Observability loss** — TCP probes detect "port open" vs "port closed" but cannot detect a live-but-unresponsive BEAM process (e.g., hung in NIF). The current `ps`/`/proc` approach can. This is an acceptable tradeoff for portability — a hung workspace that doesn't respond to TCP also won't respond to REPL or MCP clients.
+- ⚠️ **Observability loss** — TCP probes detect "port open" vs "port closed" but cannot detect a live-but-unresponsive BEAM process (e.g., hung in NIF). This is an acceptable tradeoff — a hung workspace that doesn't respond to TCP also won't respond to REPL or MCP clients.
 - ⚠️ **Port file reliability** — Port files become the primary workspace discovery mechanism. Stale port files (from crashed workspaces) need handling: connect + nonce verification, with cleanup on failure.
 
 ## Prior Art
@@ -228,6 +236,7 @@ Originally proposed abstracting all process operations behind a `ProcessManager`
 - CI catches Windows and macOS regressions automatically
 - Matches peer language expectations (Gleam, Elixir, Erlang all support Windows)
 - TCP-first workspace management means most code is platform-agnostic, reducing `#[cfg]` surface
+- OTP-level shutdown (`init:stop()`) ensures clean teardown — safe foundation for future persistence (workspace state, actor snapshots, session history)
 - Tiered approach delivers value incrementally
 - TCP foundation enables future remote workspace management (SSH, Docker, cloud)
 
@@ -256,10 +265,10 @@ Originally proposed abstracting all process operations behind a `ProcessManager`
 
 ### Phase 2: TCP-first workspace management
 - Add TCP health endpoint to workspace (probe port for liveness)
-- Add TCP shutdown message to workspace protocol (graceful stop)
+- Add TCP shutdown message → workspace calls `init:stop()` (OTP-level graceful shutdown)
 - Replace `ps`/`kill -0`/`/proc` checks with TCP probes in `is_node_running()`, `find_beam_pid_by_node()`, `wait_for_process_exit()`
-- Add `#[cfg]`-guarded force-kill for hung workspaces (consider `sysinfo` crate if Windows edge cases exceed a single function)
-- `stop_workspace()` works on Windows via TCP shutdown + force-kill fallback
+- Add `#[cfg]`-guarded force-kill as break-glass fallback (consider `sysinfo` crate for Windows)
+- `stop_workspace()` works on all platforms: TCP→`init:stop()` (primary), OS force-kill (timeout fallback)
 - `beamtalk repl` works on Windows
 
 ### Phase 3: Build script portability
