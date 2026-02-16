@@ -19,7 +19,7 @@ name = "beamtalk-mcp"
 path = "src/main.rs"
 
 [dependencies]
-# MCP SDK
+# why: MCP SDK for Model Context Protocol server implementation
 rmcp = { version = "0.15", features = ["server", "macros", "transport-io", "schemars"] }
 
 # Async runtime

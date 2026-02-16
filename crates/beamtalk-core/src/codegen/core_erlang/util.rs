@@ -146,32 +146,11 @@ impl CoreErlangGenerator {
 
 /// Converts class name (`CamelCase`) to module name (`snake_case`).
 ///
-/// This is the inverse of the `snake_case` → `CamelCase` derivation used as a
-/// fallback in `class_name()`, and properly handles multi-word
-/// class names like `MyCounterActor` -> `my_counter_actor`.
-///
-/// Note: Acronyms like `HTTPRouter` become `httprouter` (no underscores within acronyms).
+/// Delegates to [`crate::ast::to_module_name`] (Shared Kernel).
 ///
 /// Visibility: `pub` to allow usage in IDE queries (hover, completion, etc.)
 pub fn to_module_name(class_name: &str) -> String {
-    let mut result = String::new();
-    let mut prev_was_lowercase = false;
-
-    for ch in class_name.chars() {
-        if ch.is_uppercase() {
-            // Add underscore before uppercase if previous char was lowercase
-            if prev_was_lowercase {
-                result.push('_');
-            }
-            result.extend(ch.to_lowercase());
-            prev_was_lowercase = false;
-        } else {
-            result.push(ch);
-            prev_was_lowercase = ch.is_lowercase();
-        }
-    }
-
-    result
+    crate::ast::to_module_name(class_name)
 }
 
 /// Returns true if `module_name` corresponds to the compiled form of `class_name`.

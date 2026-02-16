@@ -3,6 +3,8 @@
 
 //! Semantic analysis for Beamtalk.
 //!
+//! **DDD Context:** Semantic Analysis
+//!
 //! This module performs semantic analysis on the AST, including:
 //! - Variable scope and lifetime analysis (via `scope` module)
 //! - Pattern variable binding in match expressions

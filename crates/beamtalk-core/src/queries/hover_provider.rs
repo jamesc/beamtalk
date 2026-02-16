@@ -26,8 +26,9 @@
 //! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
 //! - LSP specification: Language Server Protocol hover requests
 
-use crate::ast::{ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, Module};
-use crate::codegen::core_erlang::to_module_name;
+use crate::ast::{
+    ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, Module, to_module_name,
+};
 use crate::language_service::{HoverInfo, Position};
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::semantic_analysis::{ClassHierarchy, InferredType, infer_types};

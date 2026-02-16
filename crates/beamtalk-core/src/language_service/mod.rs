@@ -3,6 +3,8 @@
 
 //! Language service API for IDE integration.
 //!
+//! **DDD Context:** Language Service
+//!
 //! Following the TypeScript approach: the compiler IS the language service.
 //! All compiler phases are designed to answer IDE queries efficiently.
 //!
