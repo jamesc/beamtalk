@@ -241,7 +241,9 @@ fuzz DURATION="60":
 # Coverage
 # ═══════════════════════════════════════════════════════════════════════════
 
+# Unix-only: depends on coverage-runtime (Unix-only)
 # Generate coverage reports for both Rust and Erlang runtime
+[unix]
 coverage: coverage-rust coverage-runtime
     @echo "✅ Coverage reports generated"
     @echo "  Rust:    target/llvm-cov/html/index.html"
