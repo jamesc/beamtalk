@@ -412,8 +412,11 @@ pub fn tcp_send_shutdown(port: u16, cookie: &str) -> Result<()> {
     let mut reader = BufReader::new(stream);
 
     // Send shutdown request with cookie
-    let request = format!("{{\"op\":\"shutdown\",\"cookie\":\"{cookie}\"}}\n");
-    writer.write_all(request.as_bytes()).into_diagnostic()?;
+    let request = serde_json::json!({"op": "shutdown", "cookie": cookie});
+    writer
+        .write_all(request.to_string().as_bytes())
+        .into_diagnostic()?;
+    writer.write_all(b"\n").into_diagnostic()?;
     writer.flush().into_diagnostic()?;
 
     // Read response
