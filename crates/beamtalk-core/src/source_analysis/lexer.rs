@@ -80,7 +80,8 @@ impl<'src> Lexer<'src> {
         self.chars.peek().map(|&(_, c)| c)
     }
 
-    /// Peeks at the `n`th character ahead without consuming (0-indexed from current peek position).
+    /// Peeks `n+1` characters ahead without consuming (n=0 is same as `peek_char`,
+    /// n=1 returns the second character, n=2 the third, etc.).
     fn peek_char_n(&self, n: usize) -> Option<char> {
         let mut iter = self.chars.clone();
         for _ in 0..n {
