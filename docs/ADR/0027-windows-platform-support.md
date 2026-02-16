@@ -7,12 +7,13 @@ Proposed (2026-02-16)
 
 ### The Problem
 
-Beamtalk is developed and tested exclusively on Linux (Ubuntu in CI, devcontainers for development). There is no Windows CI, no Windows testing, and several components use Unix-specific system calls and tools. A developer on Windows cannot reliably build or run Beamtalk today.
+Beamtalk is developed and tested exclusively on Linux (Ubuntu in CI, devcontainers for development). There is no Windows CI, no macOS CI, no Windows testing, and several components use Unix-specific or Linux-specific system calls and tools. A developer on Windows cannot reliably build or run Beamtalk today, and macOS has degraded behavior in workspace management.
 
 This matters because:
 1. **Developer reach** — Windows is ~45% of developer desktops. Excluding it limits adoption.
-2. **Peer expectation** — Gleam, Elixir, and Erlang all have first-class Windows support. A BEAM language that doesn't run on Windows is an outlier.
-3. **CI gaps** — Without Windows CI, regressions can silently break Windows compatibility even for code that should be portable.
+2. **macOS degradation** — 6 `#[cfg(target_os = "linux")]` guards use `/proc` filesystem for process start-time verification. On macOS, these fall back to skipping stale-node detection, meaning a macOS developer could connect to a wrong/stale workspace without warning.
+3. **Peer expectation** — Gleam, Elixir, and Erlang all have first-class Windows and macOS support. A BEAM language that only tests on Linux is an outlier.
+4. **CI gaps** — Without Windows or macOS CI, regressions can silently break cross-platform compatibility even for code that should be portable.
 
 ### Current State
 
@@ -40,6 +41,8 @@ Several components have no Windows path at all:
 | `find_beam_pid_by_node()` | Calls `ps` without `#[cfg]` guard | `workspace/mod.rs:573` |
 | `wait_for_process_exit()` | Unix-only, uses signal probing | `workspace/mod.rs:737-761` |
 | `stop_workspace()` | Returns error on Windows | `workspace/mod.rs:787-812` |
+| `/proc` start-time tracking | Linux-only, degrades silently on macOS | `workspace/mod.rs:262,293,586` |
+| REPL Unix guard | `#[cfg(unix)]` in REPL module | `repl/mod.rs:941` |
 | rebar3 pre-hook | `bash -c ./compile.sh` | `runtime/rebar.config:21` |
 | Test fixture compilation | Bash script | `test_fixtures/compile.sh` |
 | Home directory fallback | `os:getenv("HOME", "/tmp")` | `beamtalk_workspace_meta.erl:173` |
@@ -63,7 +66,7 @@ Several components have no Windows path at all:
 
 The core compilation path — `beamtalk build`, `beamtalk new`, `beamtalk test` — must work on Windows. This means:
 
-1. **Add Windows CI job** — `windows-latest` in GitHub Actions, running `cargo test`, `cargo clippy`, and `beamtalk build` on a test project
+1. **Add Windows and macOS CI jobs** — `windows-latest` and `macos-latest` in GitHub Actions, running `cargo test`, `cargo clippy`, and `beamtalk build` on a test project
 2. **Fix unguarded Unix code** — Wrap `find_beam_pid_by_node()` with `#[cfg(unix)]` and add Windows fallback
 3. **Portable path handling** — Replace any hardcoded `/` root checks with `std::path` methods or `Path::has_root()`
 4. **No bash dependency for compilation** — The `beamtalk build` command must not require bash. The embedded compiler port (ADR 0022) already avoids shell scripts for compilation.
@@ -121,12 +124,16 @@ mod windows {
 
 This keeps platform-specific code isolated and testable.
 
+**Note:** Workspaces already use TCP for REPL communication (not Unix sockets). An alternative to the `ProcessManager` trait is to lean on TCP-based health probes for liveness checks and shutdown messages for termination, reducing the surface area of platform-specific process management code. Evaluate this during Tier 2 implementation — TCP probes may eliminate the need for `find_pid_by_name()` entirely.
+
 ## Prior Art
 
 ### Gleam
 Full Windows support from early on. Rust compiler is inherently portable. Uses `std::process::Command` for `erl`/`erlc` invocation (works cross-platform if Erlang is in PATH). CI runs on Windows. Ships Windows binaries via GitHub releases.
 
 **Adopted:** Same model — Rust compiler portable, platform differences in process management only.
+
+**Key difference:** Gleam's compilation is stateless batch processing (compile files → output `.beam`). Beamtalk adds persistent workspaces, live hot-reload into running nodes, and process start-time tracking for stale-node detection. The process management layer is substantially more complex than Gleam's.
 
 ### Elixir
 Works on Windows via Erlang/OTP's Windows support. `mix` (Elixir's build tool) is written in Elixir itself, running on BEAM — inherently cross-platform. Some ecosystem tools (like `phoenix_live_reload`) use `inotifywait` which requires alternatives on Windows.
@@ -198,6 +205,11 @@ Use the `sysinfo` crate for all process management, replacing both Unix-specific
 
 **Deferred, not rejected:** `sysinfo` is a good candidate for the `ProcessManager` implementation but adds a dependency. Evaluate during Tier 2 implementation — it may be simpler than manual Windows API calls. Keep the `ProcessManager` trait so the implementation can be swapped.
 
+### Alternative: TCP-based workspace management
+Use TCP health probes for liveness checking and TCP shutdown messages for termination, eliminating most OS-level process management. The workspace already uses TCP for REPL communication.
+
+**Deferred, not rejected:** This approach would simplify cross-platform support significantly by avoiding `ps`/signal/Windows API differences. However, it requires the workspace to be responsive to TCP — if a workspace hangs, TCP won't help and OS-level process termination is still needed as a fallback. Evaluate alongside `sysinfo` during Tier 2.
+
 ## Consequences
 
 ### Positive
@@ -221,12 +233,12 @@ Use the `sysinfo` crate for all process management, replacing both Unix-specific
 ## Implementation
 
 ### Phase 1: CI and compiler portability
-- Add `windows-latest` job to `.github/workflows/ci.yml` running `cargo test` and `cargo clippy`
+- Add `windows-latest` and `macos-latest` jobs to `.github/workflows/ci.yml` running `cargo test` and `cargo clippy`
 - Fix `find_beam_pid_by_node()` — add `#[cfg(unix)]` guard with Windows fallback
 - Fix `/` root check in `beamtalk_compiler_port.erl` — use `filename:pathtype/1`
 - Fix `HOME` → `USERPROFILE` fallback in `beamtalk_workspace_meta.erl`
-- Verify `beamtalk build` and `beamtalk new` work in Windows CI
-- Add Windows binary to GitHub release workflow
+- Verify `beamtalk build` and `beamtalk new` work in Windows and macOS CI
+- Add Windows and macOS binaries to GitHub release workflow
 
 ### Phase 2: Process management abstraction
 - Create `ProcessManager` trait with platform implementations
@@ -247,6 +259,6 @@ Use the `sysinfo` crate for all process management, replacing both Unix-specific
 
 ## References
 - Prior art: [Gleam Windows support](https://gleam.run), [Erlang Windows install](https://www.erlang.org/downloads)
-- Related ADRs: ADR 0004 (workspaces — process management), ADR 0022 (embedded compiler — already portable)
+- Related ADRs: ADR 0004 (workspaces — process management), ADR 0017 (browser connectivity — assumes Unix host, Windows changes scope), ADR 0020 (connection security — TCP choice aids portability), ADR 0022 (embedded compiler — already portable), ADR 0024 (IDE tooling — workspace dependency affects Windows IDE experience)
 - Rust cross-platform patterns: [`#[cfg]` attributes](https://doc.rust-lang.org/reference/conditional-compilation.html), [`sysinfo` crate](https://crates.io/crates/sysinfo)
-- Platform-specific code inventory: `workspace/mod.rs`, `beam_compiler.rs`, `paths.rs`
+- Platform-specific code inventory: `workspace/mod.rs` (31 `#[cfg]` guards), `beam_compiler.rs`, `paths.rs`, `repl/mod.rs`
