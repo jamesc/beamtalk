@@ -176,11 +176,50 @@ pub fn to_module_name(class_name: &str) -> String {
 
 /// Returns true if `module_name` corresponds to the compiled form of `class_name`.
 ///
-/// ADR 0016: Module names may be prefixed with `bt@` (user code) or
-/// `bt@stdlib@` (stdlib), or unprefixed (legacy/tests).
+/// ADR 0016/0026: Module names may be prefixed with `bt@` (user code),
+/// `bt@stdlib@` (stdlib), `bt@{package}@` (package mode), or unprefixed (legacy/tests).
 pub(super) fn module_matches_class(module_name: &str, class_name: &str) -> bool {
     let snake = to_module_name(class_name);
     module_name == snake
         || module_name == format!("bt@{snake}")
         || module_name == format!("bt@stdlib@{snake}")
+        || module_name
+            .strip_prefix("bt@")
+            .and_then(|rest| rest.rsplit_once('@'))
+            .is_some_and(|(_, suffix)| suffix == snake)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_module_matches_class_unprefixed() {
+        assert!(module_matches_class("counter", "Counter"));
+    }
+
+    #[test]
+    fn test_module_matches_class_bt_prefix() {
+        assert!(module_matches_class("bt@counter", "Counter"));
+    }
+
+    #[test]
+    fn test_module_matches_class_stdlib_prefix() {
+        assert!(module_matches_class("bt@stdlib@integer", "Integer"));
+    }
+
+    #[test]
+    fn test_module_matches_class_package_prefix() {
+        assert!(module_matches_class("bt@my_app@counter", "Counter"));
+    }
+
+    #[test]
+    fn test_module_matches_class_package_multi_word() {
+        assert!(module_matches_class("bt@my_app@my_counter", "MyCounter"));
+    }
+
+    #[test]
+    fn test_module_matches_class_no_match() {
+        assert!(!module_matches_class("bt@other", "Counter"));
+    }
 }
