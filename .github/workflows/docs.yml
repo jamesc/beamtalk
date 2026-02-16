@@ -1,0 +1,93 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+name: Deploy API Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'lib/**'
+      - 'crates/beamtalk-cli/src/commands/doc.rs'
+      - 'crates/beamtalk-core/src/codegen/core_erlang/doc_chunks.rs'
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.0'
+          rebar3-version: '3.23'
+
+      - name: Install Just
+        uses: extractions/setup-just@v3
+
+      - name: Cache Erlang/rebar3 artifacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-otp-27.0-rebar3-3.23
+          restore-keys: |
+            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-rebar3-3.23
+            ${{ runner.os }}-erlang-otp-27.0-
+
+      - name: Cache cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build compiler
+        run: just build-rust
+
+      - name: Build Erlang runtime
+        run: just build-erlang
+
+      - name: Build standard library
+        run: just build-stdlib
+
+      - name: Generate API documentation
+        run: cargo run --bin beamtalk -- doc lib/ --output _site/
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

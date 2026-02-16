@@ -4,7 +4,7 @@
 //! Declaration parsing for Beamtalk.
 //!
 //! This module handles parsing of top-level declarations including:
-//! - Class definitions with modifiers (`abstract`, `sealed`)
+//! - Class definitions with modifiers (`abstract`, `sealed`, `typed`)
 //! - State (field) declarations with types and default values
 //! - Method definitions with advice modifiers (`before`, `after`, `around`)
 
@@ -25,7 +25,7 @@ impl Parser {
     ///
     /// Syntax:
     /// ```text
-    /// abstract? sealed? <Superclass> subclass: <ClassName>
+    /// abstract? sealed? typed? <Superclass> subclass: <ClassName>
     ///   state: fieldName = defaultValue
     ///   state: fieldName: TypeName = defaultValue
     ///
@@ -40,14 +40,18 @@ impl Parser {
         let doc_comment = self.collect_doc_comment();
         let mut is_abstract = false;
         let mut is_sealed = false;
+        let mut is_typed = false;
 
-        // Parse optional modifiers: abstract, sealed
+        // Parse optional modifiers: abstract, sealed, typed
         while let TokenKind::Identifier(name) = self.current_kind() {
             if name == "abstract" {
                 is_abstract = true;
                 self.advance();
             } else if name == "sealed" {
                 is_sealed = true;
+                self.advance();
+            } else if name == "typed" {
+                is_typed = true;
                 self.advance();
             } else {
                 break;
@@ -108,6 +112,7 @@ impl Parser {
             methods,
             span,
         );
+        class_def.is_typed = is_typed;
         class_def.class_methods = class_methods;
         class_def.class_variables = class_variables;
         class_def.doc_comment = doc_comment;

@@ -24,6 +24,7 @@ Module {
             ),
             is_abstract: false,
             is_sealed: true,
+            is_typed: false,
             state: [
                 StateDeclaration {
                     name: Identifier {
