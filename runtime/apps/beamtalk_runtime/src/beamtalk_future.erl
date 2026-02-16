@@ -3,6 +3,8 @@
 
 %%% @doc Beamtalk Future/Promise Runtime
 %%%
+%%% **DDD Context:** Concurrency
+%%%
 %%% Implements futures (promises) as lightweight BEAM processes.
 %%% Beamtalk is async-first: message sends return futures by default.
 %%%

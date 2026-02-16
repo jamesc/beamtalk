@@ -2,6 +2,8 @@
 %% SPDX-License-Identifier: Apache-2.0
 
 %%% @doc Top-level supervisor for the Beamtalk runtime.
+%%%
+%%% **DDD Context:** Runtime
 -module(beamtalk_runtime_sup).
 -behaviour(supervisor).
 

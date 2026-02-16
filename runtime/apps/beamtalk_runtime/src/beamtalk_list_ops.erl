@@ -3,6 +3,8 @@
 
 %% @doc Runtime helper for complex List operations.
 %%
+%% **DDD Context:** Runtime Context — Domain Service
+%%
 %% Provides implementations for List methods that require custom logic
 %% beyond simple BIF calls (bounds checking, error formatting, iteration).
 %%

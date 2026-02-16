@@ -3,6 +3,8 @@
 
 %%% @doc Expression evaluation for Beamtalk REPL
 %%%
+%%% **DDD Context:** REPL
+%%%
 %%% This module handles compilation, bytecode generation, and evaluation
 %%% of Beamtalk expressions via the beamtalk_compiler OTP application
 %%% (ADR 0022). Uses the OTP Port backend exclusively.
@@ -151,10 +153,8 @@ handle_load(Path, State) ->
                             %% Load the module (persistent, not deleted)
                             case code:load_binary(ModuleName, Path, Binary) of
                                 {module, ModuleName} ->
-                                    %% Register classes with beamtalk_object_class
-                                    register_classes(ClassNames, ModuleName),
-                                    %% BT-572: Trigger hot reload for affected actors
-                                    trigger_hot_reload(ModuleName, ClassNames),
+                                    %% Activate module (register classes, hot reload, metadata)
+                                    activate_module(ModuleName, ClassNames),
                                     %% Track loaded module (avoid duplicates on reload)
                                     LoadedModules = beamtalk_repl_state:get_loaded_modules(State),
                                     NewState1 = case lists:member(ModuleName, LoadedModules) of
@@ -165,12 +165,6 @@ handle_load(Path, State) ->
                                     Tracker = beamtalk_repl_state:get_module_tracker(NewState1),
                                     NewTracker = beamtalk_repl_modules:add_module(ModuleName, Path, Tracker),
                                     NewState2 = beamtalk_repl_state:set_module_tracker(NewTracker, NewState1),
-                                    
-                                    %% Register module with workspace metadata
-                                    beamtalk_workspace_meta:register_module(ModuleName),
-                                    
-                                    %% Mark activity - code hot reloaded
-                                    beamtalk_workspace_meta:update_activity(),
                                     
                                     %% BT-571: Store class source for method patching
                                     %% ClassNames is a list of maps with atom keys
@@ -203,19 +197,14 @@ handle_class_definition(ClassInfo, Warnings, Expression, State) ->
     #{binary := Binary, module_name := ClassModName, classes := Classes} = ClassInfo,
     case code:load_binary(ClassModName, "", Binary) of
         {module, ClassModName} ->
-            %% Register classes with beamtalk_object_class
-            register_classes(Classes, ClassModName),
-            %% BT-572: Trigger hot reload for affected actors
-            trigger_hot_reload(ClassModName, Classes),
+            %% Activate module (register classes, hot reload, metadata)
+            activate_module(ClassModName, Classes),
             %% Track loaded module
             LoadedModules = beamtalk_repl_state:get_loaded_modules(State),
             NewState1 = case lists:member(ClassModName, LoadedModules) of
                 true -> State;
                 false -> beamtalk_repl_state:add_loaded_module(ClassModName, State)
             end,
-            %% Register module with workspace metadata
-            beamtalk_workspace_meta:register_module(ClassModName),
-            beamtalk_workspace_meta:update_activity(),
             %% Store class source for later method patching (all classes)
             {ClassName, NewState2} = case Classes of
                 [#{name := FirstName} | _] ->
@@ -262,11 +251,8 @@ handle_method_definition(MethodInfo, Warnings, Expression, State) ->
                         {ok, _CompiledMod, Binary} ->
                             case code:load_binary(ModName, "", Binary) of
                                 {module, ModName} ->
-                                    register_classes(Classes, ModName),
-                                    %% BT-572: Trigger hot reload for affected actors
-                                    trigger_hot_reload(ModName, Classes),
-                                    beamtalk_workspace_meta:register_module(ModName),
-                                    beamtalk_workspace_meta:update_activity(),
+                                    %% Activate module (register classes, hot reload, metadata)
+                                    activate_module(ModName, Classes),
                                     %% Update stored class source with the combined version
                                     NewState = beamtalk_repl_state:set_class_source(
                                         ClassNameBin, CombinedSource, State),
@@ -426,6 +412,15 @@ extract_assignment(Expression) ->
         nomatch ->
             none
     end.
+
+%% @doc Activate a loaded module: register classes, trigger hot reload,
+%% and update workspace metadata. Called after code:load_binary succeeds.
+-spec activate_module(atom(), [map()]) -> ok.
+activate_module(ModuleName, Classes) ->
+    register_classes(Classes, ModuleName),
+    trigger_hot_reload(ModuleName, Classes),
+    beamtalk_workspace_meta:register_module(ModuleName),
+    beamtalk_workspace_meta:update_activity().
 
 %% @doc Register loaded classes by calling the module's register_class/0 function.
 %% This function (generated by codegen) has full metadata including

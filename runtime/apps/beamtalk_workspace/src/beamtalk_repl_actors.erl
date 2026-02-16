@@ -3,6 +3,8 @@
 
 %%% @doc Actor registry for REPL sessions
 %%%
+%%% **DDD Context:** REPL
+%%%
 %%% Tracks actor PIDs spawned during a REPL session to keep them alive
 %%% across eval cycles. Each actor is registered with metadata including
 %%% its class name, module, and spawn time.

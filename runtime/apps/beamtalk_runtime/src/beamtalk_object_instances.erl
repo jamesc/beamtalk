@@ -2,6 +2,8 @@
 %% SPDX-License-Identifier: Apache-2.0
 
 %%% @doc Instance tracking registry for Beamtalk.
+%%%
+%%% **DDD Context:** Object System
 %%
 %% Tracks all instances of each class to support Smalltalk-style reflection:
 %% - `allInstances` - get all instances of a class
