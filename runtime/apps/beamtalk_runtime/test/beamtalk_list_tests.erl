@@ -210,3 +210,114 @@ primitive_send_collect_test() ->
     ?assertEqual([2, 4, 6],
         beamtalk_primitive:send([1, 2, 3], 'collect:', [fun(X) -> X * 2 end])).
 
+%%% ============================================================================
+%%% Error Path Tests — type_error for non-function blocks (BT-622)
+%%% ============================================================================
+
+detect_non_function_test() ->
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'List', selector = 'detect:'}},
+        beamtalk_list_ops:detect([1, 2, 3], not_a_function)).
+
+detect_if_none_non_function_test() ->
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'List', selector = 'detect:ifNone:'}},
+        beamtalk_list_ops:detect_if_none([1, 2, 3], not_a_function, default)).
+
+detect_if_none_function_default_test() ->
+    %% When not found, a 0-arity function default should be evaluated
+    ?assertEqual(42,
+        beamtalk_list_ops:detect_if_none([1, 2, 3], fun(X) -> X > 10 end, fun() -> 42 end)).
+
+do_non_function_test() ->
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'List', selector = 'do:'}},
+        beamtalk_list_ops:do([1, 2, 3], not_a_function)).
+
+reject_non_function_test() ->
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'List', selector = 'reject:'}},
+        beamtalk_list_ops:reject([1, 2, 3], not_a_function)).
+
+zip_non_list_test() ->
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'List', selector = 'zip:'}},
+        beamtalk_list_ops:zip([1, 2, 3], not_a_list)).
+
+zip_uneven_length_test() ->
+    %% Zip truncates to shorter list
+    ?assertEqual([#{<<"key">> => 1, <<"value">> => a}],
+        beamtalk_list_ops:zip([1, 2], [a])).
+
+zip_empty_test() ->
+    ?assertEqual([], beamtalk_list_ops:zip([], [1, 2])),
+    ?assertEqual([], beamtalk_list_ops:zip([1, 2], [])).
+
+group_by_non_function_test() ->
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'List', selector = 'groupBy:'}},
+        beamtalk_list_ops:group_by([1, 2, 3], not_a_function)).
+
+partition_non_function_test() ->
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'List', selector = 'partition:'}},
+        beamtalk_list_ops:partition([1, 2, 3], not_a_function)).
+
+each_with_index_non_function_test() ->
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'List', selector = 'eachWithIndex:'}},
+        beamtalk_list_ops:each_with_index([1, 2, 3], not_a_function)).
+
+%%% ============================================================================
+%%% from_to/3 Error Path Tests (BT-622)
+%%% ============================================================================
+
+from_to_valid_test() ->
+    ?assertEqual([2, 3], beamtalk_list_ops:from_to([1, 2, 3, 4], 2, 3)).
+
+from_to_end_less_than_start_test() ->
+    ?assertEqual([], beamtalk_list_ops:from_to([1, 2, 3], 3, 1)).
+
+from_to_non_integer_start_test() ->
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'List', selector = 'from:to:'}},
+        beamtalk_list_ops:from_to([1, 2, 3], foo, 2)).
+
+from_to_non_integer_end_test() ->
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'List', selector = 'from:to:'}},
+        beamtalk_list_ops:from_to([1, 2, 3], 1, foo)).
+
+from_to_negative_start_test() ->
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand, class = 'List', selector = 'from:to:'}},
+        beamtalk_list_ops:from_to([1, 2, 3], 0, 2)).
+
+%%% ============================================================================
+%%% index_of/2 Tests (BT-622)
+%%% ============================================================================
+
+index_of_found_test() ->
+    ?assertEqual(2, beamtalk_list_ops:index_of([a, b, c], b)),
+    ?assertEqual(1, beamtalk_list_ops:index_of([a, b, c], a)),
+    ?assertEqual(3, beamtalk_list_ops:index_of([a, b, c], c)).
+
+index_of_not_found_test() ->
+    ?assertEqual(nil, beamtalk_list_ops:index_of([a, b, c], d)),
+    ?assertEqual(nil, beamtalk_list_ops:index_of([], a)).
+
+%%% ============================================================================
+%%% each_with_index/2 Tests (BT-622)
+%%% ============================================================================
+
+each_with_index_test() ->
+    Self = self(),
+    Ref = make_ref(),
+    beamtalk_list_ops:each_with_index([a, b, c], fun(Elem, Idx) -> Self ! {Ref, Elem, Idx} end),
+    ?assertEqual({a, 1}, receive {Ref, Elem1, Idx1} -> {Elem1, Idx1} after 100 -> timeout end),
+    ?assertEqual({b, 2}, receive {Ref, Elem2, Idx2} -> {Elem2, Idx2} after 100 -> timeout end),
+    ?assertEqual({c, 3}, receive {Ref, Elem3, Idx3} -> {Elem3, Idx3} after 100 -> timeout end).
+
+each_with_index_returns_nil_test() ->
+    ?assertEqual(nil, beamtalk_list_ops:each_with_index([1, 2], fun(_, _) -> ok end)).
+
+each_with_index_empty_test() ->
+    ?assertEqual(nil, beamtalk_list_ops:each_with_index([], fun(_, _) -> ok end)).
+
+%%% ============================================================================
+%%% sort_with/2 non-list receiver test (BT-622)
+%%% ============================================================================
+
+sort_with_non_list_test() ->
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'List', selector = 'sort:'}},
+        beamtalk_list_ops:sort_with(not_a_list, fun(A, B) -> A >= B end)).
+
