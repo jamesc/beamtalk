@@ -302,112 +302,59 @@ fn class_link(name: &str, classes: &HashMap<String, &ClassInfo>) -> String {
 
 /// Render markdown doc comment as HTML.
 ///
-/// Supports paragraphs, code blocks (with syntax highlighting for beamtalk),
-/// headings, and inline code.
+/// Uses `pulldown-cmark` for full `CommonMark` + GFM table support.
+/// Beamtalk code blocks get syntax highlighting via `highlight_beamtalk()`.
 fn render_doc(doc: &str) -> String {
-    let mut html = String::new();
-    let mut in_code_block = false;
-    let mut code_lang = String::new();
-    let mut code_lines = Vec::new();
-    let mut paragraph = String::new();
+    use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
-    for line in doc.lines() {
-        if line.starts_with("```") {
-            if in_code_block {
-                let code = code_lines.join("\n");
-                if code_lang.is_empty() || code_lang == "beamtalk" {
-                    html.push_str(&highlight_beamtalk(&code));
-                } else {
-                    html.push_str(&html_escape(&code));
-                }
-                html.push_str("</code></pre>\n");
-                in_code_block = false;
-                code_lines.clear();
-                code_lang.clear();
-            } else {
-                flush_paragraph(&mut paragraph, &mut html);
-                code_lang = line.trim_start_matches('`').trim().to_string();
-                let css_class = if code_lang.is_empty() || code_lang == "beamtalk" {
+    let options =
+        Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_HEADING_ATTRIBUTES;
+    let parser = Parser::new_ext(doc, options);
+
+    let mut html = String::new();
+    let mut code_text = String::new();
+    let mut in_beamtalk_code = false;
+    let mut in_code_block = false;
+
+    for event in parser {
+        match event {
+            Event::Start(Tag::CodeBlock(kind)) => {
+                let lang = match &kind {
+                    CodeBlockKind::Fenced(lang) => lang.as_ref(),
+                    CodeBlockKind::Indented => "",
+                };
+                in_beamtalk_code = lang.is_empty() || lang == "beamtalk";
+                in_code_block = true;
+                code_text.clear();
+                let css_class = if in_beamtalk_code {
                     " class=\"language-beamtalk\""
                 } else {
                     ""
                 };
                 let _ = write!(html, "<pre><code{css_class}>");
-                in_code_block = true;
             }
-            continue;
+            Event::End(TagEnd::CodeBlock) => {
+                if in_beamtalk_code {
+                    html.push_str(&highlight_beamtalk(&code_text));
+                } else {
+                    html.push_str(&html_escape(&code_text));
+                }
+                html.push_str("</code></pre>\n");
+                in_code_block = false;
+                code_text.clear();
+            }
+            Event::Text(text) if in_code_block => {
+                code_text.push_str(&text);
+            }
+            _ if in_code_block => {}
+            other => {
+                // For all non-code-block events, use pulldown-cmark's HTML renderer
+                pulldown_cmark::html::push_html(&mut html, std::iter::once(other));
+            }
         }
-
-        if in_code_block {
-            code_lines.push(line.to_string());
-            continue;
-        }
-
-        if line.is_empty() {
-            flush_paragraph(&mut paragraph, &mut html);
-            continue;
-        }
-
-        if let Some(heading) = line.strip_prefix("## ") {
-            flush_paragraph(&mut paragraph, &mut html);
-            let _ = writeln!(html, "<h4>{}</h4>", html_escape(heading.trim()));
-            continue;
-        }
-
-        if !paragraph.is_empty() {
-            paragraph.push(' ');
-        }
-        paragraph.push_str(line);
     }
-
-    if in_code_block {
-        let code = code_lines.join("\n");
-        if code_lang.is_empty() || code_lang == "beamtalk" {
-            html.push_str(&highlight_beamtalk(&code));
-        } else {
-            html.push_str(&html_escape(&code));
-        }
-        html.push_str("</code></pre>\n");
-    }
-    flush_paragraph(&mut paragraph, &mut html);
 
     html
-}
-
-/// Flush accumulated paragraph text as a `<p>` element.
-fn flush_paragraph(paragraph: &mut String, html: &mut String) {
-    if !paragraph.is_empty() {
-        html.push_str("<p>");
-        html.push_str(&render_inline(&html_escape(paragraph)));
-        html.push_str("</p>\n");
-        paragraph.clear();
-    }
-}
-
-/// Render inline formatting (backtick code spans).
-fn render_inline(text: &str) -> String {
-    let mut result = String::new();
-    let mut in_code = false;
-
-    for ch in text.chars() {
-        if ch == '`' {
-            if in_code {
-                result.push_str("</code>");
-                in_code = false;
-            } else {
-                result.push_str("<code>");
-                in_code = true;
-            }
-        } else {
-            result.push(ch);
-        }
-    }
-
-    if in_code {
-        result.push_str("</code>");
-    }
-
-    result
 }
 
 /// CSS stylesheet content for generated documentation.
@@ -637,6 +584,28 @@ pre {
 }
 
 pre code { background: none; padding: 0; font-size: 0.85em; }
+
+/* --- Tables (rendered from markdown) --- */
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+th, td {
+  border: 1px solid var(--border);
+  padding: 0.4rem 0.75rem;
+  text-align: left;
+}
+th { background: var(--accent-bg); font-weight: 600; }
+tbody tr:nth-child(even) { background: var(--code-bg); }
+
+/* --- Lists (rendered from markdown) --- */
+.class-doc ul, .class-doc ol, .method-doc ul, .method-doc ol, .readme ul, .readme ol {
+  margin-bottom: 0.75rem;
+  padding-left: 1.5rem;
+}
+.class-doc li, .method-doc li, .readme li { margin-bottom: 0.25rem; }
 
 /* --- Breadcrumb --- */
 .breadcrumb { font-size: 0.85rem; color: var(--fg-muted); margin-bottom: 0.75rem; }
@@ -1018,7 +987,7 @@ fn write_method_html_with_source(
     );
 
     if let (Some(file), Some(line)) = (source_file, method.line_number) {
-        let root = source_root.unwrap_or("lib");
+        let root = source_root.unwrap_or("lib").trim_end_matches('/');
         let _ = writeln!(
             html,
             "<a class=\"source-link\" \
@@ -1618,13 +1587,44 @@ mod tests {
     #[test]
     fn test_render_doc_heading() {
         let html = render_doc("## Examples");
-        assert!(html.contains("<h4>Examples</h4>"));
+        assert!(html.contains("<h2>Examples</h2>"));
     }
 
     #[test]
-    fn test_render_inline_code() {
-        let result = render_inline("use `foo` here");
-        assert_eq!(result, "use <code>foo</code> here");
+    fn test_render_doc_inline_code() {
+        let html = render_doc("use `foo` here");
+        assert!(html.contains("<code>foo</code>"));
+    }
+
+    #[test]
+    fn test_render_doc_table() {
+        let md = "| A | B |\n|---|---|\n| 1 | 2 |";
+        let html = render_doc(md);
+        assert!(html.contains("<table>"));
+        assert!(html.contains("</table>"));
+        // Table renders with header and body rows
+        assert!(html.contains("<thead>"));
+        assert!(html.contains("<tbody>"));
+    }
+
+    #[test]
+    fn test_render_doc_link() {
+        let html = render_doc("[click](https://example.com)");
+        assert!(html.contains("<a href=\"https://example.com\">click</a>"));
+    }
+
+    #[test]
+    fn test_render_doc_bold_italic() {
+        let html = render_doc("**bold** and *italic*");
+        assert!(html.contains("<strong>bold</strong>"));
+        assert!(html.contains("<em>italic</em>"));
+    }
+
+    #[test]
+    fn test_render_doc_list() {
+        let html = render_doc("- one\n- two");
+        assert!(html.contains("<ul>"));
+        assert!(html.contains("<li>one</li>"));
     }
 
     #[test]
