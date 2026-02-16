@@ -688,6 +688,11 @@ docs:
     @echo "📚 Generating Rust documentation..."
     cargo doc --workspace --no-deps --open
 
+# Generate stdlib API documentation (HTML)
+docs-api:
+    @echo "📚 Generating stdlib API documentation..."
+    cargo run --bin beamtalk -- doc lib/ --output docs/api/
+
 # Check documentation for broken links
 docs-check:
     @echo "🔍 Checking documentation..."
