@@ -117,7 +117,7 @@ dbg!(&expr);
 ```bash
 # 1. Check if modules loaded
 beamtalk repl
-> Beamtalk loadedModules
+> Beamtalk allClasses
 > Beamtalk classNamed: #Counter
 
 # 2. Enable verbose mode

@@ -589,7 +589,7 @@ Detailed coding standards are in `docs/development/`:
 ### CI Commands
 
 ```bash
-just ci                      # Run all CI checks (build, lint, test, test-stdlib, test-e2e)
+just ci                      # Run all CI checks (build, lint, test, test-stdlib, test-integration, test-mcp, test-e2e)
 just build                   # Build Rust + Erlang runtime
 just test                    # Run fast tests (~10s)
 just test-stdlib             # Compiled language feature tests (~14s)
