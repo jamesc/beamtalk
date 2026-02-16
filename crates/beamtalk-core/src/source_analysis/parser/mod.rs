@@ -510,7 +510,7 @@ impl Parser {
         self.nesting_depth += 1;
         if self.nesting_depth > MAX_NESTING_DEPTH {
             self.diagnostics.push(Diagnostic::error(
-                "Expression nesting is too deep (maximum 256 levels)",
+                format!("Expression nesting is too deep (maximum {MAX_NESTING_DEPTH} levels)"),
                 span,
             ));
             self.nesting_depth -= 1;
@@ -3909,5 +3909,25 @@ Actor subclass: Counter
             diagnostics.iter().any(|d| d.message.contains("nesting")),
             "Expected nesting depth error, got: {diagnostics:?}"
         );
+    }
+
+    #[test]
+    fn deeply_nested_string_interpolation_does_not_stack_overflow() {
+        // Each nesting level needs a real string-in-interpolation: "x {"y {"z {1} z"} y"} x"
+        // The lexer only produces StringStart inside {..."..."...} sequences.
+        // Build: "{"{"{ ... 1 ... "}"}"}"
+        let mut source = String::new();
+        for _ in 0..300 {
+            source.push_str("\"a{");
+        }
+        source.push('1');
+        for _ in 0..300 {
+            source.push_str("}a\"");
+        }
+        // This input may or may not trigger the nesting guard depending on
+        // lexer behavior, but it must never stack overflow.
+        let tokens = crate::source_analysis::lex_with_eof(&source);
+        let (_module, _diagnostics) = crate::source_analysis::parse(tokens);
+        // Success = no panic/stack overflow
     }
 }
