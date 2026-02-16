@@ -13,6 +13,7 @@ use miette::{Context, IntoDiagnostic, Result};
 use std::fs;
 
 use super::manifest::PackageManifest;
+use crate::beam_compiler::escape_erlang_string;
 
 /// Metadata for a class discovered during compilation.
 #[derive(Debug, Clone)]
@@ -85,15 +86,6 @@ fn format_app_file(
         modules = modules_list,
         classes = classes_list,
     )
-}
-
-/// Escape a string for embedding in an Erlang double-quoted string literal.
-fn escape_erlang_string(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t")
 }
 
 /// Format the module list for the `.app` file.
@@ -238,19 +230,6 @@ mod tests {
         // Should be sorted by module name
         assert!(result.starts_with("{'bt@app@a'"));
         assert!(result.contains("{'bt@app@b'"));
-    }
-
-    #[test]
-    fn test_escape_erlang_string() {
-        assert_eq!(escape_erlang_string("hello"), "hello");
-        assert_eq!(escape_erlang_string(r#"say "hi""#), r#"say \"hi\""#);
-        assert_eq!(escape_erlang_string(r"back\slash"), r"back\\slash");
-        assert_eq!(
-            escape_erlang_string(r#"both "and\" here"#),
-            r#"both \"and\\\" here"#
-        );
-        assert_eq!(escape_erlang_string("line\none"), "line\\none");
-        assert_eq!(escape_erlang_string("tab\there"), "tab\\there");
     }
 
     #[test]

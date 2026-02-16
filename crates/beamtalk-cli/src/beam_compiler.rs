@@ -90,7 +90,7 @@ fn is_runtime_unavailable_error(err: &miette::Report) -> bool {
 /// This escapes backslashes, quotes, and control characters to prevent
 /// injection attacks and ensure valid Erlang term syntax when constructing
 /// Erlang terms from file paths.
-fn escape_erlang_string(s: &str) -> String {
+pub(crate) fn escape_erlang_string(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
