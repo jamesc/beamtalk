@@ -5,7 +5,7 @@
 //!
 //! These tests use `proptest` to verify parser invariants over generated inputs:
 //!
-//! 1. **Parser never panics** — arbitrary string input always returns
+//! 1. **Parser never panics** — arbitrary string input always returns a result
 //! 2. **Diagnostic spans within input** — all spans have `end <= input.len()`
 //! 3. **Error nodes produce diagnostics** — `Expression::Error` ⟹ non-empty diagnostics
 //! 4. **Error messages are user-facing** — no internal type names in diagnostics
@@ -23,11 +23,14 @@ use crate::source_analysis::{lex_with_eof, parse};
 // Near-valid Beamtalk generators
 // ============================================================================
 
-/// Valid Beamtalk expression fragments for composing near-valid inputs.
-const VALID_FRAGMENTS: &[&str] = &[
+/// Beamtalk expression fragments for composing near-valid inputs.
+///
+/// Most are valid Beamtalk; a few are intentionally invalid (e.g., single-quoted
+/// strings) to exercise error recovery paths when mutated by generators.
+const FRAGMENTS: &[&str] = &[
     "42",
     "3.14",
-    "'hello'",
+    "\"hello\"",
     "\"world\"",
     "true",
     "false",
@@ -47,14 +50,14 @@ const VALID_FRAGMENTS: &[&str] = &[
     "#symbol",
     "$A",
     "x foo bar",
-    "Object subclass: Counter [\n  | count |\n  increment => count := count + 1\n]",
+    "Object subclass: Counter\n  state: count = 0\n  increment => count := count + 1",
     "3 timesRepeat: [x := x + 1]",
     "x > 0 ifTrue: ['positive'] ifFalse: ['non-positive']",
 ];
 
-/// Generates a valid Beamtalk fragment.
+/// Generates a Beamtalk fragment from the seed corpus.
 fn valid_fragment() -> impl Strategy<Value = String> {
-    prop::sample::select(VALID_FRAGMENTS).prop_map(std::string::ToString::to_string)
+    prop::sample::select(FRAGMENTS).prop_map(std::string::ToString::to_string)
 }
 
 /// Generates a truncated valid expression (cut at a random point).
@@ -79,9 +82,21 @@ fn truncated_expression() -> impl Strategy<Value = String> {
     })
 }
 
-/// Generates input with mismatched brackets.
+/// Generates input with mismatched brackets via single-pass char mapping.
 fn mismatched_brackets() -> impl Strategy<Value = String> {
-    valid_fragment().prop_map(|s| s.replace('[', "(").replace(']', "}").replace('(', "["))
+    valid_fragment().prop_map(|s| {
+        let mut result = String::with_capacity(s.len());
+        for ch in s.chars() {
+            let mapped = match ch {
+                '[' => '(',
+                ']' => '}',
+                '(' => '[',
+                _ => ch,
+            };
+            result.push(mapped);
+        }
+        result
+    })
 }
 
 /// Generates input with missing keyword colons.
@@ -173,9 +188,9 @@ fn has_error_node(expr: &Expression) -> bool {
         }),
         // Leaf nodes
         Expression::Literal(..)
-        | Expression::Identifier { .. }
+        | Expression::Identifier(..)
         | Expression::ClassReference { .. }
-        | Expression::Super { .. }
+        | Expression::Super(..)
         | Expression::Primitive { .. } => false,
     }
 }
