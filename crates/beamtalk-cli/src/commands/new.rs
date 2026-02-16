@@ -7,8 +7,21 @@ use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::fs;
 
+use super::manifest::{suggest_package_name, validate_package_name};
+
 /// Create a new beamtalk project.
 pub fn new_project(name: &str) -> Result<()> {
+    // Validate package name before creating anything
+    if let Err(e) = validate_package_name(name) {
+        let msg = format!("Package name '{name}' is invalid — {e}");
+        let suggestion = suggest_package_name(name);
+        if let Some(ref s) = suggestion {
+            miette::bail!("{msg} (try '{s}')");
+        } else {
+            miette::bail!("{msg}");
+        }
+    }
+
     let project_path = Utf8PathBuf::from(name);
 
     // Check if directory already exists
@@ -281,9 +294,9 @@ mod tests {
     /// (process-global state) using `std::env::set_current_dir`.
     #[test]
     #[serial(cwd)]
-    fn test_new_project_with_special_characters() {
+    fn test_new_project_with_underscores_and_digits() {
         let temp = TempDir::new().unwrap();
-        let project_name = "my-cool_project123";
+        let project_name = "my_cool_project123";
 
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(temp.path()).unwrap();
@@ -296,5 +309,43 @@ mod tests {
         let project_path = temp.path().join(project_name);
         assert!(project_path.exists());
         assert!(project_path.join("src").join("main.bt").exists());
+    }
+
+    /// Uses `#[serial(cwd)]` because it changes the current working directory
+    /// (process-global state) using `std::env::set_current_dir`.
+    #[test]
+    #[serial(cwd)]
+    fn test_new_project_rejects_invalid_name() {
+        let temp = TempDir::new().unwrap();
+
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp.path()).unwrap();
+
+        // Dashes are invalid
+        let result = new_project("my-cool-app");
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("invalid"),
+            "error should mention invalid: {err}"
+        );
+
+        // CamelCase is invalid
+        let result = new_project("MyApp");
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(err.contains("my_app"), "error should suggest my_app: {err}");
+
+        // Reserved name
+        let result = new_project("stdlib");
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("reserved"),
+            "error should mention reserved: {err}"
+        );
+
+        // Restore directory
+        std::env::set_current_dir(original_dir).unwrap();
     }
 }
