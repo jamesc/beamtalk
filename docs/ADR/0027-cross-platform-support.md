@@ -1,4 +1,4 @@
-# ADR 0027: Windows Platform Support
+# ADR 0027: Cross-Platform Support
 
 ## Status
 Proposed (2026-02-16)
@@ -10,8 +10,8 @@ Proposed (2026-02-16)
 Beamtalk is developed and tested exclusively on Linux (Ubuntu in CI, devcontainers for development). There is no Windows CI, no macOS CI, no Windows testing, and several components use Unix-specific or Linux-specific system calls and tools. A developer on Windows cannot reliably build or run Beamtalk today, and macOS has degraded behavior in workspace management.
 
 This matters because:
-1. **Developer reach** — Windows is ~45% of developer desktops. Excluding it limits adoption.
-2. **macOS degradation** — 6 `#[cfg(target_os = "linux")]` guards use `/proc` filesystem for process start-time verification. On macOS, these fall back to skipping stale-node detection, meaning a macOS developer could connect to a wrong/stale workspace without warning.
+1. **Developer reach** — Windows is ~45% of developer desktops, macOS ~30%. Supporting only Linux limits adoption to a fraction of developers.
+2. **macOS degradation** — 6 `#[cfg(target_os = "linux")]` guards use `/proc` filesystem for process start-time verification. On macOS, these fall back to skipping stale-node detection, meaning a macOS developer could connect to a wrong/stale workspace without warning. TCP-first workspace management (see Decision) eliminates this entire category of macOS issues.
 3. **Peer expectation** — Gleam, Elixir, and Erlang all have first-class Windows and macOS support. A BEAM language that only tests on Linux is an outlier.
 4. **CI gaps** — Without Windows or macOS CI, regressions can silently break cross-platform compatibility even for code that should be portable.
 
@@ -60,14 +60,15 @@ Several components have no Windows path at all:
 
 ## Decision
 
-### Adopt a tiered approach to Windows support
+### Adopt a tiered approach to cross-platform support
 
 **Tier 1 (immediate): Compiler + build command work on Windows**
 
 The core compilation path — `beamtalk build`, `beamtalk new`, `beamtalk test` — must work on Windows. This means:
 
-1. **Add Windows CI job** — `windows-latest` in GitHub Actions, running `cargo test`, `cargo clippy`, and `beamtalk build` on a test project. macOS is expected to work via Unix compatibility (existing `#[cfg]` fallbacks degrade gracefully) but is not formally tested — add macOS CI as future work if issues are reported.
-2. **Fix unguarded Unix code** — Wrap `find_beam_pid_by_node()` with `#[cfg(unix)]` and add Windows fallback
+1. **Add Windows CI job** — `windows-latest` in GitHub Actions, running `cargo test`, `cargo clippy`, and `beamtalk build` on a test project.
+2. **Add macOS CI job** — `macos-latest` to catch regressions (macOS works today via Unix compatibility, but without CI, regressions go undetected).
+3. **Fix unguarded Unix code** — Wrap `find_beam_pid_by_node()` with `#[cfg(unix)]` and add Windows fallback
 3. **Portable path handling** — Replace any hardcoded `/` root checks with `std::path` methods or `Path::has_root()`
 4. **No bash dependency for compilation** — The `beamtalk build` command must not require bash. The embedded compiler port (ADR 0022) already avoids shell scripts for compilation.
 
@@ -160,18 +161,18 @@ Erlang itself has excellent Windows support — prebuilt Windows installers, `we
 ### Windows developer (primary beneficiary)
 Can download a binary or `cargo install beamtalk`, run `beamtalk new myapp`, `beamtalk build`, and `beamtalk repl` — the full workflow works. No WSL, no bash, no Unix tools required beyond Erlang/OTP.
 
-### Linux/macOS developer (no change)
-No regressions. Platform-specific code is behind `#[cfg]` guards. CI still runs on Linux. Development workflow unchanged.
+### Linux/macOS developer (improved)
+macOS: TCP-first workspace management eliminates all `/proc` degradation — stale-node detection works reliably. No other changes. Linux: no change.
 
 ### CI/CD operator
-Windows CI job catches regressions early. Cross-platform matrix ensures releases work everywhere.
+Windows and macOS CI jobs catch regressions early. Cross-platform matrix ensures releases work everywhere.
 
 ### Contributor
 New `#[cfg]` patterns to follow when adding process management code. TCP-first approach means most workspace management code is platform-agnostic. Only force-kill remains OS-specific. Must test on Windows CI (automatic via matrix).
 
 ## Steelman Analysis
 
-### Option A: Tiered Windows support (this decision)
+### Option A: Tiered cross-platform support (this decision)
 
 - 🧑‍💻 **Newcomer**: "I can install on my Windows laptop and follow the tutorial without needing Linux or WSL. That's the difference between trying Beamtalk and giving up at step 1."
 - 🎩 **Smalltalk developer**: "Pharo runs everywhere — Windows, macOS, Linux. A Smalltalk-inspired language should meet that bar. Platform lock-in contradicts the philosophy of accessible, interactive development."
@@ -217,7 +218,8 @@ Originally proposed abstracting all process operations behind a `ProcessManager`
 
 ### Positive
 - Beamtalk runs on Windows — compiler, build, REPL, workspace management
-- CI catches Windows regressions automatically
+- macOS fully supported — TCP-first eliminates all `/proc` degradation
+- CI catches Windows and macOS regressions automatically
 - Matches peer language expectations (Gleam, Elixir, Erlang all support Windows)
 - TCP-first workspace management means most code is platform-agnostic, reducing `#[cfg]` surface
 - Tiered approach delivers value incrementally
@@ -225,7 +227,7 @@ Originally proposed abstracting all process operations behind a `ProcessManager`
 
 ### Negative
 - Maintenance burden increases — `#[cfg]` branches need testing on both platforms
-- CI time increases with Windows matrix job
+- CI time increases with Windows and macOS matrix jobs
 - Some edge cases in process management may behave differently across platforms
 - Contributors need to consider Windows when adding process-related code
 
@@ -237,13 +239,13 @@ Originally proposed abstracting all process operations behind a `ProcessManager`
 ## Implementation
 
 ### Phase 1: CI and compiler portability
-- Add `windows-latest` job to `.github/workflows/ci.yml` running `cargo test` and `cargo clippy`
+- Add `windows-latest` and `macos-latest` jobs to `.github/workflows/ci.yml` running `cargo test` and `cargo clippy`
 - Fix `find_beam_pid_by_node()` — add `#[cfg(unix)]` guard with Windows fallback
 - Fix `/` root check in `beamtalk_compiler_port.erl` — use `filename:pathtype/1`
 - Fix `HOME` → `USERPROFILE` fallback in `beamtalk_workspace_meta.erl`
 - Verify `beamtalk build` and `beamtalk new` work in Windows CI
 - Add Windows binary to GitHub release workflow
-- **macOS note:** macOS expected to work via existing Unix `#[cfg]` guards. Add macOS CI as future work if issues are reported.
+- **macOS note:** After TCP-first workspace management (Phase 2), macOS has zero known platform-specific issues — all `/proc` degradation is eliminated. macOS CI ensures this stays true.
 
 ### Phase 2: TCP-first workspace management
 - Add TCP health endpoint to workspace (probe port for liveness)
