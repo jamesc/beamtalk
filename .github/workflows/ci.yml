@@ -41,7 +41,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
 
@@ -49,6 +49,15 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.0'
+          rebar3-version: '3.23'
+
+      - name: Install Just
+        uses: extractions/setup-just@v3
 
       - name: Cache cargo registry
         uses: actions/cache@v5
@@ -61,20 +70,20 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Build Rust
-        run: cargo build --all-targets --quiet
+      - name: Cache Erlang/rebar3 artifacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-otp-27.0-rebar3-3.23
+          restore-keys: |
+            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-rebar3-3.23
+            ${{ runner.os }}-erlang-otp-27.0-
 
-      - name: Clippy
-        run: cargo clippy --all-targets --quiet -- -D warnings
-
-      - name: Format check
-        run: cargo fmt --all -- --check
-
-      - name: Test Rust (unit + integration)
-        run: cargo test --all-targets
-
-      - name: Smoke test
-        run: cargo run --bin beamtalk --quiet -- --version
+      - name: Build, lint, and fast tests
+        run: just build clippy fmt-check test
 
   # ─── Full test suite on Linux only (requires Erlang/OTP) ──────────────
   test:
@@ -155,11 +164,17 @@ jobs:
       - name: Test stdlib (compiled language features)
         run: just test-stdlib
 
-      - name: Test E2E (full pipeline)
-        run: just test-e2e
-
       - name: Test Erlang runtime (unit tests)
         run: just test-runtime
+
+      - name: Test workspace integration
+        run: just test-integration
+
+      - name: Test MCP server integration
+        run: just test-mcp
+
+      - name: Test E2E (full pipeline)
+        run: just test-e2e
 
   coverage:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
