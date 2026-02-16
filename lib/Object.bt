@@ -46,7 +46,7 @@ ProtoObject subclass: Object
   /// 42 isNil              // => false
   /// nil isNil             // => true
   /// ```
-  isNil => false
+  isNil -> Boolean => false
 
   /// Test if the receiver is not nil. Returns true for all objects except nil.
   ///
@@ -55,7 +55,7 @@ ProtoObject subclass: Object
   /// 42 notNil             // => true
   /// nil notNil            // => false
   /// ```
-  notNil => true
+  notNil -> Boolean => true
 
   /// If the receiver is nil, evaluate `nilBlock`. Otherwise return self.
   ///
@@ -64,7 +64,7 @@ ProtoObject subclass: Object
   /// 42 ifNil: [0]         // => 42
   /// nil ifNil: [0]        // => 0
   /// ```
-  ifNil: nilBlock => self
+  ifNil: nilBlock: Block => self
 
   /// If the receiver is not nil, evaluate `notNilBlock` with self.
   ///
@@ -73,7 +73,7 @@ ProtoObject subclass: Object
   /// 42 ifNotNil: [:v | v + 1]   // => 43
   /// nil ifNotNil: [:v | v + 1]  // => nil
   /// ```
-  ifNotNil: notNilBlock => notNilBlock value: self
+  ifNotNil: notNilBlock: Block => notNilBlock value: self
 
   /// If nil, evaluate `nilBlock`; otherwise evaluate `notNilBlock` with self.
   ///
@@ -82,7 +82,7 @@ ProtoObject subclass: Object
   /// 42 ifNil: [0] ifNotNil: [:v | v + 1]    // => 43
   /// nil ifNil: [0] ifNotNil: [:v | v + 1]   // => 0
   /// ```
-  ifNil: nilBlock ifNotNil: notNilBlock => notNilBlock value: self
+  ifNil: nilBlock: Block ifNotNil: notNilBlock: Block => notNilBlock value: self
 
   /// If not nil, evaluate `notNilBlock` with self; otherwise evaluate `nilBlock`.
   ///
@@ -91,7 +91,7 @@ ProtoObject subclass: Object
   /// 42 ifNotNil: [:v | v + 1] ifNil: [0]    // => 43
   /// nil ifNotNil: [:v | v + 1] ifNil: [0]   // => 0
   /// ```
-  ifNotNil: notNilBlock ifNil: nilBlock => notNilBlock value: self
+  ifNotNil: notNilBlock: Block ifNil: nilBlock: Block => notNilBlock value: self
 
   /// Return a developer-readable string representation.
   ///
@@ -99,7 +99,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 42 printString         // => "42"
   /// ```
-  printString => "a " ++ self class printString
+  printString -> String => "a " ++ self class printString
 
   /// Inspect the receiver (alias for `describe`).
   ///
@@ -107,7 +107,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 42 inspect             // => "42"
   /// ```
-  inspect => self describe
+  inspect -> String => self describe
 
   /// Human-readable description of the receiver.
   ///
@@ -115,7 +115,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// Object new describe    // => "an Object"
   /// ```
-  describe => "an Object"
+  describe -> String => "an Object"
 
   /// Return the receiver itself. Useful for cascading side effects.
   ///
@@ -131,7 +131,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 42 hash
   /// ```
-  hash => @intrinsic hash
+  hash -> Integer => @intrinsic hash
 
   /// Test if the receiver responds to the given selector.
   ///
@@ -139,7 +139,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 42 respondsTo: #abs    // => true
   /// ```
-  sealed respondsTo: selector => @intrinsic respondsTo
+  sealed respondsTo: selector: Symbol -> Boolean => @intrinsic respondsTo
 
   /// Return the names of instance variables.
   ///
@@ -147,7 +147,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// Object new instVarNames
   /// ```
-  sealed instVarNames => @intrinsic instVarNames
+  sealed instVarNames -> List => @intrinsic instVarNames
 
   /// Return the value of the named instance variable.
   ///
@@ -155,7 +155,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// object instVarAt: #name
   /// ```
-  sealed instVarAt: name => @intrinsic instVarAt
+  sealed instVarAt: name: Symbol => @intrinsic instVarAt
 
   /// Set the value of the named instance variable (returns new state).
   ///
@@ -163,7 +163,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// object instVarAt: #name put: "Alice"
   /// ```
-  sealed instVarAt: name put: value => @intrinsic instVarAtPut
+  sealed instVarAt: name: Symbol put: value => @intrinsic instVarAtPut
 
   /// Send a unary message dynamically.
   ///
@@ -171,7 +171,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 42 perform: #abs       // => 42
   /// ```
-  sealed perform: selector => @intrinsic dynamicSend
+  sealed perform: selector: Symbol => @intrinsic dynamicSend
 
   /// Send a message dynamically with arguments.
   ///
@@ -179,7 +179,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 3 perform: #max: withArguments: #(5)   // => 5
   /// ```
-  sealed perform: selector withArguments: args => @intrinsic dynamicSendWithArgs
+  sealed perform: selector: Symbol withArguments: args: Tuple => @intrinsic dynamicSendWithArgs
 
   /// Create an Association (key-value pair) with the receiver as key.
   ///
@@ -203,4 +203,4 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// self error: "something went wrong"
   /// ```
-  error: message => @intrinsic error
+  error: message: String => @intrinsic error

@@ -21,7 +21,7 @@ sealed Object subclass: Stream
   /// ```beamtalk
   /// (Stream from: 1) take: 3           // => #(1, 2, 3)
   /// ```
-  class sealed from: start => @primitive "from:"
+  class sealed from: start: Integer -> Stream => @primitive "from:"
 
   /// Create an infinite Stream starting from `start`, applying `stepFun` to get next.
   ///
@@ -29,7 +29,7 @@ sealed Object subclass: Stream
   /// ```beamtalk
   /// (Stream from: 1 by: [:n | n * 2]) take: 4  // => #(1, 2, 4, 8)
   /// ```
-  class sealed from: start by: stepFun => @primitive "from:by:"
+  class sealed from: start: Integer by: stepFun: Block -> Stream => @primitive "from:by:"
 
   /// Create a Stream from a collection (list).
   ///
@@ -37,7 +37,7 @@ sealed Object subclass: Stream
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3)) asList     // => #(1, 2, 3)
   /// ```
-  class sealed on: collection => @primitive "on:"
+  class sealed on: collection: Collection -> Stream => @primitive "on:"
 
   /// Filter elements matching predicate (lazy).
   ///
@@ -45,7 +45,7 @@ sealed Object subclass: Stream
   /// ```beamtalk
   /// ((Stream on: #(1, 2, 3, 4)) select: [:n | n > 2]) asList  // => #(3, 4)
   /// ```
-  select: predicate => @primitive "select:"
+  select: predicate: Block -> Stream => @primitive "select:"
 
   /// Transform each element (lazy).
   ///
@@ -53,7 +53,7 @@ sealed Object subclass: Stream
   /// ```beamtalk
   /// ((Stream on: #(1, 2, 3)) collect: [:n | n * 10]) asList  // => #(10, 20, 30)
   /// ```
-  collect: transform => @primitive "collect:"
+  collect: transform: Block -> Stream => @primitive "collect:"
 
   /// Inverse filter — exclude elements matching predicate (lazy).
   ///
@@ -61,7 +61,7 @@ sealed Object subclass: Stream
   /// ```beamtalk
   /// ((Stream on: #(1, 2, 3, 4)) reject: [:n | n > 2]) asList  // => #(1, 2)
   /// ```
-  reject: predicate => @primitive "reject:"
+  reject: predicate: Block -> Stream => @primitive "reject:"
 
   /// Skip first N elements (lazy).
   ///
@@ -69,7 +69,7 @@ sealed Object subclass: Stream
   /// ```beamtalk
   /// ((Stream on: #(1, 2, 3, 4, 5)) drop: 2) asList  // => #(3, 4, 5)
   /// ```
-  drop: count => @primitive "drop:"
+  drop: count: Integer -> Stream => @primitive "drop:"
 
   /// Return first N elements as a List (terminal).
   ///
@@ -77,7 +77,7 @@ sealed Object subclass: Stream
   /// ```beamtalk
   /// (Stream from: 1) take: 5           // => #(1, 2, 3, 4, 5)
   /// ```
-  take: count => @primitive "take:"
+  take: count: Integer -> List => @primitive "take:"
 
   /// Iterate with side effects, return nil (terminal).
   ///
@@ -85,7 +85,7 @@ sealed Object subclass: Stream
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3)) do: [:n | Transcript show: n]
   /// ```
-  do: block => @primitive "do:"
+  do: block: Block -> Nil => @primitive "do:"
 
   /// Fold/reduce with initial value (terminal).
   ///
@@ -93,7 +93,7 @@ sealed Object subclass: Stream
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3)) inject: 0 into: [:sum :n | sum + n]  // => 6
   /// ```
-  inject: initial into: block => @primitive "inject:into:"
+  inject: initial into: block: Block => @primitive "inject:into:"
 
   /// Return first element matching predicate, or nil (terminal).
   ///
@@ -101,7 +101,7 @@ sealed Object subclass: Stream
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3, 4)) detect: [:n | n > 2]  // => 3
   /// ```
-  detect: predicate => @primitive "detect:"
+  detect: predicate: Block => @primitive "detect:"
 
   /// Materialize entire stream to a List (terminal).
   ///
@@ -109,7 +109,7 @@ sealed Object subclass: Stream
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3)) asList     // => #(1, 2, 3)
   /// ```
-  asList => @primitive "asList"
+  asList -> List => @primitive "asList"
 
   /// Return true if any element satisfies predicate (terminal).
   ///
@@ -117,7 +117,7 @@ sealed Object subclass: Stream
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3)) anySatisfy: [:n | n > 2]  // => true
   /// ```
-  anySatisfy: predicate => @primitive "anySatisfy:"
+  anySatisfy: predicate: Block -> Boolean => @primitive "anySatisfy:"
 
   /// Return true if all elements satisfy predicate (terminal).
   ///
@@ -125,7 +125,7 @@ sealed Object subclass: Stream
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3)) allSatisfy: [:n | n > 0]  // => true
   /// ```
-  allSatisfy: predicate => @primitive "allSatisfy:"
+  allSatisfy: predicate: Block -> Boolean => @primitive "allSatisfy:"
 
   /// Return a developer-readable string showing pipeline structure.
   ///
@@ -133,7 +133,7 @@ sealed Object subclass: Stream
   /// ```beamtalk
   /// (Stream from: 1) printString        // => "Stream(from: 1)"
   /// ```
-  printString => @primitive "printString"
+  printString -> String => @primitive "printString"
 
   /// Human-readable description of the receiver.
-  describe => "a Stream"
+  describe -> String => "a Stream"

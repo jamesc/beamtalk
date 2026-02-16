@@ -18,10 +18,10 @@ Actor subclass: TranscriptStream
   classVar: current = nil
 
   /// Return the current singleton instance (nil before workspace bootstrap).
-  class current => self.current
+  class current -> TranscriptStream => self.current
 
   /// Set the current singleton instance.
-  class current: instance => self.current := instance
+  class current: instance: TranscriptStream -> Nil => self.current := instance
 
   /// Write a value to the transcript.
   ///
@@ -30,7 +30,7 @@ Actor subclass: TranscriptStream
   /// Transcript show: "hello"
   /// Transcript show: 42
   /// ```
-  show: value => @primitive "show:"
+  show: value: Object -> Nil => @primitive "show:"
 
   /// Write a newline to the transcript.
   ///
@@ -38,7 +38,7 @@ Actor subclass: TranscriptStream
   /// ```beamtalk
   /// Transcript cr
   /// ```
-  cr => @primitive "cr"
+  cr -> Nil => @primitive "cr"
 
   /// Subscribe the calling process to receive transcript output.
   ///
@@ -46,7 +46,7 @@ Actor subclass: TranscriptStream
   /// ```beamtalk
   /// Transcript subscribe
   /// ```
-  subscribe => @primitive "subscribe"
+  subscribe -> Nil => @primitive "subscribe"
 
   /// Unsubscribe the calling process from transcript output.
   ///
@@ -54,7 +54,7 @@ Actor subclass: TranscriptStream
   /// ```beamtalk
   /// Transcript unsubscribe
   /// ```
-  unsubscribe => @primitive "unsubscribe"
+  unsubscribe -> Nil => @primitive "unsubscribe"
 
   /// Return recent transcript entries as a list.
   ///
@@ -62,7 +62,7 @@ Actor subclass: TranscriptStream
   /// ```beamtalk
   /// Transcript recent
   /// ```
-  recent => @primitive "recent"
+  recent -> List => @primitive "recent"
 
   /// Clear the transcript buffer.
   ///
@@ -70,4 +70,4 @@ Actor subclass: TranscriptStream
   /// ```beamtalk
   /// Transcript clear
   /// ```
-  clear => @primitive "clear"
+  clear -> Nil => @primitive "clear"

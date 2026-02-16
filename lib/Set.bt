@@ -22,7 +22,7 @@ sealed Collection subclass: Set
   /// (Set new add: 1) size           // => 1
   /// Set new size                    // => 0
   /// ```
-  size => @primitive "size"
+  size -> Integer => @primitive "size"
 
   /// Test if the set has no elements.
   ///
@@ -30,7 +30,7 @@ sealed Collection subclass: Set
   /// ```beamtalk
   /// Set new isEmpty                 // => true
   /// ```
-  isEmpty => @primitive "isEmpty"
+  isEmpty -> Boolean => @primitive "isEmpty"
 
   /// Test if the set contains the given element.
   ///
@@ -39,7 +39,7 @@ sealed Collection subclass: Set
   /// (Set new add: 1) includes: 1   // => true
   /// (Set new add: 1) includes: 2   // => false
   /// ```
-  includes: element => @primitive "includes:"
+  includes: element -> Boolean => @primitive "includes:"
 
   /// Return a new set with the element added.
   ///
@@ -47,7 +47,7 @@ sealed Collection subclass: Set
   /// ```beamtalk
   /// (Set new add: 1) size          // => 1
   /// ```
-  add: element => @primitive "add:"
+  add: element -> Set => @primitive "add:"
 
   /// Return a new set with the element removed.
   ///
@@ -55,7 +55,7 @@ sealed Collection subclass: Set
   /// ```beamtalk
   /// ((Set new add: 1) remove: 1) isEmpty   // => true
   /// ```
-  remove: element => @primitive "remove:"
+  remove: element -> Set => @primitive "remove:"
 
   /// Return a new set with elements from both sets.
   ///
@@ -63,7 +63,7 @@ sealed Collection subclass: Set
   /// ```beamtalk
   /// (Set new add: 1) union: (Set new add: 2)
   /// ```
-  union: other => @primitive "union:"
+  union: other: Set -> Set => @primitive "union:"
 
   /// Return a new set with only elements present in both sets.
   ///
@@ -71,7 +71,7 @@ sealed Collection subclass: Set
   /// ```beamtalk
   /// ((Set new add: 1) add: 2) intersection: ((Set new add: 2) add: 3)
   /// ```
-  intersection: other => @primitive "intersection:"
+  intersection: other: Set -> Set => @primitive "intersection:"
 
   /// Return a new set with elements in the receiver but not in `other`.
   ///
@@ -79,7 +79,7 @@ sealed Collection subclass: Set
   /// ```beamtalk
   /// ((Set new add: 1) add: 2) difference: (Set new add: 2)
   /// ```
-  difference: other => @primitive "difference:"
+  difference: other: Set -> Set => @primitive "difference:"
 
   /// Test if all elements of the receiver are in `other`.
   ///
@@ -87,7 +87,7 @@ sealed Collection subclass: Set
   /// ```beamtalk
   /// (Set new add: 1) isSubsetOf: ((Set new add: 1) add: 2)   // => true
   /// ```
-  isSubsetOf: other => @primitive "isSubsetOf:"
+  isSubsetOf: other: Set -> Boolean => @primitive "isSubsetOf:"
 
   /// Convert the set to a list of elements.
   ///
@@ -95,7 +95,7 @@ sealed Collection subclass: Set
   /// ```beamtalk
   /// (Set new add: 1) asList        // => #(1)
   /// ```
-  asList => @primitive "asList"
+  asList -> List => @primitive "asList"
 
   /// Create a set from a list of elements.
   ///
@@ -103,7 +103,7 @@ sealed Collection subclass: Set
   /// ```beamtalk
   /// Set new fromList: #(1, 2, 2, 3)
   /// ```
-  fromList: list => @primitive "fromList:"
+  fromList: list: List -> Set => @primitive "fromList:"
 
   /// Iterate over each element, evaluating `block` with each one.
   ///
@@ -111,7 +111,7 @@ sealed Collection subclass: Set
   /// ```beamtalk
   /// (Set new add: 1) do: [:x | Transcript show: x]
   /// ```
-  do: block => @primitive "do:"
+  do: block: Block -> Nil => @primitive "do:"
 
   /// Return a developer-readable string representation.
   ///
@@ -119,7 +119,7 @@ sealed Collection subclass: Set
   /// ```beamtalk
   /// Set new printString
   /// ```
-  printString => @primitive "printString"
+  printString -> String => @primitive "printString"
 
   /// Return a lazy Stream over the set elements.
   ///
@@ -127,7 +127,7 @@ sealed Collection subclass: Set
   /// ```beamtalk
   /// ((Set new add: 1) stream) asList   // => #(1)
   /// ```
-  stream => @primitive "stream"
+  stream -> Stream => @primitive "stream"
 
   /// Human-readable description of the receiver.
   ///
@@ -135,4 +135,4 @@ sealed Collection subclass: Set
   /// ```beamtalk
   /// Set new describe               // => "a Set"
   /// ```
-  describe => "a Set"
+  describe -> String => "a Set"

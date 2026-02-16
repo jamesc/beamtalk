@@ -18,4 +18,4 @@ Error subclass: RuntimeError
   /// ```beamtalk
   /// RuntimeError describe   // => "a RuntimeError"
   /// ```
-  describe => "a RuntimeError"
+  describe -> String => "a RuntimeError"

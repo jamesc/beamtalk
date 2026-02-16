@@ -54,7 +54,7 @@ sealed Object subclass: Block
   /// ```beamtalk
   /// x := 0. [x < 3] whileTrue: [x := x + 1]
   /// ```
-  whileTrue: bodyBlock => @intrinsic whileTrue
+  whileTrue: bodyBlock: Block -> Nil => @intrinsic whileTrue
 
   /// Repeatedly evaluate `bodyBlock` while the receiver evaluates to false.
   ///
@@ -62,7 +62,7 @@ sealed Object subclass: Block
   /// ```beamtalk
   /// x := 0. [x >= 3] whileFalse: [x := x + 1]
   /// ```
-  whileFalse: bodyBlock => @intrinsic whileFalse
+  whileFalse: bodyBlock: Block -> Nil => @intrinsic whileFalse
 
   /// Evaluate the block repeatedly forever (until an exception is raised).
   ///
@@ -70,7 +70,7 @@ sealed Object subclass: Block
   /// ```beamtalk
   /// [self processNextMessage] repeat
   /// ```
-  repeat => @intrinsic repeat
+  repeat -> Nil => @intrinsic repeat
 
   /// Evaluate the block; if an exception of class `exClass` is raised, evaluate `handler`.
   ///
@@ -78,7 +78,7 @@ sealed Object subclass: Block
   /// ```beamtalk
   /// [1 / 0] on: Error do: [:e | e message]
   /// ```
-  on: exClass do: handler => @intrinsic onDo
+  on: exClass do: handler: Block => @intrinsic onDo
 
   /// Evaluate the block, then always evaluate `cleanupBlock` (even on exception).
   ///
@@ -86,7 +86,7 @@ sealed Object subclass: Block
   /// ```beamtalk
   /// [File readAll: "data.txt"] ensure: [Transcript show: "done"]
   /// ```
-  ensure: cleanupBlock => @intrinsic ensure
+  ensure: cleanupBlock: Block => @intrinsic ensure
 
   /// Return the number of arguments the block expects.
   ///
@@ -95,7 +95,7 @@ sealed Object subclass: Block
   /// [:x :y | x + y] arity     // => 2
   /// [42] arity                 // => 0
   /// ```
-  arity => @primitive "arity"
+  arity -> Integer => @primitive "arity"
 
   /// Evaluate the block with arguments from a list.
   ///
@@ -103,7 +103,7 @@ sealed Object subclass: Block
   /// ```beamtalk
   /// [:x :y | x + y] valueWithArguments: #(3, 4)   // => 7
   /// ```
-  valueWithArguments: args => @primitive "valueWithArguments:"
+  valueWithArguments: args: Tuple => @primitive "valueWithArguments:"
 
   /// Human-readable description of the receiver.
   ///
@@ -111,4 +111,4 @@ sealed Object subclass: Block
   /// ```beamtalk
   /// [42] describe              // => "a Block"
   /// ```
-  describe => "a Block"
+  describe -> String => "a Block"

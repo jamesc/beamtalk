@@ -22,7 +22,7 @@ sealed Number subclass: Float
   /// ```beamtalk
   /// 1.5 + 2.5        // => 4.0
   /// ```
-  + other => @primitive "+"
+  + other: Number -> Float => @primitive "+"
 
   /// Subtract a number from the receiver.
   ///
@@ -30,7 +30,7 @@ sealed Number subclass: Float
   /// ```beamtalk
   /// 5.0 - 2.5        // => 2.5
   /// ```
-  - other => @primitive "-"
+  - other: Number -> Float => @primitive "-"
 
   /// Multiply the receiver by a number.
   ///
@@ -38,7 +38,7 @@ sealed Number subclass: Float
   /// ```beamtalk
   /// 2.5 * 4.0        // => 10.0
   /// ```
-  * other => @primitive "*"
+  * other: Number -> Float => @primitive "*"
 
   /// Divide the receiver by a number.
   ///
@@ -46,7 +46,7 @@ sealed Number subclass: Float
   /// ```beamtalk
   /// 10.0 / 4.0       // => 2.5
   /// ```
-  / other => @primitive "/"
+  / other: Number -> Float => @primitive "/"
 
   /// Test strict equality with another number.
   ///
@@ -55,7 +55,7 @@ sealed Number subclass: Float
   /// 3.14 =:= 3.14      // => true
   /// 1.0 =:= 2.0        // => false
   /// ```
-  =:= other => @primitive "=:="
+  =:= other: Number -> Boolean => @primitive "=:="
 
   /// Test inequality with another number.
   ///
@@ -64,7 +64,7 @@ sealed Number subclass: Float
   /// 1.0 /= 2.0       // => true
   /// 3.14 /= 3.14     // => false
   /// ```
-  /= other => @primitive "/="
+  /= other: Number -> Boolean => @primitive "/="
 
   /// Test if the receiver is less than another number.
   ///
@@ -73,7 +73,7 @@ sealed Number subclass: Float
   /// 1.0 < 2.0        // => true
   /// 5.0 < 3.0        // => false
   /// ```
-  < other => @primitive "<"
+  < other: Number -> Boolean => @primitive "<"
 
   /// Test if the receiver is greater than another number.
   ///
@@ -82,7 +82,7 @@ sealed Number subclass: Float
   /// 5.0 > 3.0        // => true
   /// 1.0 > 2.0        // => false
   /// ```
-  > other => @primitive ">"
+  > other: Number -> Boolean => @primitive ">"
 
   /// Test if the receiver is less than or equal to another number.
   ///
@@ -91,7 +91,7 @@ sealed Number subclass: Float
   /// 1.0 <= 2.0       // => true
   /// 3.0 <= 3.0       // => true
   /// ```
-  <= other => @primitive "<="
+  <= other: Number -> Boolean => @primitive "<="
 
   /// Test if the receiver is greater than or equal to another number.
   ///
@@ -100,7 +100,7 @@ sealed Number subclass: Float
   /// 5.0 >= 3.0       // => true
   /// 3.0 >= 3.0       // => true
   /// ```
-  >= other => @primitive ">="
+  >= other: Number -> Boolean => @primitive ">="
 
   /// Negate the receiver.
   ///
@@ -108,7 +108,7 @@ sealed Number subclass: Float
   /// ```beamtalk
   /// 3.14 negated     // => -3.14
   /// ```
-  negated => 0.0 - self
+  negated -> Float => 0.0 - self
 
   /// Absolute value of the receiver.
   ///
@@ -117,7 +117,7 @@ sealed Number subclass: Float
   /// -3.14 abs        // => 3.14
   /// 2.5 abs          // => 2.5
   /// ```
-  abs => (self < 0.0) ifTrue: [self negated] ifFalse: [self]
+  abs -> Float => (self < 0.0) ifTrue: [self negated] ifFalse: [self]
 
   /// Return the smaller of the receiver and `other`.
   ///
@@ -125,7 +125,7 @@ sealed Number subclass: Float
   /// ```beamtalk
   /// 1.5 min: 3.0     // => 1.5
   /// ```
-  min: other => (self < other) ifTrue: [self] ifFalse: [other]
+  min: other: Number -> Float => (self < other) ifTrue: [self] ifFalse: [other]
 
   /// Return the larger of the receiver and `other`.
   ///
@@ -133,7 +133,7 @@ sealed Number subclass: Float
   /// ```beamtalk
   /// 1.5 max: 3.0     // => 3.0
   /// ```
-  max: other => (self > other) ifTrue: [self] ifFalse: [other]
+  max: other: Number -> Float => (self > other) ifTrue: [self] ifFalse: [other]
 
   /// Round to the nearest integer.
   ///
@@ -142,7 +142,7 @@ sealed Number subclass: Float
   /// 3.7 rounded      // => 4
   /// 3.2 rounded      // => 3
   /// ```
-  rounded => @primitive "rounded"
+  rounded -> Integer => @primitive "rounded"
 
   /// Round up to the nearest integer.
   ///
@@ -150,7 +150,7 @@ sealed Number subclass: Float
   /// ```beamtalk
   /// 3.2 ceiling      // => 4
   /// ```
-  ceiling => @primitive "ceiling"
+  ceiling -> Integer => @primitive "ceiling"
 
   /// Round down to the nearest integer.
   ///
@@ -158,7 +158,7 @@ sealed Number subclass: Float
   /// ```beamtalk
   /// 3.7 floor        // => 3
   /// ```
-  floor => @primitive "floor"
+  floor -> Integer => @primitive "floor"
 
   /// Truncate toward zero.
   ///
@@ -167,7 +167,7 @@ sealed Number subclass: Float
   /// 3.7 truncated    // => 3
   /// -3.7 truncated   // => -3
   /// ```
-  truncated => @primitive "truncated"
+  truncated -> Integer => @primitive "truncated"
 
   /// Always returns false. BEAM has no NaN representation.
   ///
@@ -175,7 +175,7 @@ sealed Number subclass: Float
   /// ```beamtalk
   /// 3.14 isNaN       // => false
   /// ```
-  isNaN => false
+  isNaN -> Boolean => false
 
   /// Always returns false. BEAM has no Infinity representation.
   ///
@@ -183,7 +183,7 @@ sealed Number subclass: Float
   /// ```beamtalk
   /// 3.14 isInfinite  // => false
   /// ```
-  isInfinite => false
+  isInfinite -> Boolean => false
 
   /// Test if the receiver is zero. Uses exact float comparison.
   ///
@@ -192,7 +192,7 @@ sealed Number subclass: Float
   /// 0.0 isZero       // => true
   /// 1.0 isZero       // => false
   /// ```
-  isZero => self =:= 0.0
+  isZero -> Boolean => self =:= 0.0
 
   /// Convert the receiver to an integer (truncates).
   ///
@@ -200,7 +200,7 @@ sealed Number subclass: Float
   /// ```beamtalk
   /// 3.7 asInteger    // => 3
   /// ```
-  asInteger => @primitive "asInteger"
+  asInteger -> Integer => @primitive "asInteger"
 
   /// Convert the receiver to its string representation.
   ///
@@ -208,7 +208,7 @@ sealed Number subclass: Float
   /// ```beamtalk
   /// 3.14 asString    // => "3.14"
   /// ```
-  asString => @primitive "asString"
+  asString -> String => @primitive "asString"
 
   /// Return a developer-readable string representation.
   ///
@@ -216,7 +216,7 @@ sealed Number subclass: Float
   /// ```beamtalk
   /// 3.14 printString // => "3.14"
   /// ```
-  printString => @primitive "printString"
+  printString -> String => @primitive "printString"
 
   /// Human-readable description of the receiver.
   ///
@@ -224,4 +224,4 @@ sealed Number subclass: Float
   /// ```beamtalk
   /// 3.14 describe    // => "3.14"
   /// ```
-  describe => self asString
+  describe -> String => self asString

@@ -21,10 +21,10 @@ Actor subclass: WorkspaceEnvironment
   classVar: current = nil
 
   /// Return the current singleton instance (nil before workspace bootstrap).
-  class current => self.current
+  class current -> WorkspaceEnvironment => self.current
 
   /// Set the current singleton instance.
-  class current: instance => self.current := instance
+  class current: instance: WorkspaceEnvironment -> Nil => self.current := instance
 
   /// Return a list of all live actors as object references.
   ///
@@ -32,7 +32,7 @@ Actor subclass: WorkspaceEnvironment
   /// ```beamtalk
   /// Workspace actors
   /// ```
-  actors => @primitive "actors"
+  actors -> List => @primitive "actors"
 
   /// Look up a specific actor by pid string.
   ///
@@ -40,7 +40,7 @@ Actor subclass: WorkspaceEnvironment
   /// ```beamtalk
   /// Workspace actorAt: "<0.132.0>"
   /// ```
-  actorAt: pidString => @primitive "actorAt:"
+  actorAt: pidString: String -> Object => @primitive "actorAt:"
 
   /// Return all actors of a given class.
   ///
@@ -48,4 +48,4 @@ Actor subclass: WorkspaceEnvironment
   /// ```beamtalk
   /// Workspace actorsOf: Counter
   /// ```
-  actorsOf: className => @primitive "actorsOf:"
+  actorsOf: className: Object -> List => @primitive "actorsOf:"

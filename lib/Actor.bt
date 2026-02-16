@@ -54,4 +54,4 @@ Object subclass: Actor
   /// ```beamtalk
   /// Actor describe   // => "an Actor"
   /// ```
-  describe => "an Actor"
+  describe -> String => "an Actor"

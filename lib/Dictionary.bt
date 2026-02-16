@@ -23,7 +23,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1, #b => 2} size                   // => 2
   /// ```
-  size => @primitive "size"
+  size -> Integer => @primitive "size"
 
   /// Return a list of all keys.
   ///
@@ -31,7 +31,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1, #b => 2} keys
   /// ```
-  keys => @primitive "keys"
+  keys -> List => @primitive "keys"
 
   /// Return a list of all values.
   ///
@@ -39,7 +39,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1, #b => 2} values
   /// ```
-  values => @primitive "values"
+  values -> List => @primitive "values"
 
   /// Return the value associated with `key`. Raises an error if not found.
   ///
@@ -55,7 +55,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1} at: #b ifAbsent: [0]            // => 0
   /// ```
-  at: key ifAbsent: block => @primitive "at:ifAbsent:"
+  at: key ifAbsent: block: Block => @primitive "at:ifAbsent:"
 
   /// Return a new dictionary with `key` mapped to `value`.
   ///
@@ -63,7 +63,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1} at: #b put: 2                   // => #{#a => 1, #b => 2}
   /// ```
-  at: key put: value => @primitive "at:put:"
+  at: key put: value -> Dictionary => @primitive "at:put:"
 
   /// Test if the dictionary contains the given key.
   ///
@@ -72,7 +72,7 @@ sealed Collection subclass: Dictionary
   /// #{#a => 1} includesKey: #a                 // => true
   /// #{#a => 1} includesKey: #b                 // => false
   /// ```
-  includesKey: key => @primitive "includesKey:"
+  includesKey: key -> Boolean => @primitive "includesKey:"
 
   /// Return a new dictionary without the given key.
   ///
@@ -80,7 +80,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1, #b => 2} removeKey: #a          // => #{#b => 2}
   /// ```
-  removeKey: key => @primitive "removeKey:"
+  removeKey: key -> Dictionary => @primitive "removeKey:"
 
   /// Merge another dictionary into the receiver (other's values win on conflict).
   ///
@@ -88,7 +88,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1} merge: #{#b => 2}               // => #{#a => 1, #b => 2}
   /// ```
-  merge: other => @primitive "merge:"
+  merge: other: Dictionary -> Dictionary => @primitive "merge:"
 
   /// Test if the dictionary contains the given value.
   ///
@@ -97,7 +97,7 @@ sealed Collection subclass: Dictionary
   /// #{#a => 1, #b => 2} includes: 1     // => true
   /// #{#a => 1} includes: 3              // => false
   /// ```
-  includes: value => @primitive "includes:"
+  includes: value -> Boolean => @primitive "includes:"
 
   /// Iterate over each value, evaluating `block` with each one.
   ///
@@ -105,7 +105,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1, #b => 2} do: [:v | Transcript show: v]
   /// ```
-  do: block => @primitive "do:"
+  do: block: Block -> Nil => @primitive "do:"
 
   /// Iterate over each key-value pair, evaluating `block` with key and value.
   ///
@@ -113,7 +113,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1} keysAndValuesDo: [:k :v | Transcript show: k]
   /// ```
-  keysAndValuesDo: block => @primitive "keysAndValuesDo:"
+  keysAndValuesDo: block: Block -> Nil => @primitive "keysAndValuesDo:"
 
   /// Return a string representation using Beamtalk syntax.
   ///
@@ -121,7 +121,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1} printString                     // => "#{#a => 1}"
   /// ```
-  printString => @primitive "printString"
+  printString -> String => @primitive "printString"
 
   /// Return a lazy Stream over the dictionary entries as Associations.
   ///
@@ -129,7 +129,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// (#{#a => 1} stream) asList
   /// ```
-  stream => @primitive "stream"
+  stream -> Stream => @primitive "stream"
 
   /// Human-readable description of the receiver.
   ///
@@ -137,4 +137,4 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1} describe                        // => "a Dictionary"
   /// ```
-  describe => "a Dictionary"
+  describe -> String => "a Dictionary"

@@ -18,7 +18,7 @@ sealed Object subclass: Association
   /// ```beamtalk
   /// (#name -> "James") key      // => #name
   /// ```
-  key => @primitive "key"
+  key -> Object => @primitive "key"
 
   /// Return the value of the association.
   ///
@@ -26,7 +26,7 @@ sealed Object subclass: Association
   /// ```beamtalk
   /// (#name -> "James") value    // => "James"
   /// ```
-  value => @primitive "value"
+  value -> Object => @primitive "value"
 
   /// Convert the association to its string representation.
   ///
@@ -34,7 +34,7 @@ sealed Object subclass: Association
   /// ```beamtalk
   /// (#name -> "James") asString // => "#name -> James"
   /// ```
-  asString => @primitive "asString"
+  asString -> String => @primitive "asString"
 
   /// Return a developer-readable string representation.
   ///
@@ -42,7 +42,7 @@ sealed Object subclass: Association
   /// ```beamtalk
   /// (#name -> "James") printString
   /// ```
-  printString => self asString
+  printString -> String => self asString
 
   /// Human-readable description of the receiver.
   ///
@@ -50,4 +50,4 @@ sealed Object subclass: Association
   /// ```beamtalk
   /// (#name -> "James") describe
   /// ```
-  describe => self asString
+  describe -> String => self asString

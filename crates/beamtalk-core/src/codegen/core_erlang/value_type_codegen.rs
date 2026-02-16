@@ -10,6 +10,7 @@
 //! not `spawn`, and methods are synchronous functions operating on maps.
 
 use super::document::Document;
+use super::spec_codegen;
 use super::util::ClassIdentity;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{
@@ -128,11 +129,17 @@ impl CoreErlangGenerator {
 
         let mut docs: Vec<Document<'static>> = Vec::new();
 
+        // BT-586: Generate spec attributes from type annotations
+        let spec_attrs = spec_codegen::generate_class_specs(class, true);
+        let spec_suffix = spec_codegen::format_spec_attributes(&spec_attrs)
+            .map(|s| format!(",\n     {s}"))
+            .unwrap_or_default();
+
         // Module header
         let module_name = self.module_name.clone();
         docs.push(docvec![
             format!("module '{}' [{}]\n", module_name, exports.join(", ")),
-            "  attributes ['on_load' = [{'register_class', 0}]]\n",
+            format!("  attributes ['on_load' = [{{'register_class', 0}}]{spec_suffix}]\n"),
             "\n",
         ]);
 

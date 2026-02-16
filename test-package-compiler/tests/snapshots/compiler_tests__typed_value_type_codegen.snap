@@ -1,0 +1,131 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: core_erlang
+---
+module 'typed_value_type' ['new'/0, 'new'/1, 'getX'/1, 'getY'/1, 'distanceTo:'/2, 'printString'/1, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0]
+  attributes ['on_load' = [{'register_class', 0}],
+     'spec' =
+        [{{'getX', 1}, [{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'map', 'any'}]}, {'type', 0, 'integer', []}]}]}],
+     'spec' =
+        [{{'getY', 1}, [{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'map', 'any'}]}, {'type', 0, 'integer', []}]}]}],
+     'spec' =
+        [{{'distanceTo:', 2}, [{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'map', 'any'}, {'type', 0, 'any', []}]}, {'type', 0, 'float', []}]}]}]]
+
+'new'/0 = fun () ->
+    ~{'$beamtalk_class' => 'TypedPoint', 'x' => 0, 'y' => 0}~
+
+
+'new'/1 = fun (InitArgs) ->
+    let DefaultState = call 'typed_value_type':'new'() in
+    call 'maps':'merge'(DefaultState, InitArgs)
+
+
+'getX'/1= fun (Self) ->
+call 'maps':'get'('x', Self)
+
+'getY'/1= fun (Self) ->
+call 'maps':'get'('y', Self)
+
+'distanceTo:'/2= fun (Self, _other1) ->
+call 'bt@stdlib@typed_point':'dispatch'('distanceTo:', [_other1], Self)
+
+'printString'/1= fun (Self) ->
+call 'bt@stdlib@typed_point':'dispatch'('printString', [], Self)
+
+'dispatch'/3 = fun (Selector, Args, Self) ->
+    case Selector of
+        <'class'> when 'true' ->
+            'TypedPoint'
+        <'respondsTo:'> when 'true' ->
+            case Args of
+                <[RtSelector | _]> when 'true' -> call 'typed_value_type':'has_method'(RtSelector)
+                <_> when 'true' -> 'false'
+            end
+        <'instVarNames'> when 'true' ->
+            []
+        <'instVarAt:'> when 'true' ->
+            let <IvaErr0> = call 'beamtalk_error':'new'('immutable_value', 'TypedPoint') in
+            let <IvaErr1> = call 'beamtalk_error':'with_selector'(IvaErr0, 'instVarAt:') in
+            let <IvaErr2> = call 'beamtalk_error':'with_hint'(IvaErr1, #{#<84>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<80>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<118>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<118>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<46>(8,1,'integer',['unsigned'|['big']])}#) in
+            call 'beamtalk_error':'raise'(IvaErr2)
+        <'instVarAt:put:'> when 'true' ->
+            let <ImmErr0> = call 'beamtalk_error':'new'('immutable_value', 'TypedPoint') in
+            let <ImmErr1> = call 'beamtalk_error':'with_selector'(ImmErr0, 'instVarAt:put:') in
+            let <ImmErr2> = call 'beamtalk_error':'with_hint'(ImmErr1, #{#<84>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<80>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<46>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<85>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<40>(8,1,'integer',['unsigned'|['big']]),#<120>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<119>(8,1,'integer',['unsigned'|['big']]),#<86>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<41>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<46>(8,1,'integer',['unsigned'|['big']])}#) in
+            call 'beamtalk_error':'raise'(ImmErr2)
+        <'perform:'> when 'true' ->
+            let <PerfSel> = call 'erlang':'hd'(Args) in
+            call 'typed_value_type':'dispatch'(PerfSel, [], Self)
+        <'perform:withArguments:'> when 'true' ->
+            let <PwaSel> = call 'erlang':'hd'(Args) in
+            let <PwaArgs> = call 'erlang':'hd'(call 'erlang':'tl'(Args)) in
+            call 'typed_value_type':'dispatch'(PwaSel, PwaArgs, Self)
+        <'getX'> when 'true' ->
+            call 'typed_value_type':'getX'(Self)
+        <'getY'> when 'true' ->
+            call 'typed_value_type':'getY'(Self)
+        <'distanceTo:'> when 'true' ->
+            let <DispArg0> = call 'erlang':'hd'(Args) in
+            call 'typed_value_type':'distanceTo:'(Self, DispArg0)
+        <'printString'> when 'true' ->
+            call 'typed_value_type':'printString'(Self)
+        <_Other> when 'true' ->
+            case call 'beamtalk_extensions':'lookup'('TypedPoint', Selector) of
+                <{'ok', ExtFun, _ExtOwner}> when 'true' ->
+                    apply ExtFun(Args, Self)
+                <'not_found'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+            end
+    end
+
+
+'dispatch'/4 = fun (Selector, Args, Self, State) ->
+    try call 'typed_value_type':'dispatch'(Selector, Args, Self)
+    of <D4Result> -> {'reply', D4Result, State}
+    catch <_D4Type, D4Error, _D4Stack> -> {'error', D4Error, State}
+
+
+'has_method'/1 = fun (Selector) ->
+    case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'instVarNames', 'instVarAt:', 'instVarAt:put:', 'perform:', 'perform:withArguments:', 'getX', 'getY', 'distanceTo:', 'printString']) of
+        <'true'> when 'true' -> 'true'
+        <'false'> when 'true' ->
+            case call 'beamtalk_extensions':'has'('TypedPoint', Selector) of
+                <'true'> when 'true' -> 'true'
+                <'false'> when 'true' -> call 'bt@stdlib@object':'has_method'(Selector)
+            end
+    end
+
+
+'superclass'/0 = fun () -> 'Object'
+
+'register_class'/0 = fun () ->
+    try
+        let ClassInfo0 = ~{
+            'name' => 'TypedPoint',
+            'module' => 'typed_value_type',
+            'superclass' => 'Object',
+            'is_sealed' => 'false',
+            'is_abstract' => 'false',
+            'instance_methods' => ~{'getX' => ~{'arity' => 0, 'is_sealed' => 'false'}~, 'getY' => ~{'arity' => 0, 'is_sealed' => 'false'}~, 'distanceTo:' => ~{'arity' => 1, 'is_sealed' => 'false'}~, 'printString' => ~{'arity' => 0, 'is_sealed' => 'false'}~}~,
+            'instance_variables' => ['x', 'y'],
+            'class_methods' => ~{
+                'new' => ~{'arity' => 0}~,
+                'new:' => ~{'arity' => 1}~,
+                'superclass' => ~{'arity' => 0}~
+            }~,
+            'method_source' => ~{'getX' => #{#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<88>(8,1,'integer',['unsigned'|['big']])}#, 'getY' => #{#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<89>(8,1,'integer',['unsigned'|['big']])}#, 'distanceTo:' => #{#<100>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<84>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']])}#, 'printString' => #{#<112>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<83>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']])}#}~,
+            'class_variables' => ~{}~
+        }~
+        in let _Reg0 = case call 'beamtalk_object_class':'start'('TypedPoint', ClassInfo0) of
+            <{'ok', _Pid0}> when 'true' -> 'ok'
+            <{'error', {'already_started', _Existing0}}> when 'true' ->
+                call 'beamtalk_object_class':'update_class'('TypedPoint', ClassInfo0)
+            <{'error', _Reason0}> when 'true' -> 'ok'
+        end
+
+        in 'ok'
+    of RegResult -> RegResult
+    catch <CatchType, CatchError, CatchStack> -> 'ok'
+
+
+end

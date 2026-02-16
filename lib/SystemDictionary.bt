@@ -18,10 +18,10 @@ Actor subclass: SystemDictionary
   classVar: current = nil
 
   /// Return the current singleton instance (nil before workspace bootstrap).
-  class current => self.current
+  class current -> SystemDictionary => self.current
 
   /// Set the current singleton instance.
-  class current: instance => self.current := instance
+  class current: instance: SystemDictionary -> Nil => self.current := instance
 
   /// Return a list of all registered class names.
   ///
@@ -29,7 +29,7 @@ Actor subclass: SystemDictionary
   /// ```beamtalk
   /// Beamtalk allClasses
   /// ```
-  allClasses => @primitive "allClasses"
+  allClasses -> List => @primitive "allClasses"
 
   /// Look up a class by name (symbol).
   ///
@@ -37,7 +37,7 @@ Actor subclass: SystemDictionary
   /// ```beamtalk
   /// Beamtalk classNamed: #Integer
   /// ```
-  classNamed: className => @primitive "classNamed:"
+  classNamed: className: Symbol -> Object => @primitive "classNamed:"
 
   /// Return the global namespace as a dictionary.
   ///
@@ -45,7 +45,7 @@ Actor subclass: SystemDictionary
   /// ```beamtalk
   /// Beamtalk globals
   /// ```
-  globals => @primitive "globals"
+  globals -> Dictionary => @primitive "globals"
 
   /// Return the Beamtalk version string.
   ///
@@ -53,4 +53,4 @@ Actor subclass: SystemDictionary
   /// ```beamtalk
   /// Beamtalk version
   /// ```
-  version => @primitive "version"
+  version -> String => @primitive "version"

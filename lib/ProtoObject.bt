@@ -20,7 +20,7 @@ abstract nil subclass: ProtoObject
   /// 42 == 42           // => true
   /// "abc" == "abc"     // => true
   /// ```
-  == other => @primitive "=="
+  == other -> Boolean => @primitive "=="
 
   /// Test value inequality (negation of `==`).
   ///
@@ -29,7 +29,7 @@ abstract nil subclass: ProtoObject
   /// 1 /= 2             // => true
   /// 42 /= 42           // => false
   /// ```
-  /= other => @primitive "/="
+  /= other -> Boolean => @primitive "/="
 
   /// Return the class of the receiver.
   ///
