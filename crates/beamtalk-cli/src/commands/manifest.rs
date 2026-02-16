@@ -24,7 +24,7 @@ pub struct Manifest {
 /// Package metadata from `beamtalk.toml`.
 ///
 /// Required fields: `name`, `version`.
-/// Optional fields: `description`, `licenses`.
+/// Optional fields: `description`, `licenses`, `start`.
 #[derive(Debug, Deserialize)]
 pub struct PackageManifest {
     /// Package name (used for module naming and OTP application ID).
@@ -38,6 +38,13 @@ pub struct PackageManifest {
     #[serde(default)]
     #[allow(dead_code)] // Read by future phases (Hex publishing)
     pub licenses: Option<Vec<String>>,
+    /// Optional start module name (e.g. `"app"`).
+    ///
+    /// When set, `beamtalk run` will compile the package and call this
+    /// module's `start` method. The module name refers to a `.bt` file
+    /// in `src/` (e.g. `start = "app"` → `src/app.bt`).
+    #[serde(default)]
+    pub start: Option<String>,
 }
 
 /// Parse a `beamtalk.toml` manifest file.
@@ -289,6 +296,7 @@ version = "0.1.0"
         assert_eq!(manifest.version, "0.1.0");
         assert!(manifest.description.is_none());
         assert!(manifest.licenses.is_none());
+        assert!(manifest.start.is_none());
     }
 
     #[test]
@@ -436,6 +444,24 @@ some_dep = "1.0"
         let manifest = parse_manifest(&path.join("beamtalk.toml")).unwrap();
         assert_eq!(manifest.name, "my_app");
         assert_eq!(manifest.version, "0.1.0");
+    }
+
+    #[test]
+    fn test_parse_manifest_with_start_field() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+start = "app"
+"#,
+        );
+
+        let manifest = parse_manifest(&path.join("beamtalk.toml")).unwrap();
+        assert_eq!(manifest.name, "my_app");
+        assert_eq!(manifest.start.as_deref(), Some("app"));
     }
 
     #[test]
