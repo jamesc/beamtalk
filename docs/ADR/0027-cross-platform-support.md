@@ -1,7 +1,7 @@
 # ADR 0027: Cross-Platform Support
 
 ## Status
-Proposed (2026-02-16)
+Accepted (2026-02-16)
 
 ## Context
 
@@ -286,6 +286,26 @@ Originally proposed abstracting all process operations behind a `ProcessManager`
 ## Migration Path
 
 Not applicable. This is an infrastructure enhancement — no existing user code, APIs, or language semantics change. All modifications are internal to the toolchain (CI configuration, build scripts, `#[cfg]` guards in workspace management).
+
+## Implementation Tracking
+
+**Epic:** [BT-609](https://linear.app/beamtalk/issue/BT-609)
+**Status:** Planned
+
+| Phase | Issue | Title | Size |
+|-------|-------|-------|------|
+| 1 | BT-610 | Fix cross-platform code issues (Rust + Erlang) | M |
+| 2 | BT-611 | Add TCP health and shutdown endpoints to workspace | L |
+| 2 | BT-612 | Replace process management with TCP probes and force-kill | L |
+| 3 | BT-613 | Add cross-platform CI and release workflow | M |
+
+**Dependency graph:**
+```
+BT-610 (code fixes)
+  ├── BT-611 (TCP endpoints) ──► BT-612 (TCP process mgmt)
+  │                                      │
+  └──────────────────────────────────────►├── BT-613 (CI + release)
+```
 
 ## References
 - Prior art: [Gleam Windows support](https://gleam.run), [Erlang Windows install](https://www.erlang.org/downloads)

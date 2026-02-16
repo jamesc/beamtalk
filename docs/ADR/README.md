@@ -53,7 +53,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0024](0024-static-first-live-augmented-ide-tooling.md) | Static-First, Live-Augmented IDE Tooling | Accepted | 2026-02-15 |
 | [0025](0025-gradual-typing-and-protocols.md) | Gradual Typing and Protocols | Accepted | 2026-02-15 |
 | [0026](0026-package-definition-and-project-manifest.md) | Package Definition and Project Manifest | Accepted | 2026-02-16 |
-| [0027](0027-cross-platform-support.md) | Cross-Platform Support | Proposed | 2026-02-16 |
+| [0027](0027-cross-platform-support.md) | Cross-Platform Support | Accepted | 2026-02-16 |
 
 ## Creating New ADRs
 
