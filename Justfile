@@ -91,9 +91,10 @@ build-vscode: build-lsp
     echo "✅ VS Code extension built for local install from editors/vscode"
 
 # Build Erlang runtime
+[working-directory: 'runtime']
 build-erlang:
     @echo "🔨 Building Erlang runtime..."
-    @cd runtime && rebar3 compile
+    @rebar3 compile
     @echo "✅ Erlang build complete"
 
 # Build standard library (lib/*.bt → BEAM, incremental — skips if up to date)
@@ -126,9 +127,10 @@ fmt:
     cargo fmt --all
 
 # Run Dialyzer on Erlang runtime
+[working-directory: 'runtime']
 dialyzer:
     @echo "🔬 Running Dialyzer type checking..."
-    cd runtime && rebar3 dialyzer
+    rebar3 dialyzer
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Testing
@@ -213,15 +215,17 @@ test-stdlib: build-stdlib
 
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
 # Run Erlang runtime unit tests
+[working-directory: 'runtime']
 test-runtime: build-stdlib
     @echo "🧪 Running Erlang runtime unit tests..."
-    @cd runtime && rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace
+    @rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace
     @echo "✅ Runtime tests complete"
 
 # Run performance benchmarks (separate from unit tests, ~30s)
+[working-directory: 'runtime']
 perf: build-stdlib
     @echo "⏱️  Running performance benchmarks..."
-    @cd runtime && rebar3 eunit --dir=perf
+    @rebar3 eunit --dir=perf
     @echo "✅ Performance benchmarks complete"
 
 # Run a specific Rust test by name
@@ -403,9 +407,10 @@ clean-rust:
     @echo "  ✅ Cleaned target/"
 
 # Clean Erlang build artifacts
+[working-directory: 'runtime']
 clean-erlang:
     @echo "🧹 Cleaning Erlang artifacts..."
-    cd runtime && rebar3 clean
+    rebar3 clean
     @echo "  ✅ Cleaned runtime/_build/"
 
 # Unix-only: uses rm -rf
