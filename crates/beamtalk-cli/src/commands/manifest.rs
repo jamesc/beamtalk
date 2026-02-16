@@ -57,7 +57,11 @@ pub fn parse_manifest(path: &Utf8Path) -> Result<PackageManifest> {
 /// exists but is malformed.
 pub fn find_manifest(project_root: &Utf8Path) -> Result<Option<PackageManifest>> {
     let manifest_path = project_root.join("beamtalk.toml");
-    if manifest_path.exists() {
+    if manifest_path
+        .try_exists()
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to stat manifest '{manifest_path}'"))?
+    {
         parse_manifest(&manifest_path).map(Some)
     } else {
         Ok(None)
