@@ -2,68 +2,156 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Run beamtalk programs.
+//!
+//! **DDD Context:** Build System — Program Execution
+//!
+//! Compiles a Beamtalk package and starts a BEAM node to execute the
+//! start module's `start` method. The node keeps running after the
+//! method returns so that supervised actors remain alive.
 
-use miette::{Context, IntoDiagnostic, Result};
-use std::process::Command;
+use std::ffi::OsString;
+use std::process::{Command, Stdio};
+
+use camino::Utf8PathBuf;
+use miette::{Result, miette};
 use tracing::{info, instrument};
 
-/// Compile and run a beamtalk program.
+use beamtalk_cli::repl_startup;
+
+use super::manifest;
+
+/// Compile and run a beamtalk package.
+///
+/// In package mode (beamtalk.toml with `start` field): compiles the package,
+/// starts a BEAM node with the runtime, stdlib, and package code paths, then
+/// calls the start module's `start` method. The BEAM node stays alive so
+/// actors remain supervised.
+///
+/// Errors if no manifest is found or if the manifest lacks a `start` field.
 #[instrument(skip_all, fields(path = %path))]
 pub fn run(path: &str) -> Result<()> {
     info!("Starting run command");
-    // First, build the project
+    let project_root = Utf8PathBuf::from(path);
+
+    // Look for package manifest
+    let pkg = manifest::find_manifest(&project_root)?.ok_or_else(|| {
+        miette!(
+            "No beamtalk.toml found in '{path}'.\n\
+             The run command requires a package manifest.\n\
+             Create one with: beamtalk new <project_name>"
+        )
+    })?;
+
+    let start_module = pkg.start.as_deref().ok_or_else(|| {
+        miette!(
+            "Error: no start module defined — add start = \"module_name\" to [package] in beamtalk.toml"
+        )
+    })?;
+
+    // Validate start module name (same rules as file stems in build.rs)
+    if start_module.is_empty()
+        || !start_module
+            .chars()
+            .all(|c| c == '_' || c.is_ascii_alphanumeric())
+    {
+        miette::bail!(
+            "Invalid start module '{start_module}': must contain only alphanumeric characters and underscores"
+        );
+    }
+
+    info!(start = %start_module, "Found start module in manifest");
+
+    // Build the project
     println!("Building...");
     super::build::build(path, &beamtalk_core::CompilerOptions::default())?;
 
-    info!("Build complete, preparing to run");
-    println!("\nRunning...");
-    // TODO: Once codegen is implemented, we need to:
-    // 1. Find the compiled BEAM file
-    // 2. Execute it with erl
-    //
-    // For now, we'll just show that it would run
-    println!("(Execution will be implemented once codegen is complete)");
+    // Resolve the Erlang module name: bt@{package}@{start_module}
+    let erlang_module = format!(
+        "bt@{}@{}",
+        pkg.name,
+        beamtalk_core::codegen::core_erlang::to_module_name(start_module),
+    );
+
+    info!(erlang_module = %erlang_module, "Starting BEAM node");
+    println!(
+        "\nRunning {} v{} (start module: {start_module})...",
+        pkg.name, pkg.version
+    );
+
+    // Start BEAM node with runtime + stdlib + package code paths
+    let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout()?;
+    let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
+
+    // Auto-build runtime if needed (dev mode only)
+    if layout == repl_startup::RuntimeLayout::Dev && !paths.runtime_ebin.exists() {
+        info!("Building Beamtalk runtime...");
+        let status = Command::new("rebar3")
+            .arg("compile")
+            .current_dir(&runtime_dir)
+            .status()
+            .map_err(|e| miette!("Failed to build runtime: {e}"))?;
+
+        if !status.success() {
+            return Err(miette!("Failed to build Beamtalk runtime"));
+        }
+    }
+
+    let mut args = repl_startup::beam_pa_args(&paths);
+
+    // Add package ebin to code path
+    let ebin_dir = project_root.join("_build").join("dev").join("ebin");
+    args.push(OsString::from("-pa"));
+    args.push(OsString::from(ebin_dir.as_str()));
+
+    // Build eval command:
+    // 1. Start beamtalk_runtime application (for object system, actors, etc.)
+    // 2. Call the start module's start method
+    // 3. Keep the node alive (actors are supervised)
+    let eval_cmd = format!(
+        "{{ok, _}} = application:ensure_all_started(beamtalk_runtime), \
+         '{erlang_module}':'start'(), \
+         receive stop -> ok end."
+    );
+
+    args.push(OsString::from("-eval"));
+    args.push(OsString::from(&eval_cmd));
+
+    // Set compiler port binary path (for runtime compilation support)
+    let mut cmd = Command::new("erl");
+    cmd.arg("-noshell")
+        .args(&args)
+        .current_dir(project_root.as_std_path())
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(bin_dir) = exe.parent() {
+            let compiler_port = bin_dir.join("beamtalk-compiler-port");
+            if compiler_port.exists() {
+                cmd.env("BEAMTALK_COMPILER_PORT_BIN", &compiler_port);
+            }
+        }
+    }
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| miette!("Failed to start BEAM node: {e}\nIs Erlang/OTP installed?"))?;
+
+    // Wait for the BEAM node to exit (Ctrl+C will propagate to child)
+    let status = child
+        .wait()
+        .map_err(|e| miette!("Failed to wait for BEAM node: {e}"))?;
+
+    if !status.success() {
+        if let Some(code) = status.code() {
+            miette::bail!("Program exited with code {code}");
+        }
+        // Signal-terminated (e.g. Ctrl+C) — exit silently
+    }
 
     info!("Run command completed");
-    // Example of how to run once BEAM files are generated:
-    // let status = Command::new("erl")
-    //     .args(["-noshell", "-s", "main", "-s", "init", "stop"])
-    //     .status()
-    //     .into_diagnostic()
-    //     .wrap_err("Failed to execute erl")?;
-    //
-    // if !status.success() {
-    //     miette::bail!("Program exited with error");
-    // }
-
     Ok(())
-}
-
-/// Find the erlc executable in the system PATH.
-///
-/// TODO: This implementation uses `which` which is Unix-specific.
-/// For Windows support, consider using the `which` crate or checking
-/// common installation paths like `C:\Program Files\erl*\bin\erlc.exe`.
-#[cfg_attr(not(test), allow(dead_code))]
-fn find_erlc() -> Result<String> {
-    // Try to find erlc in PATH
-    let output = Command::new("which")
-        .arg("erlc")
-        .output()
-        .into_diagnostic()
-        .wrap_err("Failed to search for erlc")?;
-
-    if output.status.success() {
-        let path = String::from_utf8(output.stdout)
-            .into_diagnostic()
-            .wrap_err("Invalid UTF-8 in erlc path")?;
-        Ok(path.trim().to_string())
-    } else {
-        miette::bail!(
-            "erlc not found in PATH. Please install Erlang/OTP.\n\
-             Visit: https://www.erlang.org/downloads"
-        );
-    }
 }
 
 #[cfg(test)]
@@ -72,7 +160,7 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
-    fn create_test_project(temp: &TempDir) -> String {
+    fn create_test_project_with_manifest(temp: &TempDir, manifest: &str) -> String {
         let project_path = temp.path().to_string_lossy().to_string();
         let src_path = temp.path().join("src");
         fs::create_dir_all(&src_path).unwrap();
@@ -81,26 +169,43 @@ mod tests {
             "main := [\"Hello, World!\" length].",
         )
         .unwrap();
+        fs::write(temp.path().join("beamtalk.toml"), manifest).unwrap();
         project_path
     }
 
     #[test]
-    fn test_run_calls_build() {
+    fn test_run_no_manifest() {
         let temp = TempDir::new().unwrap();
-        let project_path = create_test_project(&temp);
+        let project_path = temp.path().to_string_lossy().to_string();
+        let src_path = temp.path().join("src");
+        fs::create_dir_all(&src_path).unwrap();
+        fs::write(src_path.join("main.bt"), "main := [42].").unwrap();
+        // No beamtalk.toml
 
         let result = run(&project_path);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("No beamtalk.toml"),
+            "Should mention missing manifest: {err}"
+        );
+    }
 
-        // If escript is not available, the test should fail at the BEAM compilation stage
-        // We allow this in CI environments
-        if let Err(e) = result {
-            let error_msg = format!("{e:?}");
-            if error_msg.contains("escript not found") {
-                println!("Skipping test - escript not installed in CI environment");
-                return;
-            }
-            panic!("Run failed with unexpected error: {e:?}");
-        }
+    #[test]
+    fn test_run_no_start_field() {
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project_with_manifest(
+            &temp,
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
+        );
+
+        let result = run(&project_path);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("no start module defined"),
+            "Should mention missing start field: {err}"
+        );
     }
 
     #[test]
@@ -110,31 +215,79 @@ mod tests {
     }
 
     #[test]
+    fn test_run_with_start_field_builds() {
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project_with_manifest(
+            &temp,
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\nstart = \"main\"\n",
+        );
+
+        let result = run(&project_path);
+
+        // The build should succeed but the BEAM node start may fail
+        // (no runtime in test environment). That's expected.
+        if let Err(e) = result {
+            let error_msg = format!("{e:?}");
+            // These are acceptable failures in test environment
+            if error_msg.contains("escript not found")
+                || error_msg.contains("Could not find Beamtalk runtime")
+                || error_msg.contains("Failed to start BEAM node")
+                || error_msg.contains("Program exited with code")
+            {
+                return;
+            }
+            panic!("Run failed with unexpected error: {e:?}");
+        }
+    }
+
+    #[test]
     fn test_run_with_syntax_error() {
         let temp = TempDir::new().unwrap();
         let project_path = temp.path().to_string_lossy().to_string();
         let src_path = temp.path().join("src");
         fs::create_dir_all(&src_path).unwrap();
         fs::write(src_path.join("main.bt"), "main := [1 + ].").unwrap();
+        fs::write(
+            temp.path().join("beamtalk.toml"),
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\nstart = \"main\"\n",
+        )
+        .unwrap();
 
-        // Should fail due to syntax error in build phase
         let result = run(&project_path);
         assert!(result.is_err());
     }
 
     #[test]
-    fn test_find_erlc_exists() {
-        // This test will only pass if erlc is installed
-        // We'll skip it if erlc is not available
-        match find_erlc() {
-            Ok(path) => {
-                assert!(!path.is_empty());
-                assert!(path.contains("erlc"));
-            }
-            Err(_) => {
-                // Skip test if erlc not found - this is expected in many environments
-                println!("Skipping test_find_erlc_exists - erlc not installed");
-            }
-        }
+    fn test_run_invalid_start_module_name() {
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project_with_manifest(
+            &temp,
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\nstart = \"foo'bar\"\n",
+        );
+
+        let result = run(&project_path);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("Invalid start module"),
+            "Should reject invalid start module name: {err}"
+        );
+    }
+
+    #[test]
+    fn test_run_empty_start_module_name() {
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project_with_manifest(
+            &temp,
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\nstart = \"\"\n",
+        );
+
+        let result = run(&project_path);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("Invalid start module"),
+            "Should reject empty start module name: {err}"
+        );
     }
 }
