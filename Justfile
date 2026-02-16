@@ -653,9 +653,8 @@ dist-vscode-platform target:
     cd editors/vscode
     npm install --quiet
     npm run compile
-    ln -sf ../../LICENSE LICENSE
+    mkdir -p ../../dist
     npx --yes @vscode/vsce package --target "{{target}}" --out "../../dist/beamtalk-{{target}}.vsix"
-    rm -f LICENSE
     rm -rf bin
     echo "✅ VS Code extension: dist/beamtalk-{{target}}.vsix"
 
