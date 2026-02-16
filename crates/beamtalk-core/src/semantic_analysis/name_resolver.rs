@@ -388,7 +388,7 @@ impl NameResolver {
                     Diagnostic::warning("Unreachable code after early return", expr.span());
                 diag.hint = Some("Code after an early return (^) will never execute".into());
                 self.diagnostics.push(diag);
-                // Still resolve the rest for other diagnostics (undefined vars, etc.)
+                // Still resolve this unreachable expression for other diagnostics (undefined vars, etc.)
                 self.resolve_expression(expr);
                 break;
             }

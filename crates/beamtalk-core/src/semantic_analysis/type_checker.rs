@@ -511,7 +511,7 @@ impl TypeChecker {
         span: Span,
     ) {
         let is_numeric = |ty: &str| ty == "Integer" || ty == "Float" || ty == "Number";
-        let is_arithmetic = matches!(operator, "+" | "-" | "*" | "/" | "//" | "%" | "**");
+        let is_arithmetic = matches!(operator, "+" | "-" | "*" | "/");
         let is_comparison = matches!(operator, "<" | ">" | "<=" | ">=");
 
         // Arithmetic operators on numeric types require numeric arguments
