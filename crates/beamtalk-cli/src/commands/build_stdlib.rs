@@ -163,10 +163,21 @@ fn is_stdlib_up_to_date(ebin_dir: &Utf8Path, source_files: &[Utf8PathBuf]) -> bo
     let Ok(entries) = fs::read_dir(ebin_dir) else {
         return false;
     };
-    let has_beam = entries
+    let beam_count = entries
         .filter_map(Result::ok)
-        .any(|e| e.path().extension().is_some_and(|ext| ext == "beam"));
-    if !has_beam {
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "beam"))
+        .count();
+    if beam_count == 0 {
+        return false;
+    }
+
+    // Detect deleted/renamed source files: beam count should match source count
+    if beam_count != source_files.len() {
+        info!(
+            beam_count,
+            source_count = source_files.len(),
+            "Beam/source count mismatch — forcing rebuild"
+        );
         return false;
     }
 
@@ -187,31 +198,35 @@ fn is_stdlib_up_to_date(ebin_dir: &Utf8Path, source_files: &[Utf8PathBuf]) -> bo
         }
     }
 
-    // Check compiler binary
-    if let Ok(exe) = std::env::current_exe() {
-        match fs::metadata(&exe).and_then(|m| m.modified()) {
-            Ok(t) if t > oldest_output => {
-                info!("Compiler binary newer than stdlib output");
-                return false;
+    // Check compiler binary — if we can't locate it, force rebuild to be safe
+    match std::env::current_exe() {
+        Ok(exe) => {
+            match fs::metadata(&exe).and_then(|m| m.modified()) {
+                Ok(t) if t > oldest_output => {
+                    info!("Compiler binary newer than stdlib output");
+                    return false;
+                }
+                Err(_) => return false,
+                _ => {}
             }
-            Err(_) => return false,
-            _ => {}
         }
+        Err(_) => return false,
     }
 
-    // Check runtime .beam files
+    // Check runtime .beam files — if directory missing, force rebuild
     let runtime_ebin = "runtime/_build/default/lib/beamtalk_runtime/ebin";
-    if let Ok(entries) = fs::read_dir(runtime_ebin) {
-        for entry in entries.flatten() {
-            if entry.path().extension().is_some_and(|ext| ext == "beam") {
-                match entry.metadata().and_then(|m| m.modified()) {
-                    Ok(t) if t > oldest_output => {
-                        info!("Runtime .beam newer than stdlib output");
-                        return false;
-                    }
-                    Err(_) => return false,
-                    _ => {}
+    let Ok(entries) = fs::read_dir(runtime_ebin) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        if entry.path().extension().is_some_and(|ext| ext == "beam") {
+            match entry.metadata().and_then(|m| m.modified()) {
+                Ok(t) if t > oldest_output => {
+                    info!("Runtime .beam newer than stdlib output");
+                    return false;
                 }
+                Err(_) => return false,
+                _ => {}
             }
         }
     }
