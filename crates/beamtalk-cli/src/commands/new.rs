@@ -70,14 +70,14 @@ version = "0.1.0"
 
     // Create main.bt
     let main_content = format!(
-        r"// Copyright 2026 {name} authors
+        r#"// Copyright 2026 {name} authors
 // SPDX-License-Identifier: Apache-2.0
 
 // Main entry point for {name}
 main := [
-    Transcript show: 'Hello from {name}!'; cr.
+    Transcript show: "Hello from {name}!"; cr.
 ]
-"
+"#
     );
     fs::write(path.join("src").join("main.bt"), main_content)
         .into_diagnostic()
@@ -98,7 +98,7 @@ beamtalk build
 ## Running
 
 ```bash
-beamtalk run
+beamtalk repl
 ```
 "
     );
@@ -139,7 +139,7 @@ beamtalk run
 
 fn write_agents_md(path: &Utf8Path, name: &str) -> Result<()> {
     let content = format!(
-        r"# {name} — Agent Guide
+        r#"# {name} — Agent Guide
 
 ## Project Structure
 
@@ -171,12 +171,12 @@ beamtalk test        # Run BUnit tests
 ```beamtalk
 // Variables
 x := 42
-name := 'hello'
+name := "hello"
 
 // Message sends
 x factorial              // unary
 3 + 4                    // binary
-list at: 1 put: 'value'  // keyword
+list at: 1 put: "value"  // keyword
 
 // Blocks (closures)
 square := [:x | x * x]
@@ -186,8 +186,8 @@ square value: 5          // => 25
 Object subclass: Counter
   state: count = 0
 
-  increment => count := count + 1
-  count => count
+  increment => self.count := self.count + 1
+  count => self.count
 ```
 
 ## Language Documentation
@@ -195,7 +195,7 @@ Object subclass: Counter
 - Language features: https://beamtalk.dev/docs/language-features
 - Syntax rationale: https://beamtalk.dev/docs/syntax-rationale
 - Examples: see `src/` directory
-"
+"#
     );
     fs::write(path.join("AGENTS.md"), content)
         .into_diagnostic()
