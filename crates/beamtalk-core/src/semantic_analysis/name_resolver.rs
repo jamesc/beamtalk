@@ -149,10 +149,8 @@ impl NameResolver {
                 .define(&param.name.name, param.name.span, BindingKind::Parameter);
         }
 
-        // Resolve method body
-        for expr in &method.body {
-            self.resolve_expression(expr);
-        }
+        // Resolve method body, checking for dead code after early return
+        self.resolve_body(&method.body);
 
         // Collect unused variable warnings before exiting scope
         self.collect_unused_warnings();
@@ -161,6 +159,7 @@ impl NameResolver {
     }
 
     /// Resolves an expression, checking for undefined variables and defining new bindings.
+    #[allow(clippy::too_many_lines)] // one arm per Expression variant; irreducible
     fn resolve_expression(&mut self, expr: &Expression) {
         #[allow(clippy::enum_glob_use)] // cleaner match arms
         use Expression::*;
@@ -268,7 +267,18 @@ impl NameResolver {
                 }
             }
 
-            Literal(..) | Super(..) | Error { .. } | ClassReference { .. } | Primitive { .. } => {
+            Super(span) => {
+                // super can only be used inside a method body (depth >= 2).
+                // Depth 0 = module, 1 = class, 2+ = method/block.
+                if self.scope.current_depth() < 2 {
+                    self.diagnostics.push(Diagnostic::error(
+                        "super can only be used inside a method body",
+                        *span,
+                    ));
+                }
+            }
+
+            Literal(..) | Error { .. } | ClassReference { .. } | Primitive { .. } => {
                 // No name resolution needed
             }
 
@@ -286,16 +296,15 @@ impl NameResolver {
     fn resolve_block(&mut self, block: &Block) {
         self.scope.push(); // Enter block scope (depth 3+)
 
-        // Define block parameters
+        // Define block parameters, checking for shadowing
         for param in &block.parameters {
+            self.check_shadowing(&param.name, param.span);
             self.scope
                 .define(&param.name, param.span, BindingKind::Parameter);
         }
 
-        // Resolve block body
-        for expr in &block.body {
-            self.resolve_expression(expr);
-        }
+        // Resolve block body, checking for dead code after early return
+        self.resolve_body(&block.body);
 
         // Collect unused variable warnings before exiting scope
         self.collect_unused_warnings();
@@ -333,6 +342,63 @@ impl NameResolver {
 
         // Exit match arm scope
         self.scope.pop();
+    }
+
+    /// Checks if defining a variable with the given name would shadow an outer variable.
+    ///
+    /// Emits a warning if the name exists in an outer scope. Variables prefixed
+    /// with `_` are exempt (conventional "I know what I'm doing" signal).
+    fn check_shadowing(&mut self, name: &str, span: Span) {
+        if name.starts_with('_') {
+            return;
+        }
+
+        // Check if this name exists in an outer scope (different depth)
+        if let Some(outer) = self.scope.lookup_immut(name) {
+            // Only warn if the existing binding is at a strictly outer scope depth.
+            // Same-depth duplicates (e.g., [:x :x |]) are not shadowing.
+            if outer.depth < self.scope.current_depth() {
+                let outer_span = outer.defined_at;
+                let mut diag =
+                    Diagnostic::warning(format!("Variable `{name}` shadows outer variable"), span);
+                diag.hint = Some(
+                    format!(
+                        "Outer variable defined at offset {}. Use a different name to avoid confusion",
+                        outer_span.start()
+                    )
+                    .into(),
+                );
+                self.diagnostics.push(diag);
+            }
+        }
+    }
+
+    /// Resolves a body (method or block), detecting unreachable code after early return.
+    ///
+    /// Iterates through expressions, resolving each one. If a `Return` expression
+    /// is encountered and there are subsequent expressions, emits a warning for the
+    /// first unreachable expression only (avoids diagnostic spam).
+    fn resolve_body(&mut self, body: &[Expression]) {
+        let mut saw_return = false;
+
+        for expr in body {
+            if saw_return {
+                // First unreachable expression after early return — warn and stop
+                let mut diag =
+                    Diagnostic::warning("Unreachable code after early return", expr.span());
+                diag.hint = Some("Code after an early return (^) will never execute".into());
+                self.diagnostics.push(diag);
+                // Still resolve the rest for other diagnostics (undefined vars, etc.)
+                self.resolve_expression(expr);
+                break;
+            }
+
+            self.resolve_expression(expr);
+
+            if matches!(expr, Expression::Return { .. }) {
+                saw_return = true;
+            }
+        }
     }
 
     /// Collects warnings for unused local variables in the current scope.

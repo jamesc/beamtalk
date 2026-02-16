@@ -3612,4 +3612,494 @@ mod tests {
         // x is used via closure in the block
         assert!(warnings.is_empty());
     }
+
+    // --- Dead code after early return tests (BT-596) ---
+
+    #[test]
+    fn test_dead_code_after_return_in_method() {
+        // Method: getValue => ^ 42. self doSomething
+        let class = ClassDefinition {
+            name: Identifier::new("Foo", test_span()),
+            superclass: Some(Identifier::new("Object", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("getValue".into()),
+                parameters: vec![],
+                body: vec![
+                    Expression::Return {
+                        value: Box::new(Expression::Literal(Literal::Integer(42), Span::new(0, 4))),
+                        span: Span::new(0, 4),
+                    },
+                    Expression::MessageSend {
+                        receiver: Box::new(Expression::Identifier(Identifier::new(
+                            "self",
+                            Span::new(5, 9),
+                        ))),
+                        selector: MessageSelector::Unary("doSomething".into()),
+                        arguments: vec![],
+                        span: Span::new(5, 20),
+                    },
+                ],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let dead_code: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unreachable code"))
+            .collect();
+        assert_eq!(dead_code.len(), 1);
+        assert!(
+            dead_code[0]
+                .message
+                .contains("Unreachable code after early return")
+        );
+    }
+
+    #[test]
+    fn test_no_dead_code_without_return() {
+        // Method with no return: getValue => 42
+        let class = ClassDefinition {
+            name: Identifier::new("Foo", test_span()),
+            superclass: Some(Identifier::new("Object", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("getValue".into()),
+                parameters: vec![],
+                body: vec![Expression::Literal(Literal::Integer(42), test_span())],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let dead_code: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unreachable code"))
+            .collect();
+        assert!(dead_code.is_empty());
+    }
+
+    #[test]
+    fn test_dead_code_in_block() {
+        // Block with return followed by expression: [^ 42. 99]
+        let block = Expression::Block(Block {
+            parameters: vec![],
+            body: vec![
+                Expression::Return {
+                    value: Box::new(Expression::Literal(Literal::Integer(42), Span::new(0, 4))),
+                    span: Span::new(0, 4),
+                },
+                Expression::Literal(Literal::Integer(99), Span::new(5, 7)),
+            ],
+            span: test_span(),
+        });
+
+        // Put block inside a method body so it's in scope
+        let class = ClassDefinition {
+            name: Identifier::new("Foo", test_span()),
+            superclass: Some(Identifier::new("Object", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("test".into()),
+                parameters: vec![],
+                body: vec![block],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let dead_code: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unreachable code"))
+            .collect();
+        assert_eq!(dead_code.len(), 1);
+    }
+
+    #[test]
+    fn test_return_at_end_no_warning() {
+        // Return as the last expression — no dead code
+        let class = ClassDefinition {
+            name: Identifier::new("Foo", test_span()),
+            superclass: Some(Identifier::new("Object", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("getValue".into()),
+                parameters: vec![],
+                body: vec![Expression::Return {
+                    value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
+                    span: test_span(),
+                }],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let dead_code: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unreachable code"))
+            .collect();
+        assert!(dead_code.is_empty());
+    }
+
+    // --- Super outside method tests (BT-596) ---
+
+    #[test]
+    fn test_super_outside_method_gives_error() {
+        // Using super at module top level should error
+        let super_expr = Expression::Super(Span::new(0, 5));
+        let module = Module::new(vec![super_expr], test_span());
+        let result = analyse(&module);
+
+        let super_errors: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("super"))
+            .collect();
+        assert_eq!(super_errors.len(), 1);
+        assert!(
+            super_errors[0]
+                .message
+                .contains("super can only be used inside a method body")
+        );
+        assert_eq!(super_errors[0].severity, Severity::Error);
+    }
+
+    #[test]
+    fn test_super_inside_method_no_error() {
+        // super inside a method body should not emit an error from name resolution
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("reset".into()),
+                parameters: vec![],
+                body: vec![Expression::MessageSend {
+                    receiver: Box::new(Expression::Super(test_span())),
+                    selector: MessageSelector::Unary("reset".into()),
+                    arguments: vec![],
+                    span: test_span(),
+                }],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let super_errors: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("super can only"))
+            .collect();
+        assert!(super_errors.is_empty());
+    }
+
+    #[test]
+    fn test_super_in_class_scope_gives_error() {
+        // super at class level (not inside method) should error
+        // This tests depth 1 (class scope, not method scope)
+        let super_expr = Expression::Super(Span::new(0, 5));
+        let module = Module::new(vec![super_expr], test_span());
+        let result = analyse(&module);
+
+        let super_errors: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("super can only"))
+            .collect();
+        assert_eq!(super_errors.len(), 1);
+    }
+
+    // --- Variable shadowing tests (BT-596) ---
+
+    #[test]
+    fn test_block_param_shadows_outer_variable() {
+        // [:x | [:x | x + 1]] — inner x shadows outer x
+        let inner_block = Expression::Block(Block {
+            parameters: vec![BlockParameter {
+                name: "x".into(),
+                span: Span::new(10, 11),
+            }],
+            body: vec![Expression::MessageSend {
+                receiver: Box::new(Expression::Identifier(Identifier::new(
+                    "x",
+                    Span::new(14, 15),
+                ))),
+                selector: MessageSelector::Binary("+".into()),
+                arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(18, 19))],
+                span: Span::new(14, 19),
+            }],
+            span: Span::new(8, 20),
+        });
+
+        let outer_block = Expression::Block(Block {
+            parameters: vec![BlockParameter {
+                name: "x".into(),
+                span: Span::new(1, 2),
+            }],
+            body: vec![inner_block],
+            span: Span::new(0, 21),
+        });
+
+        // Put in method body
+        let class = ClassDefinition {
+            name: Identifier::new("Foo", test_span()),
+            superclass: Some(Identifier::new("Object", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("test".into()),
+                parameters: vec![],
+                body: vec![outer_block],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let shadow_warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("shadows"))
+            .collect();
+        assert_eq!(shadow_warnings.len(), 1);
+        assert!(shadow_warnings[0].message.contains("Variable `x` shadows"));
+        assert_eq!(shadow_warnings[0].severity, Severity::Warning);
+    }
+
+    #[test]
+    fn test_underscore_prefixed_no_shadow_warning() {
+        // [:_x | [:_x | _x + 1]] — underscore-prefixed, no warning
+        let inner_block = Expression::Block(Block {
+            parameters: vec![BlockParameter {
+                name: "_x".into(),
+                span: Span::new(10, 12),
+            }],
+            body: vec![Expression::Identifier(Identifier::new(
+                "_x",
+                Span::new(15, 17),
+            ))],
+            span: Span::new(8, 18),
+        });
+
+        let outer_block = Expression::Block(Block {
+            parameters: vec![BlockParameter {
+                name: "_x".into(),
+                span: Span::new(1, 3),
+            }],
+            body: vec![inner_block],
+            span: Span::new(0, 19),
+        });
+
+        let class = ClassDefinition {
+            name: Identifier::new("Foo", test_span()),
+            superclass: Some(Identifier::new("Object", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("test".into()),
+                parameters: vec![],
+                body: vec![outer_block],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let shadow_warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("shadows"))
+            .collect();
+        assert!(shadow_warnings.is_empty());
+    }
+
+    #[test]
+    fn test_no_shadow_warning_different_names() {
+        // [:x | [:y | y + 1]] — different names, no shadowing
+        let inner_block = Expression::Block(Block {
+            parameters: vec![BlockParameter {
+                name: "y".into(),
+                span: Span::new(10, 11),
+            }],
+            body: vec![Expression::Identifier(Identifier::new(
+                "y",
+                Span::new(14, 15),
+            ))],
+            span: Span::new(8, 16),
+        });
+
+        let outer_block = Expression::Block(Block {
+            parameters: vec![BlockParameter {
+                name: "x".into(),
+                span: Span::new(1, 2),
+            }],
+            body: vec![inner_block],
+            span: Span::new(0, 17),
+        });
+
+        let class = ClassDefinition {
+            name: Identifier::new("Foo", test_span()),
+            superclass: Some(Identifier::new("Object", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("test".into()),
+                parameters: vec![],
+                body: vec![outer_block],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let shadow_warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("shadows"))
+            .collect();
+        assert!(shadow_warnings.is_empty());
+    }
 }
