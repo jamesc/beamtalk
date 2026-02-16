@@ -31,11 +31,14 @@ use tracing::debug;
 
 /// LSP backend wrapping `SimpleLanguageService`.
 pub struct Backend {
+    /// LSP client handle for sending notifications and responses.
     client: Client,
+    /// The underlying language service, protected by a mutex for concurrent access.
     service: Mutex<SimpleLanguageService>,
 }
 
 impl Backend {
+    /// Creates a new `Backend` with the given LSP client handle.
     pub fn new(client: Client) -> Self {
         Self {
             client,
@@ -64,6 +67,7 @@ impl Backend {
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
+    /// Reports server capabilities to the client during handshake.
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
@@ -84,14 +88,17 @@ impl LanguageServer for Backend {
         })
     }
 
+    /// Called after the client acknowledges initialization.
     async fn initialized(&self, _: InitializedParams) {
         debug!("beamtalk-lsp initialized");
     }
 
+    /// Handles a graceful shutdown request from the client.
     async fn shutdown(&self) -> Result<()> {
         Ok(())
     }
 
+    /// Indexes a newly opened document and publishes diagnostics.
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
         if let Some(path) = uri_to_path(&uri) {
@@ -103,6 +110,7 @@ impl LanguageServer for Backend {
         }
     }
 
+    /// Re-indexes a document after edits and republishes diagnostics.
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
         if let (Some(path), Some(change)) =
@@ -116,6 +124,7 @@ impl LanguageServer for Backend {
         }
     }
 
+    /// Removes a closed document from the index and clears its diagnostics.
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
         if let Some(path) = uri_to_path(&uri) {
@@ -127,6 +136,7 @@ impl LanguageServer for Backend {
         }
     }
 
+    /// Returns completion items for the cursor position.
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let uri = &params.text_document_position.text_document.uri;
         let Some(path) = uri_to_path(uri) else {
@@ -170,6 +180,7 @@ impl LanguageServer for Backend {
         }
     }
 
+    /// Returns hover information (type/docs) for the symbol at the cursor.
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let uri = &params.text_document_position_params.text_document.uri;
         let Some(path) = uri_to_path(uri) else {
@@ -200,6 +211,7 @@ impl LanguageServer for Backend {
         }))
     }
 
+    /// Navigates to the definition of the symbol at the cursor.
     async fn goto_definition(
         &self,
         params: GotoDefinitionParams,
@@ -228,6 +240,7 @@ impl LanguageServer for Backend {
         }))
     }
 
+    /// Finds all references to the symbol at the cursor.
     async fn references(
         &self,
         params: ReferenceParams,
@@ -263,6 +276,7 @@ impl LanguageServer for Backend {
         }
     }
 
+    /// Returns the document symbol outline (classes, methods, fields).
     async fn document_symbol(
         &self,
         params: DocumentSymbolParams,

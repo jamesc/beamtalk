@@ -10,6 +10,7 @@ use miette::{Result, miette};
 use super::ReplResponse;
 use crate::commands::protocol::{self, ProtocolClient};
 
+/// REPL client that wraps [`ProtocolClient`] with REPL-specific operations.
 pub(super) struct ReplClient {
     inner: ProtocolClient,
     last_loaded_file: Option<String>,

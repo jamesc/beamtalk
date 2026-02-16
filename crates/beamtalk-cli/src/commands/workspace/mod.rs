@@ -43,7 +43,9 @@
 //! beamtalk repl                         # Auto-detect/create workspace
 //! ```
 
+/// CLI subcommands for workspace management (`workspace list`, `workspace stop`, etc.).
 pub mod cli;
+/// Project root discovery and workspace auto-detection.
 pub mod discovery;
 
 use std::fs;
@@ -62,16 +64,22 @@ const DEFAULT_IDLE_TIMEOUT_SECONDS: u64 = 3600 * 4;
 /// Workspace metadata stored in ~/.beamtalk/workspaces/{id}/metadata.json
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceMetadata {
+    /// Unique identifier (hash of project path or user-provided name).
     pub workspace_id: String,
+    /// Absolute path to the project directory.
     pub project_path: PathBuf,
+    /// Unix timestamp (seconds) when the workspace was created.
     pub created_at: u64,
 }
 
 /// Node information stored in ~/.beamtalk/workspaces/{id}/node.info
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeInfo {
+    /// Erlang node name (e.g. `beamtalk_workspace_abc123@localhost`).
     pub node_name: String,
+    /// TCP port the REPL server is listening on.
     pub port: u16,
+    /// OS process ID of the BEAM node.
     pub pid: u32,
     /// Process start time, representation is platform-dependent.
     /// On Linux, this is clock ticks since boot from `/proc/{pid}/stat` field 22.
@@ -641,11 +649,17 @@ pub fn get_or_start_workspace(
 /// Summary of a workspace for listing purposes.
 #[derive(Debug, Clone, Serialize)]
 pub struct WorkspaceSummary {
+    /// Unique workspace identifier.
     pub workspace_id: String,
+    /// Absolute path to the project directory.
     pub project_path: PathBuf,
+    /// Whether the workspace BEAM node is currently running.
     pub status: WorkspaceStatus,
+    /// TCP port of the running node, if any.
     pub port: Option<u16>,
+    /// OS process ID of the running node, if any.
     pub pid: Option<u32>,
+    /// Unix timestamp (seconds) when the workspace was created.
     pub created_at: u64,
 }
 
@@ -653,7 +667,9 @@ pub struct WorkspaceSummary {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WorkspaceStatus {
+    /// The workspace BEAM node is alive and reachable.
     Running,
+    /// The workspace has no running BEAM node.
     Stopped,
 }
 
@@ -824,12 +840,19 @@ pub fn stop_workspace(name_or_id: &str, force: bool) -> Result<()> {
 /// Detailed status information for a workspace.
 #[derive(Debug, Clone, Serialize)]
 pub struct WorkspaceDetail {
+    /// Unique workspace identifier.
     pub workspace_id: String,
+    /// Absolute path to the project directory.
     pub project_path: PathBuf,
+    /// Whether the workspace BEAM node is currently running.
     pub status: WorkspaceStatus,
+    /// Unix timestamp (seconds) when the workspace was created.
     pub created_at: u64,
+    /// Erlang node name, if the workspace is running.
     pub node_name: Option<String>,
+    /// TCP port of the running node, if any.
     pub port: Option<u16>,
+    /// OS process ID of the running node, if any.
     pub pid: Option<u32>,
 }
 
