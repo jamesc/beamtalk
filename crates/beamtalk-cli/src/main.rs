@@ -139,6 +139,14 @@ enum Command {
         /// Output directory for generated HTML
         #[arg(long, default_value = "docs/api")]
         output: String,
+
+        /// Build full documentation site (landing page + API docs + prose docs)
+        #[arg(long)]
+        site: bool,
+
+        /// Directory containing prose documentation markdown files
+        #[arg(long, default_value = "docs")]
+        docs_path: String,
     },
 }
 
@@ -212,7 +220,18 @@ fn main() -> Result<()> {
         Command::Workspace { action } => commands::workspace::cli::run(action),
         Command::TestStdlib { path } => commands::test_stdlib::run_tests(&path),
         Command::Test { path } => commands::test::run_tests(&path),
-        Command::Doc { path, output } => commands::doc::run(&path, &output),
+        Command::Doc {
+            path,
+            output,
+            site,
+            docs_path,
+        } => {
+            if site {
+                commands::doc::run_site(&path, &docs_path, &output)
+            } else {
+                commands::doc::run(&path, &output)
+            }
+        }
     };
 
     // Exit with appropriate code

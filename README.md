@@ -1,6 +1,7 @@
 # Beamtalk
 
 [![CI](https://github.com/jamesc/beamtalk/actions/workflows/ci.yml/badge.svg)](https://github.com/jamesc/beamtalk/actions/workflows/ci.yml)
+[![API Docs](https://img.shields.io/badge/docs-API%20Reference-blue)](https://jamesc.github.io/beamtalk/apidocs/)
 [![Rust coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jamesc/beamtalk/badges/rust-coverage.json)](https://github.com/jamesc/beamtalk/actions/workflows/ci.yml)
 [![Erlang coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jamesc/beamtalk/badges/erlang-coverage.json)](https://github.com/jamesc/beamtalk/actions/workflows/ci.yml)
 
@@ -614,7 +615,8 @@ BEAMTALK_NODE_NAME=beamtalk_custom@localhost
 ## Documentation
 
 📚 **[Documentation Index](docs/README.md)** — Start here for a guided tour
-🌐 **[API Reference](https://jamesc.github.io/beamtalk/)** — Standard library API docs (auto-generated)
+🌐 **[API Reference](https://jamesc.github.io/beamtalk/apidocs/)** — Standard library API docs (auto-generated)
+📖 **[Documentation Site](https://jamesc.github.io/beamtalk/)** — Full docs including language features, principles, and architecture
 
 ### Core Documents
 
