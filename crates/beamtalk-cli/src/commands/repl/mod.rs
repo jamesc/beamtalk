@@ -418,7 +418,9 @@ pub fn run(
         }
 
         // Read workspace cookie for WebSocket authentication (ADR 0020)
-        let ws_cookie = workspace::read_workspace_cookie(&workspace_id)?;
+        let ws_cookie = workspace::read_workspace_cookie(&workspace_id)?
+            .trim()
+            .to_string();
 
         println!();
 

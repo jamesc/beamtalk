@@ -1433,7 +1433,7 @@ ws_recv_with_buf(Sock, Buf) ->
             {MK, R2};
         0 -> {<<0,0,0,0>>, Rest1}
     end,
-    {Payload, _Rest3} = ws_read_exact(Sock, PayloadLen, Rest2),
+    {Payload, Rest3} = ws_read_exact(Sock, PayloadLen, Rest2),
     Unmasked = case Mask of
         1 -> ws_mask(Payload, MaskKey);
         0 -> Payload
@@ -1446,8 +1446,8 @@ ws_recv_with_buf(Sock, Buf) ->
             PongMaskKey = crypto:strong_rand_bytes(4),
             Pong = <<1:1, 0:3, 10:4, 1:1, 0:7>>,
             ok = gen_tcp:send(Sock, [Pong, PongMaskKey]),
-            ws_recv(Sock);
-        _ -> ws_recv(Sock)      % skip other frames
+            ws_recv_with_buf(Sock, Rest3);
+        _ -> ws_recv_with_buf(Sock, Rest3)      % skip other frames
     end.
 
 %% Read exactly N bytes: first from Buf, then from socket if needed.
