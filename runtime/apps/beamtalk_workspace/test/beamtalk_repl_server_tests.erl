@@ -1293,7 +1293,10 @@ tcp_integration_test_() ->
           {"health op", fun() -> tcp_health_op_test(Port) end},
           {"start_link integer port", fun() -> tcp_start_link_integer_test() end},
           %% BT-523: session ID uniqueness test
-          {"clone uniqueness", fun() -> tcp_clone_uniqueness_test(Port) end}
+          {"clone uniqueness", fun() -> tcp_clone_uniqueness_test(Port) end},
+          %% BT-666: interrupt operation tests
+          {"interrupt no eval", fun() -> tcp_interrupt_no_eval_test(Port) end},
+          {"interrupt unknown session", fun() -> tcp_interrupt_unknown_session_test(Port) end}
          ]
      end}.
 
@@ -2294,3 +2297,21 @@ code_change_test() ->
     %% Test code_change callback (line 137)
     Exports = beamtalk_repl_server:module_info(exports),
     ?assert(lists:member({code_change, 3}, Exports)).
+
+%%% BT-666: Interrupt operation tests
+
+%% Test: interrupt op when no evaluation is running returns ok
+tcp_interrupt_no_eval_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"interrupt">>, <<"id">> => <<"int1">>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"int1">>}, Resp),
+    ?assert(lists:member(<<"done">>, maps:get(<<"status">>, Resp))).
+
+%% Test: interrupt op with an unknown session ID falls back to current session
+tcp_interrupt_unknown_session_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"interrupt">>,
+                       <<"id">> => <<"int2">>,
+                       <<"session">> => <<"nonexistent_session">>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"int2">>}, Resp),
+    ?assert(lists:member(<<"done">>, maps:get(<<"status">>, Resp))).
