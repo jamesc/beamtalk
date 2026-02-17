@@ -17,14 +17,14 @@ default:
 # Quick Commands (CI equivalents)
 # ═══════════════════════════════════════════════════════════════════════════
 
-# On Unix: full CI including E2E tests (requires REPL process lifecycle management)
-# On Windows: portable subset — skips E2E (no REPL process lifecycle yet)
+# On Unix: full CI including E2E and MCP tests (requires REPL workspace)
+# On Windows: portable subset — skips E2E and MCP (workspace startup not yet supported)
 # Run local CI checks (build, lint, test)
 [unix]
 ci: build lint test test-stdlib test-integration test-mcp test-e2e
 
 [windows]
-ci: build lint test test-stdlib test-integration test-mcp
+ci: build lint test test-stdlib test-integration
 
 # Unix-only: uses rm -rf
 # Clean all build artifacts (Rust, Erlang, VS Code, caches, examples)
