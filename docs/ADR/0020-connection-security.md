@@ -27,10 +27,10 @@ Beamtalk has several TCP communication channels that need security consideration
 
 **Local development** (shared machine, CI runner, Docker `--net=host`):
 - Multiple users/processes share the loopback interface
-- Any local process can connect to `127.0.0.1:49152` — TCP has no caller identity
-- The REPL is an **arbitrary code execution endpoint** — a connection = full RCE as the workspace owner
-- Erlang cookie protects distributed Erlang but **not** the REPL TCP protocol
-- **Threat level: medium.** Loopback binding is necessary but not sufficient on shared machines.
+- Any local process can connect to `127.0.0.1:49152` — but cookie handshake (BT-683) requires knowledge of the workspace cookie file (`chmod 600`)
+- The REPL is an **arbitrary code execution endpoint** — a valid cookie = full RCE as the workspace owner
+- Erlang cookie protects distributed Erlang; workspace cookie protects the REPL WebSocket protocol
+- **Threat level: medium.** Loopback binding + cookie auth provides adequate isolation on shared machines where filesystem permissions are enforced.
 
 **Web terminal** (browser on same or different machine):
 - Browser cannot connect to raw TCP — needs an HTTP/WebSocket proxy
@@ -46,15 +46,16 @@ Beamtalk has several TCP communication channels that need security consideration
 - Anyone who can reach the port and knows the cookie has full control
 - **Threat level: high.** Network encryption + strong identity required.
 
-### Why TCP (Not Unix Socket) for the REPL
+### Why WebSocket (Not Unix Socket or Raw TCP) for the REPL
 
-The compiler daemon uses a Unix socket (`~/.beamtalk/daemon.sock`) — why doesn't the REPL?
+**Update (2026-02-17):** The REPL now uses WebSocket over TCP (BT-683), not raw TCP. The original reasoning for choosing TCP over Unix sockets still applies — WebSocket inherits TCP's network capability while adding HTTP-upgrade compatibility for browser access and standard proxy support.
 
-1. **The workspace is an Erlang/OTP process.** Erlang's `gen_tcp` is native and well-supported. Unix socket support in Erlang requires workarounds (`afunix` or NIF-based solutions) and isn't portable to Windows.
-2. **Remote attach needs TCP.** The REPL protocol must work over the network for `beamtalk attach`. Using Unix sockets locally and TCP remotely would mean two transport implementations for the same protocol.
-3. **The daemon is Rust-native.** Unix sockets are trivial in Rust (`std::os::unix::net`). The daemon runs on the same machine as the CLI by definition — it never needs network transport.
+1. **The workspace is an Erlang/OTP process.** Cowboy (HTTP/WebSocket server) is native to the BEAM ecosystem and well-supported. Unix socket support in Erlang requires workarounds (`afunix` or NIF-based solutions) and isn't portable to Windows.
+2. **Remote attach needs network transport.** The REPL protocol must work over the network for `beamtalk attach`. WebSocket is HTTP-upgrade-compatible, so standard proxies (Caddy, nginx) can terminate TLS without custom bridging code.
+3. **Browser access requires HTTP.** Raw TCP cannot be reached from a browser. WebSocket provides bidirectional communication over HTTP, enabling browser-based workspaces (ADR 0017).
+4. **The compiler is now an OTP Port (ADR 0022).** The Unix socket daemon was eliminated — the compiler runs as a child process of the workspace, communicating via stdin/stdout.
 
-**Trade-off acknowledged:** TCP on localhost is less secure than Unix sockets on shared machines. We mitigate this with cookie-based authentication on the REPL protocol (see Layer 1 below).
+**Trade-off acknowledged:** WebSocket on localhost is less secure than Unix sockets on shared machines. We mitigate this with cookie-based authentication on WebSocket connect (see Layer 1 below).
 
 ### Design Principles
 
@@ -449,14 +450,7 @@ This is deferred to a future ADR when Kubernetes deployment becomes a priority. 
 - **Dependencies:** `cowboy` (Erlang, already common in BEAM ecosystem), `tungstenite` (Rust crate)
 - **Tests:** Runtime unit tests for auth accept/reject, E2E test for REPL connection with cookie
 
-### Phase 1: Web terminal (browser-based REPL)
-- `beamtalk web` command that serves static xterm.js page
-- Browser connects directly to `ws://localhost:49152` — no proxy needed for local dev
-- xterm.js page reads cookie from user input or `beamtalk web --token` convenience URL
-- **Components:** Static HTML/JS (xterm.js), new CLI command
-- **Tests:** Manual browser testing, WebSocket Origin header validation
-
-### Phase 2: Network binding + standard proxy documentation
+### Phase 1: Network binding + standard proxy documentation
 - `--bind tailscale` / `--bind <ip>` for workspace
 - Tailscale auto-detection (`tailscale status --json`)
 - Safety checks for non-loopback binding (`--confirm-network`)
@@ -464,7 +458,7 @@ This is deferred to a future ADR when Kubernetes deployment becomes a priority. 
 - **Components:** CLI argument handling, `beamtalk_repl_server.erl` bind config, docs
 - **Tests:** CLI argument validation, error on `--bind 0.0.0.0` without `--confirm-network`
 
-### Phase 3: mTLS for Erlang distribution
+### Phase 2: mTLS for Erlang distribution
 - `beamtalk tls init` — generate self-signed CA
 - Auto-generate per-workspace certs on `workspace create`
 - `--tls` flag for `beamtalk attach` and `beamtalk run`
@@ -473,7 +467,7 @@ This is deferred to a future ADR when Kubernetes deployment becomes a priority. 
 - **Components:** CLI commands, cert generation, `vm.args` templating
 - **Tests:** mTLS connection acceptance/rejection, cert generation and validation
 
-### Phase 4: SPIFFE/SPIRE integration (future)
+### Phase 3: SPIFFE/SPIRE integration (future)
 - Workload API client for fetching SVIDs
 - Feed SPIRE-issued certs to `ssl_dist` configuration
 - Kubernetes deployment manifests with SPIRE sidecar
@@ -500,7 +494,7 @@ beamtalk repl                    # Starts new workspace with WebSocket + cookie
 
 ### Later phases (no migration needed)
 
-Phases 1–4 (web terminal, network binding, mTLS, SPIFFE) are additive features. They do not change the core protocol and require no migration from users already on WebSocket transport.
+Phases 1–3 (network binding, mTLS, SPIFFE) are additive features. They do not change the core protocol and require no migration from users already on WebSocket transport. Browser UI is handled by ADR 0017.
 
 ## Scope Boundaries
 
@@ -518,10 +512,9 @@ This ADR does **not** cover:
 | Phase | Issue | Title | Size | Status |
 |-------|-------|-------|------|--------|
 | 0 | BT-683 | Migrate REPL transport from TCP to WebSocket with cookie auth | L | Done |
-| 1 | TBD | Web terminal (`beamtalk web` + xterm.js) | M | Planned |
-| 2 | TBD | Network binding + proxy documentation | M | Planned |
-| 3 | TBD | mTLS for Erlang distribution | L | Planned |
-| 4 | TBD | SPIFFE/SPIRE integration | XL | Future |
+| 1 | TBD | Network binding + proxy documentation (`--bind tailscale`) | M | Planned |
+| 2 | TBD | mTLS for Erlang distribution | L | Planned |
+| 3 | TBD | SPIFFE/SPIRE integration | XL | Future |
 
 ## References
 - Related ADRs: [ADR 0004 — Persistent Workspace Management](0004-persistent-workspace-management.md), [ADR 0009 — OTP Application Structure](0009-otp-application-structure.md)

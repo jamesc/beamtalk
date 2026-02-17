@@ -33,7 +33,7 @@ Beamtalk is an **interactive-first** language (Principle 1), but the workspace i
                                    └──────────────────────┘
 ```
 
-**What already exists (after ADR 0020/BT-683):**
+**What already exists (after BT-683 merges — ADR 0020):**
 - JSON-over-WebSocket REPL protocol (`docs/repl-protocol.md`) with cookie authentication
 - Cowboy WebSocket handler (`beamtalk_ws_handler.erl`) in `beamtalk_workspace` app
 - Per-connection sessions with isolated bindings
@@ -90,7 +90,7 @@ The browser experience is a **multi-pane workspace** — not a single REPL texta
 │ beamtalk_workspace app               │
 │                                      │
 │ ┌──────────────────────────────────┐ │
-│ │ beamtalk_web_handler.erl        │ │
+│ │ beamtalk_ws_handler.erl         │ │
 │ │ (cowboy_websocket)              │ │
 │ │                                  │ │
 │ │ • request/response (eval, etc.) │ │
@@ -159,7 +159,7 @@ This leverages the existing session supervision tree — sessions already surviv
 ### WebSocket Handler (Sketch)
 
 ```erlang
--module(beamtalk_web_handler).
+-module(beamtalk_ws_handler).
 -behaviour(cowboy_websocket).
 
 -export([init/2, websocket_init/1, websocket_handle/2,
@@ -245,7 +245,7 @@ This also enables a **file editor pane** in the browser UI — users can write c
 ```erlang
 Dispatch = cowboy_router:compile([
     {'_', [
-        {"/ws", beamtalk_web_handler, []},
+        {"/ws", beamtalk_ws_handler, []},
         {"/", cowboy_static, {priv_file, beamtalk_workspace, "index.html"}},
         {"/[...]", cowboy_static, {priv_dir, beamtalk_workspace, "static"}}
     ]}
