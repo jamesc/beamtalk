@@ -431,7 +431,11 @@ Erlang call: "lists" function: "reverse" args: #(#(1, 2, 3))
 - Add `Erlang` as a global singleton (ADR 0010 pattern)
 - Implement `ErlangModule` proxy class that dispatches to `erlang:apply/3`
 - Wire up `class_of/1` for proxy instances
-- **Components:** `lib/Erlang.bt`, `lib/ErlangModule.bt`, runtime dispatch in `beamtalk_primitive.erl`
+- **Export introspection:** Proxies use `module_info(exports)` to validate function existence and arity at dispatch time. This is always available (no `+debug_info` needed) and enables:
+  - Runtime arity validation with actionable error messages
+  - LSP completions: typing `Erlang lists` triggers `lists:module_info(exports)` to offer `reverse:`, `seq:with:`, `map:with:`, etc.
+  - REPL discoverability: `(Erlang lists) methods` returns all exported functions
+- **Components:** `lib/Erlang.bt`, `lib/ErlangModule.bt`, runtime dispatch in `beamtalk_primitive.erl`, LSP completion extension in `completion_provider.rs`
 
 ### Phase 2: Pid/Port/Reference Methods
 - Add basic Object protocol to opaque BEAM types
@@ -453,7 +457,7 @@ Erlang call: "lists" function: "reverse" args: #(#(1, 2, 3))
 - **`Elixir` global** — same proxy pattern, maps `Elixir enum` → `'Elixir.Enum'`
 - **`Gleam` global** — maps `Gleam list` → `gleam@list`
 - **Type annotations** — optional protocol declarations for Erlang module proxies (leveraging ADR 0025)
-- **Erlang introspection** — `module_info(exports)` can validate function existence and arity at dispatch time (always available). With `+debug_info`, `beam_lib:chunks/2` can extract parameter names from the abstract code AST, enabling meaningful keyword names (e.g., `seq: 1 to: 10 step: 2` validated against actual parameter names) and IDE autocomplete for Erlang functions
+- **Erlang parameter name introspection** — with `+debug_info`, `beam_lib:chunks/2` can extract parameter names from the abstract code AST, enabling meaningful keyword names (e.g., `seq: 1 to: 10 step: 2` validated against actual parameter names) and richer IDE tooltips. Complements Phase 1's export-based arity introspection
 - **Hex.pm integration** — separate ADR (ADR 0026 scope)
 
 ## Migration Path
