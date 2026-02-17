@@ -72,6 +72,9 @@ pub struct ClassInfo {
     pub is_typed: bool,
     /// State (instance variable) names.
     pub state: Vec<EcoString>,
+    /// Declared type annotations for state fields (field name → type name).
+    /// Only populated for fields with explicit type annotations.
+    pub state_types: HashMap<EcoString, EcoString>,
     /// Methods defined directly on this class (instance-side).
     pub methods: Vec<MethodInfo>,
     /// Class-side methods defined on this class.
@@ -246,6 +249,37 @@ impl ClassHierarchy {
             }
         }
         state
+    }
+
+    /// Returns the declared type annotation for a state field, walking
+    /// the superclass chain to find inherited field types.
+    ///
+    /// Returns `None` if the field has no type annotation, the field does not
+    /// exist, or the class is unknown.
+    #[must_use]
+    pub fn state_field_type(&self, class_name: &str, field_name: &str) -> Option<EcoString> {
+        let mut visited = HashSet::new();
+        let mut current = Some(class_name.to_string());
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break;
+            }
+            if let Some(info) = self.classes.get(name.as_str()) {
+                // If this class declares the field, return its type (or None if untyped).
+                // This handles shadowing: a subclass redeclaring a field without a type
+                // should NOT inherit the parent's type annotation.
+                if info.state.iter().any(|s| s == field_name) {
+                    return info.state_types.get(field_name).cloned();
+                }
+                current = info
+                    .superclass
+                    .as_ref()
+                    .map(std::string::ToString::to_string);
+            } else {
+                break;
+            }
+        }
+        None
     }
 
     /// Returns all methods available on a class (local + inherited).
@@ -588,6 +622,15 @@ impl ClassHierarchy {
                 is_abstract: class.is_abstract,
                 is_typed: class.is_typed,
                 state: class.state.iter().map(|s| s.name.name.clone()).collect(),
+                state_types: class
+                    .state
+                    .iter()
+                    .filter_map(|s| {
+                        s.type_annotation
+                            .as_ref()
+                            .map(|ty| (s.name.name.clone(), ty.type_name()))
+                    })
+                    .collect(),
                 methods: class
                     .methods
                     .iter()
@@ -636,7 +679,9 @@ impl Default for ClassHierarchy {
 mod tests {
     use super::builtins::builtin_method;
     use super::*;
-    use crate::ast::{ClassDefinition, Identifier, MethodDefinition, StateDeclaration};
+    use crate::ast::{
+        ClassDefinition, Identifier, MethodDefinition, StateDeclaration, TypeAnnotation,
+    };
     use crate::source_analysis::Span;
 
     fn test_span() -> Span {
@@ -1176,6 +1221,7 @@ mod tests {
                 is_abstract: false,
                 is_typed: false,
                 state: vec![],
+                state_types: HashMap::new(),
                 methods: vec![builtin_method("methodA", 0, "A")],
                 class_methods: vec![],
                 class_variables: vec![],
@@ -1190,6 +1236,7 @@ mod tests {
                 is_abstract: false,
                 is_typed: false,
                 state: vec![],
+                state_types: HashMap::new(),
                 methods: vec![builtin_method("methodB", 0, "B")],
                 class_methods: vec![],
                 class_variables: vec![],
@@ -1536,5 +1583,172 @@ mod tests {
 
         assert!(!hierarchy.is_typed("Parent"));
         assert!(!hierarchy.is_typed("Child"));
+    }
+
+    // --- State field type tests ---
+
+    fn make_typed_state_class(name: &str, superclass: &str) -> ClassDefinition {
+        ClassDefinition {
+            name: Identifier::new(name, test_span()),
+            superclass: Some(Identifier::new(superclass, test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: true,
+            state: vec![
+                StateDeclaration::with_type(
+                    Identifier::new("count", test_span()),
+                    TypeAnnotation::simple("Integer", test_span()),
+                    test_span(),
+                ),
+                StateDeclaration::new(Identifier::new("label", test_span()), test_span()),
+            ],
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        }
+    }
+
+    #[test]
+    fn state_field_type_returns_type_for_annotated_field() {
+        let module = Module {
+            classes: vec![make_typed_state_class("Counter", "Actor")],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (h, diags) = ClassHierarchy::build(&module);
+        assert!(diags.is_empty());
+        assert_eq!(
+            h.state_field_type("Counter", "count"),
+            Some(EcoString::from("Integer"))
+        );
+    }
+
+    #[test]
+    fn state_field_type_returns_none_for_untyped_field() {
+        let module = Module {
+            classes: vec![make_typed_state_class("Counter", "Actor")],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (h, _) = ClassHierarchy::build(&module);
+        assert_eq!(h.state_field_type("Counter", "label"), None);
+    }
+
+    #[test]
+    fn state_field_type_returns_none_for_unknown_field() {
+        let module = Module {
+            classes: vec![make_typed_state_class("Counter", "Actor")],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (h, _) = ClassHierarchy::build(&module);
+        assert_eq!(h.state_field_type("Counter", "nonexistent"), None);
+    }
+
+    #[test]
+    fn state_field_type_returns_none_for_unknown_class() {
+        let h = ClassHierarchy::with_builtins();
+        assert_eq!(h.state_field_type("DoesNotExist", "count"), None);
+    }
+
+    #[test]
+    fn state_field_type_inherited_from_parent() {
+        let parent = make_typed_state_class("TypedParent", "Actor");
+        let child = ClassDefinition {
+            name: Identifier::new("Child", test_span()),
+            superclass: Some(Identifier::new("TypedParent", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![StateDeclaration::with_type(
+                Identifier::new("extra", test_span()),
+                TypeAnnotation::simple("String", test_span()),
+                test_span(),
+            )],
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![parent, child],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (h, diags) = ClassHierarchy::build(&module);
+        assert!(diags.is_empty());
+
+        // Child's own typed field
+        assert_eq!(
+            h.state_field_type("Child", "extra"),
+            Some(EcoString::from("String"))
+        );
+        // Inherited typed field from parent
+        assert_eq!(
+            h.state_field_type("Child", "count"),
+            Some(EcoString::from("Integer"))
+        );
+        // Inherited untyped field from parent
+        assert_eq!(h.state_field_type("Child", "label"), None);
+    }
+
+    #[test]
+    fn state_field_type_builtin_classes_return_none() {
+        let h = ClassHierarchy::with_builtins();
+        // Built-in classes have no typed state currently
+        assert_eq!(h.state_field_type("Integer", "anything"), None);
+        assert_eq!(h.state_field_type("Actor", "anything"), None);
+    }
+
+    #[test]
+    fn state_field_type_shadowed_untyped_field() {
+        // Parent declares `count: Integer`, child redeclares `count` without type.
+        // The child's untyped declaration should shadow the parent's type.
+        let parent = make_typed_state_class("TypedParent", "Actor");
+        let child = ClassDefinition {
+            name: Identifier::new("Child", test_span()),
+            superclass: Some(Identifier::new("TypedParent", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![StateDeclaration::new(
+                Identifier::new("count", test_span()),
+                test_span(),
+            )],
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![parent, child],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (h, _) = ClassHierarchy::build(&module);
+
+        // Child's untyped `count` shadows parent's typed `count: Integer`
+        assert_eq!(h.state_field_type("Child", "count"), None);
+        // Parent's typed `count` is still accessible on the parent
+        assert_eq!(
+            h.state_field_type("TypedParent", "count"),
+            Some(EcoString::from("Integer"))
+        );
     }
 }
