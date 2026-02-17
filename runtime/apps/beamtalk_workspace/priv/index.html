@@ -114,7 +114,8 @@
       }
       if (msg.op === 'session-started') {
         sessionId = msg.session;
-        setStatus('Connected (session ' + sessionId.slice(0, 8) + '…)', '#a6e3a1');
+        const display = sessionId ? sessionId.slice(0, 8) + '…' : 'unknown';
+        setStatus('Connected (session ' + display + ')', '#a6e3a1');
         authPanel.style.display = 'none';
         evalInput.disabled = false;
         sendBtn.disabled = false;
@@ -130,7 +131,7 @@
 
       // Eval response
       if (msg.id && msg.status) {
-        const isError = msg.status.includes('error');
+        const isError = Array.isArray(msg.status) && msg.status.includes('error');
         const value = msg.value != null ? String(msg.value) : '';
         if (value) {
           appendTranscript('=> ' + value + '\n', isError ? '#f38ba8' : '#a6e3a1');
