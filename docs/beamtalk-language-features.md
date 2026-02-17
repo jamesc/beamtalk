@@ -322,7 +322,7 @@ true ifTrue: [self.x := 5]
 [:x :y | x + y]
 
 // Block with local variables
-[:x | | temp | temp := x * 2; temp + 1]
+[:x | temp := x * 2. temp + 1]
 ```
 
 ---
