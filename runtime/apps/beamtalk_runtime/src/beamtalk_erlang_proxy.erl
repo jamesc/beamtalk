@@ -106,7 +106,11 @@ selector_to_function(Selector) ->
         true ->
             %% Keyword selector — extract first keyword (before first colon)
             [FunStr | _] = string:split(SelectorStr, ":"),
-            list_to_atom(FunStr);
+            try list_to_existing_atom(FunStr)
+            catch error:badarg ->
+                %% Function name not in atom table — cannot exist as exported function
+                list_to_atom(FunStr)
+            end;
         false ->
             %% Unary selector — use as-is
             Selector

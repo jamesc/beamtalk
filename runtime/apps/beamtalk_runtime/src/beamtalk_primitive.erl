@@ -560,6 +560,12 @@ erlang_class_dispatch(Self, Selector, Args) ->
                     Error2 = beamtalk_error:with_hint(Error1,
                         <<"Use unary message for module name: Erlang moduleName">>),
                     beamtalk_error:raise(Error2);
+                false when Args =/= [] ->
+                    Error0 = beamtalk_error:new(arity_mismatch, 'Erlang'),
+                    Error1 = beamtalk_error:with_selector(Error0, Selector),
+                    Error2 = beamtalk_error:with_hint(Error1,
+                        <<"Module lookup takes no arguments: Erlang moduleName">>),
+                    beamtalk_error:raise(Error2);
                 false ->
                     beamtalk_erlang_proxy:new(Selector)
             end

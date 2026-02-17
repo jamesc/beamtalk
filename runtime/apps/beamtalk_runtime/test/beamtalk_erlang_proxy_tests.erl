@@ -207,3 +207,15 @@ dispatch_function_clause_error_wraps_test() ->
             ?assertEqual(type_error, Inner#beamtalk_error.kind),
             ?assertEqual('ErlangModule', Inner#beamtalk_error.class)
     end.
+
+erlang_proxy_with_args_raises_arity_mismatch_test() ->
+    %% Module lookup should reject non-empty args
+    ErlangObj = #{'$beamtalk_class' => 'Erlang'},
+    try
+        beamtalk_primitive:send(ErlangObj, 'lists', [unexpected_arg]),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(arity_mismatch, Inner#beamtalk_error.kind),
+            ?assertEqual('Erlang', Inner#beamtalk_error.class)
+    end.
