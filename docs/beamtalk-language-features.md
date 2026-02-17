@@ -28,7 +28,7 @@ Planned language features for beamtalk. See [beamtalk-principles.md](beamtalk-pr
 
 ### String Types
 
-```
+```beamtalk
 // Double-quoted strings - UTF-8 binaries
 name := "Alice"
 greeting := "Hello, 世界! 🌍"
@@ -53,7 +53,7 @@ emoji := "Status: {status} ✓"
 
 String operations respect Unicode grapheme clusters (user-perceived characters):
 
-```
+```beamtalk
 // Length in graphemes, not bytes
 "Hello" length        // => 5
 "世界" length          // => 2 (not 6 bytes)
@@ -127,7 +127,7 @@ Charlists are Erlang lists of integer codepoints. Beamtalk uses binaries for str
 
 ### Actor Definition
 
-```
+```beamtalk
 Actor subclass: Counter
   state: value = 0
 
@@ -143,7 +143,7 @@ Actor subclass: Counter
 
 Beamtalk distinguishes between **value types** (immutable data) and **actors** (concurrent processes):
 
-```
+```beamtalk
 // Value type - plain Erlang map, no process
 Object subclass: Point
   state: x = 0
@@ -174,7 +174,7 @@ Actor subclass: Counter
 | Use cases | Data structures, coordinates, money | Services, stateful entities, concurrent tasks |
 
 **Class hierarchy:**
-```
+```text
 ProtoObject (minimal - identity, DNU)
   └─ Object (reflection + new)
        ├─ Integer, String (primitives)
@@ -191,7 +191,7 @@ ProtoObject (minimal - identity, DNU)
 
 ### Message Sends
 
-```
+```beamtalk
 // Unary message
 counter increment
 
@@ -240,7 +240,7 @@ Binary operators follow standard math precedence (highest to lowest):
 - `=/=` - Strict inequality (Erlang `=/=`): `5 =/= 6` → `true`
 
 **Note on `and`/`or`:** These are **not** binary operators. They are keyword messages that take blocks for short-circuit evaluation:
-```
+```beamtalk
 // Short-circuit AND - second block only evaluated if first is true
 result := condition and: [expensiveCheck()]
 
@@ -252,7 +252,7 @@ result := condition or: [fallbackValue()]
 
 Direct field access within actors using dot notation:
 
-```
+```beamtalk
 // Read field
 current := self.value
 
@@ -269,7 +269,7 @@ self.total := self.total * factor
 
 **Parenthesized assignment:** Field assignments can be used as expressions when wrapped in parentheses — `(self.x := 5)` returns the assigned value:
 
-```
+```beamtalk
 // Assignment as expression (returns 6)
 (self.x := 5) + 1
 
@@ -281,7 +281,7 @@ self.y := self.x + 1.
 
 **Limitation:** Field assignments in stored blocks (non-control-flow) are not supported:
 
-```
+```beamtalk
 // NOT SUPPORTED: field assignment inside stored blocks
 nestedBlock := [:m | self.x := m]
 nestedBlock value: 10
@@ -292,7 +292,7 @@ true ifTrue: [self.x := 5]
 
 ### Blocks (Closures)
 
-```
+```beamtalk
 // Block with no arguments
 [self doSomething]
 
@@ -329,7 +329,7 @@ These message sends detect literal blocks and generate tail-recursive loops with
 
 ### Local Variable Mutations
 
-```
+```beamtalk
 // Simple counter
 count := 0.
 [count < 10] whileTrue: [count := count + 1].
@@ -362,7 +362,7 @@ result := 0.
 
 Mutations to actor state (`self.field`) work the same way:
 
-```
+```beamtalk
 Actor subclass: Counter [
     state: value = 0
     state: count = 0
@@ -387,7 +387,7 @@ Actor subclass: Counter [
 
 Local variables and fields can be mutated together:
 
-```
+```beamtalk
 processItems =>
     total := 0.
     self.processed := 0.
@@ -404,7 +404,7 @@ processItems =>
 
 Stored or passed closures cannot mutate:
 
-```
+```beamtalk
 // ❌ ERROR: Field assignment in stored closure
 badBlock =>
     myBlock := [self.value := self.value + 1].
@@ -441,7 +441,7 @@ testCorrect =>
 
 When you accidentally store a mutating closure, you get helpful guidance:
 
-```
+```text
 Error: Cannot assign to field 'sum' inside a stored closure.
 
 Field assignments require immediate execution context for state threading.
@@ -467,7 +467,7 @@ Beamtalk uses **async-first** message passing, unlike Smalltalk's synchronous mo
 
 ### Default: Async with Futures
 
-```
+```beamtalk
 // Load the Counter actor
 :load examples/counter.bt
 
@@ -484,7 +484,7 @@ c getValue await        // => 2
 
 In the REPL, futures are **automatically awaited** for a natural, synchronous feel:
 
-```
+```text
 > c := Counter spawn
 #Actor<Counter,_>
 
@@ -568,7 +568,7 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 
 Pattern matching can bind variables in match arms:
 
-```
+```beamtalk
 // Variable captures the matched value
 42 match: [x -> x + 1]
 // => 43
@@ -589,7 +589,7 @@ Pattern matching can bind variables in match arms:
 
 Hot code reload with dedicated syntax.
 
-```
+```beamtalk
 // Patch a method on running actors
 patch Counter >> #increment {
   Telemetry log: "incrementing"
@@ -805,14 +805,14 @@ There are two pragma forms:
 Both forms are semantically equivalent at the compiler level (they produce the same AST node), but the naming convention distinguishes their intent:
 
 **`@primitive` (quoted)** — runtime-dispatched method implementations:
-```
+```beamtalk
 // In lib/Integer.bt
 + other => @primitive '+'
 asString => @primitive 'asString'
 ```
 
 **`@intrinsic` (unquoted)** — compiler structural intrinsics:
-```
+```beamtalk
 // In lib/Block.bt
 value => @intrinsic blockValue
 whileTrue: bodyBlock => @intrinsic whileTrue
@@ -883,7 +883,7 @@ beamtalk observer           # ❌ Not yet implemented
 
 ### REPL Features
 
-```
+```beamtalk
 // Spawn and interact
 counter := Counter spawn
 counter increment
@@ -1004,7 +1004,7 @@ Running 2 tests...
 
 ### Debug/Trace Syntax
 
-```
+```beamtalk
 // Trace all messages to an actor
 counter trace: #all
 
@@ -1232,7 +1232,7 @@ Integer extend
 
 ### Pattern Matching in Message Handlers
 
-```
+```beamtalk
 // Match on message structure
 handle: {#ok, value} => self process: value
 handle: {#error, reason} => self logError: reason
@@ -1246,7 +1246,7 @@ process: 0 => self zero
 
 ### Destructuring Assignment
 
-```
+```beamtalk
 // Destructure tuple
 {x, y, z} := point coordinates
 
@@ -1263,7 +1263,7 @@ Clean data flow through transformations.
 
 #### Sync Pipe
 
-```
+```beamtalk
 data
   |> Transform with: options
   |> Filter where: [:x | x > 0]
@@ -1272,7 +1272,7 @@ data
 
 #### Async Pipe
 
-```
+```beamtalk
 // Each step returns future, flows through
 data
   |>> agent1 process
@@ -1288,7 +1288,7 @@ Early exit on error without deep nesting.
 
 #### Problem: Nested Error Handling
 
-```
+```beamtalk
 // Ugly pyramid of doom
 (file open: path) ifOk: [:f |
   (f read) ifOk: [:data |
@@ -1298,7 +1298,7 @@ Early exit on error without deep nesting.
 
 #### Solution: With Blocks
 
-```
+```beamtalk
 with: [
   file := File open: path
   data := file read
@@ -1316,7 +1316,7 @@ with: [
 
 Explicit error handling as alternative to exceptions.
 
-```
+```beamtalk
 // Return Result instead of raising
 divide: a by: b -> Result =>
   b = 0
@@ -1342,7 +1342,7 @@ result match: [
 
 Declarative iteration with filtering.
 
-```
+```beamtalk
 // List comprehension with filter
 for: [x in: 1 to: 10; x > 5]
 yield: [x * 2]
@@ -1363,7 +1363,7 @@ yield: [Person new name: name age: age]
 
 Declarative fault tolerance.
 
-```
+```beamtalk
 Supervisor subclass: WebApp
   children: [
     {DatabasePool, scale: 10},
@@ -1385,7 +1385,7 @@ Actor subclass: Worker
 
 Type-based dispatch for polymorphism.
 
-```
+```beamtalk
 // Define protocol
 Protocol define: #Stringable
   requiring: [#asString]
@@ -1409,7 +1409,7 @@ Types are optional - add them gradually for safety and optimization.
 
 #### Basic Annotations
 
-```
+```beamtalk
 Actor subclass: Counter
   state: value: Integer = 0
 
@@ -1425,7 +1425,7 @@ transferFrom: source: Account amount: Money -> Boolean =>
 
 #### Limited Types
 
-```
+```beamtalk
 // Singleton type - exactly one value
 state: direction: #north | #south | #east | #west
 
@@ -1441,7 +1441,7 @@ process: items: <Collection> => ...
 
 #### Sealing for Optimization
 
-```
+```beamtalk
 // Sealed class - no subclasses, enables optimization
 sealed Actor subclass: Point
   state: x: Float, y: Float
@@ -1467,7 +1467,7 @@ Recoverable exceptions with options.
 
 #### Traditional Exception
 
-```
+```beamtalk
 [file open: path]
   on: FileNotFound
   do: [:e | ^nil]
@@ -1475,7 +1475,7 @@ Recoverable exceptions with options.
 
 #### Conditions with Restarts
 
-```
+```beamtalk
 // Handler chooses recovery option
 [file open: path]
   on: FileNotFound
@@ -1500,7 +1500,7 @@ FileNotFound signal: path
 
 ### Binary Pattern Matching
 
-```
+```beamtalk
 // Parse a network packet
 parsePacket: <<version: 8, length: 16/big, payload: length/binary, rest/binary>> =>
   Packet new version: version payload: payload
