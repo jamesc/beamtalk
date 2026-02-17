@@ -76,6 +76,8 @@ Erlang string uppercase: "hello"
 
 **Hot code reload:** Because proxies call `erlang:apply/3` dynamically (not bound to a specific module version), they automatically pick up reloaded Erlang modules — no proxy invalidation needed.
 
+**Name conflicts:** Workspace bindings always take precedence over user-defined class names. If a user defines a class named `Erlang`, the workspace binding shadows it — the global `Erlang` proxy remains accessible. This is consistent with how `Transcript`, `Beamtalk`, and `Workspace` globals work. Future module/namespace support will provide a proper resolution mechanism.
+
 **REPL session:**
 
 ```beamtalk
