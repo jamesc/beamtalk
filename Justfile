@@ -90,6 +90,18 @@ build-vscode: build-lsp
     npm run compile
     echo "✅ VS Code extension built for local install from editors/vscode"
 
+# Build VS Code extension for local development (debug LSP, no .vsix packaging)
+[windows]
+build-vscode: build-lsp
+    @echo "🔨 Building VS Code extension for local development..."
+    if (!(Get-Command npm -ErrorAction SilentlyContinue)) { Write-Error "npm not found"; exit 1 }
+    if (!(Test-Path target/debug/beamtalk-lsp.exe)) { Write-Error "Debug LSP binary not found — run: just build-lsp"; exit 1 }
+    New-Item -ItemType Directory -Force -Path editors/vscode/bin | Out-Null
+    Copy-Item target/debug/beamtalk-lsp.exe editors/vscode/bin/beamtalk-lsp.exe
+    @echo "   Bundled debug beamtalk-lsp.exe"
+    Push-Location editors/vscode; npm install --quiet; npm run compile; Pop-Location
+    @echo "✅ VS Code extension built for local install from editors/vscode"
+
 # Build Erlang runtime
 [working-directory: 'runtime']
 build-erlang:
@@ -413,13 +425,20 @@ clean-erlang:
     rebar3 clean
     @echo "  ✅ Cleaned runtime/_build/"
 
-# Unix-only: uses rm -rf
 # Clean VS Code extension build artifacts
 [unix]
 clean-vscode:
     @echo "🧹 Cleaning VS Code extension artifacts..."
     @rm -rf editors/vscode/out 2>/dev/null || true
     @rm -rf editors/vscode/node_modules 2>/dev/null || true
+    @echo "  ✅ Cleaned editors/vscode/{out,node_modules}/"
+
+# Clean VS Code extension build artifacts
+[windows]
+clean-vscode:
+    @echo "🧹 Cleaning VS Code extension artifacts..."
+    if (Test-Path editors/vscode/out) { Remove-Item -Recurse -Force editors/vscode/out }
+    if (Test-Path editors/vscode/node_modules) { Remove-Item -Recurse -Force editors/vscode/node_modules }
     @echo "  ✅ Cleaned editors/vscode/{out,node_modules}/"
 
 # Unix-only: uses read for interactive confirmation, rm -rf
@@ -608,6 +627,11 @@ dist-vscode:
     esac
     just dist-vscode-platform "${TARGET}"
 
+# Build VS Code extension (.vsix)
+[windows]
+dist-vscode:
+    just dist-vscode-platform win32-x64
+
 # Unix-only: uses chmod, du, case statements
 # Usage: just dist-vscode-platform linux-x64
 # Build VS Code extension for a specific platform target
@@ -657,6 +681,23 @@ dist-vscode-platform target:
     npx --yes @vscode/vsce package --target "{{target}}" --out "../../dist/beamtalk-{{target}}.vsix"
     rm -rf bin
     echo "✅ VS Code extension: dist/beamtalk-{{target}}.vsix"
+
+# Usage: just dist-vscode-platform win32-x64
+# Build VS Code extension for a specific platform target
+[windows]
+dist-vscode-platform target:
+    @echo "📦 Building VS Code extension for {{target}}..."
+    if (!(Get-Command npm -ErrorAction SilentlyContinue)) { Write-Error "npm not found"; exit 1 }
+    $binName = if ("{{target}}" -like "win32-*") { "beamtalk-lsp.exe" } else { "beamtalk-lsp" }
+    $lspBin = "target/release/$binName"; if (!(Test-Path $lspBin)) { $lspBin = "target/x86_64-pc-windows-msvc/release/$binName" }; if (!(Test-Path $lspBin)) { Write-Error "LSP binary not found — run: cargo build --release --bin beamtalk-lsp"; exit 1 }
+    New-Item -ItemType Directory -Force -Path editors/vscode/bin | Out-Null
+    Copy-Item $lspBin "editors/vscode/bin/$binName"
+    @echo "   Bundled $binName"
+    Push-Location editors/vscode; npm install --quiet; npm run compile; Pop-Location
+    New-Item -ItemType Directory -Force -Path dist | Out-Null
+    Push-Location editors/vscode; npx --yes @vscode/vsce package --target "{{target}}" --out "../../dist/beamtalk-{{target}}.vsix"; Pop-Location
+    Remove-Item -Recurse -Force editors/vscode/bin -ErrorAction SilentlyContinue
+    @echo "✅ VS Code extension: dist/beamtalk-{{target}}.vsix"
 
 # Unix-only: depends on Unix-only install and dist-vscode recipes
 # Create a distributable install in dist/
