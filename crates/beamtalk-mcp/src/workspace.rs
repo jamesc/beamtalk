@@ -223,6 +223,7 @@ mod tests {
         let dir = workspaces_dir().unwrap().join(&workspace_id);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("port"), "5555").unwrap();
+        fs::write(dir.join("cookie"), "testcookie").unwrap();
 
         let result = discover_port(Some(&workspace_id));
         assert_eq!(result, Some(5555));
