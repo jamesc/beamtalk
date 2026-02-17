@@ -281,6 +281,88 @@ on_actor_spawned_multiple_actors_test() ->
     gen_server:stop(RegistryPid).
 
 %%% ===========================================================================
+%%% get_pids_for_module/2 Tests
+%%% ===========================================================================
+
+get_pids_for_module_empty_test() ->
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
+    {ok, Pids} = beamtalk_repl_actors:get_pids_for_module(RegistryPid, nonexistent_module),
+    ?assertEqual([], Pids),
+    gen_server:stop(RegistryPid).
+
+get_pids_for_module_single_test() ->
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
+    {ok, ActorPid} = test_counter:start_link(0),
+    ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
+    {ok, Pids} = beamtalk_repl_actors:get_pids_for_module(RegistryPid, test_counter),
+    ?assertEqual([ActorPid], Pids),
+    gen_server:stop(ActorPid),
+    gen_server:stop(RegistryPid).
+
+get_pids_for_module_multiple_test() ->
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
+    {ok, Actor1} = test_counter:start_link(0),
+    {ok, Actor2} = test_counter:start_link(10),
+    {ok, Actor3} = test_counter:start_link(20),
+    ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor1, 'Counter', test_counter),
+    ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor2, 'Counter', test_counter),
+    ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor3, 'OtherClass', other_module),
+    {ok, Pids} = beamtalk_repl_actors:get_pids_for_module(RegistryPid, test_counter),
+    ?assertEqual(2, length(Pids)),
+    ?assert(lists:member(Actor1, Pids)),
+    ?assert(lists:member(Actor2, Pids)),
+    gen_server:stop(Actor1),
+    gen_server:stop(Actor2),
+    gen_server:stop(Actor3),
+    gen_server:stop(RegistryPid).
+
+%%% ===========================================================================
+%%% count_actors_for_module/2 Direct Tests
+%%% ===========================================================================
+
+count_actors_for_module_zero_test() ->
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
+    {ok, Count} = beamtalk_repl_actors:count_actors_for_module(RegistryPid, nonexistent),
+    ?assertEqual(0, Count),
+    gen_server:stop(RegistryPid).
+
+count_actors_for_module_multiple_test() ->
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
+    {ok, Actor1} = test_counter:start_link(0),
+    {ok, Actor2} = test_counter:start_link(10),
+    ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor1, 'Counter', test_counter),
+    ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor2, 'Counter', test_counter),
+    {ok, Count} = beamtalk_repl_actors:count_actors_for_module(RegistryPid, test_counter),
+    ?assertEqual(2, Count),
+    gen_server:stop(Actor1),
+    gen_server:stop(Actor2),
+    gen_server:stop(RegistryPid).
+
+%%% ===========================================================================
+%%% Gen_server Callback Edge Case Tests
+%%% ===========================================================================
+
+unknown_call_returns_error_test() ->
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
+    ?assertEqual({error, unknown_request}, gen_server:call(RegistryPid, some_random_request)),
+    gen_server:stop(RegistryPid).
+
+unknown_cast_is_ignored_test() ->
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
+    gen_server:cast(RegistryPid, some_random_message),
+    %% Registry should still be alive and functional
+    ?assertEqual([], beamtalk_repl_actors:list_actors(RegistryPid)),
+    gen_server:stop(RegistryPid).
+
+unknown_info_is_ignored_test() ->
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
+    RegistryPid ! {some_random, message},
+    timer:sleep(10),
+    %% Registry should still be alive and functional
+    ?assertEqual([], beamtalk_repl_actors:list_actors(RegistryPid)),
+    gen_server:stop(RegistryPid).
+
+%%% ===========================================================================
 %%% Workspace App Callback Env Tests
 %%% ===========================================================================
 

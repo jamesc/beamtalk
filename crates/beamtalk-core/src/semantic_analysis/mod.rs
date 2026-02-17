@@ -552,7 +552,7 @@ mod tests {
     use super::*;
     use crate::ast::{
         Block, BlockParameter, ClassDefinition, Expression, Identifier, Literal, MatchArm,
-        MessageSelector, MethodDefinition, Pattern, StateDeclaration,
+        MessageSelector, MethodDefinition, Pattern, StateDeclaration, StringSegment,
     };
     use crate::source_analysis::{Severity, Span};
 
@@ -3075,5 +3075,331 @@ mod tests {
             .filter(|d| d.message.contains("shadows"))
             .collect();
         assert!(shadow_warnings.is_empty());
+    }
+
+    #[test]
+    fn test_block_match_pattern_var_not_treated_as_capture() {
+        // BT-655: A block containing a match expression where the pattern variable
+        // has the same name as an outer variable should NOT treat the pattern
+        // variable as a captured variable.
+        //
+        // Code equivalent:
+        //   x := 0
+        //   [:val | val match: [x -> x]]
+        //
+        // The `x` in the match arm pattern and body refers to the pattern-bound
+        // variable, not the outer `x`. It should NOT appear in block captures.
+        let outer_x = Expression::Assignment {
+            target: Box::new(Expression::Identifier(Identifier::new("x", test_span()))),
+            value: Box::new(Expression::Literal(Literal::Integer(0), test_span())),
+            span: test_span(),
+        };
+
+        let block_span = Span::new(100, 200);
+        let match_expr = Expression::Match {
+            value: Box::new(Expression::Identifier(Identifier::new("val", test_span()))),
+            arms: vec![MatchArm::new(
+                Pattern::Variable(Identifier::new("x", test_span())),
+                Expression::Identifier(Identifier::new("x", test_span())),
+                test_span(),
+            )],
+            span: test_span(),
+        };
+
+        let block = Block::new(
+            vec![BlockParameter::new("val", test_span())],
+            vec![match_expr],
+            block_span,
+        );
+
+        let module = Module::new(vec![outer_x, Expression::Block(block)], test_span());
+
+        let result = analyse(&module);
+
+        let block_info = result.block_info.get(&block_span).unwrap();
+        // The pattern variable `x` should NOT be in captures,
+        // even though an outer variable `x` exists.
+        assert!(
+            block_info.captures.is_empty(),
+            "Pattern variable 'x' should not be treated as a capture, but found: {:?}",
+            block_info
+                .captures
+                .iter()
+                .map(|c| &c.name)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_block_match_captures_real_outer_variable() {
+        // Counterpart to the above test: when a match arm body references a
+        // variable that is NOT a pattern variable, it SHOULD be captured.
+        //
+        // Code equivalent:
+        //   y := 42
+        //   [:val | val match: [x -> y]]
+        //
+        // Here `y` in the match body is genuinely captured from outer scope.
+        let outer_y = Expression::Assignment {
+            target: Box::new(Expression::Identifier(Identifier::new("y", test_span()))),
+            value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
+            span: test_span(),
+        };
+
+        let block_span = Span::new(100, 200);
+        let match_expr = Expression::Match {
+            value: Box::new(Expression::Identifier(Identifier::new("val", test_span()))),
+            arms: vec![MatchArm::new(
+                Pattern::Variable(Identifier::new("x", test_span())),
+                Expression::Identifier(Identifier::new("y", test_span())),
+                test_span(),
+            )],
+            span: test_span(),
+        };
+
+        let block = Block::new(
+            vec![BlockParameter::new("val", test_span())],
+            vec![match_expr],
+            block_span,
+        );
+
+        let module = Module::new(vec![outer_y, Expression::Block(block)], test_span());
+
+        let result = analyse(&module);
+
+        let block_info = result.block_info.get(&block_span).unwrap();
+        assert_eq!(
+            block_info.captures.len(),
+            1,
+            "Should capture outer variable 'y'"
+        );
+        assert_eq!(block_info.captures[0].name, "y");
+    }
+
+    // --- BT-656: Validator coverage tests ────────────────────────────────────
+
+    /// Helper: create an abstract class definition for validator tests.
+    fn make_abstract_class(name: &str) -> ClassDefinition {
+        ClassDefinition {
+            name: Identifier::new(name, test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: true,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![],
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        }
+    }
+
+    /// Helper: create a `ClassName spawn` message send.
+    fn make_spawn_expr(class_name: &str) -> Expression {
+        Expression::MessageSend {
+            receiver: Box::new(Expression::ClassReference {
+                name: Identifier::new(class_name, test_span()),
+                span: test_span(),
+            }),
+            selector: MessageSelector::Unary("spawn".into()),
+            arguments: vec![],
+            span: test_span(),
+        }
+    }
+
+    #[test]
+    fn test_abstract_instantiation_in_class_method() {
+        use crate::ast::MethodKind;
+
+        // BT-656: abstract instantiation inside a class-side method should be detected
+        let mut shape = make_abstract_class("Shape");
+        shape.class_methods.push(MethodDefinition {
+            selector: MessageSelector::Unary("create".into()),
+            parameters: vec![],
+            body: vec![make_spawn_expr("Shape")],
+            return_type: None,
+            is_sealed: false,
+            kind: MethodKind::Primary,
+            doc_comment: None,
+            span: test_span(),
+        });
+
+        let module = Module {
+            classes: vec![shape],
+            method_definitions: Vec::new(),
+            expressions: Vec::new(),
+            span: test_span(),
+            leading_comments: vec![],
+        };
+
+        let result = analyse(&module);
+        let abstract_errors: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Cannot instantiate abstract class"))
+            .collect();
+
+        assert_eq!(
+            abstract_errors.len(),
+            1,
+            "Should detect abstract instantiation in class method, got: {:?}",
+            result.diagnostics
+        );
+        assert!(abstract_errors[0].message.contains("Shape"));
+    }
+
+    #[test]
+    fn test_abstract_instantiation_in_string_interpolation() {
+        // BT-656: abstract instantiation inside string interpolation should be detected
+        let shape = make_abstract_class("Shape");
+
+        let interp = Expression::StringInterpolation {
+            segments: vec![
+                StringSegment::Literal("result: ".into()),
+                StringSegment::Interpolation(make_spawn_expr("Shape")),
+            ],
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![shape],
+            method_definitions: Vec::new(),
+            expressions: vec![interp],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+
+        let result = analyse(&module);
+        let abstract_errors: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Cannot instantiate abstract class"))
+            .collect();
+
+        assert_eq!(
+            abstract_errors.len(),
+            1,
+            "Should detect abstract instantiation in string interpolation, got: {:?}",
+            result.diagnostics
+        );
+        assert!(abstract_errors[0].message.contains("Shape"));
+    }
+
+    #[test]
+    fn test_abstract_instantiation_in_standalone_method() {
+        use crate::ast::{MethodKind, StandaloneMethodDefinition};
+
+        // BT-656: abstract instantiation inside a standalone method definition should be detected
+        let shape = make_abstract_class("Shape");
+
+        let standalone = StandaloneMethodDefinition {
+            class_name: Identifier::new("Foo", test_span()),
+            is_class_method: false,
+            method: MethodDefinition {
+                selector: MessageSelector::Unary("build".into()),
+                parameters: vec![],
+                body: vec![make_spawn_expr("Shape")],
+                return_type: None,
+                is_sealed: false,
+                kind: MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            },
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![shape],
+            method_definitions: vec![standalone],
+            expressions: Vec::new(),
+            span: test_span(),
+            leading_comments: vec![],
+        };
+
+        let result = analyse(&module);
+        let abstract_errors: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Cannot instantiate abstract class"))
+            .collect();
+
+        assert_eq!(
+            abstract_errors.len(),
+            1,
+            "Should detect abstract instantiation in standalone method, got: {:?}",
+            result.diagnostics
+        );
+        assert!(abstract_errors[0].message.contains("Shape"));
+    }
+
+    #[test]
+    fn test_actor_new_warning_in_standalone_method() {
+        use crate::ast::{MethodKind, StandaloneMethodDefinition};
+
+        // BT-656: actor `new` usage warning inside standalone method definitions
+        let counter = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![],
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        // Counter new (should warn — use spawn instead)
+        let new_expr = Expression::MessageSend {
+            receiver: Box::new(Expression::ClassReference {
+                name: Identifier::new("Counter", test_span()),
+                span: test_span(),
+            }),
+            selector: MessageSelector::Unary("new".into()),
+            arguments: vec![],
+            span: test_span(),
+        };
+
+        let standalone = StandaloneMethodDefinition {
+            class_name: Identifier::new("Foo", test_span()),
+            is_class_method: false,
+            method: MethodDefinition {
+                selector: MessageSelector::Unary("build".into()),
+                parameters: vec![],
+                body: vec![new_expr],
+                return_type: None,
+                is_sealed: false,
+                kind: MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            },
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![counter],
+            method_definitions: vec![standalone],
+            expressions: Vec::new(),
+            span: test_span(),
+            leading_comments: vec![],
+        };
+
+        let result = analyse(&module);
+        let actor_warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("should use `spawn`"))
+            .collect();
+
+        assert_eq!(
+            actor_warnings.len(),
+            1,
+            "Should detect actor new usage in standalone method, got: {:?}",
+            result.diagnostics
+        );
+        assert!(actor_warnings[0].message.contains("Counter"));
     }
 }

@@ -193,6 +193,46 @@ format_module_info_time_ago_seconds_test() ->
     ?assert(lists:suffix("s ago", TimeAgo)).
 
 %% ===================================================================
+%% get_source_file/1 tests
+%% ===================================================================
+
+get_source_file_with_path_test() ->
+    Tracker = beamtalk_repl_modules:new(),
+    Tracker2 = beamtalk_repl_modules:add_module(my_module, "/path/to/file.bt", Tracker),
+    {ok, Info} = beamtalk_repl_modules:get_module_info(my_module, Tracker2),
+    ?assertEqual("/path/to/file.bt", beamtalk_repl_modules:get_source_file(Info)).
+
+get_source_file_undefined_test() ->
+    Tracker = beamtalk_repl_modules:new(),
+    Tracker2 = beamtalk_repl_modules:add_module(my_module, undefined, Tracker),
+    {ok, Info} = beamtalk_repl_modules:get_module_info(my_module, Tracker2),
+    ?assertEqual(undefined, beamtalk_repl_modules:get_source_file(Info)).
+
+%% ===================================================================
+%% get_actor_count/3 with live registry
+%% ===================================================================
+
+get_actor_count_with_live_registry_test() ->
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
+    Tracker = beamtalk_repl_modules:new(),
+    Tracker2 = beamtalk_repl_modules:add_module(test_counter, "/path.bt", Tracker),
+    %% No actors registered yet
+    Count = beamtalk_repl_modules:get_actor_count(test_counter, RegistryPid, Tracker2),
+    ?assertEqual(0, Count),
+    gen_server:stop(RegistryPid).
+
+get_actor_count_with_registered_actors_test() ->
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
+    {ok, ActorPid} = test_counter:start_link(0),
+    ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
+    Tracker = beamtalk_repl_modules:new(),
+    Tracker2 = beamtalk_repl_modules:add_module(test_counter, "/path.bt", Tracker),
+    Count = beamtalk_repl_modules:get_actor_count(test_counter, RegistryPid, Tracker2),
+    ?assertEqual(1, Count),
+    gen_server:stop(ActorPid),
+    gen_server:stop(RegistryPid).
+
+%% ===================================================================
 %% Integration tests
 %% ===================================================================
 
@@ -223,3 +263,51 @@ full_lifecycle_test() ->
     %% Remove second module
     Tracker5 = beamtalk_repl_modules:remove_module(worker, Tracker4),
     ?assertEqual([], beamtalk_repl_modules:list_modules(Tracker5)).
+
+%% ===================================================================
+%% format_time_ago/1 tests (BT-627)
+%% ===================================================================
+
+format_time_ago_seconds_test() ->
+    Result = lists:flatten(beamtalk_repl_modules:format_time_ago(30)),
+    ?assert(lists:suffix("s ago", Result)).
+
+format_time_ago_minutes_test() ->
+    Result = lists:flatten(beamtalk_repl_modules:format_time_ago(120)),
+    ?assert(lists:suffix("m ago", Result)).
+
+format_time_ago_hours_test() ->
+    Result = lists:flatten(beamtalk_repl_modules:format_time_ago(7200)),
+    ?assert(lists:suffix("h ago", Result)).
+
+format_time_ago_days_test() ->
+    Result = lists:flatten(beamtalk_repl_modules:format_time_ago(172800)),
+    ?assert(lists:suffix("d ago", Result)).
+
+format_time_ago_zero_test() ->
+    Result = lists:flatten(beamtalk_repl_modules:format_time_ago(0)),
+    ?assertEqual("0s ago", Result).
+
+format_time_ago_boundary_59_test() ->
+    Result = lists:flatten(beamtalk_repl_modules:format_time_ago(59)),
+    ?assert(lists:suffix("s ago", Result)).
+
+format_time_ago_boundary_60_test() ->
+    Result = lists:flatten(beamtalk_repl_modules:format_time_ago(60)),
+    ?assert(lists:suffix("m ago", Result)).
+
+format_time_ago_boundary_3599_test() ->
+    Result = lists:flatten(beamtalk_repl_modules:format_time_ago(3599)),
+    ?assert(lists:suffix("m ago", Result)).
+
+format_time_ago_boundary_3600_test() ->
+    Result = lists:flatten(beamtalk_repl_modules:format_time_ago(3600)),
+    ?assert(lists:suffix("h ago", Result)).
+
+format_time_ago_boundary_86399_test() ->
+    Result = lists:flatten(beamtalk_repl_modules:format_time_ago(86399)),
+    ?assert(lists:suffix("h ago", Result)).
+
+format_time_ago_boundary_86400_test() ->
+    Result = lists:flatten(beamtalk_repl_modules:format_time_ago(86400)),
+    ?assert(lists:suffix("d ago", Result)).

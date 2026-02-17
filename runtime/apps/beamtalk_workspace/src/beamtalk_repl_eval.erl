@@ -24,7 +24,12 @@
          strip_internal_bindings/1,
          start_io_capture/0, stop_io_capture/1, io_capture_loop/1,
          is_stdlib_path/1, reset_captured_group_leaders/2,
-         inject_output/3, handle_io_request/2]).
+         inject_output/3, handle_io_request/2,
+         is_internal_key/1, activate_module/2,
+         register_classes/2, trigger_hot_reload/2,
+         io_passthrough_loop/1,
+         handle_class_definition/4, handle_method_definition/4,
+         compile_expression_via_port/3, compile_file_via_port/3]).
 -endif.
 
 -define(INTERNAL_REGISTRY_KEY, '__repl_actor_registry__').
