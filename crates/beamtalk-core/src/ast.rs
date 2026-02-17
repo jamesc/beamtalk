@@ -67,7 +67,7 @@
 //! Prefer these constructors over manual struct initialization.
 
 use crate::source_analysis::Span;
-use ecow::EcoString;
+use ecow::{EcoString, eco_format};
 
 /// Top-level container for a Beamtalk module (Aggregate Root).
 ///
@@ -604,30 +604,44 @@ impl TypeAnnotation {
 
     /// Returns a human-readable name for this type annotation.
     ///
-    /// Used by the class hierarchy to store declared state field types.
+    /// Used by the class hierarchy to store declared state field types
+    /// and method parameter/return types.
     #[must_use]
     pub fn type_name(&self) -> EcoString {
         match self {
             Self::Simple(id) => id.name.clone(),
-            Self::Singleton { name, .. } => EcoString::from(format!("#{name}")),
+            Self::Singleton { name, .. } => eco_format!("#{name}"),
             Self::Union { types, .. } => {
-                let names: Vec<_> = types.iter().map(Self::type_name).collect();
-                EcoString::from(names.join(" | "))
+                let mut result = EcoString::new();
+                for (i, ty) in types.iter().enumerate() {
+                    if i > 0 {
+                        result.push_str(" | ");
+                    }
+                    result.push_str(&ty.type_name());
+                }
+                result
             }
             Self::Generic {
                 base, parameters, ..
             } => {
-                let params: Vec<_> = parameters.iter().map(Self::type_name).collect();
-                EcoString::from(format!("{}<{}>", base.name, params.join(", ")))
+                let mut result = eco_format!("{}<", base.name);
+                for (i, ty) in parameters.iter().enumerate() {
+                    if i > 0 {
+                        result.push_str(", ");
+                    }
+                    result.push_str(&ty.type_name());
+                }
+                result.push('>');
+                result
             }
             Self::FalseOr { inner, .. } => {
                 let inner_name = match inner.as_ref() {
                     Self::Union { .. } | Self::FalseOr { .. } => {
-                        EcoString::from(format!("({})", inner.type_name()))
+                        eco_format!("({})", inner.type_name())
                     }
                     _ => inner.type_name(),
                 };
-                EcoString::from(format!("{inner_name} | False"))
+                eco_format!("{inner_name} | False")
             }
         }
     }

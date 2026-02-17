@@ -13,7 +13,7 @@
 //!
 //! The hierarchy uses simple depth-first MRO (no multiple inheritance).
 
-use crate::ast::{MethodKind, Module};
+use crate::ast::{MethodKind, Module, TypeAnnotation};
 use crate::source_analysis::Diagnostic;
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
@@ -38,6 +38,9 @@ pub struct MethodInfo {
     /// Inferred return type (e.g., "Integer", "String", "Boolean").
     /// `None` means the return type is unknown (Dynamic).
     pub return_type: Option<EcoString>,
+    /// Parameter type annotations (e.g., `vec![Some("Number")]` for `+ other: Number`).
+    /// Empty for unary methods. `None` elements mean the parameter type is unknown.
+    pub param_types: Vec<Option<EcoString>>,
 }
 
 impl MethodInfo {
@@ -640,7 +643,12 @@ impl ClassHierarchy {
                         kind: m.kind,
                         defined_in: class.name.name.clone(),
                         is_sealed: m.is_sealed,
-                        return_type: None,
+                        return_type: m.return_type.as_ref().map(TypeAnnotation::type_name),
+                        param_types: m
+                            .parameters
+                            .iter()
+                            .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
+                            .collect(),
                     })
                     .collect(),
                 class_methods: class
@@ -652,7 +660,12 @@ impl ClassHierarchy {
                         kind: m.kind,
                         defined_in: class.name.name.clone(),
                         is_sealed: m.is_sealed,
-                        return_type: None,
+                        return_type: m.return_type.as_ref().map(TypeAnnotation::type_name),
+                        param_types: m
+                            .parameters
+                            .iter()
+                            .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
+                            .collect(),
                     })
                     .collect(),
                 class_variables: class
@@ -680,7 +693,8 @@ mod tests {
     use super::builtins::builtin_method;
     use super::*;
     use crate::ast::{
-        ClassDefinition, Identifier, MethodDefinition, StateDeclaration, TypeAnnotation,
+        ClassDefinition, Identifier, MethodDefinition, ParameterDefinition, StateDeclaration,
+        TypeAnnotation,
     };
     use crate::source_analysis::Span;
 
@@ -1583,6 +1597,120 @@ mod tests {
 
         assert!(!hierarchy.is_typed("Parent"));
         assert!(!hierarchy.is_typed("Child"));
+    }
+
+    // --- Type annotation propagation tests ---
+
+    #[test]
+    fn stdlib_integer_plus_has_return_type() {
+        let h = ClassHierarchy::with_builtins();
+        let method = h
+            .find_method("Integer", "+")
+            .expect("Integer >> + should exist");
+        assert_eq!(method.return_type.as_deref(), Some("Integer"));
+    }
+
+    #[test]
+    fn stdlib_integer_plus_has_param_types() {
+        let h = ClassHierarchy::with_builtins();
+        let method = h
+            .find_method("Integer", "+")
+            .expect("Integer >> + should exist");
+        assert_eq!(method.param_types, vec![Some("Number".into())]);
+    }
+
+    #[test]
+    fn stdlib_unary_method_has_empty_param_types() {
+        let h = ClassHierarchy::with_builtins();
+        let method = h
+            .find_method("Integer", "asFloat")
+            .expect("Integer >> asFloat should exist");
+        assert!(method.param_types.is_empty());
+    }
+
+    #[test]
+    fn user_class_return_type_propagated() {
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Object", test_span())),
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: crate::ast::MessageSelector::Unary("getValue".into()),
+                parameters: vec![],
+                body: vec![],
+                return_type: Some(TypeAnnotation::simple("Integer", test_span())),
+                is_sealed: false,
+                kind: MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let method = hierarchy
+            .find_method("Counter", "getValue")
+            .expect("Counter >> getValue should exist");
+        assert_eq!(method.return_type.as_deref(), Some("Integer"));
+    }
+
+    #[test]
+    fn user_class_param_types_propagated() {
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Object", test_span())),
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: crate::ast::MessageSelector::Keyword(vec![crate::ast::KeywordPart {
+                    keyword: "add:".into(),
+                    span: test_span(),
+                }]),
+                parameters: vec![ParameterDefinition::with_type(
+                    Identifier::new("amount", test_span()),
+                    TypeAnnotation::simple("Integer", test_span()),
+                )],
+                body: vec![],
+                return_type: Some(TypeAnnotation::simple("Counter", test_span())),
+                is_sealed: false,
+                kind: MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let method = hierarchy
+            .find_method("Counter", "add:")
+            .expect("Counter >> add: should exist");
+        assert_eq!(method.return_type.as_deref(), Some("Counter"));
+        assert_eq!(method.param_types, vec![Some("Integer".into())]);
     }
 
     // --- State field type tests ---
