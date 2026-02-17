@@ -443,9 +443,7 @@ pub(crate) fn generate_pid_bif(selector: &str, params: &[String]) -> Option<Docu
             "call 'beamtalk_opaque_ops':'pid_to_string'(Self)",
         )),
         "hash" => Some(Document::Str("call 'erlang':'phash2'(Self)")),
-        "isAlive" => Some(Document::Str(
-            "call 'erlang':'is_process_alive'(Self)",
-        )),
+        "isAlive" => Some(Document::Str("call 'erlang':'is_process_alive'(Self)")),
         _ => None,
     }
 }
