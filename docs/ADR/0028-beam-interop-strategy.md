@@ -65,7 +65,7 @@ Erlang string uppercase: "hello"
 
 **How it works:**
 
-1. `Erlang` is a **value-type global** — a tagged map injected as a workspace binding (extending ADR 0010's pattern beyond actor singletons). Unlike `Transcript` and `Beamtalk` which are actor singletons, `Erlang` is a stateless value type — no gen_server process, no serialization bottleneck.
+1. `Erlang` is a **value-type global** — a tagged map injected as a workspace binding (extending ADR 0010's pattern beyond actor singletons). Unlike `Transcript` and `Beamtalk` which are actor singletons, `Erlang` is a stateless value type — no gen_server process, no serialization bottleneck. Note: ADR 0010 rejected value-type globals for `Transcript` (Alternative C) because it needs shared identity for I/O coordination; the `Erlang` global is different — it's stateless and merely acts as a namespace proxy, making the value-type approach appropriate here.
 2. Sending a unary message like `lists` returns an **ErlangModule proxy** for the atom `lists`
 3. The proxy translates Beamtalk message sends to Erlang function calls:
    - Unary message `reverse:` with one arg → `lists:reverse(Arg)`
@@ -246,25 +246,24 @@ These types are **interop artifacts** — they appear when calling Erlang code t
 
 ### 4. Tuple is for Interop
 
-Tuples are **Erlang interop artifacts**, not general-purpose data structures. Users should not construct tuples directly — they receive them from Erlang calls and destructure them via pattern matching.
+Tuples are **Erlang interop artifacts**, not general-purpose data structures. Users should not construct tuples directly — they receive them from Erlang calls and work with them via the Tuple protocol.
 
 ```beamtalk
 // Tuples arrive from Erlang
 result := Erlang file read_file: "config.json"
 // => {ok, <<"...">>}
 
-// Destructure via pattern matching
-result match: [
-  {#ok, data} -> data;
-  {#error, reason} -> Transcript show: "Failed: " , reason
-]
+// Work with tuples via the Tuple protocol
+result isOk
+  ifTrue: [result unwrap]
+  ifFalse: [Transcript show: "Failed to read config.json"]
 
 // Tuple protocol is for inspection and unwrapping
 result isOk      // => true
 result unwrap     // => <<"...">>
 ```
 
-The `Tuple new:` constructor remains available for edge cases but is not the recommended pattern. Future Array literals (`{1, 2, 3}`) will be a separate class (see ADR 0012 future work).
+Future language versions may add tuple pattern matching in `match:` blocks for more ergonomic destructuring (the parser already supports `Pattern::Tuple`, but end-to-end support is not yet tested — see ADR 0012 future work).
 
 ### 5. Supervising Foreign Erlang Gen_Servers (Future Work)
 
