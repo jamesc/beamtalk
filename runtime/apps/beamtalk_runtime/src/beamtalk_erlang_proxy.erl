@@ -187,43 +187,58 @@ validate_and_apply(Module, FunName, Args, OrigSelector) ->
                     try
                         erlang:apply(Module, FunName, Args)
                     catch
-                        error:#{error := #beamtalk_error{}} = Wrapped ->
+                        error:#{error := #beamtalk_error{}} = Wrapped:_Stack ->
                             %% Re-raise already-wrapped Beamtalk exceptions
                             %% (e.g., from Beamtalk code called via Erlang)
                             error(Wrapped);
-                        error:badarg ->
+                        error:undef:Stack ->
+                            %% Unlikely with export validation (BT-679), but
+                            %% possible during hot code reload race conditions
+                            Error0 = beamtalk_error:new(does_not_understand, 'ErlangModule'),
+                            Error1 = beamtalk_error:with_selector(Error0, OrigSelector),
+                            Error2 = beamtalk_error:with_hint(Error1,
+                                erlang_error_hint(Module, FunName, undef)),
+                            beamtalk_error:raise(
+                                beamtalk_error:with_details(Error2,
+                                    #{erlang_error => undef,
+                                      erlang_stacktrace => Stack}));
+                        error:badarg:Stack ->
                             Error0 = beamtalk_error:new(type_error, 'ErlangModule'),
                             Error1 = beamtalk_error:with_selector(Error0, OrigSelector),
                             Error2 = beamtalk_error:with_hint(Error1,
                                 erlang_error_hint(Module, FunName, badarg)),
                             beamtalk_error:raise(
                                 beamtalk_error:with_details(Error2,
-                                    #{erlang_error => badarg}));
-                        error:function_clause ->
+                                    #{erlang_error => badarg,
+                                      erlang_stacktrace => Stack}));
+                        error:function_clause:Stack ->
                             Error0 = beamtalk_error:new(arity_mismatch, 'ErlangModule'),
                             Error1 = beamtalk_error:with_selector(Error0, OrigSelector),
                             Error2 = beamtalk_error:with_hint(Error1,
                                 erlang_error_hint(Module, FunName, function_clause)),
                             beamtalk_error:raise(
                                 beamtalk_error:with_details(Error2,
-                                    #{erlang_error => function_clause}));
-                        error:badarith ->
+                                    #{erlang_error => function_clause,
+                                      erlang_stacktrace => Stack}));
+                        error:badarith:Stack ->
                             Error0 = beamtalk_error:new(type_error, 'ErlangModule'),
                             Error1 = beamtalk_error:with_selector(Error0, OrigSelector),
                             Error2 = beamtalk_error:with_hint(Error1,
                                 erlang_error_hint(Module, FunName, badarith)),
                             beamtalk_error:raise(
                                 beamtalk_error:with_details(Error2,
-                                    #{erlang_error => badarith}));
-                        error:Reason ->
+                                    #{erlang_error => badarith,
+                                      erlang_stacktrace => Stack}));
+                        error:Reason:Stack ->
                             Error0 = beamtalk_error:new(runtime_error, 'ErlangModule'),
                             Error1 = beamtalk_error:with_selector(Error0, OrigSelector),
                             Error2 = beamtalk_error:with_hint(Error1,
                                 erlang_error_hint(Module, FunName, Reason)),
                             beamtalk_error:raise(
                                 beamtalk_error:with_details(Error2,
-                                    #{erlang_error => Reason}));
-                        exit:Reason ->
+                                    #{erlang_error => Reason,
+                                      erlang_stacktrace => Stack}));
+                        exit:Reason:Stack ->
                             Error0 = beamtalk_error:new(erlang_exit, 'ErlangModule'),
                             Error1 = beamtalk_error:with_selector(Error0, OrigSelector),
                             ReasonBin = iolist_to_binary(io_lib:format("~p", [Reason])),
@@ -236,8 +251,9 @@ validate_and_apply(Module, FunName, Args, OrigSelector) ->
                             Error2 = beamtalk_error:with_hint(Error1, Hint),
                             beamtalk_error:raise(
                                 beamtalk_error:with_details(Error2,
-                                    #{erlang_exit_reason => Reason}));
-                        throw:Value ->
+                                    #{erlang_exit_reason => Reason,
+                                      erlang_stacktrace => Stack}));
+                        throw:Value:Stack ->
                             Error0 = beamtalk_error:new(erlang_throw, 'ErlangModule'),
                             Error1 = beamtalk_error:with_selector(Error0, OrigSelector),
                             ValueBin = iolist_to_binary(io_lib:format("~p", [Value])),
@@ -250,7 +266,8 @@ validate_and_apply(Module, FunName, Args, OrigSelector) ->
                             Error2 = beamtalk_error:with_hint(Error1, Hint),
                             beamtalk_error:raise(
                                 beamtalk_error:with_details(Error2,
-                                    #{erlang_throw_value => Value}))
+                                    #{erlang_throw_value => Value,
+                                      erlang_stacktrace => Stack}))
                     end;
                 false ->
                     %% Function/arity not found — check if function exists with different arity

@@ -271,7 +271,7 @@ dispatch_badarith_wraps_as_type_error_test() ->
     end.
 
 dispatch_exit_preserves_details_test() ->
-    %% exit errors should preserve the original reason in details
+    %% exit errors should preserve the original reason and stacktrace in details
     Proxy = beamtalk_erlang_proxy:new(erlang),
     try
         beamtalk_erlang_proxy:dispatch('exit:', [normal], Proxy),
@@ -280,11 +280,12 @@ dispatch_exit_preserves_details_test() ->
         error:#{error := Inner} ->
             ?assertEqual(erlang_exit, Inner#beamtalk_error.kind),
             Details = Inner#beamtalk_error.details,
-            ?assertEqual(normal, maps:get(erlang_exit_reason, Details))
+            ?assertEqual(normal, maps:get(erlang_exit_reason, Details)),
+            ?assert(is_list(maps:get(erlang_stacktrace, Details)))
     end.
 
 dispatch_throw_preserves_details_test() ->
-    %% throw errors should preserve the original value in details
+    %% throw errors should preserve the original value and stacktrace in details
     Proxy = beamtalk_erlang_proxy:new(erlang),
     try
         beamtalk_erlang_proxy:dispatch('throw:', [{custom, value}], Proxy),
@@ -293,7 +294,8 @@ dispatch_throw_preserves_details_test() ->
         error:#{error := Inner} ->
             ?assertEqual(erlang_throw, Inner#beamtalk_error.kind),
             Details = Inner#beamtalk_error.details,
-            ?assertEqual({custom, value}, maps:get(erlang_throw_value, Details))
+            ?assertEqual({custom, value}, maps:get(erlang_throw_value, Details)),
+            ?assert(is_list(maps:get(erlang_stacktrace, Details)))
     end.
 
 dispatch_exit_hint_includes_module_test() ->
@@ -350,7 +352,7 @@ dispatch_function_clause_is_arity_mismatch_test() ->
     end.
 
 dispatch_badarg_preserves_details_test() ->
-    %% badarg errors should include erlang_error in details (ADR 0028)
+    %% badarg errors should include erlang_error and erlang_stacktrace in details (ADR 0028)
     Proxy = beamtalk_erlang_proxy:new(erlang),
     try
         beamtalk_erlang_proxy:dispatch('abs:', [not_a_number], Proxy),
@@ -358,7 +360,8 @@ dispatch_badarg_preserves_details_test() ->
     catch
         error:#{error := Inner} ->
             Details = Inner#beamtalk_error.details,
-            ?assertEqual(badarg, maps:get(erlang_error, Details))
+            ?assertEqual(badarg, maps:get(erlang_error, Details)),
+            ?assert(is_list(maps:get(erlang_stacktrace, Details)))
     end.
 
 dispatch_function_clause_preserves_details_test() ->
@@ -421,7 +424,8 @@ dispatch_generic_error_maps_to_runtime_error_test() ->
             ?assertEqual('ErlangModule', Inner#beamtalk_error.class),
             ?assert(is_binary(Inner#beamtalk_error.hint)),
             Details = Inner#beamtalk_error.details,
-            ?assertEqual({custom_reason, 42}, maps:get(erlang_error, Details))
+            ?assertEqual({custom_reason, 42}, maps:get(erlang_error, Details)),
+            ?assert(is_list(maps:get(erlang_stacktrace, Details)))
     end.
 
 %%% ===================================================================
