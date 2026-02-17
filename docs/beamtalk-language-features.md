@@ -586,20 +586,6 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 
 **Guard expressions** support: `>`, `<`, `>=`, `<=`, `=:=`, `=/=`, `/=`, `+`, `-`, `*`, `/`
 
-### In Message Handlers (Future)
-
-```
-// Match on message structure
-handle: {#ok, value} => self process: value
-handle: {#error, reason} => self logError: reason
-handle: _ => self handleUnknown
-
-// Match with guards
-process: n when: [n > 0] => self positive: n
-process: n when: [n < 0] => self negative: n
-process: 0 => self zero
-```
-
 ### Destructuring Assignment
 
 ```
@@ -1259,6 +1245,20 @@ Integer extend
 ## Not Yet Implemented
 
 > The following features are planned but not yet implemented. They are kept here for review and future reference.
+
+### Pattern Matching in Message Handlers
+
+```
+// Match on message structure
+handle: {#ok, value} => self process: value
+handle: {#error, reason} => self logError: reason
+handle: _ => self handleUnknown
+
+// Match with guards
+process: n when: [n > 0] => self positive: n
+process: n when: [n < 0] => self negative: n
+process: 0 => self zero
+```
 
 ### Pipe Operator (Elixir-inspired)
 
