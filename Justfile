@@ -26,13 +26,20 @@ ci: build lint test test-stdlib test-integration test-mcp test-e2e
 [windows]
 ci: build lint test test-stdlib test-integration
 
-# Unix-only: uses rm -rf
 # Clean all build artifacts (Rust, Erlang, VS Code, caches, examples)
 [unix]
 clean: clean-rust clean-erlang clean-vscode
     @rm -rf runtime/_build 2>/dev/null || true
     @rm -rf target/llvm-cov 2>/dev/null || true
     @rm -rf examples/build 2>/dev/null || true
+    @echo "✅ All build artifacts cleaned"
+
+# Clean all build artifacts (Rust, Erlang, VS Code, caches, examples)
+[windows]
+clean: clean-rust clean-erlang clean-vscode
+    if (Test-Path runtime\_build) { Remove-Item -Recurse -Force runtime\_build }
+    if (Test-Path target\llvm-cov) { Remove-Item -Recurse -Force target\llvm-cov }
+    if (Test-Path examples\build) { Remove-Item -Recurse -Force examples\build }
     @echo "✅ All build artifacts cleaned"
 
 # ═══════════════════════════════════════════════════════════════════════════
