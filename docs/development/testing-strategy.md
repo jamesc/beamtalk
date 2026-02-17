@@ -912,6 +912,74 @@ just fuzz 5  # 5 seconds
 
 ---
 
+## Property Testing (Nightly Extended)
+
+Property tests use [proptest](https://proptest-rs.github.io/proptest/) to verify parser invariants over thousands of randomly generated inputs. Standard CI runs 512 cases per property (~0.4s). The nightly run extends this to 10,000 cases to catch rare edge cases.
+
+**Location:** `crates/beamtalk-core/src/source_analysis/parser/property_tests.rs`
+
+**Properties tested:**
+
+| Property | What It Verifies |
+|----------|-----------------|
+| `parser_never_panics` | Arbitrary UTF-8 input never causes a panic |
+| `parser_never_panics_near_valid` | Near-valid Beamtalk fragments don't panic |
+| `diagnostic_spans_within_input` | All diagnostic spans have `end <= input.len()` |
+| `error_nodes_produce_diagnostics` | Every `Expression::Error` node has diagnostics |
+| `error_messages_are_user_facing` | No internal type names leak into error messages |
+
+### Running Locally
+
+```bash
+# Run with default 512 cases (fast, ~0.4s)
+cargo test -p beamtalk-core property_tests
+
+# Run with extended cases (matches nightly)
+PROPTEST_CASES=10000 cargo test -p beamtalk-core property_tests
+```
+
+### CI Integration
+
+The extended proptest runs nightly alongside cargo-fuzz in `.github/workflows/fuzz.yml`:
+- Cases per property: 10,000 (vs 512 in standard CI)
+- Schedule: 2 AM UTC daily (same as fuzzing)
+- Can be triggered manually via `workflow_dispatch`
+- Proptest automatically shrinks failures to minimal reproducing cases
+
+**Why nightly?** 10,000 cases × 5 properties takes longer than is appropriate for per-PR CI. Nightly runs provide deeper exploration without slowing development.
+
+### Interpreting Results
+
+**Success:** All 5 properties pass with 10,000 cases each.
+
+**Failure:** Proptest finds a failing input and shrinks it to the smallest reproducer. The shrunk case is printed in the test output. Example:
+```
+proptest: Shrink failed: parser panicked on input "\x00\xff"
+```
+
+To reproduce a specific failure, use the seed shown in the output:
+```bash
+PROPTEST_CASES=1 cargo test -p beamtalk-core property_tests -- parser_never_panics
+```
+
+### Standard CI vs Nightly
+
+| | Standard CI | Nightly |
+|---|---|---|
+| Cases per property | 512 | 10,000 |
+| Duration | ~0.4s | ~10s |
+| Runs on | Every PR | Daily at 2 AM UTC |
+| Trigger | Automatic | Schedule + manual |
+| Configured via | `ProptestConfig` in source | `PROPTEST_CASES` env var |
+
+### References
+
+- [proptest documentation](https://proptest-rs.github.io/proptest/) - Property testing framework
+- [ADR 0011](../ADR/0011-robustness-testing-layered-fuzzing.md) - Robustness testing strategy
+- Epic: BT-362
+
+---
+
 ## Performance Testing (Future)
 
 From [AGENTS.md](../../AGENTS.md), targets for tooling responsiveness:
