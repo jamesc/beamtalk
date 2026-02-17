@@ -18,13 +18,16 @@
   #connect-btn, #send-btn { font-family: monospace; font-size: 12px; background: #89b4fa; color: #1e1e2e; border: none; padding: 4px 12px; cursor: pointer; }
   #connect-btn:hover, #send-btn:hover { background: #74c7ec; }
   #connect-btn:disabled, #send-btn:disabled { background: #45475a; color: #6c7086; cursor: default; }
-  main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-  .pane { flex: 1; display: flex; flex-direction: column; border-bottom: 1px solid #45475a; }
-  .pane-header { padding: 4px 16px; background: #313244; font-size: 11px; color: #a6adc8; text-transform: uppercase; letter-spacing: 1px; }
-  #transcript { flex: 1; overflow-y: auto; padding: 8px 16px; font-size: 13px; white-space: pre-wrap; background: #181825; }
+  main { flex: 1; display: flex; overflow: hidden; }
+  .pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .pane + .pane { border-left: 1px solid #45475a; }
+  .pane-header { padding: 4px 16px; background: #313244; font-size: 11px; color: #a6adc8; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #45475a; }
+  .pane-content { flex: 1; overflow-y: auto; padding: 8px 16px; font-size: 13px; white-space: pre-wrap; background: #181825; }
+  #workspace-pane { display: flex; flex-direction: column; }
   #eval-panel { display: flex; gap: 8px; padding: 8px 16px; background: #1e1e2e; border-top: 1px solid #45475a; }
   #eval-input { flex: 1; font-family: monospace; font-size: 13px; background: #313244; color: #cdd6f4; border: 1px solid #45475a; padding: 8px; resize: none; }
   #eval-input:focus { outline: 1px solid #89b4fa; }
+  #transcript-empty { color: #6c7086; font-style: italic; }
 </style>
 </head>
 <body>
@@ -36,31 +39,36 @@
 
 <div id="auth-panel">
   <label for="cookie-input">Cookie:</label>
-  <input id="cookie-input" type="password" placeholder="Paste Erlang cookie (~/.erlang.cookie)">
+  <input id="cookie-input" type="password" placeholder="Paste workspace cookie (~/.beamtalk/workspaces/…/cookie)">
   <button id="connect-btn" onclick="connect()">Connect</button>
 </div>
 
 <main>
+  <div class="pane" id="workspace-pane">
+    <div class="pane-header">Workspace</div>
+    <div class="pane-content" id="repl-output"></div>
+    <div id="eval-panel">
+      <textarea id="eval-input" rows="2" placeholder="Beamtalk expression…" disabled></textarea>
+      <button id="send-btn" onclick="sendEval()" disabled>Send</button>
+    </div>
+  </div>
   <div class="pane">
     <div class="pane-header">Transcript</div>
-    <div id="transcript"></div>
+    <div class="pane-content" id="transcript"><span id="transcript-empty">Transcript output appears here…</span></div>
   </div>
 </main>
-
-<div id="eval-panel">
-  <textarea id="eval-input" rows="2" placeholder="Beamtalk expression…" disabled></textarea>
-  <button id="send-btn" onclick="sendEval()" disabled>Send</button>
-</div>
 
 <script>
 (function() {
   const statusEl = document.getElementById('status');
+  const replOutput = document.getElementById('repl-output');
   const transcriptEl = document.getElementById('transcript');
   const evalInput = document.getElementById('eval-input');
   const sendBtn = document.getElementById('send-btn');
   const connectBtn = document.getElementById('connect-btn');
   const cookieInput = document.getElementById('cookie-input');
   const authPanel = document.getElementById('auth-panel');
+  const transcriptEmpty = document.getElementById('transcript-empty');
 
   let ws = null;
   let msgId = 0;
@@ -71,12 +79,12 @@
     statusEl.style.color = color || '#a6adc8';
   }
 
-  function appendTranscript(text, cls) {
+  function appendTo(el, text, cls) {
     const span = document.createElement('span');
     span.textContent = text;
     if (cls) span.style.color = cls;
-    transcriptEl.appendChild(span);
-    transcriptEl.scrollTop = transcriptEl.scrollHeight;
+    el.appendChild(span);
+    el.scrollTop = el.scrollHeight;
   }
 
   window.connect = function() {
@@ -123,19 +131,28 @@
         return;
       }
 
-      // Push messages (Transcript)
+      // Push messages → Transcript pane
       if (msg.push === 'transcript') {
-        appendTranscript(msg.text, '#cdd6f4');
+        if (transcriptEmpty) transcriptEmpty.remove();
+        appendTo(transcriptEl, msg.text, '#cdd6f4');
         return;
       }
 
-      // Eval response
+      // Eval response → Workspace pane
       if (msg.id && msg.status) {
         const isError = Array.isArray(msg.status) && msg.status.includes('error');
-        const value = msg.value != null ? String(msg.value) : '';
-        if (value) {
-          appendTranscript('=> ' + value + '\n', isError ? '#f38ba8' : '#a6e3a1');
+        if (isError && msg.error) {
+          appendTo(replOutput, 'Error: ' + msg.error + '\n', '#f38ba8');
+        } else {
+          const value = msg.value != null ? String(msg.value) : '';
+          if (value) {
+            appendTo(replOutput, '=> ' + value + '\n', '#a6e3a1');
+          }
         }
+      }
+      // Legacy error format (no id/status)
+      if (msg.type === 'error' && msg.message) {
+        appendTo(replOutput, 'Error: ' + msg.message + '\n', '#f38ba8');
       }
     };
 
@@ -156,7 +173,7 @@
     const code = evalInput.value.trim();
     if (!code || !ws || ws.readyState !== WebSocket.OPEN) return;
 
-    appendTranscript(code + '\n', '#89b4fa');
+    appendTo(replOutput, code + '\n', '#89b4fa');
     msgId++;
     ws.send(JSON.stringify({ op: 'eval', id: 'msg-' + msgId, code: code }));
     evalInput.value = '';
