@@ -160,7 +160,7 @@ Fault tolerance via **declarative supervision trees**, not library patterns.
 Hot code reload is just **message sends to class objects** — no special syntax.
 
 - Redefine a class to update all future instances
-- Replace individual methods with `Foo >> #selector put: [...]`
+- Replace individual methods: `Counter >> increment => self.value := self.value + 1`
 - BEAM's built-in hot code loading provides the foundation
 - State preservation across code versions is automatic
 - Sub-200ms from edit to running in production

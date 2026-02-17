@@ -560,20 +560,19 @@ Pattern matching can bind variables in match arms:
 
 ## Live Patching
 
-Hot code reload with dedicated syntax.
+Hot code reload via message sends — no dedicated `patch` syntax needed.
 
 ```beamtalk
-// Patch a method on running actors
-patch Counter >> #increment [
+// Replace a method on a running class
+Counter >> increment =>
   Telemetry log: "incrementing"
   self.value := self.value + 1
-]
 
-// Patch with state migration
-patch Agent >> state [
-  // Add new field, migrate existing
-  self.memory := self.history ifNil: [OrderedCollection new]
-]
+// Redefine a class to update all future instances
+Actor subclass: Counter
+  state: value = 0, lastModified = nil
+  increment => self.value := self.value + 1
+  getValue => ^self.value
 ```
 
 ---

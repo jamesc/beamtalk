@@ -1,6 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
 // Tuple primitive tests (BT-417)
 // Tuples are an Erlang interop type — they exist primarily to handle
-// results from Erlang/OTP functions that return {ok, Value} or {error, Reason}.
+// results from Erlang/OTP functions that return {'ok', Value} or {'error', Reason}.
 // For general-purpose collections, prefer List, Dictionary, or Array.
 
 // ⚠️ NOTE: Beamtalk does not have tuple literal syntax.

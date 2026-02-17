@@ -538,7 +538,7 @@ doubled := #(1, 2, 3) collect: [:x | x * 2]
 **Core Erlang:**
 ```erlang
 let Fun = fun (X) -> call 'erlang':'*'(X, 2)
-in let Doubled = call 'lists':'map'(Fun, #(1, 2, 3))
+in let Doubled = call 'lists':'map'(Fun, [1, 2, 3])
 ```
 
 ### Keyword Message Compilation
@@ -547,7 +547,7 @@ Keyword messages flatten to function calls:
 
 **Beamtalk:**
 ```
-#{#x => 1} at: #x put: 'hello'
+#{#x => 1} at: #x put: "hello"
 ```
 
 **Core Erlang:**
@@ -601,7 +601,7 @@ code_change(OldVsn, State, Extra) ->
 
 ### Explicit State Migration in Beamtalk
 
-State migration during hot reload is handled by redefining the class with new state fields. The runtime's `beamtalk_hot_reload` module detects schema changes and applies them automatically.
+State migration during hot reload is handled by the `beamtalk_hot_reload` module. When the compiler/loader supplies new instance variable info via `code_change/3`, the module can add fields with defaults and remove obsolete fields. Without this info, state is preserved unchanged.
 
 ### Automatic Field Migration
 

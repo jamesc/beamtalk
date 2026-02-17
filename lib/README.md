@@ -1,10 +1,14 @@
+<!--
+Copyright 2026 James Casey
+SPDX-License-Identifier: Apache-2.0
+-->
 # Beamtalk Standard Library
 
 The standard library for Beamtalk, where everything is a message send.
 
 ## Class Hierarchy
 
-```
+```text
 ProtoObject (minimal root - identity, DNU)
   └─ Object (value types - reflection, nil testing)
        ├─ Integer, Float, String, Atom  (sealed primitives)

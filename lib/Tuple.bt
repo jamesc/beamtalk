@@ -4,7 +4,7 @@
 /// Tuple — Erlang interop type for fixed-size tagged results.
 ///
 /// Tuples exist primarily for interoperability with Erlang/OTP code.
-/// Many Erlang functions return `{ok, Value}` or `{error, Reason}` tuples.
+/// Many Erlang functions return `{'ok', Value}` or `{'error', Reason}` tuples.
 /// Use `isOk`, `isError`, `unwrap`, and `unwrapOr:` to work with these results.
 ///
 /// For general-purpose collections, prefer List, Dictionary, or Array.
@@ -36,7 +36,7 @@ sealed Collection subclass: Tuple
   /// ```
   at: index: Integer => @primitive "at:"
 
-  /// Test if the tuple represents an `{ok, _}` result.
+  /// Test if the tuple represents an `{'ok', _}` result.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -44,7 +44,7 @@ sealed Collection subclass: Tuple
   /// ```
   isOk -> Boolean => @primitive "isOk"
 
-  /// Test if the tuple represents an `{error, _}` result.
+  /// Test if the tuple represents an `{'error', _}` result.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -52,7 +52,7 @@ sealed Collection subclass: Tuple
   /// ```
   isError -> Boolean => @primitive "isError"
 
-  /// Extract the value from an `{ok, Value}` tuple, or raise on `{error, Reason}`.
+  /// Extract the value from an `{'ok', Value}` tuple, or raise on `{'error', Reason}`.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -60,7 +60,7 @@ sealed Collection subclass: Tuple
   /// ```
   unwrap => @primitive "unwrap"
 
-  /// Extract the value from an `{ok, Value}` tuple, or return `default` on error.
+  /// Extract the value from an `{'ok', Value}` tuple, or return `default` on error.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -68,7 +68,7 @@ sealed Collection subclass: Tuple
   /// ```
   unwrapOr: default => @primitive "unwrapOr:"
 
-  /// Extract the value from an `{ok, Value}` tuple, or evaluate `block` on error.
+  /// Extract the value from an `{'ok', Value}` tuple, or evaluate `block` on error.
   ///
   /// ## Examples
   /// ```beamtalk

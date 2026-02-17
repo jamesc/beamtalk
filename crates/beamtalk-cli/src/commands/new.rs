@@ -192,8 +192,8 @@ Object subclass: Counter
 
 ## Language Documentation
 
-- Language features: https://jamesc.github.io/beamtalk/docs/language-features
-- Syntax rationale: https://jamesc.github.io/beamtalk/docs/syntax-rationale
+- Language features: https://jamesc.github.io/beamtalk/docs/language-features.html
+- Syntax rationale: https://jamesc.github.io/beamtalk/docs/syntax-rationale.html
 - Examples: see `src/` directory
 "#
     );
