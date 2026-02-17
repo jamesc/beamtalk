@@ -77,10 +77,15 @@ terminate(_Reason, _Req, #ws_state{session_id = SessionId, session_pid = Session
 %% Expected: {"type":"auth","cookie":"<workspace cookie>"}
 handle_auth(Data, State) ->
     try jsx:decode(Data, [return_maps]) of
-        #{<<"type">> := <<"auth">>, <<"cookie">> := ProvidedCookie} ->
+        #{<<"type">> := <<"auth">>, <<"cookie">> := ProvidedCookie}
+                when is_binary(ProvidedCookie) ->
             NodeCookie = atom_to_binary(erlang:get_cookie(), utf8),
-            %% Timing-safe comparison to prevent side-channel attacks
-            case crypto:hash_equals(ProvidedCookie, NodeCookie) of
+            %% Timing-safe comparison to prevent side-channel attacks.
+            %% crypto:hash_equals/2 raises badarg on length mismatch,
+            %% so we guard with byte_size check first.
+            CookieValid = byte_size(ProvidedCookie) =:= byte_size(NodeCookie)
+                andalso crypto:hash_equals(ProvidedCookie, NodeCookie),
+            case CookieValid of
                 true ->
                     %% Auth succeeded — now create the session
                     SessionId = beamtalk_repl_server:generate_session_id(),
@@ -101,7 +106,10 @@ handle_auth(Data, State) ->
                                             session_id = SessionId,
                                             session_pid = SessionPid}};
                         {error, Reason} ->
-                            ?LOG_ERROR("Session creation failed after auth: ~p", [Reason]),
+                            ?LOG_ERROR("Session creation failed after auth", #{
+                                reason => Reason,
+                                peer => State#ws_state.peer
+                            }),
                             ErrorJson = jsx:encode(#{<<"type">> => <<"auth_error">>,
                                                      <<"message">> => <<"Session creation failed">>}),
                             {[{text, ErrorJson}, {close, 1011, <<"Session creation failed">>}], State}
@@ -156,9 +164,11 @@ handle_shutdown(Msg, State) ->
             ?LOG_WARNING("Shutdown denied: missing cookie in message", #{}),
             ErrorJson = beamtalk_repl_json:format_error(<<"Shutdown requires cookie">>),
             {[{text, ErrorJson}], State};
-        ProvidedCookie ->
+        ProvidedCookie when is_binary(ProvidedCookie) ->
             NodeCookie = atom_to_binary(erlang:get_cookie(), utf8),
-            case crypto:hash_equals(ProvidedCookie, NodeCookie) of
+            CookieValid = byte_size(ProvidedCookie) =:= byte_size(NodeCookie)
+                andalso crypto:hash_equals(ProvidedCookie, NodeCookie),
+            case CookieValid of
                 true ->
                     ?LOG_INFO("Shutdown requested via WebSocket protocol", #{}),
                     erlang:send_after(100, self(), shutdown_requested),
@@ -169,5 +179,9 @@ handle_shutdown(Msg, State) ->
                     ?LOG_WARNING("Shutdown denied: invalid cookie", #{}),
                     ErrorJson = beamtalk_repl_json:format_error(<<"Invalid shutdown cookie">>),
                     {[{text, ErrorJson}], State}
-            end
+            end;
+        _ ->
+            ?LOG_WARNING("Shutdown denied: invalid cookie type", #{}),
+            ErrorJson = beamtalk_repl_json:format_error(<<"Invalid shutdown cookie">>),
+            {[{text, ErrorJson}], State}
     end.

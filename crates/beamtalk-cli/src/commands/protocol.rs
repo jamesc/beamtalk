@@ -69,7 +69,11 @@ impl ProtocolClient {
         };
 
         // Read auth-required message (pre-auth, no session yet)
-        let _auth_required = client.read_response()?;
+        let auth_required = client.read_response()?;
+        match auth_required.get("op").and_then(|v| v.as_str()) {
+            Some("auth-required") => {}
+            _ => return Err(miette!("Unexpected pre-auth message: {auth_required}")),
+        }
 
         // ADR 0020: Cookie handshake — first message must be auth
         let auth_msg = serde_json::json!({"type": "auth", "cookie": cookie});
@@ -93,6 +97,10 @@ impl ProtocolClient {
 
         // Read session-started message (sent after auth_ok)
         let session_msg = client.read_response()?;
+        match session_msg.get("op").and_then(|v| v.as_str()) {
+            Some("session-started") => {}
+            _ => return Err(miette!("Unexpected session message: {session_msg}")),
+        }
         client.session_id = session_msg
             .get("session")
             .and_then(|s| s.as_str())

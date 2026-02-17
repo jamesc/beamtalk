@@ -99,6 +99,11 @@ fn resolve_port_and_cookie(args: &Args) -> Result<(u16, String), Box<dyn std::er
     // Explicit port takes priority (cookie from env or default Erlang cookie)
     if let Some(port) = args.port {
         let cookie = std::env::var("BEAMTALK_COOKIE").unwrap_or_default();
+        if cookie.trim().is_empty() {
+            return Err(
+                "BEAMTALK_COOKIE is required when using --port (or use --workspace-id).".into(),
+            );
+        }
         return Ok((port, cookie));
     }
 
