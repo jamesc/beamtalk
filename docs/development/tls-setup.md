@@ -153,4 +153,4 @@ openssl x509 -in ~/.beamtalk/workspaces/{id}/tls/ca.pem -text -noout
 
 - [ADR 0020: Connection Security](../ADR/0020-connection-security.md)
 - [Erlang ssl_dist documentation](https://www.erlang.org/doc/apps/ssl/ssl_distribution.html)
-- [OTP Using TLS for Erlang Distribution](https://www.erlang.org/doc/apps/ssl/ssl_distribution.html)
+- [Erlang ssl application documentation](https://www.erlang.org/doc/man/ssl.html)

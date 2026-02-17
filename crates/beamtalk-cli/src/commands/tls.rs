@@ -23,9 +23,12 @@ use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
 use miette::{IntoDiagnostic, Result};
-use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, KeyPair, KeyUsagePurpose};
+use rcgen::{
+    BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair,
+    KeyUsagePurpose,
+};
 
-use super::workspace::storage;
+use super::workspace::{self, storage};
 
 /// TLS certificate management subcommands.
 #[derive(Debug, Subcommand)]
@@ -52,7 +55,8 @@ pub fn run(action: TlsCommand) -> Result<()> {
 /// Initialize TLS certificates for a workspace.
 fn init_tls(workspace_name: Option<&str>) -> Result<()> {
     let current_dir = std::env::current_dir().into_diagnostic()?;
-    let workspace_id = storage::workspace_id_for(&current_dir, workspace_name)?;
+    let project_root = workspace::discovery::discover_project_root(&current_dir);
+    let workspace_id = storage::workspace_id_for(&project_root, workspace_name)?;
 
     let tls_dir = storage::workspace_dir(&workspace_id)?.join("tls");
 
@@ -145,6 +149,10 @@ fn generate_node_cert(ca_cert_pem: &str, ca_key_pair: &KeyPair) -> Result<(Strin
     params
         .distinguished_name
         .push(DnType::OrganizationName, "Beamtalk");
+    params.extended_key_usages = vec![
+        ExtendedKeyUsagePurpose::ServerAuth,
+        ExtendedKeyUsagePurpose::ClientAuth,
+    ];
 
     let cert = params
         .signed_by(&node_key_pair, &ca_cert, ca_key_pair)
@@ -158,30 +166,32 @@ fn generate_node_cert(ca_cert_pem: &str, ca_key_pair: &KeyPair) -> Result<(Strin
 /// This file is consumed by `-ssl_dist_optfile` and configures both
 /// server and client sides of the TLS distribution connection.
 pub fn generate_ssl_dist_conf(tls_dir: &Path) -> Result<PathBuf> {
-    let ca_path = tls_dir.join("ca.pem");
-    let cert_path = tls_dir.join("node.pem");
-    let key_path = tls_dir.join("node-key.pem");
+    // Use forward slashes for paths — Erlang string literals treat backslashes
+    // as escape sequences, which breaks on Windows.
+    let ca_path = tls_dir.join("ca.pem").to_string_lossy().replace('\\', "/");
+    let cert_path = tls_dir
+        .join("node.pem")
+        .to_string_lossy()
+        .replace('\\', "/");
+    let key_path = tls_dir
+        .join("node-key.pem")
+        .to_string_lossy()
+        .replace('\\', "/");
 
     let conf = format!(
         "[{{server, [\n\
-         \x20 {{certfile, \"{}\"}},\n\
-         \x20 {{keyfile, \"{}\"}},\n\
-         \x20 {{cacertfile, \"{}\"}},\n\
+         \x20 {{certfile, \"{cert_path}\"}},\n\
+         \x20 {{keyfile, \"{key_path}\"}},\n\
+         \x20 {{cacertfile, \"{ca_path}\"}},\n\
          \x20 {{verify, verify_peer}},\n\
          \x20 {{fail_if_no_peer_cert, true}}\n\
          ]}},\n\
          {{client, [\n\
-         \x20 {{certfile, \"{}\"}},\n\
-         \x20 {{keyfile, \"{}\"}},\n\
-         \x20 {{cacertfile, \"{}\"}},\n\
+         \x20 {{certfile, \"{cert_path}\"}},\n\
+         \x20 {{keyfile, \"{key_path}\"}},\n\
+         \x20 {{cacertfile, \"{ca_path}\"}},\n\
          \x20 {{verify, verify_peer}}\n\
          ]}}].\n",
-        cert_path.display(),
-        key_path.display(),
-        ca_path.display(),
-        cert_path.display(),
-        key_path.display(),
-        ca_path.display(),
     );
 
     let conf_path = tls_dir.join("ssl_dist.conf");
