@@ -100,14 +100,36 @@ ErlangModule
 
 **Selector-to-function mapping:**
 
-Beamtalk keyword messages map to Erlang functions by using the **first keyword as the function name** and passing subsequent arguments positionally:
+Beamtalk keyword messages map to Erlang functions by using the **first keyword as the function name** and passing subsequent arguments positionally. By default, extra keywords use the `with:` convention — a deliberate signal that the keyword name carries no semantic meaning:
 
 | Beamtalk message send | Erlang call | Rule |
 |---|---|---|
 | `Erlang lists reverse: xs` | `lists:reverse(Xs)` | Unary: keyword = function name |
-| `Erlang lists seq: 1 with: 10` | `lists:seq(1, 10)` | Multi-keyword: first keyword = function, rest = extra args |
+| `Erlang lists seq: 1 with: 10` | `lists:seq(1, 10)` | Multi-keyword: first keyword = function, `with:` = positional |
 | `Erlang erlang system_time: #microsecond` | `erlang:system_time(microsecond)` | Keyword: function name + arg |
-| `Erlang math pow: 2 with: 10` | `math:pow(2, 10)` | First keyword = function, additional args positional |
+| `Erlang math pow: 2 with: 10` | `math:pow(2, 10)` | First keyword = function, `with:` = positional |
+
+**Annotation files — meaningful keywords (experimental):**
+
+The `with:` convention is the universal fallback, but meaningful keyword names are desirable. The direction is **annotation files** that map Erlang parameter names to Beamtalk keywords:
+
+```beamtalk
+// With annotations (goal):
+Erlang lists seq: 1 to: 10 step: 2        // => lists:seq(1, 10, 2)
+
+// Without annotations (always works):
+Erlang lists seq: 1 with: 10 with: 2      // => lists:seq(1, 10, 2)
+```
+
+Both forms compile to the same code — keyword names are stripped, only argument order matters.
+
+**This needs a spike before committing.** Open questions:
+- Can `beam_lib:chunks` reliably extract parameter names from OTP modules?
+- What percentage of Hex packages ship with `+debug_info`?
+- Is AI generation of annotation files from Erlang docs practical at scale?
+- How do annotations interact with the LSP completion provider?
+
+The spike should produce a small annotation file for one OTP module (e.g., `lists`) and validate the end-to-end flow: annotation → LSP completion → runtime dispatch. If the spike succeeds, a follow-up ADR will define the annotation format, generation pipeline, and distribution strategy.
 
 **Escaping for unusual function names:**
 
@@ -366,7 +388,7 @@ Transparent interop means Observer, recon, and crash dumps show native BEAM valu
 ### Best Argument for Gleam-Style `@external` Pragma
 **From the type safety advocate:** "The `Erlang` proxy approach is dynamically typed — you can call `Erlang lists nonexistent: 42` and get a runtime error. With `@external`, the compiler knows the function signature, can check arity, and IDE tooling can autocomplete. For production code, declaration-then-use is worth the boilerplate."
 
-**Response:** Agreed for library authors. When gradual typing (ADR 0025) lands, we can add optional type annotations to `ErlangModule` proxies via protocol declarations. But the dynamic path must exist for REPL exploration and rapid prototyping. Both can coexist.
+**Response:** Agreed for library authors. When gradual typing (ADR 0025) lands, we can add optional type annotations to `ErlangModule` proxies via protocol declarations. Annotation files (experimental — needs spike) could provide meaningful keyword names for well-known modules. But the dynamic `with:` path must exist for REPL exploration and rapid prototyping. Both can coexist.
 
 ### Best Argument for Direct Namespace Syntax (`Erlang:lists`)
 **From the Erlang developer:** "Adding a `:` after `Erlang` makes it visually obvious this is a foreign call, not a message send. It's a single dispatch (not two-step proxy), so it's faster and the compiler can optimize it directly."
@@ -472,7 +494,8 @@ Erlang call: "lists" function: "reverse" args: #(#(1, 2, 3))
 - **`Elixir` global** — same proxy pattern, maps `Elixir enum` → `'Elixir.Enum'`
 - **`Gleam` global** — maps `Gleam list` → `gleam@list`
 - **Type annotations** — optional protocol declarations for Erlang module proxies (leveraging ADR 0025)
-- **Erlang parameter name introspection** — with `+debug_info`, `beam_lib:chunks/2` can extract parameter names from the abstract code AST, enabling meaningful keyword names (e.g., `seq: 1 to: 10 step: 2` validated against actual parameter names) and richer IDE tooltips. Complements Phase 1's export-based arity introspection
+- **Erlang parameter name introspection** — with `+debug_info`, `beam_lib:chunks/2` can extract parameter names from the abstract code AST, enabling meaningful keyword names. Complements Phase 1's export-based arity introspection. **Requires a spike first** — see annotation file discussion in §1
+- **Annotation file format and pipeline** — if the spike validates the approach, a follow-up ADR defines `.bta` format, AI-generation pipeline for OTP modules, build-time generation for dependencies, and LSP integration
 - **Hex.pm integration** — separate ADR (ADR 0026 scope)
 
 ## Migration Path
