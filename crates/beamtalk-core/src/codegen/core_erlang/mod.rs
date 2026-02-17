@@ -1227,8 +1227,14 @@ impl CoreErlangGenerator {
         let runtime_module = PrimitiveBindingTable::runtime_module_for_class(&class_name);
 
         let params_str = self.current_method_params.join(", ");
+        // BT-677: In class methods, self is bound to ClassSelf, not Self
+        let self_var = if self.in_class_method {
+            "ClassSelf"
+        } else {
+            "Self"
+        };
         Ok(Document::String(format!(
-            "call '{runtime_module}':'dispatch'('{name}', [{params_str}], Self)"
+            "call '{runtime_module}':'dispatch'('{name}', [{params_str}], {self_var})"
         )))
     }
 }

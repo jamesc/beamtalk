@@ -1,0 +1,81 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for Erlang interop (ADR 0028, BT-677)
+// Tests inline proxy construction and erlang:apply dispatch.
+
+// ===========================================================================
+// MODULE PROXY CONSTRUCTION
+// ===========================================================================
+
+// Unary message on Erlang constructs ErlangModule proxy
+Erlang lists
+// => #ErlangModule<lists>
+
+Erlang maps
+// => #ErlangModule<maps>
+
+Erlang erlang
+// => #ErlangModule<erlang>
+
+// Proxy class is ErlangModule
+(Erlang lists) class
+// => ErlangModule
+
+// ===========================================================================
+// ERLANG FUNCTION CALLS — KEYWORD MESSAGES
+// ===========================================================================
+
+// Single keyword: lists:reverse/1
+Erlang lists reverse: #(3, 2, 1)
+// => [1,2,3]
+
+// Multi-keyword: maps:merge/2
+Erlang maps merge: #{#a => 1} with: #{#b => 2}
+// => #{#a => 1, #b => 2}
+
+// lists:seq/2
+Erlang lists seq: 1 with: 5
+// => [1,2,3,4,5]
+
+// lists:nth/2
+Erlang lists nth: 2 with: #(10, 20, 30)
+// => 20
+
+// ===========================================================================
+// ERLANG FUNCTION CALLS — ZERO-ARG (UNARY ON PROXY)
+// ===========================================================================
+
+// erlang:node/0
+(Erlang erlang) node
+// => _
+
+// ===========================================================================
+// CACHED PROXY
+// ===========================================================================
+
+// Store proxy in variable and reuse
+proxy := Erlang lists
+// => #ErlangModule<lists>
+
+proxy reverse: #(1, 2, 3)
+// => [3,2,1]
+
+proxy reverse: #(#a, #b, #c)
+// => _
+
+// ===========================================================================
+// PROXY OBJECT PROTOCOL
+// ===========================================================================
+
+proxy class
+// => ErlangModule
+
+proxy == proxy
+// => true
+
+proxy isNil
+// => false
+
+proxy notNil
+// => true

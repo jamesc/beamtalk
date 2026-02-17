@@ -75,9 +75,10 @@ impl CoreErlangGenerator {
     /// 4. **Object messages** → `try_generate_object_message` → delegates to nil protocol, error signaling, object identity, object reflection
     /// 5. **Block messages** → `try_generate_block_message` (structural intrinsics)
     /// 6. **Spawn/Await** → `try_handle_spawn_await` (spawn, await intrinsics)
-    /// 7. **Class references** → `try_handle_class_reference` (workspace bindings, class methods)
-    /// 8. **Self-sends** → `try_handle_self_dispatch` (synchronous actor self-dispatch)
-    /// 9. **Default** → Runtime dispatch (BT-223: actor vs primitive check)
+    /// 7. **Erlang interop** → `try_handle_erlang_interop` (ADR 0028 inline proxy)
+    /// 8. **Class references** → `try_handle_class_reference` (workspace bindings, class methods)
+    /// 9. **Self-sends** → `try_handle_self_dispatch` (synchronous actor self-dispatch)
+    /// 10. **Default** → Runtime dispatch (BT-223: actor vs primitive check)
     pub(super) fn generate_message_send(
         &mut self,
         receiver: &Expression,
@@ -159,6 +160,11 @@ impl CoreErlangGenerator {
 
         // Special case: spawn, spawnWith:, await, awaitForever, await:
         if let Some(doc) = self.try_handle_spawn_await(receiver, selector, arguments)? {
+            return Ok(doc);
+        }
+
+        // BT-677 / ADR 0028: Erlang interop — inline proxy construction
+        if let Some(doc) = self.try_handle_erlang_interop(receiver, selector, arguments)? {
             return Ok(doc);
         }
 
@@ -258,6 +264,47 @@ impl CoreErlangGenerator {
         }
 
         Ok(None)
+    }
+
+    /// BT-677 / ADR 0028: Handles `Erlang` class reference for BEAM interop.
+    ///
+    /// When the receiver is `ClassReference("Erlang")` and the message is unary,
+    /// generates an inline `ErlangModule` proxy map construction:
+    /// ```erlang
+    /// ~{'$beamtalk_class' => 'ErlangModule', 'module' => 'lists'}~
+    /// ```
+    ///
+    /// For keyword/binary messages on `Erlang`, falls through to runtime
+    /// dispatch via `beamtalk_primitive:send/3`.
+    #[allow(clippy::unused_self, clippy::unnecessary_wraps)] // uniform try_handle_* interface
+    fn try_handle_erlang_interop(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        _arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        if let Expression::ClassReference { name, .. } = receiver {
+            if name.name != "Erlang" {
+                return Ok(None);
+            }
+            match selector {
+                MessageSelector::Unary(module_name) => {
+                    // `Erlang lists` → inline proxy map
+                    let doc = docvec![Document::String(format!(
+                        "~{{'$beamtalk_class' => 'ErlangModule', 'module' => '{module_name}'}}~"
+                    ))];
+                    Ok(Some(doc))
+                }
+                _ => {
+                    // Keyword/binary on Erlang class itself falls through to
+                    // runtime dispatch via beamtalk_primitive:send/3, which
+                    // handles `erlang_class_dispatch` for the Erlang tagged map.
+                    Ok(None)
+                }
+            }
+        } else {
+            Ok(None)
+        }
     }
 
     /// Handles `ClassReference` receivers as class method calls.
