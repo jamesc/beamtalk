@@ -15,7 +15,7 @@
 ///
 /// ## Examples
 /// ```beamtalk
-/// [Erlang erlang halt: 1] on: BEAMError do: [:e | e message]
+/// [Erlang erlang exit: 1] on: BEAMError do: [:e | e message]
 /// ```
 Error subclass: BEAMError
   /// Human-readable description of the receiver.

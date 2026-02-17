@@ -97,6 +97,10 @@ dispatch(Selector, Args, Self) ->
                             beamtalk_error:raise(
                                 beamtalk_error:with_details(Error2,
                                     #{erlang_error => badarith}));
+                        error:#{error := #beamtalk_error{}} = Wrapped ->
+                            %% Re-raise already-wrapped Beamtalk exceptions
+                            %% (e.g., from Beamtalk code called via Erlang)
+                            error(Wrapped);
                         error:Reason ->
                             Error0 = beamtalk_error:new(runtime_error, 'ErlangModule'),
                             Error1 = beamtalk_error:with_selector(Error0, Selector),

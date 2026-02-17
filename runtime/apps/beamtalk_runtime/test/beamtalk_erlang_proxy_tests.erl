@@ -322,16 +322,19 @@ dispatch_throw_hint_includes_module_test() ->
     end.
 
 dispatch_generic_error_preserves_details_test() ->
-    %% Generic error:Reason should preserve in details
+    %% binary_to_existing_atom with non-existent atom raises badarg,
+    %% which is caught by the specific badarg handler
     Proxy = beamtalk_erlang_proxy:new(erlang),
     try
-        %% binary_to_existing_atom with non-existent atom
         beamtalk_erlang_proxy:dispatch('binary_to_existing_atom:', [<<"zzzz_nonexistent_atom_xyz">>], Proxy),
         ?assert(false)
     catch
         error:#{error := Inner} ->
+            ?assertEqual(type_error, Inner#beamtalk_error.kind),
             ?assertEqual('ErlangModule', Inner#beamtalk_error.class),
-            ?assert(is_binary(Inner#beamtalk_error.hint))
+            ?assert(is_binary(Inner#beamtalk_error.hint)),
+            Details = Inner#beamtalk_error.details,
+            ?assertEqual(badarg, maps:get(erlang_error, Details))
     end.
 
 dispatch_function_clause_is_arity_mismatch_test() ->
@@ -380,4 +383,39 @@ dispatch_undef_preserves_details_test() ->
         error:#{error := Inner} ->
             Details = Inner#beamtalk_error.details,
             ?assertEqual(undef, maps:get(erlang_error, Details))
+    end.
+
+dispatch_reraises_beamtalk_exceptions_test() ->
+    %% If the called Erlang function raises a Beamtalk exception,
+    %% the proxy must re-raise it unchanged, not re-wrap as runtime_error
+    Proxy = beamtalk_erlang_proxy:new(erlang),
+    OrigError = beamtalk_error:new(type_error, 'Integer'),
+    OrigError1 = beamtalk_error:with_selector(OrigError, '+:'),
+    Wrapped = beamtalk_exception_handler:wrap(OrigError1),
+    try
+        %% erlang:error/1 with an already-wrapped Beamtalk exception
+        beamtalk_erlang_proxy:dispatch('error:', [Wrapped], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            %% Should preserve original kind/class, not re-wrap as runtime_error
+            ?assertEqual(type_error, Inner#beamtalk_error.kind),
+            ?assertEqual('Integer', Inner#beamtalk_error.class),
+            ?assertEqual('+:', Inner#beamtalk_error.selector)
+    end.
+
+dispatch_generic_error_maps_to_runtime_error_test() ->
+    %% Generic error:Reason should map to runtime_error and preserve details
+    Proxy = beamtalk_erlang_proxy:new(erlang),
+    try
+        %% erlang:error/1 with a custom reason triggers generic error handler
+        beamtalk_erlang_proxy:dispatch('error:', [{custom_reason, 42}], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(runtime_error, Inner#beamtalk_error.kind),
+            ?assertEqual('ErlangModule', Inner#beamtalk_error.class),
+            ?assert(is_binary(Inner#beamtalk_error.hint)),
+            Details = Inner#beamtalk_error.details,
+            ?assertEqual({custom_reason, 42}, maps:get(erlang_error, Details))
     end.
