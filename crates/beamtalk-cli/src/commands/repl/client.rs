@@ -5,6 +5,10 @@
 //!
 //! **DDD Context:** REPL — Client Communication
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
 use miette::{Result, miette};
 
 use super::ReplResponse;
@@ -14,15 +18,41 @@ use crate::commands::protocol::{self, ProtocolClient};
 pub(super) struct ReplClient {
     inner: ProtocolClient,
     last_loaded_file: Option<String>,
+    /// Session ID assigned by the server (BT-666)
+    session_id: Option<String>,
+    /// Port used for this connection (needed for interrupt connection)
+    port: u16,
 }
 
 impl ReplClient {
     /// Connect to the REPL backend.
     pub(super) fn connect(port: u16) -> Result<Self> {
-        let inner = ProtocolClient::connect(port, None)?;
+        let mut inner = ProtocolClient::connect(port, None)?;
+
+        // BT-666: Read the session-started welcome message
+        let session_id = match inner.read_response_line() {
+            Ok(line) => {
+                if let Ok(welcome) = serde_json::from_str::<serde_json::Value>(&line) {
+                    welcome
+                        .get("session")
+                        .and_then(|s| s.as_str())
+                        .map(String::from)
+                } else {
+                    tracing::debug!("Welcome message was not valid JSON");
+                    None
+                }
+            }
+            Err(e) => {
+                tracing::debug!("Failed to read welcome message: {e}");
+                None
+            }
+        };
+
         Ok(Self {
             inner,
             last_loaded_file: None,
+            session_id,
+            port,
         })
     }
 
@@ -32,12 +62,84 @@ impl ReplClient {
     }
 
     /// Send an eval request and receive the response.
+    #[allow(dead_code)] // Used in non-interruptible mode or tests
     pub(super) fn eval(&mut self, expression: &str) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "eval",
             "id": protocol::next_msg_id(),
             "code": expression
         }))
+    }
+
+    /// Send an eval request that can be interrupted by Ctrl-C (BT-666).
+    ///
+    /// Sets a read timeout on the socket and polls for the response while
+    /// checking the `interrupted` flag. If the flag is set, sends an
+    /// interrupt op on a separate connection to the backend.
+    pub(super) fn eval_interruptible(
+        &mut self,
+        expression: &str,
+        interrupted: &Arc<AtomicBool>,
+    ) -> Result<ReplResponse> {
+        // Send the eval request
+        let request = serde_json::json!({
+            "op": "eval",
+            "id": protocol::next_msg_id(),
+            "code": expression
+        });
+        self.inner.send_only(&request)?;
+
+        // Set a short read timeout for polling
+        self.inner
+            .set_read_timeout(Some(Duration::from_millis(200)))?;
+
+        let result = loop {
+            match self.inner.read_response_line() {
+                Ok(line) => {
+                    // Got a response — parse it
+                    let response: ReplResponse = serde_json::from_str(&line)
+                        .map_err(|e| miette!("Failed to parse response: {e}\nRaw: {line}"))?;
+                    break Ok(response);
+                }
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut =>
+                {
+                    // Timeout — check if interrupted
+                    if interrupted.swap(false, Ordering::SeqCst) {
+                        // Send interrupt on a separate connection
+                        self.send_interrupt();
+                        // Continue waiting for the eval response (which should now be an error)
+                    }
+                }
+                Err(e) => {
+                    break Err(miette!("Communication error: {e}"));
+                }
+            }
+        };
+
+        // Restore blocking read timeout
+        self.inner.set_read_timeout(None)?;
+        result
+    }
+
+    /// Send an interrupt request on a separate TCP connection (BT-666).
+    fn send_interrupt(&self) {
+        let mut interrupt_req = serde_json::json!({
+            "op": "interrupt",
+            "id": protocol::next_msg_id()
+        });
+        if let Some(ref session) = self.session_id {
+            interrupt_req["session"] = serde_json::Value::String(session.clone());
+        }
+        // Open a new connection and send interrupt — best effort
+        if let Ok(mut interrupt_client) =
+            ProtocolClient::connect(self.port, Some(Duration::from_secs(2)))
+        {
+            // Consume the welcome message on the interrupt connection
+            let _ = interrupt_client.read_response_line();
+            let _ = interrupt_client.send_request::<serde_json::Value>(&interrupt_req);
+        }
     }
 
     /// Send a clear bindings request.

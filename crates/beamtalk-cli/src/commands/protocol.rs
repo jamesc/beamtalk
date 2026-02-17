@@ -62,6 +62,27 @@ impl ProtocolClient {
         Ok(Self { stream, reader })
     }
 
+    /// Set the read timeout on the underlying TCP stream.
+    pub fn set_read_timeout(&self, timeout: Option<Duration>) -> Result<()> {
+        self.stream.set_read_timeout(timeout).into_diagnostic()
+    }
+
+    /// Read a single response line from the connection.
+    /// Returns `Ok(line)` on success, or an error.
+    /// When a read timeout is set and expires, returns `Err` with `WouldBlock` kind.
+    pub fn read_response_line(&mut self) -> std::io::Result<String> {
+        let mut line = String::new();
+        self.reader.read_line(&mut line)?;
+        Ok(line)
+    }
+
+    /// Send a JSON request without reading the response.
+    pub fn send_only(&mut self, request: &serde_json::Value) -> Result<()> {
+        let request_str = serde_json::to_string(request).into_diagnostic()?;
+        writeln!(self.stream, "{request_str}").into_diagnostic()?;
+        self.stream.flush().into_diagnostic()
+    }
+
     /// Send a JSON request and receive a raw JSON response.
     pub fn send_raw(&mut self, request: &serde_json::Value) -> Result<serde_json::Value> {
         let request_str = serde_json::to_string(request).into_diagnostic()?;

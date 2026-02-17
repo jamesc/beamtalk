@@ -52,6 +52,7 @@ fs2 = "0.4"
 # Signal handling
 ctrlc = "3"
 libc = "0.2"
+signal-hook = "0.3"
 
 # Markdown rendering
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }

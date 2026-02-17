@@ -197,10 +197,10 @@ unload_module_removes_from_tracker_test_() ->
               {ok, DummyMod, Binary} = compile:forms(Forms),
               {module, DummyMod} = code:load_binary(DummyMod, "test.erl", Binary),
               %% Inject module into the session's tracker
-              sys:replace_state(Pid, fun({SId, State}) ->
+              sys:replace_state(Pid, fun({SId, State, Worker}) ->
                   Tracker = beamtalk_repl_state:get_module_tracker(State),
                   NewTracker = beamtalk_repl_modules:add_module(DummyMod, "/tmp/test.bt", Tracker),
-                  {SId, beamtalk_repl_state:set_module_tracker(NewTracker, State)}
+                  {SId, beamtalk_repl_state:set_module_tracker(NewTracker, State), Worker}
               end),
               try
                   %% Verify module is in tracker

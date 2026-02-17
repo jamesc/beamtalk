@@ -519,7 +519,11 @@ impl ReplClient {
         stream.set_read_timeout(Some(repl_timeout()))?;
         stream.set_write_timeout(Some(repl_timeout()))?;
 
-        let reader = BufReader::new(stream.try_clone()?);
+        let mut reader = BufReader::new(stream.try_clone()?);
+
+        // BT-666: Consume the session-started welcome message
+        let mut welcome = String::new();
+        let _ = reader.read_line(&mut welcome);
 
         Ok(Self {
             stream,
