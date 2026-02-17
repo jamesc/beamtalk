@@ -147,11 +147,27 @@ readAll_invalid_path_windows_test() ->
 readAll_permission_denied_test() ->
     case os:type() of
         {win32, _} ->
-            %% Skip on Windows: file:change_mode/2 doesn't restrict permissions
-            %% Windows uses ACLs instead of Unix modes, would need Windows-specific APIs
-            {skip, "Unix file modes not supported on Windows"};
+            %% Windows: Use icacls to deny read permissions via ACL
+            FileName = "_bt_test_noperm_read.txt",
+            ok = file:write_file(FileName, <<"secret">>),
+            %% Get current username
+            UserName = string:trim(os:cmd("echo %USERNAME%")),
+            %% Deny read access using icacls
+            DenyCmd = "icacls \"" ++ FileName ++ "\" /deny " ++ UserName ++ ":R >nul 2>&1",
+            _ = os:cmd(DenyCmd),
+            try
+                ?assertError(
+                    #{'$beamtalk_class' := _, error := #beamtalk_error{
+                        kind = permission_denied, class = 'File', selector = 'readAll:'}},
+                    beamtalk_file:'readAll:'(list_to_binary(FileName)))
+            after
+                %% Reset ACL to allow access before deleting
+                ResetCmd = "icacls \"" ++ FileName ++ "\" /grant " ++ UserName ++ ":F >nul 2>&1",
+                _ = os:cmd(ResetCmd),
+                file:delete(FileName)
+            end;
         _ ->
-            %% Create a file, remove read permissions, verify error
+            %% Unix: Use chmod to remove read permissions
             FileName = "_bt_test_noperm_read.txt",
             ok = file:write_file(FileName, <<"secret">>),
             ok = file:change_mode(FileName, 8#000),
@@ -219,11 +235,27 @@ writeAll_creates_subdirectory_test() ->
 writeAll_permission_denied_test() ->
     case os:type() of
         {win32, _} ->
-            %% Skip on Windows: file:change_mode/2 doesn't restrict permissions
-            %% Windows uses ACLs instead of Unix modes, would need Windows-specific APIs
-            {skip, "Unix file modes not supported on Windows"};
+            %% Windows: Create a file first, then deny write access to it
+            FileName = "_bt_test_readonly_file.txt",
+            ok = file:write_file(FileName, <<"initial">>),
+            %% Get current username
+            UserName = string:trim(os:cmd("echo %USERNAME%")),
+            %% Deny write access to the file using icacls
+            DenyCmd = "icacls \"" ++ FileName ++ "\" /deny " ++ UserName ++ ":W >nul 2>&1",
+            _ = os:cmd(DenyCmd),
+            try
+                ?assertError(
+                    #{'$beamtalk_class' := _, error := #beamtalk_error{
+                        kind = permission_denied, class = 'File', selector = 'writeAll:contents:'}},
+                    beamtalk_file:'writeAll:contents:'(list_to_binary(FileName), <<"data">>))
+            after
+                %% Reset ACL to allow access before cleanup
+                ResetCmd = "icacls \"" ++ FileName ++ "\" /grant " ++ UserName ++ ":F >nul 2>&1",
+                _ = os:cmd(ResetCmd),
+                file:delete(FileName)
+            end;
         _ ->
-            %% Create a read-only directory, try to write in it
+            %% Unix: Use chmod to make directory read-only
             Dir = "_bt_test_readonly_dir",
             FileName = Dir ++ "/test.txt",
             ok = filelib:ensure_dir(FileName),
