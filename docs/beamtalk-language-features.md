@@ -13,17 +13,8 @@ Planned language features for beamtalk. See [beamtalk-principles.md](beamtalk-pr
 - [String Encoding and UTF-8](#string-encoding-and-utf-8)
 - [Core Syntax](#core-syntax)
 - [Async Message Passing](#async-message-passing)
-- [Pattern Matching (Erlang-inspired)](#pattern-matching-erlang-inspired)
-- [Pipe Operator (Elixir-inspired)](#pipe-operator-elixir-inspired)
-- [With Blocks (Elixir/Gleam-inspired)](#with-blocks-elixirgleam-inspired)
-- [Result Type (Gleam-inspired)](#result-type-gleam-inspired)
-- [Comprehensions (Elixir-inspired)](#comprehensions-elixir-inspired)
-- [Supervision (OTP-inspired)](#supervision-otp-inspired)
+- [Pattern Matching](#pattern-matching)
 - [Live Patching](#live-patching)
-- [Protocols (Elixir-inspired)](#protocols-elixir-inspired)
-- [Optional Type Annotations (Dylan-inspired)](#optional-type-annotations-dylan-inspired)
-- [Conditions and Restarts (Dylan-inspired)](#conditions-and-restarts-dylan-inspired)
-- [Method Combinations (Dylan/CLOS-inspired)](#method-combinations-dylanclos-inspired)
 - [Smalltalk + BEAM Mapping](#smalltalk--beam-mapping)
 - [Tooling](#tooling)
 - [Inspiration Sources](#inspiration-sources)
@@ -163,7 +154,7 @@ str := String fromCharlist: [72, 101, 108, 108, 111]  // => "Hello"
 | Field access & assignment | ✅ Implemented (with limitations) | `actor_state_mutation` |
 | Class definitions | ✅ Implemented | `class_definition` |
 | Map literals | ✅ Implemented | `map_literals` |
-| Pattern matching (`match:`) | ✅ Implemented (BT-406) | `pattern_matching` (stdlib + E2E) |
+| Pattern matching (`match:`) | ✅ Implemented | `pattern_matching` (stdlib + E2E) |
 | Comments | ✅ Implemented | `comment_handling` |
 | Async message sends | ✅ Implemented | `async_with_await`, `async_keyword_message` |
 
@@ -181,7 +172,7 @@ Actor subclass: Counter
 
 ### Value Types vs Actors
 
-**Status:** ✅ Implemented (BT-213)
+**Status:** ✅ Implemented
 
 Beamtalk distinguishes between **value types** (immutable data) and **actors** (concurrent processes):
 
@@ -325,8 +316,6 @@ self.y := self.x + 1.
 ^self.y
 ```
 
-This is tracked in issue BT-98 for future enhancement.
-
 ### Blocks (Closures)
 
 ```
@@ -342,7 +331,7 @@ This is tracked in issue BT-98 for future enhancement.
 
 ---
 
-## Control Flow and Mutations (BT-90)
+## Control Flow and Mutations
 
 Beamtalk supports Smalltalk-style control flow via messages to booleans and blocks, with one important enhancement: **literal blocks in control flow positions can mutate local variables and fields**.
 
@@ -587,11 +576,11 @@ value := agent analyzeSync: data
 
 ---
 
-## Pattern Matching (Erlang-inspired)
+## Pattern Matching
 
 Smalltalk lacks pattern matching - this is a major ergonomic addition.
 
-### Match Expression (BT-406)
+### Match Expression
 
 **Status:** ✅ Implemented
 
@@ -681,130 +670,6 @@ packet := <<16r01, messageLength: 16/big, messageBytes/binary>>
 
 ---
 
-## Pipe Operator (Elixir-inspired)
-
-Clean data flow through transformations.
-
-### Sync Pipe
-
-```
-data
-  |> Transform with: options
-  |> Filter where: [:x | x > 0]
-  |> Sort by: #name
-```
-
-### Async Pipe
-
-```
-// Each step returns future, flows through
-data
-  |>> agent1 process
-  |>> agent2 validate
-  |>> agent3 store
-```
-
----
-
-## With Blocks (Elixir/Gleam-inspired)
-
-Early exit on error without deep nesting.
-
-### Problem: Nested Error Handling
-
-```
-// Ugly pyramid of doom
-(file open: path) ifOk: [:f |
-  (f read) ifOk: [:data |
-    (Json parse: data) ifOk: [:json |
-      self process: json]]]
-```
-
-### Solution: With Blocks
-
-```
-with: [
-  file := File open: path
-  data := file read
-  json := Json parse: data
-] do: [
-  self process: json
-] else: [:error |
-  self handleError: error
-]
-```
-
----
-
-## Result Type (Gleam-inspired)
-
-Explicit error handling as alternative to exceptions.
-
-```
-// Return Result instead of raising
-divide: a by: b -> Result =>
-  b = 0
-    ifTrue: [Error new: #divisionByZero]
-    ifFalse: [Ok new: a / b]
-
-// Chain with map
-(self divide: 10 by: x)
-  |> map: [:v | v * 2]
-  |> unwrapOr: 0
-
-// Pattern match on result
-result := self divide: a by: b
-result match: [
-  {#ok, v} -> self use: v
-  {#error, e} -> self report: e
-]
-```
-
----
-
-## Comprehensions (Elixir-inspired)
-
-Declarative iteration with filtering.
-
-```
-// List comprehension with filter
-for: [x in: 1 to: 10; x > 5]
-yield: [x * 2]
-// => [12, 14, 16, 18, 20]
-
-// Multiple generators
-for: [x in: 1 to: 3; y in: 1 to: 3]
-yield: [{x, y}]
-
-// Parallel iteration
-for: [name in: names; age in: ages]
-yield: [Person new name: name age: age]
-```
-
----
-
-## Supervision (OTP-inspired)
-
-Declarative fault tolerance.
-
-```
-Supervisor subclass: WebApp
-  children: [
-    {DatabasePool, scale: 10},
-    HTTPRouter spawn,
-    {MetricsCollector, interval: 5000}
-  ]
-  strategy: #oneForOne
-
-// Actor with supervision spec
-Actor subclass: Worker
-  supervisor: #transient  // Restart on crash, not normal exit
-  maxRestarts: 5
-  restartWindow: 60  // seconds
-```
-
----
-
 ## Live Patching
 
 Hot code reload with dedicated syntax.
@@ -813,7 +678,7 @@ Hot code reload with dedicated syntax.
 // Patch a method on running actors
 patch Counter >> #increment {
   Telemetry log: "incrementing"
-  self.value += 1
+  self.value := self.value + 1
 }
 
 // Patch with state migration
@@ -822,123 +687,6 @@ patch Agent >> state {
   self.memory := self.history ifNil: [OrderedCollection new]
 }
 ```
-
----
-
-## Protocols (Elixir-inspired)
-
-Type-based dispatch for polymorphism.
-
-```
-// Define protocol
-Protocol define: #Stringable
-  requiring: [#asString]
-
-// Implement for types
-Integer implements: #Stringable
-  asString => self printString
-
-Point implements: #Stringable
-  asString => "({self x}, {self y})"
-
-// Use generically
-items collect: [:x | x asString]
-```
-
----
-
-## Optional Type Annotations (Dylan-inspired)
-
-Types are optional - add them gradually for safety and optimization.
-
-### Basic Annotations
-
-```
-Actor subclass: Counter
-  state: value: Integer = 0
-
-  increment => self.value := self.value + 1
-  getValue -> Integer => ^self.value
-
-// Typed parameters
-transferFrom: source: Account amount: Money -> Boolean =>
-  source withdraw: amount
-  self deposit: amount
-  ^true
-```
-
-### Limited Types
-
-```
-// Singleton type - exactly one value
-state: direction: #north | #south | #east | #west
-
-// Union type
-state: result: Integer | Error
-
-// False-or type (Option/Maybe)
-state: cache: Integer | False = false
-
-// Subtype constraint
-process: items: <Collection> => ...
-```
-
-### Sealing for Optimization
-
-```
-// Sealed class - no subclasses, enables optimization
-sealed Actor subclass: Point
-  state: x: Float, y: Float
-
-  distanceTo: other: Point -> Float =>
-    ((self.x - other x) squared + (self.y - other y) squared) sqrt
-
-// Sealed method - final implementation
-Counter >> sealed getValue -> Integer => ^self.value
-```
-
-### BEAM Integration
-
-- Generate Dialyzer `-spec` annotations
-- Type info becomes guards: `when is_integer(X)`
-- Sealed methods can bypass `gen_server` overhead
-
----
-
-## Conditions and Restarts (Dylan-inspired)
-
-Recoverable exceptions with options.
-
-### Traditional Exception
-
-```
-[file open: path]
-  on: FileNotFound
-  do: [:e | ^nil]
-```
-
-### Conditions with Restarts
-
-```
-// Handler chooses recovery option
-[file open: path]
-  on: FileNotFound
-  restarts: [
-    #useDefault -> [^self defaultFile],
-    #retry -> [^self open: (self promptForPath)],
-    #createNew -> [^File create: path]
-  ]
-
-// Signaler offers restart options
-FileNotFound signal: path
-  restarts: [#useDefault, #retry, #createNew]
-```
-
-### BEAM Mapping
-
-- Conditions → `throw`/`catch` with restart metadata
-- Handler selects restart; execution continues
-- Unhandled → crash (supervisor takes over)
 
 ---
 
@@ -1371,22 +1119,11 @@ Tracer enable: #messageFlow for: Counter
 - Process links/monitors
 - Distribution
 
-### From Elixir
-- Pipe operator
-- With blocks
-- Protocols
-- Comprehensions
-
-### From Gleam
-- Result types
-- Use expressions
+### From Elixir/Gleam
 - Exhaustive matching
 
 ### From Dylan
 - Sealing
-- Conditions/restarts
-- Method combinations
-- Limited types
 
 ---
 
@@ -1400,7 +1137,7 @@ Tracer enable: #messageFlow for: Counter
 
 ---
 
-## Reflection API (BT-97)
+## Reflection API
 
 **Status:** ✅ Implemented as of 2026-02-05
 
@@ -1482,22 +1219,21 @@ Reflection methods are declared in the stdlib via pragma annotations (see [ADR 0
 - `instVarAt:` and `instVarAt:put:` require symbol field names (`#fieldName`)
 - No reflection on class methods (only instance methods)
 - No reflection on method metadata (arity, parameters, etc.)
-- Primitives don't support reflection yet (BT-163, BT-164)
+- Primitives don't support reflection yet
 
-**Note:** Symbol literals (`#selector`) work correctly. Future semantic validation (BT-244) will provide better error messages when users accidentally pass identifiers instead of symbols.
+**Note:** Symbol literals (`#selector`) work correctly. Future semantic validation will provide better error messages when users accidentally pass identifiers instead of symbols.
 
 ### Future Enhancements
 
-Planned improvements tracked in Linear:
-- **BT-163, BT-164**: Reflection support for primitives
-- **BT-244**: Better error messages for symbol validation (semantic analysis)
+- Reflection support for primitives
+- Better error messages for symbol validation (semantic analysis)
 - Class-level reflection (`allInstances`, `allSubclasses`)
 - Method metadata (`methodDict`, `sourceCodeAt:`)
 - Block reflection (`sourceNode`, `numArgs`)
 
 See [ADR 0005](ADR/0005-beam-object-model-pragmatic-hybrid.md) for full object model design.
 
-## Extension Methods (BT-229)
+## Extension Methods
 
 Extension methods allow adding new methods to existing classes without subclassing.
 This follows Pharo's proven extension method design.
@@ -1521,10 +1257,10 @@ For both Actor classes and value types, the dispatch order is:
 
 ### Supported Class Types
 
-| Class Type | Extension Support | Since |
-|------------|-------------------|-------|
-| **Value types** (Integer, String, Boolean, etc.) | ✅ Supported | Initial |
-| **Actor classes** (user-defined via `Actor subclass:`) | ✅ Supported | BT-229 |
+| Class Type | Extension Support |
+|------------|-------------------|
+| **Value types** (Integer, String, Boolean, etc.) | ✅ Supported |
+| **Actor classes** (user-defined via `Actor subclass:`) | ✅ Supported |
 
 ### Extension Function Signature
 
@@ -1572,3 +1308,248 @@ Integer extend
 - Extension registry: `runtime/apps/beamtalk_runtime/src/beamtalk_extensions.erl`
 - ADR 0005: `docs/ADR/0005-beam-object-model-pragmatic-hybrid.md` (Q3: Extension methods)
 - Design doc: `docs/internal/design-self-as-object.md` (Section 3.3)
+
+---
+
+## Not Yet Implemented
+
+> The following features are planned but not yet implemented. They are kept here for review and future reference.
+
+### Pipe Operator (Elixir-inspired)
+
+Clean data flow through transformations.
+
+#### Sync Pipe
+
+```
+data
+  |> Transform with: options
+  |> Filter where: [:x | x > 0]
+  |> Sort by: #name
+```
+
+#### Async Pipe
+
+```
+// Each step returns future, flows through
+data
+  |>> agent1 process
+  |>> agent2 validate
+  |>> agent3 store
+```
+
+---
+
+### With Blocks (Elixir/Gleam-inspired)
+
+Early exit on error without deep nesting.
+
+#### Problem: Nested Error Handling
+
+```
+// Ugly pyramid of doom
+(file open: path) ifOk: [:f |
+  (f read) ifOk: [:data |
+    (Json parse: data) ifOk: [:json |
+      self process: json]]]
+```
+
+#### Solution: With Blocks
+
+```
+with: [
+  file := File open: path
+  data := file read
+  json := Json parse: data
+] do: [
+  self process: json
+] else: [:error |
+  self handleError: error
+]
+```
+
+---
+
+### Result Type (Gleam-inspired)
+
+Explicit error handling as alternative to exceptions.
+
+```
+// Return Result instead of raising
+divide: a by: b -> Result =>
+  b = 0
+    ifTrue: [Error new: #divisionByZero]
+    ifFalse: [Ok new: a / b]
+
+// Chain with map
+(self divide: 10 by: x)
+  |> map: [:v | v * 2]
+  |> unwrapOr: 0
+
+// Pattern match on result
+result := self divide: a by: b
+result match: [
+  {#ok, v} -> self use: v
+  {#error, e} -> self report: e
+]
+```
+
+---
+
+### Comprehensions (Elixir-inspired)
+
+Declarative iteration with filtering.
+
+```
+// List comprehension with filter
+for: [x in: 1 to: 10; x > 5]
+yield: [x * 2]
+// => [12, 14, 16, 18, 20]
+
+// Multiple generators
+for: [x in: 1 to: 3; y in: 1 to: 3]
+yield: [{x, y}]
+
+// Parallel iteration
+for: [name in: names; age in: ages]
+yield: [Person new name: name age: age]
+```
+
+---
+
+### Supervision (OTP-inspired)
+
+Declarative fault tolerance.
+
+```
+Supervisor subclass: WebApp
+  children: [
+    {DatabasePool, scale: 10},
+    HTTPRouter spawn,
+    {MetricsCollector, interval: 5000}
+  ]
+  strategy: #oneForOne
+
+// Actor with supervision spec
+Actor subclass: Worker
+  supervisor: #transient  // Restart on crash, not normal exit
+  maxRestarts: 5
+  restartWindow: 60  // seconds
+```
+
+---
+
+### Protocols (Elixir-inspired)
+
+Type-based dispatch for polymorphism.
+
+```
+// Define protocol
+Protocol define: #Stringable
+  requiring: [#asString]
+
+// Implement for types
+Integer implements: #Stringable
+  asString => self printString
+
+Point implements: #Stringable
+  asString => "({self x}, {self y})"
+
+// Use generically
+items collect: [:x | x asString]
+```
+
+---
+
+### Optional Type Annotations (Dylan-inspired)
+
+Types are optional - add them gradually for safety and optimization.
+
+#### Basic Annotations
+
+```
+Actor subclass: Counter
+  state: value: Integer = 0
+
+  increment => self.value := self.value + 1
+  getValue -> Integer => ^self.value
+
+// Typed parameters
+transferFrom: source: Account amount: Money -> Boolean =>
+  source withdraw: amount
+  self deposit: amount
+  ^true
+```
+
+#### Limited Types
+
+```
+// Singleton type - exactly one value
+state: direction: #north | #south | #east | #west
+
+// Union type
+state: result: Integer | Error
+
+// False-or type (Option/Maybe)
+state: cache: Integer | False = false
+
+// Subtype constraint
+process: items: <Collection> => ...
+```
+
+#### Sealing for Optimization
+
+```
+// Sealed class - no subclasses, enables optimization
+sealed Actor subclass: Point
+  state: x: Float, y: Float
+
+  distanceTo: other: Point -> Float =>
+    ((self.x - other x) squared + (self.y - other y) squared) sqrt
+
+// Sealed method - final implementation
+Counter >> sealed getValue -> Integer => ^self.value
+```
+
+#### BEAM Integration
+
+- Generate Dialyzer `-spec` annotations
+- Type info becomes guards: `when is_integer(X)`
+- Sealed methods can bypass `gen_server` overhead
+
+---
+
+### Conditions and Restarts (Dylan-inspired)
+
+Recoverable exceptions with options.
+
+#### Traditional Exception
+
+```
+[file open: path]
+  on: FileNotFound
+  do: [:e | ^nil]
+```
+
+#### Conditions with Restarts
+
+```
+// Handler chooses recovery option
+[file open: path]
+  on: FileNotFound
+  restarts: [
+    #useDefault -> [^self defaultFile],
+    #retry -> [^self open: (self promptForPath)],
+    #createNew -> [^File create: path]
+  ]
+
+// Signaler offers restart options
+FileNotFound signal: path
+  restarts: [#useDefault, #retry, #createNew]
+```
+
+#### BEAM Mapping
+
+- Conditions → `throw`/`catch` with restart metadata
+- Handler selects restart; execution continues
+- Unhandled → crash (supervisor takes over)
