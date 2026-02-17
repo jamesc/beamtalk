@@ -33,7 +33,7 @@ Beamtalk is an **interactive-first** language (Principle 1), but the workspace i
                                    └──────────────────────┘
 ```
 
-**What already exists (after BT-683 merges — ADR 0020):**
+**What already exists (BT-683 / ADR 0020):**
 - JSON-over-WebSocket REPL protocol (`docs/repl-protocol.md`) with cookie authentication
 - Cowboy WebSocket handler (`beamtalk_ws_handler.erl`) in `beamtalk_workspace` app
 - Per-connection sessions with isolated bindings
@@ -536,7 +536,7 @@ Use HTTP POST for eval commands and SSE for server-initiated push (Transcript, a
 
 ### Phase 0: Wire Check (Size: S) — ✅ Mostly Done (BT-683)
 
-The WebSocket transport, Cowboy handler, and cookie auth are implemented by ADR 0020/BT-683. The remaining wire-check work is minimal:
+The WebSocket transport, Cowboy handler, and cookie auth were implemented by ADR 0020/BT-683. The remaining wire-check work is minimal:
 
 **Done (via BT-683):**
 - ✅ Cowboy added to rebar.config and beamtalk_workspace.app.src
@@ -613,7 +613,7 @@ Build the workspace experience on Phase 0's validated transport. The browser mus
 | Phase | Issue | Title | Size | Status |
 |-------|-------|-------|------|--------|
 | 0 | BT-683 | Migrate REPL transport from TCP to WebSocket with cookie auth | L | Done |
-| 0 | BT-686 | Browser wire check with Transcript push | M | Blocked by BT-683 |
+| 0 | BT-686 | Browser wire check with Transcript push | M | Planned |
 | 1 | BT-687 | Load-source operation and multi-pane browser workspace | L | Blocked by BT-686 |
 | 1 | BT-688 | Browser workspace keyboard shortcuts, completion, and history | M | Blocked by BT-687 |
 | 1 | BT-689 | CLI --web and --web-port flags for browser workspace | S | Blocked by BT-686 |

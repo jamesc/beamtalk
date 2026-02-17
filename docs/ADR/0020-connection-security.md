@@ -514,7 +514,7 @@ This ADR does **not** cover:
 | Phase | Issue | Title | Size | Status |
 |-------|-------|-------|------|--------|
 | 0 | BT-683 | Migrate REPL transport from TCP to WebSocket with cookie auth | L | Done |
-| 1 | BT-691 | Network bind options and reverse proxy documentation | M | Blocked by BT-683 |
+| 1 | BT-691 | Network bind options and reverse proxy documentation | M | Planned |
 | 2 | BT-692 | mTLS for Erlang distribution | L | Blocked by BT-691 |
 | 3 | BT-693 | SPIFFE/SPIRE workload identity integration | XL | Future |
 
