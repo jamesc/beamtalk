@@ -71,28 +71,6 @@ String operations respect Unicode grapheme clusters (user-perceived characters):
 "straße" uppercase    // => "STRASSE" (German ß → SS)
 ```
 
-### Binary Pattern Matching for Bytes
-
-When you need byte-level access (network protocols, file formats):
-
-```
-// Parse UTF-8 manually
-parseUtf8: <<codepoint/utf8, rest/binary>> =>
-  Transcript show: codepoint
-  self parseUtf8: rest
-
-parseUtf8: <<>> => // done
-
-// Parse fixed-size header + UTF-8 body
-parsePacket: <<version:8, length:16/big, body:length/binary, rest/binary>> =>
-  // body is a UTF-8 string
-  message := body asString
-  self process: message
-
-// Build binary with UTF-8 content
-packet := <<1, messageBytes/utf8>>
-```
-
 ### BEAM Mapping
 
 | Beamtalk | Erlang | Notes |
@@ -586,18 +564,24 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 
 **Guard expressions** support: `>`, `<`, `>=`, `<=`, `=:=`, `=/=`, `/=`, `+`, `-`, `*`, `/`
 
-### Destructuring Assignment
+### Destructuring in Match Arms
+
+Pattern matching can bind variables in match arms:
 
 ```
-// Destructure tuple
-{x, y, z} := point coordinates
+// Variable captures the matched value
+42 match: [x -> x + 1]
+// => 43
 
-// Destructure in block
-results collect: [{#ok, v} -> v; {#error, _} -> nil]
+// Multiple arms with variable binding
+"hello" match: [s -> s size]
+// => 5
 
-// Nested destructuring
-{name, {street, city}} := person address
+// Tuple destructuring in match arms (parser supports; runtime planned)
+// {1, 2} match: [{a, b} -> a + b]
 ```
+
+> **Note:** Destructuring assignment (`{x, y} := expr`) and `collect:` with pattern blocks are planned but not yet implemented.
 
 ---
 
@@ -1258,6 +1242,19 @@ handle: _ => self handleUnknown
 process: n when: [n > 0] => self positive: n
 process: n when: [n < 0] => self negative: n
 process: 0 => self zero
+```
+
+### Destructuring Assignment
+
+```
+// Destructure tuple
+{x, y, z} := point coordinates
+
+// Destructure in block
+results collect: [{#ok, v} -> v; {#error, _} -> nil]
+
+// Nested destructuring
+{name, {street, city}} := person address
 ```
 
 ### Pipe Operator (Elixir-inspired)
