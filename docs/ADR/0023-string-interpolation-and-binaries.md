@@ -1,7 +1,7 @@
 # ADR 0023: String Interpolation Syntax and Compilation
 
 ## Status
-Accepted (2026-02-15)
+Implemented (2026-02-17)
 
 ## Context
 
@@ -402,7 +402,7 @@ The language is pre-release — no external user code needs migration.
 
 **Epic:** BT-554 — String Interpolation and Quote Convention (ADR 0023)
 **Issues:** BT-555, BT-556, BT-557, BT-558, BT-559, BT-560
-**Status:** In Progress
+**Status:** ✅ Done
 
 | Phase | Issue | Title | Size | Blocked by | Status |
 |-------|-------|-------|------|------------|--------|
@@ -410,8 +410,8 @@ The language is pre-release — no external user code needs migration.
 | 2a | BT-556 | Lexer: parse `{expr}` segments | M | BT-555 | ✅ Done |
 | 2b | BT-557 | Parser/AST: StringInterpolation node | S | BT-556 | ✅ Done |
 | 3 | BT-558 | Codegen: binary construction + printString | M | BT-557 | ✅ Done |
-| 4a | BT-559 | E2E tests and REPL validation | S | BT-558 | Planned |
-| 4b | BT-560 | Documentation update | S | BT-558 | 🔄 In Progress |
+| 4a | BT-559 | E2E tests and REPL validation | S | BT-558 | ✅ Done |
+| 4b | BT-560 | Documentation update | S | BT-558 | ✅ Done |
 
 ## References
 - Related issues: BT-39 (Define string interpolation syntax)
