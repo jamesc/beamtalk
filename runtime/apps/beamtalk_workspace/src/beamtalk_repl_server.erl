@@ -1,12 +1,14 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc TCP server and client handling for Beamtalk REPL
+%%% @doc WebSocket server for Beamtalk REPL (ADR 0020).
 %%%
 %%% **DDD Context:** REPL
 %%%
-%%% This module handles TCP connections, client communication, and
-%%% dispatching REPL protocol messages via beamtalk_repl_protocol.
+%%% Starts a cowboy HTTP/WebSocket listener for the REPL protocol.
+%%% Client connections are handled by beamtalk_ws_handler.
+%%% This module manages the listener lifecycle, port/nonce discovery,
+%%% and protocol request dispatch.
 
 -module(beamtalk_repl_server).
 -behaviour(gen_server).
@@ -14,39 +16,34 @@
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--export([start_link/1, get_port/0, get_nonce/0, handle_client/3, parse_request/1, safe_to_existing_atom/1]).
+-export([start_link/1, get_port/0, get_nonce/0, handle_protocol_request/2,
+         generate_session_id/0, parse_request/1, safe_to_existing_atom/1]).
 -ifdef(TEST).
 -export([generate_nonce/0, validate_actor_pid/1, is_known_actor/1,
          get_completions/1, get_symbol_info/1, resolve_class_to_module/1,
          ensure_structured_error/1, ensure_structured_error/2,
          make_class_not_found_error/1, format_name/1,
-         generate_session_id/0, base_protocol_response/1,
+         base_protocol_response/1,
          resolve_module_atoms/2,
-         handle_op/4, handle_protocol_request/2, recv_line/2,
-         write_port_file/3, handle_client_once/2]).
+         handle_op/4,
+         write_port_file/3]).
 -endif.
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--define(RECV_TIMEOUT, 30000).
-
-%% Maximum line length for recv_line/2. Prevents unbounded memory growth
-%% if a client sends a very long line. 1 MB is generous for any REPL request.
--define(MAX_LINE_LENGTH, 1048576).
+-define(LISTENER_REF, beamtalk_repl_ws).
 
 -record(state, {
-    listen_socket :: gen_tcp:socket(),
     port :: inet:port_number(),
-    acceptor_pid :: pid() | undefined,
     workspace_id :: binary() | undefined,
     nonce :: binary()
 }).
 
 %%% Public API
 
-%% @doc Start the REPL TCP server.
+%% @doc Start the REPL WebSocket server (ADR 0020).
 %% Listens on the specified port for incoming REPL connections.
 %% Accepts a map with `port` key, or a plain port number for backward compatibility.
 -spec start_link(map() | inet:port_number()) -> {ok, pid()} | {error, term()}.
@@ -77,25 +74,25 @@ init(Config) ->
     Nonce = generate_nonce(),
     %% BT-666: Session registry for interrupt routing
     ets:new(beamtalk_sessions, [named_table, public, {read_concurrency, true}]),
-    %% SECURITY: Bind to loopback only (127.0.0.1) so that only local
-    %% processes can connect. No authentication is performed — the loopback
-    %% restriction is the sole access control, matching the security model of
-    %% erl, iex, and other language REPLs. If remote binding is ever added,
-    %% authentication must be required. See docs/beamtalk-security.md (BT-184).
-    %% buffer must be large enough for the longest request line to avoid
-    %% {packet, line} splitting multi-byte UTF-8 sequences (BT-388).
-    ListenOpts = [binary, {packet, line}, {active, false}, {reuseaddr, true},
-                  {ip, {127, 0, 0, 1}}, {buffer, 65536}],
-    case gen_tcp:listen(Port, ListenOpts) of
-        {ok, ListenSocket} ->
-            %% Discover actual bound port (important when Port=0 for OS-assigned ephemeral port)
-            {ok, ActualPort} = inet:port(ListenSocket),
+    %% ADR 0020: Start cowboy WebSocket listener on loopback only.
+    %% SECURITY: Bind to 127.0.0.1 so only local processes can connect.
+    %% Cookie handshake in beamtalk_ws_handler provides auth on shared machines.
+    Dispatch = cowboy_router:compile([
+        {'_', [{"/ws", beamtalk_ws_handler, []}]}
+    ]),
+    TransportOpts = #{
+        socket_opts => [{ip, {127, 0, 0, 1}}, {port, Port}],
+        num_acceptors => 10
+    },
+    ProtocolOpts = #{env => #{dispatch => Dispatch}},
+    case cowboy:start_clear(?LISTENER_REF, TransportOpts, ProtocolOpts) of
+        {ok, _Pid} ->
+            %% Discover actual bound port (important when Port=0 for ephemeral port)
+            ActualPort = ranch:get_port(?LISTENER_REF),
             %% Write port file so CLI can discover the actual port and nonce
             write_port_file(WorkspaceId, ActualPort, Nonce),
-            %% Start acceptor process
-            {ok, AcceptorPid} = start_acceptor(ListenSocket),
-            {ok, #state{listen_socket = ListenSocket, port = ActualPort,
-                        acceptor_pid = AcceptorPid, workspace_id = WorkspaceId,
+            {ok, #state{port = ActualPort,
+                        workspace_id = WorkspaceId,
                         nonce = Nonce}};
         {error, Reason} ->
             {stop, {listen_failed, Reason}}
@@ -114,16 +111,9 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 %% @private
-handle_info({'DOWN', _Ref, process, AcceptorPid, Reason}, State = #state{acceptor_pid = AcceptorPid, listen_socket = ListenSocket}) ->
-    %% Acceptor died, restart it
-    ?LOG_WARNING("REPL acceptor died: ~p, restarting", [Reason]),
-    {ok, NewAcceptorPid} = start_acceptor(ListenSocket),
-    {noreply, State#state{acceptor_pid = NewAcceptorPid}};
-
 handle_info(shutdown_requested, State) ->
-    %% TCP shutdown endpoint (BT-611): initiate OTP-level graceful teardown.
-    %% This runs in the gen_server process after the TCP response was sent.
-    ?LOG_INFO("Executing TCP-requested shutdown", #{}),
+    %% Shutdown endpoint (BT-611): initiate OTP-level graceful teardown.
+    ?LOG_INFO("Executing requested shutdown", #{}),
     init:stop(),
     {noreply, State};
 
@@ -131,9 +121,9 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 %% @private
-terminate(Reason, #state{listen_socket = ListenSocket, port = Port}) ->
+terminate(Reason, #state{port = Port}) ->
     ?LOG_INFO("REPL server shutting down", #{reason => Reason, port => Port}),
-    gen_tcp:close(ListenSocket),
+    cowboy:stop_listener(?LISTENER_REF),
     ok.
 
 %% @private
@@ -189,194 +179,22 @@ generate_nonce() ->
     list_to_binary(lists:flatten(
         [io_lib:format("~2.16.0b", [B]) || <<B>> <= Bytes])).
 
-%%% Acceptor Process
-
-%% @private
-start_acceptor(ListenSocket) ->
-    Pid = spawn_link(fun() -> acceptor_loop(ListenSocket) end),
-    {ok, Pid}.
-
-%% @private
-acceptor_loop(ListenSocket) ->
-    case gen_tcp:accept(ListenSocket) of
-        {ok, ClientSocket} ->
-            %% Generate unique session ID
-            SessionId = generate_session_id(),
-            Peer = case inet:peername(ClientSocket) of
-                       {ok, {PeerAddr, PeerPort}} -> {PeerAddr, PeerPort};
-                       _ -> unknown
-                   end,
-            
-            %% Start session under supervisor
-            case beamtalk_session_sup:start_session(SessionId) of
-                {ok, SessionPid} ->
-                    %% BT-666: Register session for interrupt routing
-                    ets:insert(beamtalk_sessions, {SessionId, SessionPid}),
-                    
-                    ?LOG_INFO("REPL client connected", #{
-                        session => SessionId,
-                        session_pid => SessionPid,
-                        peer => Peer
-                    }),
-                    
-                    %% Mark activity - new session connected
-                    beamtalk_workspace_meta:update_activity(),
-                    
-                    %% Spawn client handler monitoring the session.
-                    %% If the session crashes, handle_client eventually
-                    %% gets a recv error (closed socket) or timeout, and
-                    %% the handler exits cleanly.
-                    spawn(fun() ->
-                        MonRef = erlang:monitor(process, SessionPid),
-                        handle_client(ClientSocket, SessionPid, SessionId),
-                        %% Client disconnected — terminate the session
-                        ?LOG_INFO("REPL client disconnected", #{
-                            session => SessionId,
-                            session_pid => SessionPid,
-                            peer => Peer
-                        }),
-                        %% BT-666: Unregister session
-                        ets:delete(beamtalk_sessions, SessionId),
-                        erlang:demonitor(MonRef, [flush]),
-                        beamtalk_repl_shell:stop(SessionPid)
-                    end);
-                {error, Reason} ->
-                    ?LOG_ERROR("Failed to create session: ~p", [Reason]),
-                    ErrorJson = beamtalk_repl_json:format_error({session_creation_failed, Reason}),
-                    gen_tcp:send(ClientSocket, [ErrorJson, "\n"]),
-                    gen_tcp:close(ClientSocket)
-            end,
-            acceptor_loop(ListenSocket);
-        {error, Reason} ->
-            ?LOG_ERROR("Accept error: ~p", [Reason]),
-            timer:sleep(1000),
-            acceptor_loop(ListenSocket)
-    end.
+%%% Session ID Generation
 
 %% @doc Generate a unique session ID.
-%% Format: "session_{timestamp}_{random}"
+%% Uses crypto:strong_rand_bytes for unpredictable IDs (prevents session ID guessing).
 -spec generate_session_id() -> binary().
 generate_session_id() ->
     Timestamp = erlang:system_time(microsecond),
-    Random = rand:uniform(99999),
-    list_to_binary(io_lib:format("session_~p_~p", [Timestamp, Random])).
-
-%%% Client Handling
-
-%% @doc Handle a client connection in session mode (runs in separate process).
-%%
-%% The SessionPid is a beamtalk_repl_shell process that handles
-%% protocol-aware request routing via beamtalk_repl_protocol.
-%% Called by: beamtalk_repl_server acceptor_loop
--spec handle_client(gen_tcp:socket(), pid(), binary()) -> ok.
-handle_client(Socket, SessionPid, SessionId) ->
-    inet:setopts(Socket, [{active, false}, {packet, line}, {buffer, 65536}]),
-    %% BT-666: Send session ID so the client can use it for interrupt requests
-    Welcome = jsx:encode(#{<<"op">> => <<"session-started">>,
-                           <<"session">> => SessionId}),
-    _ = gen_tcp:send(Socket, [Welcome, "\n"]),
-    handle_client_loop(Socket, SessionPid).
-
-%% @private
-%% Session mode: forward requests to beamtalk_repl_shell via protocol-aware dispatch.
-%% The try/catch is scoped to a single iteration so that the recursive
-%% tail-call to handle_client_loop/2 happens outside the try block,
-%% allowing proper tail-call optimisation and preventing stack growth.
-handle_client_loop(Socket, SessionPid) ->
-    Result = try handle_client_once(Socket, SessionPid)
-             catch
-                 Class:Reason:Stack ->
-                     ?LOG_ERROR("REPL client handler crash", #{
-                         class => Class,
-                         reason => Reason,
-                         stack => lists:sublist(Stack, 10)
-                     }),
-                     catch gen_tcp:close(Socket),
-                     stop
-             end,
-    case Result of
-        continue -> handle_client_loop(Socket, SessionPid);
-        stop     -> ok
-    end.
-
-%% @private
-%% Read a complete line from the socket, accumulating partial reads.
-%% With {packet, line}, a complete line includes the trailing \n.
-%% @doc Receive a complete newline-terminated line from a TCP socket.
-%% Accumulates partial reads, guarding against unbounded buffering and slowloris attacks.
--spec recv_line(gen_tcp:socket(), binary()) -> {ok, binary()} | {error, term()}.
-recv_line(_Socket, Acc) when byte_size(Acc) >= ?MAX_LINE_LENGTH ->
-    {error, line_too_long};
-recv_line(Socket, Acc) ->
-    case gen_tcp:recv(Socket, 0, ?RECV_TIMEOUT) of
-        {ok, Data} ->
-            Combined = <<Acc/binary, Data/binary>>,
-            case byte_size(Combined) >= ?MAX_LINE_LENGTH of
-                true  -> {error, line_too_long};
-                false ->
-                    case binary:last(Data) of
-                        $\n -> {ok, Combined};
-                        _   -> recv_line(Socket, Combined)
-                    end
-            end;
-        {error, timeout} when byte_size(Acc) > 0 ->
-            %% Timeout while accumulating a partial line — keep waiting.
-            %% The MAX_LINE_LENGTH guard above bounds total accumulation.
-            recv_line(Socket, Acc);
-        {error, _} = Error ->
-            Error
-    end.
-
-%% @private
-%% Process a single recv/send iteration. Returns 'continue' or 'stop'.
-handle_client_once(Socket, SessionPid) ->
-    case recv_line(Socket, <<>>) of
-        {ok, Data} ->
-            %% Decode request using protocol module
-            case beamtalk_repl_protocol:decode(Data) of
-                {ok, Msg} ->
-                    %% Process request via session or workspace APIs
-                    Response = handle_protocol_request(Msg, SessionPid),
-                    
-                    %% Send response
-                    case gen_tcp:send(Socket, [Response, "\n"]) of
-                        ok ->
-                            continue;
-                        {error, SendError} ->
-                            ?LOG_WARNING("REPL client send error: ~p", [SendError]),
-                            gen_tcp:close(Socket),
-                            stop
-                    end;
-                {error, DecodeError} ->
-                    ErrorJson = beamtalk_repl_json:format_error(DecodeError),
-                    case gen_tcp:send(Socket, [ErrorJson, "\n"]) of
-                        ok ->
-                            continue;
-                        {error, SendError} ->
-                            ?LOG_WARNING("REPL client send error: ~p", [SendError]),
-                            gen_tcp:close(Socket),
-                            stop
-                    end
-            end;
-        {error, closed} ->
-            ?LOG_DEBUG("REPL client TCP closed", #{reason => closed, session_pid => SessionPid}),
-            stop;
-        {error, timeout} ->
-            %% No data within RECV_TIMEOUT — just retry.
-            %% The idle monitor handles truly abandoned sessions.
-            continue;
-        {error, RecvError} ->
-            ?LOG_WARNING("REPL client recv error: ~p", [RecvError]),
-            gen_tcp:close(Socket),
-            stop
-    end.
-
+    RandomBytes = crypto:strong_rand_bytes(8),
+    RandomHex = lists:flatten([io_lib:format("~2.16.0b", [B]) || <<B>> <= RandomBytes]),
+    list_to_binary(io_lib:format("session_~p_~s", [Timestamp, RandomHex])).
 
 %%% Protocol-aware request handling
 
-%% @private
-%% Handle a protocol message by dispatching to appropriate API.
+%% @doc Handle a protocol message by dispatching to appropriate API.
 %% Returns JSON binary response using protocol encoding.
+%% Called by beamtalk_ws_handler after authentication.
 handle_protocol_request(Msg, SessionPid) ->
     Op = beamtalk_repl_protocol:get_op(Msg),
     Params = beamtalk_repl_protocol:get_params(Msg),
@@ -765,16 +583,15 @@ handle_op(<<"shutdown">>, Params, Msg, _SessionPid) ->
     %% Triggers init:stop() for OTP-level supervisor tree teardown.
     ProvidedCookie = maps:get(<<"cookie">>, Params, <<>>),
     NodeCookie = atom_to_binary(erlang:get_cookie(), utf8),
-    case ProvidedCookie of
-        NodeCookie ->
-            ?LOG_INFO("Shutdown requested via TCP protocol", #{}),
-            %% Schedule shutdown via gen_server handle_info after TCP response is sent.
-            %% Using send_after to the registered server ensures init:stop() runs
-            %% only after the response has been flushed to the client socket.
+    %% Timing-safe comparison to prevent side-channel attacks
+    case crypto:hash_equals(ProvidedCookie, NodeCookie) of
+        true ->
+            ?LOG_INFO("Shutdown requested via protocol", #{}),
+            %% Schedule shutdown via gen_server handle_info after response is sent.
             erlang:send_after(100, ?MODULE, shutdown_requested),
             beamtalk_repl_protocol:encode_status(ok, Msg,
                 fun beamtalk_repl_json:term_to_json/1);
-        _ ->
+        false ->
             ?LOG_WARNING("Shutdown rejected: invalid cookie", #{}),
             Err0 = beamtalk_error:new(auth_error, 'REPL'),
             Err1 = beamtalk_error:with_message(Err0, <<"Invalid cookie">>),

@@ -1302,7 +1302,7 @@ tcp_integration_test_() ->
 
 tcp_setup() ->
     process_flag(trap_exit, true),
-    application:ensure_all_started(beamtalk_runtime),
+    application:ensure_all_started(beamtalk_workspace),
     %% Find a free port and start workspace, with retry on port conflict
     {Port, SupPid} = tcp_start_workspace(3),
     timer:sleep(100),
@@ -1323,11 +1323,12 @@ tcp_start_workspace(Retries) ->
     case beamtalk_workspace_sup:start_link(Config) of
         {ok, Pid} -> {Port, Pid};
         {error, {already_started, Pid}} -> {Port, Pid};
-        {error, {listen_failed, eaddrinuse}} -> tcp_start_workspace(Retries - 1);
-        {error, Reason} -> error({workspace_start_failed, Reason})
+        {error, _Reason} -> tcp_start_workspace(Retries - 1)
     end.
 
 tcp_cleanup({_Port, SupPid}) ->
+    %% Stop cowboy listener before killing supervisor (ADR 0020)
+    _ = cowboy:stop_listener(beamtalk_repl_ws),
     case is_pid(SupPid) andalso is_process_alive(SupPid) of
         true ->
             unlink(SupPid),
@@ -1336,15 +1337,147 @@ tcp_cleanup({_Port, SupPid}) ->
         false -> ok
     end.
 
-%% Helper: connect, send a JSON op, receive response
+%% Helper: connect, send a JSON op, receive response via WebSocket
 tcp_send_op(Port, OpJson) ->
-    {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
-    %% BT-666: Consume the session-started welcome message
-    {ok, _Welcome} = gen_tcp:recv(Sock, 0, 5000),
-    ok = gen_tcp:send(Sock, [OpJson, "\n"]),
-    {ok, Data} = gen_tcp:recv(Sock, 0, 5000),
-    gen_tcp:close(Sock),
+    {Ws, _Welcome} = ws_connect(Port),
+    ws_send(Ws, OpJson),
+    {ok, Data} = ws_recv(Ws),
+    ws_close(Ws),
     jsx:decode(Data, [return_maps]).
+
+%% Minimal WebSocket client for tests.
+%% Performs HTTP upgrade, cookie auth, then supports text frame send/recv.
+
+ws_connect(Port) ->
+    {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port,
+                                 [binary, {active, false}, {packet, raw}], 5000),
+    %% WebSocket upgrade request
+    Key = base64:encode(crypto:strong_rand_bytes(16)),
+    Req = [<<"GET /ws HTTP/1.1\r\n">>,
+           <<"Host: 127.0.0.1:">>, integer_to_binary(Port), <<"\r\n">>,
+           <<"Upgrade: websocket\r\n">>,
+           <<"Connection: Upgrade\r\n">>,
+           <<"Sec-WebSocket-Key: ">>, Key, <<"\r\n">>,
+           <<"Sec-WebSocket-Version: 13\r\n">>,
+           <<"\r\n">>],
+    ok = gen_tcp:send(Sock, Req),
+    %% Read HTTP upgrade response, return any leftover bytes after \r\n\r\n
+    {ok, Rest} = ws_consume_http_response(Sock),
+    %% Read auth-required message (may already be in Rest buffer)
+    {ok, _AuthRequired} = ws_recv_with_buf(Sock, Rest),
+    %% Send cookie auth
+    Cookie = atom_to_binary(erlang:get_cookie(), utf8),
+    AuthMsg = jsx:encode(#{<<"type">> => <<"auth">>, <<"cookie">> => Cookie}),
+    ws_send(Sock, AuthMsg),
+    %% Read auth_ok response
+    {ok, _AuthOk} = ws_recv(Sock),
+    %% Read session-started message (created after auth)
+    {ok, Welcome} = ws_recv(Sock),
+    {Sock, Welcome}.
+
+ws_consume_http_response(Sock) ->
+    ws_consume_http_response(Sock, <<>>).
+
+ws_consume_http_response(Sock, Buf) ->
+    case binary:match(Buf, <<"\r\n\r\n">>) of
+        nomatch ->
+            {ok, More} = gen_tcp:recv(Sock, 0, 5000),
+            ws_consume_http_response(Sock, <<Buf/binary, More/binary>>);
+        {Pos, Len} ->
+            %% Return bytes after the \r\n\r\n delimiter
+            RestStart = Pos + Len,
+            Rest = binary:part(Buf, RestStart, byte_size(Buf) - RestStart),
+            {ok, Rest}
+    end.
+
+%% Send a masked text frame (clients must mask per RFC 6455)
+ws_send(Sock, Data) when is_binary(Data) ->
+    Len = byte_size(Data),
+    MaskKey = crypto:strong_rand_bytes(4),
+    Header = if
+        Len < 126 ->
+            <<1:1, 0:3, 1:4, 1:1, Len:7>>;  % FIN=1, opcode=1 (text), MASK=1
+        Len < 65536 ->
+            <<1:1, 0:3, 1:4, 1:1, 126:7, Len:16>>;
+        true ->
+            <<1:1, 0:3, 1:4, 1:1, 127:7, Len:64>>
+    end,
+    Masked = ws_mask(Data, MaskKey),
+    ok = gen_tcp:send(Sock, [Header, MaskKey, Masked]);
+ws_send(Sock, Data) when is_list(Data) ->
+    ws_send(Sock, iolist_to_binary(Data)).
+
+%% Receive a text frame (server frames are unmasked).
+%% Uses exact-byte reads to avoid consuming bytes from the next frame.
+ws_recv(Sock) ->
+    ws_recv_with_buf(Sock, <<>>).
+
+%% Receive a text frame, with optional pre-buffered data from HTTP upgrade.
+%% Buf may contain leftover bytes from ws_consume_http_response.
+ws_recv_with_buf(Sock, Buf) ->
+    %% Read 2-byte frame header (may already be in Buf)
+    {<<_FIN:1, _RSV:3, Opcode:4, Mask:1, Len0:7>>, Rest0} = ws_read_exact(Sock, 2, Buf),
+    {PayloadLen, Rest1} = case Len0 of
+        126 ->
+            {<<L:16>>, R} = ws_read_exact(Sock, 2, Rest0),
+            {L, R};
+        127 ->
+            {<<L:64>>, R} = ws_read_exact(Sock, 8, Rest0),
+            {L, R};
+        L -> {L, Rest0}
+    end,
+    {MaskKey, Rest2} = case Mask of
+        1 ->
+            {MK, R2} = ws_read_exact(Sock, 4, Rest1),
+            {MK, R2};
+        0 -> {<<0,0,0,0>>, Rest1}
+    end,
+    {Payload, _Rest3} = ws_read_exact(Sock, PayloadLen, Rest2),
+    Unmasked = case Mask of
+        1 -> ws_mask(Payload, MaskKey);
+        0 -> Payload
+    end,
+    case Opcode of
+        1 -> {ok, Unmasked};    % text
+        8 -> {close, Unmasked}; % close
+        9 ->
+            %% Ping — respond with pong and continue reading
+            Pong = <<1:1, 0:3, 10:4, 0:1, 0:7>>,
+            ok = gen_tcp:send(Sock, Pong),
+            ws_recv(Sock);
+        _ -> ws_recv(Sock)      % skip other frames
+    end.
+
+%% Read exactly N bytes: first from Buf, then from socket if needed.
+%% Returns {Bytes, Rest} where Bytes is exactly N bytes and Rest is leftovers.
+ws_read_exact(_Sock, N, Buf) when byte_size(Buf) >= N ->
+    <<Bytes:N/binary, Rest/binary>> = Buf,
+    {Bytes, Rest};
+ws_read_exact(Sock, N, Buf) ->
+    Need = N - byte_size(Buf),
+    {ok, More} = gen_tcp:recv(Sock, Need, 5000),
+    Combined = <<Buf/binary, More/binary>>,
+    <<Bytes:N/binary, Rest/binary>> = Combined,
+    {Bytes, Rest}.
+
+ws_close(Sock) ->
+    %% Send close frame
+    CloseFrame = <<1:1, 0:3, 8:4, 1:1, 0:7, 0:32>>,
+    _ = gen_tcp:send(Sock, CloseFrame),
+    gen_tcp:close(Sock).
+
+ws_mask(Data, <<M1, M2, M3, M4>>) ->
+    ws_mask(Data, <<M1, M2, M3, M4>>, 0, <<>>).
+
+ws_mask(<<>>, _Key, _I, Acc) -> Acc;
+ws_mask(<<B, Rest/binary>>, Key = <<K1, K2, K3, K4>>, I, Acc) ->
+    M = case I rem 4 of
+        0 -> B bxor K1;
+        1 -> B bxor K2;
+        2 -> B bxor K3;
+        3 -> B bxor K4
+    end,
+    ws_mask(Rest, Key, I + 1, <<Acc/binary, M>>).
 
 %% Test: clear op returns ok status
 tcp_clear_test(Port) ->
@@ -1538,24 +1671,20 @@ tcp_inspect_dead_actor_test(Port) ->
 
 %% Test: malformed JSON falls back to raw eval
 tcp_malformed_json_test(Port) ->
-    {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
-    %% BT-666: Consume session-started welcome
-    {ok, _Welcome} = gen_tcp:recv(Sock, 0, 5000),
-    ok = gen_tcp:send(Sock, <<"not valid json\n">>),
-    {ok, Data} = gen_tcp:recv(Sock, 0, 5000),
-    gen_tcp:close(Sock),
+    {Ws, _Welcome} = ws_connect(Port),
+    ws_send(Ws, <<"not valid json">>),
+    {ok, Data} = ws_recv(Ws),
+    ws_close(Ws),
     Resp = jsx:decode(Data, [return_maps]),
     %% The server should try to eval "not valid json" or return error
     ?assert(maps:is_key(<<"value">>, Resp) orelse maps:is_key(<<"error">>, Resp) orelse maps:is_key(<<"type">>, Resp)).
 
 %% Test: raw expression (non-JSON) backwards compatibility
 tcp_raw_expression_test(Port) ->
-    {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
-    %% BT-666: Consume session-started welcome
-    {ok, _Welcome} = gen_tcp:recv(Sock, 0, 5000),
-    ok = gen_tcp:send(Sock, <<"42\n">>),
-    {ok, Data} = gen_tcp:recv(Sock, 0, 5000),
-    gen_tcp:close(Sock),
+    {Ws, _Welcome} = ws_connect(Port),
+    ws_send(Ws, <<"42">>),
+    {ok, Data} = ws_recv(Ws),
+    ws_close(Ws),
     Resp = jsx:decode(Data, [return_maps]),
     %% Raw expressions go through protocol decode
     ?assert(is_map(Resp)).
@@ -1577,21 +1706,18 @@ tcp_multiple_connects_test(Port) ->
     Resp3 = tcp_send_op(Port, Msg3),
     ?assertMatch(#{<<"id">> := <<"mc3">>}, Resp3).
 
-%% Test: multiple concurrent TCP connections
+%% Test: multiple concurrent WebSocket connections
 tcp_concurrent_clients_test(Port) ->
     Msg1 = jsx:encode(#{<<"op">> => <<"bindings">>, <<"id">> => <<"cc1">>}),
     Msg2 = jsx:encode(#{<<"op">> => <<"actors">>, <<"id">> => <<"cc2">>}),
-    {ok, Sock1} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
-    {ok, Sock2} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
-    %% BT-666: Consume session-started welcome on both sockets
-    {ok, _W1} = gen_tcp:recv(Sock1, 0, 5000),
-    {ok, _W2} = gen_tcp:recv(Sock2, 0, 5000),
-    ok = gen_tcp:send(Sock1, [Msg1, "\n"]),
-    ok = gen_tcp:send(Sock2, [Msg2, "\n"]),
-    {ok, Data1} = gen_tcp:recv(Sock1, 0, 5000),
-    {ok, Data2} = gen_tcp:recv(Sock2, 0, 5000),
-    gen_tcp:close(Sock1),
-    gen_tcp:close(Sock2),
+    {Ws1, _W1} = ws_connect(Port),
+    {Ws2, _W2} = ws_connect(Port),
+    ws_send(Ws1, Msg1),
+    ws_send(Ws2, Msg2),
+    {ok, Data1} = ws_recv(Ws1),
+    {ok, Data2} = ws_recv(Ws2),
+    ws_close(Ws1),
+    ws_close(Ws2),
     Resp1 = jsx:decode(Data1, [return_maps]),
     Resp2 = jsx:decode(Data2, [return_maps]),
     ?assertMatch(#{<<"id">> := <<"cc1">>}, Resp1),
@@ -1599,8 +1725,8 @@ tcp_concurrent_clients_test(Port) ->
 
 %% Test: client disconnect is handled gracefully (no crash)
 tcp_client_disconnect_test(Port) ->
-    {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
-    %% Close immediately without sending
+    %% Connect and immediately close the TCP socket
+    {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port, [binary, {active, false}], 5000),
     gen_tcp:close(Sock),
     timer:sleep(100),
     %% Server should still be responsive
@@ -1608,48 +1734,43 @@ tcp_client_disconnect_test(Port) ->
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"dc1">>}, Resp).
 
-%% Test: multiple requests on the same connection
+%% Test: multiple requests on the same WebSocket connection
 tcp_multi_request_same_conn_test(Port) ->
-    {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
-    %% BT-666: Consume session-started welcome
-    {ok, _Welcome} = gen_tcp:recv(Sock, 0, 5000),
+    {Ws, _Welcome} = ws_connect(Port),
     %% Send first request
     Msg1 = jsx:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"mr1">>}),
-    ok = gen_tcp:send(Sock, [Msg1, "\n"]),
-    {ok, Data1} = gen_tcp:recv(Sock, 0, 5000),
+    ws_send(Ws, Msg1),
+    {ok, Data1} = ws_recv(Ws),
     Resp1 = jsx:decode(Data1, [return_maps]),
     ?assertMatch(#{<<"id">> := <<"mr1">>}, Resp1),
     %% Send second request on same connection
     Msg2 = jsx:encode(#{<<"op">> => <<"bindings">>, <<"id">> => <<"mr2">>}),
-    ok = gen_tcp:send(Sock, [Msg2, "\n"]),
-    {ok, Data2} = gen_tcp:recv(Sock, 0, 5000),
+    ws_send(Ws, Msg2),
+    {ok, Data2} = ws_recv(Ws),
     Resp2 = jsx:decode(Data2, [return_maps]),
     ?assertMatch(#{<<"id">> := <<"mr2">>}, Resp2),
-    gen_tcp:close(Sock).
+    ws_close(Ws).
 
 %%% BT-523: Connection error handling tests
 
-%% Test: send empty line to server
+%% Test: send empty string to server via WebSocket
 tcp_empty_line_test(Port) ->
-    {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
-    %% BT-666: Consume session-started welcome
-    {ok, _Welcome} = gen_tcp:recv(Sock, 0, 5000),
-    ok = gen_tcp:send(Sock, <<"\n">>),
-    {ok, Data} = gen_tcp:recv(Sock, 0, 5000),
-    gen_tcp:close(Sock),
+    {Ws, _Welcome} = ws_connect(Port),
+    ws_send(Ws, <<>>),
+    {ok, Data} = ws_recv(Ws),
+    ws_close(Ws),
     Resp = jsx:decode(Data, [return_maps]),
-    %% Empty line results in error (legacy type=error or protocol status=[error])
+    %% Empty message results in error
     ?assert(maps:is_key(<<"error">>, Resp) orelse
             maps:get(<<"type">>, Resp, undefined) =:= <<"error">>).
 
-%% Test: binary garbage data
+%% Test: non-JSON text data via WebSocket
 tcp_binary_garbage_test(Port) ->
-    {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
-    %% BT-666: Consume session-started welcome
-    {ok, _Welcome} = gen_tcp:recv(Sock, 0, 5000),
-    ok = gen_tcp:send(Sock, <<0, 1, 2, 255, 254, 10>>),
-    {ok, Data} = gen_tcp:recv(Sock, 0, 5000),
-    gen_tcp:close(Sock),
+    {Ws, _Welcome} = ws_connect(Port),
+    %% Send garbled text (valid UTF-8 but not JSON)
+    ws_send(Ws, <<"@#$%^&*not-json">>),
+    {ok, Data} = ws_recv(Ws),
+    ws_close(Ws),
     %% Should get some response without crashing the server
     ?assert(is_binary(Data)),
     %% Server still works after garbage
@@ -1754,7 +1875,10 @@ tcp_start_link_integer_test() ->
     Result = beamtalk_repl_server:start_link(0),
     case Result of
         {error, {already_started, _}} ->
-            %% Expected: server was already registered by workspace sup
+            %% Expected: gen_server already registered
+            ok;
+        {error, {listen_failed, {already_started, _}}} ->
+            %% Expected: cowboy listener already running (ADR 0020)
             ok;
         {ok, Pid} ->
             %% Server wasn't registered (race with test ordering).
@@ -2261,16 +2385,7 @@ handle_protocol_request_crash_test() ->
     ?assertMatch(#{<<"id">> := <<"crash1">>}, Decoded).
 
 %% ===================================================================
-%% recv_line tests (BT-627)
-%% ===================================================================
-
-recv_line_line_too_long_test() ->
-    %% Test the line_too_long guard (line 295-296)
-    %% Create an accumulator that's already at MAX_LINE_LENGTH
-    BigBin = binary:copy(<<$a>>, 1048576),
-    Result = beamtalk_repl_server:recv_line(undefined, BigBin),
-    ?assertEqual({error, line_too_long}, Result).
-
+%% recv_line tests removed — function replaced by WebSocket handler (ADR 0020)
 %% ===================================================================
 %% write_port_file tests (BT-627)
 %% ===================================================================

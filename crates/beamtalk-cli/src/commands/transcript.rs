@@ -51,8 +51,11 @@ pub fn run(workspace_name: Option<&str>, recent: Option<usize>) -> Result<()> {
         ));
     }
 
+    // Read workspace cookie for WebSocket authentication (ADR 0020)
+    let cookie = workspace::read_workspace_cookie(&workspace_id)?;
+
     // Connect to workspace REPL backend
-    let mut client = TranscriptClient::connect(node_info.port)?;
+    let mut client = TranscriptClient::connect(node_info.port, &cookie)?;
 
     // Set up Ctrl-C handler
     let running = Arc::new(AtomicBool::new(true));
@@ -123,11 +126,9 @@ struct TranscriptClient {
 
 impl TranscriptClient {
     /// Connect to the workspace backend at the given port.
-    fn connect(port: u16) -> Result<Self> {
-        let mut inner =
-            ProtocolClient::connect(port, Some(Duration::from_millis(READ_TIMEOUT_MS)))?;
-        // BT-666: Consume the session-started welcome message
-        let _ = inner.read_response_line();
+    fn connect(port: u16, cookie: &str) -> Result<Self> {
+        let inner =
+            ProtocolClient::connect(port, cookie, Some(Duration::from_millis(READ_TIMEOUT_MS)))?;
         Ok(Self { inner })
     }
 

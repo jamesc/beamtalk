@@ -47,6 +47,8 @@ fs2.workspace = true
 pulldown-cmark.workspace = true
 # why: temporary files for REPL evaluation and workspace management
 tempfile = "3.14"
+# why: WebSocket client for REPL protocol (ADR 0020)
+tungstenite.workspace = true
 
 [dev-dependencies]
 serial_test = "3"

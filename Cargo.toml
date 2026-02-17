@@ -67,6 +67,10 @@ tokio = { version = "1", features = ["full"] }
 # Stack safety
 stacker = "0.1"
 
+# WebSocket (ADR 0020 — REPL protocol transport)
+tungstenite = "0.26"
+tokio-tungstenite = "0.26"
+
 # Testing
 insta = { version = "1", features = ["yaml"] }
 proptest = "1"

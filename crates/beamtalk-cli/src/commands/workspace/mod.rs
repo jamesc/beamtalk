@@ -59,8 +59,8 @@ pub use lifecycle::{
 };
 pub use process::is_node_running;
 pub use storage::{
-    cleanup_stale_node_info, get_node_info, get_workspace_metadata, workspace_exists,
-    workspace_id_for,
+    cleanup_stale_node_info, get_node_info, get_workspace_metadata, read_workspace_cookie,
+    workspace_exists, workspace_id_for,
 };
 
 #[cfg(test)]

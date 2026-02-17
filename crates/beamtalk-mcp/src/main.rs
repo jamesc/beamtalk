@@ -64,21 +64,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let args = Args::parse();
 
-    // Resolve REPL port
-    let port = resolve_port(&args)?;
+    // Resolve REPL port and cookie
+    let (port, cookie) = resolve_port_and_cookie(&args)?;
     tracing::info!(port, "Connecting to beamtalk REPL");
 
     // Connect to REPL
-    let repl_client = client::ReplClient::connect(port).await.map_err(|e| {
-        eprintln!("Error: {e}");
-        eprintln!();
-        eprintln!("Make sure a beamtalk REPL is running:");
-        eprintln!("  beamtalk repl");
-        eprintln!();
-        eprintln!("Or specify a port directly:");
-        eprintln!("  beamtalk-mcp --port 9876");
-        e
-    })?;
+    let repl_client = client::ReplClient::connect(port, &cookie)
+        .await
+        .map_err(|e| {
+            eprintln!("Error: {e}");
+            eprintln!();
+            eprintln!("Make sure a beamtalk REPL is running:");
+            eprintln!("  beamtalk repl");
+            eprintln!();
+            eprintln!("Or specify a port directly:");
+            eprintln!("  beamtalk-mcp --port 9876");
+            e
+        })?;
 
     tracing::info!("Connected to REPL, starting MCP server on stdio");
 
@@ -92,22 +94,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Resolve the REPL port from CLI args or workspace discovery.
-fn resolve_port(args: &Args) -> Result<u16, Box<dyn std::error::Error>> {
-    // Explicit port takes priority
+/// Resolve the REPL port and cookie from CLI args or workspace discovery.
+fn resolve_port_and_cookie(args: &Args) -> Result<(u16, String), Box<dyn std::error::Error>> {
+    // Explicit port takes priority (cookie from env or default Erlang cookie)
     if let Some(port) = args.port {
-        return Ok(port);
+        let cookie = std::env::var("BEAMTALK_COOKIE").unwrap_or_default();
+        return Ok((port, cookie));
     }
 
     // Try workspace discovery
-    if let Some(port) = workspace::discover_port(args.workspace_id.as_deref()) {
-        return Ok(port);
+    if let Some((port, cookie)) = workspace::discover_port_and_cookie(args.workspace_id.as_deref())
+    {
+        return Ok((port, cookie));
     }
 
     // Try finding any running workspace
-    if let Some(port) = workspace::discover_any_port() {
+    if let Some((port, cookie)) = workspace::discover_any_port_and_cookie() {
         tracing::info!(port, "Auto-discovered running REPL");
-        return Ok(port);
+        return Ok((port, cookie));
     }
 
     Err("Could not find a running beamtalk REPL. \
