@@ -269,7 +269,7 @@ For batch compilation (`beamtalk build`), only `beamtalk_runtime` needs to start
 
 ### Test Fixtures
 
-The existing `test_fixtures/compile.sh` compiles `counter.bt` and `logging_counter.bt` for runtime tests (codegen simulation, super keyword). These fixtures stay with `beamtalk_runtime` — they test core actor behavior, not REPL features. If workspace tests need compiled fixtures in the future, `beamtalk_workspace` can add its own `test_fixtures/` with a similar compile hook.
+The existing `test_fixtures/compile_fixtures.escript` compiles `counter.bt` and `logging_counter.bt` for runtime tests (codegen simulation, super keyword). These fixtures stay with `beamtalk_runtime` — they test core actor behavior, not REPL features. If workspace tests need compiled fixtures in the future, `beamtalk_workspace` can add its own `test_fixtures/` with a similar compile hook.
 
 ```erlang
 %% beamtalk_runtime.app.src
