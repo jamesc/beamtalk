@@ -1,7 +1,9 @@
 # ADR 0020: Connection Security — mTLS, Proxies, and Network Overlays
 
 ## Status
-Proposed (2026-02-12)
+Accepted (2026-02-17)
+
+**Update (2026-02-17):** Phase 0 (WebSocket transport + cookie auth) implemented in BT-683. ADR accepted based on validated implementation.
 
 ## Context
 
@@ -9,8 +11,8 @@ Beamtalk has several TCP communication channels that need security consideration
 
 | Channel | Transport | Current Security | Users |
 |---------|-----------|-----------------|-------|
-| **REPL ↔ Workspace** | TCP `127.0.0.1:49152` | Loopback-only binding | `beamtalk repl` |
-| **CLI ↔ Compiler Daemon** | Unix socket `~/.beamtalk/daemon.sock` | Filesystem permissions | `beamtalk build`, LSP |
+| **REPL ↔ Workspace** | WebSocket `ws://127.0.0.1:49152` | Loopback + cookie handshake (BT-683) | `beamtalk repl` |
+| **CLI ↔ Compiler** | OTP Port (stdin/stdout) | Process isolation (ADR 0022) | `beamtalk build`, LSP |
 | **Distributed Erlang** | Erlang distribution protocol | Cookie file (`chmod 600`) | Workspace-to-workspace |
 | **Web terminal** | Not yet implemented | — | Browser-based REPL |
 | **Remote attach** | Not yet implemented | — | `beamtalk attach prod@host` |
@@ -507,6 +509,19 @@ This ADR does **not** cover:
 - **Distributed actor security** (workspace-to-workspace messaging) — deferred until multi-workspace communication is designed
 - **Audit logging implementation** — recommended but not specified; a separate issue for production readiness
 - **Code deployment authorization** (who can hot-reload code) — separate from REPL eval authorization
+
+## Implementation Tracking
+
+**Epic:** TBD (Phases 1–4)
+**Status:** Phase 0 Done
+
+| Phase | Issue | Title | Size | Status |
+|-------|-------|-------|------|--------|
+| 0 | BT-683 | Migrate REPL transport from TCP to WebSocket with cookie auth | L | Done |
+| 1 | TBD | Web terminal (`beamtalk web` + xterm.js) | M | Planned |
+| 2 | TBD | Network binding + proxy documentation | M | Planned |
+| 3 | TBD | mTLS for Erlang distribution | L | Planned |
+| 4 | TBD | SPIFFE/SPIRE integration | XL | Future |
 
 ## References
 - Related ADRs: [ADR 0004 — Persistent Workspace Management](0004-persistent-workspace-management.md), [ADR 0009 — OTP Application Structure](0009-otp-application-structure.md)

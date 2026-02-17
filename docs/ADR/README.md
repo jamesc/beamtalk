@@ -43,10 +43,10 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0014](0014-beamtalk-test-framework.md) | Beamtalk Test Framework — Native Unit Tests and CLI Integration Tests | Implemented | 2026-02-15 |
 | [0015](0015-repl-error-objects-and-exception-hierarchy.md) | Signal-Time Exception Objects and Error Class Hierarchy | Implemented | 2026-02-15 |
 | [0016](0016-unified-stdlib-module-naming.md) | Unified Stdlib Packaging and Module Naming | Implemented | 2026-02-10 |
-| [0017](0017-browser-connectivity-to-running-workspaces.md) | Browser Connectivity to Running Workspaces | Proposed | 2026-02-11 |
+| [0017](0017-browser-connectivity-to-running-workspaces.md) | Browser Connectivity to Running Workspaces | Accepted | 2026-02-17 |
 | [0018](0018-document-tree-codegen.md) | Document Tree Code Generation (Wadler-Lindig Pretty Printer) | Implemented | 2026-02-15 |
 | [0019](0019-singleton-class-variables.md) | Singleton Access via Class Variables | Implemented | 2026-02-15 |
-| [0020](0020-connection-security.md) | Connection Security — mTLS, Proxies, and Network Overlays | Proposed | 2026-02-12 |
+| [0020](0020-connection-security.md) | Connection Security — mTLS, Proxies, and Network Overlays | Accepted | 2026-02-17 |
 | [0021](0021-streams-and-io-design.md) | Stream — Universal Data Interface | Implemented | 2026-02-15 |
 | [0022](0022-embedded-compiler-via-otp-port.md) | Embedded Compiler via OTP Port (with NIF option) | Implemented | 2026-02-15 |
 | [0023](0023-string-interpolation-and-binaries.md) | String Interpolation Syntax and Compilation | Implemented | 2026-02-17 |
