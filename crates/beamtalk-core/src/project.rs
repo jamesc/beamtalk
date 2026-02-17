@@ -7,6 +7,7 @@
 //!
 //! Shared project/workspace discovery logic for Beamtalk tooling (CLI, LSP, etc.).
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Project marker files/directories, in priority order.
@@ -25,7 +26,16 @@ fn global_beamtalk_dir() -> Option<PathBuf> {
 
 /// Check whether a `.beamtalk` marker refers to global config, not a project marker.
 fn is_global_config_dir(candidate: &Path) -> bool {
-    global_beamtalk_dir().is_some_and(|global| candidate == global)
+    global_beamtalk_dir().is_some_and(|global| {
+        if candidate == global {
+            return true;
+        }
+
+        match (fs::canonicalize(candidate), fs::canonicalize(&global)) {
+            (Ok(candidate), Ok(global)) => candidate == global,
+            _ => false,
+        }
+    })
 }
 
 /// Discover the Beamtalk project root by walking up the directory tree.
