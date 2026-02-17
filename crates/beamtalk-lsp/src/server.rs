@@ -8,7 +8,7 @@
 //! Delegates all IDE operations to `SimpleLanguageService` + `ProjectIndex`.
 //! Maps between LSP protocol types and beamtalk language service types.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -40,6 +40,12 @@ use tracing::debug;
 const DIAGNOSTIC_DEBOUNCE_DURATION: Duration = Duration::from_millis(150);
 const PRELOAD_MAX_FILES: usize = 5000;
 
+#[derive(Clone)]
+struct PreloadConfig {
+    roots: Vec<PathBuf>,
+    stdlib_dirs: Vec<PathBuf>,
+}
+
 /// LSP backend wrapping `SimpleLanguageService`.
 pub struct Backend {
     /// LSP client handle for sending notifications and responses.
@@ -50,6 +56,8 @@ pub struct Backend {
     versions: Mutex<HashMap<Utf8PathBuf, i32>>,
     /// Monotonic generation counter used to debounce `didChange` diagnostics per URI.
     diagnostic_generation: Mutex<HashMap<Url, u64>>,
+    /// Deferred preload config captured at initialize and consumed after handshake.
+    preload_config: Mutex<Option<PreloadConfig>>,
 }
 
 impl Backend {
@@ -60,6 +68,7 @@ impl Backend {
             service: Mutex::new(SimpleLanguageService::new()),
             versions: Mutex::new(HashMap::new()),
             diagnostic_generation: Mutex::new(HashMap::new()),
+            preload_config: Mutex::new(None),
         }
     }
 
@@ -69,48 +78,17 @@ impl Backend {
         versions.get(&path).copied()
     }
 
-    fn preload_workspace_source_files(&self, initialize_params: &InitializeParams) {
-        let roots = workspace_roots(initialize_params);
-        if roots.is_empty() {
-            return;
-        }
-
-        let configured_stdlib = configured_stdlib_source_dir(initialize_params);
-        let stdlib_dirs = configured_stdlib_source_dirs(configured_stdlib.as_deref(), &roots);
+    async fn preload_workspace_source_files(&self, config: PreloadConfig) {
+        let loaded_files = tokio::task::spawn_blocking(move || collect_preload_files(config))
+            .await
+            .unwrap_or_default();
 
         let mut svc = self.service.lock().expect("service lock poisoned");
-        for root in &roots {
-            let mut beamtalk_files = Vec::new();
-
-            let src_dir = root.join("src");
-            if src_dir.is_dir() {
-                collect_beamtalk_files_recursive(&src_dir, &mut beamtalk_files);
-            }
-
-            for path in beamtalk_files {
-                let Ok(content) = fs::read_to_string(&path) else {
-                    continue;
-                };
-                let Ok(utf8_path) = Utf8PathBuf::from_path_buf(path) else {
-                    continue;
-                };
-                svc.update_file(utf8_path, content);
-            }
-        }
-
-        for dir in &stdlib_dirs {
-            let mut beamtalk_files = Vec::new();
-            collect_beamtalk_files_recursive(dir, &mut beamtalk_files);
-
-            for path in beamtalk_files {
-                let Ok(content) = fs::read_to_string(&path) else {
-                    continue;
-                };
-                let Ok(utf8_path) = Utf8PathBuf::from_path_buf(path) else {
-                    continue;
-                };
-                svc.update_file(utf8_path, content);
-            }
+        for (path, content) in loaded_files {
+            let Ok(utf8_path) = Utf8PathBuf::from_path_buf(path) else {
+                continue;
+            };
+            svc.update_file(utf8_path, content);
         }
     }
 
@@ -138,7 +116,16 @@ impl Backend {
 impl LanguageServer for Backend {
     /// Reports server capabilities to the client during handshake.
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
-        self.preload_workspace_source_files(&params);
+        let roots = workspace_roots(&params);
+        let configured_stdlib = configured_stdlib_source_dir(&params);
+        let stdlib_dirs = configured_stdlib_source_dirs(configured_stdlib.as_deref(), &roots);
+        {
+            let mut preload_config = self
+                .preload_config
+                .lock()
+                .expect("preload_config lock poisoned");
+            *preload_config = Some(PreloadConfig { roots, stdlib_dirs });
+        }
 
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
@@ -171,6 +158,17 @@ impl LanguageServer for Backend {
 
     /// Called after the client acknowledges initialization.
     async fn initialized(&self, _: InitializedParams) {
+        let preload_config = {
+            let mut preload_config = self
+                .preload_config
+                .lock()
+                .expect("preload_config lock poisoned");
+            preload_config.take()
+        };
+        if let Some(config) = preload_config {
+            self.preload_workspace_source_files(config).await;
+        }
+
         debug!("beamtalk-lsp initialized");
         self.client
             .log_message(
@@ -589,12 +587,53 @@ fn path_within_any_root(path: &Path, roots: &[PathBuf]) -> bool {
     roots.iter().any(|root| path.starts_with(root))
 }
 
+fn collect_preload_files(config: PreloadConfig) -> Vec<(PathBuf, String)> {
+    let PreloadConfig { roots, stdlib_dirs } = config;
+    let mut files_to_index = Vec::new();
+    let mut seen_files = HashSet::new();
+    let mut remaining_budget = PRELOAD_MAX_FILES;
+
+    for root in &roots {
+        if remaining_budget == 0 {
+            break;
+        }
+        let src_dir = root.join("src");
+        if src_dir.is_dir() {
+            collect_beamtalk_files_recursive(&src_dir, &mut files_to_index, &mut remaining_budget);
+        }
+    }
+
+    for dir in &stdlib_dirs {
+        if remaining_budget == 0 {
+            break;
+        }
+        collect_beamtalk_files_recursive(dir, &mut files_to_index, &mut remaining_budget);
+    }
+
+    let mut loaded_files = Vec::new();
+    for path in files_to_index {
+        if !seen_files.insert(path.clone()) {
+            continue;
+        }
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        loaded_files.push((path, content));
+    }
+
+    loaded_files
+}
+
 fn is_beamtalk_file(path: &Path) -> bool {
     path.is_file() && path.extension().is_some_and(|ext| ext == "bt")
 }
 
-fn collect_beamtalk_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
-    if files.len() >= PRELOAD_MAX_FILES {
+fn collect_beamtalk_files_recursive(
+    dir: &Path,
+    files: &mut Vec<PathBuf>,
+    remaining_budget: &mut usize,
+) {
+    if *remaining_budget == 0 {
         return;
     }
 
@@ -603,7 +642,7 @@ fn collect_beamtalk_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
     };
 
     for entry in entries.flatten() {
-        if files.len() >= PRELOAD_MAX_FILES {
+        if *remaining_budget == 0 {
             return;
         }
 
@@ -623,9 +662,10 @@ fn collect_beamtalk_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
             if matches!(name, ".git" | "target" | "node_modules" | "_build") {
                 continue;
             }
-            collect_beamtalk_files_recursive(&path, files);
+            collect_beamtalk_files_recursive(&path, files, remaining_budget);
         } else if is_beamtalk_file(&path) {
             files.push(path);
+            *remaining_budget = remaining_budget.saturating_sub(1);
         }
     }
 }
@@ -944,6 +984,19 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn configured_stdlib_source_dir_reads_initialize_option() {
+        let params = InitializeParams {
+            initialization_options: Some(serde_json::json!({
+                "stdlibSourceDir": "lib"
+            })),
+            ..Default::default()
+        };
+
+        let configured = configured_stdlib_source_dir(&params);
+        assert_eq!(configured.as_deref(), Some("lib"));
     }
 
     #[test]
