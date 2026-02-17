@@ -17,7 +17,7 @@ typed Actor subclass: TypedAccount
       self error: "Amount must be non-negative"
     ].
     self.balance := self.balance + amount.
-    ^self.balance
+    self.balance
 
   withdraw: amount: Integer -> Integer =>
     amount < 0 ifTrue: [
@@ -27,12 +27,12 @@ typed Actor subclass: TypedAccount
       self error: "Insufficient funds (balance: " ++ self.balance printString ++ ", requested: " ++ amount printString ++ ")"
     ].
     self.balance := self.balance - amount.
-    ^self.balance
+    self.balance
 
-  balance -> Integer => ^self.balance
+  balance -> Integer => self.balance
 
   setOwner: name: String -> String =>
     self.owner := name.
-    ^self.owner
+    self.owner
 
-  owner -> String => ^self.owner
+  getOwner -> String => self.owner

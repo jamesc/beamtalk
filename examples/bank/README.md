@@ -28,36 +28,36 @@ and transferring money requires coordinating two actors.
 
 Start a REPL session and load the bank classes:
 
-```text
+```
 $ beamtalk repl
 > :load examples/bank/account.bt
 > :load examples/bank/transaction.bt
 > :load examples/bank/bank.bt
 > :load examples/bank/transfer_agent.bt
-```text
+```
 
 Typed variant:
 
-```text
+```
 > :load examples/bank/typed_account.bt
 > typed := TypedAccount spawn
 > typed deposit: 100
 100
 > typed balance
 100
-```text
+```
 
 ### Create a bank and open accounts
 
-```text
+```
 > bank := Bank spawn
 > bank openAccount: "Alice"
 > bank openAccount: "Bob"
-```text
+```
 
 ### Deposit money
 
-```text
+```
 > alice := bank accountFor: "Alice"
 > alice deposit: 1000
 1000
@@ -65,57 +65,57 @@ Typed variant:
 > bob := bank accountFor: "Bob"
 > bob deposit: 500
 500
-```text
+```
 
 ### Check balances
 
-```text
+```
 > alice balance
 1000
 
 > bob balance
 500
-```text
+```
 
 ### Transfer money
 
-```text
+```
 > agent := TransferAgent spawn
 > agent transfer: 250 from: alice to: bob
-```text
+```
 
 The `TransferAgent` sends withdraw and deposit messages to each account:
 
-```text
+```
 > alice balance
 750
 
 > bob balance
 750
-```text
+```
 
 ### Overdraft protection
 
 What happens if we try to withdraw more than the balance?
 
-```text
+```
 > alice withdraw: 5000
 ERROR: Insufficient funds (balance: 750, requested: 5000)
-```text
+```
 
 The withdrawal is rejected — the balance remains unchanged:
 
-```text
+```
 > alice balance
 750
-```text
+```
 
 ### Inspect the last transfer
 
-```text
+```
 > agent getLastAmount
 250
-```text
+```
 
 ## How It Works
 

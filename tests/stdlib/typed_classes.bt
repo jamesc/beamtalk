@@ -33,5 +33,5 @@ account := TypedAccount spawn
 account balance await
 // => 7
 
-account owner await
+account getOwner await
 // => Alice

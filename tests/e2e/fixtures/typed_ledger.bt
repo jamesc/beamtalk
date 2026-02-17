@@ -6,4 +6,4 @@ typed Actor subclass: TypedLedger
 
   addOne -> Integer =>
     self.amount := self.amount + 1.
-    ^self.amount
+    self.amount

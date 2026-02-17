@@ -6,10 +6,10 @@ typed Actor subclass: TypedCounter
 
   increment -> Integer =>
     self.value := self.value + 1.
-    ^self.value
+    self.value
 
   add: amount: Integer -> Integer =>
     self.value := self.value + amount.
-    ^self.value
+    self.value
 
-  current -> Integer => ^self.value
+  current -> Integer => self.value
