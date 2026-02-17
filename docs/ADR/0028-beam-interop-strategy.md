@@ -65,14 +65,15 @@ Erlang string uppercase: "hello"
 
 **How it works:**
 
-1. `Erlang` is a **class** (ProtoObject subclass) whose class-side methods handle module proxy creation. Since `Erlang` is an uppercase identifier, the parser treats it as a `ClassReference` — it works everywhere: REPL, compiled code, and inside actor methods. No workspace binding is needed; `Erlang lists` is a class-side message send, just like `Counter spawn` or `Integer methods`. Unlike `Transcript` and `Beamtalk` which are actor *instances* injected as workspace bindings, `Erlang` is stateless — its class-side behavior IS the entire API.
-2. Sending a unary message like `lists` returns an **ErlangModule proxy** for the atom `lists`
-3. The proxy translates Beamtalk message sends to Erlang function calls:
+1. `Erlang` is a **class** (ProtoObject subclass) in `lib/Erlang.bt` — always loaded as part of stdlib. Since `Erlang` is an uppercase identifier, the parser treats it as a `ClassReference` — it works everywhere: REPL, compiled code, and inside actor methods. No workspace binding is needed; `Erlang lists` is a class-side message send, just like `Counter spawn` or `Integer methods`.
+2. `Erlang`'s class-side `doesNotUnderstand:args:` is an **`@intrinsic`** — the compiler recognizes it and emits inline proxy construction (or direct `erlang:apply/3`) rather than routing through the class process gen_server. This follows the same pattern as `@intrinsic blockValue` on Block.
+3. Sending a unary message like `lists` returns an **ErlangModule proxy** for the atom `lists`
+4. The proxy translates Beamtalk message sends to Erlang function calls:
    - Unary message `reverse:` with one arg → `lists:reverse(Arg)`
    - Keyword message `merge:with:` → `maps:merge(Arg1, Arg2)` (keywords stripped, args positional)
-4. Return values are native BEAM terms — `class_of/1` handles them automatically
+5. Return values are native BEAM terms — `class_of/1` handles them automatically
 
-**Important:** `Erlang` is a class, not an actor — there is no gen_server process. Class-side `doesNotUnderstand:args:` creates `ErlangModule` proxy maps (value types, per ADR 0005) and the `erlang:apply/3` call happens in the caller's process. No serialization bottleneck, no single-process routing.
+**Important:** Because the `@intrinsic` generates code inline in the caller's process, there is no gen_server bottleneck — no serialization, no single-process routing. The `ErlangModule` proxy is a simple tagged map (value type, per ADR 0005), and the `erlang:apply/3` call runs in the caller.
 
 **Hot code reload:** Because proxies call `erlang:apply/3` dynamically (not bound to a specific module version), they automatically pick up reloaded Erlang modules — no proxy invalidation needed.
 
@@ -419,7 +420,7 @@ Erlang call: "lists" function: "reverse" args: #(#(1, 2, 3))
 
 ### Negative
 - **No compile-time arity checking** — calling `Erlang lists reverse: 1 extra: 2` fails at runtime, not compile time
-- **Two-step dispatch overhead** — unoptimized path routes through `doesNotUnderstand:args:` and `erlang:apply/3`, preventing BEAM inlining; mitigated by compiler optimization in Phase 4 which emits direct calls
+- **Two-step dispatch overhead** — unoptimized path creates a proxy map then calls `erlang:apply/3`; Phase 4 collapses to a single direct call. The `@intrinsic` DNU already avoids the class process bottleneck
 - **Keyword-to-positional mapping** is a convention, not enforced — users must know Erlang function arities
 - **Selector naming ambiguity** — `Erlang lists seq: 1 to: 10` works, but the keyword names are arbitrary (they don't match Erlang's parameter names)
 - **Reserved selector collision** — `class`, `==`, and `/=` on proxies shadow same-named Erlang functions (ProtoObject methods); `call:args:` escape hatch required for edge cases
@@ -463,9 +464,8 @@ Erlang call: "lists" function: "reverse" args: #(#(1, 2, 3))
 - **Components:** Supervisor implementation (depends on supervision language features)
 
 ### Phase 4: Compiler Optimization (Optional)
-- Detect `Erlang <mod> <fn>:` patterns at compile time
-- Emit direct `call 'module':'function'(args)` without proxy allocation or class process dispatch
-- Eliminates the class-side `doesNotUnderstand:args:` gen_server round-trip — same optimization strategy as inlining common `Integer`/`String` methods
+- Collapse `Erlang <mod> <fn>:` patterns to direct `call 'module':'function'(args)` — no proxy map allocation at all
+- The `@intrinsic` DNU (Phase 0) already avoids the class process; this phase eliminates the intermediate proxy map too
 - **Components:** `crates/beamtalk-core/src/codegen/`
 
 ### Future Work
