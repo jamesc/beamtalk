@@ -49,12 +49,12 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0020](0020-connection-security.md) | Connection Security — mTLS, Proxies, and Network Overlays | Proposed | 2026-02-12 |
 | [0021](0021-streams-and-io-design.md) | Stream — Universal Data Interface | Implemented | 2026-02-15 |
 | [0022](0022-embedded-compiler-via-otp-port.md) | Embedded Compiler via OTP Port (with NIF option) | Implemented | 2026-02-15 |
-| [0023](0023-string-interpolation-and-binaries.md) | String Interpolation Syntax and Compilation | Accepted | 2026-02-15 |
-| [0024](0024-static-first-live-augmented-ide-tooling.md) | Static-First, Live-Augmented IDE Tooling | Accepted | 2026-02-15 |
+| [0023](0023-string-interpolation-and-binaries.md) | String Interpolation Syntax and Compilation | Implemented | 2026-02-17 |
+| [0024](0024-static-first-live-augmented-ide-tooling.md) | Static-First, Live-Augmented IDE Tooling | Implemented (Phase 1) | 2026-02-17 |
 | [0025](0025-gradual-typing-and-protocols.md) | Gradual Typing and Protocols | Accepted | 2026-02-15 |
-| [0026](0026-package-definition-and-project-manifest.md) | Package Definition and Project Manifest | Accepted | 2026-02-16 |
-| [0027](0027-cross-platform-support.md) | Cross-Platform Support | Accepted | 2026-02-16 |
-| [0028](0028-beam-interop-strategy.md) | BEAM Interop Strategy | Proposed | 2026-02-17 |
+| [0026](0026-package-definition-and-project-manifest.md) | Package Definition and Project Manifest | Implemented | 2026-02-17 |
+| [0027](0027-cross-platform-support.md) | Cross-Platform Support | Implemented | 2026-02-17 |
+| [0028](0028-beam-interop-strategy.md) | BEAM Interop Strategy | Accepted | 2026-02-17 |
 
 ## Creating New ADRs
 

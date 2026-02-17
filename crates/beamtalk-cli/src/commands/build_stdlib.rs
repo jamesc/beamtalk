@@ -327,6 +327,8 @@ struct ClassMeta {
     is_typed: bool,
     /// Instance state (field) names declared in the class.
     state: Vec<String>,
+    /// Declared type annotations for state fields (field name → type name).
+    state_types: Vec<(String, String)>,
     /// Instance method signatures.
     methods: Vec<MethodMeta>,
     /// Class-side method signatures.
@@ -345,6 +347,10 @@ struct MethodMeta {
     kind: MethodKindMeta,
     /// Whether this method is sealed (cannot be overridden).
     is_sealed: bool,
+    /// Return type annotation (e.g., `"Integer"`), if present.
+    return_type: Option<String>,
+    /// Parameter type annotations, one per parameter. `None` means untyped.
+    param_types: Vec<Option<String>>,
 }
 
 /// Simplified method kind for code generation.
@@ -402,6 +408,16 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
             arity: m.selector.arity(),
             kind: MethodKindMeta::from_ast(m.kind),
             is_sealed: m.is_sealed,
+            return_type: m.return_type.as_ref().map(|t| t.type_name().to_string()),
+            param_types: m
+                .parameters
+                .iter()
+                .map(|p| {
+                    p.type_annotation
+                        .as_ref()
+                        .map(|t| t.type_name().to_string())
+                })
+                .collect(),
         })
         .collect();
 
@@ -413,6 +429,16 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
             arity: m.selector.arity(),
             kind: MethodKindMeta::from_ast(m.kind),
             is_sealed: m.is_sealed,
+            return_type: m.return_type.as_ref().map(|t| t.type_name().to_string()),
+            param_types: m
+                .parameters
+                .iter()
+                .map(|p| {
+                    p.type_annotation
+                        .as_ref()
+                        .map(|t| t.type_name().to_string())
+                })
+                .collect(),
         })
         .collect();
 
@@ -420,6 +446,16 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         .state
         .iter()
         .map(|s| s.name.name.to_string())
+        .collect();
+
+    let state_types = class
+        .state
+        .iter()
+        .filter_map(|s| {
+            s.type_annotation
+                .as_ref()
+                .map(|ty| (s.name.name.to_string(), ty.type_name().to_string()))
+        })
         .collect();
 
     let class_variables = class
@@ -436,6 +472,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         is_abstract: class.is_abstract,
         is_typed: class.is_typed,
         state,
+        state_types,
         methods,
         class_methods,
         class_variables,
@@ -662,6 +699,20 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
         code.push_str("],\n");
     }
 
+    // State types
+    if meta.state_types.is_empty() {
+        code.push_str("            state_types: HashMap::new(),\n");
+    } else {
+        code.push_str("            state_types: HashMap::from([");
+        for (i, (field, ty)) in meta.state_types.iter().enumerate() {
+            if i > 0 {
+                code.push_str(", ");
+            }
+            let _ = write!(code, "(\"{field}\".into(), \"{ty}\".into())");
+        }
+        code.push_str("]),\n");
+    }
+
     // Instance methods
     generate_method_list(code, "methods", &meta.methods, &meta.class_name);
     // Class methods
@@ -701,10 +752,34 @@ fn generate_method_list(
         let kind = m.kind.to_rust_expr();
         // Escape backslashes and quotes in selector for Rust string literals
         let selector = m.selector.replace('\\', "\\\\").replace('"', "\\\"");
+        let return_type_expr = match &m.return_type {
+            Some(t) => {
+                let escaped = t.replace('\\', "\\\\").replace('"', "\\\"");
+                format!("Some(\"{escaped}\".into())")
+            }
+            None => "None".to_string(),
+        };
+        let param_types_expr = if m.param_types.is_empty() {
+            "vec![]".to_string()
+        } else {
+            let parts: Vec<_> = m
+                .param_types
+                .iter()
+                .map(|p| match p {
+                    Some(t) => {
+                        let escaped = t.replace('\\', "\\\\").replace('"', "\\\"");
+                        format!("Some(\"{escaped}\".into())")
+                    }
+                    None => "None".to_string(),
+                })
+                .collect();
+            format!("vec![{}]", parts.join(", "))
+        };
         let _ = writeln!(
             code,
             "                MethodInfo {{ selector: \"{selector}\".into(), arity: {arity}, \
-             kind: {kind}, defined_in: \"{class}\".into(), is_sealed: {sealed}, return_type: None }},",
+             kind: {kind}, defined_in: \"{class}\".into(), is_sealed: {sealed}, \
+             return_type: {return_type_expr}, param_types: {param_types_expr} }},",
             arity = m.arity,
             class = class_name,
             sealed = m.is_sealed,
@@ -859,18 +934,23 @@ mod tests {
             is_abstract: false,
             is_typed: false,
             state: vec!["count".to_string()],
+            state_types: vec![],
             methods: vec![
                 MethodMeta {
                     selector: "increment".to_string(),
                     arity: 0,
                     kind: MethodKindMeta::Primary,
                     is_sealed: false,
+                    return_type: None,
+                    param_types: vec![],
                 },
                 MethodMeta {
                     selector: "add:".to_string(),
                     arity: 1,
                     kind: MethodKindMeta::Primary,
                     is_sealed: true,
+                    return_type: Some("Counter".to_string()),
+                    param_types: vec![Some("Integer".to_string())],
                 },
             ],
             class_methods: vec![MethodMeta {
@@ -878,6 +958,8 @@ mod tests {
                 arity: 0,
                 kind: MethodKindMeta::Primary,
                 is_sealed: false,
+                return_type: Some("Counter".to_string()),
+                param_types: vec![],
             }],
             class_variables: vec![],
         }
@@ -920,6 +1002,7 @@ mod tests {
             is_abstract: true,
             is_typed: false,
             state: vec![],
+            state_types: vec![],
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -950,6 +1033,7 @@ mod tests {
                 is_abstract: false,
                 is_typed: false,
                 state: vec![],
+                state_types: vec![],
                 methods: vec![],
                 class_methods: vec![],
                 class_variables: vec![],
@@ -962,6 +1046,7 @@ mod tests {
                 is_abstract: false,
                 is_typed: false,
                 state: vec![],
+                state_types: vec![],
                 methods: vec![],
                 class_methods: vec![],
                 class_variables: vec![],
@@ -983,6 +1068,50 @@ mod tests {
         assert!(
             alpha_pos < zebra_pos,
             "Classes should be sorted alphabetically"
+        );
+    }
+
+    #[test]
+    fn test_generate_method_list_emits_return_type() {
+        let methods = vec![MethodMeta {
+            selector: "add:".to_string(),
+            arity: 1,
+            kind: MethodKindMeta::Primary,
+            is_sealed: false,
+            return_type: Some("Counter".to_string()),
+            param_types: vec![Some("Integer".to_string())],
+        }];
+        let mut code = String::new();
+        generate_method_list(&mut code, "methods", &methods, "Counter");
+        assert!(
+            code.contains("return_type: Some(\"Counter\".into())"),
+            "Should emit return type. Got: {code}"
+        );
+        assert!(
+            code.contains("param_types: vec![Some(\"Integer\".into())]"),
+            "Should emit param types. Got: {code}"
+        );
+    }
+
+    #[test]
+    fn test_generate_method_list_emits_none_return_type() {
+        let methods = vec![MethodMeta {
+            selector: "increment".to_string(),
+            arity: 0,
+            kind: MethodKindMeta::Primary,
+            is_sealed: false,
+            return_type: None,
+            param_types: vec![],
+        }];
+        let mut code = String::new();
+        generate_method_list(&mut code, "methods", &methods, "Counter");
+        assert!(
+            code.contains("return_type: None"),
+            "Should emit None for untyped methods. Got: {code}"
+        );
+        assert!(
+            code.contains("param_types: vec![]"),
+            "Should emit empty param_types. Got: {code}"
         );
     }
 }

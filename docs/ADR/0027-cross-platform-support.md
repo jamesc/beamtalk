@@ -1,7 +1,7 @@
 # ADR 0027: Cross-Platform Support
 
 ## Status
-Accepted (2026-02-16)
+Implemented (2026-02-17)
 
 ## Context
 

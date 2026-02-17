@@ -150,6 +150,9 @@ fn escape_erlang_atom(s: &str) -> String {
 ///
 /// Returns alternating `["-pa", "<path>", "-pa", "<path>", ...]`.
 /// Uses `OsString` so non-UTF8 filesystem paths are handled without panicking.
+///
+/// On Windows, converts backslashes to forward slashes since Erlang expects
+/// Unix-style paths in `-pa` arguments (see BT-661).
 pub fn beam_pa_args(paths: &BeamPaths) -> Vec<OsString> {
     let dirs = [
         &paths.runtime_ebin,
@@ -161,7 +164,16 @@ pub fn beam_pa_args(paths: &BeamPaths) -> Vec<OsString> {
     let mut args = Vec::with_capacity(dirs.len() * 2);
     for dir in dirs {
         args.push(OsString::from("-pa"));
-        args.push(dir.as_os_str().to_os_string());
+        #[cfg(windows)]
+        {
+            // Convert Windows backslashes to forward slashes for Erlang
+            let path_str = dir.to_string_lossy().replace('\\', "/");
+            args.push(OsString::from(path_str));
+        }
+        #[cfg(not(windows))]
+        {
+            args.push(dir.as_os_str().to_os_string());
+        }
     }
     args
 }
@@ -381,5 +393,30 @@ mod tests {
             paths.stdlib_ebin,
             PathBuf::from("/rt/apps/beamtalk_stdlib/ebin")
         );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn beam_pa_args_converts_backslashes_to_forward_slashes() {
+        // Create a Windows-style path with backslashes
+        let runtime_dir = PathBuf::from("C:\\Users\\test\\beamtalk\\runtime");
+        let paths = beam_paths(&runtime_dir);
+        let args = beam_pa_args(&paths);
+
+        // All path arguments (at odd indices) should contain forward slashes, not backslashes
+        for (i, arg) in args.iter().enumerate() {
+            if i % 2 == 1 {
+                // This is a path argument (not a "-pa" flag)
+                let path_str = arg.to_string_lossy();
+                assert!(
+                    !path_str.contains('\\'),
+                    "Path argument at index {i} contains backslashes: {path_str}"
+                );
+                assert!(
+                    path_str.contains('/'),
+                    "Path argument at index {i} doesn't contain forward slashes: {path_str}"
+                );
+            }
+        }
     }
 }

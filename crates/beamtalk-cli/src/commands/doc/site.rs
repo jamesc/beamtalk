@@ -163,6 +163,13 @@ pub(super) fn write_site_landing_page(
             "Agent-Native Development" => {
                 "Why Beamtalk is uniquely suited as a development environment for AI coding agents."
             }
+            "Syntax Rationale" => {
+                "Why Beamtalk keeps certain Smalltalk conventions and diverges from others."
+            }
+            "Domain Model" => {
+                "Domain-Driven Design model: bounded contexts, aggregates, and ubiquitous language."
+            }
+            "Security" => "Security model, threat analysis, and sandboxing for untrusted code.",
             _ => "",
         };
         let _ = writeln!(

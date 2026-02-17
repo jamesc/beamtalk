@@ -1,26 +1,14 @@
-// Tuple primitive tests (BT-417)
-// Tuples are Erlang tuples — immutable fixed-size collections,
-// particularly useful for Erlang interop with {ok, Value} and {error, Reason} patterns.
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
 
-// ⚠️ NOTE: Beamtalk does not currently have tuple literal syntax.
-// Tuples are only accessible via Erlang interop or FFI calls.
-// Once tuple literals are added (e.g., {a, b, c} syntax), this file should be expanded
-// with comprehensive E2E tests for all Tuple methods.
-//
-// For now, automated Tuple coverage is limited to:
-// 1. Basic Tuple reflection (class / respondsTo:) in Erlang runtime unit tests
-//    (runtime/apps/beamtalk_runtime/test/beamtalk_primitive_tests.erl).
-// 2. Tuple operations (at:, unwrap*, asString) in runtime unit tests
-//    (runtime/apps/beamtalk_runtime/test/beamtalk_tuple_tests.erl).
-// 3. This placeholder E2E file, which currently has no direct Tuple literals or methods.
-//
-// Planned tests (when tuple literals are available):
-// - Size: {}, {a}, {a, b, c}
-// - Access: at: (1-based indexing)
-// - Pattern matching: isOk, isError
-// - Unwrapping: unwrap, unwrapOr:, unwrapOrElse:
-// - String conversion: asString
-// - Reflection: class, respondsTo:
+// Tuple primitive tests (BT-417)
+// Tuples are an Erlang interop type — they exist primarily to handle
+// results from Erlang/OTP functions that return {'ok', Value} or {'error', Reason}.
+// For general-purpose collections, prefer List, Dictionary, or Array.
+
+// ⚠️ NOTE: Beamtalk does not have tuple literal syntax.
+// Tuples arrive from Erlang FFI calls and are handled via isOk/isError/unwrap.
+// The Tuple new / Tuple new: constructors exist for testing purposes only.
 
 // Placeholder to satisfy E2E test parser
 1 + 1

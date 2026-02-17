@@ -35,6 +35,7 @@ pub(super) fn builtin_method(selector: &str, arity: usize, defined_in: &str) -> 
         defined_in: defined_in.into(),
         is_sealed: false,
         return_type: None,
+        param_types: vec![None; arity],
     }
 }
 
@@ -66,6 +67,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],

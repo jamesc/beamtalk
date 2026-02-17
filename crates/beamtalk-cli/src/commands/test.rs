@@ -351,7 +351,16 @@ fn run_eunit_tests(
     );
 
     let mut cmd = std::process::Command::new("erl");
-    cmd.arg("-noshell").arg("-pa").arg(build_dir.as_str());
+    #[cfg(windows)]
+    {
+        // Convert Windows backslashes to forward slashes for Erlang (BT-661)
+        let build_dir_path = build_dir.as_str().replace('\\', "/");
+        cmd.arg("-noshell").arg("-pa").arg(build_dir_path);
+    }
+    #[cfg(not(windows))]
+    {
+        cmd.arg("-noshell").arg("-pa").arg(build_dir.as_str());
+    }
 
     for arg in &pa_args {
         cmd.arg(arg);
