@@ -605,6 +605,20 @@ Build the workspace experience on Phase 0's validated transport. The browser mus
 
 **Note on Phoenix migration:** Phase 1 keeps frontend complexity minimal — no JS framework, no build toolchain. The Cowboy WebSocket handler and protocol extensions carry over directly into Phoenix; only the HTML/JS frontend is replaced.
 
+## Implementation Tracking
+
+**Epic:** BT-684
+**Status:** Planned
+
+| Phase | Issue | Title | Size | Status |
+|-------|-------|-------|------|--------|
+| 0 | BT-683 | Migrate REPL transport from TCP to WebSocket with cookie auth | L | Done |
+| 0 | BT-686 | Browser wire check with Transcript push | M | Blocked by BT-683 |
+| 1 | BT-687 | Load-source operation and multi-pane browser workspace | L | Blocked by BT-686 |
+| 1 | BT-688 | Browser workspace keyboard shortcuts, completion, and history | M | Blocked by BT-687 |
+| 1 | BT-689 | CLI --web and --web-port flags for browser workspace | S | Blocked by BT-686 |
+| 2 | BT-690 | Actor lifecycle push messages for browser workspace | M | Blocked by BT-687 |
+
 ## Migration Path
 
 No migration needed — this is purely additive. The WebSocket REPL transport (ADR 0020/BT-683) is already in place. The `load-source` op is a new operation alongside the existing `load-file` op.

@@ -508,15 +508,15 @@ This ADR does **not** cover:
 
 ## Implementation Tracking
 
-**Epic:** TBD (Phases 1–3)
+**Epic:** BT-685
 **Status:** Phase 0 Done
 
 | Phase | Issue | Title | Size | Status |
 |-------|-------|-------|------|--------|
 | 0 | BT-683 | Migrate REPL transport from TCP to WebSocket with cookie auth | L | Done |
-| 1 | TBD | Network binding + proxy documentation (`--bind tailscale`) | M | Planned |
-| 2 | TBD | mTLS for Erlang distribution | L | Planned |
-| 3 | TBD | SPIFFE/SPIRE integration | XL | Future |
+| 1 | BT-691 | Network bind options and reverse proxy documentation | M | Blocked by BT-683 |
+| 2 | BT-692 | mTLS for Erlang distribution | L | Blocked by BT-691 |
+| 3 | BT-693 | SPIFFE/SPIRE workload identity integration | XL | Future |
 
 ## References
 - Related ADRs: [ADR 0004 — Persistent Workspace Management](0004-persistent-workspace-management.md), [ADR 0009 — OTP Application Structure](0009-otp-application-structure.md)
