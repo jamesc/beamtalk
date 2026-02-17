@@ -269,9 +269,7 @@ impl TypeChecker {
                         // Check self.field := value against declared state type
                         if let Expression::Identifier(recv_id) = receiver.as_ref() {
                             if recv_id.name == "self" {
-                                self.check_field_assignment(
-                                    field, &ty, *span, hierarchy, env,
-                                );
+                                self.check_field_assignment(field, &ty, *span, hierarchy, env);
                             }
                         }
                     }
@@ -675,9 +673,7 @@ impl TypeChecker {
                 ),
                 span,
             );
-            diag.hint = Some(
-                format!("Expected {declared_type} but assigning {value_type}").into(),
-            );
+            diag.hint = Some(format!("Expected {declared_type} but assigning {value_type}").into());
             self.diagnostics.push(diag);
         }
     }
@@ -711,8 +707,10 @@ impl TypeChecker {
                     decl.span,
                 );
                 diag.hint = Some(
-                    format!("Default value type {value_type} is not compatible with {declared_type}")
-                        .into(),
+                    format!(
+                        "Default value type {value_type} is not compatible with {declared_type}"
+                    )
+                    .into(),
                 );
                 self.diagnostics.push(diag);
             }
@@ -724,12 +722,23 @@ impl TypeChecker {
     /// A type is assignable if it is the same type or a subclass of the declared type.
     /// For example, Integer is assignable to Number because Integer's superclass
     /// chain includes Number.
+    ///
+    /// Returns true (permissive) for complex type annotations (unions, generics)
+    /// that are not yet supported — full union type support is Phase 3.
     fn is_assignable_to(
         value_type: &EcoString,
         declared_type: &EcoString,
         hierarchy: &ClassHierarchy,
     ) -> bool {
         if value_type == declared_type {
+            return true;
+        }
+        // Skip checking for complex type annotations (unions, generics, singletons)
+        // that contain non-class-name characters. These need Phase 3 union support.
+        if declared_type.contains('|')
+            || declared_type.contains('<')
+            || declared_type.starts_with('#')
+        {
             return true;
         }
         // Check if value_type is a subclass of declared_type
@@ -2283,10 +2292,7 @@ mod tests {
             TypeAnnotation::simple("Integer", span()),
             span(),
         )];
-        let method = make_method(
-            "setUnknown",
-            vec![field_assign("count", var("unknownVar"))],
-        );
+        let method = make_method("setUnknown", vec![field_assign("count", var("unknownVar"))]);
         let class = counter_class_with_typed_state(vec![method], state);
         let module = make_module_with_classes(vec![], vec![class]);
         let (hierarchy, _) = ClassHierarchy::build(&module);
@@ -2295,6 +2301,34 @@ mod tests {
         assert!(
             checker.diagnostics().is_empty(),
             "Dynamic expressions should never produce warnings, got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn test_union_type_annotation_no_false_positive() {
+        // state: value: Integer | String = 42 → no warning (union types skip check)
+        let state = vec![StateDeclaration::with_type_and_default(
+            ident("value"),
+            TypeAnnotation::union(
+                vec![
+                    TypeAnnotation::simple("Integer", span()),
+                    TypeAnnotation::simple("String", span()),
+                ],
+                span(),
+            ),
+            int_lit(42),
+            span(),
+        )];
+        let method = make_method("setValue", vec![field_assign("value", str_lit("hello"))]);
+        let class = counter_class_with_typed_state(vec![method], state);
+        let module = make_module_with_classes(vec![], vec![class]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "Union type annotations should not produce false positives, got: {:?}",
             checker.diagnostics()
         );
     }
