@@ -252,7 +252,7 @@ test-runtime: build-stdlib
 [working-directory: 'runtime']
 test-runtime: build-stdlib
     @echo "🧪 Running Erlang runtime unit tests..."
-    rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace; if ($$LASTEXITCODE -ne 0) { exit $$LASTEXITCODE }; Write-Host "  All EUnit tests passed"
+    @rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace
     @echo "✅ Runtime tests complete"
 
 # Run performance benchmarks (separate from unit tests, ~30s)
