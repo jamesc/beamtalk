@@ -137,6 +137,9 @@ impl TypeChecker {
                 let mut body_type = InferredType::Dynamic;
                 for expr in &method.body {
                     body_type = self.infer_expr(expr, hierarchy, &mut method_env, is_abstract);
+                    if matches!(expr, Expression::Return { .. }) {
+                        break; // Explicit return ends the body; later expressions are unreachable
+                    }
                 }
                 self.check_return_type(method, &body_type, &class.name.name, hierarchy);
                 self.check_override_param_compatibility(method, &class.name.name, hierarchy);
@@ -152,6 +155,9 @@ impl TypeChecker {
                 let mut body_type = InferredType::Dynamic;
                 for expr in &method.body {
                     body_type = self.infer_expr(expr, hierarchy, &mut method_env, is_abstract);
+                    if matches!(expr, Expression::Return { .. }) {
+                        break;
+                    }
                 }
                 self.check_return_type(method, &body_type, &class.name.name, hierarchy);
                 if is_typed {
@@ -171,6 +177,9 @@ impl TypeChecker {
             let mut body_type = InferredType::Dynamic;
             for expr in &standalone.method.body {
                 body_type = self.infer_expr(expr, hierarchy, &mut method_env, is_abstract);
+                if matches!(expr, Expression::Return { .. }) {
+                    break;
+                }
             }
             self.check_return_type(&standalone.method, &body_type, class_name, hierarchy);
         }
@@ -603,13 +612,13 @@ impl TypeChecker {
         if actual == expected {
             return true;
         }
-        // Walk superclass chain: if expected is an ancestor of actual, it's compatible
-        let chain = hierarchy.superclass_chain(actual);
-        if chain.iter().any(|ancestor| ancestor == expected) {
+        // If either type isn't known to the hierarchy, don't warn (conservative)
+        if !hierarchy.has_class(actual) || !hierarchy.has_class(expected) {
             return true;
         }
-        // If the expected type isn't known to the hierarchy, don't warn (conservative)
-        !hierarchy.has_class(expected)
+        // Walk superclass chain: if expected is an ancestor of actual, it's compatible
+        let chain = hierarchy.superclass_chain(actual);
+        chain.iter().any(|ancestor| ancestor == expected)
     }
 
     /// Check argument types against declared parameter types for a message send.
@@ -2157,10 +2166,8 @@ mod tests {
     // ---- BT-671: Argument and return type checking tests ----
 
     #[test]
-    fn test_string_plus_integer_warns_arg_type() {
-        // 'hello' + 42 — String doesn't define +, so we get unknown selector
-        // But Integer + "hello" should warn about argument type
-        // This test verifies: 42 + "hello" warns (acceptance criteria)
+    fn test_integer_plus_string_warns_operand_type() {
+        // 42 + "hello" — Integer + expects numeric arg, String is wrong type
         let module = make_module(vec![msg_send(
             int_lit(42),
             MessageSelector::Binary("+".into()),
@@ -2169,10 +2176,9 @@ mod tests {
         let hierarchy = ClassHierarchy::with_builtins();
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
-        // Should have both the binary operand warning AND the arg type warning
         assert!(
             !checker.diagnostics().is_empty(),
-            "'hello' + 42 should produce warnings"
+            "42 + 'hello' should produce a type warning"
         );
     }
 
@@ -2729,6 +2735,47 @@ mod tests {
         assert!(
             return_warnings.is_empty(),
             "Integer return should be compatible with Number declaration"
+        );
+    }
+
+    #[test]
+    fn test_early_return_uses_return_type_not_trailing() {
+        // Method with early return: ^ 42 followed by unreachable "oops"
+        // Return type checking should use the return expression type (Integer),
+        // not the unreachable trailing expression (String)
+        let class_def = ClassDefinition::with_modifiers(
+            ident("Calculator"),
+            Some(ident("Object")),
+            false,
+            false,
+            vec![],
+            vec![MethodDefinition::with_return_type(
+                MessageSelector::Unary("compute".into()),
+                vec![],
+                vec![
+                    Expression::Return {
+                        value: Box::new(int_lit(42)),
+                        span: span(),
+                    },
+                    str_lit("unreachable"), // would be String, but never reached
+                ],
+                TypeAnnotation::Simple(ident("Integer")),
+                span(),
+            )],
+            span(),
+        );
+        let module = make_module_with_classes(vec![], vec![class_def]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let return_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("declares return type"))
+            .collect();
+        assert!(
+            return_warnings.is_empty(),
+            "early return of Integer should match declared Integer, not unreachable String"
         );
     }
 }
