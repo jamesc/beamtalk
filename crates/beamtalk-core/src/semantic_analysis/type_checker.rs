@@ -432,7 +432,14 @@ impl TypeChecker {
         // If receiver is a class reference, check class-side methods
         if let Expression::ClassReference { name, .. } = receiver {
             let class_name = &name.name;
-            self.check_argument_types(class_name, &selector_name, &arg_types, span, hierarchy, true);
+            self.check_argument_types(
+                class_name,
+                &selector_name,
+                &arg_types,
+                span,
+                hierarchy,
+                true,
+            );
             return self.check_class_side_send(class_name, &selector_name, span, hierarchy);
         }
 
@@ -441,7 +448,14 @@ impl TypeChecker {
             // In class methods, self sends should check class-side methods
             if env.in_class_method && Self::is_self_receiver(receiver) {
                 if !in_abstract_method {
-                    self.check_argument_types(class_name, &selector_name, &arg_types, span, hierarchy, true);
+                    self.check_argument_types(
+                        class_name,
+                        &selector_name,
+                        &arg_types,
+                        span,
+                        hierarchy,
+                        true,
+                    );
                     return self.check_class_side_send(class_name, &selector_name, span, hierarchy);
                 }
                 return InferredType::Dynamic;
@@ -451,7 +465,14 @@ impl TypeChecker {
             // Skip argument type check for binary messages — check_binary_operand_types
             // already provides more specific warnings for arithmetic/comparison/concat.
             if !matches!(selector, MessageSelector::Binary(_)) {
-                self.check_argument_types(class_name, &selector_name, &arg_types, span, hierarchy, false);
+                self.check_argument_types(
+                    class_name,
+                    &selector_name,
+                    &arg_types,
+                    span,
+                    hierarchy,
+                    false,
+                );
             }
 
             // Infer return type from method info
@@ -626,9 +647,8 @@ impl TypeChecker {
                     ),
                     span,
                 );
-                diag.hint = Some(
-                    format!("Expected {expected_ty} (or a subclass), got {actual_ty}").into(),
-                );
+                diag.hint =
+                    Some(format!("Expected {expected_ty} (or a subclass), got {actual_ty}").into());
                 self.diagnostics.push(diag);
             }
         }
@@ -671,8 +691,9 @@ impl TypeChecker {
                 ),
                 method.span,
             );
-            diag.hint =
-                Some(format!("Declared -> {expected_ty}, inferred body type is {actual_ty}").into());
+            diag.hint = Some(
+                format!("Declared -> {expected_ty}, inferred body type is {actual_ty}").into(),
+            );
             self.diagnostics.push(diag);
         }
     }
@@ -721,8 +742,7 @@ impl TypeChecker {
                     method.span,
                 );
                 diag.hint = Some(
-                    format!("Parent class {superclass} declares parameter type {parent_t}")
-                        .into(),
+                    format!("Parent class {superclass} declares parameter type {parent_t}").into(),
                 );
                 self.diagnostics.push(diag);
             }
