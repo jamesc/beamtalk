@@ -42,7 +42,16 @@ const PID_DISCOVERY_RETRY_DELAY_MS: u64 = 500;
 const DISCOVERY_MAX_RETRIES: usize = 10;
 
 /// Delay between port file read attempts in milliseconds.
-const PORT_DISCOVERY_DELAY_MS: u64 = 200;
+const PORT_DISCOVERY_DELAY_MS: u64 = 500;
+
+/// Maximum number of port file discovery attempts.
+const PORT_DISCOVERY_MAX_RETRIES: usize = 20;
+
+/// Delay between TCP readiness probe retries in milliseconds.
+const READINESS_PROBE_DELAY_MS: u64 = 200;
+
+/// Maximum number of TCP readiness probe attempts.
+const READINESS_PROBE_MAX_RETRIES: usize = 25;
 
 /// TCP connect timeout for exit probe in milliseconds.
 const EXIT_PROBE_CONNECT_TIMEOUT_MS: u64 = 500;
@@ -251,7 +260,7 @@ pub fn start_detached_node(
     // Retry a few times since the BEAM node may still be initializing.
     let (actual_port, nonce) = if port == 0 {
         let mut discovered = None;
-        for _ in 0..DISCOVERY_MAX_RETRIES {
+        for _ in 0..PORT_DISCOVERY_MAX_RETRIES {
             if let Some(port_nonce) = read_port_file(workspace_id)? {
                 discovered = Some(port_nonce);
                 break;
@@ -272,6 +281,9 @@ pub fn start_detached_node(
         }
     };
 
+    // Wait for TCP health endpoint to be fully ready before returning.
+    wait_for_tcp_ready(actual_port, pid)?;
+
     // Create node info
     let node_info = NodeInfo {
         node_name: node_name.clone(),
@@ -285,6 +297,23 @@ pub fn start_detached_node(
     save_node_info(workspace_id, &node_info)?;
 
     Ok(node_info)
+}
+
+/// Poll until the TCP health endpoint responds on the given port.
+///
+/// The port file may be written before the health handler is fully initialized,
+/// so we probe until the endpoint responds to a health request.
+fn wait_for_tcp_ready(port: u16, pid: u32) -> Result<()> {
+    for _ in 0..READINESS_PROBE_MAX_RETRIES {
+        if tcp_health_probe(port).is_ok() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(READINESS_PROBE_DELAY_MS));
+    }
+    Err(miette!(
+        "BEAM node started (PID {pid}) but TCP health endpoint on port {port} \
+         did not become ready. The workspace may have failed to initialize."
+    ))
 }
 
 /// Build a `Command` for starting a detached BEAM workspace node.
@@ -464,4 +493,46 @@ pub(super) fn force_kill_process(pid: u32) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Wait for a node name to be deregistered from `epmd`.
+///
+/// After force-killing a BEAM node, `epmd` may still hold the registration
+/// briefly. This polls `epmd -names` until the node name disappears or
+/// timeout is reached. Returns `Ok(())` once deregistered, or `Err` on timeout.
+#[cfg(all(unix, test))]
+pub(super) fn wait_for_epmd_deregistration(node_name: &str, timeout_secs: u64) -> Result<()> {
+    // Extract the short name (before '@') for epmd lookup
+    let short_name = node_name.split('@').next().unwrap_or(node_name);
+
+    let interval = Duration::from_millis(100);
+    let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
+
+    while std::time::Instant::now() < deadline {
+        let output = Command::new("epmd")
+            .args(["-names"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output();
+
+        match output {
+            Ok(out) => {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                if !stdout.lines().any(|line| line.contains(short_name)) {
+                    return Ok(());
+                }
+            }
+            Err(_) => {
+                // epmd not available — nothing to wait for
+                return Ok(());
+            }
+        }
+        std::thread::sleep(interval);
+    }
+
+    Err(miette!(
+        "Node '{}' still registered in epmd after {}s",
+        short_name,
+        timeout_secs
+    ))
 }

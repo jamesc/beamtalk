@@ -67,7 +67,10 @@ pub use storage::{
 mod tests {
     use super::lifecycle::{WorkspaceStatus, find_workspace_by_project_path, resolve_workspace_id};
     #[cfg(unix)]
-    use super::process::{force_kill_process, start_detached_node, wait_for_workspace_exit};
+    use super::process::{
+        force_kill_process, start_detached_node, wait_for_epmd_deregistration,
+        wait_for_workspace_exit,
+    };
     #[cfg(target_os = "linux")]
     use super::storage::read_proc_start_time;
     use super::storage::{
@@ -881,7 +884,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    #[ignore = "integration test — requires Erlang/OTP runtime; flaky (BT-660)"]
+    #[ignore = "integration test — requires Erlang/OTP runtime"]
     #[serial(workspace_integration)]
     fn test_is_node_running_true_then_false_integration() {
         let tw = TestWorkspace::new("integ_running");
@@ -926,7 +929,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    #[ignore = "integration test — requires Erlang/OTP runtime; flaky (BT-660)"]
+    #[ignore = "integration test — requires Erlang/OTP runtime"]
     #[serial(workspace_integration)]
     fn test_get_or_start_workspace_lifecycle_integration() {
         let tw = TestWorkspace::new("integ_lifecycle");
@@ -979,6 +982,11 @@ mod tests {
             !is_node_running(&info1),
             "node should not be running after stop"
         );
+
+        // Wait for epmd to deregister the old node name before restarting.
+        // After force-kill, epmd may still hold the registration briefly,
+        // which prevents a new node with the same name from starting.
+        let _ = wait_for_epmd_deregistration(&info1.node_name, 5);
 
         // Step 4: Third call starts a new node
         let (info3, started3, id3) = get_or_start_workspace(
