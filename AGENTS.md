@@ -459,7 +459,7 @@ runtime/
 │   │   ├── config/         # OTP sys.config
 │   │   └── test_fixtures/  # Fixtures for runtime tests (BT-239)
 │   │       ├── logging_counter.bt
-│   │       ├── compile.sh  # Auto-compiles fixtures via rebar3 pre-hook
+│   │       ├── compile_fixtures.escript  # Auto-compiles fixtures via rebar3 pre-hook
 │   │       └── README.md
 │   ├── beamtalk_workspace/  # Workspace and interactive development OTP application (ADR 0009) — NEW
 │   │   ├── src/            # REPL source (repl eval, server, workspace supervision, session management)
@@ -517,7 +517,7 @@ beamtalk_stdlib (compiled stdlib)
 - Other tests use simulated state structures for complex scenarios
 - **Test fixtures compile automatically** via rebar3 pre-hook (no manual step needed)
 - Fixtures: `logging_counter.bt` stored in `runtime/apps/beamtalk_runtime/test_fixtures/`, `counter.bt` sourced from E2E fixtures
-- Compiled by `runtime/apps/beamtalk_runtime/test_fixtures/compile.sh` (rebar3 pre-hook)
+- Compiled by `runtime/apps/beamtalk_runtime/test_fixtures/compile_fixtures.escript` (rebar3 pre-hook)
 - See `docs/development/testing-strategy.md` for compilation workflow details
 
 #### 4. Stdlib Tests (Compiled Expression Tests) — ADR 0014
@@ -563,7 +563,7 @@ beamtalk_stdlib (compiled stdlib)
 
 **Runtime fixtures:** `runtime/apps/beamtalk_runtime/test_fixtures/`
 - Colocated with runtime tests for better locality
-- Compiled by `apps/beamtalk_runtime/test_fixtures/compile.sh` (rebar3 pre-hook)
+- Compiled by `apps/beamtalk_runtime/test_fixtures/compile_fixtures.escript` (rebar3 pre-hook)
 - Currently: `logging_counter.bt` (super keyword tests)
 - Note: `counter.bt` consolidated to E2E fixture
 
