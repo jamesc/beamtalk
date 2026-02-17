@@ -304,7 +304,10 @@ register_module_when_not_started_test() ->
 persist_and_restore_modules_test() ->
     %% Use a unique workspace ID so we control the metadata file
     WsId = <<"persist_test_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
-    Home = os:getenv("HOME", "/tmp"),
+    Home = case beamtalk_platform:home_dir() of
+        false -> filename:basedir(user_cache, "beamtalk");
+        HomeDir -> HomeDir
+    end,
     MetaDir = filename:join([Home, ".beamtalk", "workspaces", binary_to_list(WsId)]),
     MetaFile = filename:join(MetaDir, "metadata.json"),
     
@@ -387,7 +390,10 @@ load_corrupt_json_falls_back_test() ->
 debounce_coalesces_rapid_changes_test() ->
     %% Use a unique workspace ID to control the metadata file
     WsId = <<"debounce_test_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
-    Home = os:getenv("HOME", "/tmp"),
+    Home = case beamtalk_platform:home_dir() of
+        false -> filename:basedir(user_cache, "beamtalk");
+        HomeDir -> HomeDir
+    end,
     MetaDir = filename:join([Home, ".beamtalk", "workspaces", binary_to_list(WsId)]),
     MetaFile = filename:join(MetaDir, "metadata.json"),
     
