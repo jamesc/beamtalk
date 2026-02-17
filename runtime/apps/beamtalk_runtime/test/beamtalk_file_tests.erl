@@ -145,18 +145,25 @@ readAll_invalid_path_windows_test() ->
         beamtalk_file:'readAll:'(<<"C:\\file.txt">>)).
 
 readAll_permission_denied_test() ->
-    %% Create a file, remove read permissions, verify error
-    FileName = "_bt_test_noperm_read.txt",
-    ok = file:write_file(FileName, <<"secret">>),
-    ok = file:change_mode(FileName, 8#000),
-    try
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{
-                kind = permission_denied, class = 'File', selector = 'readAll:'}},
-            beamtalk_file:'readAll:'(list_to_binary(FileName)))
-    after
-        file:change_mode(FileName, 8#644),
-        file:delete(FileName)
+    case os:type() of
+        {win32, _} ->
+            %% Skip on Windows: file:change_mode/2 doesn't restrict permissions
+            %% Windows uses ACLs instead of Unix modes, would need Windows-specific APIs
+            {skip, "Unix file modes not supported on Windows"};
+        _ ->
+            %% Create a file, remove read permissions, verify error
+            FileName = "_bt_test_noperm_read.txt",
+            ok = file:write_file(FileName, <<"secret">>),
+            ok = file:change_mode(FileName, 8#000),
+            try
+                ?assertError(
+                    #{'$beamtalk_class' := _, error := #beamtalk_error{
+                        kind = permission_denied, class = 'File', selector = 'readAll:'}},
+                    beamtalk_file:'readAll:'(list_to_binary(FileName)))
+            after
+                file:change_mode(FileName, 8#644),
+                file:delete(FileName)
+            end
     end.
 
 %%% ============================================================================
@@ -210,20 +217,27 @@ writeAll_creates_subdirectory_test() ->
     end.
 
 writeAll_permission_denied_test() ->
-    %% Create a read-only directory, try to write in it
-    Dir = "_bt_test_readonly_dir",
-    FileName = Dir ++ "/test.txt",
-    ok = filelib:ensure_dir(FileName),
-    ok = file:change_mode(Dir, 8#555),
-    try
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{
-                kind = permission_denied, class = 'File', selector = 'writeAll:contents:'}},
-            beamtalk_file:'writeAll:contents:'(list_to_binary(FileName), <<"data">>))
-    after
-        file:change_mode(Dir, 8#755),
-        file:delete(FileName),
-        file:del_dir(Dir)
+    case os:type() of
+        {win32, _} ->
+            %% Skip on Windows: file:change_mode/2 doesn't restrict permissions
+            %% Windows uses ACLs instead of Unix modes, would need Windows-specific APIs
+            {skip, "Unix file modes not supported on Windows"};
+        _ ->
+            %% Create a read-only directory, try to write in it
+            Dir = "_bt_test_readonly_dir",
+            FileName = Dir ++ "/test.txt",
+            ok = filelib:ensure_dir(FileName),
+            ok = file:change_mode(Dir, 8#555),
+            try
+                ?assertError(
+                    #{'$beamtalk_class' := _, error := #beamtalk_error{
+                        kind = permission_denied, class = 'File', selector = 'writeAll:contents:'}},
+                    beamtalk_file:'writeAll:contents:'(list_to_binary(FileName), <<"data">>))
+            after
+                file:change_mode(Dir, 8#755),
+                file:delete(FileName),
+                file:del_dir(Dir)
+            end
     end.
 
 %%% ============================================================================
