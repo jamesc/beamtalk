@@ -51,6 +51,11 @@ websocket_info(shutdown_requested, State) ->
     ?LOG_INFO("Executing WebSocket-requested shutdown", #{}),
     init:stop(),
     {ok, State};
+%% Transcript push — forwarded from beamtalk_transcript_stream subscriber (ADR 0017)
+websocket_info({transcript_output, Text}, State = #ws_state{authenticated = true}) ->
+    Push = jsx:encode(#{<<"push">> => <<"transcript">>,
+                        <<"text">> => Text}),
+    {[{text, Push}], State};
 websocket_info(_Info, State) ->
     {ok, State}.
 
@@ -63,6 +68,8 @@ terminate(_Reason, _Req, #ws_state{session_id = SessionId, session_pid = Session
         session_pid => SessionPid,
         peer => Peer
     }),
+    %% Unsubscribe from Transcript push messages (ADR 0017)
+    beamtalk_transcript_stream:unsubscribe('Transcript'),
     ets:delete(beamtalk_sessions, SessionId),
     case is_pid(SessionPid) andalso is_process_alive(SessionPid) of
         true -> beamtalk_repl_shell:stop(SessionPid);
@@ -98,6 +105,8 @@ handle_auth(Data, State) ->
                                 peer => State#ws_state.peer
                             }),
                             beamtalk_workspace_meta:update_activity(),
+                            %% Subscribe to Transcript for push messages (ADR 0017 Phase 0)
+                            beamtalk_transcript_stream:subscribe('Transcript'),
                             AuthOk = jsx:encode(#{<<"type">> => <<"auth_ok">>}),
                             SessionMsg = jsx:encode(#{<<"op">> => <<"session-started">>,
                                                       <<"session">> => SessionId}),
