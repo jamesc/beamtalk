@@ -245,7 +245,7 @@ test-stdlib: build-stdlib
 [working-directory: 'runtime']
 test-runtime: build-stdlib
     @echo "🧪 Running Erlang runtime unit tests..."
-    @rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace; test $$? -eq 0 && echo "  All EUnit tests passed"
+    @rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace
     @echo "✅ Runtime tests complete"
 
 [windows]
