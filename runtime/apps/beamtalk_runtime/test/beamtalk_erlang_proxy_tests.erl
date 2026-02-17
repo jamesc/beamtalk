@@ -322,7 +322,7 @@ dispatch_throw_hint_includes_module_test() ->
             ?assertNotEqual(nomatch, binary:match(Hint, <<"throw">>))
     end.
 
-dispatch_generic_error_preserves_details_test() ->
+dispatch_badarg_from_binary_to_atom_preserves_details_test() ->
     %% binary_to_existing_atom with non-existent atom raises badarg,
     %% which is caught by the specific badarg handler
     Proxy = beamtalk_erlang_proxy:new(erlang),
