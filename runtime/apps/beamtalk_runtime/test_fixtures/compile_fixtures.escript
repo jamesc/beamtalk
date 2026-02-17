@@ -18,17 +18,31 @@ main([]) ->
     end,
 
     %% Ensure beamtalk binary is built
-    CargoCmd = case os:type() of
-        {win32, _} -> "cargo.exe build --bin beamtalk --quiet 2>&1";
-        _          -> "cargo build --bin beamtalk --quiet 2>&1"
+    CargoBin = case os:type() of
+        {win32, _} -> os:find_executable("cargo.exe");
+        _          -> os:find_executable("cargo")
     end,
-    CargoOutput = os:cmd(CargoCmd),
+    case CargoBin of
+        false ->
+            io:format(standard_error, "cargo not found in PATH~n", []),
+            halt(1);
+        _ -> ok
+    end,
+    CargoPort = open_port({spawn_executable, CargoBin},
+                          [{args, ["build", "--bin", "beamtalk", "--quiet"]},
+                           exit_status, stderr_to_stdout, binary]),
+    case collect_port_output(CargoPort, []) of
+        {ok, _} -> ok;
+        {error, Reason, Output} ->
+            io:format(standard_error, "cargo build failed (~p)~n~s", [Reason, Output]),
+            halt(1)
+    end,
 
     %% Verify the binary exists
     case filelib:is_regular(Beamtalk) of
         true -> ok;
         false ->
-            io:format(standard_error, "beamtalk binary not found at ~s (cargo build may have failed)~nCargo output:~n~s~n", [Beamtalk, CargoOutput]),
+            io:format(standard_error, "beamtalk binary not found at ~s (cargo build may have failed)~n", [Beamtalk]),
             halt(1)
     end,
 
@@ -47,7 +61,11 @@ main([]) ->
     case filelib:is_regular(CounterBeam) of
         true -> ok;
         false ->
-            io:format(standard_error, "Failed to compile counter.bt (no .beam output)~n", []),
+            io:format(standard_error, "Failed to compile counter.bt (no .beam output)~n"
+                      "  Expected: ~s~n"
+                      "  Beamtalk: ~s~n"
+                      "  Source:   ~s~n"
+                      "  RepoRoot: ~s~n", [CounterBeam, Beamtalk, CounterSrc, RepoRoot]),
             halt(1)
     end,
 
@@ -61,7 +79,10 @@ main([]) ->
     case filelib:is_regular(LoggingCounterBeam) of
         true -> ok;
         false ->
-            io:format(standard_error, "Failed to compile logging_counter.bt (no .beam output)~n", []),
+            io:format(standard_error, "Failed to compile logging_counter.bt (no .beam output)~n"
+                      "  Expected: ~s~n"
+                      "  Beamtalk: ~s~n"
+                      "  Source:   ~s~n", [LoggingCounterBeam, Beamtalk, LoggingCounterSrc]),
             halt(1)
     end,
 
@@ -71,9 +92,34 @@ main([]) ->
     ok.
 
 %% @private Run beamtalk build on a source file.
+%% Uses open_port/spawn_executable to avoid cmd.exe quoting issues on Windows.
 run_beamtalk(Beamtalk, SrcFile) ->
-    Cmd = "\"" ++ Beamtalk ++ "\" build \"" ++ SrcFile ++ "\"",
-    os:cmd(Cmd).
+    Port = open_port({spawn_executable, Beamtalk},
+                     [{args, ["build", SrcFile]},
+                      exit_status, stderr_to_stdout, binary]),
+    case collect_port_output(Port, []) of
+        {ok, <<>>} -> ok;
+        {ok, Output} ->
+            io:put_chars(["beamtalk build ", filename:basename(SrcFile), ":\n", Output, "\n"]);
+        {error, Reason, Output} ->
+            io:put_chars(["beamtalk build ", filename:basename(SrcFile), ":\n", Output, "\n"]),
+            io:format(standard_error, "beamtalk build failed (~p)~n", [Reason]),
+            halt(1)
+    end.
+
+%% @private Collect all output from an open_port until exit.
+collect_port_output(Port, Acc) ->
+    receive
+        {Port, {data, Data}} ->
+            collect_port_output(Port, [Acc, Data]);
+        {Port, {exit_status, 0}} ->
+            {ok, iolist_to_binary(Acc)};
+        {Port, {exit_status, Code}} ->
+            {error, {exit_status, Code}, iolist_to_binary(Acc)}
+    after 60000 ->
+        catch port_close(Port),
+        {error, timeout, iolist_to_binary(Acc)}
+    end.
 
 %% @private Delete a file if it exists.
 delete_if_exists(Path) ->

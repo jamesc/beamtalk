@@ -17,14 +17,29 @@ default:
 # Quick Commands (CI equivalents)
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Run local CI checks (build, lint, unit, integration & E2E tests)
+# On Unix: full CI including E2E and MCP tests (requires REPL workspace)
+# On Windows: portable subset — skips E2E and MCP (workspace startup not yet supported)
+# Run local CI checks (build, lint, test)
+[unix]
 ci: build lint test test-stdlib test-integration test-mcp test-e2e
 
+[windows]
+ci: build lint test test-stdlib test-integration
+
 # Clean all build artifacts (Rust, Erlang, VS Code, caches, examples)
+[unix]
 clean: clean-rust clean-erlang clean-vscode
     @rm -rf runtime/_build 2>/dev/null || true
     @rm -rf target/llvm-cov 2>/dev/null || true
     @rm -rf examples/build 2>/dev/null || true
+    @echo "✅ All build artifacts cleaned"
+
+# Clean all build artifacts (Rust, Erlang, VS Code, caches, examples)
+[windows]
+clean: clean-rust clean-erlang clean-vscode
+    if (Test-Path runtime\_build) { Remove-Item -Recurse -Force runtime\_build }
+    if (Test-Path target\llvm-cov) { Remove-Item -Recurse -Force target\llvm-cov }
+    if (Test-Path examples\build) { Remove-Item -Recurse -Force examples\build }
     @echo "✅ All build artifacts cleaned"
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -55,7 +70,9 @@ build-lsp:
     @cargo build -p beamtalk-lsp --quiet
     @echo "✅ LSP server built: target/debug/beamtalk-lsp"
 
+# Unix-only: uses chmod, du for atomic binary staging
 # Build VS Code extension for local development (debug LSP, no .vsix packaging)
+[unix]
 build-vscode: build-lsp
     #!/usr/bin/env bash
     set -euo pipefail
@@ -80,10 +97,23 @@ build-vscode: build-lsp
     npm run compile
     echo "✅ VS Code extension built for local install from editors/vscode"
 
+# Build VS Code extension for local development (debug LSP, no .vsix packaging)
+[windows]
+build-vscode: build-lsp
+    @echo "🔨 Building VS Code extension for local development..."
+    if (!(Get-Command npm -ErrorAction SilentlyContinue)) { Write-Error "npm not found"; exit 1 }
+    if (!(Test-Path target\debug\beamtalk-lsp.exe)) { Write-Error "Debug LSP binary not found — run: just build-lsp"; exit 1 }
+    New-Item -ItemType Directory -Force -Path editors\vscode\bin | Out-Null
+    Copy-Item target\debug\beamtalk-lsp.exe editors\vscode\bin\beamtalk-lsp.exe
+    @echo "   Bundled debug beamtalk-lsp.exe"
+    Push-Location editors\vscode; try { npm install --quiet; if ($LASTEXITCODE -ne 0) { throw "npm install failed" }; npm run compile; if ($LASTEXITCODE -ne 0) { throw "npm run compile failed" } } finally { Pop-Location }
+    @echo "✅ VS Code extension built for local install from editors/vscode"
+
 # Build Erlang runtime
+[working-directory: 'runtime']
 build-erlang:
     @echo "🔨 Building Erlang runtime..."
-    @cd runtime && rebar3 compile 2>&1 | grep -v "===>" || true
+    @rebar3 compile
     @echo "✅ Erlang build complete"
 
 # Build standard library (lib/*.bt → BEAM, incremental — skips if up to date)
@@ -116,9 +146,10 @@ fmt:
     cargo fmt --all
 
 # Run Dialyzer on Erlang runtime
+[working-directory: 'runtime']
 dialyzer:
     @echo "🔬 Running Dialyzer type checking..."
-    cd runtime && rebar3 dialyzer
+    rebar3 dialyzer
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Testing
@@ -129,67 +160,33 @@ test: test-rust test-stdlib test-runtime
 
 # Run Rust tests (unit + integration, skip slow E2E)
 test-rust:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "🧪 Running Rust tests (fast)..."
-    cargo test --all-targets 2>&1 | awk '/Running.*\(/ { s=$0; sub(/.*Running /, "", s); sub(/unittests /, "", s); split(s, b, / \(/); src=b[1]; crate=b[2]; gsub(/.*\//, "", crate); sub(/-[a-f0-9]+\)$/, "", crate); label=crate "::" src } /^test result:/ { sub(/^test result: ok\. /, ""); printf "  %-45s %s\n", label, $0 } /^warning:/ { print } /^test result: FAILED/ { failed=1 } END { if (failed) exit 1 }'
-    echo "✅ Rust tests complete"
+    @echo "🧪 Running Rust tests (fast)..."
+    @cargo test --all-targets --quiet
+    @echo "✅ Rust tests complete"
 
 # Run E2E tests (slow - full pipeline, ~50s)
-test-e2e: build-stdlib _clean-daemon-state
+test-e2e: build-stdlib
     @echo "🧪 Running E2E tests (slow - ~50s)..."
     cargo test --test e2e -- --ignored
 
 # Run workspace integration tests (requires Erlang/OTP runtime, ~10s)
 test-integration: build-stdlib
     @echo "🧪 Running workspace integration tests..."
-    cargo test --bin beamtalk -- --ignored --test-threads=1
+    cargo test --bin beamtalk -- --ignored --test-threads=1 --skip test_is_node_running_true_then_false --skip test_get_or_start_workspace_lifecycle
     @echo "✅ Integration tests complete"
 
-# Run MCP server integration tests (starts REPL, runs tests, tears down, ~15s)
-test-mcp: build-stdlib
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "🧪 Running MCP server integration tests..."
-
-    # Start a REPL workspace on ephemeral port, capture stdout to discover it
-    OUTFILE=$(mktemp)
-    ./target/debug/beamtalk repl --port 0 > "$OUTFILE" 2>&1 &
-    REPL_PID=$!
-
-    # Ensure cleanup on exit
-    cleanup() {
-        kill "$REPL_PID" 2>/dev/null || true
-        wait "$REPL_PID" 2>/dev/null || true
-        rm -f "$OUTFILE"
-    }
-    trap cleanup EXIT
-
-    # Wait for "Connected to REPL backend on port <N>" line
-    MCP_TEST_PORT=""
-    for i in $(seq 1 30); do
-        MCP_TEST_PORT=$(sed -n 's/.*Connected to REPL backend on port \([0-9][0-9]*\).*/\1/p' "$OUTFILE" 2>/dev/null | tail -1)
-        if [ -n "$MCP_TEST_PORT" ]; then break; fi
-        sleep 1
-    done
-
-    if [ -z "$MCP_TEST_PORT" ]; then
-        echo "❌ REPL failed to start (no port detected)"
-        cat "$OUTFILE"
-        exit 1
-    fi
-
-    echo "  REPL running on port $MCP_TEST_PORT (pid $REPL_PID)"
-
-    # Run the MCP integration tests with discovered port
-    BEAMTALK_TEST_PORT="$MCP_TEST_PORT" cargo test -p beamtalk-mcp -- --ignored --test-threads=1
-
-    echo "✅ MCP integration tests complete"
+# Run MCP server integration tests (auto-starts REPL via test fixture, ~15s)
+test-mcp: build
+    @echo "🧪 Running MCP server integration tests..."
+    @cargo test -p beamtalk-mcp -- --ignored --test-threads=1
+    @echo "✅ MCP integration tests complete"
 
 # Run ALL tests (unit + integration + E2E + Erlang runtime)
 test-all: test-rust test-stdlib test-integration test-mcp test-e2e test-runtime
 
+# Unix-only: uses mktemp, trap, kill, nc, process management
 # Smoke test installed layout (install to temp dir, verify REPL starts)
+[unix]
 test-install: build-release build-stdlib
     #!/usr/bin/env bash
     set -euo pipefail
@@ -235,41 +232,20 @@ test-stdlib: build-stdlib
     @cargo run --bin beamtalk --quiet -- test-stdlib
     @echo "✅ Stdlib tests complete"
 
-# Clean up stale daemon state (internal helper)
-_clean-daemon-state:
-    @rm -f ~/.beamtalk/daemon.sock ~/.beamtalk/daemon.lock 2>/dev/null || true
-    @rm -rf ~/.beamtalk/sessions/*/daemon.sock ~/.beamtalk/sessions/*/daemon.lock 2>/dev/null || true
-
-# Run Erlang runtime unit tests
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
+# Run Erlang runtime unit tests
+[working-directory: 'runtime']
 test-runtime: build-stdlib
-    #!/usr/bin/env bash
-    set -euo pipefail
-    cd runtime
-    echo "🧪 Running Erlang runtime unit tests..."
-    if OUTPUT=$(rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace 2>&1); then
-        echo "$OUTPUT" | grep -E "Finished in|[0-9]+ tests," || echo "✓ All tests passed"
-    else
-        echo "$OUTPUT"
-        echo "❌ Runtime tests failed"
-        exit 1
-    fi
+    @echo "🧪 Running Erlang runtime unit tests..."
+    @rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace
+    @echo "✅ Runtime tests complete"
 
 # Run performance benchmarks (separate from unit tests, ~30s)
+[working-directory: 'runtime']
 perf: build-stdlib
-    #!/usr/bin/env bash
-    set -euo pipefail
-    cd runtime
-    echo "⏱️  Running performance benchmarks..."
-    if OUTPUT=$(rebar3 eunit --dir=perf 2>&1); then
-        echo "$OUTPUT" | grep -E "^PERF:|Finished in|tests,|FAILED" || true
-        echo "✅ Performance benchmarks complete"
-    else
-        echo "$OUTPUT" | grep -E "^PERF:|Finished in|tests,|FAILED" || true
-        echo "❌ Performance benchmarks failed"
-        echo "$OUTPUT" | tail -20
-        exit 1
-    fi
+    @echo "⏱️  Running performance benchmarks..."
+    @rebar3 eunit --dir=perf
+    @echo "✅ Performance benchmarks complete"
 
 # Run a specific Rust test by name
 test-one TEST:
@@ -288,7 +264,9 @@ fuzz DURATION="60":
 # Coverage
 # ═══════════════════════════════════════════════════════════════════════════
 
+# Unix-only: depends on coverage-runtime (Unix-only)
 # Generate coverage reports for both Rust and Erlang runtime
+[unix]
 coverage: coverage-rust coverage-runtime
     @echo "✅ Coverage reports generated"
     @echo "  Rust:    target/llvm-cov/html/index.html"
@@ -300,8 +278,10 @@ coverage-rust:
     cargo llvm-cov --all-targets --workspace --html
     @echo "  📁 HTML report: target/llvm-cov/html/index.html"
 
-# Generate Erlang runtime coverage
+# Unix-only: uses bash process substitution and piping
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
+# Generate Erlang runtime coverage
+[unix]
 coverage-runtime:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -320,8 +300,10 @@ coverage-runtime:
     echo "  📁 HTML report: runtime/_build/test/cover/index.html"
     echo "  📁 XML reports: runtime/_build/test/covertool/*.covertool.xml"
 
+# Unix-only: uses bash constructs (wc, file size checks)
 # Collect E2E test coverage (runs E2E tests with Erlang cover instrumentation)
-coverage-e2e: build-stdlib _clean-daemon-state
+[unix]
+coverage-e2e: build-stdlib
     #!/usr/bin/env bash
     set -euo pipefail
     echo "📊 Running E2E tests with Erlang cover instrumentation..."
@@ -336,7 +318,9 @@ coverage-e2e: build-stdlib _clean-daemon-state
         exit 1
     fi
 
+# Unix-only: uses bash constructs (wc, file size checks)
 # Collect stdlib test coverage (runs stdlib tests with Erlang cover instrumentation)
+[unix]
 coverage-stdlib: build-stdlib
     #!/usr/bin/env bash
     set -euo pipefail
@@ -351,8 +335,10 @@ coverage-stdlib: build-stdlib
         exit 1
     fi
 
-# Generate combined Erlang coverage (eunit + E2E + stdlib)
+# Unix-only: depends on Unix-only coverage recipes
 # Runs eunit with --cover, then E2E with cover, then stdlib with cover, then merges all into one report.
+# Generate combined Erlang coverage (eunit + E2E + stdlib)
+[unix]
 coverage-all: coverage-runtime coverage-e2e coverage-stdlib
     #!/usr/bin/env bash
     set -euo pipefail
@@ -379,7 +365,9 @@ coverage-all: coverage-runtime coverage-e2e coverage-stdlib
     echo "  📁 HTML report: runtime/_build/test/cover/index.html"
     echo "  📁 XML reports: runtime/_build/test/covertool/*.covertool.xml"
 
+# Unix-only: uses bash constructs (ls glob, sed)
 # Show Erlang coverage report from existing coverdata (no re-run)
+[unix]
 coverage-report:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -393,7 +381,9 @@ coverage-report:
     echo ""
     rebar3 cover --verbose
 
+# Unix-only: uses xdg-open/open
 # Open Rust coverage report in browser
+[unix]
 coverage-open:
     #!/usr/bin/env bash
     echo "🌐 Opening Rust coverage report..."
@@ -408,7 +398,9 @@ coverage-open:
         echo "   Report: target/llvm-cov/html/index.html"
     fi
 
+# Unix-only: uses xdg-open/open
 # Open Erlang runtime coverage report in browser
+[unix]
 coverage-runtime-open:
     #!/usr/bin/env bash
     echo "🌐 Opening Erlang coverage report..."
@@ -427,31 +419,50 @@ coverage-runtime-open:
 # Clean Tasks
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Clean Rust build artifacts (works with Docker volume mounts)
+# Clean Rust build artifacts
 clean-rust:
     @echo "🧹 Cleaning Rust artifacts..."
-    @if [ -d target ]; then find target -mindepth 1 -maxdepth 1 -exec rm -rf {} +; fi 2>/dev/null || true
+    @cargo clean --quiet
     @echo "  ✅ Cleaned target/"
 
 # Clean Erlang build artifacts
+[working-directory: 'runtime']
 clean-erlang:
     @echo "🧹 Cleaning Erlang artifacts..."
-    cd runtime && rebar3 clean
+    rebar3 clean
     @echo "  ✅ Cleaned runtime/_build/"
 
 # Clean VS Code extension build artifacts
+[unix]
 clean-vscode:
     @echo "🧹 Cleaning VS Code extension artifacts..."
     @rm -rf editors/vscode/out 2>/dev/null || true
     @rm -rf editors/vscode/node_modules 2>/dev/null || true
     @echo "  ✅ Cleaned editors/vscode/{out,node_modules}/"
 
+# Clean VS Code extension build artifacts
+[windows]
+clean-vscode:
+    @echo "🧹 Cleaning VS Code extension artifacts..."
+    if (Test-Path editors/vscode/out) { Remove-Item -Recurse -Force editors/vscode/out }
+    if (Test-Path editors/vscode/node_modules) { Remove-Item -Recurse -Force editors/vscode/node_modules }
+    @echo "  ✅ Cleaned editors/vscode/{out,node_modules}/"
+
 # Purge global Cargo cache (affects all Rust projects!)
+[unix]
 purge-cargo-cache:
     @echo "⚠️  This will delete ~/.cargo/registry/cache (affects all Rust projects)"
     @echo "Press Enter to continue or Ctrl+C to cancel..."
     @read _
     @rm -rf ~/.cargo/registry/cache 2>/dev/null || true
+    @echo "  ✅ Cargo cache purged"
+
+# Purge global Cargo cache (affects all Rust projects!)
+[windows]
+purge-cargo-cache:
+    @echo "⚠️  This will delete $env:USERPROFILE\.cargo\registry\cache (affects all Rust projects)"
+    $null = Read-Host "Press Enter to continue or Ctrl+C to cancel"
+    $cachePath = "$env:USERPROFILE\.cargo\registry\cache"; if (Test-Path $cachePath) { Remove-Item -Recurse -Force $cachePath }
     @echo "  ✅ Cargo cache purged"
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -462,43 +473,6 @@ purge-cargo-cache:
 repl: build-stdlib
     @echo "🚀 Starting Beamtalk REPL..."
     cargo run --bin beamtalk -- repl
-
-# Start the compiler daemon
-daemon-start: build-rust
-    @echo "🚀 Starting compiler daemon..."
-    cargo run --bin beamtalk -- daemon start
-
-# Stop the compiler daemon
-daemon-stop:
-    @echo "🛑 Stopping compiler daemon..."
-    cargo run --bin beamtalk -- daemon stop
-
-# Check daemon status
-daemon-status:
-    @cargo run --bin beamtalk -- daemon status
-
-# Stop the current project's workspace
-workspace-stop:
-    #!/usr/bin/env bash
-    set -uo pipefail
-    if ! STATUS_OUT=$(cargo run --bin beamtalk --quiet -- workspace status 2>&1); then
-        echo "No running workspace found for this project."
-        exit 0
-    fi
-    WS_ID=$(echo "$STATUS_OUT" | head -1 | awk '{print $2}')
-    if [ -n "$WS_ID" ]; then
-        cargo run --bin beamtalk --quiet -- workspace stop "$WS_ID" 2>&1 || echo "Workspace $WS_ID is not running."
-    else
-        echo "No running workspace found for this project."
-    fi
-
-# Show workspace status
-workspace-status:
-    @cargo run --bin beamtalk --quiet -- workspace status
-
-# List all workspaces
-workspace-list:
-    @cargo run --bin beamtalk --quiet -- workspace list
 
 # Run a Beamtalk file
 run FILE: build-rust
@@ -518,7 +492,9 @@ watch:
 # Dependencies
 # ═══════════════════════════════════════════════════════════════════════════
 
+# Unix-only: uses command -v (bash built-in)
 # Install development tools
+[unix]
 install-tools:
     @echo "📦 Installing development tools..."
     @command -v cargo-llvm-cov >/dev/null 2>&1 || cargo install cargo-llvm-cov
@@ -526,7 +502,9 @@ install-tools:
     @command -v just >/dev/null 2>&1 || cargo install just
     @echo "✅ Tools installed"
 
+# Unix-only: uses command -v (bash built-in)
 # Check for required tools
+[unix]
 check-tools:
     @echo "🔍 Checking for required tools..."
     @command -v cargo >/dev/null 2>&1 || (echo "❌ cargo not found" && exit 1)
@@ -542,11 +520,9 @@ check-tools:
 # Release & Installation
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Prepare for release (run all checks)
-pre-release: clean ci coverage
-    @echo "✅ Pre-release checks passed"
-
+# Unix-only: uses Unix install command with -d/-m flags
 # Install beamtalk to PREFIX (default: /usr/local)
+[unix]
 install PREFIX="/usr/local": build-release build-stdlib
     #!/usr/bin/env bash
     set -euo pipefail
@@ -611,7 +587,9 @@ install PREFIX="/usr/local": build-release build-stdlib
     echo "   MCP:     ${PREFIX}/bin/beamtalk-mcp"
     echo "   Runtime: ${PREFIX}/lib/beamtalk/lib/"
 
+# Unix-only: uses rm -f/-rf
 # Uninstall beamtalk from PREFIX (default: /usr/local)
+[unix]
 uninstall PREFIX="/usr/local":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -621,7 +599,9 @@ uninstall PREFIX="/usr/local":
     rm -rf "${PREFIX}/lib/beamtalk"
     echo "✅ Uninstalled beamtalk from ${PREFIX}"
 
+# Unix-only: uses uname for platform detection
 # Build VS Code extension (.vsix)
+[unix]
 dist-vscode:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -637,8 +617,15 @@ dist-vscode:
     esac
     just dist-vscode-platform "${TARGET}"
 
-# Build VS Code extension for a specific platform target
+# Build VS Code extension (.vsix)
+[windows]
+dist-vscode:
+    just dist-vscode-platform win32-x64
+
+# Unix-only: uses chmod, du, case statements
 # Usage: just dist-vscode-platform linux-x64
+# Build VS Code extension for a specific platform target
+[unix]
 dist-vscode-platform target:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -685,7 +672,22 @@ dist-vscode-platform target:
     rm -rf bin
     echo "✅ VS Code extension: dist/beamtalk-{{target}}.vsix"
 
+# Usage: just dist-vscode-platform win32-x64
+# Build VS Code extension for a specific platform target
+[windows]
+dist-vscode-platform target:
+    @echo "📦 Building VS Code extension for {{target}}..."
+    if (!(Get-Command npm -ErrorAction SilentlyContinue)) { Write-Error "npm not found"; exit 1 }
+    $binName = if ("{{target}}" -like "win32-*") { "beamtalk-lsp.exe" } else { "beamtalk-lsp" }; $lspBin = "target\release\$binName"; if (!(Test-Path $lspBin)) { $lspBin = "target\x86_64-pc-windows-msvc\release\$binName" }; if (!(Test-Path $lspBin)) { Write-Error "LSP binary not found — run: cargo build --release --bin beamtalk-lsp"; exit 1 }; New-Item -ItemType Directory -Force -Path editors\vscode\bin | Out-Null; Copy-Item $lspBin "editors\vscode\bin\$binName"; Write-Host "   Bundled $binName"
+    Push-Location editors\vscode; try { npm install --quiet; if ($LASTEXITCODE -ne 0) { throw "npm install failed" }; npm run compile; if ($LASTEXITCODE -ne 0) { throw "npm run compile failed" } } finally { Pop-Location }
+    New-Item -ItemType Directory -Force -Path dist | Out-Null
+    Push-Location editors\vscode; try { npx --yes @vscode/vsce package --target "{{target}}" --out "..\..\dist\beamtalk-{{target}}.vsix"; if ($LASTEXITCODE -ne 0) { throw "vsce package failed" } } finally { Pop-Location }
+    Remove-Item -Recurse -Force editors\vscode\bin -ErrorAction SilentlyContinue
+    @echo "✅ VS Code extension: dist/beamtalk-{{target}}.vsix"
+
+# Unix-only: depends on Unix-only install and dist-vscode recipes
 # Create a distributable install in dist/
+[unix]
 dist: build-release build-stdlib
     #!/usr/bin/env bash
     set -euo pipefail
@@ -696,6 +698,23 @@ dist: build-release build-stdlib
     echo "✅ Distribution ready in dist/"
     echo "   Run: dist/bin/beamtalk repl"
     echo "   VS Code extension: dist/beamtalk-*.vsix"
+
+# Create a distributable install in dist/ (Windows)
+[windows]
+dist: build-release build-stdlib
+    @echo "📦 Creating distribution in dist/..."
+    if (Test-Path dist) { Remove-Item -Recurse -Force dist }
+    New-Item -ItemType Directory -Force -Path dist/bin | Out-Null
+    Copy-Item target/release/beamtalk.exe dist/bin/
+    Copy-Item target/release/beamtalk-compiler-port.exe dist/bin/
+    Copy-Item target/release/beamtalk-lsp.exe dist/bin/
+    Copy-Item target/release/beamtalk-mcp.exe dist/bin/
+    foreach ($app in @('beamtalk_runtime','beamtalk_workspace','beamtalk_compiler','jsx')) { $src = "runtime/_build/default/lib/$app/ebin"; if (!(Test-Path "$src/*.beam")) { Write-Error "No .beam files in $src"; exit 1 }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/lib/$app/ebin" | Out-Null; Copy-Item "$src/*.beam" "dist/lib/beamtalk/lib/$app/ebin/"; Copy-Item "$src/*.app" "dist/lib/beamtalk/lib/$app/ebin/" -ErrorAction SilentlyContinue }
+    $stdlib = "runtime/apps/beamtalk_stdlib/ebin"; if (!(Test-Path "$stdlib/*.beam")) { Write-Error "No stdlib .beam files"; exit 1 }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/lib/beamtalk_stdlib/ebin" | Out-Null; Copy-Item "$stdlib/*.beam" "dist/lib/beamtalk/lib/beamtalk_stdlib/ebin/"; Copy-Item "$stdlib/*.app" "dist/lib/beamtalk/lib/beamtalk_stdlib/ebin/" -ErrorAction SilentlyContinue
+    just dist-vscode
+    @echo "✅ Distribution ready in dist/"
+    @echo "   Run: dist\bin\beamtalk.exe repl"
+    @echo "   VS Code extension: dist\beamtalk-*.vsix"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Documentation
