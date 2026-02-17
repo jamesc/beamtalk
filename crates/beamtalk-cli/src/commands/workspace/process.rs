@@ -3,12 +3,11 @@
 
 //! Process management for workspace BEAM nodes.
 //!
-//! Handles starting detached BEAM nodes, TCP health probes, shutdown,
+//! Handles starting detached BEAM nodes, WebSocket health probes, shutdown,
 //! and PID discovery.
 //!
 //! **DDD Context:** CLI
 
-use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -19,6 +18,8 @@ use std::os::windows::process::CommandExt;
 
 use miette::{IntoDiagnostic, Result, miette};
 use serde::Deserialize;
+
+use crate::commands::protocol::ProtocolClient;
 
 #[cfg(target_os = "linux")]
 use super::storage::read_proc_start_time;
@@ -58,10 +59,6 @@ const READINESS_PROBE_DELAY_MS: u64 = 200;
 /// Total worst-case: 30 × (300ms connect + 500ms read + 200ms sleep) = ~30s.
 const READINESS_PROBE_MAX_RETRIES: usize = 30;
 
-/// TCP connect timeout for readiness probe in milliseconds (shorter than
-/// the full health probe to keep worst-case bounded at ~10s).
-const READINESS_CONNECT_TIMEOUT_MS: u64 = 300;
-
 /// TCP read timeout for readiness probe in milliseconds.
 const READINESS_READ_TIMEOUT_MS: u64 = 500;
 
@@ -70,26 +67,68 @@ const EXIT_PROBE_CONNECT_TIMEOUT_MS: u64 = 500;
 
 /// Check if a BEAM node is actually running (handle stale node.info files).
 ///
-/// Uses TCP health probe (cross-platform) to verify the workspace is alive.
-/// If the workspace has a nonce, validates it against the port file nonce
-/// to detect stale entries (PID reuse after crash).
+/// Uses a lightweight TCP connect probe (cross-platform) to verify the
+/// workspace port is listening. If the workspace has a nonce, validates it
+/// against the port file nonce to detect stale entries (PID reuse after crash).
 pub fn is_node_running(info: &NodeInfo) -> bool {
-    match tcp_health_probe(info.port) {
-        Ok(response) => {
-            // If we have a nonce, verify it matches to detect stale port files
-            if let Some(ref expected_nonce) = info.nonce {
-                response.nonce == *expected_nonce
-            } else {
-                // No nonce stored (old node.info format) — trust the probe
-                true
-            }
+    let addr = format!("127.0.0.1:{}", info.port);
+    let Ok(addr) = addr.parse::<std::net::SocketAddr>() else {
+        return false;
+    };
+
+    // Lightweight connect-only probe — if the port is listening, the node is likely alive
+    if TcpStream::connect_timeout(&addr, Duration::from_millis(TCP_CONNECT_TIMEOUT_MS)).is_err() {
+        return false;
+    }
+
+    // If we have a nonce, verify it against the port file for stale detection
+    if let Some(ref expected_nonce) = info.nonce {
+        // Read the port file nonce directly (no auth needed)
+        match read_port_file_nonce(info.port) {
+            Some(file_nonce) => file_nonce == *expected_nonce,
+            None => true, // No port file — trust the TCP probe
         }
-        Err(_) => false,
+    } else {
+        true
     }
 }
 
-/// Response from a TCP health probe (BT-611).
+/// Read the nonce from a port file that matches the given port.
+/// Scans all workspace directories since we don't know `workspace_id` here.
+/// Returns `None` if no matching port file found or on read error.
+fn read_port_file_nonce(port: u16) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct PortFile {
+        port: u16,
+        nonce: String,
+    }
+
+    let home_dir = dirs::home_dir()?;
+    let workspaces_root = home_dir.join(".beamtalk").join("workspaces");
+
+    let entries = std::fs::read_dir(workspaces_root).ok()?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let port_file_path = path.join("port");
+        let Ok(contents) = std::fs::read_to_string(&port_file_path) else {
+            continue;
+        };
+        if let Ok(parsed) = serde_json::from_str::<PortFile>(&contents) {
+            if parsed.port == port {
+                return Some(parsed.nonce);
+            }
+        }
+    }
+    None
+}
+
+/// Response from a health probe (BT-611).
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)] // Used in workspace lifecycle and integration tests
 pub struct HealthProbeResponse {
     /// Workspace identifier reported by the running node.
     #[allow(dead_code)] // deserialized for protocol completeness; used in Debug output
@@ -102,82 +141,44 @@ pub struct HealthProbeResponse {
     pub status: Vec<String>,
 }
 
-/// Send a TCP health probe to a workspace (BT-611).
+/// Send a WebSocket health probe to a workspace (BT-611, ADR 0020).
 ///
-/// Connects to the workspace's TCP port, sends a `{"op":"health"}` message,
-/// and returns the parsed response containing `workspace_id` and `nonce`.
-/// The nonce can be compared against the port file nonce to detect stale entries.
-pub fn tcp_health_probe(port: u16) -> Result<HealthProbeResponse> {
-    let addr: std::net::SocketAddr = format!("127.0.0.1:{port}")
-        .parse()
-        .map_err(|e| miette!("Invalid address: {e}"))?;
-
-    let stream = TcpStream::connect_timeout(&addr, Duration::from_millis(TCP_CONNECT_TIMEOUT_MS))
-        .into_diagnostic()?;
-    stream
-        .set_read_timeout(Some(Duration::from_millis(TCP_READ_TIMEOUT_MS)))
-        .into_diagnostic()?;
-
-    let mut writer = stream.try_clone().into_diagnostic()?;
-    let mut reader = BufReader::new(stream);
-
-    // BT-666: Consume the session-started welcome message
-    let mut welcome = String::new();
-    let _ = reader.read_line(&mut welcome);
+/// Connects to the workspace's WebSocket endpoint, authenticates with the
+/// cookie, sends a `{"op":"health"}` message, and returns the parsed response
+/// containing `workspace_id` and `nonce`.
+#[allow(dead_code)] // Available for workspace lifecycle and integration tests
+pub fn tcp_health_probe(port: u16, cookie: &str) -> Result<HealthProbeResponse> {
+    let mut client = ProtocolClient::connect(
+        port,
+        cookie,
+        Some(Duration::from_millis(TCP_READ_TIMEOUT_MS)),
+    )?;
 
     // Send health probe request
-    writer
-        .write_all(b"{\"op\":\"health\"}\n")
-        .into_diagnostic()?;
-    writer.flush().into_diagnostic()?;
-
-    // Read response line
-    let mut response_line = String::new();
-    reader.read_line(&mut response_line).into_diagnostic()?;
-
-    let response: HealthProbeResponse =
-        serde_json::from_str(response_line.trim()).into_diagnostic()?;
-    Ok(response)
+    let request = serde_json::json!({"op": "health"});
+    let response = client.send_raw(&request)?;
+    let parsed: HealthProbeResponse = serde_json::from_value(response).into_diagnostic()?;
+    Ok(parsed)
 }
 
-/// Send a TCP shutdown message to a workspace (BT-611).
+/// Send a WebSocket shutdown message to a workspace (BT-611, ADR 0020).
 ///
-/// Connects to the workspace's TCP port, sends a cookie-authenticated
-/// `{"op":"shutdown","cookie":"..."}` message, and waits for acknowledgement.
-/// The workspace will call `init:stop()` for OTP-level graceful teardown.
+/// Connects to the workspace's WebSocket endpoint, authenticates with the
+/// cookie, sends a `{"op":"shutdown","cookie":"..."}` message, and waits for
+/// acknowledgement. The workspace will call `init:stop()` for OTP-level
+/// graceful teardown.
 pub fn tcp_send_shutdown(port: u16, cookie: &str) -> Result<()> {
-    let addr: std::net::SocketAddr = format!("127.0.0.1:{port}")
-        .parse()
-        .map_err(|e| miette!("Invalid address: {e}"))?;
-
-    let stream = TcpStream::connect_timeout(&addr, Duration::from_millis(TCP_CONNECT_TIMEOUT_MS))
-        .into_diagnostic()?;
-    stream
-        .set_read_timeout(Some(Duration::from_millis(TCP_READ_TIMEOUT_MS)))
-        .into_diagnostic()?;
-
-    let mut writer = stream.try_clone().into_diagnostic()?;
-    let mut reader = BufReader::new(stream);
-
-    // BT-666: Consume the session-started welcome message
-    let mut welcome = String::new();
-    let _ = reader.read_line(&mut welcome);
+    let mut client = ProtocolClient::connect(
+        port,
+        cookie,
+        Some(Duration::from_millis(TCP_READ_TIMEOUT_MS)),
+    )?;
 
     // Send shutdown request with cookie
     let request = serde_json::json!({"op": "shutdown", "cookie": cookie});
-    writer
-        .write_all(request.to_string().as_bytes())
-        .into_diagnostic()?;
-    writer.write_all(b"\n").into_diagnostic()?;
-    writer.flush().into_diagnostic()?;
-
-    // Read response
-    let mut response_line = String::new();
-    reader.read_line(&mut response_line).into_diagnostic()?;
+    let response = client.send_raw(&request)?;
 
     // Check for error in response
-    let response: serde_json::Value =
-        serde_json::from_str(response_line.trim()).into_diagnostic()?;
     if let Some(error) = response.get("error") {
         return Err(miette!("Shutdown rejected: {error}"));
     }
@@ -321,8 +322,8 @@ pub fn start_detached_node(
         }
     };
 
-    // Wait for TCP health endpoint to be fully ready before returning.
-    wait_for_tcp_ready(actual_port, pid)?;
+    // Wait for WebSocket health endpoint to be fully ready before returning.
+    wait_for_tcp_ready(actual_port, pid, &cookie)?;
 
     // Create node info
     let node_info = NodeInfo {
@@ -354,41 +355,25 @@ fn path_to_erlang_arg(path: &Path) -> String {
     }
 }
 
-/// Poll until the TCP health endpoint responds on the given port.
+/// Poll until the WebSocket health endpoint responds on the given port.
 ///
-/// Uses short per-attempt timeouts (300ms connect, 500ms read) to keep the
-/// worst-case total bounded at ~25s rather than the ~175s that would result
-/// from reusing `tcp_health_probe`'s production timeouts.
-fn wait_for_tcp_ready(port: u16, pid: u32) -> Result<()> {
-    let addr: std::net::SocketAddr = format!("127.0.0.1:{port}")
-        .parse()
-        .map_err(|e| miette!("Invalid address: {e}"))?;
-
+/// Uses short per-attempt timeouts to keep the worst-case total bounded.
+fn wait_for_tcp_ready(port: u16, pid: u32, cookie: &str) -> Result<()> {
     for _ in 0..READINESS_PROBE_MAX_RETRIES {
-        if let Ok(stream) =
-            TcpStream::connect_timeout(&addr, Duration::from_millis(READINESS_CONNECT_TIMEOUT_MS))
-        {
-            if stream
-                .set_read_timeout(Some(Duration::from_millis(READINESS_READ_TIMEOUT_MS)))
-                .is_err()
-            {
-                std::thread::sleep(Duration::from_millis(READINESS_PROBE_DELAY_MS));
-                continue;
-            }
-            if let Ok(mut writer) = stream.try_clone() {
-                let mut reader = BufReader::new(stream);
-                if writer.write_all(b"{\"op\":\"health\"}\n").is_ok() && writer.flush().is_ok() {
-                    let mut response = String::new();
-                    if reader.read_line(&mut response).is_ok() && !response.is_empty() {
-                        return Ok(());
-                    }
-                }
+        if let Ok(mut client) = ProtocolClient::connect(
+            port,
+            cookie,
+            Some(Duration::from_millis(READINESS_READ_TIMEOUT_MS)),
+        ) {
+            let request = serde_json::json!({"op": "health"});
+            if client.send_raw(&request).is_ok() {
+                return Ok(());
             }
         }
         std::thread::sleep(Duration::from_millis(READINESS_PROBE_DELAY_MS));
     }
     Err(miette!(
-        "BEAM node started (PID {pid}) but TCP health endpoint on port {port} \
+        "BEAM node started (PID {pid}) but WebSocket health endpoint on port {port} \
          did not become ready. The workspace may have failed to initialize."
     ))
 }

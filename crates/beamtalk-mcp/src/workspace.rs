@@ -47,24 +47,47 @@ pub fn read_port_file(workspace_id: &str) -> Option<u16> {
     content.trim().parse().ok()
 }
 
-/// Discover the REPL port for the current directory.
+/// Read the cookie file for a workspace.
+pub fn read_cookie_file(workspace_id: &str) -> Option<String> {
+    let cookie_file = workspace_dir(workspace_id)?.join("cookie");
+    let content = std::fs::read_to_string(cookie_file).ok()?;
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// Discover the REPL port and cookie for the current directory.
 ///
 /// 1. If a workspace ID is given, use it directly.
 /// 2. Otherwise, generate from the current directory.
-pub fn discover_port(workspace_id: Option<&str>) -> Option<u16> {
+pub fn discover_port_and_cookie(workspace_id: Option<&str>) -> Option<(u16, String)> {
     let id = if let Some(id) = workspace_id {
         id.to_string()
     } else {
         let cwd = std::env::current_dir().ok()?;
         generate_workspace_id(&cwd)
     };
-    read_port_file(&id)
+    let port = read_port_file(&id)?;
+    let cookie = read_cookie_file(&id)?;
+    Some((port, cookie))
 }
 
-/// Find any running workspace and return its port.
+/// Discover the REPL port for the current directory.
+///
+/// 1. If a workspace ID is given, use it directly.
+/// 2. Otherwise, generate from the current directory.
+#[allow(dead_code)] // Used by tests; main uses discover_port_and_cookie
+pub fn discover_port(workspace_id: Option<&str>) -> Option<u16> {
+    discover_port_and_cookie(workspace_id).map(|(port, _)| port)
+}
+
+/// Find any running workspace and return its port and cookie.
 ///
 /// Scans `~/.beamtalk/workspaces/` for directories with port files.
-pub fn discover_any_port() -> Option<u16> {
+pub fn discover_any_port_and_cookie() -> Option<(u16, String)> {
     let dir = workspaces_dir()?;
     let entries = std::fs::read_dir(dir).ok()?;
 
@@ -74,7 +97,11 @@ pub fn discover_any_port() -> Option<u16> {
             let port_file = entry.path().join("port");
             if let Ok(content) = std::fs::read_to_string(port_file) {
                 if let Ok(port) = content.trim().parse::<u16>() {
-                    return Some(port);
+                    let cookie = std::fs::read_to_string(entry.path().join("cookie"))
+                        .ok()
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())?;
+                    return Some((port, cookie));
                 }
             }
         }
@@ -196,6 +223,7 @@ mod tests {
         let dir = workspaces_dir().unwrap().join(&workspace_id);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("port"), "5555").unwrap();
+        fs::write(dir.join("cookie"), "testcookie").unwrap();
 
         let result = discover_port(Some(&workspace_id));
         assert_eq!(result, Some(5555));

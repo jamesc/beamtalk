@@ -278,6 +278,22 @@ fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
     }
 }
 
+/// Read the Erlang default cookie from ~/.erlang.cookie.
+/// Used for foreground mode where no workspace cookie exists.
+fn read_erlang_cookie() -> Option<String> {
+    let home = dirs::home_dir()?;
+    let cookie_path = home.join(".erlang.cookie");
+    let cookie = std::fs::read_to_string(cookie_path)
+        .ok()?
+        .trim()
+        .to_string();
+    if cookie.is_empty() {
+        None
+    } else {
+        Some(cookie)
+    }
+}
+
 /// Start the interactive REPL session.
 ///
 /// Connects to (or spawns) a workspace BEAM node, then enters the
@@ -313,7 +329,12 @@ pub fn run(
     let project_root = workspace::discovery::discover_project_root(&current_dir);
 
     // Choose startup mode: workspace (default) or foreground (debug)
-    let (beam_guard_opt, is_new_workspace, connect_port) = if foreground {
+    let (beam_guard_opt, is_new_workspace, connect_port, cookie): (
+        Option<BeamChildGuard>,
+        bool,
+        u16,
+        String,
+    ) = if foreground {
         // Foreground mode: start node directly (original behavior)
         println!("Starting BEAM node in foreground mode (--foreground)...");
         let mut child = start_beam_node(port, node_name.as_ref(), &project_root)?;
@@ -326,7 +347,10 @@ pub fn run(
             port
         };
 
-        (Some(BeamChildGuard { child }), true, actual_port)
+        // Foreground mode: use Erlang cookie, or "nocookie" for nodes without -setcookie
+        let fg_cookie = read_erlang_cookie().unwrap_or_else(|| "nocookie".to_string());
+
+        (Some(BeamChildGuard { child }), true, actual_port, fg_cookie)
     } else {
         // Workspace mode: start or connect to detached node
 
@@ -342,7 +366,11 @@ pub fn run(
         }
 
         // Auto-compile package if beamtalk.toml is present (BT-606)
-        let extra_code_paths = auto_compile_package(&project_root);
+        let mut extra_code_paths = auto_compile_package(&project_root);
+        // cowboy/cowlib/ranch are needed for the WebSocket transport (ADR 0020)
+        extra_code_paths.push(paths.cowboy_ebin.clone());
+        extra_code_paths.push(paths.cowlib_ebin.clone());
+        extra_code_paths.push(paths.ranch_ebin.clone());
 
         let (node_info, is_new, workspace_id) = workspace::get_or_start_workspace(
             &project_root,
@@ -389,13 +417,18 @@ pub fn run(
             println!("  Project:   {}", metadata.project_path.display());
         }
 
+        // Read workspace cookie for WebSocket authentication (ADR 0020)
+        let ws_cookie = workspace::read_workspace_cookie(&workspace_id)?
+            .trim()
+            .to_string();
+
         println!();
 
-        (None, is_new, actual_port) // No guard needed - node is detached
+        (None, is_new, actual_port, ws_cookie) // No guard needed - node is detached
     };
 
     // Connect to REPL backend
-    let mut client = connect_with_retries(connect_port)?;
+    let mut client = connect_with_retries(connect_port, &cookie)?;
 
     println!("Connected to REPL backend on port {connect_port}.");
 
@@ -425,7 +458,7 @@ pub fn run(
     let config = Config::builder()
         .completion_type(CompletionType::List)
         .build();
-    let helper = ReplHelper::new(connect_port);
+    let helper = ReplHelper::new(connect_port, &cookie);
     let mut rl: Editor<ReplHelper, FileHistory> = Editor::with_config(config).into_diagnostic()?;
     rl.set_helper(Some(helper));
 

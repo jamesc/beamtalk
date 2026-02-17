@@ -1,26 +1,26 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Async TCP client for the beamtalk REPL JSON protocol.
+//! Async WebSocket client for the beamtalk REPL JSON protocol (ADR 0020).
 //!
 //! **DDD Context:** Language Service / Interactive Development
 //!
 //! Connects to a running REPL server and sends/receives
-//! newline-delimited JSON messages over TCP.
+//! JSON messages over WebSocket with cookie authentication.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::TcpStream;
 use tokio::sync::Mutex;
+use tokio_tungstenite::tungstenite::Message;
 use tracing::instrument;
 
 /// Default timeout for REPL I/O operations.
 const REPL_IO_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Async TCP client for the beamtalk REPL protocol.
+/// Async WebSocket client for the beamtalk REPL protocol.
 #[derive(Debug)]
 pub struct ReplClient {
     inner: Mutex<ReplClientInner>,
@@ -28,30 +28,69 @@ pub struct ReplClient {
 
 #[derive(Debug)]
 struct ReplClientInner {
-    writer: tokio::io::WriteHalf<TcpStream>,
-    reader: BufReader<tokio::io::ReadHalf<TcpStream>>,
+    ws: tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
 }
 
 impl ReplClient {
-    /// Connect to a REPL server at the given port on localhost.
-    pub async fn connect(port: u16) -> Result<Self, String> {
-        let addr = format!("127.0.0.1:{port}");
-        let stream = TcpStream::connect(&addr)
+    /// Connect to a REPL server at the given port on localhost with cookie auth.
+    pub async fn connect(port: u16, cookie: &str) -> Result<Self, String> {
+        let url = format!("ws://127.0.0.1:{port}/ws");
+        let (mut ws, _response) = tokio_tungstenite::connect_async(&url)
             .await
-            .map_err(|e| format!("Failed to connect to REPL at {addr}: {e}"))?;
+            .map_err(|e| format!("Failed to connect to REPL at {url}: {e}"))?;
 
-        let (read_half, write_half) = tokio::io::split(stream);
-        let mut reader = BufReader::new(read_half);
+        // Read auth-required message (pre-auth, no session yet)
+        let auth_required = read_text_message_with_timeout(&mut ws, REPL_IO_TIMEOUT).await?;
+        let auth_required_json: serde_json::Value = serde_json::from_str(&auth_required)
+            .map_err(|e| format!("Failed to parse auth-required: {e}"))?;
+        match auth_required_json.get("op").and_then(|v| v.as_str()) {
+            Some("auth-required") => {}
+            _ => return Err(format!("Unexpected pre-auth message: {auth_required_json}")),
+        }
 
-        // BT-666: Consume the session-started welcome message
-        let mut welcome = String::new();
-        let _ = reader.read_line(&mut welcome).await;
+        // ADR 0020: Cookie handshake
+        let auth_msg = serde_json::json!({"type": "auth", "cookie": cookie});
+        let auth_str = serde_json::to_string(&auth_msg)
+            .map_err(|e| format!("Failed to serialize auth: {e}"))?;
+        ws.send(Message::Text(auth_str.into()))
+            .await
+            .map_err(|e| format!("Failed to send auth: {e}"))?;
+
+        // Read auth response
+        let auth_response = read_text_message_with_timeout(&mut ws, REPL_IO_TIMEOUT).await?;
+        let auth_json: serde_json::Value = serde_json::from_str(&auth_response)
+            .map_err(|e| format!("Failed to parse auth response: {e}"))?;
+        match auth_json.get("type").and_then(|t| t.as_str()) {
+            Some("auth_ok") => {}
+            Some("auth_error") => {
+                let msg = auth_json
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("Authentication failed");
+                return Err(format!("Workspace authentication failed: {msg}"));
+            }
+            _ => {
+                return Err(format!("Unexpected auth response: {auth_json}"));
+            }
+        }
+
+        // Read session-started message (sent after successful auth)
+        let session_started = read_text_message_with_timeout(&mut ws, REPL_IO_TIMEOUT).await?;
+        let session_started_json: serde_json::Value = serde_json::from_str(&session_started)
+            .map_err(|e| format!("Failed to parse session-started: {e}"))?;
+        match session_started_json.get("op").and_then(|v| v.as_str()) {
+            Some("session-started") => {}
+            _ => {
+                return Err(format!(
+                    "Unexpected post-auth message: {session_started_json}"
+                ));
+            }
+        }
 
         Ok(Self {
-            inner: Mutex::new(ReplClientInner {
-                writer: write_half,
-                reader,
-            }),
+            inner: Mutex::new(ReplClientInner { ws }),
         })
     }
 
@@ -63,35 +102,20 @@ impl ReplClient {
     pub async fn send(&self, request: &serde_json::Value) -> Result<ReplResponse, String> {
         let mut inner = self.inner.lock().await;
 
-        let mut request_str =
+        let request_str =
             serde_json::to_string(request).map_err(|e| format!("Failed to serialize: {e}"))?;
-        request_str.push('\n');
 
         let io_future = async {
             inner
-                .writer
-                .write_all(request_str.as_bytes())
+                .ws
+                .send(Message::Text(request_str.into()))
                 .await
                 .map_err(|e| format!("Failed to send: {e}"))?;
-            inner
-                .writer
-                .flush()
-                .await
-                .map_err(|e| format!("Failed to flush: {e}"))?;
 
-            let mut response_line = String::new();
-            inner
-                .reader
-                .read_line(&mut response_line)
-                .await
-                .map_err(|e| format!("Failed to read response: {e}"))?;
+            let response_text = read_text_message(&mut inner.ws).await?;
 
-            if response_line.is_empty() {
-                return Err("Connection closed by REPL server".to_string());
-            }
-
-            serde_json::from_str(&response_line)
-                .map_err(|e| format!("Failed to parse response: {e}\nRaw: {response_line}"))
+            serde_json::from_str(&response_text)
+                .map_err(|e| format!("Failed to parse response: {e}\nRaw: {response_text}"))
         };
 
         tokio::time::timeout(REPL_IO_TIMEOUT, io_future)
@@ -286,6 +310,39 @@ pub struct ModuleInfo {
     pub time_ago: String,
 }
 
+/// Read the next text message from a WebSocket stream.
+async fn read_text_message<S>(
+    ws: &mut tokio_tungstenite::WebSocketStream<S>,
+) -> Result<String, String>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    loop {
+        match ws.next().await {
+            Some(Ok(Message::Text(text))) => return Ok(text.to_string()),
+            Some(Ok(Message::Close(_))) => {
+                return Err("WebSocket connection closed by server".to_string());
+            }
+            Some(Ok(_)) => {} // Skip ping/pong/binary
+            Some(Err(e)) => return Err(format!("WebSocket read error: {e}")),
+            None => return Err("WebSocket stream ended".to_string()),
+        }
+    }
+}
+
+/// Read the next text message with an explicit timeout.
+async fn read_text_message_with_timeout<S>(
+    ws: &mut tokio_tungstenite::WebSocketStream<S>,
+    timeout: Duration,
+) -> Result<String, String>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    tokio::time::timeout(timeout, read_text_message(ws))
+        .await
+        .map_err(|_| format!("WebSocket read timed out after {}s", timeout.as_secs()))?
+}
+
 /// Generate a unique message ID.
 fn next_msg_id() -> String {
     static MSG_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -303,9 +360,10 @@ mod tests {
     use std::time::Duration;
 
     /// Managed REPL workspace for integration tests.
-    /// Holds the workspace ID so we can stop it on Drop.
+    /// Holds the workspace ID and cookie so we can authenticate and stop it on Drop.
     struct ReplWorkspace {
         port: u16,
+        cookie: String,
         workspace_id: Option<String>,
     }
 
@@ -381,6 +439,27 @@ mod tests {
                 .map(|rest| rest.split_whitespace().next().unwrap_or(rest).to_string())
         });
 
+        // Read cookie from workspace storage for WebSocket auth (ADR 0020)
+        let cookie = if let Some(ref ws_id) = workspace_id {
+            let home =
+                dirs::home_dir().ok_or_else(|| "Cannot determine home directory".to_string())?;
+            let cookie_path = home
+                .join(".beamtalk")
+                .join("workspaces")
+                .join(ws_id)
+                .join("cookie");
+            std::fs::read_to_string(&cookie_path)
+                .map(|s| s.trim().to_string())
+                .map_err(|e| format!("Failed to read cookie at {}: {e}", cookie_path.display()))?
+        } else {
+            // Fallback to default Erlang cookie
+            let home =
+                dirs::home_dir().ok_or_else(|| "Cannot determine home directory".to_string())?;
+            std::fs::read_to_string(home.join(".erlang.cookie"))
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default()
+        };
+
         // Wait for TCP readiness (15s default, configurable)
         let timeout_ms: u64 = std::env::var("BEAMTALK_REPL_STARTUP_TIMEOUT_MS")
             .ok()
@@ -391,7 +470,11 @@ mod tests {
         for _ in 0..max_attempts {
             if StdTcpStream::connect(format!("127.0.0.1:{port}")).is_ok() {
                 eprintln!("MCP tests: REPL workspace ready on port {port}");
-                return Ok(ReplWorkspace { port, workspace_id });
+                return Ok(ReplWorkspace {
+                    port,
+                    cookie,
+                    workspace_id,
+                });
             }
             std::thread::sleep(Duration::from_millis(300));
         }
@@ -400,16 +483,16 @@ mod tests {
         ))
     });
 
-    /// Get the port of the shared REPL, starting it if needed.
-    /// If `BEAMTALK_TEST_PORT` is set, uses that (external REPL) instead.
-    fn test_port() -> Result<u16, String> {
+    /// Get the port and cookie of the shared REPL, starting it if needed.
+    fn test_port_and_cookie() -> Result<(u16, String), String> {
         if let Ok(port) = std::env::var("BEAMTALK_TEST_PORT") {
             if let Ok(p) = port.parse() {
-                return Ok(p);
+                let cookie = std::env::var("BEAMTALK_TEST_COOKIE").unwrap_or_default();
+                return Ok((p, cookie));
             }
         }
         match REPL.as_ref() {
-            Ok(repl) => Ok(repl.port),
+            Ok(repl) => Ok((repl.port, repl.cookie.clone())),
             Err(e) => Err(e.clone()),
         }
     }
@@ -417,7 +500,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_eval_arithmetic() -> Result<(), Box<dyn std::error::Error>> {
-        let client = ReplClient::connect(test_port()?).await?;
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie).await?;
         let resp = client.eval("2 + 3").await.unwrap();
         assert!(!resp.is_error(), "eval should succeed");
         assert_eq!(resp.value_string(), "5");
@@ -427,7 +511,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_eval_string() -> Result<(), Box<dyn std::error::Error>> {
-        let client = ReplClient::connect(test_port()?).await?;
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie).await?;
         let resp = client.eval("\"hello\"").await.unwrap();
         assert!(!resp.is_error(), "eval should succeed");
         assert_eq!(resp.value_string(), "hello");
@@ -437,7 +522,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_eval_error() -> Result<(), Box<dyn std::error::Error>> {
-        let client = ReplClient::connect(test_port()?).await?;
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie).await?;
         let resp = client.eval("42 nonexistentMethod").await.unwrap();
         assert!(resp.is_error(), "should be an error");
         assert!(resp.error_message().is_some(), "should have error message");
@@ -447,7 +533,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_bindings() -> Result<(), Box<dyn std::error::Error>> {
-        let client = ReplClient::connect(test_port()?).await?;
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie).await?;
 
         // Set a binding
         let resp = client.eval("testVar := 99").await.unwrap();
@@ -467,7 +554,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_actors_list() -> Result<(), Box<dyn std::error::Error>> {
-        let client = ReplClient::connect(test_port()?).await?;
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie).await?;
         let resp = client.actors().await.unwrap();
         assert!(!resp.is_error());
         assert!(resp.actors.is_some(), "should return actors list");
@@ -477,7 +565,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_modules_list() -> Result<(), Box<dyn std::error::Error>> {
-        let client = ReplClient::connect(test_port()?).await?;
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie).await?;
         let resp = client.modules().await.unwrap();
         assert!(!resp.is_error());
         assert!(resp.modules.is_some(), "should return modules list");
@@ -487,7 +576,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_complete() -> Result<(), Box<dyn std::error::Error>> {
-        let client = ReplClient::connect(test_port()?).await?;
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie).await?;
         let resp = client.complete("Integer ").await.unwrap();
         assert!(!resp.is_error());
         assert!(resp.completions.is_some(), "should return completions list");
@@ -497,7 +587,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_load_file_and_spawn_actor() -> Result<(), Box<dyn std::error::Error>> {
-        let client = ReplClient::connect(test_port()?).await?;
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie).await?;
 
         // Load counter
         let resp = client.load_file("examples/counter.bt").await.unwrap();
@@ -540,7 +631,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_docs() -> Result<(), Box<dyn std::error::Error>> {
-        let client = ReplClient::connect(test_port()?).await?;
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie).await?;
         let resp = client.docs("Integer", None).await.unwrap();
         assert!(!resp.is_error());
         assert!(resp.docs.is_some(), "should return docs");
@@ -552,7 +644,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_value_string_formats_correctly() -> Result<(), Box<dyn std::error::Error>> {
-        let client = ReplClient::connect(test_port()?).await?;
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie).await?;
 
         // Integer value
         let resp = client.eval("42").await.unwrap();
@@ -572,7 +665,7 @@ mod tests {
     #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_connection_failure() {
         // Port 1 should never have a REPL running
-        let result = ReplClient::connect(1).await;
+        let result = ReplClient::connect(1, "dummy").await;
         assert!(result.is_err(), "connecting to port 1 should fail");
     }
 }
