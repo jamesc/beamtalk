@@ -881,7 +881,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    #[ignore = "integration test — requires Erlang/OTP runtime"]
+    #[ignore = "integration test — requires Erlang/OTP runtime; flaky (BT-660)"]
     #[serial(workspace_integration)]
     fn test_is_node_running_true_then_false_integration() {
         let tw = TestWorkspace::new("integ_running");
@@ -926,7 +926,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    #[ignore = "integration test — requires Erlang/OTP runtime"]
+    #[ignore = "integration test — requires Erlang/OTP runtime; flaky (BT-660)"]
     #[serial(workspace_integration)]
     fn test_get_or_start_workspace_lifecycle_integration() {
         let tw = TestWorkspace::new("integ_lifecycle");
