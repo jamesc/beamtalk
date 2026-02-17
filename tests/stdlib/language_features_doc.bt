@@ -94,12 +94,11 @@
 [:x :y | x + y] value: 3 value: 4
 // => 7
 
-// BT-665: Uncomment when stored block local variable fix lands
 // Block with local variables
-// myBlock := [:x | temp := x * 2. temp + 1]
-// // => _
-// myBlock value: 5
-// // => 11
+myBlock := [:x | temp := x * 2. temp + 1]
+// => _
+myBlock value: 5
+// => 11
 
 // ===========================================================================
 // Pattern Matching — Match Expression
@@ -162,10 +161,9 @@
 // Control Flow and Mutations
 // ===========================================================================
 
-// BT-665: Uncomment when local variable mutation fix lands
+// BT-665: Uncomment when local variable mutation in control flow fix lands
 // These examples are from the Control Flow section of the doc.
-// They require block analysis to distinguish new local definitions
-// from mutations of captured variables.
+// whileTrue:/do:/to:do: mutations still don't work in stdlib test mode.
 
 // Simple counter with whileTrue:
 // count := 0
