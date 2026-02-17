@@ -179,7 +179,7 @@ test-e2e: build-stdlib
 # Run workspace integration tests (requires Erlang/OTP runtime, ~10s)
 test-integration: build-stdlib
     @echo "🧪 Running workspace integration tests..."
-    cargo test --bin beamtalk -- --ignored --test-threads=1 --skip test_is_node_running_true_then_false --skip test_get_or_start_workspace_lifecycle
+    cargo test --bin beamtalk -- --ignored --test-threads=1
     @echo "✅ Integration tests complete"
 
 # Run MCP server integration tests (auto-starts REPL via test fixture, ~15s)
