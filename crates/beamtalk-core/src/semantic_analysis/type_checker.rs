@@ -164,6 +164,9 @@ impl TypeChecker {
                     self.check_typed_method_annotations(method, &class.name.name);
                 }
             }
+
+            // Check state default values match declared types
+            self.check_state_defaults(class, hierarchy);
         }
 
         // Check standalone method definitions (Tonel-style: `Counter >> increment => ...`)
@@ -227,10 +230,27 @@ impl TypeChecker {
             // Class references are the class itself (class-side receiver)
             Expression::ClassReference { name, .. } => InferredType::Known(name.name.clone()),
 
-            // Field access, primitives, errors — no type info available
-            Expression::FieldAccess { .. }
-            | Expression::Primitive { .. }
-            | Expression::Error { .. } => InferredType::Dynamic,
+            // Field access — infer type from declared state type for self.field
+            Expression::FieldAccess {
+                receiver, field, ..
+            } => {
+                let mut result = InferredType::Dynamic;
+                if let Expression::Identifier(recv_id) = receiver.as_ref() {
+                    if recv_id.name == "self" {
+                        if let Some(InferredType::Known(class_name)) = env.get("self") {
+                            if let Some(field_type) =
+                                hierarchy.state_field_type(&class_name, &field.name)
+                            {
+                                result = InferredType::Known(field_type);
+                            }
+                        }
+                    }
+                }
+                result
+            }
+
+            // Primitives and errors — no type info available
+            Expression::Primitive { .. } | Expression::Error { .. } => InferredType::Dynamic,
 
             // Message sends — the core of type checking
             Expression::MessageSend {
@@ -249,10 +269,27 @@ impl TypeChecker {
             ),
 
             // Assignments track the type of the value
-            Expression::Assignment { target, value, .. } => {
+            Expression::Assignment {
+                target,
+                value,
+                span,
+            } => {
                 let ty = self.infer_expr(value, hierarchy, env, in_abstract_method);
-                if let Expression::Identifier(ident) = target.as_ref() {
-                    env.set(ident.name.as_str(), ty.clone());
+                match target.as_ref() {
+                    Expression::Identifier(ident) => {
+                        env.set(ident.name.as_str(), ty.clone());
+                    }
+                    Expression::FieldAccess {
+                        receiver, field, ..
+                    } => {
+                        // Check self.field := value against declared state type
+                        if let Expression::Identifier(recv_id) = receiver.as_ref() {
+                            if recv_id.name == "self" {
+                                self.check_field_assignment(field, &ty, *span, hierarchy, env);
+                            }
+                        }
+                    }
+                    _ => {}
                 }
                 ty
             }
@@ -811,6 +848,110 @@ impl TypeChecker {
         }
     }
 
+    /// Check a field assignment `self.field := value` against the declared state type.
+    ///
+    /// If the field has a type annotation in the class hierarchy and the inferred
+    /// value type is known and incompatible, emits a warning.
+    fn check_field_assignment(
+        &mut self,
+        field: &crate::ast::Identifier,
+        value_ty: &InferredType,
+        span: Span,
+        hierarchy: &ClassHierarchy,
+        env: &TypeEnv,
+    ) {
+        let InferredType::Known(value_type) = value_ty else {
+            return; // Dynamic expressions never produce warnings
+        };
+        let Some(InferredType::Known(class_name)) = env.get("self") else {
+            return;
+        };
+        let Some(declared_type) = hierarchy.state_field_type(&class_name, &field.name) else {
+            return; // No type annotation on this field
+        };
+        if !Self::is_assignable_to(value_type, &declared_type, hierarchy) {
+            let mut diag = Diagnostic::warning(
+                format!(
+                    "Type mismatch: field `{}` declared as {declared_type}, got {value_type}",
+                    field.name
+                ),
+                span,
+            );
+            diag.hint = Some(format!("Expected {declared_type} but assigning {value_type}").into());
+            self.diagnostics.push(diag);
+        }
+    }
+
+    /// Check state default values match declared types at class definition time.
+    fn check_state_defaults(
+        &mut self,
+        class: &crate::ast::ClassDefinition,
+        hierarchy: &ClassHierarchy,
+    ) {
+        for decl in &class.state {
+            let Some(ref type_annotation) = decl.type_annotation else {
+                continue;
+            };
+            let Some(ref default_value) = decl.default_value else {
+                continue;
+            };
+            let declared_type = type_annotation.type_name();
+            let mut env = TypeEnv::new();
+            env.set("self", InferredType::Known(class.name.name.clone()));
+            let inferred = self.infer_expr(default_value, hierarchy, &mut env, false);
+            let InferredType::Known(value_type) = &inferred else {
+                continue; // Dynamic defaults are fine
+            };
+            if !Self::is_assignable_to(value_type, &declared_type, hierarchy) {
+                let mut diag = Diagnostic::warning(
+                    format!(
+                        "Type mismatch: state `{}` declared as {declared_type}, default is {value_type}",
+                        decl.name.name
+                    ),
+                    decl.span,
+                );
+                diag.hint = Some(
+                    format!(
+                        "Default value type {value_type} is not compatible with {declared_type}"
+                    )
+                    .into(),
+                );
+                self.diagnostics.push(diag);
+            }
+        }
+    }
+
+    /// Returns true if `value_type` is assignable to `declared_type`.
+    ///
+    /// A type is assignable if it is the same type or a subclass of the declared type.
+    /// For example, Integer is assignable to Number because Integer's superclass
+    /// chain includes Number.
+    ///
+    /// Returns true (permissive) for complex type annotations (unions, generics)
+    /// that are not yet supported — full union type support is Phase 3.
+    fn is_assignable_to(
+        value_type: &EcoString,
+        declared_type: &EcoString,
+        hierarchy: &ClassHierarchy,
+    ) -> bool {
+        if value_type == declared_type {
+            return true;
+        }
+        // Skip checking for complex type annotations (unions, generics, singletons)
+        // that contain non-class-name characters. These need Phase 3 union support.
+        if declared_type.contains('|')
+            || declared_type.contains('<')
+            || declared_type.starts_with('#')
+        {
+            return true;
+        }
+        // Check if value_type is a subclass of declared_type
+        hierarchy
+            .superclass_chain(value_type)
+            .iter()
+            .any(|ancestor| ancestor == declared_type)
+    }
+
     /// Emit a warning diagnostic for an unknown selector.
     fn emit_unknown_selector_warning(
         &mut self,
@@ -942,7 +1083,7 @@ mod tests {
     use super::*;
     use crate::ast::{
         Block, CascadeMessage, ClassDefinition, Identifier, KeywordPart, MethodDefinition,
-        MethodKind, Module, ParameterDefinition, TypeAnnotation,
+        MethodKind, Module, ParameterDefinition, StateDeclaration, TypeAnnotation,
     };
     use crate::source_analysis::Span;
 
@@ -2651,6 +2792,43 @@ mod tests {
         }
     }
 
+    // --- State field assignment type checking tests (BT-672) ---
+
+    fn field_access(field_name: &str) -> Expression {
+        Expression::FieldAccess {
+            receiver: Box::new(var("self")),
+            field: ident(field_name),
+            span: span(),
+        }
+    }
+
+    fn field_assign(field_name: &str, value: Expression) -> Expression {
+        Expression::Assignment {
+            target: Box::new(field_access(field_name)),
+            value: Box::new(value),
+            span: span(),
+        }
+    }
+
+    fn counter_class_with_typed_state(
+        methods: Vec<MethodDefinition>,
+        state: Vec<StateDeclaration>,
+    ) -> ClassDefinition {
+        ClassDefinition {
+            name: ident("Counter"),
+            superclass: Some(ident("Object")),
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state,
+            methods,
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: span(),
+        }
+    }
+
     #[test]
     fn test_empty_body_with_return_type_no_crash() {
         // Empty method body with return type annotation — should not crash
@@ -2706,6 +2884,59 @@ mod tests {
     }
 
     #[test]
+    fn test_field_assign_typed_mismatch_warns() {
+        // state: count: Integer = 0; self.count := "bad" → warning
+        let state = vec![StateDeclaration::with_type_and_default(
+            ident("count"),
+            TypeAnnotation::simple("Integer", span()),
+            int_lit(0),
+            span(),
+        )];
+        let method = make_method("badMethod", vec![field_assign("count", str_lit("bad"))]);
+        let class = counter_class_with_typed_state(vec![method], state);
+        let module = make_module_with_classes(vec![], vec![class]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("Type mismatch"))
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Expected 1 type mismatch warning, got: {:?}",
+            checker.diagnostics()
+        );
+        assert!(warnings[0].message.contains("count"));
+        assert!(warnings[0].message.contains("Integer"));
+        assert!(warnings[0].message.contains("String"));
+    }
+
+    #[test]
+    fn test_field_assign_typed_match_no_warn() {
+        // state: count: Integer = 0; self.count := 42 → no warning
+        let state = vec![StateDeclaration::with_type_and_default(
+            ident("count"),
+            TypeAnnotation::simple("Integer", span()),
+            int_lit(0),
+            span(),
+        )];
+        let method = make_method("goodMethod", vec![field_assign("count", int_lit(42))]);
+        let class = counter_class_with_typed_state(vec![method], state);
+        let module = make_module_with_classes(vec![], vec![class]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "No warnings expected, got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
     fn test_return_type_subtype_compatible() {
         // Method declares -> Number, body returns Integer (subtype) — no warning
         let class_def = ClassDefinition::with_modifiers(
@@ -2735,6 +2966,30 @@ mod tests {
         assert!(
             return_warnings.is_empty(),
             "Integer return should be compatible with Number declaration"
+        );
+    }
+
+    #[test]
+    fn test_field_assign_untyped_no_warn() {
+        // state: value = 0; self.value := "anything" → no warning
+        let state = vec![StateDeclaration::with_default(
+            ident("value"),
+            int_lit(0),
+            span(),
+        )];
+        let method = make_method(
+            "setAnything",
+            vec![field_assign("value", str_lit("anything"))],
+        );
+        let class = counter_class_with_typed_state(vec![method], state);
+        let module = make_module_with_classes(vec![], vec![class]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "Untyped fields should not produce warnings, got: {:?}",
+            checker.diagnostics()
         );
     }
 
@@ -2776,6 +3031,125 @@ mod tests {
         assert!(
             return_warnings.is_empty(),
             "early return of Integer should match declared Integer, not unreachable String"
+        );
+    }
+
+    #[test]
+    fn test_field_assign_subtype_no_warn() {
+        // Integer is assignable to Number (Integer's superclass chain includes Number)
+        let state = vec![StateDeclaration::with_type(
+            ident("value"),
+            TypeAnnotation::simple("Number", span()),
+            span(),
+        )];
+        let method = make_method("setNumber", vec![field_assign("value", int_lit(42))]);
+        let class = counter_class_with_typed_state(vec![method], state);
+        let module = make_module_with_classes(vec![], vec![class]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "Integer should be assignable to Number, got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn test_state_default_value_mismatch_warns() {
+        // state: count: Integer = "bad" → warning at class definition time
+        let state = vec![StateDeclaration::with_type_and_default(
+            ident("count"),
+            TypeAnnotation::simple("Integer", span()),
+            str_lit("bad"),
+            span(),
+        )];
+        let class = counter_class_with_typed_state(vec![], state);
+        let module = make_module_with_classes(vec![], vec![class]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("Type mismatch"))
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Expected 1 type mismatch for default value, got: {:?}",
+            checker.diagnostics()
+        );
+        assert!(warnings[0].message.contains("count"));
+    }
+
+    #[test]
+    fn test_state_default_value_match_no_warn() {
+        // state: count: Integer = 0 → no warning
+        let state = vec![StateDeclaration::with_type_and_default(
+            ident("count"),
+            TypeAnnotation::simple("Integer", span()),
+            int_lit(0),
+            span(),
+        )];
+        let class = counter_class_with_typed_state(vec![], state);
+        let module = make_module_with_classes(vec![], vec![class]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "Default value matching declared type should not warn, got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn test_dynamic_expression_no_warn() {
+        // Assigning a dynamic expression (unknown variable) to a typed field → no warning
+        let state = vec![StateDeclaration::with_type(
+            ident("count"),
+            TypeAnnotation::simple("Integer", span()),
+            span(),
+        )];
+        let method = make_method("setUnknown", vec![field_assign("count", var("unknownVar"))]);
+        let class = counter_class_with_typed_state(vec![method], state);
+        let module = make_module_with_classes(vec![], vec![class]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "Dynamic expressions should never produce warnings, got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn test_union_type_annotation_no_false_positive() {
+        // state: value: Integer | String = 42 → no warning (union types skip check)
+        let state = vec![StateDeclaration::with_type_and_default(
+            ident("value"),
+            TypeAnnotation::union(
+                vec![
+                    TypeAnnotation::simple("Integer", span()),
+                    TypeAnnotation::simple("String", span()),
+                ],
+                span(),
+            ),
+            int_lit(42),
+            span(),
+        )];
+        let method = make_method("setValue", vec![field_assign("value", str_lit("hello"))]);
+        let class = counter_class_with_typed_state(vec![method], state);
+        let module = make_module_with_classes(vec![], vec![class]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "Union type annotations should not produce false positives, got: {:?}",
+            checker.diagnostics()
         );
     }
 }
