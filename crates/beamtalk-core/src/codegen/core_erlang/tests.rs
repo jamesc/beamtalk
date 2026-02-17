@@ -3087,3 +3087,201 @@ fn test_as_type_erasure() {
         "asType: should generate only the receiver expression. Got: {output}"
     );
 }
+
+// BT-682: Direct Erlang call optimization tests
+
+#[test]
+fn test_erlang_interop_direct_call_keyword_single_arg() {
+    // `Erlang lists reverse: xs` → `call 'lists':'reverse'(Xs)`
+    let mut generator = CoreErlangGenerator::new("test");
+
+    // Inner: Erlang lists (ClassReference("Erlang") + Unary("lists"))
+    let inner_receiver = Expression::MessageSend {
+        receiver: Box::new(Expression::ClassReference {
+            name: Identifier::new("Erlang", Span::new(0, 6)),
+            span: Span::new(0, 6),
+        }),
+        selector: MessageSelector::Unary("lists".into()),
+        arguments: vec![],
+        span: Span::new(0, 12),
+    };
+    // Outer: (Erlang lists) reverse: xs
+    let selector = MessageSelector::Keyword(vec![KeywordPart::new("reverse:", Span::new(13, 21))]);
+    let arguments = vec![Expression::Identifier(Identifier::new(
+        "xs",
+        Span::new(22, 24),
+    ))];
+
+    let doc = generator
+        .generate_message_send(&inner_receiver, &selector, &arguments)
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    assert!(
+        output.contains("call 'lists':'reverse'("),
+        "Should emit direct call. Got: {output}"
+    );
+    assert!(
+        !output.contains("ErlangModule"),
+        "Should not create proxy map. Got: {output}"
+    );
+    assert!(
+        !output.contains("beamtalk_message_dispatch"),
+        "Should not use runtime dispatch. Got: {output}"
+    );
+}
+
+#[test]
+fn test_erlang_interop_direct_call_keyword_multi_arg() {
+    // `Erlang lists seq: 1 with: 10` → `call 'lists':'seq'(1, 10)`
+    let mut generator = CoreErlangGenerator::new("test");
+
+    let inner_receiver = Expression::MessageSend {
+        receiver: Box::new(Expression::ClassReference {
+            name: Identifier::new("Erlang", Span::new(0, 6)),
+            span: Span::new(0, 6),
+        }),
+        selector: MessageSelector::Unary("lists".into()),
+        arguments: vec![],
+        span: Span::new(0, 12),
+    };
+    let selector = MessageSelector::Keyword(vec![
+        KeywordPart::new("seq:", Span::new(13, 17)),
+        KeywordPart::new("with:", Span::new(20, 25)),
+    ]);
+    let arguments = vec![
+        Expression::Literal(Literal::Integer(1), Span::new(18, 19)),
+        Expression::Literal(Literal::Integer(10), Span::new(26, 28)),
+    ];
+
+    let doc = generator
+        .generate_message_send(&inner_receiver, &selector, &arguments)
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    assert!(
+        output.contains("call 'lists':'seq'(1, 10)"),
+        "Should emit direct multi-arg call. Got: {output}"
+    );
+    assert!(
+        !output.contains("ErlangModule"),
+        "Should not create proxy map. Got: {output}"
+    );
+}
+
+#[test]
+fn test_erlang_interop_direct_call_zero_arg() {
+    // `Erlang erlang node` → `call 'erlang':'node'()`
+    let mut generator = CoreErlangGenerator::new("test");
+
+    let inner_receiver = Expression::MessageSend {
+        receiver: Box::new(Expression::ClassReference {
+            name: Identifier::new("Erlang", Span::new(0, 6)),
+            span: Span::new(0, 6),
+        }),
+        selector: MessageSelector::Unary("erlang".into()),
+        arguments: vec![],
+        span: Span::new(0, 13),
+    };
+    // Outer: (Erlang erlang) node — unary selector, zero arguments
+    let selector = MessageSelector::Unary("node".into());
+    let arguments = vec![];
+
+    let doc = generator
+        .generate_message_send(&inner_receiver, &selector, &arguments)
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    assert_eq!(
+        output, "call 'erlang':'node'()",
+        "Should emit direct zero-arg call. Got: {output}"
+    );
+}
+
+#[test]
+fn test_erlang_interop_proxy_still_works_for_standalone() {
+    // `Erlang lists` (standalone, no chained call) → proxy map (unchanged)
+    let mut generator = CoreErlangGenerator::new("test");
+
+    let receiver = Expression::ClassReference {
+        name: Identifier::new("Erlang", Span::new(0, 6)),
+        span: Span::new(0, 6),
+    };
+    let selector = MessageSelector::Unary("lists".into());
+
+    let doc = generator
+        .generate_message_send(&receiver, &selector, &[])
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    assert!(
+        output.contains("ErlangModule"),
+        "Standalone Erlang lists should still create proxy. Got: {output}"
+    );
+    assert!(
+        output.contains("'module' => 'lists'"),
+        "Proxy should contain module name. Got: {output}"
+    );
+}
+
+#[test]
+fn test_erlang_interop_cached_proxy_uses_runtime_dispatch() {
+    // `proxy reverse: xs` where proxy is an Identifier (cached proxy)
+    // Should use runtime dispatch, not direct call
+    let mut generator = CoreErlangGenerator::new("test");
+
+    let receiver = Expression::Identifier(Identifier::new("proxy", Span::new(0, 5)));
+    let selector = MessageSelector::Keyword(vec![KeywordPart::new("reverse:", Span::new(6, 14))]);
+    let arguments = vec![Expression::Identifier(Identifier::new(
+        "xs",
+        Span::new(15, 17),
+    ))];
+
+    let doc = generator
+        .generate_message_send(&receiver, &selector, &arguments)
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    assert!(
+        output.contains("beamtalk_message_dispatch"),
+        "Cached proxy should use runtime dispatch. Got: {output}"
+    );
+    assert!(
+        !output.contains("call 'lists'"),
+        "Cached proxy should not use direct call. Got: {output}"
+    );
+}
+
+#[test]
+fn test_erlang_interop_protocol_selectors_not_optimized() {
+    // `(Erlang lists) printString` should NOT emit `call 'lists':'printString'()`
+    // It should fall through to runtime dispatch for the proxy's inherited method.
+    let mut generator = CoreErlangGenerator::new("test");
+
+    let inner_receiver = Expression::MessageSend {
+        receiver: Box::new(Expression::ClassReference {
+            name: Identifier::new("Erlang", Span::new(0, 6)),
+            span: Span::new(0, 6),
+        }),
+        selector: MessageSelector::Unary("lists".into()),
+        arguments: vec![],
+        span: Span::new(0, 12),
+    };
+    let selector = MessageSelector::Unary("printString".into());
+
+    let doc = generator
+        .generate_message_send(&inner_receiver, &selector, &[])
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    assert!(
+        !output.contains("call 'lists':'printString'"),
+        "printString should not be optimized as direct Erlang call. Got: {output}"
+    );
+    assert!(
+        output.contains("beamtalk_message_dispatch")
+            || output.contains("beamtalk_primitive")
+            || output.contains("ErlangModule"),
+        "printString should use runtime dispatch or proxy. Got: {output}"
+    );
+}

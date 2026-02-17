@@ -75,7 +75,7 @@ impl CoreErlangGenerator {
     /// 4. **Object messages** → `try_generate_object_message` → delegates to nil protocol, error signaling, object identity, object reflection
     /// 5. **Block messages** → `try_generate_block_message` (structural intrinsics)
     /// 6. **Spawn/Await** → `try_handle_spawn_await` (spawn, await intrinsics)
-    /// 7. **Erlang interop** → `try_handle_erlang_interop` (ADR 0028 inline proxy)
+    /// 7. **Erlang interop** → `try_handle_erlang_interop` (ADR 0028 direct call / proxy)
     /// 8. **Class references** → `try_handle_class_reference` (workspace bindings, class methods)
     /// 9. **Self-sends** → `try_handle_self_dispatch` (synchronous actor self-dispatch)
     /// 10. **Default** → Runtime dispatch (BT-223: actor vs primitive check)
@@ -163,7 +163,7 @@ impl CoreErlangGenerator {
             return Ok(doc);
         }
 
-        // BT-677 / ADR 0028: Erlang interop — inline proxy construction
+        // BT-677 / BT-682 / ADR 0028: Erlang interop — direct calls and proxy construction
         if let Some(doc) = self.try_handle_erlang_interop(receiver, selector, arguments)? {
             return Ok(doc);
         }
@@ -268,25 +268,32 @@ impl CoreErlangGenerator {
 
     /// BT-677 / ADR 0028: Handles `Erlang` class reference for BEAM interop.
     ///
-    /// When the receiver is `ClassReference("Erlang")` and the message is unary
-    /// (and not a standard class-protocol selector), generates an inline
-    /// `ErlangModule` proxy map construction:
-    /// ```erlang
-    /// ~{'$beamtalk_class' => 'ErlangModule', 'module' => 'lists'}~
-    /// ```
+    /// Two cases are handled:
+    ///
+    /// 1. **Direct call optimization (BT-682, ADR 0028 Phase 4):** When the
+    ///    receiver is `MessageSend(ClassReference("Erlang"), Unary(module))` and
+    ///    the outer selector is a function call, emits a direct BEAM call:
+    ///    ```erlang
+    ///    call 'lists':'reverse'(Xs)
+    ///    ```
+    ///    This eliminates proxy map allocation entirely.
+    ///
+    /// 2. **Proxy construction (BT-677):** When the receiver is
+    ///    `ClassReference("Erlang")` and the message is a unary module name,
+    ///    generates an inline `ErlangModule` proxy map:
+    ///    ```erlang
+    ///    ~{'$beamtalk_class' => 'ErlangModule', 'module' => 'lists'}~
+    ///    ```
+    ///    This fallback handles `proxy := Erlang lists` (standalone proxy).
     ///
     /// Standard class-protocol selectors (e.g. `class`, `new`, `superclass`)
     /// fall through to normal class dispatch so that `Erlang class` returns the
     /// metaclass rather than a proxy for module `'class'`.
-    ///
-    /// For keyword/binary messages on `Erlang`, falls through to runtime
-    /// dispatch via `beamtalk_primitive:send/3`.
-    #[allow(clippy::unused_self, clippy::unnecessary_wraps)] // uniform try_handle_* interface
     fn try_handle_erlang_interop(
         &mut self,
         receiver: &Expression,
         selector: &MessageSelector,
-        _arguments: &[Expression],
+        arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
         /// Class-protocol selectors that must NOT be intercepted as module
         /// lookups. These are handled by `beamtalk_object_class:class_send/3`.
@@ -303,6 +310,25 @@ impl CoreErlangGenerator {
             "printString",
         ];
 
+        // BT-682: Direct call optimization — `Erlang lists reverse: xs` →
+        // `call 'lists':'reverse'(Xs)` with no proxy map allocation.
+        // Only when the module name is a compile-time literal (ClassReference path).
+        if let Expression::MessageSend {
+            receiver: inner_receiver,
+            selector: MessageSelector::Unary(module_name),
+            ..
+        } = receiver
+        {
+            if let Expression::ClassReference { name, .. } = inner_receiver.as_ref() {
+                if name.name == "Erlang"
+                    && !CLASS_PROTOCOL_SELECTORS.contains(&module_name.as_str())
+                {
+                    return self.generate_direct_erlang_call(module_name, selector, arguments);
+                }
+            }
+        }
+
+        // BT-677: Proxy construction — `Erlang lists` → inline proxy map
         if let Expression::ClassReference { name, .. } = receiver {
             if name.name != "Erlang" {
                 return Ok(None);
@@ -311,7 +337,6 @@ impl CoreErlangGenerator {
                 MessageSelector::Unary(module_name)
                     if !CLASS_PROTOCOL_SELECTORS.contains(&module_name.as_str()) =>
                 {
-                    // `Erlang lists` → inline proxy map
                     let doc = docvec![Document::String(format!(
                         "~{{'$beamtalk_class' => 'ErlangModule', 'module' => '{module_name}'}}~"
                     ))];
@@ -325,6 +350,59 @@ impl CoreErlangGenerator {
             }
         } else {
             Ok(None)
+        }
+    }
+
+    /// BT-682: Generates a direct `call 'module':'function'(args)` for Erlang interop.
+    ///
+    /// Converts Beamtalk selectors to Erlang function names:
+    /// - Unary: `node` → `call 'erlang':'node'()` (zero-arg)
+    /// - Keyword single: `reverse:` → `call 'lists':'reverse'(Xs)` (first keyword = fn name)
+    /// - Keyword multi: `seq:with:` → `call 'lists':'seq'(1, 10)` (first keyword = fn name)
+    ///
+    /// Returns `None` for selectors that are Object/ProtoObject protocol methods
+    /// (e.g. `printString`, `asString`) — these must go through runtime dispatch
+    /// so the proxy's inherited protocol methods are called, not a non-existent
+    /// Erlang function.
+    fn generate_direct_erlang_call(
+        &mut self,
+        module_name: &str,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        /// Object protocol selectors that must NOT be optimized as direct Erlang
+        /// calls. These are inherited from ProtoObject/Object and handled by
+        /// runtime dispatch. Selectors already handled as compiler intrinsics
+        /// (class, isNil, notNil, hash, yourself, respondsTo:, error:) never
+        /// reach here — they're intercepted earlier in the dispatch chain.
+        const OBJECT_PROTOCOL_SELECTORS: &[&str] = &["printString", "asString", "inspect"];
+
+        match selector {
+            MessageSelector::Unary(function_name) => {
+                if OBJECT_PROTOCOL_SELECTORS.contains(&function_name.as_str()) {
+                    return Ok(None);
+                }
+                // Zero-arg Erlang call: `Erlang erlang node` → `call 'erlang':'node'()`
+                let doc = docvec![Document::String(format!(
+                    "call '{module_name}':'{function_name}'()"
+                ))];
+                Ok(Some(doc))
+            }
+            MessageSelector::Keyword(parts) => {
+                // Extract function name from first keyword (before the colon)
+                let function_name = parts[0].keyword.trim_end_matches(':');
+                let args_doc = self.capture_argument_list_doc(arguments)?;
+                let doc = docvec![
+                    Document::String(format!("call '{module_name}':'{function_name}'(")),
+                    args_doc,
+                    ")"
+                ];
+                Ok(Some(doc))
+            }
+            MessageSelector::Binary(_) => {
+                // Binary operators on Erlang module proxy — fall through to runtime
+                Ok(None)
+            }
         }
     }
 

@@ -1,8 +1,10 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Stdlib tests for Erlang interop (ADR 0028, BT-677)
-// Tests inline proxy construction and erlang:apply dispatch.
+// Stdlib tests for Erlang interop (ADR 0028, BT-677, BT-682)
+// Tests direct call optimization (BT-682) and cached proxy dispatch.
+// Direct calls: `Erlang lists reverse: xs` → `call 'lists':'reverse'(Xs)`
+// Cached proxy: `proxy := Erlang lists; proxy reverse: xs` → runtime dispatch
 
 // ===========================================================================
 // MODULE PROXY CONSTRUCTION
@@ -86,4 +88,28 @@ proxy isNil
 // => false
 
 proxy notNil
+// => true
+
+// ===========================================================================
+// BT-682: DIRECT CALL vs PROXY EQUIVALENCE
+// ===========================================================================
+// Verify optimized (direct call) and unoptimized (cached proxy) paths
+// produce identical results.
+
+// Single-arg keyword: direct vs proxy
+directResult := Erlang lists reverse: #(1, 2, 3)
+// => _
+proxyLists := Erlang lists
+// => _
+proxyResult := proxyLists reverse: #(1, 2, 3)
+// => _
+directResult =:= proxyResult
+// => true
+
+// Multi-arg keyword: direct vs proxy
+directSeq := Erlang lists seq: 1 with: 5
+// => _
+proxySeq := proxyLists seq: 1 with: 5
+// => _
+directSeq =:= proxySeq
 // => true
