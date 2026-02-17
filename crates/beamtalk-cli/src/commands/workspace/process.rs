@@ -14,6 +14,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 use miette::{IntoDiagnostic, Result, miette};
 use serde::Deserialize;
 
@@ -250,26 +253,27 @@ pub fn start_detached_node(
         &project_path,
     );
 
-    let _child = cmd.spawn().map_err(|e| {
+    let mut child = cmd.spawn().map_err(|e| {
         miette!("Failed to start detached BEAM node: {e}\nIs Erlang/OTP installed?")
     })?;
 
-    // KNOWN BUG (BT-662): On Windows, detached BEAM nodes don't reliably start when spawned
-    // via Rust's Command::spawn(). The spawn() call succeeds but the eval command never
-    // executes, despite the exact same erl command working when run manually from PowerShell.
-    // This affects workspace mode and MCP integration tests on Windows.
-    //
-    // Workarounds:
-    // 1. Use foreground REPL (`beamtalk repl --foreground`) - works perfectly
-    // 2. Run `erl` commands manually for workspace testing
-    //
-    // Root cause investigation needed:
-    // - Windows process creation flags
-    // - Stdio handle inheritance with -detached
-    // - Erlang's Windows detach implementation vs Rust's expectations
-    //
-    // With -detached, the spawn() returns immediately and the real BEAM node
-    // runs independently. We need to wait for it to start up.
+    // Windows-specific handling (BT-662 fix):
+    // On Windows, Erlang's -detached flag doesn't work when spawned from Rust Command::spawn().
+    // Instead, we omit -detached and use CREATE_NO_WINDOW + CREATE_NEW_PROCESS_GROUP flags
+    // to achieve similar behavior. We must use mem::forget() to prevent Rust from killing
+    // the process when the Child handle is dropped.
+    #[cfg(windows)]
+    {
+        std::mem::forget(child);
+    }
+    #[cfg(not(windows))]
+    {
+        // On Unix, -detached makes the BEAM process fully independent
+        let _ = child;
+    }
+
+    // With -detached (Unix) or CREATE_NEW_PROCESS_GROUP (Windows), the spawn() returns
+    // immediately and the real BEAM node runs independently. We need to wait for it to start up.
     // The compiler app (ADR 0022) adds ~500ms to startup, and under load
     // (e.g., parallel integration tests) it can take longer.
     // Retry PID discovery instead of a single fixed sleep.
@@ -413,6 +417,9 @@ fn build_detached_node_command(
     };
 
     let mut args = vec![
+        // On Windows, don't use -detached - it doesn't work reliably from Rust spawn
+        // Instead, we'll use CREATE_NO_WINDOW flag to prevent console popup
+        #[cfg(not(windows))]
         "-detached".to_string(),
         "-noshell".to_string(),
         node_flag.to_string(),
@@ -446,6 +453,16 @@ fn build_detached_node_command(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+
+    // On Windows, set process creation flags to properly detach
+    // CREATE_NO_WINDOW (0x08000000) prevents console window popup without -detached
+    // CREATE_NEW_PROCESS_GROUP (0x00000200) allows the process to run independently
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+        cmd.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
+    }
 
     // Set compiler port binary path (for runtime compilation support)
     // In installed mode, it lives next to the beamtalk binary in bin/.
