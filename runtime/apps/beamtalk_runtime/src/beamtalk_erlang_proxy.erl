@@ -74,20 +74,57 @@ dispatch(Selector, Args, Self) ->
                         error:badarg ->
                             Error0 = beamtalk_error:new(type_error, 'ErlangModule'),
                             Error1 = beamtalk_error:with_selector(Error0, Selector),
-                            Error2 = beamtalk_error:with_hint(Error1, <<"Bad argument in Erlang call">>),
+                            Error2 = beamtalk_error:with_hint(Error1,
+                                erlang_error_hint(Module, FunName, badarg)),
                             beamtalk_error:raise(Error2);
-                        error:Reason ->
+                        error:function_clause ->
+                            Error0 = beamtalk_error:new(arity_mismatch, 'ErlangModule'),
+                            Error1 = beamtalk_error:with_selector(Error0, Selector),
+                            Error2 = beamtalk_error:with_hint(Error1,
+                                erlang_error_hint(Module, FunName, function_clause)),
+                            beamtalk_error:raise(Error2);
+                        error:badarith ->
                             Error0 = beamtalk_error:new(type_error, 'ErlangModule'),
                             Error1 = beamtalk_error:with_selector(Error0, Selector),
+                            Error2 = beamtalk_error:with_hint(Error1,
+                                erlang_error_hint(Module, FunName, badarith)),
+                            beamtalk_error:raise(Error2);
+                        error:Reason ->
+                            Error0 = beamtalk_error:new(runtime_error, 'ErlangModule'),
+                            Error1 = beamtalk_error:with_selector(Error0, Selector),
+                            Error2 = beamtalk_error:with_hint(Error1,
+                                erlang_error_hint(Module, FunName, Reason)),
+                            beamtalk_error:raise(
+                                beamtalk_error:with_details(Error2,
+                                    #{erlang_error => Reason}));
+                        exit:Reason ->
+                            Error0 = beamtalk_error:new(erlang_exit, 'ErlangModule'),
+                            Error1 = beamtalk_error:with_selector(Error0, Selector),
                             ReasonBin = iolist_to_binary(io_lib:format("~p", [Reason])),
-                            Hint2 = iolist_to_binary([
-                                <<"Erlang error in ">>,
+                            Hint = iolist_to_binary([
+                                <<"Erlang process exit in ">>,
                                 atom_to_binary(Module, utf8), <<":">>,
                                 atom_to_binary(FunName, utf8), <<": ">>,
                                 ReasonBin
                             ]),
-                            Error2 = beamtalk_error:with_hint(Error1, Hint2),
-                            beamtalk_error:raise(Error2)
+                            Error2 = beamtalk_error:with_hint(Error1, Hint),
+                            beamtalk_error:raise(
+                                beamtalk_error:with_details(Error2,
+                                    #{erlang_exit_reason => Reason}));
+                        throw:Value ->
+                            Error0 = beamtalk_error:new(erlang_throw, 'ErlangModule'),
+                            Error1 = beamtalk_error:with_selector(Error0, Selector),
+                            ValueBin = iolist_to_binary(io_lib:format("~p", [Value])),
+                            Hint = iolist_to_binary([
+                                <<"Erlang throw in ">>,
+                                atom_to_binary(Module, utf8), <<":">>,
+                                atom_to_binary(FunName, utf8), <<": ">>,
+                                ValueBin
+                            ]),
+                            Error2 = beamtalk_error:with_hint(Error1, Hint),
+                            beamtalk_error:raise(
+                                beamtalk_error:with_details(Error2,
+                                    #{erlang_throw_value => Value}))
                     end;
                 {error, FunStr} ->
                     Error0 = beamtalk_error:new(does_not_understand, 'ErlangModule'),
@@ -106,6 +143,17 @@ dispatch(Selector, Args, Self) ->
 %%% ============================================================================
 %%% Internal helpers
 %%% ============================================================================
+
+%% @doc Format an actionable hint for an Erlang error.
+-spec erlang_error_hint(atom(), atom(), term()) -> binary().
+erlang_error_hint(Module, FunName, Reason) ->
+    ReasonBin = iolist_to_binary(io_lib:format("~p", [Reason])),
+    iolist_to_binary([
+        <<"Erlang error in ">>,
+        atom_to_binary(Module, utf8), <<":">>,
+        atom_to_binary(FunName, utf8), <<": ">>,
+        ReasonBin
+    ]).
 
 %% @doc Convert a Beamtalk selector atom to an Erlang function name.
 %%

@@ -1,0 +1,62 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for BEAM interop exception classes (BT-678)
+// Verifies BEAMError, ExitError, ThrowError class hierarchy
+// and exception catching behavior.
+
+// ===========================================================================
+// BEAM ERROR HIERARCHY — SIGNAL AND CATCH
+// ===========================================================================
+
+// ExitError can be signaled and caught
+[ExitError new signal: "process exited"] on: ExitError do: [:e | e message]
+// => process exited
+
+// ThrowError can be signaled and caught
+[ThrowError new signal: "value thrown"] on: ThrowError do: [:e | e message]
+// => value thrown
+
+// BEAMError can be signaled and caught
+[BEAMError new signal: "beam error"] on: BEAMError do: [:e | e message]
+// => beam error
+
+// ===========================================================================
+// BEAM ERROR HIERARCHY — SUPERCLASS CATCHING
+// ===========================================================================
+
+// BEAMError catches ExitError (superclass)
+[ExitError new signal: "exit"] on: BEAMError do: [:e | e class]
+// => ExitError
+
+// BEAMError catches ThrowError (superclass)
+[ThrowError new signal: "throw"] on: BEAMError do: [:e | e class]
+// => ThrowError
+
+// Error catches BEAMError (grandparent)
+[BEAMError new signal: "beam error"] on: Error do: [:e | e class]
+// => BEAMError
+
+// Error catches ExitError (ancestor)
+[ExitError new signal: "exit"] on: Error do: [:e | e class]
+// => ExitError
+
+// Exception catches all BEAM errors (root)
+[ThrowError new signal: "throw"] on: Exception do: [:e | e class]
+// => ThrowError
+
+// ===========================================================================
+// BEAM ERROR — KIND FIELD
+// ===========================================================================
+
+// BEAMError signal preserves kind as signal
+[BEAMError new signal: "test"] on: Exception do: [:e | e kind]
+// => signal
+
+// ExitError signal preserves kind as signal
+[ExitError new signal: "test"] on: Exception do: [:e | e kind]
+// => signal
+
+// ThrowError signal preserves kind as signal
+[ThrowError new signal: "test"] on: Exception do: [:e | e kind]
+// => signal

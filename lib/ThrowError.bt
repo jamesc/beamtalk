@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ThrowError — BEAM non-local return.
+///
+/// Raised when an Erlang function throws via `throw(Value)`.
+/// The original thrown value is available in the error details.
+///
+/// See: ADR 0028 §1 (Exception mapping)
+///
+/// ## Examples
+/// ```beamtalk
+/// [Erlang erlang throw: #oops] on: ThrowError do: [:e | e message]
+/// ```
+BEAMError subclass: ThrowError
+  /// Human-readable description of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ThrowError describe   // => "a ThrowError"
+  /// ```
+  describe -> String => "a ThrowError"
