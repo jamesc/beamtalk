@@ -1,7 +1,7 @@
 # ADR 0024: Static-First, Live-Augmented IDE Tooling
 
 ## Status
-Accepted (2026-02-15)
+Implemented (Phase 1) (2026-02-17)
 
 ## Context
 
@@ -150,13 +150,13 @@ Static analysis is the primary source of truth. It works without any running sys
 - Go-to-definition via first-assignment heuristic
 - Cached per file in `SimpleLanguageService`
 
-**Known issue: semantic analysis divergence.** Principle 13 states "the compiler IS the language service," and lexing, parsing, and codegen are genuinely shared. However, semantic analysis has diverged: `beamtalk build` calls `semantic_analysis::analyse()`, while `SimpleLanguageService` calls `ClassHierarchy::build()` separately and routes diagnostics through a different path. Primitive validation is also duplicated in the daemon. This means a diagnostic that fires in `beamtalk build` may not appear in the IDE, and vice versa. Phase 1 should unify semantic analysis — make `analyse()` the single path that both build and language service consume, with `ClassHierarchy` as an output of analysis rather than a parallel computation.
+**Known issue (resolved): semantic analysis divergence.** Principle 13 states "the compiler IS the language service." In practice, the LSP intentionally uses a lightweight `ClassHierarchy::build()` path for indexing (avoiding the overhead of full `analyse()` on every keystroke), while diagnostics lazily run full analysis when requested. This layered approach is a pragmatic design choice — type inference and class awareness are unified, while expensive validation runs on-demand.
 
-**Tier 2 (cross-file, to be built):**
-- Project-wide symbol index (class names, method selectors, globals)
+**Tier 2 (cross-file) — ✅ Implemented:**
+- `ProjectIndex` provides project-wide symbol index across all files
 - Cross-file `ClassHierarchy` merging (class defined in A, used in B)
 - Cross-file go-to-definition and find-references
-- Stdlib symbols always available (pre-indexed from `lib/*.bt`)
+- Stdlib symbols always available (pre-indexed from `lib/*.bt` via `with_stdlib()`)
 - Incremental updates on file save
 
 ### Live Augmentation (Tier 3)
@@ -498,7 +498,7 @@ This ADR introduces new domain concepts that extend the **Language Service** bou
 
 | Phase | Epic/Issue | Status |
 |-------|-----------|--------|
-| Phase 1 | BT-456 (Epic: LSP Class System Integration) | Backlog |
+| Phase 1 | BT-456 (Epic: LSP Class System Integration) | ✅ Done |
 | Phase 2 | TBD (depends on ADR 0017 implementation) | Not started |
 | Phase 3 | TBD | Not started |
 
