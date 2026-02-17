@@ -263,7 +263,16 @@ impl BeamCompiler {
             .wrap_err_with(|| format!("Failed to create output directory '{}'", self.output_dir))?;
 
         // Build -pa arguments: only compiler ebin needed (contains beamtalk_build_worker)
-        let pa_args = vec!["-pa".to_string(), paths.compiler_ebin.display().to_string()];
+        #[cfg(windows)]
+        let compiler_path = paths
+            .compiler_ebin
+            .to_str()
+            .unwrap_or("")
+            .replace('\\', "/");
+        #[cfg(not(windows))]
+        let compiler_path = paths.compiler_ebin.display().to_string();
+
+        let pa_args = vec!["-pa".to_string(), compiler_path];
 
         // Start BEAM node with beamtalk_build_worker
         // -mode minimal: only loads kernel+stdlib, skips scanning other -pa dirs at boot

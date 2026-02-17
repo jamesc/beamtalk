@@ -190,6 +190,11 @@ pub fn start_detached_node(
     let project_path_str = project_path
         .to_str()
         .ok_or_else(|| miette!("Project path contains invalid UTF-8: {:?}", project_path))?;
+
+    // On Windows, escape backslashes in the project path for Erlang string syntax (BT-661)
+    #[cfg(windows)]
+    let project_path_str = project_path_str.replace('\\', "\\\\");
+
     let eval_cmd = format!(
         "application:set_env(beamtalk_runtime, workspace_id, <<\"{workspace_id}\">>), \
          application:set_env(beamtalk_runtime, project_path, <<\"{project_path_str}\">>), \
@@ -287,6 +292,21 @@ pub fn start_detached_node(
     Ok(node_info)
 }
 
+/// Convert a Windows path to Unix-style forward slashes for Erlang.
+///
+/// Erlang on Windows expects forward slashes in `-pa` arguments, not backslashes.
+/// See BT-661 for details on this Windows-specific issue.
+fn path_to_erlang_arg(path: &Path) -> String {
+    #[cfg(windows)]
+    {
+        path.to_str().unwrap_or("").replace('\\', "/")
+    }
+    #[cfg(not(windows))]
+    {
+        path.to_str().unwrap_or("").to_string()
+    }
+}
+
 /// Build a `Command` for starting a detached BEAM workspace node.
 ///
 /// Extracted from `start_detached_node` so the command configuration
@@ -318,21 +338,21 @@ fn build_detached_node_command(
         "-setcookie".to_string(),
         cookie.to_string(),
         "-pa".to_string(),
-        runtime_beam_dir.to_str().unwrap_or("").to_string(),
+        path_to_erlang_arg(runtime_beam_dir),
         "-pa".to_string(),
-        repl_beam_dir.to_str().unwrap_or("").to_string(),
+        path_to_erlang_arg(repl_beam_dir),
         "-pa".to_string(),
-        jsx_beam_dir.to_str().unwrap_or("").to_string(),
+        path_to_erlang_arg(jsx_beam_dir),
         "-pa".to_string(),
-        compiler_beam_dir.to_str().unwrap_or("").to_string(),
+        path_to_erlang_arg(compiler_beam_dir),
         "-pa".to_string(),
-        stdlib_beam_dir.to_str().unwrap_or("").to_string(),
+        path_to_erlang_arg(stdlib_beam_dir),
     ];
 
     // Add extra code paths (e.g. package ebin from auto-compile)
     for path in extra_code_paths {
         args.push("-pa".to_string());
-        args.push(path.to_str().unwrap_or("").to_string());
+        args.push(path_to_erlang_arg(path));
     }
 
     args.push("-eval".to_string());

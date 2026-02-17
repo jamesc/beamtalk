@@ -150,6 +150,9 @@ fn escape_erlang_atom(s: &str) -> String {
 ///
 /// Returns alternating `["-pa", "<path>", "-pa", "<path>", ...]`.
 /// Uses `OsString` so non-UTF8 filesystem paths are handled without panicking.
+///
+/// On Windows, converts backslashes to forward slashes since Erlang expects
+/// Unix-style paths in `-pa` arguments (see BT-661).
 pub fn beam_pa_args(paths: &BeamPaths) -> Vec<OsString> {
     let dirs = [
         &paths.runtime_ebin,
@@ -161,7 +164,16 @@ pub fn beam_pa_args(paths: &BeamPaths) -> Vec<OsString> {
     let mut args = Vec::with_capacity(dirs.len() * 2);
     for dir in dirs {
         args.push(OsString::from("-pa"));
-        args.push(dir.as_os_str().to_os_string());
+        #[cfg(windows)]
+        {
+            // Convert Windows backslashes to forward slashes for Erlang
+            let path_str = dir.to_str().unwrap_or("").replace('\\', "/");
+            args.push(OsString::from(path_str));
+        }
+        #[cfg(not(windows))]
+        {
+            args.push(dir.as_os_str().to_os_string());
+        }
     }
     args
 }
