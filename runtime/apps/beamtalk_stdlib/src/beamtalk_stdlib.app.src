@@ -13,6 +13,8 @@
         {'bt@stdlib@collection', 'Collection', 'Object'},
         {'bt@stdlib@compiled_method', 'CompiledMethod', 'Object'},
         {'bt@stdlib@dictionary', 'Dictionary', 'Collection'},
+        {'bt@stdlib@erlang', 'Erlang', 'ProtoObject'},
+        {'bt@stdlib@erlang_module', 'ErlangModule', 'ProtoObject'},
         {'bt@stdlib@error', 'Error', 'Exception'},
         {'bt@stdlib@exception', 'Exception', 'Object'},
         {'bt@stdlib@false', 'False', 'Boolean'},

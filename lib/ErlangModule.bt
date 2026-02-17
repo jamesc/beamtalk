@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ErlangModule — Proxy for calling functions on a specific Erlang module.
+///
+/// ErlangModule instances are value types (tagged maps) created by the
+/// `Erlang` class. They forward Beamtalk messages as `erlang:apply/3`
+/// calls to the proxied module.
+///
+/// ## Examples
+/// ```beamtalk
+/// proxy := Erlang lists
+/// proxy reverse: #(3, 2, 1)           // => [1, 2, 3]
+/// proxy class                          // => ErlangModule
+/// ```
+///
+/// ## Selector Mapping
+/// - `reverse: xs`        → `lists:reverse(Xs)`       (keyword → function name)
+/// - `seq: 1 with: 10`    → `lists:seq(1, 10)`        (first keyword = function)
+/// - `node`               → `erlang:node()`            (unary → zero-arg call)
+///
+/// See ADR 0028 §1 for full mapping rules.
+sealed ProtoObject subclass: ErlangModule
+  doesNotUnderstand: selector args: arguments => @intrinsic erlangApply

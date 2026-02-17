@@ -407,6 +407,8 @@ impl CoreErlangGenerator {
                 | "Block"
                 | "Symbol"
                 | "CompiledMethod"
+                | "Erlang"
+                | "ErlangModule"
         )
     }
 
