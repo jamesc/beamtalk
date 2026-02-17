@@ -214,6 +214,12 @@ all_children_alive_test() ->
         {ok, Pid} -> {Pid, true};
         {error, {already_started, Pid}} -> {Pid, false}
     end,
+    
+    %% If supervisor was already running, give children time to stabilize
+    case WeStarted of
+        false -> timer:sleep(100);
+        true -> ok
+    end,
 
     try
         %% Get all children
