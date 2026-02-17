@@ -289,20 +289,27 @@ self.total := self.total * factor
 
 **Note:** `self.field` compiles to direct map access, not a message send. For external access to another actor's state, use message sends.
 
-**Current Limitation:** Field assignments (`self.field := value`) must be used as **statements**, not as sub-expressions. The following patterns are not yet supported:
+**Parenthesized assignment:** Field assignments can be used as expressions when wrapped in parentheses — `(self.x := 5)` returns the assigned value:
 
 ```
-// NOT SUPPORTED: field assignment as expression value
-^(self.x := 5) + 1
+// Assignment as expression (returns 6)
+(self.x := 5) + 1
 
-// NOT SUPPORTED: field assignment inside nested blocks
-nestedBlock := [:m | self.x := m]
-nestedBlock value: 10
-
-// SUPPORTED: field assignments as sequential statements
+// Field assignments as sequential statements
 self.x := 5.
 self.y := self.x + 1.
 ^self.y
+```
+
+**Limitation:** Field assignments in stored blocks (non-control-flow) are not supported:
+
+```
+// NOT SUPPORTED: field assignment inside stored blocks
+nestedBlock := [:m | self.x := m]
+nestedBlock value: 10
+
+// SUPPORTED: field mutation in control flow blocks
+true ifTrue: [self.x := 5]
 ```
 
 ### Blocks (Closures)
