@@ -884,6 +884,7 @@ fn extract_command_arg<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
     use process::DEFAULT_REPL_PORT;
     use serial_test::serial;
     use std::sync::atomic::Ordering;
@@ -1042,13 +1043,18 @@ mod tests {
         assert!(err_msg.contains("does not contain a valid runtime"));
     }
 
-    #[cfg(unix)]
     #[test]
     fn beam_child_guard_kills_process_on_drop() {
-        use std::process::Command;
+        // Spawn a long-running process (cross-platform sleep using a simple program)
+        // We'll use a BEAM process since that's what we actually manage
+        #[cfg(windows)]
+        let child = std::process::Command::new("timeout")
+            .args(["/t", "60", "/nobreak"])
+            .spawn()
+            .expect("Failed to spawn timeout process");
 
-        // Spawn a long-running process (sleep for 60 seconds)
-        let child = Command::new("sleep")
+        #[cfg(not(windows))]
+        let child = std::process::Command::new("sleep")
             .arg("60")
             .spawn()
             .expect("Failed to spawn sleep process");
@@ -1064,16 +1070,16 @@ mod tests {
         // Give it a moment to clean up
         std::thread::sleep(std::time::Duration::from_millis(100));
 
-        // Verify the process is no longer running
-        // On Unix, kill -0 returns success if process exists, failure if it doesn't
-        let result = Command::new("kill")
-            .args(["-0", &pid.to_string()])
-            .output()
-            .expect("Failed to run kill -0");
-        // kill -0 returns exit code 0 if process exists, non-zero if it doesn't
+        // Verify the process is no longer running using sysinfo
+        let mut system = System::new();
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
+            true,
+            ProcessRefreshKind::new(),
+        );
         assert!(
-            !result.status.success(),
-            "Process should have been killed (kill -0 should fail)"
+            system.process(Pid::from_u32(pid)).is_none(),
+            "Process should have been killed"
         );
     }
 

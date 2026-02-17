@@ -139,10 +139,10 @@ pub fn build_eval_cmd_with_node(port: u16, node_name: &str) -> String {
 ///
 /// Removes the default logger handler to prevent crashes when stdout/stderr
 /// are piped (BT-686). This means log messages during application startup
-/// (before the file logger is added in beamtalk_workspace_sup:init/1) will
+/// (before the file logger is added in `beamtalk_workspace_sup:init/1`) will
 /// be discarded. This is acceptable because:
 /// 1. Application startup errors cause the entire VM to crash anyway (visible via stderr)
-/// 2. The file logger is set up very early in workspace_sup:init/1
+/// 2. The file logger is set up very early in `workspace_sup:init/1`
 /// 3. The alternative (keeping default handler) crashes the logger on pipe close
 ///
 /// Callers append their own shutdown logic (e.g. `receive stop -> ok end`

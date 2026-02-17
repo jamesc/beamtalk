@@ -66,11 +66,9 @@ pub use storage::{
 #[cfg(test)]
 mod tests {
     use super::lifecycle::{WorkspaceStatus, find_workspace_by_project_path, resolve_workspace_id};
+    use super::process::{force_kill_process, start_detached_node, wait_for_workspace_exit};
     #[cfg(unix)]
-    use super::process::{
-        force_kill_process, start_detached_node, wait_for_epmd_deregistration,
-        wait_for_workspace_exit,
-    };
+    use super::process::wait_for_epmd_deregistration;
     #[cfg(target_os = "linux")]
     use super::storage::read_proc_start_time;
     use super::storage::{
@@ -79,10 +77,10 @@ mod tests {
         validate_workspace_name, workspace_dir, workspaces_base_dir,
     };
     use super::*;
-    #[cfg(unix)]
     use serial_test::serial;
     use std::fs;
     use std::path::{Path, PathBuf};
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
     #[cfg(unix)]
     use std::process::Command;
 
@@ -787,15 +785,12 @@ mod tests {
     //
     // These tests spawn real BEAM nodes and are `#[ignore]` by default.
     // Run them with: `just test-integration` or `cargo test -- --ignored`
-    // Unix-only: uses `ps` for PID verification in some tests.
 
     /// Guard that kills a BEAM node by PID when dropped, preventing orphans.
-    #[cfg(unix)]
     struct NodeGuard {
         pid: u32,
     }
 
-    #[cfg(unix)]
     impl Drop for NodeGuard {
         fn drop(&mut self) {
             let _ = force_kill_process(self.pid);
@@ -803,7 +798,6 @@ mod tests {
     }
 
     /// Locate BEAM directories needed to start a workspace node.
-    #[cfg(unix)]
     fn beam_dirs_for_tests() -> (PathBuf, PathBuf, PathBuf, PathBuf, PathBuf, Vec<PathBuf>) {
         let runtime_dir = beamtalk_cli::repl_startup::find_runtime_dir()
             .expect("Cannot find runtime dir — run from repo root or set BEAMTALK_RUNTIME_DIR");
@@ -825,7 +819,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     #[ignore = "integration test — requires Erlang/OTP runtime"]
     #[serial(workspace_integration)]
     fn test_start_detached_node_integration() {
@@ -870,22 +863,31 @@ mod tests {
             "is_node_running should return true for live node"
         );
 
-        // Verify PID corresponds to a real BEAM process
-        let ps_output = Command::new("ps")
-            .args(["-p", &node_info.pid.to_string(), "-o", "comm="])
-            .output()
-            .expect("ps should succeed");
-        let comm = String::from_utf8_lossy(&ps_output.stdout);
+        // Verify PID corresponds to a real BEAM process using sysinfo
+        let mut system = System::new();
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[Pid::from_u32(node_info.pid)]),
+            true,
+            ProcessRefreshKind::new().with_cmd(UpdateKind::Always),
+        );
+        let process = system
+            .process(Pid::from_u32(node_info.pid))
+            .expect("PID should correspond to a running process");
+        let cmd_str = process
+            .cmd()
+            .iter()
+            .map(|s| s.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join(" ");
         assert!(
-            comm.contains("beam") || comm.contains("erl"),
-            "PID {} should be a BEAM process, got: {}",
+            cmd_str.contains("beam") || cmd_str.contains("erl"),
+            "PID {} should be a BEAM process, got: {:?}",
             node_info.pid,
-            comm.trim()
+            process.name()
         );
     }
 
     #[test]
-    #[cfg(unix)]
     #[ignore = "integration test — requires Erlang/OTP runtime"]
     #[serial(workspace_integration)]
     fn test_is_node_running_true_then_false_integration() {
@@ -915,10 +917,16 @@ mod tests {
             "is_node_running should be true while node is alive"
         );
 
-        // Kill the node (use SIGKILL since detached BEAM nodes don't exit on SIGTERM)
-        let _ = Command::new("kill")
-            .args(["-9", &node_info.pid.to_string()])
-            .status();
+        // Kill the node using sysinfo (cross-platform)
+        let mut system = System::new();
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[Pid::from_u32(node_info.pid)]),
+            true,
+            ProcessRefreshKind::new(),
+        );
+        if let Some(process) = system.process(Pid::from_u32(node_info.pid)) {
+            process.kill();
+        }
         // Wait for process to exit (TCP probe will fail once process is dead)
         let _ = wait_for_workspace_exit(node_info.port, 5);
 
@@ -1062,7 +1070,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     #[ignore = "integration test — requires Erlang/OTP runtime"]
     #[serial(workspace_integration)]
     fn test_list_workspaces_stale_cleanup_integration() {
@@ -1085,10 +1092,16 @@ mod tests {
         )
         .expect("start_detached_node should succeed");
 
-        // Kill the node without cleanup (simulating crash)
-        let _ = Command::new("kill")
-            .args(["-9", &node_info.pid.to_string()])
-            .status();
+        // Kill the node without cleanup (simulating crash) using sysinfo
+        let mut system = System::new();
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[Pid::from_u32(node_info.pid)]),
+            true,
+            ProcessRefreshKind::new(),
+        );
+        if let Some(process) = system.process(Pid::from_u32(node_info.pid)) {
+            process.kill();
+        }
         let _ = wait_for_workspace_exit(node_info.port, 5);
 
         // list_workspaces should detect stale node.info and report Stopped
