@@ -268,11 +268,16 @@ impl CoreErlangGenerator {
 
     /// BT-677 / ADR 0028: Handles `Erlang` class reference for BEAM interop.
     ///
-    /// When the receiver is `ClassReference("Erlang")` and the message is unary,
-    /// generates an inline `ErlangModule` proxy map construction:
+    /// When the receiver is `ClassReference("Erlang")` and the message is unary
+    /// (and not a standard class-protocol selector), generates an inline
+    /// `ErlangModule` proxy map construction:
     /// ```erlang
     /// ~{'$beamtalk_class' => 'ErlangModule', 'module' => 'lists'}~
     /// ```
+    ///
+    /// Standard class-protocol selectors (e.g. `class`, `new`, `superclass`)
+    /// fall through to normal class dispatch so that `Erlang class` returns the
+    /// metaclass rather than a proxy for module `'class'`.
     ///
     /// For keyword/binary messages on `Erlang`, falls through to runtime
     /// dispatch via `beamtalk_primitive:send/3`.
@@ -283,12 +288,29 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         _arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
+        /// Class-protocol selectors that must NOT be intercepted as module
+        /// lookups. These are handled by `beamtalk_object_class:class_send/3`.
+        const CLASS_PROTOCOL_SELECTORS: &[&str] = &[
+            "new",
+            "spawn",
+            "class",
+            "methods",
+            "superclass",
+            "subclasses",
+            "allSubclasses",
+            "class_name",
+            "module_name",
+            "printString",
+        ];
+
         if let Expression::ClassReference { name, .. } = receiver {
             if name.name != "Erlang" {
                 return Ok(None);
             }
             match selector {
-                MessageSelector::Unary(module_name) => {
+                MessageSelector::Unary(module_name)
+                    if !CLASS_PROTOCOL_SELECTORS.contains(&module_name.as_str()) =>
+                {
                     // `Erlang lists` → inline proxy map
                     let doc = docvec![Document::String(format!(
                         "~{{'$beamtalk_class' => 'ErlangModule', 'module' => '{module_name}'}}~"
@@ -296,9 +318,8 @@ impl CoreErlangGenerator {
                     Ok(Some(doc))
                 }
                 _ => {
-                    // Keyword/binary on Erlang class itself falls through to
-                    // runtime dispatch via beamtalk_primitive:send/3, which
-                    // handles `erlang_class_dispatch` for the Erlang tagged map.
+                    // Keyword/binary on Erlang class itself, or a class-protocol
+                    // selector, falls through to normal class dispatch.
                     Ok(None)
                 }
             }
