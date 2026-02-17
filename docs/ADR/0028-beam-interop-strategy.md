@@ -453,6 +453,7 @@ Erlang call: "lists" function: "reverse" args: #(#(1, 2, 3))
 - **`Elixir` global** — same proxy pattern, maps `Elixir enum` → `'Elixir.Enum'`
 - **`Gleam` global** — maps `Gleam list` → `gleam@list`
 - **Type annotations** — optional protocol declarations for Erlang module proxies (leveraging ADR 0025)
+- **Erlang introspection** — `module_info(exports)` can validate function existence and arity at dispatch time (always available). With `+debug_info`, `beam_lib:chunks/2` can extract parameter names from the abstract code AST, enabling meaningful keyword names (e.g., `seq: 1 to: 10 step: 2` validated against actual parameter names) and IDE autocomplete for Erlang functions
 - **Hex.pm integration** — separate ADR (ADR 0026 scope)
 
 ## Migration Path
