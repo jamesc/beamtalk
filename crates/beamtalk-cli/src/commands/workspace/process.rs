@@ -321,7 +321,13 @@ fn wait_for_tcp_ready(port: u16, pid: u32) -> Result<()> {
         if let Ok(stream) =
             TcpStream::connect_timeout(&addr, Duration::from_millis(READINESS_CONNECT_TIMEOUT_MS))
         {
-            let _ = stream.set_read_timeout(Some(Duration::from_millis(READINESS_READ_TIMEOUT_MS)));
+            if stream
+                .set_read_timeout(Some(Duration::from_millis(READINESS_READ_TIMEOUT_MS)))
+                .is_err()
+            {
+                std::thread::sleep(Duration::from_millis(READINESS_PROBE_DELAY_MS));
+                continue;
+            }
             if let Ok(mut writer) = stream.try_clone() {
                 let mut reader = BufReader::new(stream);
                 if writer.write_all(b"{\"op\":\"health\"}\n").is_ok() && writer.flush().is_ok() {
