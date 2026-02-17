@@ -128,6 +128,24 @@ pub fn build_eval_cmd_with_node(port: u16, node_name: &str, bind_addr: Option<Ip
     )
 }
 
+/// Format an optional IPv4 address as an Erlang tuple string.
+///
+/// Used in eval commands passed to the BEAM node. Returns a string like
+/// `{192,168,1,5}` for `Some(Ipv4Addr::new(192, 168, 1, 5))`, or
+/// `{127,0,0,1}` for `None`.
+pub fn format_bind_addr_erl(bind_addr: Option<Ipv4Addr>) -> String {
+    match bind_addr {
+        Some(ip) => {
+            let octets = ip.octets();
+            format!(
+                "{{{},{},{},{}}}",
+                octets[0], octets[1], octets[2], octets[3]
+            )
+        }
+        None => "{127,0,0,1}".to_string(),
+    }
+}
+
 /// The startup prelude shared by all startup modes.
 ///
 /// Starts the workspace OTP application and the workspace supervisor,
@@ -141,16 +159,7 @@ pub fn build_eval_cmd_with_node(port: u16, node_name: &str, bind_addr: Option<Ip
 /// Callers append their own shutdown logic (e.g. `receive stop -> ok end`
 /// or cover export).
 pub fn startup_prelude(port: u16, bind_addr: Option<Ipv4Addr>) -> String {
-    let bind_addr_erl = match bind_addr {
-        Some(ip) => {
-            let octets = ip.octets();
-            format!(
-                "{{{},{},{},{}}}",
-                octets[0], octets[1], octets[2], octets[3]
-            )
-        }
-        None => "{127,0,0,1}".to_string(),
-    };
+    let bind_addr_erl = format_bind_addr_erl(bind_addr);
     format!(
         "application:set_env(beamtalk_runtime, repl_port, {port}), \
          {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \

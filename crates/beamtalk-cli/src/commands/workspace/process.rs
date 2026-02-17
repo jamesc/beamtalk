@@ -229,16 +229,7 @@ pub fn start_detached_node(
     let project_path_str = project_path_str.replace('\\', "\\\\");
 
     // Format bind address as Erlang tuple for cowboy socket_opts
-    let bind_addr_erl = match bind_addr {
-        Some(ip) => {
-            let octets = ip.octets();
-            format!(
-                "{{{},{},{},{}}}",
-                octets[0], octets[1], octets[2], octets[3]
-            )
-        }
-        None => "{127,0,0,1}".to_string(),
-    };
+    let bind_addr_erl = beamtalk_cli::repl_startup::format_bind_addr_erl(bind_addr);
 
     let eval_cmd = format!(
         "application:set_env(beamtalk_runtime, workspace_id, <<\"{workspace_id}\">>), \
