@@ -105,6 +105,8 @@ The workspace cookie already exists at `~/.beamtalk/workspaces/{id}/cookie` with
 
 **Rationale for cookie (not mTLS):** Any process that can read cert files can also read the cookie file. Cookie auth is simpler and provides equivalent security to mTLS for the localhost threat model. The OS filesystem ACL (`chmod 600`) is the actual authentication boundary.
 
+**Cookie lifecycle:** The workspace cookie persists across workspace restarts, following the Erlang cookie model (`~/.erlang.cookie`). Cookie rotation is a separate concern — a future `beamtalk workspace rotate-cookie` command can regenerate it when needed, but automatic rotation on restart would break reconnecting clients unnecessarily.
+
 ### Layer 2: Web terminal via standard reverse proxy
 
 Since the workspace speaks WebSocket natively, the browser can connect directly for local dev. For remote access or TLS, use a **standard reverse proxy** (Caddy, nginx, envoy) — zero custom proxy code.

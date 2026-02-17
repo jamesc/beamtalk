@@ -575,18 +575,15 @@ Build the workspace experience on Phase 0's validated transport. The browser mus
 1. Add `load-source` operation to `beamtalk_repl_server.erl` / `beamtalk_repl_eval.erl`
 2. Build multi-pane `index.html` — Workspace, Transcript, Inspector, Editor panes
 3. Add `--web` flag to CLI
-4. Tests: load-source, Inspector via `inspect` op, error handling
+4. Session reconnection via `resume` op + session ID in URL
+5. Keyboard shortcuts (Ctrl+D Do It, Ctrl+P Print It, Ctrl+I Inspect It)
+6. Tab completion in Workspace pane (using `complete` op)
+7. Command history (up/down arrow)
+8. Tests: load-source, Inspector via `inspect` op, error handling, reconnection
 
-### Phase 2: Polish + Reconnection (Size: M)
+**Frontend complexity cutoff:** Phase 1 is the last phase with vanilla JS. No new JS dependencies (CodeMirror, etc.) after Phase 1. The vanilla JS frontend is intentionally minimal and disposable — it validates the protocol and workspace experience, not the UI technology. Syntax highlighting, pop-out windows, and rich editing wait for Phoenix (Phase 3).
 
-- Session reconnection via `resume` op + session ID in URL
-- Syntax highlighting (CodeMirror)
-- Keyboard shortcuts (Ctrl+D Do It, Ctrl+P Print It, Ctrl+I Inspect It)
-- Tab completion in Workspace pane (using `complete` op)
-- Command history (up/down arrow)
-- Pop-out window support (BroadcastChannel for cross-window communication)
-
-### Phase 3: Live Updates + Authentication (Size: L)
+### Phase 2: Live Updates + Authentication (Size: L)
 
 - Actor registry notification infrastructure (new: subscribe to spawn/stop events)
 - `actor-spawned` and `actor-stopped` push messages
@@ -595,7 +592,7 @@ Build the workspace experience on Phase 0's validated transport. The browser mus
 - HTTPS/WSS support (TLS termination or reverse proxy guidance)
 - Bind to `0.0.0.0` when `--web-remote` flag is used
 
-### Phase 4: Phoenix LiveView IDE (Size: XL)
+### Phase 3: Phoenix LiveView IDE (Size: XL)
 
 - Migrate to Phoenix (Cowboy handlers become Phoenix channels/LiveView)
 - Full IDE from `docs/beamtalk-ide.md`
@@ -603,8 +600,10 @@ Build the workspace experience on Phase 0's validated transport. The browser mus
 - Debugger integration (pause, inspect, resume)
 - Message Timeline visualization
 - PubSub integration for live actor state updates
+- Pop-out windows (LiveView naturally supports multi-window via PubSub)
+- Syntax highlighting (CodeMirror or LiveView-native)
 
-**Note on Phoenix migration:** Phases 1-2 should keep frontend complexity minimal — avoid building a sophisticated JS SPA that gets rewritten in LiveView. The Cowboy WebSocket handler and protocol extensions carry over directly; the HTML/JS frontend is disposable.
+**Note on Phoenix migration:** Phase 1 keeps frontend complexity minimal — no JS framework, no build toolchain. The Cowboy WebSocket handler and protocol extensions carry over directly into Phoenix; only the HTML/JS frontend is replaced.
 
 ## Migration Path
 
