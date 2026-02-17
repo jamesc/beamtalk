@@ -986,7 +986,8 @@ mod tests {
         // Wait for epmd to deregister the old node name before restarting.
         // After force-kill, epmd may still hold the registration briefly,
         // which prevents a new node with the same name from starting.
-        let _ = wait_for_epmd_deregistration(&info1.node_name, 5);
+        wait_for_epmd_deregistration(&info1.node_name, 5)
+            .expect("epmd should deregister node name within timeout");
 
         // Step 4: Third call starts a new node
         let (info3, started3, id3) = get_or_start_workspace(

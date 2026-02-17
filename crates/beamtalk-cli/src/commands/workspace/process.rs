@@ -51,7 +51,15 @@ const PORT_DISCOVERY_MAX_RETRIES: usize = 20;
 const READINESS_PROBE_DELAY_MS: u64 = 200;
 
 /// Maximum number of TCP readiness probe attempts.
-const READINESS_PROBE_MAX_RETRIES: usize = 25;
+/// Total worst-case: 30 × (300ms connect + 500ms read + 200ms sleep) = ~30s.
+const READINESS_PROBE_MAX_RETRIES: usize = 30;
+
+/// TCP connect timeout for readiness probe in milliseconds (shorter than
+/// the full health probe to keep worst-case bounded at ~10s).
+const READINESS_CONNECT_TIMEOUT_MS: u64 = 300;
+
+/// TCP read timeout for readiness probe in milliseconds.
+const READINESS_READ_TIMEOUT_MS: u64 = 500;
 
 /// TCP connect timeout for exit probe in milliseconds.
 const EXIT_PROBE_CONNECT_TIMEOUT_MS: u64 = 500;
@@ -301,12 +309,28 @@ pub fn start_detached_node(
 
 /// Poll until the TCP health endpoint responds on the given port.
 ///
-/// The port file may be written before the health handler is fully initialized,
-/// so we probe until the endpoint responds to a health request.
+/// Uses short per-attempt timeouts (300ms connect, 500ms read) to keep the
+/// worst-case total bounded at ~25s rather than the ~175s that would result
+/// from reusing `tcp_health_probe`'s production timeouts.
 fn wait_for_tcp_ready(port: u16, pid: u32) -> Result<()> {
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{port}")
+        .parse()
+        .map_err(|e| miette!("Invalid address: {e}"))?;
+
     for _ in 0..READINESS_PROBE_MAX_RETRIES {
-        if tcp_health_probe(port).is_ok() {
-            return Ok(());
+        if let Ok(stream) =
+            TcpStream::connect_timeout(&addr, Duration::from_millis(READINESS_CONNECT_TIMEOUT_MS))
+        {
+            let _ = stream.set_read_timeout(Some(Duration::from_millis(READINESS_READ_TIMEOUT_MS)));
+            if let Ok(mut writer) = stream.try_clone() {
+                let mut reader = BufReader::new(stream);
+                if writer.write_all(b"{\"op\":\"health\"}\n").is_ok() && writer.flush().is_ok() {
+                    let mut response = String::new();
+                    if reader.read_line(&mut response).is_ok() && !response.is_empty() {
+                        return Ok(());
+                    }
+                }
+            }
         }
         std::thread::sleep(Duration::from_millis(READINESS_PROBE_DELAY_MS));
     }
@@ -517,8 +541,25 @@ pub(super) fn wait_for_epmd_deregistration(node_name: &str, timeout_secs: u64) -
 
         match output {
             Ok(out) => {
+                // If epmd exits with a non-success status, keep polling
+                // rather than treating empty stdout as "deregistered".
+                if !out.status.success() {
+                    std::thread::sleep(interval);
+                    continue;
+                }
+
                 let stdout = String::from_utf8_lossy(&out.stdout);
-                if !stdout.lines().any(|line| line.contains(short_name)) {
+                // Match exact node name in epmd output format:
+                //   "name <node_short_name> at port <N>"
+                // Using token-level matching to avoid false positives
+                // (e.g. "foo" matching "foobar").
+                let still_registered = stdout.lines().any(|line| {
+                    let mut parts = line.split_whitespace();
+                    matches!(parts.next(), Some("name"))
+                        && matches!(parts.next(), Some(name) if name == short_name)
+                });
+
+                if !still_registered {
                     return Ok(());
                 }
             }
