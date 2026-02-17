@@ -43,7 +43,7 @@ The FFI philosophy is also recorded: transparent interop, not wrapper-based.
 
 ### 1. The `Erlang` Global Object — Module Proxy Pattern
 
-Introduce `Erlang` as a **global singleton object** (ADR 0010) that responds to module names as unary messages, returning a **module proxy** that dispatches keyword/unary/binary messages as Erlang function calls.
+Introduce `Erlang` as a **ProtoObject subclass** that responds to module names as class-side messages, returning a **module proxy** that dispatches keyword/unary/binary messages as Erlang function calls.
 
 ```beamtalk
 // Call lists:reverse/1
@@ -65,18 +65,18 @@ Erlang string uppercase: "hello"
 
 **How it works:**
 
-1. `Erlang` is a **value-type global** — a tagged map injected as a workspace binding (extending ADR 0010's pattern beyond actor singletons). Unlike `Transcript` and `Beamtalk` which are actor singletons, `Erlang` is a stateless value type — no gen_server process, no serialization bottleneck. Note: ADR 0010 rejected value-type globals for `Transcript` (Alternative C) because it needs shared identity for I/O coordination; the `Erlang` global is different — it's stateless and merely acts as a namespace proxy, making the value-type approach appropriate here.
+1. `Erlang` is a **class** (ProtoObject subclass) whose class-side methods handle module proxy creation. Since `Erlang` is an uppercase identifier, the parser treats it as a `ClassReference` — it works everywhere: REPL, compiled code, and inside actor methods. No workspace binding is needed; `Erlang lists` is a class-side message send, just like `Counter spawn` or `Integer methods`. Unlike `Transcript` and `Beamtalk` which are actor *instances* injected as workspace bindings, `Erlang` is stateless — its class-side behavior IS the entire API.
 2. Sending a unary message like `lists` returns an **ErlangModule proxy** for the atom `lists`
 3. The proxy translates Beamtalk message sends to Erlang function calls:
    - Unary message `reverse:` with one arg → `lists:reverse(Arg)`
    - Keyword message `merge:with:` → `maps:merge(Arg1, Arg2)` (keywords stripped, args positional)
 4. Return values are native BEAM terms — `class_of/1` handles them automatically
 
-**Important:** The `Erlang` global and `ErlangModule` proxies are **not gen_server actors**. They are **value type objects** (tagged maps, per ADR 0005) dispatched through `beamtalk_primitive:send/3`. This avoids the serialization bottleneck of routing every Erlang call through a single process. Proxy creation is a simple map allocation; `erlang:apply/3` calls happen in the caller's process.
+**Important:** `Erlang` is a class, not an actor — there is no gen_server process. Class-side `doesNotUnderstand:args:` creates `ErlangModule` proxy maps (value types, per ADR 0005) and the `erlang:apply/3` call happens in the caller's process. No serialization bottleneck, no single-process routing.
 
 **Hot code reload:** Because proxies call `erlang:apply/3` dynamically (not bound to a specific module version), they automatically pick up reloaded Erlang modules — no proxy invalidation needed.
 
-**Name conflicts:** Workspace bindings always take precedence over user-defined class names. If a user defines a class named `Erlang`, the workspace binding shadows it — the global `Erlang` proxy remains accessible. This is consistent with how `Transcript`, `Beamtalk`, and `Workspace` globals work. Future module/namespace support will provide a proper resolution mechanism.
+**Name conflicts:** `Erlang` is a reserved class name, like `Integer` or `Object`. A user-defined class named `Erlang` would shadow the built-in — the same way redefining `Integer` would. Future module/namespace support will provide proper scoping.
 
 **REPL session:**
 
@@ -327,13 +327,13 @@ Type-safe, explicit, but requires per-function declarations. Good for libraries,
 ```lisp
 (: lists reverse '(1 2 3))
 ```
-Zero boilerplate, but LFE adds special `:` syntax for module calls. Beamtalk achieves the same ergonomics using message sends to the `Erlang` global object — no new syntax needed.
+Zero boilerplate, but LFE adds special `:` syntax for module calls. Beamtalk achieves the same ergonomics using message sends to the `Erlang` class — no new syntax needed.
 
 ### Elixir — Erlang Atom Calls
 ```elixir
 :lists.reverse([1, 2, 3])
 ```
-Minimal syntax (`:atom.function`). Elixir can do this because its syntax already has the `.` operator for function calls. Beamtalk doesn't have `.` for dispatch — we use message sends — so the `Erlang` global object provides equivalent ergonomics.
+Minimal syntax (`:atom.function`). Elixir can do this because its syntax already has the `.` operator for function calls. Beamtalk doesn't have `.` for dispatch — we use message sends — so the `Erlang` class provides equivalent ergonomics.
 
 ### Ruby — FFI via Objects
 ```ruby
@@ -410,7 +410,7 @@ Erlang call: "lists" function: "reverse" args: #(#(1, 2, 3))
 ## Consequences
 
 ### Positive
-- **Zero new syntax** — `Erlang` is just a global object, module proxies are just objects, everything is message sends
+- **Zero new syntax** — `Erlang` is just a class, module proxies are just objects, everything is message sends
 - **REPL-friendly** — call any Erlang function immediately with no setup
 - **Discoverable** — `Erlang` and its proxies respond to introspection messages
 - **Extensible** — `Elixir` and `Gleam` globals can follow the same pattern later
@@ -433,15 +433,16 @@ Erlang call: "lists" function: "reverse" args: #(#(1, 2, 3))
 ## Implementation
 
 ### Phase 0: Wire Check — Single Erlang Call Round-Trip
-- Hardcode `Erlang` as a workspace binding pointing to a runtime module
-- Implement a single `doesNotUnderstand:` handler that returns an ErlangModule proxy map
+- Add `lib/Erlang.bt` as a ProtoObject subclass with class-side `doesNotUnderstand:args:`
+- Class-side handler returns an ErlangModule proxy map for the module name
 - Proxy handles one keyword message via `erlang:apply/3`
 - Verify in REPL: `Erlang lists reverse: #(1, 2, 3)` returns `#(3, 2, 1)`
-- **Components:** `beamtalk_erlang_proxy.erl` (new), workspace binding injection
+- Works in actors too — `Erlang` is a stdlib class, always loaded
+- **Components:** `lib/Erlang.bt`, `lib/ErlangModule.bt`, `beamtalk_erlang_proxy.erl` (new)
 - **Tests:** One stdlib test, one REPL E2E test
 
-### Phase 1: Erlang Global Object and Module Proxies
-- Add `Erlang` as a global singleton (ADR 0010 pattern)
+### Phase 1: Full Erlang Class and Module Proxies
+- Complete `Erlang` class with error handling and introspection
 - Implement `ErlangModule` proxy class that dispatches to `erlang:apply/3`
 - Wire up `class_of/1` for proxy instances
 - **Export introspection:** Proxies use `module_info(exports)` to validate function existence and arity at dispatch time. This is always available (no `+debug_info` needed) and enables:
@@ -480,9 +481,9 @@ No existing user code is affected. This ADR introduces new capabilities without 
 - `@primitive` and `@intrinsic` continue to work unchanged for stdlib authors
 - Existing `class_of/1` behavior is preserved; Pid/Port/Reference gain methods but retain their class names
 - `Tuple` API remains unchanged; only documentation and framing changes (interop-only positioning)
-- The `Erlang` global is additive — no existing bindings are modified
+- The `Erlang` class is additive — a new stdlib class, no existing classes or bindings modified
 
 ## References
 - Related issues: BT-302
-- Related ADRs: ADR 0005 (object model), ADR 0006 (method dispatch), ADR 0010 (global objects — extended here to support value-type globals), ADR 0015 (exception hierarchy — extended here with interop exceptions), ADR 0016 (module naming), ADR 0025 (gradual typing), ADR 0026 (package manifest)
+- Related ADRs: ADR 0005 (object model), ADR 0006 (method dispatch), ADR 0010 (global objects — `Erlang` differs: it's a class, not a workspace-bound actor), ADR 0015 (exception hierarchy — extended here with interop exceptions), ADR 0016 (module naming), ADR 0025 (gradual typing), ADR 0026 (package manifest)
 - Design principles: §9 Seamless BEAM Ecosystem Integration
