@@ -35,7 +35,7 @@ ProtoObject subclass: Object
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Tuple new: #(1, 2, 3)
+  /// Dictionary new: #{#name => 'Alice'}
   /// ```
   new: initArgs => @intrinsic basicNewWith
 
