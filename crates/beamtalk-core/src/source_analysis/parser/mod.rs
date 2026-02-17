@@ -1581,6 +1581,68 @@ mod tests {
     }
 
     #[test]
+    fn parse_standalone_method_with_field_assignment() {
+        let source = "Counter >> foo => self.count := 5";
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no parse errors, got: {diagnostics:?}"
+        );
+        assert_eq!(
+            module.method_definitions.len(),
+            1,
+            "Expected 1 standalone method definition"
+        );
+        let md = &module.method_definitions[0];
+        assert_eq!(md.class_name.name, "Counter");
+        assert_eq!(md.method.selector.name(), "foo");
+        assert!(
+            !md.method.body.is_empty(),
+            "Method body should not be empty — it contains `self.count := 5`"
+        );
+        // Also verify no empty-body warning from semantic analysis
+        let all_diags =
+            crate::queries::diagnostic_provider::compute_diagnostics(&module, vec![]);
+        let empty_body_warnings: Vec<_> = all_diags
+            .iter()
+            .filter(|d| d.message.contains("empty body"))
+            .collect();
+        assert!(
+            empty_body_warnings.is_empty(),
+            "Should not warn about empty body, got: {empty_body_warnings:?}"
+        );
+    }
+
+    #[test]
+    fn parse_combined_class_with_standalone_method_field_assign() {
+        // Simulates what the REPL does: concatenates class source + standalone method
+        let source = "Actor subclass: Counter\n  state: count = 0\n  increment => self.count := self.count + 1\nCounter >> foo => self.count := 5";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+
+        // The standalone method should have a non-empty body
+        assert_eq!(module.method_definitions.len(), 1);
+        let md = &module.method_definitions[0];
+        assert_eq!(md.method.selector.name(), "foo");
+        assert!(
+            !md.method.body.is_empty(),
+            "Standalone method body should not be empty — contains `self.count := 5`"
+        );
+
+        let all_diags =
+            crate::queries::diagnostic_provider::compute_diagnostics(&module, parse_diags);
+        let empty_body_warnings: Vec<_> = all_diags
+            .iter()
+            .filter(|d| d.message.contains("empty body"))
+            .collect();
+        assert!(
+            empty_body_warnings.is_empty(),
+            "Should not warn about empty body, got: {empty_body_warnings:?}"
+        );
+    }
+
+    #[test]
     fn parse_empty_map() {
         let module = parse_ok("#{}");
         assert_eq!(module.expressions.len(), 1);
