@@ -55,37 +55,50 @@ dispatch(Selector, Args, Self) ->
                 {error, Error, _State} -> beamtalk_error:raise(Error)
             end;
         false ->
-            FunName = selector_to_function(Selector),
-            try
-                erlang:apply(Module, FunName, Args)
-            catch
-                error:undef ->
+            case selector_to_function(Selector) of
+                {ok, FunName} ->
+                    try
+                        erlang:apply(Module, FunName, Args)
+                    catch
+                        error:undef ->
+                            Error0 = beamtalk_error:new(does_not_understand, 'ErlangModule'),
+                            Error1 = beamtalk_error:with_selector(Error0, Selector),
+                            Hint = iolist_to_binary([
+                                atom_to_binary(Module, utf8), <<":">>,
+                                atom_to_binary(FunName, utf8), <<"/">>,
+                                integer_to_binary(length(Args)),
+                                <<" is not exported or does not exist">>
+                            ]),
+                            Error2 = beamtalk_error:with_hint(Error1, Hint),
+                            beamtalk_error:raise(Error2);
+                        error:badarg ->
+                            Error0 = beamtalk_error:new(type_error, 'ErlangModule'),
+                            Error1 = beamtalk_error:with_selector(Error0, Selector),
+                            Error2 = beamtalk_error:with_hint(Error1, <<"Bad argument in Erlang call">>),
+                            beamtalk_error:raise(Error2);
+                        error:Reason ->
+                            Error0 = beamtalk_error:new(type_error, 'ErlangModule'),
+                            Error1 = beamtalk_error:with_selector(Error0, Selector),
+                            ReasonBin = iolist_to_binary(io_lib:format("~p", [Reason])),
+                            Hint2 = iolist_to_binary([
+                                <<"Erlang error in ">>,
+                                atom_to_binary(Module, utf8), <<":">>,
+                                atom_to_binary(FunName, utf8), <<": ">>,
+                                ReasonBin
+                            ]),
+                            Error2 = beamtalk_error:with_hint(Error1, Hint2),
+                            beamtalk_error:raise(Error2)
+                    end;
+                {error, FunStr} ->
                     Error0 = beamtalk_error:new(does_not_understand, 'ErlangModule'),
                     Error1 = beamtalk_error:with_selector(Error0, Selector),
                     Hint = iolist_to_binary([
                         atom_to_binary(Module, utf8), <<":">>,
-                        atom_to_binary(FunName, utf8), <<"/">>,
+                        FunStr, <<"/">>,
                         integer_to_binary(length(Args)),
                         <<" is not exported or does not exist">>
                     ]),
                     Error2 = beamtalk_error:with_hint(Error1, Hint),
-                    beamtalk_error:raise(Error2);
-                error:badarg ->
-                    Error0 = beamtalk_error:new(type_error, 'ErlangModule'),
-                    Error1 = beamtalk_error:with_selector(Error0, Selector),
-                    Error2 = beamtalk_error:with_hint(Error1, <<"Bad argument in Erlang call">>),
-                    beamtalk_error:raise(Error2);
-                error:Reason ->
-                    Error0 = beamtalk_error:new(type_error, 'ErlangModule'),
-                    Error1 = beamtalk_error:with_selector(Error0, Selector),
-                    ReasonBin = iolist_to_binary(io_lib:format("~p", [Reason])),
-                    Hint2 = iolist_to_binary([
-                        <<"Erlang error in ">>,
-                        atom_to_binary(Module, utf8), <<":">>,
-                        atom_to_binary(FunName, utf8), <<": ">>,
-                        ReasonBin
-                    ]),
-                    Error2 = beamtalk_error:with_hint(Error1, Hint2),
                     beamtalk_error:raise(Error2)
             end
     end.
@@ -96,22 +109,25 @@ dispatch(Selector, Args, Self) ->
 
 %% @doc Convert a Beamtalk selector atom to an Erlang function name.
 %%
-%% Keyword selectors like `'reverse:'` → `reverse`
-%% Multi-keyword like `'sublist:length:'` → `sublist`  (first keyword only)
-%% Unary selectors like `'node'` → `node`
--spec selector_to_function(atom()) -> atom().
+%% Returns {ok, Atom} when the function name is a known atom,
+%% or {error, Binary} when it's not in the atom table (cannot exist as
+%% an exported function). This avoids creating new atoms for unknown selectors.
+%%
+%% Keyword selectors like `'reverse:'` → `{ok, reverse}`
+%% Multi-keyword like `'sublist:length:'` → `{ok, sublist}`  (first keyword only)
+%% Unary selectors like `'node'` → `{ok, node}`
+-spec selector_to_function(atom()) -> {ok, atom()} | {error, binary()}.
 selector_to_function(Selector) ->
     SelectorStr = atom_to_list(Selector),
     case lists:member($:, SelectorStr) of
         true ->
             %% Keyword selector — extract first keyword (before first colon)
             [FunStr | _] = string:split(SelectorStr, ":"),
-            try list_to_existing_atom(FunStr)
+            try {ok, list_to_existing_atom(FunStr)}
             catch error:badarg ->
-                %% Function name not in atom table — cannot exist as exported function
-                list_to_atom(FunStr)
+                {error, list_to_binary(FunStr)}
             end;
         false ->
-            %% Unary selector — use as-is
-            Selector
+            %% Unary selector — use as-is (already an atom)
+            {ok, Selector}
     end.
