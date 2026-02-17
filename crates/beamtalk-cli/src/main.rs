@@ -94,6 +94,17 @@ enum Command {
         /// Disable colored output (also respects `NO_COLOR` environment variable)
         #[arg(long)]
         no_color: bool,
+
+        /// Bind address for the REPL WebSocket server.
+        /// Use "tailscale" to auto-detect Tailscale interface,
+        /// or an IP address like "192.168.1.5" or "0.0.0.0".
+        /// Default: 127.0.0.1 (localhost only)
+        #[arg(long)]
+        bind: Option<String>,
+
+        /// Suppress the safety warning when binding to a non-loopback address
+        #[arg(long)]
+        confirm_network: bool,
     },
 
     /// Check source files for errors without compiling
@@ -210,6 +221,8 @@ fn main() -> Result<()> {
             persistent,
             timeout,
             no_color,
+            bind,
+            confirm_network,
         } => commands::repl::run(
             port,
             node,
@@ -218,6 +231,8 @@ fn main() -> Result<()> {
             persistent,
             timeout,
             no_color,
+            bind.as_deref(),
+            confirm_network,
         ),
         Command::Transcript { workspace, recent } => {
             commands::transcript::run(workspace.as_deref(), recent)

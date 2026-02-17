@@ -6,6 +6,7 @@
 //! **DDD Context:** CLI
 
 use std::fs;
+use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -81,6 +82,7 @@ pub fn get_or_start_workspace(
     extra_code_paths: &[PathBuf],
     auto_cleanup: bool,
     max_idle_seconds: Option<u64>,
+    bind_addr: Option<Ipv4Addr>,
 ) -> Result<(NodeInfo, bool, String)> {
     // Create workspace if it doesn't exist
     let metadata = create_workspace(project_path, workspace_name)?;
@@ -108,6 +110,7 @@ pub fn get_or_start_workspace(
         extra_code_paths,
         auto_cleanup,
         max_idle_seconds,
+        bind_addr,
     )?;
     Ok((node_info, true, workspace_id)) // New node started
 }

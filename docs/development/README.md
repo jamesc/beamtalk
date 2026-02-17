@@ -26,6 +26,13 @@ This directory contains documentation for **contributors and AI agents** working
 | [Language Features](../beamtalk-language-features.md) | Full Beamtalk syntax specification |
 | [Syntax Rationale](../beamtalk-syntax-rationale.md) | Design decisions: why we keep/change Smalltalk conventions |
 
+### Operational Guides
+
+| Guide | Description |
+|-------|-------------|
+| [Remote Access](remote-access.md) | Tailscale, reverse proxy (Caddy/nginx), SSH tunneling for remote REPL access |
+| [Debugging](debugging.md) | Step-by-step debugging for compiler, runtime, and test failures |
+
 ### Related Documentation
 
 | Document | Description |

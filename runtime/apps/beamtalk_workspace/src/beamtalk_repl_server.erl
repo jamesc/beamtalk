@@ -70,18 +70,20 @@ get_nonce() ->
 init(Config) ->
     Port = maps:get(port, Config),
     WorkspaceId = maps:get(workspace_id, Config, undefined),
+    BindAddr = maps:get(bind_addr, Config, {127, 0, 0, 1}),
     %% Generate a random nonce for stale port file detection (BT-611)
     Nonce = generate_nonce(),
     %% BT-666: Session registry for interrupt routing
     ets:new(beamtalk_sessions, [named_table, public, {read_concurrency, true}]),
-    %% ADR 0020: Start cowboy WebSocket listener on loopback only.
-    %% SECURITY: Bind to 127.0.0.1 so only local processes can connect.
+    %% ADR 0020: Start cowboy WebSocket listener.
+    %% Default: bind to 127.0.0.1 so only local processes can connect.
+    %% --bind flag allows binding to other addresses (BT-691).
     %% Cookie handshake in beamtalk_ws_handler provides auth on shared machines.
     Dispatch = cowboy_router:compile([
         {'_', [{"/ws", beamtalk_ws_handler, []}]}
     ]),
     TransportOpts = #{
-        socket_opts => [{ip, {127, 0, 0, 1}}, {port, Port}],
+        socket_opts => [{ip, BindAddr}, {port, Port}],
         num_acceptors => 10
     },
     ProtocolOpts = #{env => #{dispatch => Dispatch}},
