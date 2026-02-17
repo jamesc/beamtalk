@@ -1173,13 +1173,13 @@ impl CoreErlangGenerator {
         // BT-665: Only flag mutations of captured variables, not new local definitions.
         // A "captured mutation" is a write to a variable that was read before being
         // locally defined (i.e., it captures from outer scope).
-        let captured_mutations: Vec<&String> = analysis
+        if let Some(variable) = analysis
             .local_writes
             .intersection(&analysis.captured_reads)
-            .collect();
-        if let Some(variable) = captured_mutations.first() {
+            .next()
+        {
             return Err(CodeGenError::LocalMutationInStoredClosure {
-                variable: (*variable).clone(),
+                variable: variable.clone(),
                 location: span_str,
             });
         }
