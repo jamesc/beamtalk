@@ -195,6 +195,11 @@ fn compute_erlang_completions(
     None
 }
 
+/// Returns `true` if `b` is a valid Beamtalk identifier character (letter, digit, or underscore).
+fn is_identifier_char(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
 /// Detects if the text before cursor ends with `Erlang <module_name>`.
 ///
 /// Returns the module name if found and recognized.
@@ -208,8 +213,7 @@ fn detect_erlang_module_context(trimmed: &str) -> Option<&str> {
     if before_module.ends_with("Erlang") {
         // Verify "Erlang" is at a word boundary
         let erlang_start = before_module.len() - "Erlang".len();
-        if erlang_start == 0 || !before_module.as_bytes()[erlang_start - 1].is_ascii_alphanumeric()
-        {
+        if erlang_start == 0 || !is_identifier_char(before_module.as_bytes()[erlang_start - 1]) {
             return Some(module_name);
         }
     }
@@ -221,7 +225,7 @@ fn detect_erlang_class_context(module: &Module, trimmed: &str, offset: u32) -> b
     // Text-based check: does the text before cursor end with "Erlang"?
     if trimmed.ends_with("Erlang") {
         let erlang_start = trimmed.len() - "Erlang".len();
-        if erlang_start == 0 || !trimmed.as_bytes()[erlang_start - 1].is_ascii_alphanumeric() {
+        if erlang_start == 0 || !is_identifier_char(trimmed.as_bytes()[erlang_start - 1]) {
             return true;
         }
     }
@@ -1277,5 +1281,6 @@ mod tests {
         assert_eq!(detect_erlang_module_context("NotErlang lists"), None);
         assert_eq!(detect_erlang_module_context("Erlang"), None);
         assert_eq!(detect_erlang_module_context("FooErlang lists"), None);
+        assert_eq!(detect_erlang_module_context("Foo_Erlang lists"), None);
     }
 }
