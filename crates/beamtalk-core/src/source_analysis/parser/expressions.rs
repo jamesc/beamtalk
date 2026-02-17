@@ -52,23 +52,31 @@ impl Parser {
     /// Parses any expression.
     ///
     /// Entry point for expression parsing. Handles all precedence levels.
+    /// Uses `stacker::maybe_grow` to extend the stack on the heap if
+    /// remaining stack space falls below 32 KiB (prevents stack overflow
+    /// even under `AddressSanitizer` during fuzzing).
     pub(super) fn parse_expression(&mut self) -> Expression {
-        // Guard against stack overflow from deeply nested input
-        if let Err(error) = self.enter_nesting(self.current_token().span()) {
-            return error;
-        }
+        // Grow the stack on the heap when remaining space is low.
+        // 32 KiB red zone, 1 MiB new segment — mirrors Gleam's approach.
+        // Wraps the entire body (including nesting guard) so the stack
+        // extension happens before any per-frame work.
+        stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
+            // Guard against stack overflow from deeply nested input
+            if let Err(error) = self.enter_nesting(self.current_token().span()) {
+                return error;
+            }
 
-        // Check for return statement first
-        if self.match_token(&TokenKind::Caret) {
-            let result = self.parse_return();
+            // Check for return statement first
+            let result = if self.match_token(&TokenKind::Caret) {
+                self.parse_return()
+            } else {
+                // Try to parse assignment or regular expression
+                self.parse_assignment()
+            };
+
             self.leave_nesting();
-            return result;
-        }
-
-        // Try to parse assignment or regular expression
-        let result = self.parse_assignment();
-        self.leave_nesting();
-        result
+            result
+        })
     }
 
     /// Parses a return statement.
