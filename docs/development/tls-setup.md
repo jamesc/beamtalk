@@ -50,7 +50,7 @@ beamtalk tls init
 
 Certificates are stored under the workspace's TLS directory:
 
-```
+```text
 ~/.beamtalk/workspaces/{workspace-id}/tls/
 ├── ca.pem
 ├── node.pem
@@ -84,7 +84,7 @@ beamtalk repl --tls --foreground
 
 When `--tls` is specified, Beamtalk adds these Erlang VM arguments:
 
-```
+```text
 -proto_dist inet_tls -ssl_dist_optfile <path>/ssl_dist.conf
 ```
 

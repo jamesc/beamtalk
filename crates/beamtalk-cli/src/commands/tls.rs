@@ -63,6 +63,11 @@ fn init_tls(workspace_name: Option<&str>) -> Result<()> {
     {
         println!("TLS certificates already exist for workspace: {workspace_id}");
         println!("  Directory: {}", tls_dir.display());
+        // Regenerate ssl_dist.conf if missing (e.g. partial state)
+        if !tls_dir.join("ssl_dist.conf").exists() {
+            let conf_path = generate_ssl_dist_conf(&tls_dir)?;
+            println!("  ✓ Distribution config regenerated: {}", conf_path.display());
+        }
         println!("  To regenerate, remove the tls/ directory first.");
         return Ok(());
     }
