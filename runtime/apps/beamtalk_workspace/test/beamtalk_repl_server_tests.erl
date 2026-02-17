@@ -1843,6 +1843,16 @@ get_completions_keyword_prefix_test() ->
     ?assert(lists:member(<<"super">>, Result)),
     ?assert(lists:member(<<"subclass:">>, Result)).
 
+get_completions_workspace_binding_test() ->
+    %% Workspace bindings (Transcript, Beamtalk, Workspace) should appear
+    Result = beamtalk_repl_server:get_completions(<<"Transcri">>),
+    ?assert(lists:member(<<"Transcript">>, Result)).
+
+get_completions_workspace_binding_prefix_test() ->
+    %% "Work" should match the Workspace binding
+    Result = beamtalk_repl_server:get_completions(<<"Work">>),
+    ?assert(lists:member(<<"Workspace">>, Result)).
+
 %%% get_symbol_info/1 tests
 
 get_symbol_info_unknown_atom_test() ->

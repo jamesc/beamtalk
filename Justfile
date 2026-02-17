@@ -159,6 +159,13 @@ dialyzer:
 test: test-rust test-stdlib test-runtime
 
 # Run Rust tests (unit + integration, skip slow E2E)
+[unix]
+test-rust:
+    @echo "🧪 Running Rust tests (fast)..."
+    @cargo test --all-targets --quiet
+    @echo "✅ Rust tests complete"
+
+[windows]
 test-rust:
     @echo "🧪 Running Rust tests (fast)..."
     @cargo test --all-targets --quiet
@@ -234,6 +241,14 @@ test-stdlib: build-stdlib
 
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
 # Run Erlang runtime unit tests
+[unix]
+[working-directory: 'runtime']
+test-runtime: build-stdlib
+    @echo "🧪 Running Erlang runtime unit tests..."
+    @rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace
+    @echo "✅ Runtime tests complete"
+
+[windows]
 [working-directory: 'runtime']
 test-runtime: build-stdlib
     @echo "🧪 Running Erlang runtime unit tests..."

@@ -20,6 +20,8 @@ pub struct BlockMutationAnalysis {
     pub local_reads: HashSet<String>,
     /// Local variables that are written to in the block.
     pub local_writes: HashSet<String>,
+    /// BT-665: Variables read before being locally defined (captured from outer scope).
+    pub captured_reads: HashSet<String>,
     /// Fields (self.field) that are read in the block.
     pub field_reads: HashSet<String>,
     /// Fields (self.field) that are written to in the block.
@@ -116,6 +118,10 @@ fn analyze_expression(
             // Read of a variable - track ALL reads, not just known locals
             // This is important for detecting outer scope variables that need threading
             analysis.local_reads.insert(id.name.to_string());
+            // BT-665: Track reads of variables not yet locally defined (captured from outer scope)
+            if !ctx.local_bindings.contains(id.name.as_str()) {
+                analysis.captured_reads.insert(id.name.to_string());
+            }
         }
 
         Expression::FieldAccess {
@@ -496,5 +502,97 @@ mod tests {
 
         // Not a control flow construct because receiver is not a literal block
         assert!(!is_control_flow_construct(&condition, &selector, &[body]));
+    }
+
+    #[test]
+    fn test_captured_reads_for_outer_variable_mutation() {
+        // BT-665: [count := count + 1] — `count` is read before being locally defined
+        let block = Block::new(
+            vec![],
+            vec![Expression::Assignment {
+                target: Box::new(make_expr_id("count")),
+                value: Box::new(Expression::MessageSend {
+                    receiver: Box::new(make_expr_id("count")),
+                    selector: MessageSelector::Binary("+".into()),
+                    arguments: vec![Expression::Literal(
+                        crate::ast::Literal::Integer(1),
+                        Span::new(16, 17),
+                    )],
+                    span: Span::new(9, 17),
+                }),
+                span: Span::new(0, 17),
+            }],
+            Span::new(0, 19),
+        );
+        let analysis = analyze_block(&block);
+        assert!(
+            analysis.captured_reads.contains("count"),
+            "count should be a captured read (read before definition)"
+        );
+        assert!(analysis.local_writes.contains("count"));
+    }
+
+    #[test]
+    fn test_no_captured_reads_for_new_local_definition() {
+        // BT-665: [:x | temp := x * 2. temp + 1] — `temp` is defined then read (not captured)
+        let block = Block::new(
+            vec![BlockParameter::new("x", Span::new(1, 2))],
+            vec![
+                Expression::Assignment {
+                    target: Box::new(make_expr_id("temp")),
+                    value: Box::new(Expression::MessageSend {
+                        receiver: Box::new(make_expr_id("x")),
+                        selector: MessageSelector::Binary("*".into()),
+                        arguments: vec![Expression::Literal(
+                            crate::ast::Literal::Integer(2),
+                            Span::new(16, 17),
+                        )],
+                        span: Span::new(9, 17),
+                    }),
+                    span: Span::new(0, 17),
+                },
+                Expression::MessageSend {
+                    receiver: Box::new(make_expr_id("temp")),
+                    selector: MessageSelector::Binary("+".into()),
+                    arguments: vec![Expression::Literal(
+                        crate::ast::Literal::Integer(1),
+                        Span::new(26, 27),
+                    )],
+                    span: Span::new(19, 27),
+                },
+            ],
+            Span::new(0, 29),
+        );
+        let analysis = analyze_block(&block);
+        assert!(
+            !analysis.captured_reads.contains("temp"),
+            "temp should NOT be a captured read (defined locally before use)"
+        );
+        assert!(analysis.local_writes.contains("temp"));
+        assert!(analysis.local_reads.contains("temp"));
+    }
+
+    #[test]
+    fn test_block_param_read_is_not_captured() {
+        // BT-665: [:x | x + 1] — `x` is a block param, not a captured read
+        let block = Block::new(
+            vec![BlockParameter::new("x", Span::new(1, 2))],
+            vec![Expression::MessageSend {
+                receiver: Box::new(make_expr_id("x")),
+                selector: MessageSelector::Binary("+".into()),
+                arguments: vec![Expression::Literal(
+                    crate::ast::Literal::Integer(1),
+                    Span::new(6, 7),
+                )],
+                span: Span::new(3, 7),
+            }],
+            Span::new(0, 9),
+        );
+        let analysis = analyze_block(&block);
+        assert!(
+            !analysis.captured_reads.contains("x"),
+            "block parameter should NOT be in captured_reads"
+        );
+        assert!(analysis.local_reads.contains("x"));
     }
 }
