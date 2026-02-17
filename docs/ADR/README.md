@@ -54,6 +54,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0025](0025-gradual-typing-and-protocols.md) | Gradual Typing and Protocols | Accepted | 2026-02-15 |
 | [0026](0026-package-definition-and-project-manifest.md) | Package Definition and Project Manifest | Accepted | 2026-02-16 |
 | [0027](0027-cross-platform-support.md) | Cross-Platform Support | Accepted | 2026-02-16 |
+| [0028](0028-beam-interop-strategy.md) | BEAM Interop Strategy | Proposed | 2026-02-17 |
 
 ## Creating New ADRs
 
