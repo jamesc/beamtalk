@@ -481,57 +481,6 @@ Fix: Use control flow directly, or extract to a method:
   items do: [:item | self addToSum: item].
 ```
 
-### How It Works
-
-**Compile-time transformation:** When codegen detects control flow messages with **literal blocks**, it analyzes for mutations and generates tail-recursive loops:
-
-```erlang
-%% Beamtalk: [count < 10] whileTrue: [count := count + 1]
-%% Generated Core Erlang:
-letrec 'Loop'/1 = fun (Count) ->
-    case Count < 10 of
-      'true' ->
-          let Count1 = Count + 1
-          in apply 'Loop'/1 (Count1)
-      'false' ->
-          Count
-    end
-in apply 'Loop'/1 (Count0)
-```
-
-For field mutations, the State map is threaded through the loop:
-
-```erlang
-%% Beamtalk: [self.value < 10] whileTrue: [self.value := self.value + 1]
-%% Generated Core Erlang:
-letrec 'Loop'/1 = fun (State) ->
-    let Value = maps:get(value, State)
-    in case Value < 10 of
-      'true' ->
-          let Value1 = Value + 1
-          in let State1 = maps:put(value, Value1, State)
-          in apply 'Loop'/1 (State1)
-      'false' ->
-          State
-    end
-in apply 'Loop'/1 (State0)
-```
-
-### REPL Integration
-
-After control flow with mutations, the REPL updates its bindings:
-
-```
-beamtalk> count := 0
-0
-beamtalk> 5 timesRepeat: [count := count + 1]
-nil
-beamtalk> count
-5
-```
-
-This makes the REPL feel natural and interactive, just like Smalltalk.
-
 ---
 
 ## Async Message Passing
