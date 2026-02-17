@@ -167,7 +167,7 @@ pub fn beam_pa_args(paths: &BeamPaths) -> Vec<OsString> {
         #[cfg(windows)]
         {
             // Convert Windows backslashes to forward slashes for Erlang
-            let path_str = dir.to_str().unwrap_or("").replace('\\', "/");
+            let path_str = dir.to_string_lossy().replace('\\', "/");
             args.push(OsString::from(path_str));
         }
         #[cfg(not(windows))]
@@ -393,5 +393,34 @@ mod tests {
             paths.stdlib_ebin,
             PathBuf::from("/rt/apps/beamtalk_stdlib/ebin")
         );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn beam_pa_args_converts_backslashes_to_forward_slashes() {
+        // Create a Windows-style path with backslashes
+        let runtime_dir = PathBuf::from("C:\\Users\\test\\beamtalk\\runtime");
+        let paths = beam_paths(&runtime_dir);
+        let args = beam_pa_args(&paths);
+        
+        // All path arguments (at odd indices) should contain forward slashes, not backslashes
+        for (i, arg) in args.iter().enumerate() {
+            if i % 2 == 1 {
+                // This is a path argument (not a "-pa" flag)
+                let path_str = arg.to_string_lossy();
+                assert!(
+                    !path_str.contains('\\'),
+                    "Path argument at index {} contains backslashes: {}",
+                    i,
+                    path_str
+                );
+                assert!(
+                    path_str.contains('/'),
+                    "Path argument at index {} doesn't contain forward slashes: {}",
+                    i,
+                    path_str
+                );
+            }
+        }
     }
 }

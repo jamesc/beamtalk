@@ -266,8 +266,7 @@ impl BeamCompiler {
         #[cfg(windows)]
         let compiler_path = paths
             .compiler_ebin
-            .to_str()
-            .unwrap_or("")
+            .to_string_lossy()
             .replace('\\', "/");
         #[cfg(not(windows))]
         let compiler_path = paths.compiler_ebin.display().to_string();

@@ -342,11 +342,11 @@ pub fn start_detached_node(
 fn path_to_erlang_arg(path: &Path) -> String {
     #[cfg(windows)]
     {
-        path.to_str().unwrap_or("").replace('\\', "/")
+        path.to_string_lossy().replace('\\', "/")
     }
     #[cfg(not(windows))]
     {
-        path.to_str().unwrap_or("").to_string()
+        path.to_string_lossy().into_owned()
     }
 }
 
