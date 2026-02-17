@@ -153,3 +153,19 @@ d1 merge: d2
 // Empty nested dictionary
 #{#a => #{}}
 // => #{#a => #{}}
+
+// ===========================================================================
+// BINARY EXPRESSIONS IN MAP VALUES (BT-664)
+// ===========================================================================
+
+// Simple arithmetic in map value
+#{#x => 1 + 2}
+// => #{#x => 3}
+
+// Multiple binary expressions in values
+#{#x => 1 + 2, #y => 3 * 4}
+// => #{#x => 3, #y => 12}
+
+// Subtraction in map value
+#{#result => 10 - 3}
+// => #{#result => 7}
