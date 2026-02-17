@@ -105,8 +105,9 @@ handle_info(check_idle, State = #state{enabled = true, max_idle_seconds = MaxIdl
     case should_terminate(MaxIdle) of
         true ->
             ?LOG_WARNING("Workspace idle, shutting down", #{max_idle_seconds => MaxIdle}),
-            %% Graceful shutdown - let supervisor tree clean up
-            init:stop();
+            %% Graceful shutdown - init:stop() is async, stop this gen_server too
+            init:stop(),
+            {stop, normal, State};
         false ->
             %% Schedule next check
             TRef = erlang:send_after(?CHECK_INTERVAL, self(), check_idle),
