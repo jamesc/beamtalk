@@ -1,0 +1,38 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// TypedAccount — typed variant of the Account actor
+//
+// Demonstrates ADR 0025 syntax:
+// - typed class modifier
+// - typed state fields
+// - typed parameters and return annotations
+
+typed Actor subclass: TypedAccount
+  state: balance: Integer = 0
+  state: owner: String = ""
+
+  deposit: amount: Integer -> Integer =>
+    amount < 0 ifTrue: [
+      self error: "Amount must be non-negative"
+    ].
+    self.balance := self.balance + amount.
+    self.balance
+
+  withdraw: amount: Integer -> Integer =>
+    amount < 0 ifTrue: [
+      self error: "Amount must be non-negative"
+    ].
+    self.balance < amount ifTrue: [
+      self error: "Insufficient funds (balance: " ++ self.balance printString ++ ", requested: " ++ amount printString ++ ")"
+    ].
+    self.balance := self.balance - amount.
+    self.balance
+
+  balance -> Integer => self.balance
+
+  setOwner: name: String -> String =>
+    self.owner := name.
+    self.owner
+
+  getOwner -> String => self.owner

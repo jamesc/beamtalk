@@ -7,6 +7,9 @@
 // If a test fails, the doc is out of date (or vice versa).
 // Keep this file in sync with the doc.
 
+// @load tests/e2e/fixtures/typed_math.bt
+// @load examples/bank/typed_account.bt
+
 // ===========================================================================
 // String Encoding and UTF-8
 // ===========================================================================
@@ -85,6 +88,31 @@
 
 5 =/= 6
 // => true
+
+// ===========================================================================
+// Gradual Typing (ADR 0025)
+// ===========================================================================
+
+typedDocMath := TypedMath new
+// => _
+
+typedDocMath identity: 7
+// => 7
+
+typedDocMath sum: 2 with: 5
+// => 7
+
+typedDocMath maybeName: false
+// => none
+
+typedDocAccount := TypedAccount spawn
+// => #Actor<TypedAccount,_>
+
+(typedDocAccount deposit: 8) await
+// => 8
+
+typedDocAccount balance await
+// => 8
 
 // ===========================================================================
 // Blocks (Closures)
