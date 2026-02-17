@@ -345,3 +345,40 @@ dispatch_function_clause_is_arity_mismatch_test() ->
         error:#{error := Inner} ->
             ?assertEqual(arity_mismatch, Inner#beamtalk_error.kind)
     end.
+
+dispatch_badarg_preserves_details_test() ->
+    %% badarg errors should include erlang_error in details (ADR 0028)
+    Proxy = beamtalk_erlang_proxy:new(erlang),
+    try
+        beamtalk_erlang_proxy:dispatch('abs:', [not_a_number], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            Details = Inner#beamtalk_error.details,
+            ?assertEqual(badarg, maps:get(erlang_error, Details))
+    end.
+
+dispatch_function_clause_preserves_details_test() ->
+    %% function_clause errors should include erlang_error in details (ADR 0028)
+    Proxy = beamtalk_erlang_proxy:new(lists),
+    try
+        beamtalk_erlang_proxy:dispatch('nth:', [0, [a]], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            Details = Inner#beamtalk_error.details,
+            ?assertEqual(function_clause, maps:get(erlang_error, Details))
+    end.
+
+dispatch_undef_preserves_details_test() ->
+    %% undef errors should include erlang_error in details (ADR 0028)
+    %% Use an existing atom ('init') on a module that doesn't export it
+    Proxy = beamtalk_erlang_proxy:new(math),
+    try
+        beamtalk_erlang_proxy:dispatch('init', [], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            Details = Inner#beamtalk_error.details,
+            ?assertEqual(undef, maps:get(erlang_error, Details))
+    end.

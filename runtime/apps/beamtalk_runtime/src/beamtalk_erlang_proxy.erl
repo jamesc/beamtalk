@@ -70,25 +70,33 @@ dispatch(Selector, Args, Self) ->
                                 <<" is not exported or does not exist">>
                             ]),
                             Error2 = beamtalk_error:with_hint(Error1, Hint),
-                            beamtalk_error:raise(Error2);
+                            beamtalk_error:raise(
+                                beamtalk_error:with_details(Error2,
+                                    #{erlang_error => undef}));
                         error:badarg ->
                             Error0 = beamtalk_error:new(type_error, 'ErlangModule'),
                             Error1 = beamtalk_error:with_selector(Error0, Selector),
                             Error2 = beamtalk_error:with_hint(Error1,
                                 erlang_error_hint(Module, FunName, badarg)),
-                            beamtalk_error:raise(Error2);
+                            beamtalk_error:raise(
+                                beamtalk_error:with_details(Error2,
+                                    #{erlang_error => badarg}));
                         error:function_clause ->
                             Error0 = beamtalk_error:new(arity_mismatch, 'ErlangModule'),
                             Error1 = beamtalk_error:with_selector(Error0, Selector),
                             Error2 = beamtalk_error:with_hint(Error1,
                                 erlang_error_hint(Module, FunName, function_clause)),
-                            beamtalk_error:raise(Error2);
+                            beamtalk_error:raise(
+                                beamtalk_error:with_details(Error2,
+                                    #{erlang_error => function_clause}));
                         error:badarith ->
                             Error0 = beamtalk_error:new(type_error, 'ErlangModule'),
                             Error1 = beamtalk_error:with_selector(Error0, Selector),
                             Error2 = beamtalk_error:with_hint(Error1,
                                 erlang_error_hint(Module, FunName, badarith)),
-                            beamtalk_error:raise(Error2);
+                            beamtalk_error:raise(
+                                beamtalk_error:with_details(Error2,
+                                    #{erlang_error => badarith}));
                         error:Reason ->
                             Error0 = beamtalk_error:new(runtime_error, 'ErlangModule'),
                             Error1 = beamtalk_error:with_selector(Error0, Selector),
