@@ -485,29 +485,42 @@ Fix: Use control flow directly, or extract to a method:
 
 ## Async Message Passing
 
-Beamtalk uses **async-first** message passing (like Newspeak), unlike Smalltalk's synchronous model.
+Beamtalk uses **async-first** message passing, unlike Smalltalk's synchronous model. Messages to actors return **futures**.
 
 ### Default: Async with Futures
 
 ```
-// Returns immediately with a future
-result := agent analyze: data
+// Load the Counter actor
+:load examples/counter.bt
 
-// Explicitly wait for value
-value := result await
+// Spawn an actor — returns a reference
+c := Counter spawn
 
-// Continuation style - non-blocking
-agent analyze: data
-  whenResolved: [:value | self process: value]
-  whenRejected: [:error | self handle: error]
+// Messages to actors return futures
+c increment             // returns a Future
+c increment await       // explicitly wait for completion
+c getValue await        // => 2
 ```
 
-### Sync Opt-In
+### REPL Auto-Await
+
+In the REPL, futures are **automatically awaited** for a natural, synchronous feel:
 
 ```
-// Blocks until complete - use sparingly
-value := agent analyzeSync: data
+> c := Counter spawn
+#Actor<Counter,_>
+
+> c increment
+1
+
+> c increment
+2
+
+> c getValue
+2
 ```
+
+Outside the REPL (in compiled code), you must explicitly `await` or use continuations.
 
 ### BEAM Mapping
 
@@ -515,8 +528,7 @@ value := agent analyzeSync: data
 |----------|------|
 | Async send | `gen_server:cast` + future process |
 | `await` | `receive` block or `gen_server:call` |
-| `whenResolved:` | Callback on future completion |
-| Future | Lightweight process or ref |
+| Future | Lightweight process holding a result |
 
 ---
 
