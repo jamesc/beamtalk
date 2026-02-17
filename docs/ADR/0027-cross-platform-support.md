@@ -290,7 +290,7 @@ Not applicable. This is an infrastructure enhancement — no existing user code,
 ## Implementation Tracking
 
 **Epic:** [BT-609](https://linear.app/beamtalk/issue/BT-609)
-**Status:** Planned
+**Status:** Done
 
 | Phase | Issue | Title | Size |
 |-------|-------|-------|------|
