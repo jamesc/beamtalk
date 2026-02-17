@@ -39,6 +39,12 @@ pub struct BeamPaths {
     pub jsx_ebin: PathBuf,
     /// Path to the `beamtalk_stdlib` application's `ebin/` directory.
     pub stdlib_ebin: PathBuf,
+    /// Path to the `cowboy` HTTP server's `ebin/` directory (ADR 0020).
+    pub cowboy_ebin: PathBuf,
+    /// Path to the `cowlib` library's `ebin/` directory (cowboy dependency).
+    pub cowlib_ebin: PathBuf,
+    /// Path to the `ranch` acceptor pool's `ebin/` directory (cowboy dependency).
+    pub ranch_ebin: PathBuf,
 }
 
 /// Compute the standard `-pa` directories from a runtime root.
@@ -59,6 +65,9 @@ pub fn beam_paths_for_layout(runtime_dir: &Path, layout: RuntimeLayout) -> BeamP
                 workspace_ebin: build_lib_dir.join("beamtalk_workspace/ebin"),
                 compiler_ebin: build_lib_dir.join("beamtalk_compiler/ebin"),
                 jsx_ebin: build_lib_dir.join("jsx/ebin"),
+                cowboy_ebin: build_lib_dir.join("cowboy/ebin"),
+                cowlib_ebin: build_lib_dir.join("cowlib/ebin"),
+                ranch_ebin: build_lib_dir.join("ranch/ebin"),
                 // Stdlib beams are produced by `beamtalk build-stdlib` under apps/, not _build/
                 stdlib_ebin: runtime_dir.join("apps/beamtalk_stdlib/ebin"),
             }
@@ -70,6 +79,9 @@ pub fn beam_paths_for_layout(runtime_dir: &Path, layout: RuntimeLayout) -> BeamP
                 workspace_ebin: lib_dir.join("beamtalk_workspace/ebin"),
                 compiler_ebin: lib_dir.join("beamtalk_compiler/ebin"),
                 jsx_ebin: lib_dir.join("jsx/ebin"),
+                cowboy_ebin: lib_dir.join("cowboy/ebin"),
+                cowlib_ebin: lib_dir.join("cowlib/ebin"),
+                ranch_ebin: lib_dir.join("ranch/ebin"),
                 stdlib_ebin: lib_dir.join("beamtalk_stdlib/ebin"),
             }
         }
@@ -159,6 +171,9 @@ pub fn beam_pa_args(paths: &BeamPaths) -> Vec<OsString> {
         &paths.workspace_ebin,
         &paths.compiler_ebin,
         &paths.jsx_ebin,
+        &paths.cowboy_ebin,
+        &paths.cowlib_ebin,
+        &paths.ranch_ebin,
         &paths.stdlib_ebin,
     ];
     let mut args = Vec::with_capacity(dirs.len() * 2);
@@ -336,6 +351,18 @@ mod tests {
             PathBuf::from("/rt/_build/default/lib/jsx/ebin")
         );
         assert_eq!(
+            paths.cowboy_ebin,
+            PathBuf::from("/rt/_build/default/lib/cowboy/ebin")
+        );
+        assert_eq!(
+            paths.cowlib_ebin,
+            PathBuf::from("/rt/_build/default/lib/cowlib/ebin")
+        );
+        assert_eq!(
+            paths.ranch_ebin,
+            PathBuf::from("/rt/_build/default/lib/ranch/ebin")
+        );
+        assert_eq!(
             paths.stdlib_ebin,
             PathBuf::from("/rt/apps/beamtalk_stdlib/ebin")
         );
@@ -345,8 +372,8 @@ mod tests {
     fn beam_pa_args_alternates_flag_and_path() {
         let paths = beam_paths(Path::new("/rt"));
         let args = beam_pa_args(&paths);
-        // Should be 10 elements: 5 dirs × 2 (flag + path)
-        assert_eq!(args.len(), 10);
+        // Should be 16 elements: 8 dirs × 2 (flag + path)
+        assert_eq!(args.len(), 16);
         for i in (0..args.len()).step_by(2) {
             assert_eq!(args[i], "-pa");
         }
@@ -373,6 +400,18 @@ mod tests {
         assert_eq!(
             paths.jsx_ebin,
             PathBuf::from("/usr/local/lib/beamtalk/lib/jsx/ebin")
+        );
+        assert_eq!(
+            paths.cowboy_ebin,
+            PathBuf::from("/usr/local/lib/beamtalk/lib/cowboy/ebin")
+        );
+        assert_eq!(
+            paths.cowlib_ebin,
+            PathBuf::from("/usr/local/lib/beamtalk/lib/cowlib/ebin")
+        );
+        assert_eq!(
+            paths.ranch_ebin,
+            PathBuf::from("/usr/local/lib/beamtalk/lib/ranch/ebin")
         );
         assert_eq!(
             paths.stdlib_ebin,

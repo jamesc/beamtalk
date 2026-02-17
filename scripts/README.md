@@ -18,7 +18,7 @@ Worktrees are created in `.worktrees/` subdirectory inside the repo (inspired by
 
 | Script | Location | Description |
 |--------|----------|-------------|
-| `compile.sh` | `tests/fixtures/` | Compile Beamtalk test fixtures for runtime tests |
+| `compile_fixtures.escript` | `runtime/apps/beamtalk_runtime/test_fixtures/` | Compile Beamtalk test fixtures for runtime tests (portable) |
 
 ---
 

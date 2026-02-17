@@ -43,8 +43,8 @@ Several components have no Windows path at all:
 | `stop_workspace()` | Returns error on Windows | `crates/beamtalk-cli/src/commands/workspace/mod.rs:787-812` |
 | `/proc` start-time tracking | Linux-only, degrades silently on macOS | `crates/beamtalk-cli/src/commands/workspace/mod.rs:262,293,586` |
 | REPL Unix guard | `#[cfg(unix)]` in REPL module | `crates/beamtalk-cli/src/commands/repl/mod.rs:941` |
-| rebar3 pre-hook | `bash -c ./compile.sh` | `runtime/rebar.config:21` |
-| Test fixture compilation | Bash script | `runtime/apps/beamtalk_runtime/test_fixtures/compile.sh` |
+| rebar3 pre-hook | ~~`bash -c ./compile.sh`~~ Replaced by portable `compile_fixtures.escript` | `runtime/rebar.config:21` |
+| Test fixture compilation | ~~Bash script~~ Replaced by `compile_fixtures.escript` | `runtime/apps/beamtalk_runtime/test_fixtures/compile_fixtures.escript` |
 | Home directory fallback | `os:getenv("HOME", "/tmp")` | `runtime/apps/beamtalk_workspace/src/beamtalk_workspace_meta.erl:173` |
 | Project root detection | Hardcoded `/` root check | `runtime/apps/beamtalk_compiler/src/beamtalk_compiler_port.erl:153` |
 | Justfile | `set shell := ["bash", "-uc"]` | `Justfile:9` |
@@ -272,9 +272,9 @@ Originally proposed abstracting all process operations behind a `ProcessManager`
 - `beamtalk repl` works on Windows
 
 ### Phase 3: Build script portability
-- Replace `bash -c compile.sh` rebar3 hook with portable Erlang script
-- Add `set windows-shell` to Justfile
-- Create PowerShell equivalents for key scripts (or use `just` recipes directly)
+- ~~Replace `bash -c compile.sh` rebar3 hook with portable Erlang script~~ ✅ Done (`compile_fixtures.escript`)
+- ~~Add `set windows-shell` to Justfile~~ ✅ Done
+- ~~Create PowerShell equivalents for key scripts (or use `just` recipes directly)~~ ✅ Done (`scripts/worktree-*.ps1`)
 - Verify `just test-runtime` works on Windows
 
 **Affected components:** `beamtalk-cli` (process management, paths), runtime (Erlang build hooks, path handling), CI (workflow matrix), Justfile, documentation.
@@ -290,7 +290,7 @@ Not applicable. This is an infrastructure enhancement — no existing user code,
 ## Implementation Tracking
 
 **Epic:** [BT-609](https://linear.app/beamtalk/issue/BT-609)
-**Status:** Planned
+**Status:** Done
 
 | Phase | Issue | Title | Size |
 |-------|-------|-------|------|
@@ -298,6 +298,7 @@ Not applicable. This is an infrastructure enhancement — no existing user code,
 | 2 | BT-611 | Add TCP health and shutdown endpoints to workspace | L |
 | 2 | BT-612 | Replace process management with TCP probes and force-kill | L |
 | 3 | BT-613 | Add cross-platform CI and release workflow | M |
+| 3 | BT-619 | Bundle beamtalk-lsp per-platform in VS Code extension | M |
 
 **Dependency graph:**
 ```

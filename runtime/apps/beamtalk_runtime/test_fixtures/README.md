@@ -6,13 +6,13 @@ This directory contains Beamtalk source files compiled for use in runtime unit t
 
 **Location:** `runtime/apps/beamtalk_runtime/test_fixtures/` (BT-239 reorganization, BT-287 umbrella)  
 **Purpose:** Pre-compiled BEAM bytecode for `beamtalk_codegen_simulation_tests.erl`  
-**Build:** Automatically compiled by `compile.sh` via rebar3 pre-hook before eunit
+**Build:** Automatically compiled by `compile_fixtures.escript` via rebar3 pre-hook before eunit
 
 ## Directory Structure
 
 ```
 runtime/apps/beamtalk_runtime/test_fixtures/
-├── compile.sh           # Compiles fixtures before tests
+├── compile_fixtures.escript  # Compiles fixtures before tests (portable)
 ├── logging_counter.bt   # Super keyword test fixture
 └── README.md           # This file
 ```
@@ -28,7 +28,7 @@ Fixtures are compiled automatically by rebar3 before running tests:
 just test-runtime  # Auto-compiles fixtures via pre-hook
 
 # Or manually
-./runtime/apps/beamtalk_runtime/test_fixtures/compile.sh
+escript ./runtime/apps/beamtalk_runtime/test_fixtures/compile_fixtures.escript
 ```
 
 The script:

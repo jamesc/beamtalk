@@ -134,9 +134,15 @@ impl TypeChecker {
                 let mut method_env = TypeEnv::new();
                 method_env.set("self", InferredType::Known(class.name.name.clone()));
                 Self::set_param_types(&mut method_env, &method.parameters);
+                let mut body_type = InferredType::Dynamic;
                 for expr in &method.body {
-                    self.infer_expr(expr, hierarchy, &mut method_env, is_abstract);
+                    body_type = self.infer_expr(expr, hierarchy, &mut method_env, is_abstract);
+                    if matches!(expr, Expression::Return { .. }) {
+                        break; // Explicit return ends the body; later expressions are unreachable
+                    }
                 }
+                self.check_return_type(method, &body_type, &class.name.name, hierarchy);
+                self.check_override_param_compatibility(method, &class.name.name, hierarchy);
                 if is_typed {
                     self.check_typed_method_annotations(method, &class.name.name);
                 }
@@ -146,13 +152,21 @@ impl TypeChecker {
                 method_env.in_class_method = true;
                 method_env.set("self", InferredType::Known(class.name.name.clone()));
                 Self::set_param_types(&mut method_env, &method.parameters);
+                let mut body_type = InferredType::Dynamic;
                 for expr in &method.body {
-                    self.infer_expr(expr, hierarchy, &mut method_env, is_abstract);
+                    body_type = self.infer_expr(expr, hierarchy, &mut method_env, is_abstract);
+                    if matches!(expr, Expression::Return { .. }) {
+                        break;
+                    }
                 }
+                self.check_return_type(method, &body_type, &class.name.name, hierarchy);
                 if is_typed {
                     self.check_typed_method_annotations(method, &class.name.name);
                 }
             }
+
+            // Check state default values match declared types
+            self.check_state_defaults(class, hierarchy);
         }
 
         // Check standalone method definitions (Tonel-style: `Counter >> increment => ...`)
@@ -163,9 +177,14 @@ impl TypeChecker {
             method_env.in_class_method = standalone.is_class_method;
             method_env.set("self", InferredType::Known(class_name.clone()));
             Self::set_param_types(&mut method_env, &standalone.method.parameters);
+            let mut body_type = InferredType::Dynamic;
             for expr in &standalone.method.body {
-                self.infer_expr(expr, hierarchy, &mut method_env, is_abstract);
+                body_type = self.infer_expr(expr, hierarchy, &mut method_env, is_abstract);
+                if matches!(expr, Expression::Return { .. }) {
+                    break;
+                }
             }
+            self.check_return_type(&standalone.method, &body_type, class_name, hierarchy);
         }
     }
 
@@ -211,10 +230,27 @@ impl TypeChecker {
             // Class references are the class itself (class-side receiver)
             Expression::ClassReference { name, .. } => InferredType::Known(name.name.clone()),
 
-            // Field access, primitives, errors — no type info available
-            Expression::FieldAccess { .. }
-            | Expression::Primitive { .. }
-            | Expression::Error { .. } => InferredType::Dynamic,
+            // Field access — infer type from declared state type for self.field
+            Expression::FieldAccess {
+                receiver, field, ..
+            } => {
+                let mut result = InferredType::Dynamic;
+                if let Expression::Identifier(recv_id) = receiver.as_ref() {
+                    if recv_id.name == "self" {
+                        if let Some(InferredType::Known(class_name)) = env.get("self") {
+                            if let Some(field_type) =
+                                hierarchy.state_field_type(&class_name, &field.name)
+                            {
+                                result = InferredType::Known(field_type);
+                            }
+                        }
+                    }
+                }
+                result
+            }
+
+            // Primitives and errors — no type info available
+            Expression::Primitive { .. } | Expression::Error { .. } => InferredType::Dynamic,
 
             // Message sends — the core of type checking
             Expression::MessageSend {
@@ -233,10 +269,27 @@ impl TypeChecker {
             ),
 
             // Assignments track the type of the value
-            Expression::Assignment { target, value, .. } => {
+            Expression::Assignment {
+                target,
+                value,
+                span,
+            } => {
                 let ty = self.infer_expr(value, hierarchy, env, in_abstract_method);
-                if let Expression::Identifier(ident) = target.as_ref() {
-                    env.set(ident.name.as_str(), ty.clone());
+                match target.as_ref() {
+                    Expression::Identifier(ident) => {
+                        env.set(ident.name.as_str(), ty.clone());
+                    }
+                    Expression::FieldAccess {
+                        receiver, field, ..
+                    } => {
+                        // Check self.field := value against declared state type
+                        if let Expression::Identifier(recv_id) = receiver.as_ref() {
+                            if recv_id.name == "self" {
+                                self.check_field_assignment(field, &ty, *span, hierarchy, env);
+                            }
+                        }
+                    }
+                    _ => {}
                 }
                 ty
             }
@@ -425,6 +478,14 @@ impl TypeChecker {
         // If receiver is a class reference, check class-side methods
         if let Expression::ClassReference { name, .. } = receiver {
             let class_name = &name.name;
+            self.check_argument_types(
+                class_name,
+                &selector_name,
+                &arg_types,
+                span,
+                hierarchy,
+                true,
+            );
             return self.check_class_side_send(class_name, &selector_name, span, hierarchy);
         }
 
@@ -433,12 +494,32 @@ impl TypeChecker {
             // In class methods, self sends should check class-side methods
             if env.in_class_method && Self::is_self_receiver(receiver) {
                 if !in_abstract_method {
+                    self.check_argument_types(
+                        class_name,
+                        &selector_name,
+                        &arg_types,
+                        span,
+                        hierarchy,
+                        true,
+                    );
                     return self.check_class_side_send(class_name, &selector_name, span, hierarchy);
                 }
                 return InferredType::Dynamic;
             }
 
             self.check_instance_selector(class_name, &selector_name, span, hierarchy);
+            // Skip argument type check for binary messages — check_binary_operand_types
+            // already provides more specific warnings for arithmetic/comparison/concat.
+            if !matches!(selector, MessageSelector::Binary(_)) {
+                self.check_argument_types(
+                    class_name,
+                    &selector_name,
+                    &arg_types,
+                    span,
+                    hierarchy,
+                    false,
+                );
+            }
 
             // Infer return type from method info
             if let Some(method) = hierarchy.find_method(class_name, &selector_name) {
@@ -554,6 +635,166 @@ impl TypeChecker {
         }
     }
 
+    /// Check if `actual` type is compatible with `expected` type.
+    ///
+    /// Compatibility rules:
+    /// - Same type → compatible
+    /// - `expected` appears in `actual`'s superclass chain → compatible (e.g., Integer for Number)
+    /// - Either type is unknown to the hierarchy → compatible (conservative)
+    fn is_type_compatible(
+        actual: &EcoString,
+        expected: &EcoString,
+        hierarchy: &ClassHierarchy,
+    ) -> bool {
+        if actual == expected {
+            return true;
+        }
+        // If either type isn't known to the hierarchy, don't warn (conservative)
+        if !hierarchy.has_class(actual) || !hierarchy.has_class(expected) {
+            return true;
+        }
+        // Walk superclass chain: if expected is an ancestor of actual, it's compatible
+        let chain = hierarchy.superclass_chain(actual);
+        chain.iter().any(|ancestor| ancestor == expected)
+    }
+
+    /// Check argument types against declared parameter types for a message send.
+    fn check_argument_types(
+        &mut self,
+        class_name: &EcoString,
+        selector: &str,
+        arg_types: &[InferredType],
+        span: Span,
+        hierarchy: &ClassHierarchy,
+        is_class_side: bool,
+    ) {
+        let method = if is_class_side {
+            hierarchy.find_class_method(class_name, selector)
+        } else {
+            hierarchy.find_method(class_name, selector)
+        };
+        let Some(method) = method else { return };
+        if method.param_types.is_empty() {
+            return;
+        }
+
+        for (i, (arg_ty, expected)) in arg_types.iter().zip(method.param_types.iter()).enumerate() {
+            let Some(expected_ty) = expected else {
+                continue;
+            };
+            let InferredType::Known(actual_ty) = arg_ty else {
+                continue; // Dynamic arguments never produce warnings
+            };
+            if !Self::is_type_compatible(actual_ty, expected_ty, hierarchy) {
+                let param_pos = i + 1;
+                let mut diag = Diagnostic::warning(
+                    format!(
+                        "Argument {param_pos} of '{selector}' on {class_name} expects {expected_ty}, got {actual_ty}"
+                    ),
+                    span,
+                );
+                diag.hint =
+                    Some(format!("Expected {expected_ty} (or a subclass), got {actual_ty}").into());
+                self.diagnostics.push(diag);
+            }
+        }
+    }
+
+    /// Check that a method body's inferred return type matches its declared return type.
+    fn check_return_type(
+        &mut self,
+        method: &crate::ast::MethodDefinition,
+        body_type: &InferredType,
+        class_name: &EcoString,
+        hierarchy: &ClassHierarchy,
+    ) {
+        // Skip primitive methods
+        if method
+            .body
+            .iter()
+            .any(|e| matches!(e, Expression::Primitive { .. }))
+        {
+            return;
+        }
+
+        let Some(ref declared) = method.return_type else {
+            return;
+        };
+        // Only check Simple type annotations (Phase 3 handles unions/generics)
+        let TypeAnnotation::Simple(type_id) = declared else {
+            return;
+        };
+        let InferredType::Known(actual_ty) = body_type else {
+            return; // Dynamic body — can't check
+        };
+
+        let expected_ty = &type_id.name;
+        if !Self::is_type_compatible(actual_ty, expected_ty, hierarchy) {
+            let selector = method.selector.name();
+            let mut diag = Diagnostic::warning(
+                format!(
+                    "Method '{selector}' in {class_name} declares return type {expected_ty}, but body returns {actual_ty}"
+                ),
+                method.span,
+            );
+            diag.hint = Some(
+                format!("Declared -> {expected_ty}, inferred body type is {actual_ty}").into(),
+            );
+            self.diagnostics.push(diag);
+        }
+    }
+
+    /// Check that a child method's parameter types are compatible with its parent's.
+    fn check_override_param_compatibility(
+        &mut self,
+        method: &crate::ast::MethodDefinition,
+        class_name: &EcoString,
+        hierarchy: &ClassHierarchy,
+    ) {
+        let selector = method.selector.name();
+        let Some(class_info) = hierarchy.get_class(class_name) else {
+            return;
+        };
+        let Some(ref superclass) = class_info.superclass else {
+            return;
+        };
+        let Some(parent_method) = hierarchy.find_method(superclass, &selector) else {
+            return;
+        };
+        if parent_method.param_types.is_empty() {
+            return;
+        }
+
+        // Get child param types from MethodInfo
+        let Some(child_method) = hierarchy.find_method(class_name, &selector) else {
+            return;
+        };
+
+        for (i, (child_ty, parent_ty)) in child_method
+            .param_types
+            .iter()
+            .zip(parent_method.param_types.iter())
+            .enumerate()
+        {
+            let (Some(child_t), Some(parent_t)) = (child_ty, parent_ty) else {
+                continue;
+            };
+            if !Self::is_type_compatible(child_t, parent_t, hierarchy) {
+                let param_pos = i + 1;
+                let mut diag = Diagnostic::warning(
+                    format!(
+                        "Parameter {param_pos} of '{selector}' in {class_name} has type {child_t}, incompatible with parent's {parent_t}"
+                    ),
+                    method.span,
+                );
+                diag.hint = Some(
+                    format!("Parent class {superclass} declares parameter type {parent_t}").into(),
+                );
+                self.diagnostics.push(diag);
+            }
+        }
+    }
+
     /// Validate binary message operand types for arithmetic and string concatenation.
     ///
     /// When both receiver and argument types are known, checks that the argument type
@@ -605,6 +846,110 @@ impl TypeChecker {
             diag.hint = Some("Comparison operators require compatible types".into());
             self.diagnostics.push(diag);
         }
+    }
+
+    /// Check a field assignment `self.field := value` against the declared state type.
+    ///
+    /// If the field has a type annotation in the class hierarchy and the inferred
+    /// value type is known and incompatible, emits a warning.
+    fn check_field_assignment(
+        &mut self,
+        field: &crate::ast::Identifier,
+        value_ty: &InferredType,
+        span: Span,
+        hierarchy: &ClassHierarchy,
+        env: &TypeEnv,
+    ) {
+        let InferredType::Known(value_type) = value_ty else {
+            return; // Dynamic expressions never produce warnings
+        };
+        let Some(InferredType::Known(class_name)) = env.get("self") else {
+            return;
+        };
+        let Some(declared_type) = hierarchy.state_field_type(&class_name, &field.name) else {
+            return; // No type annotation on this field
+        };
+        if !Self::is_assignable_to(value_type, &declared_type, hierarchy) {
+            let mut diag = Diagnostic::warning(
+                format!(
+                    "Type mismatch: field `{}` declared as {declared_type}, got {value_type}",
+                    field.name
+                ),
+                span,
+            );
+            diag.hint = Some(format!("Expected {declared_type} but assigning {value_type}").into());
+            self.diagnostics.push(diag);
+        }
+    }
+
+    /// Check state default values match declared types at class definition time.
+    fn check_state_defaults(
+        &mut self,
+        class: &crate::ast::ClassDefinition,
+        hierarchy: &ClassHierarchy,
+    ) {
+        for decl in &class.state {
+            let Some(ref type_annotation) = decl.type_annotation else {
+                continue;
+            };
+            let Some(ref default_value) = decl.default_value else {
+                continue;
+            };
+            let declared_type = type_annotation.type_name();
+            let mut env = TypeEnv::new();
+            env.set("self", InferredType::Known(class.name.name.clone()));
+            let inferred = self.infer_expr(default_value, hierarchy, &mut env, false);
+            let InferredType::Known(value_type) = &inferred else {
+                continue; // Dynamic defaults are fine
+            };
+            if !Self::is_assignable_to(value_type, &declared_type, hierarchy) {
+                let mut diag = Diagnostic::warning(
+                    format!(
+                        "Type mismatch: state `{}` declared as {declared_type}, default is {value_type}",
+                        decl.name.name
+                    ),
+                    decl.span,
+                );
+                diag.hint = Some(
+                    format!(
+                        "Default value type {value_type} is not compatible with {declared_type}"
+                    )
+                    .into(),
+                );
+                self.diagnostics.push(diag);
+            }
+        }
+    }
+
+    /// Returns true if `value_type` is assignable to `declared_type`.
+    ///
+    /// A type is assignable if it is the same type or a subclass of the declared type.
+    /// For example, Integer is assignable to Number because Integer's superclass
+    /// chain includes Number.
+    ///
+    /// Returns true (permissive) for complex type annotations (unions, generics)
+    /// that are not yet supported — full union type support is Phase 3.
+    fn is_assignable_to(
+        value_type: &EcoString,
+        declared_type: &EcoString,
+        hierarchy: &ClassHierarchy,
+    ) -> bool {
+        if value_type == declared_type {
+            return true;
+        }
+        // Skip checking for complex type annotations (unions, generics, singletons)
+        // that contain non-class-name characters. These need Phase 3 union support.
+        if declared_type.contains('|')
+            || declared_type.contains('<')
+            || declared_type.starts_with('#')
+        {
+            return true;
+        }
+        // Check if value_type is a subclass of declared_type
+        hierarchy
+            .superclass_chain(value_type)
+            .iter()
+            .any(|ancestor| ancestor == declared_type)
     }
 
     /// Emit a warning diagnostic for an unknown selector.
@@ -738,7 +1083,7 @@ mod tests {
     use super::*;
     use crate::ast::{
         Block, CascadeMessage, ClassDefinition, Identifier, KeywordPart, MethodDefinition,
-        MethodKind, Module, ParameterDefinition, TypeAnnotation,
+        MethodKind, Module, ParameterDefinition, StateDeclaration, TypeAnnotation,
     };
     use crate::source_analysis::Span;
 
@@ -1955,6 +2300,855 @@ mod tests {
         assert!(
             checker.diagnostics().is_empty(),
             "asType: should not produce warnings, got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    // ---- BT-671: Argument and return type checking tests ----
+
+    #[test]
+    fn test_integer_plus_string_warns_operand_type() {
+        // 42 + "hello" — Integer + expects numeric arg, String is wrong type
+        let module = make_module(vec![msg_send(
+            int_lit(42),
+            MessageSelector::Binary("+".into()),
+            vec![str_lit("hello")],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert!(
+            !checker.diagnostics().is_empty(),
+            "42 + 'hello' should produce a type warning"
+        );
+    }
+
+    #[test]
+    fn test_integer_plus_integer_no_arg_type_warning() {
+        // 3 + 4 — valid, no warnings (acceptance criteria)
+        let module = make_module(vec![msg_send(
+            int_lit(3),
+            MessageSelector::Binary("+".into()),
+            vec![int_lit(4)],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "3 + 4 should not produce warnings, got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn test_integer_subtype_of_number_no_warning() {
+        // Integer is a subtype of Number via superclass chain
+        // Integer + Integer should work since param declares Number
+        let module = make_module(vec![msg_send(
+            int_lit(42),
+            MessageSelector::Binary("+".into()),
+            vec![int_lit(1)],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "Integer should be valid for Number param"
+        );
+    }
+
+    #[test]
+    fn test_dynamic_args_never_warn() {
+        // unknownVar + 42 — receiver is Dynamic, no warning
+        let module = make_module(vec![msg_send(
+            var("unknownVar"),
+            MessageSelector::Binary("+".into()),
+            vec![var("alsoUnknown")],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "Dynamic arguments should never produce warnings"
+        );
+    }
+
+    #[test]
+    fn test_return_type_mismatch_warns() {
+        // getBalance -> Integer => 'oops' warns (acceptance criteria)
+        let class_def = ClassDefinition::with_modifiers(
+            ident("Account"),
+            Some(ident("Object")),
+            false,
+            false,
+            vec![],
+            vec![MethodDefinition::with_return_type(
+                MessageSelector::Unary("getBalance".into()),
+                vec![],
+                vec![str_lit("oops")], // Returns String, declared Integer
+                TypeAnnotation::Simple(ident("Integer")),
+                span(),
+            )],
+            span(),
+        );
+        let module = make_module_with_classes(vec![], vec![class_def]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let return_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("declares return type"))
+            .collect();
+        assert_eq!(
+            return_warnings.len(),
+            1,
+            "should warn about return type mismatch"
+        );
+        assert!(return_warnings[0].message.contains("Integer"));
+        assert!(return_warnings[0].message.contains("String"));
+    }
+
+    #[test]
+    fn test_return_type_match_no_warning() {
+        // getBalance -> Integer => 42  — correct return type
+        let class_def = ClassDefinition::with_modifiers(
+            ident("Account"),
+            Some(ident("Object")),
+            false,
+            false,
+            vec![],
+            vec![MethodDefinition::with_return_type(
+                MessageSelector::Unary("getBalance".into()),
+                vec![],
+                vec![int_lit(42)],
+                TypeAnnotation::Simple(ident("Integer")),
+                span(),
+            )],
+            span(),
+        );
+        let module = make_module_with_classes(vec![], vec![class_def]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let return_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("declares return type"))
+            .collect();
+        assert!(
+            return_warnings.is_empty(),
+            "matching return type should not warn"
+        );
+    }
+
+    #[test]
+    fn test_return_type_skip_primitive_methods() {
+        // @primitive method — should not check return type
+        let class_def = ClassDefinition::with_modifiers(
+            ident("MyInt"),
+            Some(ident("Object")),
+            false,
+            false,
+            vec![],
+            vec![MethodDefinition::with_return_type(
+                MessageSelector::Unary("value".into()),
+                vec![],
+                vec![Expression::Primitive {
+                    name: "value".into(),
+                    is_quoted: true,
+                    span: span(),
+                }],
+                TypeAnnotation::Simple(ident("Integer")),
+                span(),
+            )],
+            span(),
+        );
+        let module = make_module_with_classes(vec![], vec![class_def]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let return_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("declares return type"))
+            .collect();
+        assert!(
+            return_warnings.is_empty(),
+            "primitive methods should skip return type check"
+        );
+    }
+
+    #[test]
+    fn test_return_type_no_annotation_no_warning() {
+        // Method without return type annotation — no warning
+        let class_def = ClassDefinition::with_modifiers(
+            ident("Counter"),
+            Some(ident("Object")),
+            false,
+            false,
+            vec![],
+            vec![MethodDefinition::new(
+                MessageSelector::Unary("count".into()),
+                vec![],
+                vec![str_lit("oops")],
+                span(),
+            )],
+            span(),
+        );
+        let module = make_module_with_classes(vec![], vec![class_def]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let return_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("declares return type"))
+            .collect();
+        assert!(
+            return_warnings.is_empty(),
+            "method without return type should not warn about return type"
+        );
+    }
+
+    #[test]
+    fn test_as_type_suppresses_subsequent_warnings() {
+        // (x asType: Integer) + "hello" — x is asserted Integer, should warn about String arg
+        let module = make_module(vec![msg_send(
+            msg_send(
+                var("x"),
+                MessageSelector::Keyword(vec![KeywordPart::new("asType:", span())]),
+                vec![class_ref("Integer")],
+            ),
+            MessageSelector::Binary("+".into()),
+            vec![str_lit("hello")],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        // After asType:, x is Known(Integer), so + "hello" should warn
+        assert!(
+            !checker.diagnostics().is_empty(),
+            "asType: Integer + String should produce a type warning"
+        );
+    }
+
+    #[test]
+    fn test_keyword_arg_type_mismatch_warns() {
+        // Counter with typed parameter: deposit: amount: Integer
+        // Sending deposit: "hello" should warn
+        let class_def = ClassDefinition::with_modifiers(
+            ident("Counter"),
+            Some(ident("Object")),
+            false,
+            false,
+            vec![],
+            vec![MethodDefinition::new(
+                MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
+                vec![ParameterDefinition::with_type(
+                    ident("amount"),
+                    TypeAnnotation::Simple(ident("Integer")),
+                )],
+                vec![int_lit(0)],
+                span(),
+            )],
+            span(),
+        );
+        let module = make_module_with_classes(
+            vec![
+                // c := Counter new
+                assign(
+                    "c",
+                    msg_send(
+                        class_ref("Counter"),
+                        MessageSelector::Unary("new".into()),
+                        vec![],
+                    ),
+                ),
+                // c deposit: "hello"
+                msg_send(
+                    var("c"),
+                    MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
+                    vec![str_lit("hello")],
+                ),
+            ],
+            vec![class_def],
+        );
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let arg_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("expects Integer"))
+            .collect();
+        assert_eq!(
+            arg_warnings.len(),
+            1,
+            "should warn about String argument where Integer expected, got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn test_keyword_arg_type_match_no_warning() {
+        // Counter deposit: 42 — correct type
+        let class_def = ClassDefinition::with_modifiers(
+            ident("Counter"),
+            Some(ident("Object")),
+            false,
+            false,
+            vec![],
+            vec![MethodDefinition::new(
+                MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
+                vec![ParameterDefinition::with_type(
+                    ident("amount"),
+                    TypeAnnotation::Simple(ident("Integer")),
+                )],
+                vec![int_lit(0)],
+                span(),
+            )],
+            span(),
+        );
+        let module = make_module_with_classes(
+            vec![
+                assign(
+                    "c",
+                    msg_send(
+                        class_ref("Counter"),
+                        MessageSelector::Unary("new".into()),
+                        vec![],
+                    ),
+                ),
+                msg_send(
+                    var("c"),
+                    MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
+                    vec![int_lit(42)],
+                ),
+            ],
+            vec![class_def],
+        );
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let arg_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("expects"))
+            .collect();
+        assert!(
+            arg_warnings.is_empty(),
+            "correct arg type should not warn, got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn test_override_incompatible_param_type_warns() {
+        // Parent: deposit: amount: Number
+        // Child: deposit: amount: String (incompatible)
+        let parent = ClassDefinition::with_modifiers(
+            ident("Base"),
+            Some(ident("Object")),
+            false,
+            false,
+            vec![],
+            vec![MethodDefinition::new(
+                MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
+                vec![ParameterDefinition::with_type(
+                    ident("amount"),
+                    TypeAnnotation::Simple(ident("Number")),
+                )],
+                vec![int_lit(0)],
+                span(),
+            )],
+            span(),
+        );
+        let child = ClassDefinition::with_modifiers(
+            ident("Derived"),
+            Some(ident("Base")),
+            false,
+            false,
+            vec![],
+            vec![MethodDefinition::new(
+                MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
+                vec![ParameterDefinition::with_type(
+                    ident("amount"),
+                    TypeAnnotation::Simple(ident("String")),
+                )],
+                vec![str_lit("ok")],
+                span(),
+            )],
+            span(),
+        );
+        let module = make_module_with_classes(vec![], vec![parent, child]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let override_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("incompatible with parent"))
+            .collect();
+        assert_eq!(
+            override_warnings.len(),
+            1,
+            "should warn about incompatible override param type"
+        );
+    }
+
+    #[test]
+    fn test_override_compatible_param_type_no_warning() {
+        // Parent: deposit: amount: Number
+        // Child: deposit: amount: Integer (compatible — Integer is subclass of Number)
+        let parent = ClassDefinition::with_modifiers(
+            ident("Base"),
+            Some(ident("Object")),
+            false,
+            false,
+            vec![],
+            vec![MethodDefinition::new(
+                MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
+                vec![ParameterDefinition::with_type(
+                    ident("amount"),
+                    TypeAnnotation::Simple(ident("Number")),
+                )],
+                vec![int_lit(0)],
+                span(),
+            )],
+            span(),
+        );
+        let child = ClassDefinition::with_modifiers(
+            ident("Derived"),
+            Some(ident("Base")),
+            false,
+            false,
+            vec![],
+            vec![MethodDefinition::new(
+                MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
+                vec![ParameterDefinition::with_type(
+                    ident("amount"),
+                    TypeAnnotation::Simple(ident("Integer")),
+                )],
+                vec![int_lit(0)],
+                span(),
+            )],
+            span(),
+        );
+        let module = make_module_with_classes(vec![], vec![parent, child]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let override_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("incompatible with parent"))
+            .collect();
+        assert!(
+            override_warnings.is_empty(),
+            "compatible override should not warn"
+        );
+    }
+
+    #[test]
+    fn test_all_type_warnings_are_severity_warning() {
+        // Verify all diagnostics from type checking are Severity::Warning
+        let class_def = ClassDefinition::with_modifiers(
+            ident("Account"),
+            Some(ident("Object")),
+            false,
+            false,
+            vec![],
+            vec![MethodDefinition::with_return_type(
+                MessageSelector::Unary("getBalance".into()),
+                vec![],
+                vec![str_lit("oops")],
+                TypeAnnotation::Simple(ident("Integer")),
+                span(),
+            )],
+            span(),
+        );
+        let module = make_module_with_classes(
+            vec![msg_send(
+                int_lit(42),
+                MessageSelector::Binary("+".into()),
+                vec![str_lit("hello")],
+            )],
+            vec![class_def],
+        );
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        for diag in checker.diagnostics() {
+            assert_eq!(
+                diag.severity,
+                crate::source_analysis::Severity::Warning,
+                "all type checking diagnostics should be warnings, not errors: {}",
+                diag.message
+            );
+        }
+    }
+
+    // --- State field assignment type checking tests (BT-672) ---
+
+    fn field_access(field_name: &str) -> Expression {
+        Expression::FieldAccess {
+            receiver: Box::new(var("self")),
+            field: ident(field_name),
+            span: span(),
+        }
+    }
+
+    fn field_assign(field_name: &str, value: Expression) -> Expression {
+        Expression::Assignment {
+            target: Box::new(field_access(field_name)),
+            value: Box::new(value),
+            span: span(),
+        }
+    }
+
+    fn counter_class_with_typed_state(
+        methods: Vec<MethodDefinition>,
+        state: Vec<StateDeclaration>,
+    ) -> ClassDefinition {
+        ClassDefinition {
+            name: ident("Counter"),
+            superclass: Some(ident("Object")),
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state,
+            methods,
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: span(),
+        }
+    }
+
+    #[test]
+    fn test_empty_body_with_return_type_no_crash() {
+        // Empty method body with return type annotation — should not crash
+        let class_def = ClassDefinition::with_modifiers(
+            ident("Counter"),
+            Some(ident("Object")),
+            false,
+            false,
+            vec![],
+            vec![MethodDefinition::with_return_type(
+                MessageSelector::Unary("count".into()),
+                vec![],
+                vec![], // empty body
+                TypeAnnotation::Simple(ident("Integer")),
+                span(),
+            )],
+            span(),
+        );
+        let module = make_module_with_classes(vec![], vec![class_def]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        // Dynamic body type — no return type warning (can't infer from empty body)
+        let return_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("declares return type"))
+            .collect();
+        assert!(
+            return_warnings.is_empty(),
+            "empty body should not produce return type mismatch"
+        );
+    }
+
+    #[test]
+    fn test_integer_plus_string_exactly_one_warning() {
+        // 42 + "hello" — should produce exactly 1 warning (binary operand check),
+        // not 2 (no duplicate from check_argument_types)
+        let module = make_module(vec![msg_send(
+            int_lit(42),
+            MessageSelector::Binary("+".into()),
+            vec![str_lit("hello")],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert_eq!(
+            checker.diagnostics().len(),
+            1,
+            "should produce exactly 1 warning (no duplicate), got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn test_field_assign_typed_mismatch_warns() {
+        // state: count: Integer = 0; self.count := "bad" → warning
+        let state = vec![StateDeclaration::with_type_and_default(
+            ident("count"),
+            TypeAnnotation::simple("Integer", span()),
+            int_lit(0),
+            span(),
+        )];
+        let method = make_method("badMethod", vec![field_assign("count", str_lit("bad"))]);
+        let class = counter_class_with_typed_state(vec![method], state);
+        let module = make_module_with_classes(vec![], vec![class]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("Type mismatch"))
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Expected 1 type mismatch warning, got: {:?}",
+            checker.diagnostics()
+        );
+        assert!(warnings[0].message.contains("count"));
+        assert!(warnings[0].message.contains("Integer"));
+        assert!(warnings[0].message.contains("String"));
+    }
+
+    #[test]
+    fn test_field_assign_typed_match_no_warn() {
+        // state: count: Integer = 0; self.count := 42 → no warning
+        let state = vec![StateDeclaration::with_type_and_default(
+            ident("count"),
+            TypeAnnotation::simple("Integer", span()),
+            int_lit(0),
+            span(),
+        )];
+        let method = make_method("goodMethod", vec![field_assign("count", int_lit(42))]);
+        let class = counter_class_with_typed_state(vec![method], state);
+        let module = make_module_with_classes(vec![], vec![class]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "No warnings expected, got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn test_return_type_subtype_compatible() {
+        // Method declares -> Number, body returns Integer (subtype) — no warning
+        let class_def = ClassDefinition::with_modifiers(
+            ident("Calculator"),
+            Some(ident("Object")),
+            false,
+            false,
+            vec![],
+            vec![MethodDefinition::with_return_type(
+                MessageSelector::Unary("compute".into()),
+                vec![],
+                vec![int_lit(42)], // Integer is subtype of Number
+                TypeAnnotation::Simple(ident("Number")),
+                span(),
+            )],
+            span(),
+        );
+        let module = make_module_with_classes(vec![], vec![class_def]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let return_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("declares return type"))
+            .collect();
+        assert!(
+            return_warnings.is_empty(),
+            "Integer return should be compatible with Number declaration"
+        );
+    }
+
+    #[test]
+    fn test_field_assign_untyped_no_warn() {
+        // state: value = 0; self.value := "anything" → no warning
+        let state = vec![StateDeclaration::with_default(
+            ident("value"),
+            int_lit(0),
+            span(),
+        )];
+        let method = make_method(
+            "setAnything",
+            vec![field_assign("value", str_lit("anything"))],
+        );
+        let class = counter_class_with_typed_state(vec![method], state);
+        let module = make_module_with_classes(vec![], vec![class]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "Untyped fields should not produce warnings, got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn test_early_return_uses_return_type_not_trailing() {
+        // Method with early return: ^ 42 followed by unreachable "oops"
+        // Return type checking should use the return expression type (Integer),
+        // not the unreachable trailing expression (String)
+        let class_def = ClassDefinition::with_modifiers(
+            ident("Calculator"),
+            Some(ident("Object")),
+            false,
+            false,
+            vec![],
+            vec![MethodDefinition::with_return_type(
+                MessageSelector::Unary("compute".into()),
+                vec![],
+                vec![
+                    Expression::Return {
+                        value: Box::new(int_lit(42)),
+                        span: span(),
+                    },
+                    str_lit("unreachable"), // would be String, but never reached
+                ],
+                TypeAnnotation::Simple(ident("Integer")),
+                span(),
+            )],
+            span(),
+        );
+        let module = make_module_with_classes(vec![], vec![class_def]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let return_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("declares return type"))
+            .collect();
+        assert!(
+            return_warnings.is_empty(),
+            "early return of Integer should match declared Integer, not unreachable String"
+        );
+    }
+
+    #[test]
+    fn test_field_assign_subtype_no_warn() {
+        // Integer is assignable to Number (Integer's superclass chain includes Number)
+        let state = vec![StateDeclaration::with_type(
+            ident("value"),
+            TypeAnnotation::simple("Number", span()),
+            span(),
+        )];
+        let method = make_method("setNumber", vec![field_assign("value", int_lit(42))]);
+        let class = counter_class_with_typed_state(vec![method], state);
+        let module = make_module_with_classes(vec![], vec![class]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "Integer should be assignable to Number, got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn test_state_default_value_mismatch_warns() {
+        // state: count: Integer = "bad" → warning at class definition time
+        let state = vec![StateDeclaration::with_type_and_default(
+            ident("count"),
+            TypeAnnotation::simple("Integer", span()),
+            str_lit("bad"),
+            span(),
+        )];
+        let class = counter_class_with_typed_state(vec![], state);
+        let module = make_module_with_classes(vec![], vec![class]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("Type mismatch"))
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Expected 1 type mismatch for default value, got: {:?}",
+            checker.diagnostics()
+        );
+        assert!(warnings[0].message.contains("count"));
+    }
+
+    #[test]
+    fn test_state_default_value_match_no_warn() {
+        // state: count: Integer = 0 → no warning
+        let state = vec![StateDeclaration::with_type_and_default(
+            ident("count"),
+            TypeAnnotation::simple("Integer", span()),
+            int_lit(0),
+            span(),
+        )];
+        let class = counter_class_with_typed_state(vec![], state);
+        let module = make_module_with_classes(vec![], vec![class]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "Default value matching declared type should not warn, got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn test_dynamic_expression_no_warn() {
+        // Assigning a dynamic expression (unknown variable) to a typed field → no warning
+        let state = vec![StateDeclaration::with_type(
+            ident("count"),
+            TypeAnnotation::simple("Integer", span()),
+            span(),
+        )];
+        let method = make_method("setUnknown", vec![field_assign("count", var("unknownVar"))]);
+        let class = counter_class_with_typed_state(vec![method], state);
+        let module = make_module_with_classes(vec![], vec![class]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "Dynamic expressions should never produce warnings, got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn test_union_type_annotation_no_false_positive() {
+        // state: value: Integer | String = 42 → no warning (union types skip check)
+        let state = vec![StateDeclaration::with_type_and_default(
+            ident("value"),
+            TypeAnnotation::union(
+                vec![
+                    TypeAnnotation::simple("Integer", span()),
+                    TypeAnnotation::simple("String", span()),
+                ],
+                span(),
+            ),
+            int_lit(42),
+            span(),
+        )];
+        let method = make_method("setValue", vec![field_assign("value", str_lit("hello"))]);
+        let class = counter_class_with_typed_state(vec![method], state);
+        let module = make_module_with_classes(vec![], vec![class]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "Union type annotations should not produce false positives, got: {:?}",
             checker.diagnostics()
         );
     }

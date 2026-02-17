@@ -69,6 +69,9 @@ const STRUCTURAL_INTRINSICS: &[&str] = &[
     "ensure",
     // Error signaling
     "error",
+    // BEAM interop (ADR 0028)
+    "erlangModuleLookup",
+    "erlangApply",
 ];
 
 /// Validates all `@primitive` usages in a module.

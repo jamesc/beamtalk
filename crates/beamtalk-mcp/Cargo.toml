@@ -42,5 +42,10 @@ sha2.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
+# why: WebSocket client for REPL protocol (ADR 0020)
+tokio-tungstenite.workspace = true
+# why: Stream/Sink combinators for WebSocket I/O
+futures-util = "0.3"
+
 [lints]
 workspace = true
