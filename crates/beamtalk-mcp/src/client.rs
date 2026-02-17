@@ -42,7 +42,13 @@ impl ReplClient {
             .map_err(|e| format!("Failed to connect to REPL at {url}: {e}"))?;
 
         // Read auth-required message (pre-auth, no session yet)
-        let _auth_required = read_text_message_with_timeout(&mut ws, REPL_IO_TIMEOUT).await?;
+        let auth_required = read_text_message_with_timeout(&mut ws, REPL_IO_TIMEOUT).await?;
+        let auth_required_json: serde_json::Value = serde_json::from_str(&auth_required)
+            .map_err(|e| format!("Failed to parse auth-required: {e}"))?;
+        match auth_required_json.get("op").and_then(|v| v.as_str()) {
+            Some("auth-required") => {}
+            _ => return Err(format!("Unexpected pre-auth message: {auth_required_json}")),
+        }
 
         // ADR 0020: Cookie handshake
         let auth_msg = serde_json::json!({"type": "auth", "cookie": cookie});
@@ -71,7 +77,17 @@ impl ReplClient {
         }
 
         // Read session-started message (sent after successful auth)
-        let _session_started = read_text_message_with_timeout(&mut ws, REPL_IO_TIMEOUT).await?;
+        let session_started = read_text_message_with_timeout(&mut ws, REPL_IO_TIMEOUT).await?;
+        let session_started_json: serde_json::Value = serde_json::from_str(&session_started)
+            .map_err(|e| format!("Failed to parse session-started: {e}"))?;
+        match session_started_json.get("op").and_then(|v| v.as_str()) {
+            Some("session-started") => {}
+            _ => {
+                return Err(format!(
+                    "Unexpected post-auth message: {session_started_json}"
+                ));
+            }
+        }
 
         Ok(Self {
             inner: Mutex::new(ReplClientInner { ws }),

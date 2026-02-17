@@ -239,7 +239,13 @@ pub fn stop_workspace(name_or_id: &str, force: bool) -> Result<()> {
                 }
                 force_kill_process(info.pid)?;
                 // Ensure the node has actually released its port before returning.
-                wait_for_workspace_exit(info.port, 5)?;
+                wait_for_workspace_exit(info.port, 5).map_err(|_| {
+                    miette!(
+                        "Workspace did not release port {} within 5s after forced stop. \
+                         It may still be shutting down; retry shortly.",
+                        info.port
+                    )
+                })?;
             } else {
                 eprintln!(
                     "Stopping workspace '{workspace_id}' (port {})...",
@@ -265,7 +271,13 @@ pub fn stop_workspace(name_or_id: &str, force: bool) -> Result<()> {
                             }
                             eprintln!("Graceful shutdown timed out, force-killing...");
                             force_kill_process(info.pid)?;
-                            wait_for_workspace_exit(info.port, 5)?;
+                            wait_for_workspace_exit(info.port, 5).map_err(|_| {
+                                miette!(
+                                    "Workspace did not release port {} within 5s after forced stop. \
+                                     It may still be shutting down; retry shortly.",
+                                    info.port
+                                )
+                            })?;
                         }
                     }
                     Err(e) => {
@@ -280,7 +292,13 @@ pub fn stop_workspace(name_or_id: &str, force: bool) -> Result<()> {
                         }
                         eprintln!("TCP shutdown failed ({e}), force-killing...");
                         force_kill_process(info.pid)?;
-                        wait_for_workspace_exit(info.port, 5)?;
+                        wait_for_workspace_exit(info.port, 5).map_err(|_| {
+                            miette!(
+                                "Workspace did not release port {} within 5s after forced stop. \
+                                 It may still be shutting down; retry shortly.",
+                                info.port
+                            )
+                        })?;
                     }
                 }
             }
