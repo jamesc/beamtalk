@@ -366,7 +366,11 @@ pub fn run(
         }
 
         // Auto-compile package if beamtalk.toml is present (BT-606)
-        let extra_code_paths = auto_compile_package(&project_root);
+        let mut extra_code_paths = auto_compile_package(&project_root);
+        // cowboy/cowlib/ranch are needed for the WebSocket transport (ADR 0020)
+        extra_code_paths.push(paths.cowboy_ebin.clone());
+        extra_code_paths.push(paths.cowlib_ebin.clone());
+        extra_code_paths.push(paths.ranch_ebin.clone());
 
         let (node_info, is_new, workspace_id) = workspace::get_or_start_workspace(
             &project_root,
