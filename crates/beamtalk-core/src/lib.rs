@@ -40,6 +40,7 @@ pub mod prelude {
 /// These flags control how the compiler handles stdlib-specific features
 /// like `@primitive` pragmas (ADR 0007) and workspace bindings (ADR 0010).
 #[derive(Debug, Clone, Default)]
+#[allow(clippy::struct_excessive_bools)] // Config struct — bools are appropriate here
 pub struct CompilerOptions {
     /// When true, the module being compiled is part of the standard library.
     /// Enables `@primitive` pragmas without warnings.
@@ -53,4 +54,8 @@ pub struct CompilerOptions {
     /// When true, class references resolve through session bindings or class
     /// registry. When false (batch compile), they go directly to the registry.
     pub workspace_mode: bool,
+
+    /// When true, suppress warning diagnostics during compilation.
+    /// Useful for test fixtures that intentionally trigger warnings.
+    pub suppress_warnings: bool,
 }
