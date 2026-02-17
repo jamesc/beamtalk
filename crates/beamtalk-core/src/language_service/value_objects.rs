@@ -285,6 +285,39 @@ pub struct DocumentSymbol {
     pub children: Vec<DocumentSymbol>,
 }
 
+/// Signature help information for a method being called.
+///
+/// **DDD Context:** Language Service — Value Object
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignatureHelp {
+    /// The matching signatures (usually one, but could be multiple if overloaded).
+    pub signatures: Vec<SignatureInfo>,
+    /// The index of the active signature.
+    pub active_signature: u32,
+    /// The index of the active parameter within the active signature.
+    pub active_parameter: u32,
+}
+
+/// Information about a single method signature.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignatureInfo {
+    /// The human-readable label for this signature (e.g., `transfer: amount: Integer to: target: Account -> Boolean`).
+    pub label: EcoString,
+    /// Optional documentation for the signature.
+    pub documentation: Option<EcoString>,
+    /// The parameters of the signature.
+    pub parameters: Vec<ParameterInfo>,
+}
+
+/// Information about a single parameter in a signature.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParameterInfo {
+    /// The label for this parameter (e.g., `amount: Integer`).
+    pub label: EcoString,
+    /// Optional documentation for the parameter.
+    pub documentation: Option<EcoString>,
+}
+
 /// The kind of a document symbol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DocumentSymbolKind {

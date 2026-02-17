@@ -26,9 +26,11 @@ use tower_lsp::lsp_types::{
     DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentSymbolParams,
     DocumentSymbolResponse, Documentation, GotoDefinitionParams, GotoDefinitionResponse, Hover,
     HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
-    InitializedParams, MarkupContent, MarkupKind, OneOf, Range, ReferenceParams,
-    ServerCapabilities, SymbolKind, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TextDocumentSyncOptions, TextDocumentSyncSaveOptions, Url,
+    InitializedParams, MarkupContent, MarkupKind, OneOf, ParameterInformation, ParameterLabel,
+    Range, ReferenceParams, ServerCapabilities, SignatureHelp, SignatureHelpOptions,
+    SignatureHelpParams, SignatureInformation, SymbolKind, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, Url,
+    WorkDoneProgressOptions,
 };
 use tower_lsp::{Client, LanguageServer};
 use tracing::debug;
@@ -101,6 +103,11 @@ impl LanguageServer for Backend {
                 completion_provider: Some(CompletionOptions {
                     trigger_characters: Some(vec![".".into(), ":".into()]),
                     ..Default::default()
+                }),
+                signature_help_provider: Some(SignatureHelpOptions {
+                    trigger_characters: Some(vec![":".into()]),
+                    retrigger_characters: Some(vec![" ".into()]),
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
                 }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
@@ -296,6 +303,60 @@ impl LanguageServer for Backend {
                     value,
                 }),
                 range: Some(span_to_range(h.span, src)),
+            }
+        }))
+    }
+
+    /// Returns signature help for the method being called at the cursor.
+    async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
+        let uri = &params.text_document_position_params.text_document.uri;
+        let Some(path) = uri_to_path(uri) else {
+            return Ok(None);
+        };
+
+        let svc = self.service.lock().expect("service lock poisoned");
+        let Some(source) = svc.file_source(&path) else {
+            return Ok(None);
+        };
+        let pos = to_bt_position(params.text_document_position_params.position, &source);
+        let help = svc.signature_help(&path, pos);
+
+        Ok(help.map(|h| {
+            let signatures = h
+                .signatures
+                .into_iter()
+                .map(|sig| {
+                    let parameters = Some(
+                        sig.parameters
+                            .into_iter()
+                            .map(|p| ParameterInformation {
+                                label: ParameterLabel::Simple(p.label.to_string()),
+                                documentation: p.documentation.map(|d| {
+                                    Documentation::MarkupContent(MarkupContent {
+                                        kind: MarkupKind::Markdown,
+                                        value: d.to_string(),
+                                    })
+                                }),
+                            })
+                            .collect(),
+                    );
+                    SignatureInformation {
+                        label: sig.label.to_string(),
+                        documentation: sig.documentation.map(|d| {
+                            Documentation::MarkupContent(MarkupContent {
+                                kind: MarkupKind::Markdown,
+                                value: d.to_string(),
+                            })
+                        }),
+                        parameters,
+                        active_parameter: None,
+                    }
+                })
+                .collect();
+            SignatureHelp {
+                signatures,
+                active_signature: Some(h.active_signature),
+                active_parameter: Some(h.active_parameter),
             }
         }))
     }
