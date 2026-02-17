@@ -434,7 +434,7 @@ pub(crate) fn generate_test_case_bif(
 /// Pid primitive implementations (BT-681).
 ///
 /// Pids are opaque BEAM process identifiers. Most methods use direct BIFs;
-/// `isAlive` delegates to `beamtalk_pid_ops` runtime module.
+/// `asString` delegates to `beamtalk_opaque_ops` runtime module.
 pub(crate) fn generate_pid_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     match selector {
         "=:=" => binary_bif("=:=", params),
