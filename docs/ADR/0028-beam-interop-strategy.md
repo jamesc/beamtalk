@@ -103,7 +103,7 @@ Beamtalk keyword messages map to Erlang functions by using the **first keyword a
 |---|---|---|
 | `Erlang lists reverse: xs` | `lists:reverse(Xs)` | Unary: keyword = function name |
 | `Erlang lists seq: 1 with: 10` | `lists:seq(1, 10)` | Multi-keyword: first keyword = function, rest = extra args |
-| `Erlang erlang now` | `erlang:now()` | Unary (no args): message name = function name |
+| `Erlang erlang system_time: #microsecond` | `erlang:system_time(microsecond)` | Keyword: function name + arg |
 | `Erlang math pow: 2 with: 10` | `math:pow(2, 10)` | First keyword = function, additional args positional |
 
 **Escaping for unusual function names:**
@@ -176,21 +176,22 @@ ERROR: #RuntimeError
   Hint: Erlang function raised 'function_clause'. Check argument types and values.
 ```
 
-**Note:** `BEAMError`, `ExitError`, and `ThrowError` are new classes extending ADR 0015's exception hierarchy. Implementation requires adding these classes to `lib/` and updating `beamtalk_exception_handler.erl`. Existing classes (`RuntimeError`, `TypeError`) are reused for Erlang `error:*` exceptions — no changes needed.
+**Note:** `BEAMError`, `ExitError`, and `ThrowError` are new classes extending ADR 0015's exception hierarchy. Implementation requires adding these classes to `lib/` and updating `beamtalk_exception_handler.erl`. The proxy's catch clause must use Erlang's three-class catch (`catch Class:Reason:Stack`) and preserve the `Class` (`error`/`exit`/`throw`) to map correctly — the current `wrap/1` only handles `error` class exceptions. Existing classes (`RuntimeError`, `TypeError`) are reused for Erlang `error:*` exceptions — no changes needed.
 
-**Proxy selector collision — reserved names:**
+**Proxy selector collision — minimal surface via ProtoObject:**
 
-The `ErlangModule` proxy is a value type with minimal methods. To avoid collision with Erlang function names, the proxy reserves **only** `class` and `printString` as its own methods. All other messages — including `asString`, `new`, `spawn`, `size` — are forwarded to `erlang:apply/3` as Erlang function calls.
+`ErlangModule` inherits from **ProtoObject**, not Object. ProtoObject's protocol is minimal: `class`, `==`, `/=`, `doesNotUnderstand:args:` (ADR 0005, Q1). This means the proxy reserves only **three selectors** (`class`, `==`, `/=`) — everything else, including `printString`, `asString`, `new`, `spawn`, `size`, is forwarded to `erlang:apply/3` via the `doesNotUnderstand:args:` handler.
 
-If a user needs to call an Erlang function named `class` or `printString`, they use the explicit `call:args:` escape hatch:
+If a user needs to call an Erlang function named `class`, they use the explicit `call:args:` escape hatch:
 ```beamtalk
 proxy := Erlang someModule
-proxy class                           // => ErlangModule (proxy's own method)
+proxy class                           // => ErlangModule (ProtoObject method)
 proxy call: #class args: #()          // => calls someModule:class()
-proxy call: #printString args: #()    // => calls someModule:printString()
 ```
 
-**Arity variants:**
+Similarly, `Erlang` itself inherits from ProtoObject — it responds to module names via `doesNotUnderstand:args:`, returning `ErlangModule` proxies.
+
+**Arity variants and zero-argument functions:**
 
 Some Erlang functions have multiple arities (e.g., `lists:seq/2` and `lists:seq/3`). Arity is determined by the number of arguments in the message send — keyword count maps directly:
 
@@ -198,6 +199,15 @@ Some Erlang functions have multiple arities (e.g., `lists:seq/2` and `lists:seq/
 Erlang lists seq: 1 with: 10              // => lists:seq(1, 10) — arity 2
 Erlang lists seq: 1 with: 10 with: 2     // => lists:seq(1, 10, 2) — arity 3
 ```
+
+Zero-argument Erlang functions are called as unary messages on the proxy. Since `ErlangModule` inherits from ProtoObject, unary messages like `self` or `module_info` hit `doesNotUnderstand:args:` and forward to `erlang:apply(Module, FunctionName, [])`:
+
+```beamtalk
+Erlang erlang node                         // => erlang:node() — arity 0
+(Erlang lists) module_info                 // => lists:module_info() — arity 0
+```
+
+**Note:** Beamtalk keywords like `self` and `super` are handled by the parser before message dispatch, so `Erlang erlang self` would not call `erlang:self/0`. Use `Erlang erlang call: #self args: #()` for Erlang functions that share names with Beamtalk keywords.
 
 ### 2. FFI Philosophy: Transparent, Not Wrapper-Based
 
@@ -211,7 +221,7 @@ Beamtalk's interop is **transparent** — values are not wrapped, marshalled, or
 | Float | `float()` | A float |
 | String | `binary()` | A binary |
 | Symbol | `atom()` | An atom |
-| Boolean | `true` \| `false` | A boolean |
+| True / False | `true` \| `false` | A boolean |
 | List | `list()` | A list |
 | Dictionary | `map()` | A map |
 | Tuple | `tuple()` | A tuple |
@@ -407,10 +417,11 @@ Erlang call: "lists" function: "reverse" args: #(#(1, 2, 3))
 
 ### Negative
 - **No compile-time arity checking** — calling `Erlang lists reverse: 1 extra: 2` fails at runtime, not compile time
-- **Two-step dispatch overhead** — unoptimized path has extra allocation for module proxy (mitigated by compiler optimization)
+- **Two-step dispatch overhead** — unoptimized path routes through `doesNotUnderstand:args:` and `erlang:apply/3`, preventing BEAM inlining; mitigated by compiler optimization in Phase 4 which emits direct calls
 - **Keyword-to-positional mapping** is a convention, not enforced — users must know Erlang function arities
 - **Selector naming ambiguity** — `Erlang lists seq: 1 to: 10` works, but the keyword names are arbitrary (they don't match Erlang's parameter names)
-- **Reserved selector collision** — `class` and `printString` on proxies shadow same-named Erlang functions; `call:args:` escape hatch required for edge cases
+- **Reserved selector collision** — `class`, `==`, and `/=` on proxies shadow same-named Erlang functions (ProtoObject methods); `call:args:` escape hatch required for edge cases
+- **Beamtalk keyword conflicts** — Erlang functions named `self`, `super`, or `true` cannot be called as unary messages because the parser handles these as keywords; use `call:args:` escape hatch
 
 ### Neutral
 - Type mapping is documented as-is (already implemented, no changes to class_of/1)
