@@ -29,6 +29,7 @@
 
 use crate::ast::{ClassDefinition, Expression, Module};
 use crate::language_service::{Completion, CompletionKind, Position};
+use crate::queries::erlang_modules;
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::semantic_analysis::{ClassHierarchy, InferredType, infer_types};
 use ecow::EcoString;
@@ -96,6 +97,12 @@ pub fn compute_completions(
 
     let mut completions = Vec::new();
 
+    // Check for Erlang module context first — if we're completing
+    // after "Erlang" or "Erlang <module>", return specialized completions
+    if let Some(erlang_completions) = compute_erlang_completions(module, source, offset) {
+        return erlang_completions;
+    }
+
     // Determine class context at cursor position
     let context = find_class_context(module, offset);
 
@@ -127,6 +134,171 @@ pub fn compute_completions(
     deduplicate_completions(&mut completions);
 
     completions
+}
+
+/// Checks if the cursor is in an `Erlang <module>` context and returns
+/// specialized completions.
+///
+/// Returns `Some(completions)` if the cursor is:
+/// - Right after `Erlang ` → suggests common Erlang module names
+/// - Right after `Erlang <module> ` → suggests module exports as Beamtalk selectors
+///
+/// Returns `None` if the cursor is not in an Erlang context.
+fn compute_erlang_completions(
+    module: &Module,
+    source: &str,
+    offset: u32,
+) -> Option<Vec<Completion>> {
+    // Look for the Erlang context by examining the text before the cursor
+    let text_before = &source[..offset as usize];
+    let trimmed = text_before.trim_end();
+
+    // Check for "Erlang <module>" context (cursor after module name)
+    // Pattern: text ends with "Erlang <word>" where <word> is a known module
+    if let Some(erlang_module) = detect_erlang_module_context(trimmed) {
+        if let Some(module_info) = erlang_modules::find_module(erlang_module) {
+            let mut completions = Vec::new();
+            let mut seen = HashSet::new();
+            for &(name, arity) in module_info.exports {
+                let selector = erlang_modules::export_to_selector(name, arity);
+                if seen.insert(selector.clone()) {
+                    let detail = erlang_modules::export_detail(module_info.name, name, arity);
+                    let doc = format!(
+                        "Erlang function `{module_name}:{name}/{arity}`",
+                        module_name = module_info.name
+                    );
+                    completions.push(
+                        Completion::new(selector.as_str(), CompletionKind::Function)
+                            .with_detail(detail)
+                            .with_documentation(doc),
+                    );
+                }
+            }
+            return Some(completions);
+        }
+    }
+
+    // Check for "Erlang" context (cursor right after "Erlang")
+    // Also check by walking the AST for a ClassReference("Erlang") near cursor
+    if detect_erlang_class_context(module, trimmed, offset) {
+        let mut completions = Vec::new();
+        for module_info in erlang_modules::COMMON_MODULES {
+            completions.push(
+                Completion::new(module_info.name, CompletionKind::Module)
+                    .with_detail(format!("Erlang module: {}", module_info.name))
+                    .with_documentation(module_info.description),
+            );
+        }
+        return Some(completions);
+    }
+
+    None
+}
+
+/// Detects if the text before cursor ends with `Erlang <module_name>`.
+///
+/// Returns the module name if found and recognized.
+fn detect_erlang_module_context(trimmed: &str) -> Option<&str> {
+    // Find the last word (potential module name)
+    let last_space = trimmed.rfind(' ')?;
+    let module_name = &trimmed[last_space + 1..];
+
+    // Check the text before the module name ends with "Erlang"
+    let before_module = trimmed[..last_space].trim_end();
+    if before_module.ends_with("Erlang") {
+        // Verify "Erlang" is at a word boundary
+        let erlang_start = before_module.len() - "Erlang".len();
+        if erlang_start == 0 || !before_module.as_bytes()[erlang_start - 1].is_ascii_alphanumeric()
+        {
+            return Some(module_name);
+        }
+    }
+    None
+}
+
+/// Detects if the cursor is right after the `Erlang` class reference.
+fn detect_erlang_class_context(module: &Module, trimmed: &str, offset: u32) -> bool {
+    // Text-based check: does the text before cursor end with "Erlang"?
+    if trimmed.ends_with("Erlang") {
+        let erlang_start = trimmed.len() - "Erlang".len();
+        if erlang_start == 0 || !trimmed.as_bytes()[erlang_start - 1].is_ascii_alphanumeric() {
+            return true;
+        }
+    }
+
+    // Also check AST for a ClassReference("Erlang") near cursor position
+    find_erlang_class_ref(module, offset)
+}
+
+/// Walks the AST to find a `ClassReference("Erlang")` expression near the cursor.
+fn find_erlang_class_ref(module: &Module, offset: u32) -> bool {
+    let all_exprs = module.expressions.iter().chain(
+        module
+            .classes
+            .iter()
+            .flat_map(|c| {
+                c.methods
+                    .iter()
+                    .chain(c.class_methods.iter())
+                    .flat_map(|m| m.body.iter())
+            })
+            .chain(
+                module
+                    .method_definitions
+                    .iter()
+                    .flat_map(|smd| smd.method.body.iter()),
+            ),
+    );
+
+    for expr in all_exprs {
+        if has_erlang_class_ref_at(expr, offset) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Recursively checks if an expression contains a `ClassReference("Erlang")`
+/// just before the cursor offset.
+fn has_erlang_class_ref_at(expr: &Expression, offset: u32) -> bool {
+    match expr {
+        Expression::ClassReference { name, span } => {
+            name.name == "Erlang" && offset >= span.end() && offset <= span.end() + 2
+        }
+        Expression::MessageSend {
+            receiver,
+            arguments,
+            ..
+        } => {
+            has_erlang_class_ref_at(receiver, offset)
+                || arguments
+                    .iter()
+                    .any(|arg| has_erlang_class_ref_at(arg, offset))
+        }
+        Expression::Assignment { target, value, .. } => {
+            has_erlang_class_ref_at(target, offset) || has_erlang_class_ref_at(value, offset)
+        }
+        Expression::Parenthesized { expression, .. } => has_erlang_class_ref_at(expression, offset),
+        Expression::Block(block) => block
+            .body
+            .iter()
+            .any(|e| has_erlang_class_ref_at(e, offset)),
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            has_erlang_class_ref_at(receiver, offset)
+                || messages.iter().any(|msg| {
+                    msg.arguments
+                        .iter()
+                        .any(|a| has_erlang_class_ref_at(a, offset))
+                })
+        }
+        Expression::Pipe { value, target, .. } => {
+            has_erlang_class_ref_at(value, offset) || has_erlang_class_ref_at(target, offset)
+        }
+        Expression::Return { value, .. } => has_erlang_class_ref_at(value, offset),
+        _ => false,
+    }
 }
 
 /// Adds keyword completions.
@@ -910,5 +1082,200 @@ mod tests {
             "Dynamic type should include Object methods (fallback). Got labels: {:?}",
             completions.iter().map(|c| &c.label).collect::<Vec<_>>()
         );
+    }
+
+    // --- Erlang module completion tests ---
+
+    #[test]
+    fn erlang_class_reference_suggests_module_names() {
+        // Cursor right after "Erlang " should suggest module names
+        let source = "Erlang ";
+        let completions = completions_at(source, Position::new(0, 7));
+
+        assert!(
+            completions.iter().any(|c| c.label == "lists"),
+            "Should suggest 'lists' module. Got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+        assert!(
+            completions.iter().any(|c| c.label == "maps"),
+            "Should suggest 'maps' module"
+        );
+        assert!(
+            completions.iter().any(|c| c.label == "erlang"),
+            "Should suggest 'erlang' module"
+        );
+        assert!(
+            completions.iter().any(|c| c.label == "string"),
+            "Should suggest 'string' module"
+        );
+
+        // All should have Module kind
+        for c in &completions {
+            assert_eq!(
+                c.kind,
+                CompletionKind::Module,
+                "Erlang module completions should have Module kind"
+            );
+        }
+    }
+
+    #[test]
+    fn erlang_module_suggests_exports() {
+        // Cursor right after "Erlang lists " should suggest list exports
+        let source = "Erlang lists ";
+        let completions = completions_at(source, Position::new(0, 13));
+
+        assert!(
+            completions.iter().any(|c| c.label == "reverse:"),
+            "Should suggest 'reverse:' from lists. Got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+        assert!(
+            completions.iter().any(|c| c.label == "map:with:"),
+            "Should suggest 'map:with:' (map/2) from lists"
+        );
+        assert!(
+            completions.iter().any(|c| c.label == "sort:"),
+            "Should suggest 'sort:' (sort/1) from lists"
+        );
+        assert!(
+            completions.iter().any(|c| c.label == "foldl:with:with:"),
+            "Should suggest 'foldl:with:with:' (foldl/3) from lists"
+        );
+
+        // All should have Function kind
+        for c in &completions {
+            assert_eq!(
+                c.kind,
+                CompletionKind::Function,
+                "Erlang export completions should have Function kind"
+            );
+        }
+    }
+
+    #[test]
+    fn erlang_module_exports_have_detail() {
+        let source = "Erlang lists ";
+        let completions = completions_at(source, Position::new(0, 13));
+
+        let reverse = completions.iter().find(|c| c.label == "reverse:");
+        assert!(reverse.is_some(), "Should have reverse: completion");
+        let reverse = reverse.unwrap();
+        assert_eq!(
+            reverse.detail.as_deref(),
+            Some("lists:reverse/1"),
+            "Detail should show Erlang function signature"
+        );
+    }
+
+    #[test]
+    fn erlang_unknown_module_returns_no_exports() {
+        // Unknown module should not return export completions,
+        // falls back to normal completions
+        let source = "Erlang nonexistent_module ";
+        let completions = completions_at(source, Position::new(0, 25));
+
+        // Should not have any Erlang export completions
+        // Instead should have normal completions (keywords, etc.)
+        assert!(
+            completions.iter().any(|c| c.label == "self"),
+            "Should fall back to normal completions for unknown module. Got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn erlang_maps_module_exports() {
+        let source = "Erlang maps ";
+        let completions = completions_at(source, Position::new(0, 12));
+
+        assert!(
+            completions.iter().any(|c| c.label == "get:with:"),
+            "Should suggest 'get:with:' (get/2) from maps. Got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+        assert!(
+            completions.iter().any(|c| c.label == "keys:"),
+            "Should suggest 'keys:' from maps"
+        );
+        assert!(
+            completions.iter().any(|c| c.label == "new"),
+            "Should suggest 'new' (new/0) from maps"
+        );
+    }
+
+    #[test]
+    fn erlang_math_module_exports() {
+        let source = "Erlang math ";
+        let completions = completions_at(source, Position::new(0, 12));
+
+        assert!(
+            completions.iter().any(|c| c.label == "pi"),
+            "Should suggest 'pi' (pi/0) from math. Got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+        assert!(
+            completions.iter().any(|c| c.label == "pow:with:"),
+            "Should suggest 'pow:with:' (pow/2) from math"
+        );
+        assert!(
+            completions.iter().any(|c| c.label == "sqrt:"),
+            "Should suggest 'sqrt:' (sqrt/1) from math"
+        );
+    }
+
+    #[test]
+    fn erlang_completions_deduplicate_overloaded_selectors() {
+        // lists has both sort/1 and sort/2 — the selector "sort:" should appear,
+        // and "sort:with:" should also appear, but no duplicate "sort:"
+        let source = "Erlang lists ";
+        let completions = completions_at(source, Position::new(0, 13));
+
+        let sort_count = completions.iter().filter(|c| c.label == "sort:").count();
+        assert_eq!(sort_count, 1, "sort: should appear exactly once");
+    }
+
+    #[test]
+    fn erlang_completions_in_assignment() {
+        // Should work in assignment context too
+        let source = "result := Erlang lists ";
+        let completions = completions_at(source, Position::new(0, 23));
+
+        assert!(
+            completions.iter().any(|c| c.label == "reverse:"),
+            "Should suggest exports after 'Erlang lists' in assignment. Got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn erlang_module_completions_have_documentation() {
+        let source = "Erlang ";
+        let completions = completions_at(source, Position::new(0, 7));
+
+        let lists = completions.iter().find(|c| c.label == "lists");
+        assert!(lists.is_some());
+        assert!(
+            lists.unwrap().documentation.is_some(),
+            "Module completions should have documentation"
+        );
+    }
+
+    #[test]
+    fn detect_erlang_module_context_basic() {
+        assert_eq!(detect_erlang_module_context("Erlang lists"), Some("lists"));
+        assert_eq!(detect_erlang_module_context("Erlang maps"), Some("maps"));
+        assert_eq!(
+            detect_erlang_module_context("x := Erlang lists"),
+            Some("lists")
+        );
+    }
+
+    #[test]
+    fn detect_erlang_module_context_no_match() {
+        assert_eq!(detect_erlang_module_context("NotErlang lists"), None);
+        assert_eq!(detect_erlang_module_context("Erlang"), None);
+        assert_eq!(detect_erlang_module_context("FooErlang lists"), None);
     }
 }
