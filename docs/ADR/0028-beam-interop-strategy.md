@@ -3,7 +3,7 @@
 # ADR 0028: BEAM Interop Strategy
 
 ## Status
-Proposed (2026-02-17)
+Accepted (2026-02-17)
 
 ## Context
 
