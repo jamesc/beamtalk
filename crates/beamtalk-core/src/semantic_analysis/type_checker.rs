@@ -448,7 +448,11 @@ impl TypeChecker {
             }
 
             self.check_instance_selector(class_name, &selector_name, span, hierarchy);
-            self.check_argument_types(class_name, &selector_name, &arg_types, span, hierarchy, false);
+            // Skip argument type check for binary messages — check_binary_operand_types
+            // already provides more specific warnings for arithmetic/comparison/concat.
+            if !matches!(selector, MessageSelector::Binary(_)) {
+                self.check_argument_types(class_name, &selector_name, &arg_types, span, hierarchy, false);
+            }
 
             // Infer return type from method info
             if let Some(method) = hierarchy.find_method(class_name, &selector_name) {
@@ -2132,24 +2136,6 @@ mod tests {
 
     // ---- BT-671: Argument and return type checking tests ----
 
-    fn make_keyword_method(
-        selector_parts: Vec<&str>,
-        params: Vec<ParameterDefinition>,
-        body: Vec<Expression>,
-    ) -> MethodDefinition {
-        MethodDefinition::new(
-            MessageSelector::Keyword(
-                selector_parts
-                    .into_iter()
-                    .map(|s| KeywordPart::new(s, span()))
-                    .collect(),
-            ),
-            params,
-            body,
-            span(),
-        )
-    }
-
     #[test]
     fn test_string_plus_integer_warns_arg_type() {
         // 'hello' + 42 — String doesn't define +, so we get unknown selector
@@ -2637,5 +2623,92 @@ mod tests {
                 diag.message
             );
         }
+    }
+
+    #[test]
+    fn test_empty_body_with_return_type_no_crash() {
+        // Empty method body with return type annotation — should not crash
+        let class_def = ClassDefinition::with_modifiers(
+            ident("Counter"),
+            Some(ident("Object")),
+            false,
+            false,
+            vec![],
+            vec![MethodDefinition::with_return_type(
+                MessageSelector::Unary("count".into()),
+                vec![],
+                vec![], // empty body
+                TypeAnnotation::Simple(ident("Integer")),
+                span(),
+            )],
+            span(),
+        );
+        let module = make_module_with_classes(vec![], vec![class_def]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        // Dynamic body type — no return type warning (can't infer from empty body)
+        let return_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("declares return type"))
+            .collect();
+        assert!(
+            return_warnings.is_empty(),
+            "empty body should not produce return type mismatch"
+        );
+    }
+
+    #[test]
+    fn test_integer_plus_string_exactly_one_warning() {
+        // 42 + "hello" — should produce exactly 1 warning (binary operand check),
+        // not 2 (no duplicate from check_argument_types)
+        let module = make_module(vec![msg_send(
+            int_lit(42),
+            MessageSelector::Binary("+".into()),
+            vec![str_lit("hello")],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert_eq!(
+            checker.diagnostics().len(),
+            1,
+            "should produce exactly 1 warning (no duplicate), got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn test_return_type_subtype_compatible() {
+        // Method declares -> Number, body returns Integer (subtype) — no warning
+        let class_def = ClassDefinition::with_modifiers(
+            ident("Calculator"),
+            Some(ident("Object")),
+            false,
+            false,
+            vec![],
+            vec![MethodDefinition::with_return_type(
+                MessageSelector::Unary("compute".into()),
+                vec![],
+                vec![int_lit(42)], // Integer is subtype of Number
+                TypeAnnotation::Simple(ident("Number")),
+                span(),
+            )],
+            span(),
+        );
+        let module = make_module_with_classes(vec![], vec![class_def]);
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let return_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("declares return type"))
+            .collect();
+        assert!(
+            return_warnings.is_empty(),
+            "Integer return should be compatible with Number declaration"
+        );
     }
 }
