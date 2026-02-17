@@ -67,7 +67,7 @@
 //! Prefer these constructors over manual struct initialization.
 
 use crate::source_analysis::Span;
-use ecow::EcoString;
+use ecow::{EcoString, eco_format};
 
 /// Top-level container for a Beamtalk module (Aggregate Root).
 ///
@@ -599,6 +599,29 @@ impl TypeAnnotation {
         Self::FalseOr {
             inner: Box::new(inner),
             span,
+        }
+    }
+
+    /// Returns the type name as a string for use in `MethodInfo`.
+    ///
+    /// Simple types return their identifier name; complex types are serialized
+    /// to a readable representation.
+    #[must_use]
+    pub fn to_type_name(&self) -> EcoString {
+        match self {
+            Self::Simple(id) => id.name.clone(),
+            Self::Singleton { name, .. } => eco_format!("#{name}"),
+            Self::FalseOr { inner, .. } => eco_format!("{} | False", inner.to_type_name()),
+            Self::Union { types, .. } => {
+                let parts: Vec<_> = types.iter().map(Self::to_type_name).collect();
+                EcoString::from(parts.join(" | "))
+            }
+            Self::Generic {
+                base, parameters, ..
+            } => {
+                let params: Vec<_> = parameters.iter().map(Self::to_type_name).collect();
+                eco_format!("{}<{}>", base.name, params.join(", "))
+            }
         }
     }
 }
@@ -1814,5 +1837,50 @@ mod tests {
         let module = Module::new(Vec::new(), span);
         assert!(module.classes.is_empty());
         assert!(module.expressions.is_empty());
+    }
+
+    // --- TypeAnnotation::to_type_name tests ---
+
+    #[test]
+    fn to_type_name_simple() {
+        let t = TypeAnnotation::simple("Integer", Span::new(0, 0));
+        assert_eq!(t.to_type_name(), "Integer");
+    }
+
+    #[test]
+    fn to_type_name_singleton() {
+        let t = TypeAnnotation::singleton("north", Span::new(0, 0));
+        assert_eq!(t.to_type_name(), "#north");
+    }
+
+    #[test]
+    fn to_type_name_union() {
+        let t = TypeAnnotation::union(
+            vec![
+                TypeAnnotation::simple("Integer", Span::new(0, 0)),
+                TypeAnnotation::simple("String", Span::new(0, 0)),
+            ],
+            Span::new(0, 0),
+        );
+        assert_eq!(t.to_type_name(), "Integer | String");
+    }
+
+    #[test]
+    fn to_type_name_generic() {
+        let t = TypeAnnotation::generic(
+            Identifier::new("Collection", Span::new(0, 0)),
+            vec![TypeAnnotation::simple("Integer", Span::new(0, 0))],
+            Span::new(0, 0),
+        );
+        assert_eq!(t.to_type_name(), "Collection<Integer>");
+    }
+
+    #[test]
+    fn to_type_name_false_or() {
+        let t = TypeAnnotation::false_or(
+            TypeAnnotation::simple("Integer", Span::new(0, 0)),
+            Span::new(0, 0),
+        );
+        assert_eq!(t.to_type_name(), "Integer | False");
     }
 }
