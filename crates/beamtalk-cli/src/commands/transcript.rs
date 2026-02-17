@@ -124,7 +124,10 @@ struct TranscriptClient {
 impl TranscriptClient {
     /// Connect to the workspace backend at the given port.
     fn connect(port: u16) -> Result<Self> {
-        let inner = ProtocolClient::connect(port, Some(Duration::from_millis(READ_TIMEOUT_MS)))?;
+        let mut inner =
+            ProtocolClient::connect(port, Some(Duration::from_millis(READ_TIMEOUT_MS)))?;
+        // BT-666: Consume the session-started welcome message
+        let _ = inner.read_response_line();
         Ok(Self { inner })
     }
 

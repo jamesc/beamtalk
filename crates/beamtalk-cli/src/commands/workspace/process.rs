@@ -38,11 +38,29 @@ const PID_DISCOVERY_INITIAL_DELAY_MS: u64 = 2000;
 /// Delay between PID discovery retry attempts in milliseconds.
 const PID_DISCOVERY_RETRY_DELAY_MS: u64 = 500;
 
-/// Maximum number of PID/port discovery attempts.
-const DISCOVERY_MAX_RETRIES: usize = 10;
+/// Maximum number of PID discovery attempts.
+/// Total worst-case: 2s initial + 20 × 500ms = 12s.
+const PID_DISCOVERY_MAX_RETRIES: usize = 20;
 
 /// Delay between port file read attempts in milliseconds.
-const PORT_DISCOVERY_DELAY_MS: u64 = 200;
+const PORT_DISCOVERY_DELAY_MS: u64 = 500;
+
+/// Maximum number of port file discovery attempts.
+const PORT_DISCOVERY_MAX_RETRIES: usize = 20;
+
+/// Delay between TCP readiness probe retries in milliseconds.
+const READINESS_PROBE_DELAY_MS: u64 = 200;
+
+/// Maximum number of TCP readiness probe attempts.
+/// Total worst-case: 30 × (300ms connect + 500ms read + 200ms sleep) = ~30s.
+const READINESS_PROBE_MAX_RETRIES: usize = 30;
+
+/// TCP connect timeout for readiness probe in milliseconds (shorter than
+/// the full health probe to keep worst-case bounded at ~10s).
+const READINESS_CONNECT_TIMEOUT_MS: u64 = 300;
+
+/// TCP read timeout for readiness probe in milliseconds.
+const READINESS_READ_TIMEOUT_MS: u64 = 500;
 
 /// TCP connect timeout for exit probe in milliseconds.
 const EXIT_PROBE_CONNECT_TIMEOUT_MS: u64 = 500;
@@ -100,6 +118,10 @@ pub fn tcp_health_probe(port: u16) -> Result<HealthProbeResponse> {
     let mut writer = stream.try_clone().into_diagnostic()?;
     let mut reader = BufReader::new(stream);
 
+    // BT-666: Consume the session-started welcome message
+    let mut welcome = String::new();
+    let _ = reader.read_line(&mut welcome);
+
     // Send health probe request
     writer
         .write_all(b"{\"op\":\"health\"}\n")
@@ -133,6 +155,10 @@ pub fn tcp_send_shutdown(port: u16, cookie: &str) -> Result<()> {
 
     let mut writer = stream.try_clone().into_diagnostic()?;
     let mut reader = BufReader::new(stream);
+
+    // BT-666: Consume the session-started welcome message
+    let mut welcome = String::new();
+    let _ = reader.read_line(&mut welcome);
 
     // Send shutdown request with cookie
     let request = serde_json::json!({"op": "shutdown", "cookie": cookie});
@@ -249,7 +275,7 @@ pub fn start_detached_node(
     // Retry PID discovery instead of a single fixed sleep.
     let mut last_err = None;
     let pid_found = 'retry: {
-        for attempt in 0..DISCOVERY_MAX_RETRIES {
+        for attempt in 0..PID_DISCOVERY_MAX_RETRIES {
             if attempt > 0 {
                 std::thread::sleep(Duration::from_millis(PID_DISCOVERY_RETRY_DELAY_MS));
             } else {
@@ -270,7 +296,7 @@ pub fn start_detached_node(
     // Retry a few times since the BEAM node may still be initializing.
     let (actual_port, nonce) = if port == 0 {
         let mut discovered = None;
-        for _ in 0..DISCOVERY_MAX_RETRIES {
+        for _ in 0..PORT_DISCOVERY_MAX_RETRIES {
             if let Some(port_nonce) = read_port_file(workspace_id)? {
                 discovered = Some(port_nonce);
                 break;
@@ -290,6 +316,9 @@ pub fn start_detached_node(
             None => (port, None),
         }
     };
+
+    // Wait for TCP health endpoint to be fully ready before returning.
+    wait_for_tcp_ready(actual_port, pid)?;
 
     // Create node info
     let node_info = NodeInfo {
@@ -319,6 +348,45 @@ fn path_to_erlang_arg(path: &Path) -> String {
     {
         path.to_str().unwrap_or("").to_string()
     }
+}
+
+/// Poll until the TCP health endpoint responds on the given port.
+///
+/// Uses short per-attempt timeouts (300ms connect, 500ms read) to keep the
+/// worst-case total bounded at ~25s rather than the ~175s that would result
+/// from reusing `tcp_health_probe`'s production timeouts.
+fn wait_for_tcp_ready(port: u16, pid: u32) -> Result<()> {
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{port}")
+        .parse()
+        .map_err(|e| miette!("Invalid address: {e}"))?;
+
+    for _ in 0..READINESS_PROBE_MAX_RETRIES {
+        if let Ok(stream) =
+            TcpStream::connect_timeout(&addr, Duration::from_millis(READINESS_CONNECT_TIMEOUT_MS))
+        {
+            if stream
+                .set_read_timeout(Some(Duration::from_millis(READINESS_READ_TIMEOUT_MS)))
+                .is_err()
+            {
+                std::thread::sleep(Duration::from_millis(READINESS_PROBE_DELAY_MS));
+                continue;
+            }
+            if let Ok(mut writer) = stream.try_clone() {
+                let mut reader = BufReader::new(stream);
+                if writer.write_all(b"{\"op\":\"health\"}\n").is_ok() && writer.flush().is_ok() {
+                    let mut response = String::new();
+                    if reader.read_line(&mut response).is_ok() && !response.is_empty() {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(READINESS_PROBE_DELAY_MS));
+    }
+    Err(miette!(
+        "BEAM node started (PID {pid}) but TCP health endpoint on port {port} \
+         did not become ready. The workspace may have failed to initialize."
+    ))
 }
 
 /// Build a `Command` for starting a detached BEAM workspace node.
@@ -515,4 +583,63 @@ pub(super) fn force_kill_process(pid: u32) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Wait for a node name to be deregistered from `epmd`.
+///
+/// After force-killing a BEAM node, `epmd` may still hold the registration
+/// briefly. This polls `epmd -names` until the node name disappears or
+/// timeout is reached. Returns `Ok(())` once deregistered, or `Err` on timeout.
+#[cfg(all(unix, test))]
+pub(super) fn wait_for_epmd_deregistration(node_name: &str, timeout_secs: u64) -> Result<()> {
+    // Extract the short name (before '@') for epmd lookup
+    let short_name = node_name.split('@').next().unwrap_or(node_name);
+
+    let interval = Duration::from_millis(100);
+    let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
+
+    while std::time::Instant::now() < deadline {
+        let output = Command::new("epmd")
+            .args(["-names"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output();
+
+        match output {
+            Ok(out) => {
+                // If epmd exits with a non-success status, keep polling
+                // rather than treating empty stdout as "deregistered".
+                if !out.status.success() {
+                    std::thread::sleep(interval);
+                    continue;
+                }
+
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                // Match exact node name in epmd output format:
+                //   "name <node_short_name> at port <N>"
+                // Using token-level matching to avoid false positives
+                // (e.g. "foo" matching "foobar").
+                let still_registered = stdout.lines().any(|line| {
+                    let mut parts = line.split_whitespace();
+                    matches!(parts.next(), Some("name"))
+                        && matches!(parts.next(), Some(name) if name == short_name)
+                });
+
+                if !still_registered {
+                    return Ok(());
+                }
+            }
+            Err(_) => {
+                // epmd not available — nothing to wait for
+                return Ok(());
+            }
+        }
+        std::thread::sleep(interval);
+    }
+
+    Err(miette!(
+        "Node '{}' still registered in epmd after {}s",
+        short_name,
+        timeout_secs
+    ))
 }

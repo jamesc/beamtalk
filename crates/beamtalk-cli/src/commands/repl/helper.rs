@@ -70,7 +70,13 @@ pub(super) struct ReplHelper {
 impl ReplHelper {
     /// Create a new helper that connects to the backend on the given port.
     pub(super) fn new(port: u16) -> Self {
-        let client = ProtocolClient::connect(port, Some(COMPLETION_TIMEOUT)).ok();
+        let client = ProtocolClient::connect(port, Some(COMPLETION_TIMEOUT))
+            .ok()
+            .map(|mut c| {
+                // BT-666: Consume the session-started welcome message
+                let _ = c.read_response_line();
+                c
+            });
         Self {
             completion_client: RefCell::new(client),
             port,
@@ -87,7 +93,13 @@ impl ReplHelper {
 
         // Try to reconnect if we don't have a client
         if client_ref.is_none() {
-            *client_ref = ProtocolClient::connect(self.port, Some(COMPLETION_TIMEOUT)).ok();
+            *client_ref = ProtocolClient::connect(self.port, Some(COMPLETION_TIMEOUT))
+                .ok()
+                .map(|mut c| {
+                    // BT-666: Consume the session-started welcome message
+                    let _ = c.read_response_line();
+                    c
+                });
         }
 
         let Some(client) = client_ref.as_mut() else {

@@ -80,6 +80,7 @@ pub fn build_stdlib() -> Result<()> {
         stdlib_mode: true,
         allow_primitives: false,
         workspace_mode: false,
+        ..Default::default()
     };
 
     // BT-295 / ADR 0007 Phase 3: Build primitive binding table from ALL stdlib sources.

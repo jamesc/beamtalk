@@ -179,7 +179,7 @@ test-e2e: build-stdlib
 # Run workspace integration tests (requires Erlang/OTP runtime, ~10s)
 test-integration: build-stdlib
     @echo "🧪 Running workspace integration tests..."
-    cargo test --bin beamtalk -- --ignored --test-threads=1 --skip test_is_node_running_true_then_false --skip test_get_or_start_workspace_lifecycle
+    cargo test --bin beamtalk -- --ignored --test-threads=1
     @echo "✅ Integration tests complete"
 
 # Run MCP server integration tests (auto-starts REPL via test fixture, ~15s)
@@ -236,7 +236,7 @@ test-install: build-release build-stdlib
 # Run compiled stdlib tests (ADR 0014 Phase 1, ~14s)
 test-stdlib: build-stdlib
     @echo "🧪 Running stdlib tests..."
-    @cargo run --bin beamtalk --quiet -- test-stdlib
+    @cargo run --bin beamtalk --quiet -- test-stdlib --no-warnings
     @echo "✅ Stdlib tests complete"
 
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
@@ -341,7 +341,7 @@ coverage-stdlib: build-stdlib
     set -euo pipefail
     echo "📊 Running stdlib tests with Erlang cover instrumentation..."
     echo "   (This is slower than normal stdlib tests due to cover overhead)"
-    STDLIB_COVER=1 cargo run --bin beamtalk --quiet -- test-stdlib || true
+    STDLIB_COVER=1 cargo run --bin beamtalk --quiet -- test-stdlib --no-warnings || true
     if [ -f runtime/_build/test/cover/stdlib.coverdata ]; then
         SIZE=$(wc -c < runtime/_build/test/cover/stdlib.coverdata)
         echo "  📁 Coverdata: runtime/_build/test/cover/stdlib.coverdata (${SIZE} bytes)"

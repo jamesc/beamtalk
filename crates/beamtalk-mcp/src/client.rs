@@ -41,11 +41,16 @@ impl ReplClient {
             .map_err(|e| format!("Failed to connect to REPL at {addr}: {e}"))?;
 
         let (read_half, write_half) = tokio::io::split(stream);
+        let mut reader = BufReader::new(read_half);
+
+        // BT-666: Consume the session-started welcome message
+        let mut welcome = String::new();
+        let _ = reader.read_line(&mut welcome).await;
 
         Ok(Self {
             inner: Mutex::new(ReplClientInner {
                 writer: write_half,
-                reader: BufReader::new(read_half),
+                reader,
             }),
         })
     }
