@@ -21,8 +21,7 @@ Beamtalk is an **interactive-first** language (Principle 1), but the workspace i
 
 ### Current Architecture
 
-```
-┌─────────────┐  WebSocket (JSON)  ┌──────────────────────┐   OTP Port    ┌──────────────┐
+```text
 │ CLI REPL    │ ────────────────→  │ beamtalk_ws_handler  │ ───────────→  │ Compiler     │
 │ (Rust)      │  ws://localhost    │ (cowboy, Erlang/OTP)  │  (stdin/out)  │ (Rust, OTP   │
 └─────────────┘                    │                      │               │  Port)       │
