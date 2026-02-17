@@ -728,8 +728,10 @@ dist: build-release build-stdlib
     Copy-Item target/release/beamtalk-mcp.exe dist/bin/
     foreach ($app in @('beamtalk_runtime','beamtalk_workspace','beamtalk_compiler','jsx')) { $src = "runtime/_build/default/lib/$app/ebin"; if (!(Test-Path "$src/*.beam")) { Write-Error "No .beam files in $src"; exit 1 }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/lib/$app/ebin" | Out-Null; Copy-Item "$src/*.beam" "dist/lib/beamtalk/lib/$app/ebin/"; Copy-Item "$src/*.app" "dist/lib/beamtalk/lib/$app/ebin/" -ErrorAction SilentlyContinue }
     $stdlib = "runtime/apps/beamtalk_stdlib/ebin"; if (!(Test-Path "$stdlib/*.beam")) { Write-Error "No stdlib .beam files"; exit 1 }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/lib/beamtalk_stdlib/ebin" | Out-Null; Copy-Item "$stdlib/*.beam" "dist/lib/beamtalk/lib/beamtalk_stdlib/ebin/"; Copy-Item "$stdlib/*.app" "dist/lib/beamtalk/lib/beamtalk_stdlib/ebin/" -ErrorAction SilentlyContinue
+    just dist-vscode
     @echo "✅ Distribution ready in dist/"
     @echo "   Run: dist\bin\beamtalk.exe repl"
+    @echo "   VS Code extension: dist\beamtalk-*.vsix"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Documentation
