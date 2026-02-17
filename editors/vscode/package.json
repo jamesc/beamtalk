@@ -50,6 +50,11 @@
           "enum": ["off", "messages", "verbose"],
           "default": "off",
           "description": "Trace communication between VS Code and the Beamtalk language server."
+        },
+        "beamtalk.stdlib.sourceDir": {
+          "type": "string",
+          "default": "",
+          "description": "Optional path to stdlib .bt sources for navigation fallback. Can be absolute, or relative to the Beamtalk project root (directory containing beamtalk.toml)."
         }
       }
     }

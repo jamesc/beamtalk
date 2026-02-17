@@ -59,7 +59,7 @@ pub use value_objects::{
     HoverInfo, Location, ParameterInfo, Position, SignatureHelp, SignatureInfo,
 };
 
-use crate::ast::{Expression, Identifier, Module};
+use crate::ast::{Expression, Identifier, Module, TypeAnnotation};
 use crate::source_analysis::Span;
 use camino::Utf8PathBuf;
 use std::collections::HashMap;
@@ -242,8 +242,35 @@ impl SimpleLanguageService {
                     return Some((superclass.clone(), superclass.span));
                 }
             }
+
+            for state in class.state.iter().chain(class.class_variables.iter()) {
+                if let Some(type_annotation) = &state.type_annotation {
+                    if let Some(ident) =
+                        Self::find_identifier_in_type_annotation(type_annotation, offset_val)
+                    {
+                        return Some(ident);
+                    }
+                }
+            }
+
             // Search method bodies
             for method in class.methods.iter().chain(class.class_methods.iter()) {
+                for parameter in &method.parameters {
+                    if let Some(type_annotation) = &parameter.type_annotation {
+                        if let Some(ident) =
+                            Self::find_identifier_in_type_annotation(type_annotation, offset_val)
+                        {
+                            return Some(ident);
+                        }
+                    }
+                }
+                if let Some(return_type) = &method.return_type {
+                    if let Some(ident) =
+                        Self::find_identifier_in_type_annotation(return_type, offset_val)
+                    {
+                        return Some(ident);
+                    }
+                }
                 for expr in &method.body {
                     if let Some(ident) = Self::find_identifier_in_expr(expr, offset) {
                         return Some(ident);
@@ -257,6 +284,24 @@ impl SimpleLanguageService {
             if offset_val >= smd.class_name.span.start() && offset_val < smd.class_name.span.end() {
                 return Some((smd.class_name.clone(), smd.class_name.span));
             }
+
+            for parameter in &smd.method.parameters {
+                if let Some(type_annotation) = &parameter.type_annotation {
+                    if let Some(ident) =
+                        Self::find_identifier_in_type_annotation(type_annotation, offset_val)
+                    {
+                        return Some(ident);
+                    }
+                }
+            }
+            if let Some(return_type) = &smd.method.return_type {
+                if let Some(ident) =
+                    Self::find_identifier_in_type_annotation(return_type, offset_val)
+                {
+                    return Some(ident);
+                }
+            }
+
             for expr in &smd.method.body {
                 if let Some(ident) = Self::find_identifier_in_expr(expr, offset) {
                     return Some(ident);
@@ -272,6 +317,38 @@ impl SimpleLanguageService {
         }
 
         None
+    }
+
+    fn find_identifier_in_type_annotation(
+        annotation: &TypeAnnotation,
+        offset_val: u32,
+    ) -> Option<(Identifier, Span)> {
+        match annotation {
+            TypeAnnotation::Simple(identifier) => {
+                if offset_val >= identifier.span.start() && offset_val < identifier.span.end() {
+                    Some((identifier.clone(), identifier.span))
+                } else {
+                    None
+                }
+            }
+            TypeAnnotation::Union { types, .. } => types
+                .iter()
+                .find_map(|ty| Self::find_identifier_in_type_annotation(ty, offset_val)),
+            TypeAnnotation::Generic {
+                base, parameters, ..
+            } => {
+                if offset_val >= base.span.start() && offset_val < base.span.end() {
+                    return Some((base.clone(), base.span));
+                }
+                parameters
+                    .iter()
+                    .find_map(|ty| Self::find_identifier_in_type_annotation(ty, offset_val))
+            }
+            TypeAnnotation::FalseOr { inner, .. } => {
+                Self::find_identifier_in_type_annotation(inner, offset_val)
+            }
+            TypeAnnotation::Singleton { .. } => None,
+        }
     }
 
     /// Recursively searches for an identifier at the given offset.
@@ -785,6 +862,50 @@ mod tests {
         assert!(def.is_some());
         let loc = def.unwrap();
         assert_eq!(loc.file, Utf8PathBuf::from("lib/Counter.bt"));
+    }
+
+    #[test]
+    fn goto_definition_superclass_in_class_header() {
+        let mut service = SimpleLanguageService::new();
+
+        let collection_file = Utf8PathBuf::from("lib/Collection.bt");
+        let set_file = Utf8PathBuf::from("lib/Set.bt");
+
+        service.update_file(
+            collection_file.clone(),
+            "abstract Object subclass: Collection".to_string(),
+        );
+        service.update_file(
+            set_file.clone(),
+            "sealed Collection subclass: Set".to_string(),
+        );
+
+        // Cursor on "Collection" in class header.
+        let def = service.goto_definition(&set_file, Position::new(0, 8));
+        assert!(def.is_some());
+        let loc = def.unwrap();
+        assert_eq!(loc.file, collection_file);
+    }
+
+    #[test]
+    fn goto_definition_type_annotation_identifier() {
+        let mut service = SimpleLanguageService::new();
+        let integer_file = Utf8PathBuf::from("lib/Integer.bt");
+        let tuple_file = Utf8PathBuf::from("lib/Tuple.bt");
+
+        service.update_file(
+            integer_file.clone(),
+            "sealed Number subclass: Integer".to_string(),
+        );
+        service.update_file(
+            tuple_file.clone(),
+            "sealed Collection subclass: Tuple\n  size -> Integer => 0".to_string(),
+        );
+
+        let def = service.goto_definition(&tuple_file, Position::new(1, 10));
+        assert!(def.is_some());
+        let loc = def.unwrap();
+        assert_eq!(loc.file, integer_file);
     }
 
     #[test]

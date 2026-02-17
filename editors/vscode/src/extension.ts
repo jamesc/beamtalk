@@ -97,6 +97,8 @@ function resolveServerPath(context: vscode.ExtensionContext): ResolvedServerPath
 async function startClient(
   context: vscode.ExtensionContext
 ): Promise<void> {
+  const config = vscode.workspace.getConfiguration("beamtalk");
+  const stdlibSourceDir = config.get<string>("stdlib.sourceDir", "").trim();
   const resolved = resolveServerPath(context);
   const serverPath = resolved.serverPath || "beamtalk-lsp";
 
@@ -123,6 +125,9 @@ async function startClient(
       { scheme: "file", language: "beamtalk" },
       { scheme: "untitled", language: "beamtalk" },
     ],
+    initializationOptions: {
+      stdlibSourceDir,
+    },
     outputChannel,
     traceOutputChannel,
     revealOutputChannelOn: RevealOutputChannelOn.Never,

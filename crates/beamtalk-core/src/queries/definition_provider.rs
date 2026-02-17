@@ -66,10 +66,11 @@ pub fn find_definition_cross_file<'a>(
         return Some(Location::new(current_file.clone(), span));
     }
 
-    // 2. Class definition in the project index (skip builtins — they have no file location)
-    if !crate::semantic_analysis::ClassHierarchy::is_builtin_class(name)
-        && project_index.hierarchy().has_class(name)
-    {
+    // 2. Class definition in the project index.
+    //
+    // Built-in/stdlib classes can still have source files (e.g. lib/*.bt),
+    // so we always search indexed files for a concrete declaration span.
+    if project_index.hierarchy().has_class(name) {
         // Find which file defines this class
         for (file_path, module) in files {
             for class in &module.classes {
@@ -628,6 +629,36 @@ mod tests {
         // Integer is a built-in, not defined in any file — so no location
         let loc = find_definition_cross_file("Integer", &file, &module, &index, [(&file, &module)]);
         assert!(loc.is_none());
+    }
+
+    #[test]
+    fn cross_file_stdlib_class_with_source_loaded() {
+        let file_collection = Utf8PathBuf::from("lib/Collection.bt");
+        let module_collection = parse_source("abstract Object subclass: Collection");
+        let hierarchy_collection = ClassHierarchy::build(&module_collection).0;
+
+        let file_set = Utf8PathBuf::from("lib/Set.bt");
+        let module_set = parse_source("sealed Collection subclass: Set");
+        let hierarchy_set = ClassHierarchy::build(&module_set).0;
+
+        let mut index = ProjectIndex::new();
+        index.update_file(file_collection.clone(), &hierarchy_collection);
+        index.update_file(file_set.clone(), &hierarchy_set);
+
+        let loc = find_definition_cross_file(
+            "Collection",
+            &file_set,
+            &module_set,
+            &index,
+            [
+                (&file_collection, &module_collection),
+                (&file_set, &module_set),
+            ],
+        );
+
+        assert!(loc.is_some());
+        let loc = loc.unwrap();
+        assert_eq!(loc.file, file_collection);
     }
 
     #[test]

@@ -18,6 +18,7 @@ pub mod ast;
 pub mod codegen;
 pub mod erlang;
 pub mod language_service;
+pub mod project;
 pub mod queries;
 pub mod semantic_analysis;
 pub mod source_analysis;
