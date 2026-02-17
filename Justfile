@@ -157,7 +157,7 @@ test-integration: build-stdlib
     @echo "✅ Integration tests complete"
 
 # Run MCP server integration tests (auto-starts REPL via test fixture, ~15s)
-test-mcp: build-stdlib
+test-mcp: build
     @echo "🧪 Running MCP server integration tests..."
     @cargo test -p beamtalk-mcp -- --ignored --test-threads=1
     @echo "✅ MCP integration tests complete"
