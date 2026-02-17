@@ -100,6 +100,10 @@ pub fn tcp_health_probe(port: u16) -> Result<HealthProbeResponse> {
     let mut writer = stream.try_clone().into_diagnostic()?;
     let mut reader = BufReader::new(stream);
 
+    // BT-666: Consume the session-started welcome message
+    let mut welcome = String::new();
+    let _ = reader.read_line(&mut welcome);
+
     // Send health probe request
     writer
         .write_all(b"{\"op\":\"health\"}\n")
@@ -133,6 +137,10 @@ pub fn tcp_send_shutdown(port: u16, cookie: &str) -> Result<()> {
 
     let mut writer = stream.try_clone().into_diagnostic()?;
     let mut reader = BufReader::new(stream);
+
+    // BT-666: Consume the session-started welcome message
+    let mut welcome = String::new();
+    let _ = reader.read_line(&mut welcome);
 
     // Send shutdown request with cookie
     let request = serde_json::json!({"op": "shutdown", "cookie": cookie});

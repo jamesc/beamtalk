@@ -46,6 +46,8 @@
 //! ```
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use miette::{IntoDiagnostic, Result};
@@ -431,6 +433,14 @@ pub fn run(
     let history_file = history_path()?;
     let _ = rl.load_history(&history_file);
 
+    // BT-666: Register SIGINT handler for interrupt during eval.
+    // Uses signal-hook to non-destructively register alongside rustyline's handler.
+    let interrupted = Arc::new(AtomicBool::new(false));
+    #[cfg(unix)]
+    {
+        let _ = signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&interrupted));
+    }
+
     // Main REPL loop
     let mut line_buffer: Vec<String> = Vec::new();
     loop {
@@ -750,8 +760,10 @@ pub fn run(
                 // Input is complete — add to history as single entry and evaluate
                 let _ = rl.add_history_entry(&accumulated);
 
-                // Evaluate expression
-                match client.eval(&accumulated) {
+                // Evaluate expression (BT-666: interruptible via Ctrl-C)
+                // Clear any stale interrupt flag before starting eval
+                interrupted.store(false, Ordering::Relaxed);
+                match client.eval_interruptible(&accumulated, &interrupted) {
                     Ok(response) => {
                         // Print captured stdout before value/error (BT-355)
                         if let Some(ref output) = response.output {
@@ -771,7 +783,12 @@ pub fn run(
                         }
                         if response.is_error() {
                             if let Some(msg) = response.error_message() {
-                                eprintln!("{}", format_error(msg));
+                                if msg == "Interrupted" {
+                                    // BT-666: Clean interrupt message
+                                    eprintln!("{msg}");
+                                } else {
+                                    eprintln!("{}", format_error(msg));
+                                }
                             }
                         } else if let Some(value) = response.value {
                             println!("{}", format_value(&value));
@@ -787,6 +804,8 @@ pub fn run(
             }
             Err(ReadlineError::Interrupted) => {
                 // Ctrl+C — cancel multi-line input if buffering, otherwise just newline
+                // BT-666: Clear the interrupt flag (signal handler also fires)
+                interrupted.store(false, Ordering::Relaxed);
                 if !line_buffer.is_empty() {
                     line_buffer.clear();
                     eprintln!("Cancelled");

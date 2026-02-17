@@ -14,7 +14,7 @@
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--export([start_link/1, get_port/0, get_nonce/0, handle_client/2, parse_request/1, safe_to_existing_atom/1]).
+-export([start_link/1, get_port/0, get_nonce/0, handle_client/3, parse_request/1, safe_to_existing_atom/1]).
 -ifdef(TEST).
 -export([generate_nonce/0, validate_actor_pid/1, is_known_actor/1,
          get_completions/1, get_symbol_info/1, resolve_class_to_module/1,
@@ -75,6 +75,8 @@ init(Config) ->
     WorkspaceId = maps:get(workspace_id, Config, undefined),
     %% Generate a random nonce for stale port file detection (BT-611)
     Nonce = generate_nonce(),
+    %% BT-666: Session registry for interrupt routing
+    ets:new(beamtalk_sessions, [named_table, public, {read_concurrency, true}]),
     %% SECURITY: Bind to loopback only (127.0.0.1) so that only local
     %% processes can connect. No authentication is performed — the loopback
     %% restriction is the sole access control, matching the security model of
@@ -208,6 +210,9 @@ acceptor_loop(ListenSocket) ->
             %% Start session under supervisor
             case beamtalk_session_sup:start_session(SessionId) of
                 {ok, SessionPid} ->
+                    %% BT-666: Register session for interrupt routing
+                    ets:insert(beamtalk_sessions, {SessionId, SessionPid}),
+                    
                     ?LOG_INFO("REPL client connected", #{
                         session => SessionId,
                         session_pid => SessionPid,
@@ -223,13 +228,15 @@ acceptor_loop(ListenSocket) ->
                     %% the handler exits cleanly.
                     spawn(fun() ->
                         MonRef = erlang:monitor(process, SessionPid),
-                        handle_client(ClientSocket, SessionPid),
+                        handle_client(ClientSocket, SessionPid, SessionId),
                         %% Client disconnected — terminate the session
                         ?LOG_INFO("REPL client disconnected", #{
                             session => SessionId,
                             session_pid => SessionPid,
                             peer => Peer
                         }),
+                        %% BT-666: Unregister session
+                        ets:delete(beamtalk_sessions, SessionId),
                         erlang:demonitor(MonRef, [flush]),
                         beamtalk_repl_shell:stop(SessionPid)
                     end);
@@ -261,9 +268,13 @@ generate_session_id() ->
 %% The SessionPid is a beamtalk_repl_shell process that handles
 %% protocol-aware request routing via beamtalk_repl_protocol.
 %% Called by: beamtalk_repl_server acceptor_loop
--spec handle_client(gen_tcp:socket(), pid()) -> ok.
-handle_client(Socket, SessionPid) ->
+-spec handle_client(gen_tcp:socket(), pid(), binary()) -> ok.
+handle_client(Socket, SessionPid, SessionId) ->
     inet:setopts(Socket, [{active, false}, {packet, line}, {buffer, 65536}]),
+    %% BT-666: Send session ID so the client can use it for interrupt requests
+    Welcome = jsx:encode(#{<<"op">> => <<"session-started">>,
+                           <<"session">> => SessionId}),
+    _ = gen_tcp:send(Socket, [Welcome, "\n"]),
     handle_client_loop(Socket, SessionPid).
 
 %% @private
@@ -555,6 +566,31 @@ handle_op(<<"kill">>, Params, Msg, _SessionPid) ->
                 Err2, Msg, fun beamtalk_repl_json:format_error_message/1);
         {ok, Pid} ->
             exit(Pid, kill),
+            beamtalk_repl_protocol:encode_status(ok, Msg, fun beamtalk_repl_json:term_to_json/1)
+    end;
+
+handle_op(<<"interrupt">>, Params, Msg, SessionPid) ->
+    %% BT-666: Interrupt a running evaluation.
+    %% If a session ID is provided, look up the target session (for cross-connection interrupt).
+    %% Otherwise, interrupt the current connection's session.
+    TargetPid = case maps:get(<<"session">>, Params, undefined) of
+        undefined ->
+            SessionPid;
+        TargetSession ->
+            case ets:lookup(beamtalk_sessions, TargetSession) of
+                [{_, Pid}] -> Pid;
+                [] ->
+                    ?LOG_WARNING("Interrupt target session not found", #{
+                        session => TargetSession
+                    }),
+                    SessionPid
+            end
+    end,
+    try
+        ok = beamtalk_repl_shell:interrupt(TargetPid),
+        beamtalk_repl_protocol:encode_status(ok, Msg, fun beamtalk_repl_json:term_to_json/1)
+    catch
+        exit:{noproc, _} ->
             beamtalk_repl_protocol:encode_status(ok, Msg, fun beamtalk_repl_json:term_to_json/1)
     end;
 

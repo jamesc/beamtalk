@@ -1336,6 +1336,8 @@ tcp_cleanup({_Port, SupPid}) ->
 %% Helper: connect, send a JSON op, receive response
 tcp_send_op(Port, OpJson) ->
     {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
+    %% BT-666: Consume the session-started welcome message
+    {ok, _Welcome} = gen_tcp:recv(Sock, 0, 5000),
     ok = gen_tcp:send(Sock, [OpJson, "\n"]),
     {ok, Data} = gen_tcp:recv(Sock, 0, 5000),
     gen_tcp:close(Sock),
@@ -1534,6 +1536,8 @@ tcp_inspect_dead_actor_test(Port) ->
 %% Test: malformed JSON falls back to raw eval
 tcp_malformed_json_test(Port) ->
     {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
+    %% BT-666: Consume session-started welcome
+    {ok, _Welcome} = gen_tcp:recv(Sock, 0, 5000),
     ok = gen_tcp:send(Sock, <<"not valid json\n">>),
     {ok, Data} = gen_tcp:recv(Sock, 0, 5000),
     gen_tcp:close(Sock),
@@ -1544,6 +1548,8 @@ tcp_malformed_json_test(Port) ->
 %% Test: raw expression (non-JSON) backwards compatibility
 tcp_raw_expression_test(Port) ->
     {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
+    %% BT-666: Consume session-started welcome
+    {ok, _Welcome} = gen_tcp:recv(Sock, 0, 5000),
     ok = gen_tcp:send(Sock, <<"42\n">>),
     {ok, Data} = gen_tcp:recv(Sock, 0, 5000),
     gen_tcp:close(Sock),
@@ -1574,6 +1580,9 @@ tcp_concurrent_clients_test(Port) ->
     Msg2 = jsx:encode(#{<<"op">> => <<"actors">>, <<"id">> => <<"cc2">>}),
     {ok, Sock1} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
     {ok, Sock2} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
+    %% BT-666: Consume session-started welcome on both sockets
+    {ok, _W1} = gen_tcp:recv(Sock1, 0, 5000),
+    {ok, _W2} = gen_tcp:recv(Sock2, 0, 5000),
     ok = gen_tcp:send(Sock1, [Msg1, "\n"]),
     ok = gen_tcp:send(Sock2, [Msg2, "\n"]),
     {ok, Data1} = gen_tcp:recv(Sock1, 0, 5000),
@@ -1599,6 +1608,8 @@ tcp_client_disconnect_test(Port) ->
 %% Test: multiple requests on the same connection
 tcp_multi_request_same_conn_test(Port) ->
     {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
+    %% BT-666: Consume session-started welcome
+    {ok, _Welcome} = gen_tcp:recv(Sock, 0, 5000),
     %% Send first request
     Msg1 = jsx:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"mr1">>}),
     ok = gen_tcp:send(Sock, [Msg1, "\n"]),
@@ -1618,6 +1629,8 @@ tcp_multi_request_same_conn_test(Port) ->
 %% Test: send empty line to server
 tcp_empty_line_test(Port) ->
     {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
+    %% BT-666: Consume session-started welcome
+    {ok, _Welcome} = gen_tcp:recv(Sock, 0, 5000),
     ok = gen_tcp:send(Sock, <<"\n">>),
     {ok, Data} = gen_tcp:recv(Sock, 0, 5000),
     gen_tcp:close(Sock),
@@ -1629,6 +1642,8 @@ tcp_empty_line_test(Port) ->
 %% Test: binary garbage data
 tcp_binary_garbage_test(Port) ->
     {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
+    %% BT-666: Consume session-started welcome
+    {ok, _Welcome} = gen_tcp:recv(Sock, 0, 5000),
     ok = gen_tcp:send(Sock, <<0, 1, 2, 255, 254, 10>>),
     {ok, Data} = gen_tcp:recv(Sock, 0, 5000),
     gen_tcp:close(Sock),

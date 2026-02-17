@@ -21,8 +21,8 @@
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %% Public API
--export([start_link/1, stop/1, eval/2, get_bindings/1, clear_bindings/1, load_file/2,
-         unload_module/2, get_module_tracker/1]).
+-export([start_link/1, stop/1, eval/2, interrupt/1, get_bindings/1, clear_bindings/1,
+         load_file/2, unload_module/2, get_module_tracker/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -44,6 +44,12 @@ stop(SessionPid) ->
 -spec eval(pid(), string()) -> {ok, term(), binary(), [binary()]} | {error, term(), binary(), [binary()]}.
 eval(SessionPid, Expression) ->
     gen_server:call(SessionPid, {eval, Expression}, 30000).
+
+%% @doc Interrupt a running evaluation in this session.
+%% If no evaluation is in progress, returns ok immediately.
+-spec interrupt(pid()) -> ok.
+interrupt(SessionPid) ->
+    gen_server:call(SessionPid, interrupt, 5000).
 
 %% @doc Get current variable bindings for this session.
 -spec get_bindings(pid()) -> {ok, map()}.
@@ -94,41 +100,67 @@ init(SessionId) ->
     end,
     State1 = beamtalk_repl_state:set_actor_registry(RegistryPid, State0b),
     
-    {ok, {SessionId, State1}}.
+    {ok, {SessionId, State1, undefined}}.
 
 %% @private
-handle_call({eval, Expression}, _From, {SessionId, State}) ->
-    case beamtalk_repl_eval:do_eval(Expression, State) of
-        {ok, Result, Output, Warnings, NewState} ->
-            {reply, {ok, Result, Output, Warnings}, {SessionId, NewState}};
-        {error, Reason, Output, Warnings, NewState} ->
-            {reply, {error, Reason, Output, Warnings}, {SessionId, NewState}}
-    end;
+handle_call({eval, Expression}, From, {SessionId, State, undefined}) ->
+    %% Spawn eval in a monitored worker process so it can be interrupted (BT-666)
+    Self = self(),
+    {WorkerPid, MonRef} = spawn_monitor(fun() ->
+        Result = beamtalk_repl_eval:do_eval(Expression, State),
+        Self ! {eval_result, self(), Result}
+    end),
+    {noreply, {SessionId, State, {WorkerPid, MonRef, From}}};
 
-handle_call(get_bindings, _From, {SessionId, State}) ->
+handle_call({eval, _Expression}, _From, {_SessionId, _State, {_Pid, _Ref, _}} = FullState) ->
+    %% Already evaluating — reject concurrent eval
+    Err0 = beamtalk_error:new(eval_busy, 'REPL'),
+    Err1 = beamtalk_error:with_message(Err0, <<"An evaluation is already in progress">>),
+    Err2 = beamtalk_error:with_hint(Err1, <<"Use Ctrl-C to interrupt the current evaluation.">>),
+    {reply, {error, Err2, <<>>, []}, FullState};
+
+handle_call(interrupt, _From, {SessionId, State, {WorkerPid, MonRef, EvalFrom}}) ->
+    %% Kill the worker process and reply to the waiting eval caller
+    erlang:demonitor(MonRef, [flush]),
+    exit(WorkerPid, kill),
+    %% Flush any eval_result message the worker may have sent before dying
+    receive
+        {eval_result, WorkerPid, _} -> ok
+    after 0 -> ok
+    end,
+    Err0 = beamtalk_error:new(interrupted, 'REPL'),
+    Err1 = beamtalk_error:with_message(Err0, <<"Interrupted">>),
+    gen_server:reply(EvalFrom, {error, Err1, <<>>, []}),
+    {reply, ok, {SessionId, State, undefined}};
+
+handle_call(interrupt, _From, {_SessionId, _State, undefined} = FullState) ->
+    %% No eval in progress — nothing to interrupt
+    {reply, ok, FullState};
+
+handle_call(get_bindings, _From, {SessionId, State, Worker}) ->
     Bindings = beamtalk_repl_state:get_bindings(State),
-    {reply, {ok, Bindings}, {SessionId, State}};
+    {reply, {ok, Bindings}, {SessionId, State, Worker}};
 
-handle_call(clear_bindings, _From, {SessionId, State}) ->
+handle_call(clear_bindings, _From, {SessionId, State, Worker}) ->
     %% ADR 0019 Phase 3: Re-inject workspace bindings after clearing
     %% so that Transcript, Beamtalk, Workspace remain available.
     Bindings = inject_workspace_bindings(#{}),
     NewState = beamtalk_repl_state:set_bindings(Bindings, State),
-    {reply, ok, {SessionId, NewState}};
+    {reply, ok, {SessionId, NewState, Worker}};
 
-handle_call({load_file, Path}, _From, {SessionId, State}) ->
+handle_call({load_file, Path}, _From, {SessionId, State, Worker}) ->
     case beamtalk_repl_eval:handle_load(Path, State) of
         {ok, LoadedModules, NewState} ->
-            {reply, {ok, LoadedModules}, {SessionId, NewState}};
+            {reply, {ok, LoadedModules}, {SessionId, NewState, Worker}};
         {error, Reason, NewState} ->
-            {reply, {error, Reason}, {SessionId, NewState}}
+            {reply, {error, Reason}, {SessionId, NewState, Worker}}
     end;
 
-handle_call(get_module_tracker, _From, {SessionId, State}) ->
+handle_call(get_module_tracker, _From, {SessionId, State, Worker}) ->
     Tracker = beamtalk_repl_state:get_module_tracker(State),
-    {reply, {ok, Tracker}, {SessionId, State}};
+    {reply, {ok, Tracker}, {SessionId, State, Worker}};
 
-handle_call({unload_module, Module}, _From, {SessionId, State}) ->
+handle_call({unload_module, Module}, _From, {SessionId, State, Worker}) ->
     case code:is_loaded(Module) of
         {file, _} ->
             case code:soft_purge(Module) of
@@ -137,20 +169,20 @@ handle_call({unload_module, Module}, _From, {SessionId, State}) ->
                     Tracker = beamtalk_repl_state:get_module_tracker(State),
                     NewTracker = beamtalk_repl_modules:remove_module(Module, Tracker),
                     NewState = beamtalk_repl_state:set_module_tracker(NewTracker, State),
-                    {reply, ok, {SessionId, NewState}};
+                    {reply, ok, {SessionId, NewState, Worker}};
                 false ->
                     Err0 = beamtalk_error:new(module_in_use, 'Module'),
                     Err1 = beamtalk_error:with_selector(Err0, Module),
                     Err = beamtalk_error:with_hint(Err1,
                         <<"Stop actors using this module first.">>),
-                    {reply, {error, Err}, {SessionId, State}}
+                    {reply, {error, Err}, {SessionId, State, Worker}}
             end;
         false ->
             Err0 = beamtalk_error:new(module_not_loaded, 'Module'),
             Err1 = beamtalk_error:with_selector(Err0, Module),
             Err = beamtalk_error:with_hint(Err1,
                 <<"Use :load <path> to load it first.">>),
-            {reply, {error, Err}, {SessionId, State}}
+            {reply, {error, Err}, {SessionId, State, Worker}}
     end;
 
 handle_call(_Request, _From, State) ->
@@ -161,11 +193,38 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 %% @private
+%% Worker completed eval successfully (BT-666)
+handle_info({eval_result, WorkerPid, Result}, {SessionId, _State, {WorkerPid, MonRef, From}}) ->
+    erlang:demonitor(MonRef, [flush]),
+    case Result of
+        {ok, Value, Output, Warnings, NewState} ->
+            gen_server:reply(From, {ok, Value, Output, Warnings}),
+            {noreply, {SessionId, NewState, undefined}};
+        {error, Reason, Output, Warnings, NewState} ->
+            gen_server:reply(From, {error, Reason, Output, Warnings}),
+            {noreply, {SessionId, NewState, undefined}}
+    end;
+
+%% Worker process crashed (BT-666)
+handle_info({'DOWN', MonRef, process, WorkerPid, Reason},
+            {SessionId, State, {WorkerPid, MonRef, From}}) ->
+    Err0 = beamtalk_error:new(eval_crashed, 'REPL'),
+    Err1 = beamtalk_error:with_message(Err0,
+        iolist_to_binary(io_lib:format("Evaluation crashed: ~p", [Reason]))),
+    gen_server:reply(From, {error, Err1, <<>>, []}),
+    {noreply, {SessionId, State, undefined}};
+
 handle_info(_Info, State) ->
     {noreply, State}.
 
 %% @private
-terminate(Reason, {SessionId, _State}) ->
+terminate(Reason, {SessionId, _State, {WorkerPid, MonRef, _From}}) ->
+    %% BT-666: Kill any running worker to avoid zombie evaluations
+    erlang:demonitor(MonRef, [flush]),
+    exit(WorkerPid, kill),
+    ?LOG_INFO("REPL session terminated", #{session => SessionId, reason => Reason}),
+    ok;
+terminate(Reason, {SessionId, _State, _Worker}) ->
     ?LOG_INFO("REPL session terminated", #{session => SessionId, reason => Reason}),
     ok;
 terminate(Reason, _State) ->
