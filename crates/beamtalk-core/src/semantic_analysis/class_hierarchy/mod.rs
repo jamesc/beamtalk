@@ -265,8 +265,11 @@ impl ClassHierarchy {
                 break;
             }
             if let Some(info) = self.classes.get(name.as_str()) {
-                if let Some(ty) = info.state_types.get(field_name) {
-                    return Some(ty.clone());
+                // If this class declares the field, return its type (or None if untyped).
+                // This handles shadowing: a subclass redeclaring a field without a type
+                // should NOT inherit the parent's type annotation.
+                if info.state.iter().any(|s| s == field_name) {
+                    return info.state_types.get(field_name).cloned();
                 }
                 current = info
                     .superclass
@@ -1707,5 +1710,45 @@ mod tests {
         // Built-in classes have no typed state currently
         assert_eq!(h.state_field_type("Integer", "anything"), None);
         assert_eq!(h.state_field_type("Actor", "anything"), None);
+    }
+
+    #[test]
+    fn state_field_type_shadowed_untyped_field() {
+        // Parent declares `count: Integer`, child redeclares `count` without type.
+        // The child's untyped declaration should shadow the parent's type.
+        let parent = make_typed_state_class("TypedParent", "Actor");
+        let child = ClassDefinition {
+            name: Identifier::new("Child", test_span()),
+            superclass: Some(Identifier::new("TypedParent", test_span())),
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![StateDeclaration::new(
+                Identifier::new("count", test_span()),
+                test_span(),
+            )],
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![parent, child],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (h, _) = ClassHierarchy::build(&module);
+
+        // Child's untyped `count` shadows parent's typed `count: Integer`
+        assert_eq!(h.state_field_type("Child", "count"), None);
+        // Parent's typed `count` is still accessible on the parent
+        assert_eq!(
+            h.state_field_type("TypedParent", "count"),
+            Some(EcoString::from("Integer"))
+        );
     }
 }
