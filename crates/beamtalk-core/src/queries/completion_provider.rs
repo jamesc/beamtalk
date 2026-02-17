@@ -230,8 +230,13 @@ fn detect_erlang_class_context(module: &Module, trimmed: &str, offset: u32) -> b
         }
     }
 
-    // Also check AST for a ClassReference("Erlang") near cursor position
-    find_erlang_class_ref(module, offset)
+    // Cheap textual hint before AST fallback — only scan when "Erlang" is near cursor
+    if let Some(idx) = trimmed.rfind("Erlang") {
+        if trimmed.len().saturating_sub(idx) <= 32 {
+            return find_erlang_class_ref(module, offset);
+        }
+    }
+    false
 }
 
 /// Walks the AST to find a `ClassReference("Erlang")` expression near the cursor.
