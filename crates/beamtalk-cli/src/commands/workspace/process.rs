@@ -491,7 +491,9 @@ fn find_beam_pid_by_node(node_name: &str) -> Result<(u32, Option<u64>)> {
             let arg_str = arg.to_string_lossy();
             arg_str.contains("erl") || arg_str.contains("beam.smp")
         });
-        let has_node = cmd.iter().any(|arg| arg.to_string_lossy().contains(node_name));
+        let has_node = cmd
+            .iter()
+            .any(|arg| arg.to_string_lossy().contains(node_name));
 
         if is_beam && has_node {
             // On Linux, try to read /proc start time for stale detection

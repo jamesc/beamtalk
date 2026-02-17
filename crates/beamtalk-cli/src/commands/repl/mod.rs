@@ -884,10 +884,10 @@ fn extract_command_arg<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
     use process::DEFAULT_REPL_PORT;
     use serial_test::serial;
     use std::sync::atomic::Ordering;
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
     /// RAII guard that restores `COLOR_ENABLED` on drop (even if test panics).
     struct ColorGuard {
