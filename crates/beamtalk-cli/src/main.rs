@@ -42,6 +42,10 @@ enum Command {
         /// Compile in stdlib mode (enables @primitive without warnings)
         #[arg(long)]
         stdlib_mode: bool,
+
+        /// Suppress warning diagnostics
+        #[arg(long)]
+        no_warnings: bool,
     },
 
     /// Compile the standard library (`lib/*.bt` → `runtime/apps/beamtalk_stdlib/ebin/`)
@@ -121,6 +125,10 @@ enum Command {
         /// Directory containing .bt test files
         #[arg(default_value = "tests/stdlib")]
         path: String,
+
+        /// Suppress warning diagnostics when compiling test fixtures
+        #[arg(long)]
+        no_warnings: bool,
     },
 
     /// Run `BUnit` tests — discover and run `TestCase` subclasses (ADR 0014 Phase 2)
@@ -181,11 +189,13 @@ fn main() -> Result<()> {
             path,
             allow_primitives,
             stdlib_mode,
+            no_warnings,
         } => {
             let options = beamtalk_core::CompilerOptions {
                 stdlib_mode,
                 allow_primitives,
                 workspace_mode: false,
+                suppress_warnings: no_warnings,
             };
             commands::build::build(&path, &options)
         }
@@ -218,7 +228,9 @@ fn main() -> Result<()> {
             Ok(())
         }
         Command::Workspace { action } => commands::workspace::cli::run(action),
-        Command::TestStdlib { path } => commands::test_stdlib::run_tests(&path),
+        Command::TestStdlib { path, no_warnings } => {
+            commands::test_stdlib::run_tests(&path, no_warnings)
+        }
         Command::Test { path } => commands::test::run_tests(&path),
         Command::Doc {
             path,

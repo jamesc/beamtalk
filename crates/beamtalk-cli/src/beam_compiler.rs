@@ -753,6 +753,12 @@ pub fn compile_source_with_bindings(
             "Found diagnostics during compilation"
         );
         for diagnostic in &diagnostics {
+            // Skip warnings when suppress_warnings is enabled
+            if options.suppress_warnings
+                && diagnostic.severity == beamtalk_core::source_analysis::Severity::Warning
+            {
+                continue;
+            }
             let compile_diag =
                 CompileDiagnostic::from_core_diagnostic(diagnostic, source_path.as_str(), &source);
             eprintln!("{:?}", miette::Report::new(compile_diag));

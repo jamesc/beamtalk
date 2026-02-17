@@ -474,7 +474,11 @@ fn generate_eunit_wrapper(
 // ──────────────────────────────────────────────────────────────────────────
 
 /// Compile a fixture file referenced by `@load` directive.
-fn compile_fixture(fixture_path: &Utf8Path, output_dir: &Utf8Path) -> Result<()> {
+fn compile_fixture(
+    fixture_path: &Utf8Path,
+    output_dir: &Utf8Path,
+    suppress_warnings: bool,
+) -> Result<()> {
     let stem = fixture_path
         .file_stem()
         .ok_or_else(|| miette::miette!("Fixture file has no name: {}", fixture_path))?;
@@ -491,6 +495,7 @@ fn compile_fixture(fixture_path: &Utf8Path, output_dir: &Utf8Path) -> Result<()>
         stdlib_mode: false,
         allow_primitives: false,
         workspace_mode: false,
+        suppress_warnings,
     };
 
     crate::beam_compiler::compile_source(fixture_path, &module_name, &core_file, &options)
@@ -525,7 +530,7 @@ struct CompiledTestFile {
 /// compiles expressions to Core Erlang, generates `EUnit` wrappers, and runs
 /// all tests in a single BEAM process.
 #[instrument(skip_all)]
-pub fn run_tests(path: &str) -> Result<()> {
+pub fn run_tests(path: &str, no_warnings: bool) -> Result<()> {
     info!("Starting stdlib test run");
 
     let test_dir = Utf8PathBuf::from(path);
@@ -557,7 +562,7 @@ pub fn run_tests(path: &str) -> Result<()> {
     let mut all_fixture_modules = Vec::new();
 
     for test_file in &test_files {
-        let result = compile_single_test_file(test_file, &build_dir)?;
+        let result = compile_single_test_file(test_file, &build_dir, no_warnings)?;
         all_core_files.extend(result.core_files);
         all_erl_files.push(result.erl_file);
         all_fixture_modules.extend(result.fixture_modules);
@@ -663,6 +668,7 @@ struct CompilationResult {
 fn compile_single_test_file(
     test_file: &Utf8Path,
     build_dir: &Utf8Path,
+    suppress_warnings: bool,
 ) -> Result<CompilationResult> {
     let content = fs::read_to_string(test_file)
         .into_diagnostic()
@@ -693,7 +699,7 @@ fn compile_single_test_file(
                 test_file
             );
         }
-        compile_fixture(&fixture_path, build_dir)?;
+        compile_fixture(&fixture_path, build_dir, suppress_warnings)?;
         // Track fixture module name for code:ensure_loaded at runtime
         if let Some(stem) = fixture_path.file_stem() {
             let module_name = format!(

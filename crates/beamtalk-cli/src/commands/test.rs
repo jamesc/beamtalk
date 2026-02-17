@@ -200,6 +200,7 @@ fn compile_fixture(fixture_path: &Utf8Path, output_dir: &Utf8Path) -> Result<Str
         stdlib_mode: false,
         allow_primitives: false,
         workspace_mode: false,
+        ..Default::default()
     };
 
     crate::beam_compiler::compile_source(fixture_path, &module_name, &core_file, &options)
@@ -241,6 +242,7 @@ fn compile_test_file(
         stdlib_mode: false,
         allow_primitives: false,
         workspace_mode: false,
+        ..Default::default()
     };
 
     crate::beam_compiler::compile_source(source_path, module_name, &core_file, &options)
