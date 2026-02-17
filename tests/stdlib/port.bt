@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Port - BEAM port identifier (BT-681)
+//
+// Full dispatch tests are in runtime EUnit (beamtalk_opaque_type_tests.erl)
+// because stdlib tests cannot easily produce raw port values without
+// Erlang interop (BT-677).
+//
+// Port class exists and is recognized
+Port
+// => Port

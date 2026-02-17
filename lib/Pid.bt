@@ -1,0 +1,62 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Pid — BEAM process identifier.
+///
+/// Pids are opaque references to Erlang/OTP processes. They appear when
+/// calling Erlang code or inspecting the runtime. Pids support basic
+/// Object protocol methods for inspection and comparison.
+///
+/// ## BEAM Mapping
+/// Beamtalk Pids map directly to Erlang pids.
+///
+/// ## Examples
+/// ```beamtalk
+/// pid class              // => Pid
+/// pid printString        // => "#Pid<0.123.0>"
+/// pid isAlive            // => true or false
+/// ```
+sealed Object subclass: Pid
+
+  /// Convert the pid to a readable string representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// pid asString           // => "#Pid<0.123.0>"
+  /// ```
+  asString -> String => @primitive "asString"
+
+  /// Return a developer-readable string representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// pid printString        // => "#Pid<0.123.0>"
+  /// ```
+  printString -> String => self asString
+
+  /// Test strict equality with another pid.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// pid1 =:= pid2          // => false
+  /// ```
+  =:= other -> Boolean => @primitive "=:="
+
+  /// Test inequality with another pid.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// pid1 /= pid2           // => true
+  /// ```
+  /= other -> Boolean => @primitive "/="
+
+  /// Return a hash value for the pid.
+  hash -> Integer => @primitive "hash"
+
+  /// Test if the process referred to by this pid is alive.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// pid isAlive            // => true
+  /// ```
+  isAlive -> Boolean => @primitive "isAlive"

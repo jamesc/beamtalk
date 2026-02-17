@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Reference - BEAM unique reference (BT-681)
+//
+// Full dispatch tests are in runtime EUnit (beamtalk_opaque_type_tests.erl)
+// because stdlib tests cannot easily produce raw reference values without
+// Erlang interop (BT-677).
+//
+// Reference class exists and is recognized
+Reference
+// => Reference

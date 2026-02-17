@@ -1,0 +1,54 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Reference — BEAM unique reference.
+///
+/// References are opaque unique values created by `make_ref()`. They appear
+/// when calling Erlang code that generates references for correlation or
+/// identification. References support basic Object protocol methods for
+/// inspection and comparison.
+///
+/// ## BEAM Mapping
+/// Beamtalk References map directly to Erlang references.
+///
+/// ## Examples
+/// ```beamtalk
+/// ref class              // => Reference
+/// ref printString        // => "#Ref<0.1.2.3>"
+/// ```
+sealed Object subclass: Reference
+
+  /// Convert the reference to a readable string representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ref asString           // => "#Ref<0.1.2.3>"
+  /// ```
+  asString -> String => @primitive "asString"
+
+  /// Return a developer-readable string representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ref printString        // => "#Ref<0.1.2.3>"
+  /// ```
+  printString -> String => self asString
+
+  /// Test strict equality with another reference.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ref1 =:= ref2         // => false
+  /// ```
+  =:= other -> Boolean => @primitive "=:="
+
+  /// Test inequality with another reference.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ref1 /= ref2          // => true
+  /// ```
+  /= other -> Boolean => @primitive "/="
+
+  /// Return a hash value for the reference.
+  hash -> Integer => @primitive "hash"

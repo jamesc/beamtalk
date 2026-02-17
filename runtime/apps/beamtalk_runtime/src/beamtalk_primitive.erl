@@ -214,6 +214,15 @@ print_string(X) when is_tuple(X) ->
     %% BT-536: Format Erlang tuples as {el1, el2, ...}
     Elements = tuple_to_list(X),
     iolist_to_binary([<<"{">>, lists:join(<<", ">>, [print_string(E) || E <- Elements]), <<"}">>]);
+print_string(X) when is_pid(X) ->
+    %% BT-681: Format pids as #Pid<...>
+    beamtalk_opaque_ops:pid_to_string(X);
+print_string(X) when is_port(X) ->
+    %% BT-681: Format ports as #Port<...>
+    beamtalk_opaque_ops:port_to_string(X);
+print_string(X) when is_reference(X) ->
+    %% BT-681: Format references as #Ref<...>
+    beamtalk_opaque_ops:ref_to_string(X);
 print_string(X) ->
     iolist_to_binary(io_lib:format("~p", [X])).
 
@@ -325,6 +334,15 @@ send(X, Selector, Args) when is_map(X) ->
 send(X, Selector, Args) when is_list(X) ->
     %% List/Array dispatch
     dispatch_via_module(X, Selector, Args);
+send(X, Selector, Args) when is_pid(X) ->
+    %% BT-681: Pid — BEAM process identifier
+    dispatch_via_module(X, Selector, Args);
+send(X, Selector, Args) when is_port(X) ->
+    %% BT-681: Port — BEAM port identifier
+    dispatch_via_module(X, Selector, Args);
+send(X, Selector, Args) when is_reference(X) ->
+    %% BT-681: Reference — BEAM unique reference
+    dispatch_via_module(X, Selector, Args);
 send(X, Selector, _Args) ->
     %% Other primitives: dispatch to generic handler
     Class = class_of(X),
@@ -418,6 +436,12 @@ responds_to(X, Selector) when is_map(X) ->
     end;
 responds_to(X, Selector) when is_list(X) ->
     responds_via_module(X, Selector);
+responds_to(X, Selector) when is_pid(X) ->
+    responds_via_module(X, Selector);
+responds_to(X, Selector) when is_port(X) ->
+    responds_via_module(X, Selector);
+responds_to(X, Selector) when is_reference(X) ->
+    responds_via_module(X, Selector);
 responds_to(_, _) ->
     %% Other primitives: no methods yet
     false.
@@ -461,6 +485,9 @@ module_for_value(X) when is_function(X) -> 'bt@stdlib@block';
 module_for_value(X) when is_tuple(X) -> 'bt@stdlib@tuple';
 module_for_value(X) when is_float(X) -> 'bt@stdlib@float';
 module_for_value(X) when is_list(X) -> 'bt@stdlib@list';
+module_for_value(X) when is_pid(X) -> 'bt@stdlib@pid';
+module_for_value(X) when is_port(X) -> 'bt@stdlib@port';
+module_for_value(X) when is_reference(X) -> 'bt@stdlib@reference';
 module_for_value(X) when is_map(X) ->
     case beamtalk_tagged_map:class_of(X) of
         'CompiledMethod' -> 'bt@stdlib@compiled_method';
