@@ -1,3 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
 // Reference - BEAM unique reference (BT-681)
 //
 // Full dispatch tests are in runtime EUnit (beamtalk_opaque_type_tests.erl)

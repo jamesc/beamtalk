@@ -95,7 +95,8 @@ pid_is_alive_test_() ->
          ?assertEqual(true, beamtalk_primitive:send(self(), 'isAlive', [])),
          %% Dead process
          Pid = spawn(fun() -> ok end),
-         timer:sleep(50),
+         MRef = monitor(process, Pid),
+         receive {'DOWN', MRef, process, Pid, _} -> ok end,
          ?assertEqual(false, beamtalk_primitive:send(Pid, 'isAlive', []))
      end}.
 
