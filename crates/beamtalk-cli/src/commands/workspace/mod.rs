@@ -813,11 +813,7 @@ mod tests {
             "Runtime BEAM files not found at {:?}. Run `cd runtime && rebar3 compile` first.",
             paths.runtime_ebin,
         );
-        let extra = vec![
-            paths.cowboy_ebin,
-            paths.cowlib_ebin,
-            paths.ranch_ebin,
-        ];
+        let extra = vec![paths.cowboy_ebin, paths.cowlib_ebin, paths.ranch_ebin];
         (
             paths.runtime_ebin,
             paths.workspace_ebin,

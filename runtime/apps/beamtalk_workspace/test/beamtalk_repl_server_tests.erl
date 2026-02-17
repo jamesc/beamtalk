@@ -1323,7 +1323,8 @@ tcp_start_workspace(Retries) ->
     case beamtalk_workspace_sup:start_link(Config) of
         {ok, Pid} -> {Port, Pid};
         {error, {already_started, Pid}} -> {Port, Pid};
-        {error, _Reason} -> tcp_start_workspace(Retries - 1)
+        {error, {listen_failed, eaddrinuse}} -> tcp_start_workspace(Retries - 1);
+        {error, Reason} -> error({workspace_start_failed, Reason})
     end.
 
 tcp_cleanup({_Port, SupPid}) ->
@@ -1442,9 +1443,9 @@ ws_recv_with_buf(Sock, Buf) ->
         8 -> {close, Unmasked}; % close
         9 ->
             %% Ping — respond with masked pong (clients must mask all frames per RFC 6455)
-            MaskKey = crypto:strong_rand_bytes(4),
+            PongMaskKey = crypto:strong_rand_bytes(4),
             Pong = <<1:1, 0:3, 10:4, 1:1, 0:7>>,
-            ok = gen_tcp:send(Sock, [Pong, MaskKey]),
+            ok = gen_tcp:send(Sock, [Pong, PongMaskKey]),
             ws_recv(Sock);
         _ -> ws_recv(Sock)      % skip other frames
     end.

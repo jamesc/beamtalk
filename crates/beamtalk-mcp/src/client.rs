@@ -42,7 +42,7 @@ impl ReplClient {
             .map_err(|e| format!("Failed to connect to REPL at {url}: {e}"))?;
 
         // Read auth-required message (pre-auth, no session yet)
-        let _auth_required = read_text_message(&mut ws).await?;
+        let _auth_required = read_text_message_with_timeout(&mut ws, REPL_IO_TIMEOUT).await?;
 
         // ADR 0020: Cookie handshake
         let auth_msg = serde_json::json!({"type": "auth", "cookie": cookie});
@@ -53,7 +53,7 @@ impl ReplClient {
             .map_err(|e| format!("Failed to send auth: {e}"))?;
 
         // Read auth response
-        let auth_response = read_text_message(&mut ws).await?;
+        let auth_response = read_text_message_with_timeout(&mut ws, REPL_IO_TIMEOUT).await?;
         let auth_json: serde_json::Value = serde_json::from_str(&auth_response)
             .map_err(|e| format!("Failed to parse auth response: {e}"))?;
         match auth_json.get("type").and_then(|t| t.as_str()) {
@@ -71,7 +71,7 @@ impl ReplClient {
         }
 
         // Read session-started message (sent after successful auth)
-        let _session_started = read_text_message(&mut ws).await?;
+        let _session_started = read_text_message_with_timeout(&mut ws, REPL_IO_TIMEOUT).await?;
 
         Ok(Self {
             inner: Mutex::new(ReplClientInner { ws }),
@@ -312,6 +312,19 @@ where
             None => return Err("WebSocket stream ended".to_string()),
         }
     }
+}
+
+/// Read the next text message with an explicit timeout.
+async fn read_text_message_with_timeout<S>(
+    ws: &mut tokio_tungstenite::WebSocketStream<S>,
+    timeout: Duration,
+) -> Result<String, String>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    tokio::time::timeout(timeout, read_text_message(ws))
+        .await
+        .map_err(|_| format!("WebSocket read timed out after {}s", timeout.as_secs()))?
 }
 
 /// Generate a unique message ID.

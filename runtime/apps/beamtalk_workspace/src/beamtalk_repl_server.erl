@@ -583,8 +583,12 @@ handle_op(<<"shutdown">>, Params, Msg, _SessionPid) ->
     %% Triggers init:stop() for OTP-level supervisor tree teardown.
     ProvidedCookie = maps:get(<<"cookie">>, Params, <<>>),
     NodeCookie = atom_to_binary(erlang:get_cookie(), utf8),
-    %% Timing-safe comparison to prevent side-channel attacks
-    case crypto:hash_equals(ProvidedCookie, NodeCookie) of
+    %% Timing-safe comparison to prevent side-channel attacks.
+    %% crypto:hash_equals/2 raises badarg when binary lengths differ.
+    ValidCookie = is_binary(ProvidedCookie)
+        andalso byte_size(ProvidedCookie) =:= byte_size(NodeCookie)
+        andalso crypto:hash_equals(ProvidedCookie, NodeCookie),
+    case ValidCookie of
         true ->
             ?LOG_INFO("Shutdown requested via protocol", #{}),
             %% Schedule shutdown via gen_server handle_info after response is sent.
