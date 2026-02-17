@@ -41,6 +41,8 @@ dirs = "6"
 sha2 = "0.10"
 rand = "0.10"
 base64 = "0.22"
+# why: X.509 certificate generation for mTLS Erlang distribution (BT-692)
+rcgen = { version = "0.13", features = ["pem", "x509-parser"] }
 
 # Logging
 tracing = "0.1"

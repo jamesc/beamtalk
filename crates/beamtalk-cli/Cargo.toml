@@ -42,6 +42,8 @@ rustyline.workspace = true
 sha2.workspace = true
 rand.workspace = true
 base64.workspace = true
+# why: X.509 certificate generation for mTLS Erlang distribution (BT-692)
+rcgen.workspace = true
 fs2.workspace = true
 # why: render markdown doc comments and README to HTML (replaces hand-rolled renderer)
 pulldown-cmark.workspace = true
