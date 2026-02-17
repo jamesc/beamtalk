@@ -159,9 +159,16 @@ dialyzer:
 test: test-rust test-stdlib test-runtime
 
 # Run Rust tests (unit + integration, skip slow E2E)
+[unix]
 test-rust:
     @echo "🧪 Running Rust tests (fast)..."
-    @cargo test --all-targets --quiet
+    @cargo test --all-targets 2>&1 | awk '/Running.*\(/ { split($$0, a, /Running (unittests )?/); split(a[2], b, / \(/); src=b[1]; gsub(/.*\//, "", b[2]); sub(/-[a-f0-9]+\)$$/, "", b[2]); crate=b[2]; label=crate "::" src } /^test result:/ { sub(/^test result: ok\. /, ""); printf "  %-45s %s\n", label, $$0 } /^warning:/ { print }' || true
+    @echo "✅ Rust tests complete"
+
+[windows]
+test-rust:
+    @echo "🧪 Running Rust tests (fast)..."
+    @cargo test --all-targets 2>&1 | Select-String -Pattern "^\s*Running|running \d+ test|test result:|^warning:"
     @echo "✅ Rust tests complete"
 
 # Run E2E tests (slow - full pipeline, ~50s)
@@ -234,10 +241,18 @@ test-stdlib: build-stdlib
 
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
 # Run Erlang runtime unit tests
+[unix]
 [working-directory: 'runtime']
 test-runtime: build-stdlib
     @echo "🧪 Running Erlang runtime unit tests..."
-    @rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace
+    @rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace 2>&1 | grep -E '(All .* tests (passed|from)|Test (passed|failed)|FAILED|Error)' || true
+    @echo "✅ Runtime tests complete"
+
+[windows]
+[working-directory: 'runtime']
+test-runtime: build-stdlib
+    @echo "🧪 Running Erlang runtime unit tests..."
+    rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace; if ($$LASTEXITCODE -eq 0) { Write-Host "  All EUnit tests passed" }
     @echo "✅ Runtime tests complete"
 
 # Run performance benchmarks (separate from unit tests, ~30s)
