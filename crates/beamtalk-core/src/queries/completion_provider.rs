@@ -33,6 +33,7 @@ use crate::semantic_analysis::type_checker::TypeMap;
 use crate::semantic_analysis::{ClassHierarchy, InferredType, infer_types};
 use ecow::EcoString;
 use std::collections::HashSet;
+use std::fmt::Write;
 
 /// The class context at the cursor position.
 #[derive(Debug, Clone)]
@@ -447,7 +448,7 @@ fn add_receiver_type_completions(
                     completions.push(
                         Completion::new(method.selector.as_str(), CompletionKind::Function)
                             .with_documentation(doc)
-                            .with_detail(format!("on {class_name}")),
+                            .with_detail(method_completion_detail(&method, class_name)),
                     );
                 }
             }
@@ -460,7 +461,7 @@ fn add_receiver_type_completions(
                     completions.push(
                         Completion::new(method.selector.as_str(), CompletionKind::Function)
                             .with_documentation(doc)
-                            .with_detail(format!("on {class_name} class")),
+                            .with_detail(method_completion_detail(&method, class_name)),
                     );
                 }
             }
@@ -468,6 +469,32 @@ fn add_receiver_type_completions(
         }
         _ => false,
     }
+}
+
+/// Builds a detail string for a completion item showing type information.
+///
+/// Example: `on Counter -> Integer` or `on Integer (other: Number) -> Number`
+fn method_completion_detail(
+    method: &crate::semantic_analysis::class_hierarchy::MethodInfo,
+    class_name: &str,
+) -> String {
+    let mut detail = format!("on {class_name}");
+
+    // Add parameter types for keyword/binary methods
+    let has_param_types = method.param_types.iter().any(Option::is_some);
+    if has_param_types {
+        let type_parts: Vec<String> = method
+            .param_types
+            .iter()
+            .map(|t| t.as_deref().unwrap_or("Dynamic").to_string())
+            .collect();
+        let _ = write!(detail, " ({})", type_parts.join(", "));
+    }
+
+    if let Some(ref return_type) = method.return_type {
+        let _ = write!(detail, " -> {return_type}");
+    }
+    detail
 }
 
 /// Adds method completions from the class hierarchy.

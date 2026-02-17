@@ -192,6 +192,9 @@ print_string(X) when is_map(X) ->
         'CompiledMethod' ->
             %% BT-457: Delegate to ops module for "a CompiledMethod(selector)" format
             beamtalk_compiled_method_ops:dispatch('printString', [], X);
+        'ErlangModule' ->
+            %% BT-676: Format as #ErlangModule<module_name>
+            beamtalk_erlang_proxy:dispatch('printString', [], X);
         Class ->
             case beamtalk_exception_handler:is_exception_class(Class) of
                 true ->
@@ -211,6 +214,15 @@ print_string(X) when is_tuple(X) ->
     %% BT-536: Format Erlang tuples as {el1, el2, ...}
     Elements = tuple_to_list(X),
     iolist_to_binary([<<"{">>, lists:join(<<", ">>, [print_string(E) || E <- Elements]), <<"}">>]);
+print_string(X) when is_pid(X) ->
+    %% BT-681: Format pids as #Pid<...>
+    beamtalk_opaque_ops:pid_to_string(X);
+print_string(X) when is_port(X) ->
+    %% BT-681: Format ports as #Port<...>
+    beamtalk_opaque_ops:port_to_string(X);
+print_string(X) when is_reference(X) ->
+    %% BT-681: Format references as #Ref<...>
+    beamtalk_opaque_ops:ref_to_string(X);
 print_string(X) ->
     iolist_to_binary(io_lib:format("~p", [X])).
 
@@ -300,6 +312,12 @@ send(X, Selector, Args) when is_map(X) ->
         'StackFrame' ->
             %% BT-107: StackFrame value type - dispatch to runtime
             beamtalk_stack_frame:dispatch(Selector, Args, X);
+        'ErlangModule' ->
+            %% BT-676: ErlangModule proxy - dispatch to Erlang module
+            beamtalk_erlang_proxy:dispatch(Selector, Args, X);
+        'Erlang' ->
+            %% BT-676: Erlang class-side proxy - construct ErlangModule on message
+            erlang_class_dispatch(X, Selector, Args);
         undefined ->
             %% Plain map (Dictionary) — BT-418: compiled stdlib dispatch
             dispatch_via_module(X, Selector, Args);
@@ -315,6 +333,15 @@ send(X, Selector, Args) when is_map(X) ->
     end;
 send(X, Selector, Args) when is_list(X) ->
     %% List/Array dispatch
+    dispatch_via_module(X, Selector, Args);
+send(X, Selector, Args) when is_pid(X) ->
+    %% BT-681: Pid — BEAM process identifier
+    dispatch_via_module(X, Selector, Args);
+send(X, Selector, Args) when is_port(X) ->
+    %% BT-681: Port — BEAM port identifier
+    dispatch_via_module(X, Selector, Args);
+send(X, Selector, Args) when is_reference(X) ->
+    %% BT-681: Reference — BEAM unique reference
     dispatch_via_module(X, Selector, Args);
 send(X, Selector, _Args) ->
     %% Other primitives: dispatch to generic handler
@@ -385,6 +412,12 @@ responds_to(X, Selector) when is_map(X) ->
         'StackFrame' ->
             %% BT-107: StackFrame value type
             beamtalk_stack_frame:has_method(Selector);
+        'ErlangModule' ->
+            %% BT-676: ErlangModule proxy — always responds (forwards to Erlang)
+            true;
+        'Erlang' ->
+            %% BT-676: Erlang class-side proxy — always responds (creates module proxies)
+            true;
         'FileHandle' ->
             %% BT-513: FileHandle value type
             beamtalk_file:handle_has_method(Selector) orelse
@@ -402,6 +435,12 @@ responds_to(X, Selector) when is_map(X) ->
             end
     end;
 responds_to(X, Selector) when is_list(X) ->
+    responds_via_module(X, Selector);
+responds_to(X, Selector) when is_pid(X) ->
+    responds_via_module(X, Selector);
+responds_to(X, Selector) when is_port(X) ->
+    responds_via_module(X, Selector);
+responds_to(X, Selector) when is_reference(X) ->
     responds_via_module(X, Selector);
 responds_to(_, _) ->
     %% Other primitives: no methods yet
@@ -446,6 +485,9 @@ module_for_value(X) when is_function(X) -> 'bt@stdlib@block';
 module_for_value(X) when is_tuple(X) -> 'bt@stdlib@tuple';
 module_for_value(X) when is_float(X) -> 'bt@stdlib@float';
 module_for_value(X) when is_list(X) -> 'bt@stdlib@list';
+module_for_value(X) when is_pid(X) -> 'bt@stdlib@pid';
+module_for_value(X) when is_port(X) -> 'bt@stdlib@port';
+module_for_value(X) when is_reference(X) -> 'bt@stdlib@reference';
 module_for_value(X) when is_map(X) ->
     case beamtalk_tagged_map:class_of(X) of
         'CompiledMethod' -> 'bt@stdlib@compiled_method';
@@ -517,6 +559,44 @@ is_ivar_method('instVarAt:') ->
     {true, <<"Value types have no instance variables">>};
 is_ivar_method(_) ->
     false.
+
+%% @doc Dispatch messages to the Erlang class-side proxy (BT-676).
+%%
+%% The Erlang proxy is a tagged map #{$beamtalk_class => 'Erlang'}.
+%% Unary messages construct an ErlangModule proxy for the named module.
+%% E.g., `Erlang lists` → #{$beamtalk_class => 'ErlangModule', module => lists}
+-spec erlang_class_dispatch(map(), atom(), list()) -> term().
+erlang_class_dispatch(_Self, 'class', _Args) ->
+    'Erlang';
+erlang_class_dispatch(_Self, 'printString', _Args) ->
+    <<"Erlang">>;
+erlang_class_dispatch(Self, Selector, Args) ->
+    case beamtalk_object_ops:has_method(Selector) of
+        true ->
+            case beamtalk_object_ops:dispatch(Selector, Args, Self, Self) of
+                {reply, Result, _State} -> Result;
+                {error, Error, _State} -> beamtalk_error:raise(Error)
+            end;
+        false ->
+            %% Only unary messages (no colon) create module proxies
+            SelectorStr = atom_to_list(Selector),
+            case lists:member($:, SelectorStr) of
+                true ->
+                    Error0 = beamtalk_error:new(does_not_understand, 'Erlang'),
+                    Error1 = beamtalk_error:with_selector(Error0, Selector),
+                    Error2 = beamtalk_error:with_hint(Error1,
+                        <<"Use unary message for module name: Erlang moduleName">>),
+                    beamtalk_error:raise(Error2);
+                false when Args =/= [] ->
+                    Error0 = beamtalk_error:new(arity_mismatch, 'Erlang'),
+                    Error1 = beamtalk_error:with_selector(Error0, Selector),
+                    Error2 = beamtalk_error:with_hint(Error1,
+                        <<"Module lookup takes no arguments: Erlang moduleName">>),
+                    beamtalk_error:raise(Error2);
+                false ->
+                    beamtalk_erlang_proxy:new(Selector)
+            end
+    end.
 
 %% @doc Check if a value type responds to a selector.
 -spec value_type_responds_to(atom(), atom()) -> boolean().

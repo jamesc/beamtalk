@@ -431,6 +431,56 @@ pub(crate) fn generate_test_case_bif(
     }
 }
 
+/// Pid primitive implementations (BT-681).
+///
+/// Pids are opaque BEAM process identifiers. Most methods use direct BIFs;
+/// `asString` delegates to `beamtalk_opaque_ops` runtime module.
+pub(crate) fn generate_pid_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
+    match selector {
+        "=:=" => binary_bif("=:=", params),
+        "/=" => binary_bif("/=", params),
+        "asString" => Some(Document::Str(
+            "call 'beamtalk_opaque_ops':'pid_to_string'(Self)",
+        )),
+        "hash" => Some(Document::Str("call 'erlang':'phash2'(Self)")),
+        "isAlive" => Some(Document::Str("call 'erlang':'is_process_alive'(Self)")),
+        _ => None,
+    }
+}
+
+/// Port primitive implementations (BT-681).
+///
+/// Ports are opaque BEAM port identifiers.
+pub(crate) fn generate_port_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
+    match selector {
+        "=:=" => binary_bif("=:=", params),
+        "/=" => binary_bif("/=", params),
+        "asString" => Some(Document::Str(
+            "call 'beamtalk_opaque_ops':'port_to_string'(Self)",
+        )),
+        "hash" => Some(Document::Str("call 'erlang':'phash2'(Self)")),
+        _ => None,
+    }
+}
+
+/// Reference primitive implementations (BT-681).
+///
+/// References are opaque BEAM unique identifiers.
+pub(crate) fn generate_reference_bif(
+    selector: &str,
+    params: &[String],
+) -> Option<Document<'static>> {
+    match selector {
+        "=:=" => binary_bif("=:=", params),
+        "/=" => binary_bif("/=", params),
+        "asString" => Some(Document::Str(
+            "call 'beamtalk_opaque_ops':'ref_to_string'(Self)",
+        )),
+        "hash" => Some(Document::Str("call 'erlang':'phash2'(Self)")),
+        _ => None,
+    }
+}
+
 /// Stream primitive implementations (BT-511).
 ///
 /// Class-side constructors delegate to `beamtalk_stream` module.

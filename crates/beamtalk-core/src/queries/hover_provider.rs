@@ -33,7 +33,6 @@ use crate::language_service::{HoverInfo, Position};
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::semantic_analysis::{ClassHierarchy, InferredType, infer_types};
 use crate::source_analysis::Span;
-use std::fmt::Write;
 
 /// Computes hover information at a given position.
 ///
@@ -587,10 +586,22 @@ fn find_hover_in_expr(
             receiver, field, ..
         } => {
             if offset >= field.span.start() && offset < field.span.end() {
-                Some(HoverInfo::new(
-                    format!("Field: `{}`", field.name),
-                    field.span,
-                ))
+                // Show declared state type if available from the class hierarchy
+                let field_type = match context {
+                    HoverClassContext::InstanceMethod(class) => {
+                        hierarchy.state_field_type(class.name.name.as_str(), field.name.as_str())
+                    }
+                    HoverClassContext::StandaloneInstanceMethod(name) => {
+                        hierarchy.state_field_type(name, field.name.as_str())
+                    }
+                    _ => None,
+                };
+                let contents = if let Some(ty) = field_type {
+                    format!("Field: `{}` — Type: {ty}", field.name)
+                } else {
+                    format!("Field: `{}`", field.name)
+                };
+                Some(HoverInfo::new(contents, field.span))
             } else {
                 find_hover_in_expr(receiver, offset, context, hierarchy, type_map)
             }
@@ -766,18 +777,51 @@ fn resolved_selector_hover_info(
     } else {
         "instance-side"
     };
-    let mut summary = format!(
-        "Method: `{}` ({dispatch}, arity: {})",
-        method.selector, method.arity
-    );
-    if let Some(return_type) = method.return_type {
-        let _ = write!(summary, " -> {return_type}");
-    }
+    let typed_sig = method_info_signature(&method);
+    let summary = format!("Method: `{typed_sig}` ({dispatch})");
 
     Some(HoverInfo::new(summary, span).with_documentation(format!(
         "Resolved on `{receiver_class}` (defined in `{}`)",
         method.defined_in
     )))
+}
+
+/// Formats a `MethodInfo` from the hierarchy as a typed signature string.
+///
+/// Uses `param_types` and `return_type` from the hierarchy (populated by BT-669).
+/// Example output: `deposit: amount: Integer -> Integer`
+fn method_info_signature(method: &crate::semantic_analysis::class_hierarchy::MethodInfo) -> String {
+    use std::fmt::Write;
+    let selector = &method.selector;
+    let base = if selector.contains(':') {
+        // Keyword message: interleave keyword parts with param types
+        let parts: Vec<&str> = selector.split(':').filter(|s| !s.is_empty()).collect();
+        let mut fragments = Vec::with_capacity(parts.len());
+        for (i, part) in parts.iter().enumerate() {
+            let mut fragment = format!("{part}:");
+            if let Some(Some(ty)) = method.param_types.get(i) {
+                let _ = write!(fragment, " {ty}");
+            }
+            fragments.push(fragment);
+        }
+        fragments.join(" ")
+    } else if method.arity == 1 {
+        // Binary message
+        let mut sig = selector.to_string();
+        if let Some(Some(ty)) = method.param_types.first() {
+            let _ = write!(sig, " {ty}");
+        }
+        sig
+    } else {
+        // Unary message
+        selector.to_string()
+    };
+
+    if let Some(ref return_type) = method.return_type {
+        format!("{base} -> {return_type}")
+    } else {
+        base
+    }
 }
 
 fn resolve_receiver_class(
@@ -890,26 +934,56 @@ fn class_reference_hover_info(
             );
         }
 
-        // Add state info
+        // Add state info with types
         if !class_info.state.is_empty() {
-            let state_str: Vec<&str> = class_info
+            let state_entries: Vec<String> = class_info
                 .state
                 .iter()
-                .map(ecow::EcoString::as_str)
+                .map(|s| {
+                    if let Some(ty) = class_info.state_types.get(s) {
+                        format!("{s}: {ty}")
+                    } else {
+                        s.to_string()
+                    }
+                })
                 .collect();
-            let _ = write!(info, "\n\nState: {}", state_str.join(", "));
+            let _ = write!(info, "\n\nState: {}", state_entries.join(", "));
         }
 
-        // Add method count
-        let instance_count = class_info.methods.len();
-        let class_count = class_info.class_methods.len();
-        if class_count > 0 {
-            let _ = write!(
-                info,
-                "\n\nMethods: {instance_count} instance, {class_count} class-side"
-            );
-        } else if instance_count > 0 {
-            let _ = write!(info, "\n\nMethods: {instance_count}");
+        // Add typed method summary (capped to avoid unwieldy hover popups)
+        if !class_info.methods.is_empty() || !class_info.class_methods.is_empty() {
+            const MAX_METHODS: usize = 10;
+            let _ = write!(info, "\n\n**Methods:**");
+            let total_instance = class_info.methods.len();
+            for method in class_info.methods.iter().take(MAX_METHODS) {
+                let sig = method_info_signature(method);
+                let _ = write!(info, "\n- `{sig}`");
+            }
+            if total_instance > MAX_METHODS {
+                let _ = write!(
+                    info,
+                    "\n- ...and {} more instance methods",
+                    total_instance - MAX_METHODS
+                );
+            }
+            let remaining_slots = MAX_METHODS.saturating_sub(total_instance);
+            let class_display = if remaining_slots > 0 {
+                remaining_slots
+            } else {
+                2 // Always show at least a couple class-side methods
+            };
+            let total_class = class_info.class_methods.len();
+            for method in class_info.class_methods.iter().take(class_display) {
+                let sig = method_info_signature(method);
+                let _ = write!(info, "\n- `{sig}` (class)");
+            }
+            if total_class > class_display {
+                let _ = write!(
+                    info,
+                    "\n- ...and {} more class methods",
+                    total_class - class_display
+                );
+            }
         }
     }
 

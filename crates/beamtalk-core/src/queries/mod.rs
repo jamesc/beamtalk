@@ -13,6 +13,7 @@
 //! - [`document_symbols_provider`] - Return document outline symbols
 //! - [`hover_provider`] - Show information on hover
 //! - [`references_provider`] - Find all references to a symbol across files
+//! - [`signature_help_provider`] - Show parameter info for keyword messages
 //!
 //! **DDD Context:** Language Service
 //!
@@ -32,3 +33,4 @@ pub mod diagnostic_provider;
 pub mod document_symbols_provider;
 pub mod hover_provider;
 pub mod references_provider;
+pub mod signature_help_provider;
