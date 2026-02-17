@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ExitError — BEAM process exit signal.
+///
+/// Raised when an Erlang function exits via `exit(Reason)`.
+/// The original exit reason is available in the error details.
+///
+/// See: ADR 0028 §1 (Exception mapping)
+///
+/// ## Examples
+/// ```beamtalk
+/// [Erlang erlang exit: #killed] on: ExitError do: [:e | e message]
+/// ```
+BEAMError subclass: ExitError
+  /// Human-readable description of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ExitError describe   // => "an ExitError"
+  /// ```
+  describe -> String => "an ExitError"

@@ -198,7 +198,7 @@ erlang_keyword_selector_raises_test() ->
     end.
 
 dispatch_function_clause_error_wraps_test() ->
-    %% function_clause errors should be caught and wrapped
+    %% function_clause errors should be caught and wrapped as arity_mismatch
     Proxy = beamtalk_erlang_proxy:new(lists),
     try
         %% lists:nth with invalid args triggers function_clause
@@ -206,7 +206,7 @@ dispatch_function_clause_error_wraps_test() ->
         ?assert(false)
     catch
         error:#{error := Inner} ->
-            ?assertEqual(type_error, Inner#beamtalk_error.kind),
+            ?assertEqual(arity_mismatch, Inner#beamtalk_error.kind),
             ?assertEqual('ErlangModule', Inner#beamtalk_error.class)
     end.
 
@@ -220,6 +220,212 @@ erlang_proxy_with_args_raises_arity_mismatch_test() ->
         error:#{error := Inner} ->
             ?assertEqual(arity_mismatch, Inner#beamtalk_error.kind),
             ?assertEqual('Erlang', Inner#beamtalk_error.class)
+    end.
+
+%%% ===================================================================
+%%% ===================================================================
+%%% Exception mapping — BT-678
+%%% ===================================================================
+
+dispatch_exit_wraps_as_exit_error_test() ->
+    %% exit:Reason should be caught and wrapped as erlang_exit
+    Proxy = beamtalk_erlang_proxy:new(erlang),
+    try
+        beamtalk_erlang_proxy:dispatch('exit:', [killed], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(erlang_exit, Inner#beamtalk_error.kind),
+            ?assertEqual('ErlangModule', Inner#beamtalk_error.class),
+            ?assert(is_binary(Inner#beamtalk_error.hint)),
+            ?assertNotEqual(undefined, Inner#beamtalk_error.hint)
+    end.
+
+dispatch_throw_wraps_as_throw_error_test() ->
+    %% throw:Value should be caught and wrapped as erlang_throw
+    Proxy = beamtalk_erlang_proxy:new(erlang),
+    try
+        beamtalk_erlang_proxy:dispatch('throw:', [oops], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(erlang_throw, Inner#beamtalk_error.kind),
+            ?assertEqual('ErlangModule', Inner#beamtalk_error.class),
+            ?assert(is_binary(Inner#beamtalk_error.hint)),
+            ?assertNotEqual(undefined, Inner#beamtalk_error.hint)
+    end.
+
+dispatch_badarith_wraps_as_type_error_test() ->
+    %% error:badarith should be caught and wrapped as type_error
+    %% erlang:'+'(1, a) raises badarith
+    Proxy = beamtalk_erlang_proxy:new(erlang),
+    try
+        beamtalk_erlang_proxy:dispatch('+:', [1, a], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(type_error, Inner#beamtalk_error.kind),
+            ?assertEqual('ErlangModule', Inner#beamtalk_error.class),
+            Details = Inner#beamtalk_error.details,
+            ?assertEqual(badarith, maps:get(erlang_error, Details))
+    end.
+
+dispatch_exit_preserves_details_test() ->
+    %% exit errors should preserve the original reason and stacktrace in details
+    Proxy = beamtalk_erlang_proxy:new(erlang),
+    try
+        beamtalk_erlang_proxy:dispatch('exit:', [normal], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(erlang_exit, Inner#beamtalk_error.kind),
+            Details = Inner#beamtalk_error.details,
+            ?assertEqual(normal, maps:get(erlang_exit_reason, Details)),
+            ?assert(is_list(maps:get(erlang_stacktrace, Details)))
+    end.
+
+dispatch_throw_preserves_details_test() ->
+    %% throw errors should preserve the original value and stacktrace in details
+    Proxy = beamtalk_erlang_proxy:new(erlang),
+    try
+        beamtalk_erlang_proxy:dispatch('throw:', [{custom, value}], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(erlang_throw, Inner#beamtalk_error.kind),
+            Details = Inner#beamtalk_error.details,
+            ?assertEqual({custom, value}, maps:get(erlang_throw_value, Details)),
+            ?assert(is_list(maps:get(erlang_stacktrace, Details)))
+    end.
+
+dispatch_exit_hint_includes_module_test() ->
+    %% Hint should include module and function name
+    Proxy = beamtalk_erlang_proxy:new(erlang),
+    try
+        beamtalk_erlang_proxy:dispatch('exit:', [killed], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            Hint = Inner#beamtalk_error.hint,
+            ?assertNotEqual(nomatch, binary:match(Hint, <<"erlang">>)),
+            ?assertNotEqual(nomatch, binary:match(Hint, <<"exit">>))
+    end.
+
+dispatch_throw_hint_includes_module_test() ->
+    %% Hint should include module and function name
+    Proxy = beamtalk_erlang_proxy:new(erlang),
+    try
+        beamtalk_erlang_proxy:dispatch('throw:', [oops], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            Hint = Inner#beamtalk_error.hint,
+            ?assertNotEqual(nomatch, binary:match(Hint, <<"erlang">>)),
+            ?assertNotEqual(nomatch, binary:match(Hint, <<"throw">>))
+    end.
+
+dispatch_badarg_from_binary_to_atom_preserves_details_test() ->
+    %% binary_to_existing_atom with non-existent atom raises badarg,
+    %% which is caught by the specific badarg handler
+    Proxy = beamtalk_erlang_proxy:new(erlang),
+    try
+        beamtalk_erlang_proxy:dispatch('binary_to_existing_atom:', [<<"zzzz_nonexistent_atom_xyz">>], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(type_error, Inner#beamtalk_error.kind),
+            ?assertEqual('ErlangModule', Inner#beamtalk_error.class),
+            ?assert(is_binary(Inner#beamtalk_error.hint)),
+            Details = Inner#beamtalk_error.details,
+            ?assertEqual(badarg, maps:get(erlang_error, Details))
+    end.
+
+dispatch_function_clause_is_arity_mismatch_test() ->
+    %% function_clause should map to arity_mismatch kind (ADR 0028)
+    Proxy = beamtalk_erlang_proxy:new(lists),
+    try
+        beamtalk_erlang_proxy:dispatch('nth:', [0, [a]], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(arity_mismatch, Inner#beamtalk_error.kind)
+    end.
+
+dispatch_badarg_preserves_details_test() ->
+    %% badarg errors should include erlang_error and erlang_stacktrace in details (ADR 0028)
+    Proxy = beamtalk_erlang_proxy:new(erlang),
+    try
+        beamtalk_erlang_proxy:dispatch('abs:', [not_a_number], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            Details = Inner#beamtalk_error.details,
+            ?assertEqual(badarg, maps:get(erlang_error, Details)),
+            ?assert(is_list(maps:get(erlang_stacktrace, Details)))
+    end.
+
+dispatch_function_clause_preserves_details_test() ->
+    %% function_clause errors should include erlang_error in details (ADR 0028)
+    Proxy = beamtalk_erlang_proxy:new(lists),
+    try
+        beamtalk_erlang_proxy:dispatch('nth:', [0, [a]], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            Details = Inner#beamtalk_error.details,
+            ?assertEqual(function_clause, maps:get(erlang_error, Details))
+    end.
+
+dispatch_missing_function_details_test() ->
+    %% BT-679: Missing function should include details about module/function/arity
+    %% (Previously tested undef, but BT-679 export validation catches this first)
+    Proxy = beamtalk_erlang_proxy:new(math),
+    try
+        beamtalk_erlang_proxy:dispatch('init', [], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(does_not_understand, Inner#beamtalk_error.kind),
+            Details = Inner#beamtalk_error.details,
+            ?assertEqual(math, maps:get(module, Details)),
+            ?assertEqual(init, maps:get(function, Details)),
+            ?assertEqual(0, maps:get(arity, Details))
+    end.
+
+dispatch_reraises_beamtalk_exceptions_test() ->
+    %% If the called Erlang function raises a Beamtalk exception,
+    %% the proxy must re-raise it unchanged, not re-wrap as runtime_error
+    Proxy = beamtalk_erlang_proxy:new(erlang),
+    OrigError = beamtalk_error:new(type_error, 'Integer'),
+    OrigError1 = beamtalk_error:with_selector(OrigError, '+:'),
+    Wrapped = beamtalk_exception_handler:wrap(OrigError1),
+    try
+        %% erlang:error/1 with an already-wrapped Beamtalk exception
+        beamtalk_erlang_proxy:dispatch('error:', [Wrapped], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            %% Should preserve original kind/class, not re-wrap as runtime_error
+            ?assertEqual(type_error, Inner#beamtalk_error.kind),
+            ?assertEqual('Integer', Inner#beamtalk_error.class),
+            ?assertEqual('+:', Inner#beamtalk_error.selector)
+    end.
+
+dispatch_generic_error_maps_to_runtime_error_test() ->
+    %% Generic error:Reason should map to runtime_error and preserve details
+    Proxy = beamtalk_erlang_proxy:new(erlang),
+    try
+        %% erlang:error/1 with a custom reason triggers generic error handler
+        beamtalk_erlang_proxy:dispatch('error:', [{custom_reason, 42}], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(runtime_error, Inner#beamtalk_error.kind),
+            ?assertEqual('ErlangModule', Inner#beamtalk_error.class),
+            ?assert(is_binary(Inner#beamtalk_error.hint)),
+            Details = Inner#beamtalk_error.details,
+            ?assertEqual({custom_reason, 42}, maps:get(erlang_error, Details)),
+            ?assert(is_list(maps:get(erlang_stacktrace, Details)))
     end.
 
 %%% ===================================================================

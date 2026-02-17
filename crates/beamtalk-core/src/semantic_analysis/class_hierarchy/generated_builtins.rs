@@ -20,6 +20,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
         name,
         "Actor"
             | "Association"
+            | "BEAMError"
             | "Block"
             | "Boolean"
             | "Character"
@@ -30,6 +31,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "ErlangModule"
             | "Error"
             | "Exception"
+            | "ExitError"
             | "False"
             | "File"
             | "Float"
@@ -50,6 +52,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Symbol"
             | "SystemDictionary"
             | "TestCase"
+            | "ThrowError"
             | "TranscriptStream"
             | "True"
             | "Tuple"
@@ -105,6 +108,24 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Association".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Association".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
                 MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Association".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "BEAMError".into(),
+        ClassInfo {
+            name: "BEAMError".into(),
+            superclass: Some("Error".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "BEAMError".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
             ],
             class_methods: vec![],
             class_variables: vec![],
@@ -363,6 +384,24 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Exception".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
                 MethodInfo { selector: "signal".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Exception".into(), is_sealed: false, return_type: None, param_types: vec![] },
                 MethodInfo { selector: "signal:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Exception".into(), is_sealed: false, return_type: None, param_types: vec![Some("String".into())] },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "ExitError".into(),
+        ClassInfo {
+            name: "ExitError".into(),
+            superclass: Some("BEAMError".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ExitError".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
             ],
             class_methods: vec![],
             class_variables: vec![],
@@ -990,6 +1029,24 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "runAll".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestCase".into(), is_sealed: false, return_type: None, param_types: vec![] },
                 MethodInfo { selector: "run:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "TestCase".into(), is_sealed: false, return_type: None, param_types: vec![None] },
             ],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "ThrowError".into(),
+        ClassInfo {
+            name: "ThrowError".into(),
+            superclass: Some("BEAMError".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ThrowError".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
+            ],
+            class_methods: vec![],
             class_variables: vec![],
         },
     );

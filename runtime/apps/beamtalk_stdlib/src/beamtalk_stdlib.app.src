@@ -7,6 +7,7 @@
     {env, [
         {classes, [{'bt@stdlib@actor', 'Actor', 'Object'},
         {'bt@stdlib@association', 'Association', 'Object'},
+        {'bt@stdlib@beamerror', 'BEAMError', 'Error'},
         {'bt@stdlib@block', 'Block', 'Object'},
         {'bt@stdlib@boolean', 'Boolean', 'Object'},
         {'bt@stdlib@character', 'Character', 'Object'},
@@ -17,6 +18,7 @@
         {'bt@stdlib@erlang_module', 'ErlangModule', 'ProtoObject'},
         {'bt@stdlib@error', 'Error', 'Exception'},
         {'bt@stdlib@exception', 'Exception', 'Object'},
+        {'bt@stdlib@exit_error', 'ExitError', 'BEAMError'},
         {'bt@stdlib@false', 'False', 'Boolean'},
         {'bt@stdlib@file', 'File', 'Object'},
         {'bt@stdlib@float', 'Float', 'Number'},
@@ -37,6 +39,7 @@
         {'bt@stdlib@symbol', 'Symbol', 'Object'},
         {'bt@stdlib@system_dictionary', 'SystemDictionary', 'Actor'},
         {'bt@stdlib@test_case', 'TestCase', 'Object'},
+        {'bt@stdlib@throw_error', 'ThrowError', 'BEAMError'},
         {'bt@stdlib@transcript_stream', 'TranscriptStream', 'Actor'},
         {'bt@stdlib@true', 'True', 'Boolean'},
         {'bt@stdlib@tuple', 'Tuple', 'Collection'},

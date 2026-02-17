@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// BEAMError — Foreign BEAM-specific exceptions.
+///
+/// Base class for exceptions that originate from BEAM-specific
+/// control flow mechanisms (`exit` and `throw`) that have no
+/// direct Beamtalk equivalent.
+///
+/// Standard Erlang `error` exceptions reuse existing Beamtalk
+/// classes (RuntimeError, TypeError). BEAMError is only for
+/// foreign concepts.
+///
+/// See: ADR 0028 §1 (Exception mapping)
+///
+/// ## Examples
+/// ```beamtalk
+/// [Erlang erlang exit: 1] on: BEAMError do: [:e | e message]
+/// ```
+Error subclass: BEAMError
+  /// Human-readable description of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// BEAMError describe   // => "a BEAMError"
+  /// ```
+  describe -> String => "a BEAMError"
