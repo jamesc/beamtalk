@@ -15,7 +15,7 @@
 //! - `reverse/1` → `reverse:`
 //! - `seq/2` → `seq:with:`
 //! - `seq/3` → `seq:with:with:`
-//! - `node/0` → `node` (unary)
+//! - `node/0` → `node` (nullary)
 
 /// An Erlang module with its commonly-used exports.
 pub(crate) struct ErlangModuleInfo {
