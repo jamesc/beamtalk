@@ -135,12 +135,19 @@ find_compiler_binary() ->
 find_compiler_binary_dev() ->
     %% Try cargo target directory (development mode)
     ProjectRoot = find_project_root(),
-    DevPath = filename:join([ProjectRoot, "target", "debug", "beamtalk-compiler-port"]),
+    
+    %% On Windows, executables have .exe extension
+    ExeName = case os:type() of
+        {win32, _} -> "beamtalk-compiler-port.exe";
+        _ -> "beamtalk-compiler-port"
+    end,
+    
+    DevPath = filename:join([ProjectRoot, "target", "debug", ExeName]),
     case filelib:is_regular(DevPath) of
         true -> DevPath;
         false ->
             %% Try release build
-            ReleasePath = filename:join([ProjectRoot, "target", "release", "beamtalk-compiler-port"]),
+            ReleasePath = filename:join([ProjectRoot, "target", "release", ExeName]),
             case filelib:is_regular(ReleasePath) of
                 true -> ReleasePath;
                 false ->

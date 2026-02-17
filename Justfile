@@ -17,14 +17,15 @@ default:
 # Quick Commands (CI equivalents)
 # ═══════════════════════════════════════════════════════════════════════════
 
-# On Unix: full CI including E2E and MCP tests (requires REPL workspace)
-# On Windows: portable subset — skips E2E and MCP (workspace startup not yet supported)
-# Run local CI checks (build, lint, test)
+# Run local CI checks (combination of GitHub Actions check + test jobs)
+# Matches: just build clippy fmt-check test (check job)
+#        + just test-integration test-mcp test-e2e (test job extras)
+#        + dialyzer if Erlang changed (skipped on Windows - known PATH issue)
 [unix]
-ci: build lint test test-stdlib test-integration test-mcp test-e2e
+ci: build lint test test-integration test-mcp test-e2e
 
 [windows]
-ci: build lint test test-stdlib test-integration
+ci: build clippy fmt-check test test-integration test-mcp test-e2e
 
 # Clean all build artifacts (Rust, Erlang, VS Code, caches, examples)
 [unix]

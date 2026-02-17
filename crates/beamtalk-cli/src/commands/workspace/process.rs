@@ -14,6 +14,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 use miette::{IntoDiagnostic, Result, miette};
 use serde::Deserialize;
 
@@ -216,6 +219,11 @@ pub fn start_detached_node(
     let project_path_str = project_path
         .to_str()
         .ok_or_else(|| miette!("Project path contains invalid UTF-8: {:?}", project_path))?;
+
+    // On Windows, escape backslashes in the project path for Erlang string syntax (BT-661)
+    #[cfg(windows)]
+    let project_path_str = project_path_str.replace('\\', "\\\\");
+
     let eval_cmd = format!(
         "application:set_env(beamtalk_runtime, workspace_id, <<\"{workspace_id}\">>), \
          application:set_env(beamtalk_runtime, project_path, <<\"{project_path_str}\">>), \
@@ -245,12 +253,27 @@ pub fn start_detached_node(
         &project_path,
     );
 
-    let _child = cmd.spawn().map_err(|e| {
+    let child = cmd.spawn().map_err(|e| {
         miette!("Failed to start detached BEAM node: {e}\nIs Erlang/OTP installed?")
     })?;
 
-    // With -detached, the spawn() returns immediately and the real BEAM node
-    // runs independently. We need to wait for it to start up.
+    // Windows-specific handling (BT-662 fix):
+    // On Windows, Erlang's -detached flag doesn't work when spawned from Rust Command::spawn().
+    // Instead, we omit -detached and use CREATE_NO_WINDOW + CREATE_NEW_PROCESS_GROUP flags
+    // to achieve similar behavior. We must use mem::forget() to prevent Rust from killing
+    // the process when the Child handle is dropped.
+    #[cfg(windows)]
+    {
+        std::mem::forget(child);
+    }
+    #[cfg(not(windows))]
+    {
+        // On Unix, -detached makes the BEAM process fully independent
+        let _ = child;
+    }
+
+    // With -detached (Unix) or CREATE_NEW_PROCESS_GROUP (Windows), the spawn() returns
+    // immediately and the real BEAM node runs independently. We need to wait for it to start up.
     // The compiler app (ADR 0022) adds ~500ms to startup, and under load
     // (e.g., parallel integration tests) it can take longer.
     // Retry PID discovery instead of a single fixed sleep.
@@ -316,6 +339,21 @@ pub fn start_detached_node(
     Ok(node_info)
 }
 
+/// Convert a Windows path to Unix-style forward slashes for Erlang.
+///
+/// Erlang on Windows expects forward slashes in `-pa` arguments, not backslashes.
+/// See BT-661 for details on this Windows-specific issue.
+fn path_to_erlang_arg(path: &Path) -> String {
+    #[cfg(windows)]
+    {
+        path.to_string_lossy().replace('\\', "/")
+    }
+    #[cfg(not(windows))]
+    {
+        path.to_string_lossy().into_owned()
+    }
+}
+
 /// Poll until the TCP health endpoint responds on the given port.
 ///
 /// Uses short per-attempt timeouts (300ms connect, 500ms read) to keep the
@@ -379,6 +417,9 @@ fn build_detached_node_command(
     };
 
     let mut args = vec![
+        // On Windows, don't use -detached - it doesn't work reliably from Rust spawn
+        // Instead, we'll use CREATE_NO_WINDOW flag to prevent console popup
+        #[cfg(not(windows))]
         "-detached".to_string(),
         "-noshell".to_string(),
         node_flag.to_string(),
@@ -386,21 +427,21 @@ fn build_detached_node_command(
         "-setcookie".to_string(),
         cookie.to_string(),
         "-pa".to_string(),
-        runtime_beam_dir.to_str().unwrap_or("").to_string(),
+        path_to_erlang_arg(runtime_beam_dir),
         "-pa".to_string(),
-        repl_beam_dir.to_str().unwrap_or("").to_string(),
+        path_to_erlang_arg(repl_beam_dir),
         "-pa".to_string(),
-        jsx_beam_dir.to_str().unwrap_or("").to_string(),
+        path_to_erlang_arg(jsx_beam_dir),
         "-pa".to_string(),
-        compiler_beam_dir.to_str().unwrap_or("").to_string(),
+        path_to_erlang_arg(compiler_beam_dir),
         "-pa".to_string(),
-        stdlib_beam_dir.to_str().unwrap_or("").to_string(),
+        path_to_erlang_arg(stdlib_beam_dir),
     ];
 
     // Add extra code paths (e.g. package ebin from auto-compile)
     for path in extra_code_paths {
         args.push("-pa".to_string());
-        args.push(path.to_str().unwrap_or("").to_string());
+        args.push(path_to_erlang_arg(path));
     }
 
     args.push("-eval".to_string());
@@ -412,6 +453,33 @@ fn build_detached_node_command(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+
+    // On Windows, set process creation flags to properly detach
+    // CREATE_NO_WINDOW (0x0800_0000) prevents console window popup without -detached
+    // CREATE_NEW_PROCESS_GROUP (0x0000_0200) allows the process to run independently
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        cmd.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
+    }
+
+    // Set compiler port binary path (for runtime compilation support)
+    // In installed mode, it lives next to the beamtalk binary in bin/.
+    // In dev mode, it lives in target/{debug,release}/.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(bin_dir) = exe.parent() {
+            let compiler_name = if cfg!(windows) {
+                "beamtalk-compiler-port.exe"
+            } else {
+                "beamtalk-compiler-port"
+            };
+            let compiler_port = bin_dir.join(compiler_name);
+            if compiler_port.exists() {
+                cmd.env("BEAMTALK_COMPILER_PORT_BIN", &compiler_port);
+            }
+        }
+    }
 
     cmd
 }
