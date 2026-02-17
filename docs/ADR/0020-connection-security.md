@@ -21,7 +21,7 @@ Beamtalk has several TCP communication channels that need security consideration
 
 **Local development** (single machine, single user):
 - REPL bound to `127.0.0.1` — only local processes can connect
-- Daemon uses Unix socket — filesystem ACL provides auth
+- Compiler uses OTP Port (stdin/stdout) — process isolation, no network exposure
 - Erlang cookie — prevents accidental cross-workspace connections
 - **Threat level: low.** The OS provides adequate isolation.
 
@@ -68,7 +68,7 @@ Beamtalk has several TCP communication channels that need security consideration
 
 ### Layer 1: Local connections (`127.0.0.1` + cookie handshake)
 
-Local REPL and daemon connections remain loopback-only. The REPL protocol uses **WebSocket** as its sole transport, with a **cookie handshake** on connection to authenticate the client on shared machines.
+Local REPL connections remain loopback-only. The compiler uses an OTP Port (stdin/stdout, no network). The REPL protocol uses **WebSocket** as its sole transport, with a **cookie handshake** on connection to authenticate the client on shared machines.
 
 ```
 ┌──────────────┐   WS ws://127.0.0.1:49152   ┌──────────────────┐
@@ -376,7 +376,7 @@ This is deferred to a future ADR when Kubernetes deployment becomes a priority. 
 - **Tension point:** Security engineers prefer defense in depth; developers prefer zero-config simplicity. We side with simplicity for local dev, with the cookie handshake as a middle ground.
 
 ### "Use Unix sockets for local REPL, TCP only for remote"
-- **Best argument (BEAM developer):** The daemon already uses Unix sockets. Filesystem permissions on Unix sockets provide stronger isolation than TCP + cookie. This eliminates port conflicts and shared-machine risks entirely.
+- **Best argument (BEAM developer):** Filesystem permissions on Unix sockets provide stronger isolation than TCP + cookie. This eliminates port conflicts and shared-machine risks entirely.
 - **Counter:** Erlang's `gen_tcp` is native and well-supported; Unix socket support requires `afunix` or NIFs and isn't portable. Maintaining two transports (UDS local, TCP remote) doubles the protocol surface. The cookie handshake on TCP achieves comparable security with a single transport.
 - **Tension point:** Simplicity of implementation vs. security purity. If Erlang had first-class Unix socket support, we'd likely use it.
 
