@@ -1009,6 +1009,11 @@ get_completions(Prefix) when is_binary(Prefix) ->
     %% Filter by prefix
     [Name || Name <- ClassNames, binary:match(Name, Prefix) =:= {0, byte_size(Prefix)}]
     ++
+    %% Add workspace binding names (Transcript, Beamtalk, Workspace)
+    [atom_to_binary(B, utf8) || B <- try beamtalk_workspace_config:binding_names()
+                                      catch _:_ -> [] end,
+     binary:match(atom_to_binary(B, utf8), Prefix) =:= {0, byte_size(Prefix)}]
+    ++
     %% Add built-in keywords
     [Kw || Kw <- builtin_keywords(), binary:match(Kw, Prefix) =:= {0, byte_size(Prefix)},
            PrefixStr =/= ""].

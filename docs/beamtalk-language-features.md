@@ -13,17 +13,8 @@ Planned language features for beamtalk. See [beamtalk-principles.md](beamtalk-pr
 - [String Encoding and UTF-8](#string-encoding-and-utf-8)
 - [Core Syntax](#core-syntax)
 - [Async Message Passing](#async-message-passing)
-- [Pattern Matching (Erlang-inspired)](#pattern-matching-erlang-inspired)
-- [Pipe Operator (Elixir-inspired)](#pipe-operator-elixir-inspired)
-- [With Blocks (Elixir/Gleam-inspired)](#with-blocks-elixirgleam-inspired)
-- [Result Type (Gleam-inspired)](#result-type-gleam-inspired)
-- [Comprehensions (Elixir-inspired)](#comprehensions-elixir-inspired)
-- [Supervision (OTP-inspired)](#supervision-otp-inspired)
+- [Pattern Matching](#pattern-matching)
 - [Live Patching](#live-patching)
-- [Protocols (Elixir-inspired)](#protocols-elixir-inspired)
-- [Optional Type Annotations (Dylan-inspired)](#optional-type-annotations-dylan-inspired)
-- [Conditions and Restarts (Dylan-inspired)](#conditions-and-restarts-dylan-inspired)
-- [Method Combinations (Dylan/CLOS-inspired)](#method-combinations-dylanclos-inspired)
 - [Smalltalk + BEAM Mapping](#smalltalk--beam-mapping)
 - [Tooling](#tooling)
 - [Inspiration Sources](#inspiration-sources)
@@ -37,7 +28,7 @@ Planned language features for beamtalk. See [beamtalk-principles.md](beamtalk-pr
 
 ### String Types
 
-```
+```beamtalk
 // Double-quoted strings - UTF-8 binaries
 name := "Alice"
 greeting := "Hello, 世界! 🌍"
@@ -62,7 +53,7 @@ emoji := "Status: {status} ✓"
 
 String operations respect Unicode grapheme clusters (user-perceived characters):
 
-```
+```beamtalk
 // Length in graphemes, not bytes
 "Hello" length        // => 5
 "世界" length          // => 2 (not 6 bytes)
@@ -80,28 +71,6 @@ String operations respect Unicode grapheme clusters (user-perceived characters):
 "straße" uppercase    // => "STRASSE" (German ß → SS)
 ```
 
-### Binary Pattern Matching for Bytes
-
-When you need byte-level access (network protocols, file formats):
-
-```
-// Parse UTF-8 manually
-parseUtf8: <<codepoint/utf8, rest/binary>> =>
-  Transcript show: codepoint
-  self parseUtf8: rest
-
-parseUtf8: <<>> => // done
-
-// Parse fixed-size header + UTF-8 body
-parsePacket: <<version:8, length:16/big, body:length/binary, rest/binary>> =>
-  // body is a UTF-8 string
-  message := body asString
-  self process: message
-
-// Build binary with UTF-8 content
-packet := <<1, messageBytes/utf8>>
-```
-
 ### BEAM Mapping
 
 | Beamtalk | Erlang | Notes |
@@ -110,7 +79,7 @@ packet := <<1, messageBytes/utf8>>
 | `"世界"` | `<<228,184,150,231,149,140>>` | UTF-8 encoded bytes |
 | String operations | `:string` module | Grapheme-aware (`:string.length/1`) |
 | `$x` | Integer codepoint | `$a` = 97, `$世` = 19990 |
-| Charlist (legacy) | `[104,101,108,108,111]` | Use `String toCharlist:` if needed |
+| Charlist (legacy) | `[104,101,108,108,111]` | Via Erlang interop |
 
 ### Why UTF-8 by Default?
 
@@ -122,18 +91,7 @@ packet := <<1, messageBytes/utf8>>
 
 ### Legacy Charlist Support
 
-For Erlang modules that require charlists:
-
-```
-// Convert to charlist when needed
-charlist := "hello" toCharlist  // => [104, 101, 108, 108, 111]
-
-// Call Erlang with charlist
-Erlang.io format: charlist arguments: []
-
-// Convert back from charlist
-str := String fromCharlist: [72, 101, 108, 108, 111]  // => "Hello"
-```
+Charlists are Erlang lists of integer codepoints. Beamtalk uses binaries for strings, but you can convert when needed for Erlang interop via `binary_to_list` / `list_to_binary`.
 
 ### Implementation Status
 
@@ -144,7 +102,7 @@ str := String fromCharlist: [72, 101, 108, 108, 111]  // => "Hello"
 | Grapheme-aware length | ✅ Available via Erlang `:string` module |
 | Unicode normalization | ✅ Available via Erlang `:unicode` module |
 | Case folding | ✅ Available via Erlang `:string` module |
-| Binary pattern UTF-8 | ✅ Implemented - AST and codegen support |
+| Binary pattern UTF-8 | ❌ Not yet implemented (BT-663) |
 
 ---
 
@@ -163,13 +121,13 @@ str := String fromCharlist: [72, 101, 108, 108, 111]  // => "Hello"
 | Field access & assignment | ✅ Implemented (with limitations) | `actor_state_mutation` |
 | Class definitions | ✅ Implemented | `class_definition` |
 | Map literals | ✅ Implemented | `map_literals` |
-| Pattern matching (`match:`) | ✅ Implemented (BT-406) | `pattern_matching` (stdlib + E2E) |
+| Pattern matching (`match:`) | ✅ Implemented | `pattern_matching` (stdlib + E2E) |
 | Comments | ✅ Implemented | `comment_handling` |
 | Async message sends | ✅ Implemented | `async_with_await`, `async_keyword_message` |
 
 ### Actor Definition
 
-```
+```beamtalk
 Actor subclass: Counter
   state: value = 0
 
@@ -181,18 +139,18 @@ Actor subclass: Counter
 
 ### Value Types vs Actors
 
-**Status:** ✅ Implemented (BT-213)
+**Status:** ✅ Implemented
 
 Beamtalk distinguishes between **value types** (immutable data) and **actors** (concurrent processes):
 
-```
+```beamtalk
 // Value type - plain Erlang map, no process
 Object subclass: Point
   state: x = 0
   state: y = 0
   
   // Methods return new instances (immutable)
-  plus: other => Point new: #{x => self.x + other.x, y => self.y + other.y}
+  plus: other => Point new: #{x => (self.x + other x), y => (self.y + other y)}
   describe => "Point({self.x}, {self.y})"
 
 // Actor - process with mailbox
@@ -216,7 +174,7 @@ Actor subclass: Counter
 | Use cases | Data structures, coordinates, money | Services, stateful entities, concurrent tasks |
 
 **Class hierarchy:**
-```
+```text
 ProtoObject (minimal - identity, DNU)
   └─ Object (reflection + new)
        ├─ Integer, String (primitives)
@@ -233,7 +191,7 @@ ProtoObject (minimal - identity, DNU)
 
 ### Message Sends
 
-```
+```beamtalk
 // Unary message
 counter increment
 
@@ -241,7 +199,7 @@ counter increment
 3 + 4
 
 // Keyword message
-array at: 1 put: "hello"
+dict at: #name put: "hello"
 
 // Cascade - multiple messages to same receiver
 Transcript show: "Hello"; cr; show: "World"
@@ -250,7 +208,7 @@ Transcript show: "Hello"; cr; show: "World"
 ### Message Precedence (high to low)
 1. Unary messages: `3 factorial`
 2. Binary messages: `3 + 4` (with standard math precedence within binary)
-3. Keyword messages: `array at: 1`
+3. Keyword messages: `dict at: #name`
 
 ### Binary Operators
 
@@ -282,7 +240,7 @@ Binary operators follow standard math precedence (highest to lowest):
 - `=/=` - Strict inequality (Erlang `=/=`): `5 =/= 6` → `true`
 
 **Note on `and`/`or`:** These are **not** binary operators. They are keyword messages that take blocks for short-circuit evaluation:
-```
+```beamtalk
 // Short-circuit AND - second block only evaluated if first is true
 result := condition and: [expensiveCheck()]
 
@@ -294,7 +252,7 @@ result := condition or: [fallbackValue()]
 
 Direct field access within actors using dot notation:
 
-```
+```beamtalk
 // Read field
 current := self.value
 
@@ -309,27 +267,32 @@ self.total := self.total * factor
 
 **Note:** `self.field` compiles to direct map access, not a message send. For external access to another actor's state, use message sends.
 
-**Current Limitation:** Field assignments (`self.field := value`) must be used as **statements**, not as sub-expressions. The following patterns are not yet supported:
+**Parenthesized assignment:** Field assignments can be used as expressions when wrapped in parentheses — `(self.x := 5)` returns the assigned value:
 
-```
-// NOT SUPPORTED: field assignment as expression value
-^(self.x := 5) + 1
+```beamtalk
+// Assignment as expression (returns 6)
+(self.x := 5) + 1
 
-// NOT SUPPORTED: field assignment inside nested blocks
-nestedBlock := [:m | self.x := m]
-nestedBlock value: 10
-
-// SUPPORTED: field assignments as sequential statements
-self.x := 5.
-self.y := self.x + 1.
+// Field assignments as sequential statements
+self.x := 5
+self.y := self.x + 1
 ^self.y
 ```
 
-This is tracked in issue BT-98 for future enhancement.
+**Limitation:** Field assignments in stored blocks (non-control-flow) are not supported:
+
+```beamtalk
+// NOT SUPPORTED: field assignment inside stored blocks
+nestedBlock := [:m | self.x := m]
+nestedBlock value: 10
+
+// SUPPORTED: field mutation in control flow blocks
+true ifTrue: [self.x := 5]
+```
 
 ### Blocks (Closures)
 
-```
+```beamtalk
 // Block with no arguments
 [self doSomething]
 
@@ -337,12 +300,12 @@ This is tracked in issue BT-98 for future enhancement.
 [:x :y | x + y]
 
 // Block with local variables
-[:x | | temp | temp := x * 2; temp + 1]
+[:x | temp := x * 2. temp + 1]
 ```
 
 ---
 
-## Control Flow and Mutations (BT-90)
+## Control Flow and Mutations
 
 Beamtalk supports Smalltalk-style control flow via messages to booleans and blocks, with one important enhancement: **literal blocks in control flow positions can mutate local variables and fields**.
 
@@ -366,32 +329,32 @@ These message sends detect literal blocks and generate tail-recursive loops with
 
 ### Local Variable Mutations
 
-```
+```beamtalk
 // Simple counter
-count := 0.
-[count < 10] whileTrue: [count := count + 1].
+count := 0
+[count < 10] whileTrue: [count := count + 1]
 // count is now 10
 
 // Multiple variables
-sum := 0.
-product := 1.
-i := 1.
+sum := 0
+product := 1
+i := 1
 [i <= 5] whileTrue: [
-    sum := sum + i.
-    product := product * i.
+    sum := sum + i
+    product := product * i
     i := i + 1
-].
+]
 // sum = 15, product = 120, i = 6
 
 // Collection iteration
 numbers := #(1, 2, 3, 4, 5)
-total := 0.
-numbers do: [:n | total := total + n].
+total := 0
+numbers do: [:n | total := total + n]
 // total = 15
 
 // With index
-result := 0.
-1 to: 10 do: [:n | result := result + n].
+result := 0
+1 to: 10 do: [:n | result := result + n]
 // result = 55 (sum of 1..10)
 ```
 
@@ -399,69 +362,68 @@ result := 0.
 
 Mutations to actor state (`self.field`) work the same way:
 
-```
-Counter := class [
-    state: value: Integer = 0.
+```beamtalk
+Actor subclass: Counter [
+    state: value = 0
+    state: count = 0
     
     // ✅ Field mutation in control flow
     increment =>
         [self.value < 10] whileTrue: [
             self.value := self.value + 1
-        ].
-        ^self.value.
+        ]
+        ^self.value
     
     // ✅ Multiple fields
     incrementBoth =>
         [self.value < 10] whileTrue: [
-            self.value := self.value + 1.
+            self.value := self.value + 1
             self.count := self.count + 1
-        ].
-    
-    state: count: Integer = 0.
-].
+        ]
+]
 ```
 
 ### Mixed Mutations
 
 Local variables and fields can be mutated together:
 
-```
+```beamtalk
 processItems =>
-    total := 0.
-    self.processed := 0.
+    total := 0
+    self.processed := 0
     
     self.items do: [:item |
-        total := total + item.
+        total := total + item
         self.processed := self.processed + 1
-    ].
+    ]
     
-    ^total.
+    ^total
 ```
 
 ### What's Forbidden
 
 Stored or passed closures cannot mutate:
 
-```
+```beamtalk
 // ❌ ERROR: Field assignment in stored closure
 badBlock =>
-    myBlock := [self.value := self.value + 1].
+    myBlock := [self.value := self.value + 1]
     // ERROR: Cannot assign to field 'value' inside a stored closure.
     
 // ⚠️ WARNING: Local mutation in stored closure has no effect
 testWarning =>
-    count := 0.
-    myBlock := [count := count + 1].
+    count := 0
+    myBlock := [count := count + 1]
     // WARNING: Assignment to 'count' has no effect on outer scope.
     
-    10 timesRepeat: myBlock.
-    ^count.  // Still 0, not 10
+    10 timesRepeat: myBlock
+    ^count  // Still 0, not 10
     
 // ✅ CORRECT: Use literal blocks in control flow
 testCorrect =>
-    count := 0.
-    10 timesRepeat: [count := count + 1].  // ✅ Works!
-    ^count.  // Now 10
+    count := 0
+    10 timesRepeat: [count := count + 1]  // ✅ Works!
+    ^count  // Now 10
 ```
 
 ### Why This Design?
@@ -479,7 +441,7 @@ testCorrect =>
 
 When you accidentally store a mutating closure, you get helpful guidance:
 
-```
+```text
 Error: Cannot assign to field 'sum' inside a stored closure.
 
 Field assignments require immediate execution context for state threading.
@@ -497,84 +459,46 @@ Fix: Use control flow directly, or extract to a method:
   items do: [:item | self addToSum: item].
 ```
 
-### How It Works
-
-**Compile-time transformation:** When codegen detects control flow messages with **literal blocks**, it analyzes for mutations and generates tail-recursive loops:
-
-```erlang
-%% Beamtalk: [count < 10] whileTrue: [count := count + 1]
-%% Generated Core Erlang:
-letrec 'Loop'/1 = fun (Count) ->
-    case Count < 10 of
-      'true' ->
-          let Count1 = Count + 1
-          in apply 'Loop'/1 (Count1)
-      'false' ->
-          Count
-    end
-in apply 'Loop'/1 (Count0)
-```
-
-For field mutations, the State map is threaded through the loop:
-
-```erlang
-%% Beamtalk: [self.value < 10] whileTrue: [self.value := self.value + 1]
-%% Generated Core Erlang:
-letrec 'Loop'/1 = fun (State) ->
-    let Value = maps:get(value, State)
-    in case Value < 10 of
-      'true' ->
-          let Value1 = Value + 1
-          in let State1 = maps:put(value, Value1, State)
-          in apply 'Loop'/1 (State1)
-      'false' ->
-          State
-    end
-in apply 'Loop'/1 (State0)
-```
-
-### REPL Integration
-
-After control flow with mutations, the REPL updates its bindings:
-
-```
-beamtalk> count := 0
-0
-beamtalk> 5 timesRepeat: [count := count + 1]
-nil
-beamtalk> count
-5
-```
-
-This makes the REPL feel natural and interactive, just like Smalltalk.
-
 ---
 
 ## Async Message Passing
 
-Beamtalk uses **async-first** message passing (like Newspeak), unlike Smalltalk's synchronous model.
+Beamtalk uses **async-first** message passing, unlike Smalltalk's synchronous model. Messages to actors return **futures**.
 
 ### Default: Async with Futures
 
-```
-// Returns immediately with a future
-result := agent analyze: data
+```beamtalk
+// Load the Counter actor
+:load examples/counter.bt
 
-// Explicitly wait for value
-value := result await
+// Spawn an actor — returns a reference
+c := Counter spawn
 
-// Continuation style - non-blocking
-agent analyze: data
-  whenResolved: [:value | self process: value]
-  whenRejected: [:error | self handle: error]
+// Messages to actors return futures
+c increment             // returns a Future
+c increment await       // explicitly wait for completion
+c getValue await        // => 2
 ```
 
-### Sync Opt-In
+### REPL Auto-Await
 
+In the REPL, futures are **automatically awaited** for a natural, synchronous feel:
+
+```text
+> c := Counter spawn
+#Actor<Counter,_>
+
+> c increment
+1
+
+> c increment
+2
+
+> c getValue
+2
 ```
-// Blocks until complete - use sparingly
-value := agent analyzeSync: data
-```
+
+Outside the REPL (in compiled code), you must explicitly `await` or use continuations.
 
 ### BEAM Mapping
 
@@ -582,16 +506,15 @@ value := agent analyzeSync: data
 |----------|------|
 | Async send | `gen_server:cast` + future process |
 | `await` | `receive` block or `gen_server:call` |
-| `whenResolved:` | Callback on future completion |
-| Future | Lightweight process or ref |
+| Future | Lightweight process holding a result |
 
 ---
 
-## Pattern Matching (Erlang-inspired)
+## Pattern Matching
 
 Smalltalk lacks pattern matching - this is a major ergonomic addition.
 
-### Match Expression (BT-406)
+### Match Expression
 
 **Status:** ✅ Implemented
 
@@ -641,167 +564,24 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 
 **Guard expressions** support: `>`, `<`, `>=`, `<=`, `=:=`, `=/=`, `/=`, `+`, `-`, `*`, `/`
 
-### In Message Handlers (Future)
+### Destructuring in Match Arms
 
-```
-// Match on message structure
-handle: {#ok, value} => self process: value
-handle: {#error, reason} => self logError: reason
-handle: _ => self handleUnknown
+Pattern matching can bind variables in match arms:
 
-// Match with guards
-process: n when: [n > 0] => self positive: n
-process: n when: [n < 0] => self negative: n
-process: 0 => self zero
-```
+```beamtalk
+// Variable captures the matched value
+42 match: [x -> x + 1]
+// => 43
 
-### Destructuring Assignment
+// Multiple arms with variable binding
+"hello" match: [s -> s size]
+// => 5
 
-```
-// Destructure tuple
-{x, y, z} := point coordinates
-
-// Destructure in block
-results collect: [{#ok, v} -> v; {#error, _} -> nil]
-
-// Nested destructuring
-{name, {street, city}} := person address
+// Tuple destructuring in match arms (parser supports; runtime planned)
+// {1, 2} match: [{a, b} -> a + b]
 ```
 
-### Binary Pattern Matching
-
-```
-// Parse a network packet
-parsePacket: <<version: 8, length: 16/big, payload: length/binary, rest/binary>> =>
-  Packet new version: version payload: payload
-
-// Build binary
-packet := <<16r01, messageLength: 16/big, messageBytes/binary>>
-```
-
----
-
-## Pipe Operator (Elixir-inspired)
-
-Clean data flow through transformations.
-
-### Sync Pipe
-
-```
-data
-  |> Transform with: options
-  |> Filter where: [:x | x > 0]
-  |> Sort by: #name
-```
-
-### Async Pipe
-
-```
-// Each step returns future, flows through
-data
-  |>> agent1 process
-  |>> agent2 validate
-  |>> agent3 store
-```
-
----
-
-## With Blocks (Elixir/Gleam-inspired)
-
-Early exit on error without deep nesting.
-
-### Problem: Nested Error Handling
-
-```
-// Ugly pyramid of doom
-(file open: path) ifOk: [:f |
-  (f read) ifOk: [:data |
-    (Json parse: data) ifOk: [:json |
-      self process: json]]]
-```
-
-### Solution: With Blocks
-
-```
-with: [
-  file := File open: path
-  data := file read
-  json := Json parse: data
-] do: [
-  self process: json
-] else: [:error |
-  self handleError: error
-]
-```
-
----
-
-## Result Type (Gleam-inspired)
-
-Explicit error handling as alternative to exceptions.
-
-```
-// Return Result instead of raising
-divide: a by: b -> Result =>
-  b = 0
-    ifTrue: [Error new: #divisionByZero]
-    ifFalse: [Ok new: a / b]
-
-// Chain with map
-(self divide: 10 by: x)
-  |> map: [:v | v * 2]
-  |> unwrapOr: 0
-
-// Pattern match on result
-result := self divide: a by: b
-result match: [
-  {#ok, v} -> self use: v
-  {#error, e} -> self report: e
-]
-```
-
----
-
-## Comprehensions (Elixir-inspired)
-
-Declarative iteration with filtering.
-
-```
-// List comprehension with filter
-for: [x in: 1 to: 10; x > 5]
-yield: [x * 2]
-// => [12, 14, 16, 18, 20]
-
-// Multiple generators
-for: [x in: 1 to: 3; y in: 1 to: 3]
-yield: [{x, y}]
-
-// Parallel iteration
-for: [name in: names; age in: ages]
-yield: [Person new name: name age: age]
-```
-
----
-
-## Supervision (OTP-inspired)
-
-Declarative fault tolerance.
-
-```
-Supervisor subclass: WebApp
-  children: [
-    {DatabasePool, scale: 10},
-    HTTPRouter spawn,
-    {MetricsCollector, interval: 5000}
-  ]
-  strategy: #oneForOne
-
-// Actor with supervision spec
-Actor subclass: Worker
-  supervisor: #transient  // Restart on crash, not normal exit
-  maxRestarts: 5
-  restartWindow: 60  // seconds
-```
+> **Note:** Destructuring assignment (`{x, y} := expr`) and `collect:` with pattern blocks are planned but not yet implemented.
 
 ---
 
@@ -809,11 +589,11 @@ Actor subclass: Worker
 
 Hot code reload with dedicated syntax.
 
-```
+```beamtalk
 // Patch a method on running actors
 patch Counter >> #increment {
   Telemetry log: "incrementing"
-  self.value += 1
+  self.value := self.value + 1
 }
 
 // Patch with state migration
@@ -822,123 +602,6 @@ patch Agent >> state {
   self.memory := self.history ifNil: [OrderedCollection new]
 }
 ```
-
----
-
-## Protocols (Elixir-inspired)
-
-Type-based dispatch for polymorphism.
-
-```
-// Define protocol
-Protocol define: #Stringable
-  requiring: [#asString]
-
-// Implement for types
-Integer implements: #Stringable
-  asString => self printString
-
-Point implements: #Stringable
-  asString => "({self x}, {self y})"
-
-// Use generically
-items collect: [:x | x asString]
-```
-
----
-
-## Optional Type Annotations (Dylan-inspired)
-
-Types are optional - add them gradually for safety and optimization.
-
-### Basic Annotations
-
-```
-Actor subclass: Counter
-  state: value: Integer = 0
-
-  increment => self.value := self.value + 1
-  getValue -> Integer => ^self.value
-
-// Typed parameters
-transferFrom: source: Account amount: Money -> Boolean =>
-  source withdraw: amount
-  self deposit: amount
-  ^true
-```
-
-### Limited Types
-
-```
-// Singleton type - exactly one value
-state: direction: #north | #south | #east | #west
-
-// Union type
-state: result: Integer | Error
-
-// False-or type (Option/Maybe)
-state: cache: Integer | False = false
-
-// Subtype constraint
-process: items: <Collection> => ...
-```
-
-### Sealing for Optimization
-
-```
-// Sealed class - no subclasses, enables optimization
-sealed Actor subclass: Point
-  state: x: Float, y: Float
-
-  distanceTo: other: Point -> Float =>
-    ((self.x - other x) squared + (self.y - other y) squared) sqrt
-
-// Sealed method - final implementation
-Counter >> sealed getValue -> Integer => ^self.value
-```
-
-### BEAM Integration
-
-- Generate Dialyzer `-spec` annotations
-- Type info becomes guards: `when is_integer(X)`
-- Sealed methods can bypass `gen_server` overhead
-
----
-
-## Conditions and Restarts (Dylan-inspired)
-
-Recoverable exceptions with options.
-
-### Traditional Exception
-
-```
-[file open: path]
-  on: FileNotFound
-  do: [:e | ^nil]
-```
-
-### Conditions with Restarts
-
-```
-// Handler chooses recovery option
-[file open: path]
-  on: FileNotFound
-  restarts: [
-    #useDefault -> [^self defaultFile],
-    #retry -> [^self open: (self promptForPath)],
-    #createNew -> [^File create: path]
-  ]
-
-// Signaler offers restart options
-FileNotFound signal: path
-  restarts: [#useDefault, #retry, #createNew]
-```
-
-### BEAM Mapping
-
-- Conditions → `throw`/`catch` with restart metadata
-- Handler selects restart; execution continues
-- Unhandled → crash (supervisor takes over)
 
 ---
 
@@ -982,7 +645,7 @@ Core classes implemented and tested:
 | **Stream** | ✅ Implemented | Lazy, closure-based sequences ([ADR 0021](ADR/0021-streams-and-io-design.md)) | `stream`, `stream_collections`, `file_stream` |
 | **Nil** | ✅ Implemented | Null object pattern | `stdlib_nil`, `stdlib_nil_object` |
 
-For detailed API documentation, see [`lib/README.md`](../lib/README.md).
+For detailed API documentation, see [beamtalk.dev/apidocs](https://beamtalk.dev/apidocs/).
 
 ### Stream — Lazy Pipelines
 
@@ -1142,14 +805,14 @@ There are two pragma forms:
 Both forms are semantically equivalent at the compiler level (they produce the same AST node), but the naming convention distinguishes their intent:
 
 **`@primitive` (quoted)** — runtime-dispatched method implementations:
-```
+```beamtalk
 // In lib/Integer.bt
 + other => @primitive '+'
 asString => @primitive 'asString'
 ```
 
 **`@intrinsic` (unquoted)** — compiler structural intrinsics:
-```
+```beamtalk
 // In lib/Block.bt
 value => @intrinsic blockValue
 whileTrue: bodyBlock => @intrinsic whileTrue
@@ -1220,7 +883,7 @@ beamtalk observer           # ❌ Not yet implemented
 
 ### REPL Features
 
-```
+```beamtalk
 // Spawn and interact
 counter := Counter spawn
 counter increment
@@ -1258,7 +921,7 @@ The simplest way to test — expressions with expected results:
 "hello" size
 // => 5
 
-"hello" , " world"
+"hello" ++ " world"
 // => hello world
 ```
 
@@ -1341,7 +1004,7 @@ Running 2 tests...
 
 ### Debug/Trace Syntax
 
-```
+```beamtalk
 // Trace all messages to an actor
 counter trace: #all
 
@@ -1371,22 +1034,11 @@ Tracer enable: #messageFlow for: Counter
 - Process links/monitors
 - Distribution
 
-### From Elixir
-- Pipe operator
-- With blocks
-- Protocols
-- Comprehensions
-
-### From Gleam
-- Result types
-- Use expressions
+### From Elixir/Gleam
 - Exhaustive matching
 
 ### From Dylan
 - Sealing
-- Conditions/restarts
-- Method combinations
-- Limited types
 
 ---
 
@@ -1400,7 +1052,7 @@ Tracer enable: #messageFlow for: Counter
 
 ---
 
-## Reflection API (BT-97)
+## Reflection API
 
 **Status:** ✅ Implemented as of 2026-02-05
 
@@ -1482,22 +1134,21 @@ Reflection methods are declared in the stdlib via pragma annotations (see [ADR 0
 - `instVarAt:` and `instVarAt:put:` require symbol field names (`#fieldName`)
 - No reflection on class methods (only instance methods)
 - No reflection on method metadata (arity, parameters, etc.)
-- Primitives don't support reflection yet (BT-163, BT-164)
+- Primitives don't support reflection yet
 
-**Note:** Symbol literals (`#selector`) work correctly. Future semantic validation (BT-244) will provide better error messages when users accidentally pass identifiers instead of symbols.
+**Note:** Symbol literals (`#selector`) work correctly. Future semantic validation will provide better error messages when users accidentally pass identifiers instead of symbols.
 
 ### Future Enhancements
 
-Planned improvements tracked in Linear:
-- **BT-163, BT-164**: Reflection support for primitives
-- **BT-244**: Better error messages for symbol validation (semantic analysis)
+- Reflection support for primitives
+- Better error messages for symbol validation (semantic analysis)
 - Class-level reflection (`allInstances`, `allSubclasses`)
 - Method metadata (`methodDict`, `sourceCodeAt:`)
 - Block reflection (`sourceNode`, `numArgs`)
 
 See [ADR 0005](ADR/0005-beam-object-model-pragmatic-hybrid.md) for full object model design.
 
-## Extension Methods (BT-229)
+## Extension Methods
 
 Extension methods allow adding new methods to existing classes without subclassing.
 This follows Pharo's proven extension method design.
@@ -1521,10 +1172,10 @@ For both Actor classes and value types, the dispatch order is:
 
 ### Supported Class Types
 
-| Class Type | Extension Support | Since |
-|------------|-------------------|-------|
-| **Value types** (Integer, String, Boolean, etc.) | ✅ Supported | Initial |
-| **Actor classes** (user-defined via `Actor subclass:`) | ✅ Supported | BT-229 |
+| Class Type | Extension Support |
+|------------|-------------------|
+| **Value types** (Integer, String, Boolean, etc.) | ✅ Supported |
+| **Actor classes** (user-defined via `Actor subclass:`) | ✅ Supported |
 
 ### Extension Function Signature
 
@@ -1572,3 +1223,288 @@ Integer extend
 - Extension registry: `runtime/apps/beamtalk_runtime/src/beamtalk_extensions.erl`
 - ADR 0005: `docs/ADR/0005-beam-object-model-pragmatic-hybrid.md` (Q3: Extension methods)
 - Design doc: `docs/internal/design-self-as-object.md` (Section 3.3)
+
+---
+
+## Not Yet Implemented
+
+> The following features are planned but not yet implemented. They are kept here for review and future reference.
+
+### Pattern Matching in Message Handlers
+
+```beamtalk
+// Match on message structure
+handle: {#ok, value} => self process: value
+handle: {#error, reason} => self logError: reason
+handle: _ => self handleUnknown
+
+// Match with guards
+process: n when: [n > 0] => self positive: n
+process: n when: [n < 0] => self negative: n
+process: 0 => self zero
+```
+
+### Destructuring Assignment
+
+```beamtalk
+// Destructure tuple
+{x, y, z} := point coordinates
+
+// Destructure in block
+results collect: [{#ok, v} -> v; {#error, _} -> nil]
+
+// Nested destructuring
+{name, {street, city}} := person address
+```
+
+### Pipe Operator (Elixir-inspired)
+
+Clean data flow through transformations.
+
+#### Sync Pipe
+
+```beamtalk
+data
+  |> Transform with: options
+  |> Filter where: [:x | x > 0]
+  |> Sort by: #name
+```
+
+#### Async Pipe
+
+```beamtalk
+// Each step returns future, flows through
+data
+  |>> agent1 process
+  |>> agent2 validate
+  |>> agent3 store
+```
+
+---
+
+### With Blocks (Elixir/Gleam-inspired)
+
+Early exit on error without deep nesting.
+
+#### Problem: Nested Error Handling
+
+```beamtalk
+// Ugly pyramid of doom
+(file open: path) ifOk: [:f |
+  (f read) ifOk: [:data |
+    (Json parse: data) ifOk: [:json |
+      self process: json]]]
+```
+
+#### Solution: With Blocks
+
+```beamtalk
+with: [
+  file := File open: path
+  data := file read
+  json := Json parse: data
+] do: [
+  self process: json
+] else: [:error |
+  self handleError: error
+]
+```
+
+---
+
+### Result Type (Gleam-inspired)
+
+Explicit error handling as alternative to exceptions.
+
+```beamtalk
+// Return Result instead of raising
+divide: a by: b -> Result =>
+  b = 0
+    ifTrue: [Error new: #divisionByZero]
+    ifFalse: [Ok new: a / b]
+
+// Chain with map
+(self divide: 10 by: x)
+  |> map: [:v | v * 2]
+  |> unwrapOr: 0
+
+// Pattern match on result
+result := self divide: a by: b
+result match: [
+  {#ok, v} -> self use: v
+  {#error, e} -> self report: e
+]
+```
+
+---
+
+### Comprehensions (Elixir-inspired)
+
+Declarative iteration with filtering.
+
+```beamtalk
+// List comprehension with filter
+for: [x in: 1 to: 10; x > 5]
+yield: [x * 2]
+// => [12, 14, 16, 18, 20]
+
+// Multiple generators
+for: [x in: 1 to: 3; y in: 1 to: 3]
+yield: [{x, y}]
+
+// Parallel iteration
+for: [name in: names; age in: ages]
+yield: [Person new name: name age: age]
+```
+
+---
+
+### Supervision (OTP-inspired)
+
+Declarative fault tolerance.
+
+```beamtalk
+Supervisor subclass: WebApp
+  children: [
+    {DatabasePool, scale: 10},
+    HTTPRouter spawn,
+    {MetricsCollector, interval: 5000}
+  ]
+  strategy: #oneForOne
+
+// Actor with supervision spec
+Actor subclass: Worker
+  supervisor: #transient  // Restart on crash, not normal exit
+  maxRestarts: 5
+  restartWindow: 60  // seconds
+```
+
+---
+
+### Protocols (Elixir-inspired)
+
+Type-based dispatch for polymorphism.
+
+```beamtalk
+// Define protocol
+Protocol define: #Stringable
+  requiring: [#asString]
+
+// Implement for types
+Integer implements: #Stringable
+  asString => self printString
+
+Point implements: #Stringable
+  asString => "({self x}, {self y})"
+
+// Use generically
+items collect: [:x | x asString]
+```
+
+---
+
+### Optional Type Annotations (Dylan-inspired)
+
+Types are optional - add them gradually for safety and optimization.
+
+#### Basic Annotations
+
+```beamtalk
+Actor subclass: Counter
+  state: value: Integer = 0
+
+  increment => self.value := self.value + 1
+  getValue -> Integer => ^self.value
+
+// Typed parameters
+transferFrom: source: Account amount: Money -> Boolean =>
+  source withdraw: amount
+  self deposit: amount
+  ^true
+```
+
+#### Limited Types
+
+```beamtalk
+// Singleton type - exactly one value
+state: direction: #north | #south | #east | #west
+
+// Union type
+state: result: Integer | Error
+
+// False-or type (Option/Maybe)
+state: cache: Integer | False = false
+
+// Subtype constraint
+process: items: <Collection> => ...
+```
+
+#### Sealing for Optimization
+
+```beamtalk
+// Sealed class - no subclasses, enables optimization
+sealed Actor subclass: Point
+  state: x: Float, y: Float
+
+  distanceTo: other: Point -> Float =>
+    ((self.x - other x) squared + (self.y - other y) squared) sqrt
+
+// Sealed method - final implementation
+Counter >> sealed getValue -> Integer => ^self.value
+```
+
+#### BEAM Integration
+
+- Generate Dialyzer `-spec` annotations
+- Type info becomes guards: `when is_integer(X)`
+- Sealed methods can bypass `gen_server` overhead
+
+---
+
+### Conditions and Restarts (Dylan-inspired)
+
+Recoverable exceptions with options.
+
+#### Traditional Exception
+
+```beamtalk
+[file open: path]
+  on: FileNotFound
+  do: [:e | ^nil]
+```
+
+#### Conditions with Restarts
+
+```beamtalk
+// Handler chooses recovery option
+[file open: path]
+  on: FileNotFound
+  restarts: [
+    #useDefault -> [^self defaultFile],
+    #retry -> [^self open: (self promptForPath)],
+    #createNew -> [^File create: path]
+  ]
+
+// Signaler offers restart options
+FileNotFound signal: path
+  restarts: [#useDefault, #retry, #createNew]
+```
+
+#### BEAM Mapping
+
+- Conditions → `throw`/`catch` with restart metadata
+- Handler selects restart; execution continues
+- Unhandled → crash (supervisor takes over)
+
+---
+
+### Binary Pattern Matching
+
+```beamtalk
+// Parse a network packet
+parsePacket: <<version: 8, length: 16/big, payload: length/binary, rest/binary>> =>
+  Packet new version: version payload: payload
+
+// Build binary
+packet := <<16r01, messageLength: 16/big, messageBytes/binary>>
+```
