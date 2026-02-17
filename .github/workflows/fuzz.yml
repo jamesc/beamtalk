@@ -198,3 +198,48 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Corpus size:** $(ls -1 fuzz/corpus/parse_arbitrary/ | wc -l) files" >> $GITHUB_STEP_SUMMARY
           echo "**Duration:** 10 minutes" >> $GITHUB_STEP_SUMMARY
+
+  extended-proptest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-proptest-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-proptest-
+
+      - name: Run extended proptest (10,000 cases)
+        id: proptest
+        run: cargo test -p beamtalk-core property_tests -- --nocapture
+        env:
+          PROPTEST_CASES: 10000
+
+      - name: Add to job summary
+        if: always()
+        run: |
+          echo "## 🎲 Extended Proptest Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ steps.proptest.outcome }}" = "success" ]; then
+            echo "✅ **Success:** All property tests passed with 10,000 cases" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Failure:** Property tests found a failing case" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Proptest automatically shrinks to a minimal failing input." >> $GITHUB_STEP_SUMMARY
+            echo "Check the job logs for the shrunk test case." >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Cases per property:** 10,000" >> $GITHUB_STEP_SUMMARY
+          echo "**Standard CI cases:** 512" >> $GITHUB_STEP_SUMMARY
