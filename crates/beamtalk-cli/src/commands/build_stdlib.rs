@@ -327,6 +327,8 @@ struct ClassMeta {
     is_typed: bool,
     /// Instance state (field) names declared in the class.
     state: Vec<String>,
+    /// Declared type annotations for state fields (field name → type name).
+    state_types: Vec<(String, String)>,
     /// Instance method signatures.
     methods: Vec<MethodMeta>,
     /// Class-side method signatures.
@@ -406,14 +408,14 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
             arity: m.selector.arity(),
             kind: MethodKindMeta::from_ast(m.kind),
             is_sealed: m.is_sealed,
-            return_type: m.return_type.as_ref().map(|t| t.to_type_name().to_string()),
+            return_type: m.return_type.as_ref().map(|t| t.type_name().to_string()),
             param_types: m
                 .parameters
                 .iter()
                 .map(|p| {
                     p.type_annotation
                         .as_ref()
-                        .map(|t| t.to_type_name().to_string())
+                        .map(|t| t.type_name().to_string())
                 })
                 .collect(),
         })
@@ -427,14 +429,14 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
             arity: m.selector.arity(),
             kind: MethodKindMeta::from_ast(m.kind),
             is_sealed: m.is_sealed,
-            return_type: m.return_type.as_ref().map(|t| t.to_type_name().to_string()),
+            return_type: m.return_type.as_ref().map(|t| t.type_name().to_string()),
             param_types: m
                 .parameters
                 .iter()
                 .map(|p| {
                     p.type_annotation
                         .as_ref()
-                        .map(|t| t.to_type_name().to_string())
+                        .map(|t| t.type_name().to_string())
                 })
                 .collect(),
         })
@@ -444,6 +446,16 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         .state
         .iter()
         .map(|s| s.name.name.to_string())
+        .collect();
+
+    let state_types = class
+        .state
+        .iter()
+        .filter_map(|s| {
+            s.type_annotation
+                .as_ref()
+                .map(|ty| (s.name.name.to_string(), ty.type_name().to_string()))
+        })
         .collect();
 
     let class_variables = class
@@ -460,6 +472,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         is_abstract: class.is_abstract,
         is_typed: class.is_typed,
         state,
+        state_types,
         methods,
         class_methods,
         class_variables,
@@ -686,6 +699,20 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
         code.push_str("],\n");
     }
 
+    // State types
+    if meta.state_types.is_empty() {
+        code.push_str("            state_types: HashMap::new(),\n");
+    } else {
+        code.push_str("            state_types: HashMap::from([");
+        for (i, (field, ty)) in meta.state_types.iter().enumerate() {
+            if i > 0 {
+                code.push_str(", ");
+            }
+            let _ = write!(code, "(\"{field}\".into(), \"{ty}\".into())");
+        }
+        code.push_str("]),\n");
+    }
+
     // Instance methods
     generate_method_list(code, "methods", &meta.methods, &meta.class_name);
     // Class methods
@@ -907,6 +934,7 @@ mod tests {
             is_abstract: false,
             is_typed: false,
             state: vec!["count".to_string()],
+            state_types: vec![],
             methods: vec![
                 MethodMeta {
                     selector: "increment".to_string(),
@@ -974,6 +1002,7 @@ mod tests {
             is_abstract: true,
             is_typed: false,
             state: vec![],
+            state_types: vec![],
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -1004,6 +1033,7 @@ mod tests {
                 is_abstract: false,
                 is_typed: false,
                 state: vec![],
+                state_types: vec![],
                 methods: vec![],
                 class_methods: vec![],
                 class_variables: vec![],
@@ -1016,6 +1046,7 @@ mod tests {
                 is_abstract: false,
                 is_typed: false,
                 state: vec![],
+                state_types: vec![],
                 methods: vec![],
                 class_methods: vec![],
                 class_variables: vec![],

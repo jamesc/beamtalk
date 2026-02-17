@@ -602,23 +602,22 @@ impl TypeAnnotation {
         }
     }
 
-    /// Returns the type name as a string for use in `MethodInfo`.
+    /// Returns a human-readable name for this type annotation.
     ///
-    /// Simple types return their identifier name; complex types are serialized
-    /// to a readable representation.
+    /// Used by the class hierarchy to store declared state field types
+    /// and method parameter/return types.
     #[must_use]
-    pub fn to_type_name(&self) -> EcoString {
+    pub fn type_name(&self) -> EcoString {
         match self {
             Self::Simple(id) => id.name.clone(),
             Self::Singleton { name, .. } => eco_format!("#{name}"),
-            Self::FalseOr { inner, .. } => eco_format!("{} | False", inner.to_type_name()),
             Self::Union { types, .. } => {
                 let mut result = EcoString::new();
                 for (i, ty) in types.iter().enumerate() {
                     if i > 0 {
                         result.push_str(" | ");
                     }
-                    result.push_str(&ty.to_type_name());
+                    result.push_str(&ty.type_name());
                 }
                 result
             }
@@ -630,10 +629,19 @@ impl TypeAnnotation {
                     if i > 0 {
                         result.push_str(", ");
                     }
-                    result.push_str(&ty.to_type_name());
+                    result.push_str(&ty.type_name());
                 }
                 result.push('>');
                 result
+            }
+            Self::FalseOr { inner, .. } => {
+                let inner_name = match inner.as_ref() {
+                    Self::Union { .. } | Self::FalseOr { .. } => {
+                        eco_format!("({})", inner.type_name())
+                    }
+                    _ => inner.type_name(),
+                };
+                eco_format!("{inner_name} | False")
             }
         }
     }
@@ -1666,6 +1674,50 @@ mod tests {
     }
 
     #[test]
+    fn type_annotation_type_name() {
+        let simple = TypeAnnotation::simple("Integer", Span::new(0, 7));
+        assert_eq!(simple.type_name(), "Integer");
+
+        let singleton = TypeAnnotation::singleton("north", Span::new(0, 6));
+        assert_eq!(singleton.type_name(), "#north");
+
+        let union = TypeAnnotation::union(
+            vec![
+                TypeAnnotation::simple("Integer", Span::new(0, 7)),
+                TypeAnnotation::simple("String", Span::new(10, 16)),
+            ],
+            Span::new(0, 16),
+        );
+        assert_eq!(union.type_name(), "Integer | String");
+
+        let generic = TypeAnnotation::generic(
+            Identifier::new("Collection", Span::new(0, 10)),
+            vec![TypeAnnotation::simple("Integer", Span::new(11, 18))],
+            Span::new(0, 19),
+        );
+        assert_eq!(generic.type_name(), "Collection<Integer>");
+
+        let false_or = TypeAnnotation::false_or(
+            TypeAnnotation::simple("Integer", Span::new(0, 7)),
+            Span::new(0, 15),
+        );
+        assert_eq!(false_or.type_name(), "Integer | False");
+
+        // FalseOr with union inner type should parenthesize
+        let false_or_union = TypeAnnotation::false_or(
+            TypeAnnotation::union(
+                vec![
+                    TypeAnnotation::simple("Integer", Span::new(0, 7)),
+                    TypeAnnotation::simple("String", Span::new(10, 16)),
+                ],
+                Span::new(0, 16),
+            ),
+            Span::new(0, 24),
+        );
+        assert_eq!(false_or_union.type_name(), "(Integer | String) | False");
+    }
+
+    #[test]
     fn state_declaration_creation() {
         let name = Identifier::new("value", Span::new(0, 5));
         let state = StateDeclaration::new(name, Span::new(0, 5));
@@ -1850,50 +1902,5 @@ mod tests {
         let module = Module::new(Vec::new(), span);
         assert!(module.classes.is_empty());
         assert!(module.expressions.is_empty());
-    }
-
-    // --- TypeAnnotation::to_type_name tests ---
-
-    #[test]
-    fn to_type_name_simple() {
-        let t = TypeAnnotation::simple("Integer", Span::new(0, 0));
-        assert_eq!(t.to_type_name(), "Integer");
-    }
-
-    #[test]
-    fn to_type_name_singleton() {
-        let t = TypeAnnotation::singleton("north", Span::new(0, 0));
-        assert_eq!(t.to_type_name(), "#north");
-    }
-
-    #[test]
-    fn to_type_name_union() {
-        let t = TypeAnnotation::union(
-            vec![
-                TypeAnnotation::simple("Integer", Span::new(0, 0)),
-                TypeAnnotation::simple("String", Span::new(0, 0)),
-            ],
-            Span::new(0, 0),
-        );
-        assert_eq!(t.to_type_name(), "Integer | String");
-    }
-
-    #[test]
-    fn to_type_name_generic() {
-        let t = TypeAnnotation::generic(
-            Identifier::new("Collection", Span::new(0, 0)),
-            vec![TypeAnnotation::simple("Integer", Span::new(0, 0))],
-            Span::new(0, 0),
-        );
-        assert_eq!(t.to_type_name(), "Collection<Integer>");
-    }
-
-    #[test]
-    fn to_type_name_false_or() {
-        let t = TypeAnnotation::false_or(
-            TypeAnnotation::simple("Integer", Span::new(0, 0)),
-            Span::new(0, 0),
-        );
-        assert_eq!(t.to_type_name(), "Integer | False");
     }
 }
