@@ -613,14 +613,27 @@ impl TypeAnnotation {
             Self::Singleton { name, .. } => eco_format!("#{name}"),
             Self::FalseOr { inner, .. } => eco_format!("{} | False", inner.to_type_name()),
             Self::Union { types, .. } => {
-                let parts: Vec<_> = types.iter().map(Self::to_type_name).collect();
-                EcoString::from(parts.join(" | "))
+                let mut result = EcoString::new();
+                for (i, ty) in types.iter().enumerate() {
+                    if i > 0 {
+                        result.push_str(" | ");
+                    }
+                    result.push_str(&ty.to_type_name());
+                }
+                result
             }
             Self::Generic {
                 base, parameters, ..
             } => {
-                let params: Vec<_> = parameters.iter().map(Self::to_type_name).collect();
-                eco_format!("{}<{}>", base.name, params.join(", "))
+                let mut result = eco_format!("{}<", base.name);
+                for (i, ty) in parameters.iter().enumerate() {
+                    if i > 0 {
+                        result.push_str(", ");
+                    }
+                    result.push_str(&ty.to_type_name());
+                }
+                result.push('>');
+                result
             }
         }
     }
