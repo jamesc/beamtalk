@@ -274,8 +274,8 @@ self.total := self.total * factor
 (self.x := 5) + 1
 
 // Field assignments as sequential statements
-self.x := 5.
-self.y := self.x + 1.
+self.x := 5
+self.y := self.x + 1
 ^self.y
 ```
 
@@ -331,30 +331,30 @@ These message sends detect literal blocks and generate tail-recursive loops with
 
 ```beamtalk
 // Simple counter
-count := 0.
-[count < 10] whileTrue: [count := count + 1].
+count := 0
+[count < 10] whileTrue: [count := count + 1]
 // count is now 10
 
 // Multiple variables
-sum := 0.
-product := 1.
-i := 1.
+sum := 0
+product := 1
+i := 1
 [i <= 5] whileTrue: [
-    sum := sum + i.
-    product := product * i.
+    sum := sum + i
+    product := product * i
     i := i + 1
-].
+]
 // sum = 15, product = 120, i = 6
 
 // Collection iteration
 numbers := #(1, 2, 3, 4, 5)
-total := 0.
-numbers do: [:n | total := total + n].
+total := 0
+numbers do: [:n | total := total + n]
 // total = 15
 
 // With index
-result := 0.
-1 to: 10 do: [:n | result := result + n].
+result := 0
+1 to: 10 do: [:n | result := result + n]
 // result = 55 (sum of 1..10)
 ```
 
@@ -371,13 +371,13 @@ Actor subclass: Counter [
     increment =>
         [self.value < 10] whileTrue: [
             self.value := self.value + 1
-        ].
+        ]
         ^self.value
     
     // ✅ Multiple fields
     incrementBoth =>
         [self.value < 10] whileTrue: [
-            self.value := self.value + 1.
+            self.value := self.value + 1
             self.count := self.count + 1
         ]
 ]
@@ -389,13 +389,13 @@ Local variables and fields can be mutated together:
 
 ```beamtalk
 processItems =>
-    total := 0.
-    self.processed := 0.
+    total := 0
+    self.processed := 0
     
     self.items do: [:item |
-        total := total + item.
+        total := total + item
         self.processed := self.processed + 1
-    ].
+    ]
     
     ^total
 ```
@@ -407,22 +407,22 @@ Stored or passed closures cannot mutate:
 ```beamtalk
 // ❌ ERROR: Field assignment in stored closure
 badBlock =>
-    myBlock := [self.value := self.value + 1].
+    myBlock := [self.value := self.value + 1]
     // ERROR: Cannot assign to field 'value' inside a stored closure.
     
 // ⚠️ WARNING: Local mutation in stored closure has no effect
 testWarning =>
-    count := 0.
-    myBlock := [count := count + 1].
+    count := 0
+    myBlock := [count := count + 1]
     // WARNING: Assignment to 'count' has no effect on outer scope.
     
-    10 timesRepeat: myBlock.
+    10 timesRepeat: myBlock
     ^count  // Still 0, not 10
     
 // ✅ CORRECT: Use literal blocks in control flow
 testCorrect =>
-    count := 0.
-    10 timesRepeat: [count := count + 1].  // ✅ Works!
+    count := 0
+    10 timesRepeat: [count := count + 1]  // ✅ Works!
     ^count  // Now 10
 ```
 
