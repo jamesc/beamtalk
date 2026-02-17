@@ -36,7 +36,10 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "List"
             | "Number"
             | "Object"
+            | "Pid"
+            | "Port"
             | "ProtoObject"
+            | "Reference"
             | "RuntimeError"
             | "Set"
             | "StackFrame"
@@ -615,6 +618,51 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     classes.insert(
+        "Pid".into(),
+        ClassInfo {
+            name: "Pid".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Pid".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Pid".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "=:=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Pid".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![None] },
+                MethodInfo { selector: "/=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Pid".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![None] },
+                MethodInfo { selector: "hash".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Pid".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![] },
+                MethodInfo { selector: "isAlive".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Pid".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![] },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "Port".into(),
+        ClassInfo {
+            name: "Port".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Port".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Port".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "=:=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Port".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![None] },
+                MethodInfo { selector: "/=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Port".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![None] },
+                MethodInfo { selector: "hash".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Port".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![] },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
         "ProtoObject".into(),
         ClassInfo {
             name: "ProtoObject".into(),
@@ -630,6 +678,28 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "class".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ProtoObject".into(), is_sealed: false, return_type: None, param_types: vec![] },
                 MethodInfo { selector: "doesNotUnderstand:args:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "ProtoObject".into(), is_sealed: false, return_type: None, param_types: vec![None, None] },
                 MethodInfo { selector: "perform:withArguments:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "ProtoObject".into(), is_sealed: false, return_type: None, param_types: vec![None, None] },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "Reference".into(),
+        ClassInfo {
+            name: "Reference".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Reference".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Reference".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "=:=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Reference".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![None] },
+                MethodInfo { selector: "/=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Reference".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![None] },
+                MethodInfo { selector: "hash".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Reference".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![] },
             ],
             class_methods: vec![],
             class_variables: vec![],

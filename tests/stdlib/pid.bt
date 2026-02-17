@@ -1,0 +1,9 @@
+// Pid - BEAM process identifier (BT-681)
+//
+// Full dispatch tests are in runtime EUnit (beamtalk_opaque_type_tests.erl)
+// because stdlib tests cannot easily produce raw pid values without
+// Erlang interop (BT-677).
+//
+// Pid class exists and is recognized
+Pid
+// => Pid

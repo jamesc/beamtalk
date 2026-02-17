@@ -1,0 +1,53 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Port — BEAM port identifier.
+///
+/// Ports are opaque references to Erlang port objects (external programs,
+/// drivers, etc.). They appear when calling Erlang code that creates ports.
+/// Ports support basic Object protocol methods for inspection and comparison.
+///
+/// ## BEAM Mapping
+/// Beamtalk Ports map directly to Erlang ports.
+///
+/// ## Examples
+/// ```beamtalk
+/// port class             // => Port
+/// port printString       // => "#Port<0.5>"
+/// ```
+sealed Object subclass: Port
+
+  /// Convert the port to a readable string representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// port asString          // => "#Port<0.5>"
+  /// ```
+  asString -> String => @primitive "asString"
+
+  /// Return a developer-readable string representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// port printString       // => "#Port<0.5>"
+  /// ```
+  printString -> String => self asString
+
+  /// Test strict equality with another port.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// port1 =:= port2       // => false
+  /// ```
+  =:= other -> Boolean => @primitive "=:="
+
+  /// Test inequality with another port.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// port1 /= port2        // => true
+  /// ```
+  /= other -> Boolean => @primitive "/="
+
+  /// Return a hash value for the port.
+  hash -> Integer => @primitive "hash"

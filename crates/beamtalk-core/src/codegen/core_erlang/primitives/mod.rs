@@ -64,6 +64,9 @@ pub fn generate_primitive_bif(
         "Stream" => misc::generate_stream_bif(selector, params),
         "Collection" => collection::generate_collection_bif(selector, params),
         "StackFrame" => misc::generate_stack_frame_bif(selector, params),
+        "Pid" => misc::generate_pid_bif(selector, params),
+        "Port" => misc::generate_port_bif(selector, params),
+        "Reference" => misc::generate_reference_bif(selector, params),
         _ => None,
     }
 }
