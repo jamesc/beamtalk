@@ -182,7 +182,7 @@ Erlang functions can fail via `error`, `exit`, or `throw`. Erlang `error` except
 
 **New exception hierarchy addition:**
 
-```
+```text
 Error
 └── BEAMError              ← base class for foreign BEAM-specific exceptions
     ├── ExitError           ← exit:Reason
