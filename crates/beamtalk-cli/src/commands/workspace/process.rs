@@ -253,7 +253,7 @@ pub fn start_detached_node(
         &project_path,
     );
 
-    let mut child = cmd.spawn().map_err(|e| {
+    let child = cmd.spawn().map_err(|e| {
         miette!("Failed to start detached BEAM node: {e}\nIs Erlang/OTP installed?")
     })?;
 
@@ -455,12 +455,12 @@ fn build_detached_node_command(
         .stderr(Stdio::null());
 
     // On Windows, set process creation flags to properly detach
-    // CREATE_NO_WINDOW (0x08000000) prevents console window popup without -detached
-    // CREATE_NEW_PROCESS_GROUP (0x00000200) allows the process to run independently
+    // CREATE_NO_WINDOW (0x0800_0000) prevents console window popup without -detached
+    // CREATE_NEW_PROCESS_GROUP (0x0000_0200) allows the process to run independently
     #[cfg(windows)]
     {
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
         cmd.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
     }
 

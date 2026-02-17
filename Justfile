@@ -18,13 +18,13 @@ default:
 # ═══════════════════════════════════════════════════════════════════════════
 
 # On Unix: full CI including E2E and MCP tests (requires REPL workspace)
-# On Windows: portable subset — skips E2E and MCP (workspace startup not yet supported)
+# On Windows: full CI including E2E and MCP tests (workspace now supported - BT-661)
 # Run local CI checks (build, lint, test)
 [unix]
 ci: build lint test test-stdlib test-integration test-mcp test-e2e
 
 [windows]
-ci: build lint test test-stdlib test-integration
+ci: build lint test test-stdlib test-integration test-mcp test-e2e
 
 # Clean all build artifacts (Rust, Erlang, VS Code, caches, examples)
 [unix]

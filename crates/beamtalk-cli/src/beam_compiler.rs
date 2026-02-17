@@ -264,10 +264,7 @@ impl BeamCompiler {
 
         // Build -pa arguments: only compiler ebin needed (contains beamtalk_build_worker)
         #[cfg(windows)]
-        let compiler_path = paths
-            .compiler_ebin
-            .to_string_lossy()
-            .replace('\\', "/");
+        let compiler_path = paths.compiler_ebin.to_string_lossy().replace('\\', "/");
         #[cfg(not(windows))]
         let compiler_path = paths.compiler_ebin.display().to_string();
 
