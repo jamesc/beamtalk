@@ -11,9 +11,12 @@
 //!
 //! Part of ADR 0008 (Doc Comments and API Documentation).
 
+mod assets;
 mod extractor;
 mod highlighter;
+mod layout;
 mod renderer;
+mod site;
 
 // Re-export for potential LSP reuse.
 #[allow(unused_imports)]
@@ -27,11 +30,11 @@ use std::collections::HashMap;
 use std::fs;
 use tracing::{info, instrument};
 
+use assets::{write_css, write_search_js};
 use extractor::{collect_inherited_methods, find_source_files, parse_class_info};
-use renderer::{
-    build_sidebar_html, generate_prose_docs, write_class_page, write_css, write_index_page,
-    write_search_js, write_site_landing_page,
-};
+use layout::build_sidebar_html;
+use renderer::{write_class_page, write_index_page};
+use site::{generate_prose_docs, write_site_landing_page};
 
 /// Prose documentation pages to render from the docs/ directory.
 const PROSE_PAGES: &[(&str, &str, &str)] = &[
