@@ -93,9 +93,9 @@ pub(crate) fn generate_exception_bif(
         "signal:" => {
             let p0 = params.first().map_or("_Msg", String::as_str);
             Some(docvec![
-                "call 'beamtalk_exception_handler':'signal_message'(",
+                "call 'beamtalk_exception_handler':'dispatch'('signal:', [",
                 p0.to_string(),
-                ")",
+                "], Self)",
             ])
         }
         "stackTrace" => Some(Document::Str(

@@ -14,6 +14,10 @@
          list_modules/1, module_exists/2, get_actor_count/3,
          format_module_info/2, get_source_file/1]).
 
+-ifdef(TEST).
+-export([format_time_ago/1]).
+-endif.
+
 -export_type([module_tracker/0, module_info/0]).
 
 -record(module_info, {

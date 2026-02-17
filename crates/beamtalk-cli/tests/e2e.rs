@@ -273,18 +273,29 @@ struct ProcessManager {
 /// polls for a signal file to trigger graceful shutdown with cover export.
 /// The non-cover path delegates to the shared `repl_startup` module (BT-390)
 /// so the E2E startup matches production exactly.
-fn beam_eval_cmd(cover: bool, ebin: &str, signal: &str, export: &str) -> String {
+fn beam_eval_cmd(
+    cover: bool,
+    ebin: &str,
+    workspace_ebin: &str,
+    signal: &str,
+    export: &str,
+) -> String {
     if cover {
-        // Cover mode wraps instrumentation around the shared startup prelude.
-        // The startup_prelude already starts the workspace supervisor (which
-        // includes the REPL TCP server), so we just add cover instrumentation.
+        // Cover mode wraps instrumentation BEFORE starting the workspace.
+        // Cover-compiling must happen before the workspace supervisor spawns
+        // the acceptor process, otherwise spawned closures use uninstrumented code.
+        let prelude = repl_startup::startup_prelude(REPL_PORT);
         format!(
-            "{}, \
-             cover:start(), \
+            "cover:start(), \
              case cover:compile_beam_directory(\"{ebin}\") of \
                  {{error, R}} -> io:format(standard_error, \"Cover compile failed: ~p~n\", [R]), halt(1); \
                  _ -> ok \
              end, \
+             case cover:compile_beam_directory(\"{workspace_ebin}\") of \
+                 {{error, R2}} -> io:format(standard_error, \"Cover compile workspace failed: ~p~n\", [R2]), halt(1); \
+                 _ -> ok \
+             end, \
+             {prelude}, \
              WaitFun = fun Wait() -> \
                  case filelib:is_file(\"{signal}\") of \
                      true -> ok; \
@@ -298,7 +309,6 @@ fn beam_eval_cmd(cover: bool, ebin: &str, signal: &str, export: &str) -> String 
              end, \
              cover:stop(), \
              init:stop().",
-            repl_startup::startup_prelude(REPL_PORT),
         )
     } else {
         repl_startup::build_eval_cmd(REPL_PORT)
@@ -369,6 +379,10 @@ impl ProcessManager {
                 .runtime_ebin
                 .to_str()
                 .expect("ebin path must be UTF-8"),
+            paths
+                .workspace_ebin
+                .to_str()
+                .expect("workspace ebin path must be UTF-8"),
             cover_signal_path
                 .to_str()
                 .expect("signal path must be UTF-8"),
