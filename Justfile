@@ -162,13 +162,13 @@ test: test-rust test-stdlib test-runtime
 [unix]
 test-rust:
     @echo "🧪 Running Rust tests (fast)..."
-    @cargo test --all-targets 2>&1 | awk '/Running.*\(/ { split($$0, a, /Running (unittests )?/); split(a[2], b, / \(/); src=b[1]; gsub(/.*\//, "", b[2]); sub(/-[a-f0-9]+\)$$/, "", b[2]); crate=b[2]; label=crate "::" src } /^test result:/ { sub(/^test result: ok\. /, ""); printf "  %-45s %s\n", label, $$0 } /^warning:/ { print }' || true
+    @set -o pipefail; cargo test --all-targets 2>&1 | awk '/Running.*\(/ { split($$0, a, /Running (unittests )?/); split(a[2], b, / \(/); src=b[1]; gsub(/.*\//, "", b[2]); sub(/-[a-f0-9]+\)$$/, "", b[2]); crate=b[2]; label=crate "::" src } /^test result:/ { sub(/^test result: ok\. /, ""); printf "  %-45s %s\n", label, $$0 } /^warning:/ { print }'
     @echo "✅ Rust tests complete"
 
 [windows]
 test-rust:
     @echo "🧪 Running Rust tests (fast)..."
-    @cargo test --all-targets 2>&1 | Select-String -Pattern "^\s*Running|running \d+ test|test result:|^warning:"
+    @cargo test --all-targets 2>&1 | Select-String -Pattern "^\s*Running|running \d+ test|test result:|^warning:"; if ($$LASTEXITCODE -ne 0) { exit $$LASTEXITCODE }
     @echo "✅ Rust tests complete"
 
 # Run E2E tests (slow - full pipeline, ~50s)
@@ -245,14 +245,14 @@ test-stdlib: build-stdlib
 [working-directory: 'runtime']
 test-runtime: build-stdlib
     @echo "🧪 Running Erlang runtime unit tests..."
-    @rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace 2>&1 | grep -E '(All .* tests (passed|from)|Test (passed|failed)|FAILED|Error)' || true
+    @set -o pipefail; OUTPUT=$$(rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace 2>&1); STATUS=$$?; echo "$$OUTPUT" | grep -E '(All .* tests (passed|from)|Test (passed|failed)|FAILED|Error)' || true; exit $$STATUS
     @echo "✅ Runtime tests complete"
 
 [windows]
 [working-directory: 'runtime']
 test-runtime: build-stdlib
     @echo "🧪 Running Erlang runtime unit tests..."
-    rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace; if ($$LASTEXITCODE -eq 0) { Write-Host "  All EUnit tests passed" }
+    rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace; if ($$LASTEXITCODE -ne 0) { exit $$LASTEXITCODE }; Write-Host "  All EUnit tests passed"
     @echo "✅ Runtime tests complete"
 
 # Run performance benchmarks (separate from unit tests, ~30s)
