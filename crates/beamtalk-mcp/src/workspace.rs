@@ -71,7 +71,7 @@ pub fn discover_port_and_cookie(workspace_id: Option<&str>) -> Option<(u16, Stri
         generate_workspace_id(&cwd)
     };
     let port = read_port_file(&id)?;
-    let cookie = read_cookie_file(&id).unwrap_or_default();
+    let cookie = read_cookie_file(&id)?;
     Some((port, cookie))
 }
 
@@ -100,7 +100,7 @@ pub fn discover_any_port_and_cookie() -> Option<(u16, String)> {
                     let cookie = std::fs::read_to_string(entry.path().join("cookie"))
                         .ok()
                         .map(|s| s.trim().to_string())
-                        .unwrap_or_default();
+                        .filter(|s| !s.is_empty())?;
                     return Some((port, cookie));
                 }
             }

@@ -537,7 +537,16 @@ impl ReplClient {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::ConnectionRefused, e))?;
 
         // Read auth-required message (pre-auth, no session yet)
-        let _auth_required = ws.read().map_err(std::io::Error::other)?;
+        let auth_required = ws.read().map_err(std::io::Error::other)?;
+        if let tungstenite::Message::Text(text) = auth_required {
+            let parsed: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+            if parsed.get("op").and_then(|v| v.as_str()) != Some("auth-required") {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Expected auth-required, got: {text}"),
+                ));
+            }
+        }
 
         // Send cookie auth handshake
         let cookie = read_erlang_cookie();
@@ -548,20 +557,38 @@ impl ReplClient {
         ws.send(tungstenite::Message::Text(auth_msg.to_string().into()))
             .map_err(std::io::Error::other)?;
 
-        // Read auth response
+        // Read auth response — must be auth_ok
         let auth_response = ws.read().map_err(std::io::Error::other)?;
         if let tungstenite::Message::Text(text) = auth_response {
             let parsed: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
-            if parsed.get("type").and_then(|t| t.as_str()) == Some("auth_error") {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::PermissionDenied,
-                    "Cookie authentication failed",
-                ));
+            match parsed.get("type").and_then(|t| t.as_str()) {
+                Some("auth_ok") => {}
+                Some("auth_error") => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "Cookie authentication failed",
+                    ));
+                }
+                _ => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("Expected auth_ok, got: {text}"),
+                    ));
+                }
             }
         }
 
         // Read session-started message (sent after successful auth)
-        let _session_started = ws.read().map_err(std::io::Error::other)?;
+        let session_started = ws.read().map_err(std::io::Error::other)?;
+        if let tungstenite::Message::Text(text) = &session_started {
+            let parsed: serde_json::Value = serde_json::from_str(text).unwrap_or_default();
+            if parsed.get("op").and_then(|v| v.as_str()) != Some("session-started") {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Expected session-started, got: {text}"),
+                ));
+            }
+        }
 
         Ok(Self {
             ws,

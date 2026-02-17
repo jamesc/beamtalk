@@ -1441,9 +1441,10 @@ ws_recv_with_buf(Sock, Buf) ->
         1 -> {ok, Unmasked};    % text
         8 -> {close, Unmasked}; % close
         9 ->
-            %% Ping — respond with pong and continue reading
-            Pong = <<1:1, 0:3, 10:4, 0:1, 0:7>>,
-            ok = gen_tcp:send(Sock, Pong),
+            %% Ping — respond with masked pong (clients must mask all frames per RFC 6455)
+            MaskKey = crypto:strong_rand_bytes(4),
+            Pong = <<1:1, 0:3, 10:4, 1:1, 0:7>>,
+            ok = gen_tcp:send(Sock, [Pong, MaskKey]),
             ws_recv(Sock);
         _ -> ws_recv(Sock)      % skip other frames
     end.

@@ -52,7 +52,14 @@ pub fn run(workspace_name: Option<&str>, recent: Option<usize>) -> Result<()> {
     }
 
     // Read workspace cookie for WebSocket authentication (ADR 0020)
-    let cookie = workspace::read_workspace_cookie(&workspace_id)?;
+    let cookie = workspace::read_workspace_cookie(&workspace_id)?
+        .trim()
+        .to_string();
+    if cookie.is_empty() {
+        return Err(miette!(
+            "Workspace cookie is empty; restart workspace with `beamtalk repl`"
+        ));
+    }
 
     // Connect to workspace REPL backend
     let mut client = TranscriptClient::connect(node_info.port, &cookie)?;

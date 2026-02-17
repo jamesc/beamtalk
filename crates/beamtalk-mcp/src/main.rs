@@ -110,11 +110,23 @@ fn resolve_port_and_cookie(args: &Args) -> Result<(u16, String), Box<dyn std::er
     // Try workspace discovery
     if let Some((port, cookie)) = workspace::discover_port_and_cookie(args.workspace_id.as_deref())
     {
+        if cookie.trim().is_empty() {
+            return Err(format!(
+                "Workspace cookie is empty for workspace {:?}; restart with `beamtalk repl`",
+                args.workspace_id
+            )
+            .into());
+        }
         return Ok((port, cookie));
     }
 
     // Try finding any running workspace
     if let Some((port, cookie)) = workspace::discover_any_port_and_cookie() {
+        if cookie.trim().is_empty() {
+            return Err(
+                "Auto-discovered workspace has empty cookie; restart with `beamtalk repl`".into(),
+            );
+        }
         tracing::info!(port, "Auto-discovered running REPL");
         return Ok((port, cookie));
     }
