@@ -17,7 +17,6 @@
 // persistent_term. Sends are async and return Futures, so we must
 // `await` to get the actual class object.
 
-// @load lib/SystemDictionary.bt
 // @load tests/e2e/fixtures/counter.bt
 
 // ===========================================================================

@@ -80,8 +80,6 @@ mod tests {
     use serial_test::serial;
     use std::fs;
     use std::path::{Path, PathBuf};
-    #[cfg(unix)]
-    use std::process::Command;
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
     /// Helper to create a unique test workspace ID and clean up after.
