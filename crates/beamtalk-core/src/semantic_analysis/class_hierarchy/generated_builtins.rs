@@ -26,6 +26,8 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Collection"
             | "CompiledMethod"
             | "Dictionary"
+            | "Erlang"
+            | "ErlangModule"
             | "Error"
             | "Exception"
             | "False"
@@ -280,6 +282,42 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
                 MethodInfo { selector: "stream".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, return_type: Some("Stream".into()), param_types: vec![] },
                 MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "Erlang".into(),
+        ClassInfo {
+            name: "Erlang".into(),
+            superclass: Some("ProtoObject".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "doesNotUnderstand:args:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Erlang".into(), is_sealed: false, return_type: None, param_types: vec![None, None] },
+            ],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "ErlangModule".into(),
+        ClassInfo {
+            name: "ErlangModule".into(),
+            superclass: Some("ProtoObject".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "doesNotUnderstand:args:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "ErlangModule".into(), is_sealed: false, return_type: None, param_types: vec![None, None] },
             ],
             class_methods: vec![],
             class_variables: vec![],

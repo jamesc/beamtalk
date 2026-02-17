@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Erlang — Gateway to the BEAM ecosystem.
+///
+/// `Erlang` is a ProtoObject subclass that provides access to all Erlang
+/// modules via message-send syntax. Sending a unary message with a module
+/// name returns an `ErlangModule` proxy that forwards subsequent messages
+/// as Erlang function calls.
+///
+/// ## Examples
+/// ```beamtalk
+/// Erlang lists reverse: #(3, 2, 1)    // => [1, 2, 3]
+/// Erlang erlang node                   // => the current node atom
+/// proxy := Erlang maps                 // => #ErlangModule<maps>
+/// proxy merge: #{#a => 1} with: #{#b => 2}
+/// ```
+///
+/// ## Design
+/// `Erlang` uses `@intrinsic` on `doesNotUnderstand:args:` so the compiler
+/// generates inline proxy construction rather than routing through a
+/// gen_server process. See ADR 0028 §1.
+sealed ProtoObject subclass: Erlang
+  class doesNotUnderstand: selector args: arguments => @intrinsic erlangModuleLookup

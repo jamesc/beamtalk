@@ -22,37 +22,22 @@ pub(super) struct ReplClient {
     session_id: Option<String>,
     /// Port used for this connection (needed for interrupt connection)
     port: u16,
+    /// Cookie used for this connection (needed for interrupt reconnection)
+    cookie: String,
 }
 
 impl ReplClient {
     /// Connect to the REPL backend.
-    pub(super) fn connect(port: u16) -> Result<Self> {
-        let mut inner = ProtocolClient::connect(port, None)?;
-
-        // BT-666: Read the session-started welcome message
-        let session_id = match inner.read_response_line() {
-            Ok(line) => {
-                if let Ok(welcome) = serde_json::from_str::<serde_json::Value>(&line) {
-                    welcome
-                        .get("session")
-                        .and_then(|s| s.as_str())
-                        .map(String::from)
-                } else {
-                    tracing::debug!("Welcome message was not valid JSON");
-                    None
-                }
-            }
-            Err(e) => {
-                tracing::debug!("Failed to read welcome message: {e}");
-                None
-            }
-        };
+    pub(super) fn connect(port: u16, cookie: &str) -> Result<Self> {
+        let inner = ProtocolClient::connect(port, cookie, None)?;
+        let session_id = inner.session_id().map(String::from);
 
         Ok(Self {
             inner,
             last_loaded_file: None,
             session_id,
             port,
+            cookie: cookie.to_string(),
         })
     }
 
@@ -123,7 +108,7 @@ impl ReplClient {
         result
     }
 
-    /// Send an interrupt request on a separate TCP connection (BT-666).
+    /// Send an interrupt request on a separate WebSocket connection (BT-666).
     fn send_interrupt(&self) {
         let mut interrupt_req = serde_json::json!({
             "op": "interrupt",
@@ -134,10 +119,8 @@ impl ReplClient {
         }
         // Open a new connection and send interrupt — best effort
         if let Ok(mut interrupt_client) =
-            ProtocolClient::connect(self.port, Some(Duration::from_secs(2)))
+            ProtocolClient::connect(self.port, &self.cookie, Some(Duration::from_secs(2)))
         {
-            // Consume the welcome message on the interrupt connection
-            let _ = interrupt_client.read_response_line();
             let _ = interrupt_client.send_request::<serde_json::Value>(&interrupt_req);
         }
     }

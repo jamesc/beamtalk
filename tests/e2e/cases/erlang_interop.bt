@@ -1,0 +1,62 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Erlang interop in REPL (ADR 0028, BT-677)
+//
+// Tests that Erlang module proxy construction and function dispatch
+// work correctly through the REPL session, including variable bindings.
+
+// ===========================================================================
+// PROXY CONSTRUCTION
+// ===========================================================================
+
+// Construct proxy via ClassReference
+Erlang lists
+// => #ErlangModule<lists>
+
+// Proxy class
+(Erlang lists) class
+// => ErlangModule
+
+// ===========================================================================
+// FUNCTION CALLS
+// ===========================================================================
+
+// Single keyword message
+Erlang lists reverse: #(3, 2, 1)
+// => [1,2,3]
+
+// Multi-keyword message
+Erlang maps merge: #{#a => 1} with: #{#b => 2}
+// => #{#a => 1, #b => 2}
+
+// ===========================================================================
+// CACHED PROXY VIA WORKSPACE BINDING
+// ===========================================================================
+
+// Store proxy in workspace variable
+proxy := Erlang lists
+// => #ErlangModule<lists>
+
+// Reuse stored proxy
+proxy reverse: #(10, 20, 30)
+// => [30,20,10]
+
+// Proxy identity
+proxy class
+// => ErlangModule
+
+// ===========================================================================
+// ERLANG INTEROP INSIDE ACTOR METHODS
+// ===========================================================================
+
+// @load tests/e2e/fixtures/erlang_user.bt
+
+eu := ErlangUser spawn
+// => _
+
+eu callErlang await
+// => _
+
+eu getResult await
+// => [3,2,1]

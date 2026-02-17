@@ -1,13 +1,32 @@
 # Beamtalk REPL Message Protocol
 
-The Beamtalk REPL uses a JSON-based message protocol over TCP for communication between clients (CLI, IDE, web) and the workspace backend. The protocol is inspired by [nREPL](https://nrepl.org/) and [Jupyter](https://jupyter.org/).
+The Beamtalk REPL uses a JSON-based message protocol over WebSocket for communication between clients (CLI, IDE, web) and the workspace backend. The protocol is inspired by [nREPL](https://nrepl.org/) and [Jupyter](https://jupyter.org/).
 
 ## Transport
 
-- **Protocol:** TCP
-- **Encoding:** JSON, one message per line (newline-delimited)
+- **Protocol:** WebSocket (RFC 6455) over TCP
+- **Endpoint:** `ws://127.0.0.1:{port}/ws`
+- **Encoding:** JSON, one message per WebSocket text frame
 - **Binding:** `127.0.0.1` (loopback only, for security)
 - **Default port:** OS-assigned (port 0); override with `--port` or `BEAMTALK_REPL_PORT`
+
+### Connection Handshake (ADR 0020)
+
+1. **TCP connect** to `127.0.0.1:{port}`
+2. **WebSocket upgrade** to `ws://127.0.0.1:{port}/ws`
+3. **Read auth-required** — server sends `{"op":"auth-required"}` (no session yet)
+4. **Send auth** — client sends `{"type":"auth","cookie":"<cookie>"}` as first message
+5. **Read auth response** — server replies `{"type":"auth_ok"}` on success, or `{"type":"auth_error","message":"..."}` + connection close on failure
+6. **Read session-started** — after auth_ok, server sends `{"op":"session-started","session":"<id>"}`
+7. **Protocol ready** — client can now send protocol operations
+
+Session creation is deferred until after successful authentication to prevent resource exhaustion from unauthenticated connections.
+
+### Cookie Authentication
+
+The cookie is read from the workspace's `cookie` file at `~/.beamtalk/workspaces/{id}/cookie` (created with `chmod 600` at workspace startup). The server validates it against `erlang:get_cookie()`. This prevents unauthorized access on shared machines.
+
+For standalone BEAM nodes (no workspace), the default `~/.erlang.cookie` is used.
 
 ## Message Format
 

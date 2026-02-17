@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test fixture: Actor that uses Erlang interop (BT-677)
+Actor subclass: ErlangUser
+  state: result = nil
+  callErlang => self.result := Erlang lists reverse: #(1, 2, 3)
+  getResult => ^self.result

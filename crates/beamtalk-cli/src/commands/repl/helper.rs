@@ -58,28 +58,25 @@ const REPL_COMMANDS: &[&str] = &[
 
 /// REPL helper providing tab completion and syntax highlighting.
 ///
-/// Uses a separate TCP connection for completion requests so the main
+/// Uses a separate WebSocket connection for completion requests so the main
 /// REPL connection isn't affected by timeouts or errors.
 pub(super) struct ReplHelper {
     /// Separate protocol client for completion requests (with short timeout).
     completion_client: RefCell<Option<ProtocolClient>>,
     /// Port for reconnection if the completion client disconnects.
     port: u16,
+    /// Cookie for reconnection (ADR 0020).
+    cookie: String,
 }
 
 impl ReplHelper {
     /// Create a new helper that connects to the backend on the given port.
-    pub(super) fn new(port: u16) -> Self {
-        let client = ProtocolClient::connect(port, Some(COMPLETION_TIMEOUT))
-            .ok()
-            .map(|mut c| {
-                // BT-666: Consume the session-started welcome message
-                let _ = c.read_response_line();
-                c
-            });
+    pub(super) fn new(port: u16, cookie: &str) -> Self {
+        let client = ProtocolClient::connect(port, cookie, Some(COMPLETION_TIMEOUT)).ok();
         Self {
             completion_client: RefCell::new(client),
             port,
+            cookie: cookie.to_string(),
         }
     }
 
@@ -93,13 +90,8 @@ impl ReplHelper {
 
         // Try to reconnect if we don't have a client
         if client_ref.is_none() {
-            *client_ref = ProtocolClient::connect(self.port, Some(COMPLETION_TIMEOUT))
-                .ok()
-                .map(|mut c| {
-                    // BT-666: Consume the session-started welcome message
-                    let _ = c.read_response_line();
-                    c
-                });
+            *client_ref =
+                ProtocolClient::connect(self.port, &self.cookie, Some(COMPLETION_TIMEOUT)).ok();
         }
 
         let Some(client) = client_ref.as_mut() else {

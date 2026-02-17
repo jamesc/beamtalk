@@ -39,11 +39,11 @@ use beamtalk_core::source_analysis::is_input_complete;
 use serial_test::serial;
 use std::env;
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
+use tungstenite::WebSocket;
 
 /// Default port for the REPL TCP server.
 const REPL_PORT: u16 = 9000;
@@ -504,32 +504,117 @@ impl Drop for ProcessManager {
     }
 }
 
-/// Client for communicating with the REPL.
+/// Client for communicating with the REPL via WebSocket.
 struct ReplClient {
-    stream: TcpStream,
-    reader: BufReader<TcpStream>,
+    ws: WebSocket<TcpStream>,
     /// Last warnings from evaluation (for WARNING: assertions)
     last_warnings: Vec<String>,
 }
 
+/// Read the Erlang cookie for WebSocket authentication.
+/// Falls back to "nocookie" which matches BEAM nodes started without -setcookie.
+fn read_erlang_cookie() -> String {
+    if let Some(home) = dirs::home_dir() {
+        if let Ok(cookie) = fs::read_to_string(home.join(".erlang.cookie")) {
+            let trimmed = cookie.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+    }
+    "nocookie".to_string()
+}
+
 impl ReplClient {
-    /// Connect to the REPL.
+    /// Connect to the REPL via WebSocket with cookie auth.
     fn connect() -> Result<Self, std::io::Error> {
-        let stream = TcpStream::connect(format!("127.0.0.1:{REPL_PORT}"))?;
-        stream.set_read_timeout(Some(repl_timeout()))?;
-        stream.set_write_timeout(Some(repl_timeout()))?;
+        let tcp = TcpStream::connect(format!("127.0.0.1:{REPL_PORT}"))?;
+        tcp.set_read_timeout(Some(repl_timeout()))?;
+        tcp.set_write_timeout(Some(repl_timeout()))?;
 
-        let mut reader = BufReader::new(stream.try_clone()?);
+        let url = format!("ws://127.0.0.1:{REPL_PORT}/ws");
+        let (mut ws, _response) = tungstenite::client(&url, tcp)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::ConnectionRefused, e))?;
 
-        // BT-666: Consume the session-started welcome message
-        let mut welcome = String::new();
-        let _ = reader.read_line(&mut welcome);
+        // Read auth-required message (pre-auth, no session yet)
+        let auth_required = ws.read().map_err(std::io::Error::other)?;
+        if let tungstenite::Message::Text(text) = auth_required {
+            let parsed: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+            if parsed.get("op").and_then(|v| v.as_str()) != Some("auth-required") {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Expected auth-required, got: {text}"),
+                ));
+            }
+        }
+
+        // Send cookie auth handshake
+        let cookie = read_erlang_cookie();
+        let auth_msg = serde_json::json!({
+            "type": "auth",
+            "cookie": cookie
+        });
+        ws.send(tungstenite::Message::Text(auth_msg.to_string().into()))
+            .map_err(std::io::Error::other)?;
+
+        // Read auth response — must be auth_ok
+        let auth_response = ws.read().map_err(std::io::Error::other)?;
+        if let tungstenite::Message::Text(text) = auth_response {
+            let parsed: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+            match parsed.get("type").and_then(|t| t.as_str()) {
+                Some("auth_ok") => {}
+                Some("auth_error") => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "Cookie authentication failed",
+                    ));
+                }
+                _ => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("Expected auth_ok, got: {text}"),
+                    ));
+                }
+            }
+        }
+
+        // Read session-started message (sent after successful auth)
+        let session_started = ws.read().map_err(std::io::Error::other)?;
+        if let tungstenite::Message::Text(text) = &session_started {
+            let parsed: serde_json::Value = serde_json::from_str(text).unwrap_or_default();
+            if parsed.get("op").and_then(|v| v.as_str()) != Some("session-started") {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Expected session-started, got: {text}"),
+                ));
+            }
+        }
 
         Ok(Self {
-            stream,
-            reader,
+            ws,
             last_warnings: Vec::new(),
         })
+    }
+
+    /// Read the next text message from the WebSocket.
+    fn read_text(&mut self) -> Result<String, String> {
+        loop {
+            match self.ws.read() {
+                Ok(tungstenite::Message::Text(text)) => return Ok(text.to_string()),
+                Ok(tungstenite::Message::Close(_)) => {
+                    return Err("WebSocket connection closed".to_string());
+                }
+                Ok(_) => {} // Skip ping/pong/binary
+                Err(e) => return Err(format!("WebSocket read error: {e}")),
+            }
+        }
+    }
+
+    /// Send a JSON message over WebSocket.
+    fn write_json(&mut self, value: &serde_json::Value) -> Result<(), String> {
+        self.ws
+            .send(tungstenite::Message::Text(value.to_string().into()))
+            .map_err(|e| format!("Failed to send WebSocket message: {e}"))
     }
 
     /// Evaluate an expression and return the result.
@@ -544,17 +629,10 @@ impl ReplClient {
             "code": expression
         });
 
-        writeln!(self.stream, "{request}").map_err(|e| format!("Failed to send request: {e}"))?;
-
-        self.stream
-            .flush()
-            .map_err(|e| format!("Failed to flush: {e}"))?;
+        self.write_json(&request)?;
 
         // Read response
-        let mut response_line = String::new();
-        self.reader
-            .read_line(&mut response_line)
-            .map_err(|e| format!("Failed to read response: {e}"))?;
+        let response_line = self.read_text()?;
 
         // Parse JSON response (handles both legacy and new protocol)
         let response: serde_json::Value = serde_json::from_str(&response_line)
@@ -636,18 +714,10 @@ impl ReplClient {
             "path": path
         });
 
-        writeln!(self.stream, "{request}")
-            .map_err(|e| format!("Failed to send load request: {e}"))?;
-
-        self.stream
-            .flush()
-            .map_err(|e| format!("Failed to flush: {e}"))?;
+        self.write_json(&request)?;
 
         // Read response
-        let mut response_line = String::new();
-        self.reader
-            .read_line(&mut response_line)
-            .map_err(|e| format!("Failed to read load response: {e}"))?;
+        let response_line = self.read_text()?;
 
         // Parse JSON response (handles both legacy and new protocol)
         let response: serde_json::Value = serde_json::from_str(&response_line)
@@ -712,17 +782,9 @@ impl ReplClient {
             request["selector"] = serde_json::Value::String(sel.to_string());
         }
 
-        writeln!(self.stream, "{request}")
-            .map_err(|e| format!("Failed to send docs request: {e}"))?;
+        self.write_json(&request)?;
 
-        self.stream
-            .flush()
-            .map_err(|e| format!("Failed to flush: {e}"))?;
-
-        let mut response_line = String::new();
-        self.reader
-            .read_line(&mut response_line)
-            .map_err(|e| format!("Failed to read docs response: {e}"))?;
+        let response_line = self.read_text()?;
 
         let response: serde_json::Value = serde_json::from_str(&response_line)
             .map_err(|e| format!("Failed to parse docs response: {e}"))?;
@@ -758,16 +820,9 @@ impl ReplClient {
 
     /// Send a generic op request and return the raw JSON response.
     fn send_op(&mut self, request: &serde_json::Value) -> Result<serde_json::Value, String> {
-        writeln!(self.stream, "{request}").map_err(|e| format!("Failed to send request: {e}"))?;
+        self.write_json(request)?;
 
-        self.stream
-            .flush()
-            .map_err(|e| format!("Failed to flush: {e}"))?;
-
-        let mut response_line = String::new();
-        self.reader
-            .read_line(&mut response_line)
-            .map_err(|e| format!("Failed to read response: {e}"))?;
+        let response_line = self.read_text()?;
 
         let response: serde_json::Value = serde_json::from_str(&response_line)
             .map_err(|e| format!("Failed to parse response: {e}"))?;
