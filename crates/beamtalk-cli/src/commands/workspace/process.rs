@@ -38,8 +38,9 @@ const PID_DISCOVERY_INITIAL_DELAY_MS: u64 = 2000;
 /// Delay between PID discovery retry attempts in milliseconds.
 const PID_DISCOVERY_RETRY_DELAY_MS: u64 = 500;
 
-/// Maximum number of PID/port discovery attempts.
-const DISCOVERY_MAX_RETRIES: usize = 10;
+/// Maximum number of PID discovery attempts.
+/// Total worst-case: 2s initial + 20 × 500ms = 12s.
+const PID_DISCOVERY_MAX_RETRIES: usize = 20;
 
 /// Delay between port file read attempts in milliseconds.
 const PORT_DISCOVERY_DELAY_MS: u64 = 500;
@@ -247,7 +248,7 @@ pub fn start_detached_node(
     // Retry PID discovery instead of a single fixed sleep.
     let mut last_err = None;
     let pid_found = 'retry: {
-        for attempt in 0..DISCOVERY_MAX_RETRIES {
+        for attempt in 0..PID_DISCOVERY_MAX_RETRIES {
             if attempt > 0 {
                 std::thread::sleep(Duration::from_millis(PID_DISCOVERY_RETRY_DELAY_MS));
             } else {
