@@ -49,10 +49,17 @@ const PROSE_PAGES: &[(&str, &str, &str)] = &[
         "Design Principles",
     ),
     (
+        "beamtalk-syntax-rationale.md",
+        "syntax-rationale.html",
+        "Syntax Rationale",
+    ),
+    (
         "beamtalk-architecture.md",
         "architecture.html",
         "Architecture",
     ),
+    ("beamtalk-ddd-model.md", "ddd-model.html", "Domain Model"),
+    ("beamtalk-security.md", "security.html", "Security"),
     (
         "beamtalk-agent-native-development.md",
         "agent-native-development.html",
@@ -478,6 +485,21 @@ mod tests {
         fs::write(
             docs_dir.join("beamtalk-agent-native-development.md"),
             "# Agent-Native Development\n\nAI agents.",
+        )
+        .unwrap();
+        fs::write(
+            docs_dir.join("beamtalk-syntax-rationale.md"),
+            "# Syntax Rationale\n\nWhy Beamtalk syntax diverges from Smalltalk.",
+        )
+        .unwrap();
+        fs::write(
+            docs_dir.join("beamtalk-ddd-model.md"),
+            "# Domain Model\n\nDDD bounded contexts.",
+        )
+        .unwrap();
+        fs::write(
+            docs_dir.join("beamtalk-security.md"),
+            "# Security\n\nSecurity model.",
         )
         .unwrap();
 

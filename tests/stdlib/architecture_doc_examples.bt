@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for code examples from docs/beamtalk-architecture.md
+// Keep in sync with the architecture document.
+
+// --- Block compilation (doc: "Block Compilation" section) ---
+doubled := #(1, 2, 3) collect: [:x | x * 2]
+// => [2,4,6]
+
+// --- Math precedence (doc: "Binary Operations with Math Precedence" section) ---
+result := 2 + 3 * 4
+// => 14

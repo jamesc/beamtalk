@@ -210,7 +210,7 @@ greeting := "Hello, {name}!"  // => "Hello, Alice!"
 - `==` tests identity (pointer equality)
 - `=` tests value equality (overrideable)
 
-**Beamtalk's equality (BT-188, ADR 0002):**
+**Beamtalk's equality ([ADR 0002](ADR/0002-use-erlang-comparison-operators.md)):**
 - `==` tests structural equality (value-based with type coercion)
 - `=:=` tests strict equality (no type coercion)
 - `/=` tests loose inequality (negation of `==`)
@@ -251,9 +251,9 @@ c1 == c2           // => false (different processes)
 - `/=` → Erlang's `/=` (loose inequality, negation of `==`)
 - `=/=` → Erlang's `=/=` (strict inequality, negation of `=:=`)
 
-**Decision rationale:** This hybrid approach emerged from BT-213 (value types) — we discovered that Erlang's `==` already provides the correct semantics for both value types and actors without any special handling.
+**Decision rationale:** This hybrid approach emerged from the value types design — we discovered that Erlang's `==` already provides the correct semantics for both value types and actors without any special handling.
 
-### Control Flow Mutations: Make Them Work (BT-90)
+### Control Flow Mutations: Make Them Work
 
 **Smalltalk-80 problem:** Blocks capture variables by value, so mutations inside blocks don't affect outer scope:
 
@@ -344,7 +344,7 @@ In Beamtalk, `Object subclass: Counter` is **parsed as syntax**, not a message s
 - Class hierarchy is fixed at compile time
 - No metaclass protocol (yet) — `Counter class` returns a name, not a mutable class object
 
-**Future consideration:** If Beamtalk gains a full metaclass protocol (BT-162: BEAM Object Model), `subclass:` could potentially become a real message send that creates classes at runtime via dynamic module generation. This would require significant runtime infrastructure but would restore full Smalltalk semantics.
+**Future consideration:** If Beamtalk gains a full metaclass protocol, `subclass:` could potentially become a real message send that creates classes at runtime via dynamic module generation. This would require significant runtime infrastructure but would restore full Smalltalk semantics.
 
 ---
 
