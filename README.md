@@ -227,6 +227,16 @@ just build-vscode
 
 Then in VS Code, run **Developer: Install Extension from Location...** and select `editors/vscode`.
 
+If your stdlib source files are outside the project root, set:
+
+```json
+{
+  "beamtalk.stdlib.sourceDir": "/opt/beamtalk/stdlib/lib"
+}
+```
+
+`beamtalk.stdlib.sourceDir` can be absolute (including outside the project) or relative to the Beamtalk project root (directory containing `beamtalk.toml`). See [editors/vscode/README.md](editors/vscode/README.md) for full extension configuration.
+
 ### REPL Usage
 
 **New to Beamtalk?** See the [REPL Tutorial](examples/repl-tutorial.md) for a complete beginner's guide!

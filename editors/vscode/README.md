@@ -25,6 +25,25 @@ cargo install --path crates/beamtalk-lsp
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `beamtalk.server.path` | `beamtalk-lsp` | Path to the beamtalk-lsp executable |
+| `beamtalk.stdlib.sourceDir` | `""` | Optional path to stdlib `.bt` sources for navigation fallback; accepts absolute paths (including outside project) or paths relative to the Beamtalk project root (`beamtalk.toml`) |
+
+### External stdlib sources
+
+If your project keeps stdlib sources outside the project root, set an absolute path:
+
+```json
+{
+	"beamtalk.stdlib.sourceDir": "/opt/beamtalk/stdlib/lib"
+}
+```
+
+If stdlib is inside the project, you can use a project-relative path:
+
+```json
+{
+	"beamtalk.stdlib.sourceDir": "lib"
+}
+```
 
 ## License
 

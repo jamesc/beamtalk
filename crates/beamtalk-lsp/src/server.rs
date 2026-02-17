@@ -8,7 +8,9 @@
 //! Delegates all IDE operations to `SimpleLanguageService` + `ProjectIndex`.
 //! Maps between LSP protocol types and beamtalk language service types.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -36,6 +38,13 @@ use tower_lsp::{Client, LanguageServer};
 use tracing::debug;
 
 const DIAGNOSTIC_DEBOUNCE_DURATION: Duration = Duration::from_millis(150);
+const PRELOAD_MAX_FILES: usize = 5000;
+
+#[derive(Clone)]
+struct PreloadConfig {
+    roots: Vec<PathBuf>,
+    stdlib_dirs: Vec<PathBuf>,
+}
 
 /// LSP backend wrapping `SimpleLanguageService`.
 pub struct Backend {
@@ -47,6 +56,8 @@ pub struct Backend {
     versions: Mutex<HashMap<Utf8PathBuf, i32>>,
     /// Monotonic generation counter used to debounce `didChange` diagnostics per URI.
     diagnostic_generation: Mutex<HashMap<Url, u64>>,
+    /// Deferred preload config captured at initialize and consumed after handshake.
+    preload_config: Mutex<Option<PreloadConfig>>,
 }
 
 impl Backend {
@@ -57,6 +68,7 @@ impl Backend {
             service: Mutex::new(SimpleLanguageService::new()),
             versions: Mutex::new(HashMap::new()),
             diagnostic_generation: Mutex::new(HashMap::new()),
+            preload_config: Mutex::new(None),
         }
     }
 
@@ -64,6 +76,20 @@ impl Backend {
         let path = uri_to_path(uri)?;
         let versions = self.versions.lock().expect("versions lock poisoned");
         versions.get(&path).copied()
+    }
+
+    async fn preload_workspace_source_files(&self, config: PreloadConfig) {
+        let loaded_files = tokio::task::spawn_blocking(move || collect_preload_files(config))
+            .await
+            .unwrap_or_default();
+
+        let mut svc = self.service.lock().expect("service lock poisoned");
+        for (path, content) in loaded_files {
+            let Ok(utf8_path) = Utf8PathBuf::from_path_buf(path) else {
+                continue;
+            };
+            svc.update_file(utf8_path, content);
+        }
     }
 
     /// Publishes diagnostics for a file after every change.
@@ -89,7 +115,18 @@ impl Backend {
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     /// Reports server capabilities to the client during handshake.
-    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        let roots = workspace_roots(&params);
+        let configured_stdlib = configured_stdlib_source_dir(&params);
+        let stdlib_dirs = configured_stdlib_source_dirs(configured_stdlib.as_deref(), &roots);
+        {
+            let mut preload_config = self
+                .preload_config
+                .lock()
+                .expect("preload_config lock poisoned");
+            *preload_config = Some(PreloadConfig { roots, stdlib_dirs });
+        }
+
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
@@ -121,6 +158,17 @@ impl LanguageServer for Backend {
 
     /// Called after the client acknowledges initialization.
     async fn initialized(&self, _: InitializedParams) {
+        let preload_config = {
+            let mut preload_config = self
+                .preload_config
+                .lock()
+                .expect("preload_config lock poisoned");
+            preload_config.take()
+        };
+        if let Some(config) = preload_config {
+            self.preload_workspace_source_files(config).await;
+        }
+
         debug!("beamtalk-lsp initialized");
         self.client
             .log_message(
@@ -455,6 +503,173 @@ impl LanguageServer for Backend {
     }
 }
 
+fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+
+    if let Some(workspace_folders) = &params.workspace_folders {
+        for folder in workspace_folders {
+            if let Ok(path) = folder.uri.to_file_path() {
+                roots.push(path);
+            }
+        }
+    }
+
+    if let Some(root_uri) = &params.root_uri {
+        if let Ok(path) = root_uri.to_file_path() {
+            roots.push(path);
+        }
+    }
+
+    roots = roots
+        .into_iter()
+        .map(|root| beamtalk_core::project::discover_project_root(&root))
+        .collect();
+
+    roots.sort_unstable();
+    roots.dedup();
+    roots
+}
+
+fn configured_stdlib_source_dir(params: &InitializeParams) -> Option<String> {
+    params
+        .initialization_options
+        .as_ref()
+        .and_then(|value| value.get("stdlibSourceDir"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn configured_stdlib_source_dirs(
+    configured: Option<&str>,
+    project_roots: &[PathBuf],
+) -> Vec<PathBuf> {
+    let Some(configured) = configured else {
+        return Vec::new();
+    };
+
+    let configured_path = PathBuf::from(configured);
+    let canonical_roots: Vec<PathBuf> = project_roots
+        .iter()
+        .filter_map(|root| canonicalize_existing_dir(root))
+        .collect();
+    let mut dirs = Vec::new();
+
+    if configured_path.is_absolute() {
+        if let Some(candidate) = canonicalize_existing_dir(&configured_path) {
+            dirs.push(candidate);
+        }
+    } else {
+        for root in project_roots {
+            let candidate = root.join(&configured_path);
+            if let Some(canonical_candidate) = canonicalize_existing_dir(&candidate)
+                && path_within_any_root(&canonical_candidate, &canonical_roots)
+            {
+                dirs.push(canonical_candidate);
+            }
+        }
+    }
+
+    dirs.sort_unstable();
+    dirs.dedup();
+    dirs
+}
+
+fn canonicalize_existing_dir(path: &Path) -> Option<PathBuf> {
+    if !path.is_dir() {
+        return None;
+    }
+    fs::canonicalize(path).ok()
+}
+
+fn path_within_any_root(path: &Path, roots: &[PathBuf]) -> bool {
+    roots.iter().any(|root| path.starts_with(root))
+}
+
+fn collect_preload_files(config: PreloadConfig) -> Vec<(PathBuf, String)> {
+    let PreloadConfig { roots, stdlib_dirs } = config;
+    let mut files_to_index = Vec::new();
+    let mut seen_files = HashSet::new();
+    let mut remaining_budget = PRELOAD_MAX_FILES;
+
+    for root in &roots {
+        if remaining_budget == 0 {
+            break;
+        }
+        let src_dir = root.join("src");
+        if src_dir.is_dir() {
+            collect_beamtalk_files_recursive(&src_dir, &mut files_to_index, &mut remaining_budget);
+        }
+    }
+
+    for dir in &stdlib_dirs {
+        if remaining_budget == 0 {
+            break;
+        }
+        collect_beamtalk_files_recursive(dir, &mut files_to_index, &mut remaining_budget);
+    }
+
+    let mut loaded_files = Vec::new();
+    for path in files_to_index {
+        if !seen_files.insert(path.clone()) {
+            continue;
+        }
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        loaded_files.push((path, content));
+    }
+
+    loaded_files
+}
+
+fn is_beamtalk_file(path: &Path) -> bool {
+    path.is_file() && path.extension().is_some_and(|ext| ext == "bt")
+}
+
+fn collect_beamtalk_files_recursive(
+    dir: &Path,
+    files: &mut Vec<PathBuf>,
+    remaining_budget: &mut usize,
+) {
+    if *remaining_budget == 0 {
+        return;
+    }
+
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        if *remaining_budget == 0 {
+            return;
+        }
+
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+
+        if file_type.is_symlink() {
+            continue;
+        }
+
+        if file_type.is_dir() {
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if matches!(name, ".git" | "target" | "node_modules" | "_build") {
+                continue;
+            }
+            collect_beamtalk_files_recursive(&path, files, remaining_budget);
+        } else if is_beamtalk_file(&path) {
+            files.push(path);
+            *remaining_budget = remaining_budget.saturating_sub(1);
+        }
+    }
+}
+
 /// Formats hover documentation for compact display in editor hovers.
 ///
 /// VS Code controls hover font sizes, so we demote markdown heading levels
@@ -709,6 +924,80 @@ mod tests {
     use super::*;
     use beamtalk_core::language_service::HoverInfo;
     use camino::Utf8PathBuf;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_temp_dir(prefix: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        std::env::temp_dir().join(format!("{prefix}_{}_{}", std::process::id(), nanos))
+    }
+
+    #[test]
+    fn configured_stdlib_source_dirs_rejects_relative_traversal_outside_root() {
+        let temp = unique_temp_dir("beamtalk_lsp_stdlib_traversal");
+        let project_root = temp.join("project");
+        let outside = temp.join("outside");
+        fs::create_dir_all(project_root.join("src")).expect("create project dirs");
+        fs::create_dir_all(outside.join("lib")).expect("create outside dirs");
+
+        let dirs = configured_stdlib_source_dirs(Some("../outside/lib"), &[project_root]);
+        assert!(dirs.is_empty());
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn configured_stdlib_source_dirs_accepts_in_root_absolute_path() {
+        let temp = unique_temp_dir("beamtalk_lsp_stdlib_in_root");
+        let project_root = temp.join("project");
+        let stdlib = project_root.join("lib");
+        fs::create_dir_all(&stdlib).expect("create stdlib dir");
+
+        let dirs = configured_stdlib_source_dirs(
+            Some(stdlib.to_str().expect("utf8 path")),
+            std::slice::from_ref(&project_root),
+        );
+        assert_eq!(dirs.len(), 1);
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn configured_stdlib_source_dirs_accepts_outside_root_absolute_path() {
+        let temp = unique_temp_dir("beamtalk_lsp_stdlib_outside_root");
+        let project_root = temp.join("project");
+        let stdlib = temp.join("shared-stdlib");
+        fs::create_dir_all(project_root.join("src")).expect("create project dir");
+        fs::create_dir_all(&stdlib).expect("create stdlib dir");
+
+        let dirs = configured_stdlib_source_dirs(
+            Some(stdlib.to_str().expect("utf8 path")),
+            std::slice::from_ref(&project_root),
+        );
+        assert_eq!(
+            dirs,
+            vec![fs::canonicalize(&stdlib).expect("canonical stdlib")]
+        );
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn configured_stdlib_source_dir_reads_initialize_option() {
+        let params = InitializeParams {
+            initialization_options: Some(serde_json::json!({
+                "stdlibSourceDir": "lib"
+            })),
+            ..Default::default()
+        };
+
+        let configured = configured_stdlib_source_dir(&params);
+        assert_eq!(configured.as_deref(), Some("lib"));
+    }
 
     #[test]
     fn extract_hover_class_name_from_class_hover() {

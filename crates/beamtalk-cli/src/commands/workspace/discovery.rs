@@ -24,28 +24,6 @@
 
 use std::path::{Path, PathBuf};
 
-use tracing::debug;
-
-/// Project marker files/directories, in priority order.
-///
-/// Earlier markers take priority: if `.beamtalk/` is found, we stop
-/// even if `.git/` exists in a parent directory.
-///
-/// Note: `.beamtalk` is skipped when it matches the global config
-/// directory (`~/.beamtalk`) to avoid collapsing unrelated directories
-/// under `$HOME` into the same workspace.
-const PROJECT_MARKERS: &[&str] = &[".beamtalk", "beamtalk.toml", ".git"];
-
-/// Returns the global beamtalk config directory (`~/.beamtalk`), if resolvable.
-fn global_beamtalk_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".beamtalk"))
-}
-
-/// Check if a `.beamtalk` marker is the global config dir, not a project marker.
-fn is_global_config_dir(candidate: &Path) -> bool {
-    global_beamtalk_dir().is_some_and(|global| candidate == global)
-}
-
 /// Discover the project root by walking up the directory tree.
 ///
 /// Starts from `start_dir` and checks each ancestor for project markers.
@@ -56,51 +34,7 @@ fn is_global_config_dir(candidate: &Path) -> bool {
 /// `beamtalk.toml`) take priority over generic markers (`.git/`).
 /// The search stops at the innermost directory containing any marker.
 pub fn discover_project_root(start_dir: &Path) -> PathBuf {
-    let mut current = start_dir.to_path_buf();
-    loop {
-        // Check beamtalk-specific markers first (highest priority)
-        for marker in &PROJECT_MARKERS[..PROJECT_MARKERS.len() - 1] {
-            let candidate = current.join(marker);
-            if candidate.exists() {
-                // Skip ~/.beamtalk — that's global config, not a project marker
-                if *marker == ".beamtalk" && is_global_config_dir(&candidate) {
-                    debug!(
-                        dir = %current.display(),
-                        "Skipping global config dir ~/.beamtalk"
-                    );
-                    continue;
-                }
-                debug!(
-                    marker = %marker,
-                    root = %current.display(),
-                    "Found Beamtalk project root"
-                );
-                return current;
-            }
-        }
-
-        // Check generic markers (.git)
-        if let Some(marker) = PROJECT_MARKERS.last() {
-            if current.join(marker).exists() {
-                debug!(
-                    marker = %marker,
-                    root = %current.display(),
-                    "Found project root"
-                );
-                return current;
-            }
-        }
-
-        if !current.pop() {
-            break;
-        }
-    }
-
-    debug!(
-        dir = %start_dir.display(),
-        "No project markers found, using start directory"
-    );
-    start_dir.to_path_buf()
+    beamtalk_core::project::discover_project_root(start_dir)
 }
 
 #[cfg(test)]

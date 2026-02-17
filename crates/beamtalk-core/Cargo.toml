@@ -20,6 +20,7 @@ camino.workspace = true
 thiserror.workspace = true
 miette.workspace = true
 stacker.workspace = true
+dirs.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
