@@ -356,9 +356,13 @@ pub enum Severity {
 /// Maximum nesting depth for expressions before the parser bails out.
 ///
 /// Prevents stack overflow on deeply nested input (e.g., `(((((...)))))`).
-/// 256 is generous enough for any realistic program while keeping the
-/// parser safe from adversarial input discovered by fuzzing.
-const MAX_NESTING_DEPTH: usize = 256;
+/// Each nesting level uses multiple stack frames through the parser call
+/// chain, and ASAN-instrumented builds (fuzzing) have larger frames.
+/// 64 is generous enough for any realistic program while staying safe.
+///
+/// As a second line of defence, `stacker::maybe_grow` is used at the
+/// recursive entry point so the stack is extended on the heap if needed.
+const MAX_NESTING_DEPTH: usize = 64;
 
 /// The parser state.
 pub(super) struct Parser {
@@ -3765,7 +3769,7 @@ Actor subclass: Counter
 
     #[test]
     fn deeply_nested_parens_does_not_stack_overflow() {
-        // 300 levels of nesting exceeds MAX_NESTING_DEPTH (256)
+        // 300 levels of nesting exceeds MAX_NESTING_DEPTH (64)
         let source = "(".repeat(300) + "1" + &")".repeat(300);
         let diagnostics = parse_err(&source);
         assert!(
