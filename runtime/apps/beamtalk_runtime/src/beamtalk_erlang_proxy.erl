@@ -93,7 +93,7 @@ selector_to_function(Selector) ->
     case lists:member($:, SelectorStr) of
         true ->
             %% Keyword selector — extract first keyword (before first colon)
-            FunStr = string:sub_string(SelectorStr, 1, string:chr(SelectorStr, $:) - 1),
+            [FunStr | _] = string:split(SelectorStr, ":"),
             list_to_atom(FunStr);
         false ->
             %% Unary selector — use as-is

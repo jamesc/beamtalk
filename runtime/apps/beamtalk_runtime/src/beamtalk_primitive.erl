@@ -396,10 +396,7 @@ responds_to(X, Selector) when is_map(X) ->
             beamtalk_stack_frame:has_method(Selector);
         'ErlangModule' ->
             %% BT-676: ErlangModule proxy — always responds (forwards to Erlang)
-            Selector =:= 'class' orelse
-                Selector =:= 'printString' orelse
-                beamtalk_object_ops:has_method(Selector) orelse
-                true;
+            true;
         'Erlang' ->
             %% BT-676: Erlang class-side proxy — always responds (creates module proxies)
             true;
