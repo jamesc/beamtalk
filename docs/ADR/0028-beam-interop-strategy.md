@@ -464,7 +464,8 @@ Erlang call: "lists" function: "reverse" args: #(#(1, 2, 3))
 
 ### Phase 4: Compiler Optimization (Optional)
 - Detect `Erlang <mod> <fn>:` patterns at compile time
-- Emit direct `call 'module':'function'(args)` without proxy allocation
+- Emit direct `call 'module':'function'(args)` without proxy allocation or class process dispatch
+- Eliminates the class-side `doesNotUnderstand:args:` gen_server round-trip — same optimization strategy as inlining common `Integer`/`String` methods
 - **Components:** `crates/beamtalk-core/src/codegen/`
 
 ### Future Work
