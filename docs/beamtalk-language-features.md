@@ -385,25 +385,24 @@ result := 0.
 Mutations to actor state (`self.field`) work the same way:
 
 ```
-Counter := class [
-    state: value: Integer = 0.
+Actor subclass: Counter [
+    state: value = 0
+    state: count = 0
     
     // ✅ Field mutation in control flow
     increment =>
         [self.value < 10] whileTrue: [
             self.value := self.value + 1
         ].
-        ^self.value.
+        ^self.value
     
     // ✅ Multiple fields
     incrementBoth =>
         [self.value < 10] whileTrue: [
             self.value := self.value + 1.
             self.count := self.count + 1
-        ].
-    
-    state: count: Integer = 0.
-].
+        ]
+]
 ```
 
 ### Mixed Mutations
@@ -420,7 +419,7 @@ processItems =>
         self.processed := self.processed + 1
     ].
     
-    ^total.
+    ^total
 ```
 
 ### What's Forbidden
@@ -440,13 +439,13 @@ testWarning =>
     // WARNING: Assignment to 'count' has no effect on outer scope.
     
     10 timesRepeat: myBlock.
-    ^count.  // Still 0, not 10
+    ^count  // Still 0, not 10
     
 // ✅ CORRECT: Use literal blocks in control flow
 testCorrect =>
     count := 0.
     10 timesRepeat: [count := count + 1].  // ✅ Works!
-    ^count.  // Now 10
+    ^count  // Now 10
 ```
 
 ### Why This Design?
