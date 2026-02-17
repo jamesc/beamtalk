@@ -228,6 +228,20 @@ pub fn start_detached_node(
         miette!("Failed to start detached BEAM node: {e}\nIs Erlang/OTP installed?")
     })?;
 
+    // KNOWN BUG (BT-662): On Windows, detached BEAM nodes don't reliably start when spawned
+    // via Rust's Command::spawn(). The spawn() call succeeds but the eval command never
+    // executes, despite the exact same erl command working when run manually from PowerShell.
+    // This affects workspace mode and MCP integration tests on Windows.
+    //
+    // Workarounds:
+    // 1. Use foreground REPL (`beamtalk repl --foreground`) - works perfectly
+    // 2. Run `erl` commands manually for workspace testing
+    //
+    // Root cause investigation needed:
+    // - Windows process creation flags
+    // - Stdio handle inheritance with -detached
+    // - Erlang's Windows detach implementation vs Rust's expectations
+    //
     // With -detached, the spawn() returns immediately and the real BEAM node
     // runs independently. We need to wait for it to start up.
     // The compiler app (ADR 0022) adds ~500ms to startup, and under load
@@ -364,6 +378,23 @@ fn build_detached_node_command(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+
+    // Set compiler port binary path (for runtime compilation support)
+    // In installed mode, it lives next to the beamtalk binary in bin/.
+    // In dev mode, it lives in target/{debug,release}/.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(bin_dir) = exe.parent() {
+            let compiler_name = if cfg!(windows) {
+                "beamtalk-compiler-port.exe"
+            } else {
+                "beamtalk-compiler-port"
+            };
+            let compiler_port = bin_dir.join(compiler_name);
+            if compiler_port.exists() {
+                cmd.env("BEAMTALK_COMPILER_PORT_BIN", &compiler_port);
+            }
+        }
+    }
 
     cmd
 }
