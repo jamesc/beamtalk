@@ -511,3 +511,19 @@ No existing user code is affected. This ADR introduces new capabilities without 
 - Related issues: BT-302
 - Related ADRs: ADR 0005 (object model), ADR 0006 (method dispatch), ADR 0010 (global objects — `Erlang` differs: it's a class, not a workspace-bound actor), ADR 0015 (exception hierarchy — extended here with interop exceptions), ADR 0016 (module naming), ADR 0025 (gradual typing), ADR 0026 (package manifest)
 - Design principles: §9 Seamless BEAM Ecosystem Integration
+
+## Implementation Tracking
+
+**Epic:** BT-675
+**Issues:** BT-676, BT-677, BT-678, BT-679, BT-680, BT-681, BT-682
+**Status:** Planned
+
+| Phase | Issue | Title | Size | Blocked by |
+|-------|-------|-------|------|------------|
+| 0 | BT-676 | Runtime: ErlangModule proxy dispatch | M | — |
+| 0 | BT-677 | Codegen + Stdlib: End-to-end Erlang interop | L | BT-676 |
+| 1 | BT-678 | Exception mapping for Erlang calls | M | BT-676 |
+| 1 | BT-679 | Export introspection and arity validation | M | BT-676 |
+| 1 | BT-680 | LSP: Completions for Erlang module exports | M | BT-679 |
+| 2 | BT-681 | Pid/Port/Reference basic methods | M | — |
+| 3 | BT-682 | Compiler optimization: direct BEAM calls | M | BT-677 |
