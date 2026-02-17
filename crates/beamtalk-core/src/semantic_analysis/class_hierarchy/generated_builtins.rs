@@ -71,6 +71,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "spawn".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, return_type: None },
                 MethodInfo { selector: "spawnWith:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, return_type: None },
@@ -92,6 +93,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "key".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Association".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "value".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Association".into(), is_sealed: false, return_type: None },
@@ -113,6 +115,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "value".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Block".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "value:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Block".into(), is_sealed: false, return_type: None },
@@ -141,6 +144,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: true,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "ifTrue:ifFalse:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Boolean".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "ifTrue:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Boolean".into(), is_sealed: false, return_type: None },
@@ -165,6 +169,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "=:=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Character".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "/=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Character".into(), is_sealed: false, return_type: None },
@@ -201,6 +206,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: true,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Collection".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "do:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Collection".into(), is_sealed: false, return_type: None },
@@ -232,6 +238,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "selector".into(), arity: 0, kind: MethodKind::Primary, defined_in: "CompiledMethod".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "source".into(), arity: 0, kind: MethodKind::Primary, defined_in: "CompiledMethod".into(), is_sealed: false, return_type: None },
@@ -253,6 +260,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "keys".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, return_type: None },
@@ -284,6 +292,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Error".into(), is_sealed: false, return_type: None },
             ],
@@ -301,6 +310,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "message".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Exception".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "hint".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Exception".into(), is_sealed: false, return_type: None },
@@ -327,6 +337,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "ifTrue:ifFalse:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "False".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "ifTrue:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "False".into(), is_sealed: false, return_type: None },
@@ -351,6 +362,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![],
             class_methods: vec![
                 MethodInfo { selector: "exists:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "File".into(), is_sealed: true, return_type: None },
@@ -372,6 +384,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "+".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "-".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: None },
@@ -413,6 +426,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "InstantiationError".into(), is_sealed: false, return_type: None },
             ],
@@ -430,6 +444,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "+".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "-".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: None },
@@ -485,6 +500,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "isEmpty".into(), arity: 0, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, return_type: None },
@@ -540,6 +556,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: true,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "=:=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Number".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "<".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Number".into(), is_sealed: false, return_type: None },
@@ -566,6 +583,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "class".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "new".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, return_type: None },
@@ -605,6 +623,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: true,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "==".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ProtoObject".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "/=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ProtoObject".into(), is_sealed: false, return_type: None },
@@ -626,6 +645,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "RuntimeError".into(), is_sealed: false, return_type: None },
             ],
@@ -643,6 +663,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec!["elements".into()],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "isEmpty".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, return_type: None },
@@ -674,6 +695,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "method".into(), arity: 0, kind: MethodKind::Primary, defined_in: "StackFrame".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "receiverClass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "StackFrame".into(), is_sealed: false, return_type: None },
@@ -698,6 +720,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "select:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Stream".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "collect:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Stream".into(), is_sealed: false, return_type: None },
@@ -731,6 +754,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "=:=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "/=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: None },
@@ -796,6 +820,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Symbol".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "asAtom".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Symbol".into(), is_sealed: false, return_type: None },
@@ -819,6 +844,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "allClasses".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SystemDictionary".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "classNamed:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SystemDictionary".into(), is_sealed: false, return_type: None },
@@ -842,6 +868,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "setUp".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestCase".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "tearDown".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestCase".into(), is_sealed: false, return_type: None },
@@ -868,6 +895,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "show:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "TranscriptStream".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "cr".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TranscriptStream".into(), is_sealed: false, return_type: None },
@@ -893,6 +921,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "ifTrue:ifFalse:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "True".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "ifTrue:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "True".into(), is_sealed: false, return_type: None },
@@ -917,6 +946,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Tuple".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "at:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Tuple".into(), is_sealed: false, return_type: None },
@@ -943,6 +973,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TypeError".into(), is_sealed: false, return_type: None },
             ],
@@ -960,6 +991,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "isNil".into(), arity: 0, kind: MethodKind::Primary, defined_in: "UndefinedObject".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "notNil".into(), arity: 0, kind: MethodKind::Primary, defined_in: "UndefinedObject".into(), is_sealed: false, return_type: None },
@@ -987,6 +1019,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "actors".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceEnvironment".into(), is_sealed: false, return_type: None },
                 MethodInfo { selector: "actorAt:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceEnvironment".into(), is_sealed: false, return_type: None },

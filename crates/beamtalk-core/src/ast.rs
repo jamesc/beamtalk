@@ -601,6 +601,30 @@ impl TypeAnnotation {
             span,
         }
     }
+
+    /// Returns a human-readable name for this type annotation.
+    ///
+    /// Used by the class hierarchy to store declared state field types.
+    #[must_use]
+    pub fn type_name(&self) -> EcoString {
+        match self {
+            Self::Simple(id) => id.name.clone(),
+            Self::Singleton { name, .. } => EcoString::from(format!("#{name}")),
+            Self::Union { types, .. } => {
+                let names: Vec<_> = types.iter().map(Self::type_name).collect();
+                EcoString::from(names.join(" | "))
+            }
+            Self::Generic {
+                base, parameters, ..
+            } => {
+                let params: Vec<_> = parameters.iter().map(Self::type_name).collect();
+                EcoString::from(format!("{}<{}>", base.name, params.join(", ")))
+            }
+            Self::FalseOr { inner, .. } => {
+                EcoString::from(format!("{} | False", inner.type_name()))
+            }
+        }
+    }
 }
 
 /// A Beamtalk expression.
@@ -1627,6 +1651,37 @@ mod tests {
             Span::new(0, 9),
         );
         assert_eq!(false_or.span(), Span::new(0, 9));
+    }
+
+    #[test]
+    fn type_annotation_type_name() {
+        let simple = TypeAnnotation::simple("Integer", Span::new(0, 7));
+        assert_eq!(simple.type_name(), "Integer");
+
+        let singleton = TypeAnnotation::singleton("north", Span::new(0, 6));
+        assert_eq!(singleton.type_name(), "#north");
+
+        let union = TypeAnnotation::union(
+            vec![
+                TypeAnnotation::simple("Integer", Span::new(0, 7)),
+                TypeAnnotation::simple("String", Span::new(10, 16)),
+            ],
+            Span::new(0, 16),
+        );
+        assert_eq!(union.type_name(), "Integer | String");
+
+        let generic = TypeAnnotation::generic(
+            Identifier::new("Collection", Span::new(0, 10)),
+            vec![TypeAnnotation::simple("Integer", Span::new(11, 18))],
+            Span::new(0, 19),
+        );
+        assert_eq!(generic.type_name(), "Collection<Integer>");
+
+        let false_or = TypeAnnotation::false_or(
+            TypeAnnotation::simple("Integer", Span::new(0, 7)),
+            Span::new(0, 15),
+        );
+        assert_eq!(false_or.type_name(), "Integer | False");
     }
 
     #[test]
