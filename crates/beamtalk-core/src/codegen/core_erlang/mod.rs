@@ -1170,14 +1170,16 @@ impl CoreErlangGenerator {
         // WARNING: Local mutations in stored closures won't work as expected
         // Note: For now we're treating this as an error too, but the error type
         // is labeled as a warning in the message.
-        if !analysis.local_writes.is_empty() {
-            let variable = analysis
-                .local_writes
-                .iter()
-                .next()
-                .expect("local_writes is non-empty");
+        // BT-665: Only flag mutations of captured variables, not new local definitions.
+        // A "captured mutation" is a write to a variable that was read before being
+        // locally defined (i.e., it captures from outer scope).
+        let captured_mutations: Vec<&String> = analysis
+            .local_writes
+            .intersection(&analysis.captured_reads)
+            .collect();
+        if let Some(variable) = captured_mutations.first() {
             return Err(CodeGenError::LocalMutationInStoredClosure {
-                variable: variable.clone(),
+                variable: (*variable).clone(),
                 location: span_str,
             });
         }
