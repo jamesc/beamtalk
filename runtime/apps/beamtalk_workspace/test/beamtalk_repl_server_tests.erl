@@ -1051,7 +1051,12 @@ term_to_json_reference_test() ->
 
 term_to_json_port_test() ->
     %% Create a port deterministically so the test doesn't depend on environment state
-    Port = open_port({spawn, "true"}, []),
+    %% Use cross-platform command: Windows cmd /c exit, Unix true
+    Command = case os:type() of
+        {win32, _} -> "cmd /c exit 0";
+        _ -> "true"
+    end,
+    Port = open_port({spawn, Command}, []),
     Result = beamtalk_repl_json:term_to_json(Port),
     ?assert(is_binary(Result)),
     catch port_close(Port).
@@ -1210,7 +1215,12 @@ format_error_message_with_complex_reason_test() ->
 
 format_response_with_unserializable_test() ->
     %% Port references are handled by term_to_json's fallback via io_lib:format
-    Port = open_port({spawn, "true"}, []),
+    %% Use cross-platform command: Windows cmd /c exit, Unix true
+    Command = case os:type() of
+        {win32, _} -> "cmd /c exit 0";
+        _ -> "true"
+    end,
+    Port = open_port({spawn, Command}, []),
     Response = beamtalk_repl_json:format_response(Port),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
