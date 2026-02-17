@@ -101,7 +101,7 @@ packet := <<1, messageBytes/utf8>>
 | `"世界"` | `<<228,184,150,231,149,140>>` | UTF-8 encoded bytes |
 | String operations | `:string` module | Grapheme-aware (`:string.length/1`) |
 | `$x` | Integer codepoint | `$a` = 97, `$世` = 19990 |
-| Charlist (legacy) | `[104,101,108,108,111]` | Use `String toCharlist:` if needed |
+| Charlist (legacy) | `[104,101,108,108,111]` | Via Erlang interop |
 
 ### Why UTF-8 by Default?
 
@@ -113,18 +113,7 @@ packet := <<1, messageBytes/utf8>>
 
 ### Legacy Charlist Support
 
-For Erlang modules that require charlists:
-
-```
-// Convert to charlist when needed
-charlist := "hello" toCharlist  // => [104, 101, 108, 108, 111]
-
-// Call Erlang with charlist
-Erlang.io format: charlist arguments: []
-
-// Convert back from charlist
-str := String fromCharlist: [72, 101, 108, 108, 111]  // => "Hello"
-```
+Charlists are Erlang lists of integer codepoints. Beamtalk uses binaries for strings, but you can convert when needed for Erlang interop via `binary_to_list` / `list_to_binary`.
 
 ### Implementation Status
 
@@ -135,7 +124,7 @@ str := String fromCharlist: [72, 101, 108, 108, 111]  // => "Hello"
 | Grapheme-aware length | ✅ Available via Erlang `:string` module |
 | Unicode normalization | ✅ Available via Erlang `:unicode` module |
 | Case folding | ✅ Available via Erlang `:string` module |
-| Binary pattern UTF-8 | ✅ Implemented - AST and codegen support |
+| Binary pattern UTF-8 | ❌ Not yet implemented (BT-663) |
 
 ---
 
