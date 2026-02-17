@@ -1,7 +1,7 @@
 # ADR 0024: Static-First, Live-Augmented IDE Tooling
 
 ## Status
-Implemented (Phase 1) (2026-02-17)
+Implemented (Phase 1, 2026-02-17)
 
 ## Context
 
@@ -150,7 +150,7 @@ Static analysis is the primary source of truth. It works without any running sys
 - Go-to-definition via first-assignment heuristic
 - Cached per file in `SimpleLanguageService`
 
-**Known issue (resolved): semantic analysis divergence.** Principle 13 states "the compiler IS the language service." In practice, the LSP intentionally uses a lightweight `ClassHierarchy::build()` path for indexing (avoiding the overhead of full `analyse()` on every keystroke), while diagnostics lazily run full analysis when requested. This layered approach is a pragmatic design choice — type inference and class awareness are unified, while expensive validation runs on-demand.
+**Design note: layered semantic analysis.** Principle 13 states "the compiler IS the language service." In practice, the LSP intentionally uses a lightweight `ClassHierarchy::build()` path for indexing (avoiding the overhead of full `analyse()` on every keystroke), while diagnostics lazily run full analysis when requested. This layered approach is a pragmatic design choice — type inference and class awareness are unified, while expensive validation runs on-demand.
 
 **Tier 2 (cross-file) — ✅ Implemented:**
 - `ProjectIndex` provides project-wide symbol index across all files

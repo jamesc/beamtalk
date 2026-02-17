@@ -548,7 +548,7 @@ Starting at C would require building all five simultaneously — workspace sync,
 
 **Epic:** BT-600
 **Issues:** BT-601, BT-602, BT-603, BT-604, BT-605, BT-606, BT-607
-**Status:** ✅ Complete
+**Status:** ✅ Done
 
 | Phase | Issue | Title | Size | Blocked by |
 |-------|-------|-------|------|------------|

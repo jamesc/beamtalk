@@ -402,7 +402,7 @@ The language is pre-release — no external user code needs migration.
 
 **Epic:** BT-554 — String Interpolation and Quote Convention (ADR 0023)
 **Issues:** BT-555, BT-556, BT-557, BT-558, BT-559, BT-560
-**Status:** ✅ Complete
+**Status:** ✅ Done
 
 | Phase | Issue | Title | Size | Blocked by | Status |
 |-------|-------|-------|------|------------|--------|
