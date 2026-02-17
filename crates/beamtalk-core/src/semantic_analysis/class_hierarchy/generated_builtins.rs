@@ -292,7 +292,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "Erlang".into(),
         ClassInfo {
             name: "Erlang".into(),
-            superclass: None,
+            superclass: Some("ProtoObject".into()),
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
@@ -310,7 +310,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "ErlangModule".into(),
         ClassInfo {
             name: "ErlangModule".into(),
-            superclass: None,
+            superclass: Some("ProtoObject".into()),
             is_sealed: true,
             is_abstract: false,
             is_typed: false,

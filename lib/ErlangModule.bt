@@ -10,7 +10,7 @@
 /// ## Examples
 /// ```beamtalk
 /// proxy := Erlang lists
-/// proxy reverse: #(3, 2, 1)           // => #(1, 2, 3)
+/// proxy reverse: #(3, 2, 1)           // => [1, 2, 3]
 /// proxy class                          // => ErlangModule
 /// ```
 ///
@@ -20,5 +20,5 @@
 /// - `node`               → `erlang:node()`            (unary → zero-arg call)
 ///
 /// See ADR 0028 §1 for full mapping rules.
-sealed nil subclass: ErlangModule
+sealed ProtoObject subclass: ErlangModule
   doesNotUnderstand: selector args: arguments => @intrinsic erlangApply
