@@ -940,7 +940,7 @@ PROPTEST_CASES=10000 cargo test -p beamtalk-core property_tests
 
 ### CI Integration
 
-The extended proptest runs nightly alongside cargo-fuzz in `.github/workflows/fuzz.yml`:
+The extended proptest runs nightly alongside cargo-fuzz in the GitHub Actions workflow `.github/workflows/fuzz.yml`:
 - Cases per property: 10,000 (vs 512 in standard CI)
 - Schedule: 2 AM UTC daily (same as fuzzing)
 - Can be triggered manually via `workflow_dispatch`
@@ -953,7 +953,7 @@ The extended proptest runs nightly alongside cargo-fuzz in `.github/workflows/fu
 **Success:** All 5 properties pass with 10,000 cases each.
 
 **Failure:** Proptest finds a failing input and shrinks it to the smallest reproducer. The shrunk case is printed in the test output. Example:
-```
+```text
 proptest: Shrink failed: parser panicked on input "\x00\xff"
 ```
 
