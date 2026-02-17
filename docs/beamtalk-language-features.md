@@ -645,7 +645,7 @@ Core classes implemented and tested:
 | **Stream** | ✅ Implemented | Lazy, closure-based sequences ([ADR 0021](ADR/0021-streams-and-io-design.md)) | `stream`, `stream_collections`, `file_stream` |
 | **Nil** | ✅ Implemented | Null object pattern | `stdlib_nil`, `stdlib_nil_object` |
 
-For detailed API documentation, see [`lib/README.md`](../lib/README.md).
+For detailed API documentation, see [beamtalk.dev/apidocs](https://beamtalk.dev/apidocs/).
 
 ### Stream — Lazy Pipelines
 
