@@ -124,7 +124,16 @@ fn run_package(project_root: &Utf8PathBuf, pkg: &manifest::PackageManifest) -> R
     // Add package ebin to code path
     let ebin_dir = project_root.join("_build").join("dev").join("ebin");
     args.push(OsString::from("-pa"));
-    args.push(OsString::from(ebin_dir.as_str()));
+    #[cfg(windows)]
+    {
+        // Convert Windows backslashes to forward slashes for Erlang (BT-661)
+        let ebin_path = ebin_dir.as_str().replace('\\', "/");
+        args.push(OsString::from(ebin_path));
+    }
+    #[cfg(not(windows))]
+    {
+        args.push(OsString::from(ebin_dir.as_str()));
+    }
 
     // Build eval command:
     // 1. Start beamtalk_runtime application (for object system, actors, etc.)
