@@ -448,7 +448,6 @@ clean-vscode:
     if (Test-Path editors/vscode/node_modules) { Remove-Item -Recurse -Force editors/vscode/node_modules }
     @echo "  ✅ Cleaned editors/vscode/{out,node_modules}/"
 
-# Unix-only: uses read for interactive confirmation, rm -rf
 # Purge global Cargo cache (affects all Rust projects!)
 [unix]
 purge-cargo-cache:
@@ -456,6 +455,14 @@ purge-cargo-cache:
     @echo "Press Enter to continue or Ctrl+C to cancel..."
     @read _
     @rm -rf ~/.cargo/registry/cache 2>/dev/null || true
+    @echo "  ✅ Cargo cache purged"
+
+# Purge global Cargo cache (affects all Rust projects!)
+[windows]
+purge-cargo-cache:
+    @echo "⚠️  This will delete $env:USERPROFILE\.cargo\registry\cache (affects all Rust projects)"
+    $null = Read-Host "Press Enter to continue or Ctrl+C to cancel"
+    $cachePath = "$env:USERPROFILE\.cargo\registry\cache"; if (Test-Path $cachePath) { Remove-Item -Recurse -Force $cachePath }
     @echo "  ✅ Cargo cache purged"
 
 # ═══════════════════════════════════════════════════════════════════════════
