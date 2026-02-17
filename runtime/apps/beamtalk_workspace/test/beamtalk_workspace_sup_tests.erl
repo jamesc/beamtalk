@@ -94,7 +94,7 @@ repl_server_spec_test() ->
     [ReplSpec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_repl_server],
     ?assertEqual(worker, maps:get(type, ReplSpec)),
     ?assertEqual(permanent, maps:get(restart, ReplSpec)),
-    ?assertEqual({beamtalk_repl_server, start_link, [#{port => 49152, workspace_id => <<"test123">>}]}, 
+    ?assertEqual({beamtalk_repl_server, start_link, [#{port => 49152, workspace_id => <<"test123">>, bind_addr => {127, 0, 0, 1}}]}, 
                  maps:get(start, ReplSpec)).
 
 idle_monitor_spec_test() ->
@@ -382,8 +382,19 @@ repl_server_config_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(Config),
 
     [ReplSpec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_repl_server],
-    ?assertEqual({beamtalk_repl_server, start_link, [#{port => 12345, workspace_id => <<"ws-custom">>}]},
+    ?assertEqual({beamtalk_repl_server, start_link, [#{port => 12345, workspace_id => <<"ws-custom">>, bind_addr => {127, 0, 0, 1}}]},
                  maps:get(start, ReplSpec)).
+
+%%% Bind address config test
+
+repl_server_custom_bind_addr_test() ->
+    Config0 = test_config(),
+    Config = Config0#{bind_addr => {192, 168, 1, 5}},
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(Config),
+
+    [ReplSpec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_repl_server],
+    {beamtalk_repl_server, start_link, [ReplConfig]} = maps:get(start, ReplSpec),
+    ?assertEqual({192, 168, 1, 5}, maps:get(bind_addr, ReplConfig)).
 
 %%% Workspace meta config test
 

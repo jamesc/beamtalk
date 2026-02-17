@@ -40,6 +40,7 @@
     workspace_id => binary(),
     project_path => binary(),
     tcp_port => inet:port_number(),
+    bind_addr => inet:ip4_address(),
     auto_cleanup => boolean(),
     max_idle_seconds => integer()
 }.
@@ -63,6 +64,7 @@ init(Config) ->
     WorkspaceId = maps:get(workspace_id, Config),
     ProjectPath = maps:get(project_path, Config),
     TcpPort = maps:get(tcp_port, Config),
+    BindAddr = maps:get(bind_addr, Config, {127, 0, 0, 1}),
     AutoCleanup = maps:get(auto_cleanup, Config, true),
     MaxIdleSeconds = maps:get(max_idle_seconds, Config, 3600 * 4),
     
@@ -119,7 +121,7 @@ init(Config) ->
         %% REPL TCP server (session-per-connection architecture)
         #{
             id => beamtalk_repl_server,
-            start => {beamtalk_repl_server, start_link, [#{port => TcpPort, workspace_id => WorkspaceId}]},
+            start => {beamtalk_repl_server, start_link, [#{port => TcpPort, workspace_id => WorkspaceId, bind_addr => BindAddr}]},
             restart => permanent,
             shutdown => 5000,
             type => worker,

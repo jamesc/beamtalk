@@ -13,6 +13,7 @@
 //! automatically reflected in tests.
 
 use std::ffi::OsString;
+use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 
 use miette::{Result, miette};
@@ -98,13 +99,13 @@ pub fn beam_paths_for_layout(runtime_dir: &Path, layout: RuntimeLayout) -> BeamP
 ///    actor registry, session supervisor, and all singletons)
 /// 4. Prints a ready message
 /// 5. Blocks forever (the BEAM VM stays alive while the REPL runs)
-pub fn build_eval_cmd(port: u16) -> String {
+pub fn build_eval_cmd(port: u16, bind_addr: Option<Ipv4Addr>) -> String {
     format!(
         "{}, \
          {{ok, ActualPort}} = beamtalk_repl_server:get_port(), \
          io:format(\"BEAMTALK_PORT:~B~n\", [ActualPort]), \
          receive stop -> ok end.",
-        startup_prelude(port),
+        startup_prelude(port, bind_addr),
     )
 }
 
@@ -115,7 +116,7 @@ pub fn build_eval_cmd(port: u16) -> String {
 ///
 /// The `node_name` is escaped for safe interpolation into an Erlang
 /// single-quoted atom literal.
-pub fn build_eval_cmd_with_node(port: u16, node_name: &str) -> String {
+pub fn build_eval_cmd_with_node(port: u16, node_name: &str, bind_addr: Option<Ipv4Addr>) -> String {
     let safe_name = escape_erlang_atom(node_name);
     format!(
         "application:set_env(beamtalk_runtime, node_name, '{safe_name}'), \
@@ -123,7 +124,7 @@ pub fn build_eval_cmd_with_node(port: u16, node_name: &str) -> String {
          {{ok, ActualPort}} = beamtalk_repl_server:get_port(), \
          io:format(\"BEAMTALK_PORT:~B~n\", [ActualPort]), \
          receive stop -> ok end.",
-        startup_prelude(port),
+        startup_prelude(port, bind_addr),
     )
 }
 
@@ -139,7 +140,17 @@ pub fn build_eval_cmd_with_node(port: u16, node_name: &str) -> String {
 ///
 /// Callers append their own shutdown logic (e.g. `receive stop -> ok end`
 /// or cover export).
-pub fn startup_prelude(port: u16) -> String {
+pub fn startup_prelude(port: u16, bind_addr: Option<Ipv4Addr>) -> String {
+    let bind_addr_erl = match bind_addr {
+        Some(ip) => {
+            let octets = ip.octets();
+            format!(
+                "{{{},{},{},{}}}",
+                octets[0], octets[1], octets[2], octets[3]
+            )
+        }
+        None => "{127,0,0,1}".to_string(),
+    };
     format!(
         "application:set_env(beamtalk_runtime, repl_port, {port}), \
          {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
@@ -148,6 +159,7 @@ pub fn startup_prelude(port: u16) -> String {
              workspace_id => list_to_binary(\"foreground_\" ++ integer_to_list(erlang:unique_integer([positive]))), \
              project_path => list_to_binary(Cwd), \
              tcp_port => {port}, \
+             bind_addr => {bind_addr_erl}, \
              auto_cleanup => false, \
              max_idle_seconds => 14400}})"
     )
@@ -286,7 +298,7 @@ mod tests {
 
     #[test]
     fn eval_cmd_contains_required_steps() {
-        let cmd = build_eval_cmd(9000);
+        let cmd = build_eval_cmd(9000, None);
         // Must set application env before starting apps
         assert!(cmd.contains("application:set_env(beamtalk_runtime, repl_port, 9000)"));
         // Must start the workspace OTP application
@@ -299,25 +311,27 @@ mod tests {
         assert!(cmd.contains("BEAMTALK_PORT:"));
         // Must block to keep the VM alive
         assert!(cmd.contains("receive stop -> ok end"));
+        // Default bind address should be loopback
+        assert!(cmd.contains("bind_addr => {127,0,0,1}"));
     }
 
     #[test]
     fn eval_cmd_with_node_includes_node_name() {
-        let cmd = build_eval_cmd_with_node(9000, "mynode");
+        let cmd = build_eval_cmd_with_node(9000, "mynode", None);
         assert!(cmd.contains("application:set_env(beamtalk_runtime, node_name, 'mynode')"));
         assert!(cmd.contains("beamtalk_workspace_sup:start_link"));
     }
 
     #[test]
     fn eval_cmd_with_node_escapes_special_chars() {
-        let cmd = build_eval_cmd_with_node(9000, "node'inject");
+        let cmd = build_eval_cmd_with_node(9000, "node'inject", None);
         assert!(cmd.contains("node\\'inject"));
         assert!(!cmd.contains("node'inject"));
     }
 
     #[test]
     fn startup_prelude_contains_set_env_and_ensure_started() {
-        let prelude = startup_prelude(9000);
+        let prelude = startup_prelude(9000, None);
         assert!(prelude.contains("application:set_env(beamtalk_runtime, repl_port, 9000)"));
         assert!(prelude.contains("application:ensure_all_started(beamtalk_workspace)"));
         // Must start workspace supervisor (which starts all singletons and services)
@@ -329,6 +343,22 @@ mod tests {
         assert!(prelude.contains("file:get_cwd()"));
         // Prelude should NOT contain the blocking receive
         assert!(!prelude.contains("receive"));
+        // Default bind address
+        assert!(prelude.contains("bind_addr => {127,0,0,1}"));
+    }
+
+    #[test]
+    fn startup_prelude_with_custom_bind_addr() {
+        use std::net::Ipv4Addr;
+        let prelude = startup_prelude(9000, Some(Ipv4Addr::new(192, 168, 1, 5)));
+        assert!(prelude.contains("bind_addr => {192,168,1,5}"));
+    }
+
+    #[test]
+    fn startup_prelude_with_all_interfaces() {
+        use std::net::Ipv4Addr;
+        let prelude = startup_prelude(9000, Some(Ipv4Addr::UNSPECIFIED));
+        assert!(prelude.contains("bind_addr => {0,0,0,0}"));
     }
 
     #[test]

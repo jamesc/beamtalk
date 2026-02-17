@@ -8,6 +8,7 @@
 //!
 //! **DDD Context:** CLI
 
+use std::net::Ipv4Addr;
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -189,6 +190,7 @@ pub fn tcp_send_shutdown(port: u16, cookie: &str) -> Result<()> {
 /// Start a detached BEAM node for a workspace.
 /// Returns the `NodeInfo` for the started node.
 #[allow(clippy::too_many_arguments)] // BEAM node requires separate beam dirs per OTP app
+#[allow(clippy::too_many_lines)] // eval command construction is necessarily verbose
 pub fn start_detached_node(
     workspace_id: &str,
     port: u16,
@@ -200,6 +202,7 @@ pub fn start_detached_node(
     extra_code_paths: &[PathBuf],
     auto_cleanup: bool,
     max_idle_seconds: Option<u64>,
+    bind_addr: Option<Ipv4Addr>,
 ) -> Result<NodeInfo> {
     // Generate node name
     let node_name = format!("beamtalk_workspace_{workspace_id}@localhost");
@@ -225,6 +228,18 @@ pub fn start_detached_node(
     #[cfg(windows)]
     let project_path_str = project_path_str.replace('\\', "\\\\");
 
+    // Format bind address as Erlang tuple for cowboy socket_opts
+    let bind_addr_erl = match bind_addr {
+        Some(ip) => {
+            let octets = ip.octets();
+            format!(
+                "{{{},{},{},{}}}",
+                octets[0], octets[1], octets[2], octets[3]
+            )
+        }
+        None => "{127,0,0,1}".to_string(),
+    };
+
     let eval_cmd = format!(
         "application:set_env(beamtalk_runtime, workspace_id, <<\"{workspace_id}\">>), \
          application:set_env(beamtalk_runtime, project_path, <<\"{project_path_str}\">>), \
@@ -233,6 +248,7 @@ pub fn start_detached_node(
          {{ok, _}} = beamtalk_workspace_sup:start_link(#{{workspace_id => <<\"{workspace_id}\">>, \
                                                           project_path => <<\"{project_path_str}\">>, \
                                                           tcp_port => {port}, \
+                                                          bind_addr => {bind_addr_erl}, \
                                                           auto_cleanup => {auto_cleanup}, \
                                                           max_idle_seconds => {idle_timeout}}}), \
          {{ok, ActualPort}} = beamtalk_repl_server:get_port(), \

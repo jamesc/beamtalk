@@ -73,6 +73,9 @@ mod display;
 mod helper;
 mod process;
 
+pub mod bind;
+
+use bind::{resolve_bind_addr, validate_network_binding};
 use client::ReplClient;
 use display::{format_error, format_value, history_path, print_help};
 use helper::ReplHelper;
@@ -302,6 +305,14 @@ fn read_erlang_cookie() -> Option<String> {
     clippy::too_many_lines,
     reason = "REPL main loop handles many commands"
 )]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "CLI flags are passed individually from clap"
+)]
+#[expect(
+    clippy::fn_params_excessive_bools,
+    reason = "bools map directly to CLI flags (foreground, persistent, no_color, confirm_network)"
+)]
 pub fn run(
     port_arg: Option<u16>,
     node_arg: Option<String>,
@@ -310,9 +321,15 @@ pub fn run(
     persistent: bool,
     timeout: Option<u64>,
     no_color: bool,
+    bind: Option<&str>,
+    confirm_network: bool,
 ) -> Result<()> {
     // Initialize color support
     color::init(no_color);
+
+    // Resolve bind address: --bind flag → IP address (ADR 0020)
+    let bind_addr = resolve_bind_addr(bind)?;
+    validate_network_binding(bind_addr, confirm_network)?;
 
     // Resolve port and node name using priority logic
     let port = resolve_port(port_arg)?;
@@ -337,7 +354,7 @@ pub fn run(
     ) = if foreground {
         // Foreground mode: start node directly (original behavior)
         println!("Starting BEAM node in foreground mode (--foreground)...");
-        let mut child = start_beam_node(port, node_name.as_ref(), &project_root)?;
+        let mut child = start_beam_node(port, node_name.as_ref(), &project_root, Some(bind_addr))?;
 
         // Discover the actual port from the BEAM node's stdout.
         // The BEAM prints "BEAMTALK_PORT:<port>" after binding.
@@ -384,6 +401,7 @@ pub fn run(
             &extra_code_paths,
             !persistent, // auto_cleanup is opposite of persistent flag
             timeout,
+            Some(bind_addr),
         )?;
 
         let actual_port = node_info.port;

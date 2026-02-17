@@ -26,6 +26,7 @@ pub(super) fn start_beam_node(
     port: u16,
     node_name: Option<&String>,
     project_root: &Path,
+    bind_addr: Option<std::net::Ipv4Addr>,
 ) -> Result<Child> {
     // Find runtime directory - try multiple locations
     let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout()?;
@@ -74,9 +75,9 @@ pub(super) fn start_beam_node(
                 "Invalid node name '{name}': must contain only alphanumeric characters, underscores, hyphens, dots, or @"
             ));
         }
-        repl_startup::build_eval_cmd_with_node(port, name)
+        repl_startup::build_eval_cmd_with_node(port, name, bind_addr)
     } else {
-        repl_startup::build_eval_cmd(port)
+        repl_startup::build_eval_cmd(port, bind_addr)
     };
 
     // Start erl with beamtalk_workspace running
