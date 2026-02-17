@@ -657,17 +657,6 @@ results collect: [{#ok, v} -> v; {#error, _} -> nil]
 {name, {street, city}} := person address
 ```
 
-### Binary Pattern Matching
-
-```
-// Parse a network packet
-parsePacket: <<version: 8, length: 16/big, payload: length/binary, rest/binary>> =>
-  Packet new version: version payload: payload
-
-// Build binary
-packet := <<16r01, messageLength: 16/big, messageBytes/binary>>
-```
-
 ---
 
 ## Live Patching
@@ -1553,3 +1542,16 @@ FileNotFound signal: path
 - Conditions → `throw`/`catch` with restart metadata
 - Handler selects restart; execution continues
 - Unhandled → crash (supervisor takes over)
+
+---
+
+### Binary Pattern Matching
+
+```
+// Parse a network packet
+parsePacket: <<version: 8, length: 16/big, payload: length/binary, rest/binary>> =>
+  Packet new version: version payload: payload
+
+// Build binary
+packet := <<16r01, messageLength: 16/big, messageBytes/binary>>
+```
