@@ -36,6 +36,8 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 ctrlc.workspace = true
 libc.workspace = true
+# why: non-destructive SIGINT registration for Ctrl-C during eval (BT-666)
+signal-hook.workspace = true
 rustyline.workspace = true
 sha2.workspace = true
 rand.workspace = true

@@ -250,8 +250,10 @@ pub fn stop_workspace(name_or_id: &str, force: bool) -> Result<()> {
                 let cookie = read_workspace_cookie(&workspace_id)?;
                 match tcp_send_shutdown(info.port, &cookie) {
                     Ok(()) => {
-                        // Wait for the workspace to actually exit
-                        if wait_for_workspace_exit(info.port, 5).is_err() {
+                        // Wait for the workspace to actually exit.
+                        // OTP init:stop() does orderly application teardown which
+                        // can take 10+ seconds under load.
+                        if wait_for_workspace_exit(info.port, 15).is_err() {
                             // Graceful shutdown acknowledged but process didn't exit
                             // Fall back to force-kill (if PID available)
                             if info.pid == 0 {

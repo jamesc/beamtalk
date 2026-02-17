@@ -237,12 +237,19 @@ const INTERNAL_NAMES: &[&str] = &[
 // Property tests
 // ============================================================================
 
+/// Default is 512 cases for standard CI; override via `PROPTEST_CASES` env var
+/// for nightly extended runs (e.g., `PROPTEST_CASES=10000`).
+fn proptest_config() -> ProptestConfig {
+    let default = ProptestConfig::default();
+    ProptestConfig {
+        // Use at least 512 cases, but allow PROPTEST_CASES to increase beyond that
+        cases: default.cases.max(512),
+        ..default
+    }
+}
+
 proptest! {
-    #![proptest_config(ProptestConfig {
-        // Keep runtime under 30s: 512 cases × fast parse = ~5s
-        cases: 512,
-        .. ProptestConfig::default()
-    })]
+    #![proptest_config(proptest_config())]
 
     /// Property 1: Parser never panics on arbitrary string input.
     ///
