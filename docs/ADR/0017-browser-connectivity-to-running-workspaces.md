@@ -1,59 +1,62 @@
 # ADR 0017: Browser Connectivity to Running Workspaces
 
 ## Status
-Proposed (2026-02-11)
+Accepted (2026-02-17)
+
+**Update (2026-02-17):** Context updated to reflect ADR 0022 (embedded compiler — no Unix socket daemon) and ADR 0027 (cross-platform support — Beamtalk runs natively on Windows/macOS). Phase 0 infrastructure (Cowboy, WebSocket handler, cookie auth) delivered by ADR 0020/BT-683; Phase 0 here reduces to serving a static HTML page.
 
 ## Context
 
 ### Problem
 
-Beamtalk is an **interactive-first** language (Principle 1), but the workspace is currently accessible only through the CLI REPL over a raw TCP connection bound to `127.0.0.1`. This creates two problems:
+Beamtalk is an **interactive-first** language (Principle 1), but the workspace is currently accessible only through the CLI REPL or IDE (LSP). This limits the interactive experience in several ways:
 
-1. **No cross-platform access.** The compiler daemon uses Unix sockets (`~/.beamtalk/daemon.sock`), so Beamtalk cannot run on Windows at all. The entire pipeline — daemon startup, IPC, REPL connection — is Linux/macOS only. There is no near-term plan to port the Unix socket layer.
+1. **No remote or browser-based access.** The workspace is a long-lived BEAM node (ADR 0004) that persists actors and state across REPL disconnects. But connecting to it requires a local CLI or IDE. Users on remote machines, tablets, or cloud VMs cannot interact with a running workspace without SSH or port forwarding.
 
-2. **No remote or browser-based access.** The workspace is a long-lived BEAM node (ADR 0004) that persists actors and state across REPL disconnects. But connecting to it requires a local TCP client. Users on remote machines, tablets, or different operating systems cannot interact with a running workspace.
+2. **No zero-install trial experience.** A prospective user must install Rust, Erlang, and the Beamtalk CLI before they can evaluate a single expression. A browser-based workspace would let anyone try Beamtalk by visiting a URL.
 
-A browser-based connection to the workspace would solve the remote access problem: users on any OS — including Windows — can connect via browser to a workspace running on Linux, in a dev container, or on a cloud VM. **Note:** this does not make Beamtalk run natively on Windows. The workspace and compiler daemon still require a Unix host. Browser connectivity enables *remote access* to a Unix-hosted workspace from any platform.
+3. **No Smalltalk-style multi-pane workspace.** The CLI REPL is a single-line evaluator. Smalltalk developers expect a Workspace pane, Transcript pane, and Inspector working together on the same running system. A browser UI can deliver this.
+
+4. **No pair programming.** Multiple browser tabs can connect to the same workspace (different sessions, shared actors and Transcript), enabling collaborative development.
 
 ### Current Architecture
 
-```
-┌─────────────┐    TCP (JSON)    ┌──────────────────────┐   Unix Socket   ┌──────────────┐
-│ CLI REPL    │ ──────────────→  │ beamtalk_repl_server │ ─────────────→  │ Compiler     │
-│ (Rust)      │  localhost:9000  │ (Erlang/OTP)         │  daemon.sock    │ Daemon       │
-└─────────────┘                  │                      │                 │ (Rust)       │
-                                 │ ┌──────────────────┐ │                 └──────────────┘
-                                 │ │ Session (shell)  │ │
-                                 │ │ Session (shell)  │ │
-                                 │ └──────────────────┘ │
-                                 └──────────────────────┘
+```text
+│ CLI REPL    │ ────────────────→  │ beamtalk_ws_handler  │ ───────────→  │ Compiler     │
+│ (Rust)      │  ws://localhost    │ (cowboy, Erlang/OTP)  │  (stdin/out)  │ (Rust, OTP   │
+└─────────────┘                    │                      │               │  Port)       │
+                                   │ ┌──────────────────┐ │               └──────────────┘
+                                   │ │ Session (shell)  │ │
+                                   │ │ Session (shell)  │ │
+                                   │ └──────────────────┘ │
+                                   └──────────────────────┘
 ```
 
-**What already exists (and is reusable):**
-- JSON-over-TCP REPL protocol (`docs/repl-protocol.md`) — nREPL-inspired, designed for CLI/IDE/web clients
+**What already exists (BT-683 / ADR 0020):**
+- JSON-over-WebSocket REPL protocol (`docs/repl-protocol.md`) with cookie authentication
+- Cowboy WebSocket handler (`beamtalk_ws_handler.erl`) in `beamtalk_workspace` app
 - Per-connection sessions with isolated bindings
 - Operations: `eval`, `complete`, `info`, `load-file`, `reload`, `bindings`, `actors`, `inspect`, `kill`, `modules`, `sessions`
-- JSX JSON library already in `rebar.config`
-- `beamtalk_repl_protocol.erl` — encoder/decoder for the protocol
-- `beamtalk_repl_shell.erl` — session gen_server (transport-agnostic)
+- Embedded compiler via OTP Port (ADR 0022) — no Unix socket daemon
+- Cross-platform support (ADR 0027) — Windows, macOS, Linux
 
 **What's missing:**
-- HTTP/WebSocket transport layer
 - Static file serving for a web frontend
-- Authentication for non-localhost access
-- A browser frontend (HTML/JS)
+- A browser frontend (HTML/JS) with multi-pane workspace
+- `load-source` operation for inline compilation (browser has no filesystem access)
+- Transcript push messages over WebSocket
 
 ### Constraints
 
-1. **Cowboy is the natural choice** — it is the HTTP server underneath Phoenix/LiveView. Any work here feeds directly into the planned Phoenix LiveView IDE (`docs/beamtalk-ide.md`).
-2. **The REPL protocol is transport-agnostic** — `beamtalk_repl_shell` speaks in terms of operations and bindings, not TCP frames. A WebSocket handler can reuse the same session infrastructure.
-3. **Security model changes** — moving beyond localhost requires authentication. But Phase 1 can stay localhost-only (same security model as the TCP REPL).
+1. **Cowboy is already in place** — ADR 0020/BT-683 added Cowboy as the WebSocket transport for the REPL protocol. The handler, cookie auth, and session management are done. This ADR focuses on the browser frontend and Transcript push infrastructure.
+2. **The REPL protocol is transport-agnostic** — `beamtalk_repl_shell` speaks in terms of operations and bindings, not transport frames. The WebSocket handler reuses the same session infrastructure as before.
+3. **Security model is solved for local dev** — ADR 0020 cookie handshake authenticates WebSocket connections. Phase 1 stays localhost-only. Remote access (TLS, proxy) is ADR 0020 Phases 1–3.
 4. **Minimal frontend** — the goal is workspace connectivity, not a full IDE. But even Phase 1 should feel like a Smalltalk workspace, not just a textarea.
 5. **File loading model** — the CLI `:load` command sends filesystem paths to the server. Browser clients don't have filesystem access, so we need a `load-source` operation that accepts source code inline.
 
 ## Decision
 
-Add a **Cowboy WebSocket transport** to the `beamtalk_workspace` OTP application, alongside the existing TCP transport. The WebSocket handler bridges browser connections to `beamtalk_repl_shell` sessions using the same JSON protocol.
+Add a **browser frontend** to the existing Cowboy WebSocket infrastructure in `beamtalk_workspace`. The WebSocket transport and cookie authentication are already in place (ADR 0020/BT-683); this ADR adds static file serving, a multi-pane workspace UI, Transcript push messages, and the `load-source` operation.
 
 The browser experience is a **multi-pane workspace** — not a single REPL textarea. Even in Phase 1, it should embody the Smalltalk principle: multiple tools (Workspace, Transcript, Inspector) looking at the same running system. Each pane connects to the same workspace over a shared WebSocket connection, and the Transcript streams output in real time via push messages.
 
@@ -86,7 +89,7 @@ The browser experience is a **multi-pane workspace** — not a single REPL texta
 │ beamtalk_workspace app               │
 │                                      │
 │ ┌──────────────────────────────────┐ │
-│ │ beamtalk_web_handler.erl        │ │
+│ │ beamtalk_ws_handler.erl         │ │
 │ │ (cowboy_websocket)              │ │
 │ │                                  │ │
 │ │ • request/response (eval, etc.) │ │
@@ -150,12 +153,12 @@ This leverages the existing session supervision tree — sessions already surviv
 
 ### Compilation Dependency
 
-**Important constraint:** Even with `load-source`, compilation goes through the daemon Unix socket (`~/.beamtalk/daemon.sock`). The browser user doesn't need a local daemon — the workspace's BEAM node connects to *its own* colocated daemon. But the workspace host must have both the BEAM runtime and the Rust compiler daemon running. This is the same setup as the CLI REPL, just accessed remotely.
+**Important constraint:** Even with `load-source`, compilation goes through the embedded compiler (OTP Port, ADR 0022). The browser user doesn't need a local compiler — the workspace's BEAM node connects to *its own* colocated compiler port. But the workspace host must have the Beamtalk CLI installed (which includes the compiler). This is the same setup as the CLI REPL, just accessed remotely.
 
 ### WebSocket Handler (Sketch)
 
 ```erlang
--module(beamtalk_web_handler).
+-module(beamtalk_ws_handler).
 -behaviour(cowboy_websocket).
 
 -export([init/2, websocket_init/1, websocket_handle/2,
@@ -241,7 +244,7 @@ This also enables a **file editor pane** in the browser UI — users can write c
 ```erlang
 Dispatch = cowboy_router:compile([
     {'_', [
-        {"/ws", beamtalk_web_handler, []},
+        {"/ws", beamtalk_ws_handler, []},
         {"/", cowboy_static, {priv_file, beamtalk_workspace, "index.html"}},
         {"/[...]", cowboy_static, {priv_dir, beamtalk_workspace, "static"}}
     ]}
@@ -530,29 +533,27 @@ Use HTTP POST for eval commands and SSE for server-initiated push (Transcript, a
 
 ## Implementation
 
-### Phase 0: Wire Check (Size: S)
+### Phase 0: Wire Check (Size: S) — ✅ Mostly Done (BT-683)
 
-Prove the WebSocket→eval→response round-trip works before building the full workspace UI. A single HTML file with a `<textarea>`, eval button, and Transcript `<div>` — the "napkin" that validates the protocol over WebSocket.
+The WebSocket transport, Cowboy handler, and cookie auth were implemented by ADR 0020/BT-683. The remaining wire-check work is minimal:
 
-**Affected components:**
+**Done (via BT-683):**
+- ✅ Cowboy added to rebar.config and beamtalk_workspace.app.src
+- ✅ `beamtalk_ws_handler.erl` — WebSocket handler with cookie auth + protocol dispatch
+- ✅ `beamtalk_repl_server.erl` rewritten from gen_tcp to cowboy:start_clear
+- ✅ JSON protocol works over WebSocket
+- ✅ Session creation/cleanup on WebSocket connect/disconnect
+
+**Remaining for wire check:**
 
 | Component | Change |
 |-----------|--------|
-| `runtime/rebar.config` | Add `cowboy` dependency |
-| `runtime/apps/beamtalk_workspace/src/beamtalk_web_handler.erl` | New — Cowboy WebSocket handler with Transcript subscription |
-| `runtime/apps/beamtalk_workspace/src/beamtalk_workspace_sup.erl` | Start Cowboy listener as child (optional, enabled by config) |
-| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_server.erl` | Extract `handle_protocol_request/2` to be callable from both TCP and WS handlers |
-| `runtime/apps/beamtalk_runtime/src/beamtalk_transcript_stream.erl` | Add exported `subscribe/1` and `unsubscribe/1` convenience functions |
 | `runtime/apps/beamtalk_workspace/priv/index.html` | New — minimal eval textarea + Transcript div (~100 lines) |
+| `runtime/apps/beamtalk_runtime/src/beamtalk_transcript_stream.erl` | Add `subscribe/1` and `unsubscribe/1` for push messages |
+| `runtime/apps/beamtalk_workspace/src/beamtalk_ws_handler.erl` | Add Transcript subscription + push message forwarding |
+| Cowboy routes | Add static file handler for `priv/` alongside WebSocket route |
 
-**Validates:**
-- Cowboy starts alongside TCP REPL without conflicts
-- JSON protocol works identically over WebSocket and TCP
-- Transcript push messages arrive in real time
-- `eval` round-trip latency is acceptable
-- Session creation/cleanup on WebSocket connect/disconnect
-
-**Does not include:** `load-source` op, Inspector, Editor, multi-pane layout, CLI `--web` flag. Those build on top once the wire works.
+**Validates:** Transcript push messages arrive in real time, browser eval round-trip works.
 
 ### Phase 1: WebSocket Workspace (Size: L)
 
@@ -573,18 +574,15 @@ Build the workspace experience on Phase 0's validated transport. The browser mus
 1. Add `load-source` operation to `beamtalk_repl_server.erl` / `beamtalk_repl_eval.erl`
 2. Build multi-pane `index.html` — Workspace, Transcript, Inspector, Editor panes
 3. Add `--web` flag to CLI
-4. Tests: load-source, Inspector via `inspect` op, error handling
+4. Session reconnection via `resume` op + session ID in URL
+5. Keyboard shortcuts (Ctrl+D Do It, Ctrl+P Print It, Ctrl+I Inspect It)
+6. Tab completion in Workspace pane (using `complete` op)
+7. Command history (up/down arrow)
+8. Tests: load-source, Inspector via `inspect` op, error handling, reconnection
 
-### Phase 2: Polish + Reconnection (Size: M)
+**Frontend complexity cutoff:** Phase 1 is the last phase with vanilla JS. No new JS dependencies (CodeMirror, etc.) after Phase 1. The vanilla JS frontend is intentionally minimal and disposable — it validates the protocol and workspace experience, not the UI technology. Syntax highlighting, pop-out windows, and rich editing wait for Phoenix (Phase 3).
 
-- Session reconnection via `resume` op + session ID in URL
-- Syntax highlighting (CodeMirror)
-- Keyboard shortcuts (Ctrl+D Do It, Ctrl+P Print It, Ctrl+I Inspect It)
-- Tab completion in Workspace pane (using `complete` op)
-- Command history (up/down arrow)
-- Pop-out window support (BroadcastChannel for cross-window communication)
-
-### Phase 3: Live Updates + Authentication (Size: L)
+### Phase 2: Live Updates + Authentication (Size: L)
 
 - Actor registry notification infrastructure (new: subscribe to spawn/stop events)
 - `actor-spawned` and `actor-stopped` push messages
@@ -593,7 +591,7 @@ Build the workspace experience on Phase 0's validated transport. The browser mus
 - HTTPS/WSS support (TLS termination or reverse proxy guidance)
 - Bind to `0.0.0.0` when `--web-remote` flag is used
 
-### Phase 4: Phoenix LiveView IDE (Size: XL)
+### Phase 3: Phoenix LiveView IDE (Size: XL)
 
 - Migrate to Phoenix (Cowboy handlers become Phoenix channels/LiveView)
 - Full IDE from `docs/beamtalk-ide.md`
@@ -601,14 +599,30 @@ Build the workspace experience on Phase 0's validated transport. The browser mus
 - Debugger integration (pause, inspect, resume)
 - Message Timeline visualization
 - PubSub integration for live actor state updates
+- Pop-out windows (LiveView naturally supports multi-window via PubSub)
+- Syntax highlighting (CodeMirror or LiveView-native)
 
-**Note on Phoenix migration:** Phases 1-2 should keep frontend complexity minimal — avoid building a sophisticated JS SPA that gets rewritten in LiveView. The Cowboy WebSocket handler and protocol extensions carry over directly; the HTML/JS frontend is disposable.
+**Note on Phoenix migration:** Phase 1 keeps frontend complexity minimal — no JS framework, no build toolchain. The Cowboy WebSocket handler and protocol extensions carry over directly into Phoenix; only the HTML/JS frontend is replaced.
+
+## Implementation Tracking
+
+**Epic:** BT-684
+**Status:** Planned
+
+| Phase | Issue | Title | Size | Status |
+|-------|-------|-------|------|--------|
+| 0 | BT-683 | Migrate REPL transport from TCP to WebSocket with cookie auth | L | Done |
+| 0 | BT-686 | Browser wire check with Transcript push | M | Planned |
+| 1 | BT-687 | Load-source operation and multi-pane browser workspace | L | Blocked by BT-686 |
+| 1 | BT-688 | Browser workspace keyboard shortcuts, completion, and history | M | Blocked by BT-687 |
+| 1 | BT-689 | CLI --web and --web-port flags for browser workspace | S | Blocked by BT-686 |
+| 2 | BT-690 | Actor lifecycle push messages for browser workspace | M | Blocked by BT-687 |
 
 ## Migration Path
 
-No migration needed — this is purely additive. The existing TCP REPL, CLI workflow, and protocol are unchanged. The `load-source` op (Phase 2) is a new operation alongside the existing `load-file` op.
+No migration needed — this is purely additive. The WebSocket REPL transport (ADR 0020/BT-683) is already in place. The `load-source` op is a new operation alongside the existing `load-file` op.
 
 ## References
-- Related ADRs: [ADR 0004 — Persistent Workspace Management](0004-persistent-workspace-management.md), [ADR 0009 — OTP Application Structure](0009-otp-application-structure.md), [ADR 0010 — Global Objects and Singleton Dispatch](0010-global-objects-and-singleton-dispatch.md)
+- Related ADRs: [ADR 0004 — Persistent Workspace Management](0004-persistent-workspace-management.md), [ADR 0009 — OTP Application Structure](0009-otp-application-structure.md), [ADR 0010 — Global Objects and Singleton Dispatch](0010-global-objects-and-singleton-dispatch.md), [ADR 0020 — Connection Security](0020-connection-security.md), [ADR 0022 — Embedded Compiler via OTP Port](0022-embedded-compiler-via-otp-port.md), [ADR 0027 — Cross-Platform Support](0027-cross-platform-support.md)
 - Documentation: [REPL Protocol](../repl-protocol.md), [IDE Vision](../beamtalk-ide.md), [Design Principles](../beamtalk-principles.md)
 - Prior art: [Livebook](https://livebook.dev/), [Jupyter Kernel Gateway](https://jupyter-kernel-gateway.readthedocs.io/), [Cowboy WebSocket](https://ninenines.eu/docs/en/cowboy/2.9/manual/cowboy_websocket/)
