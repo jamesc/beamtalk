@@ -44,7 +44,16 @@ fn is_global_config_dir(candidate: &Path) -> bool {
 /// project marker, or `start_dir` if no marker is found.
 #[must_use]
 pub fn discover_project_root(start_dir: &Path) -> PathBuf {
-    let mut current = start_dir.to_path_buf();
+    let Ok(meta) = fs::metadata(start_dir) else {
+        return start_dir.to_path_buf();
+    };
+
+    let mut current = if meta.is_dir() {
+        start_dir.to_path_buf()
+    } else {
+        start_dir.parent().unwrap_or(start_dir).to_path_buf()
+    };
+
     loop {
         // Check Beamtalk-specific markers first (highest priority).
         for marker in &PROJECT_MARKERS[..PROJECT_MARKERS.len() - 1] {
@@ -110,6 +119,37 @@ mod tests {
 
         let root = discover_project_root(&dir);
         assert_eq!(root, dir);
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn discover_uses_parent_when_start_path_is_file() {
+        let tmp = unique_temp_dir("beamtalk_core_file_start");
+        let project = tmp.join("project");
+        let src = project.join("src");
+        fs::create_dir_all(&src).expect("create dirs");
+        fs::File::create(project.join("beamtalk.toml")).expect("create manifest");
+
+        let file_path = src.join("example.bt");
+        fs::File::create(&file_path).expect("create source file");
+
+        let root = discover_project_root(&file_path);
+        assert_eq!(root, project);
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn discover_nonexistent_path_returns_input_path() {
+        let tmp = unique_temp_dir("beamtalk_core_nonexistent_start");
+        let project = tmp.join("project");
+        fs::create_dir_all(&project).expect("create project dir");
+        fs::File::create(project.join("beamtalk.toml")).expect("create manifest");
+
+        let missing_path = project.join("does-not-exist").join("subdir");
+        let root = discover_project_root(&missing_path);
+        assert_eq!(root, missing_path);
 
         let _ = fs::remove_dir_all(&tmp);
     }
