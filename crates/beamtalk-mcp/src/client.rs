@@ -337,10 +337,11 @@ mod tests {
     /// Port of the auto-started REPL workspace for integration tests.
     /// Starts `beamtalk repl --port 0` once, discovers the ephemeral port.
     /// The workspace is stopped when the test process exits.
-    static REPL: LazyLock<ReplWorkspace> = LazyLock::new(|| {
+    static REPL: LazyLock<Result<ReplWorkspace, String>> = LazyLock::new(|| {
         let bin_name = format!("beamtalk{}", std::env::consts::EXE_SUFFIX);
-        let bin = find_binary(&bin_name)
-            .unwrap_or_else(|| panic!("Could not find target/debug/{bin_name} — run `cargo build` first"));
+        let bin = find_binary(&bin_name).ok_or_else(|| {
+            format!("Could not find target/debug/{bin_name} — run `cargo build` first")
+        })?;
 
         // Start REPL with stdin=null so it exits after workspace startup.
         // The workspace node remains alive as a detached BEAM process.
@@ -350,7 +351,7 @@ mod tests {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output()
-            .unwrap_or_else(|e| panic!("Failed to start REPL at {}: {e}", bin.display()));
+            .map_err(|e| format!("Failed to start REPL at {}: {e}", bin.display()))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
 
@@ -361,13 +362,13 @@ mod tests {
                 line.strip_prefix("Connected to REPL backend on port ")
                     .and_then(|rest| rest.trim_end_matches('.').trim().parse::<u16>().ok())
             })
-            .unwrap_or_else(|| {
+            .ok_or_else(|| {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                panic!(
+                format!(
                     "REPL did not report port.\nstdout: {stdout}\nstderr: {stderr}\nexit: {:?}",
                     output.status
-                );
-            });
+                )
+            })?;
 
         // Extract workspace ID from stdout for cleanup
         let workspace_id = stdout.lines().find_map(|line| {
@@ -385,55 +386,63 @@ mod tests {
         for _ in 0..max_attempts {
             if StdTcpStream::connect(format!("127.0.0.1:{port}")).is_ok() {
                 eprintln!("MCP tests: REPL workspace ready on port {port}");
-                return ReplWorkspace { port, workspace_id };
+                return Ok(ReplWorkspace { port, workspace_id });
             }
             std::thread::sleep(Duration::from_millis(300));
         }
-        panic!("REPL reported port {port} but TCP connect failed after {timeout_ms}ms");
+        Err(format!(
+            "REPL reported port {port} but TCP connect failed after {timeout_ms}ms"
+        ))
     });
 
     /// Get the port of the shared REPL, starting it if needed.
     /// If `BEAMTALK_TEST_PORT` is set, uses that (external REPL) instead.
-    fn test_port() -> u16 {
+    fn test_port() -> Result<u16, String> {
         if let Ok(port) = std::env::var("BEAMTALK_TEST_PORT") {
             if let Ok(p) = port.parse() {
-                return p;
+                return Ok(p);
             }
         }
-        REPL.port
+        match REPL.as_ref() {
+            Ok(repl) => Ok(repl.port),
+            Err(e) => Err(e.clone()),
+        }
     }
 
     #[tokio::test]
     #[ignore = "integration test — auto-starts REPL workspace"]
-    async fn test_eval_arithmetic() {
-        let client = ReplClient::connect(test_port()).await.unwrap();
+    async fn test_eval_arithmetic() -> Result<(), Box<dyn std::error::Error>> {
+        let client = ReplClient::connect(test_port()?).await?;
         let resp = client.eval("2 + 3").await.unwrap();
         assert!(!resp.is_error(), "eval should succeed");
         assert_eq!(resp.value_string(), "5");
+        Ok(())
     }
 
     #[tokio::test]
     #[ignore = "integration test — auto-starts REPL workspace"]
-    async fn test_eval_string() {
-        let client = ReplClient::connect(test_port()).await.unwrap();
+    async fn test_eval_string() -> Result<(), Box<dyn std::error::Error>> {
+        let client = ReplClient::connect(test_port()?).await?;
         let resp = client.eval("\"hello\"").await.unwrap();
         assert!(!resp.is_error(), "eval should succeed");
         assert_eq!(resp.value_string(), "hello");
+        Ok(())
     }
 
     #[tokio::test]
     #[ignore = "integration test — auto-starts REPL workspace"]
-    async fn test_eval_error() {
-        let client = ReplClient::connect(test_port()).await.unwrap();
+    async fn test_eval_error() -> Result<(), Box<dyn std::error::Error>> {
+        let client = ReplClient::connect(test_port()?).await?;
         let resp = client.eval("42 nonexistentMethod").await.unwrap();
         assert!(resp.is_error(), "should be an error");
         assert!(resp.error_message().is_some(), "should have error message");
+        Ok(())
     }
 
     #[tokio::test]
     #[ignore = "integration test — auto-starts REPL workspace"]
-    async fn test_bindings() {
-        let client = ReplClient::connect(test_port()).await.unwrap();
+    async fn test_bindings() -> Result<(), Box<dyn std::error::Error>> {
+        let client = ReplClient::connect(test_port()?).await?;
 
         // Set a binding
         let resp = client.eval("testVar := 99").await.unwrap();
@@ -447,39 +456,43 @@ mod tests {
             bindings.get("testVar").is_some(),
             "testVar should be in bindings: {bindings}"
         );
+        Ok(())
     }
 
     #[tokio::test]
     #[ignore = "integration test — auto-starts REPL workspace"]
-    async fn test_actors_list() {
-        let client = ReplClient::connect(test_port()).await.unwrap();
+    async fn test_actors_list() -> Result<(), Box<dyn std::error::Error>> {
+        let client = ReplClient::connect(test_port()?).await?;
         let resp = client.actors().await.unwrap();
         assert!(!resp.is_error());
         assert!(resp.actors.is_some(), "should return actors list");
+        Ok(())
     }
 
     #[tokio::test]
     #[ignore = "integration test — auto-starts REPL workspace"]
-    async fn test_modules_list() {
-        let client = ReplClient::connect(test_port()).await.unwrap();
+    async fn test_modules_list() -> Result<(), Box<dyn std::error::Error>> {
+        let client = ReplClient::connect(test_port()?).await?;
         let resp = client.modules().await.unwrap();
         assert!(!resp.is_error());
         assert!(resp.modules.is_some(), "should return modules list");
+        Ok(())
     }
 
     #[tokio::test]
     #[ignore = "integration test — auto-starts REPL workspace"]
-    async fn test_complete() {
-        let client = ReplClient::connect(test_port()).await.unwrap();
+    async fn test_complete() -> Result<(), Box<dyn std::error::Error>> {
+        let client = ReplClient::connect(test_port()?).await?;
         let resp = client.complete("Integer ").await.unwrap();
         assert!(!resp.is_error());
         assert!(resp.completions.is_some(), "should return completions list");
+        Ok(())
     }
 
     #[tokio::test]
     #[ignore = "integration test — auto-starts REPL workspace"]
-    async fn test_load_file_and_spawn_actor() {
-        let client = ReplClient::connect(test_port()).await.unwrap();
+    async fn test_load_file_and_spawn_actor() -> Result<(), Box<dyn std::error::Error>> {
+        let client = ReplClient::connect(test_port()?).await?;
 
         // Load counter
         let resp = client.load_file("examples/counter.bt").await.unwrap();
@@ -516,23 +529,25 @@ mod tests {
         let resp = client.inspect(&counter.pid).await.unwrap();
         assert!(!resp.is_error());
         assert!(resp.state.is_some(), "inspect should return state");
+        Ok(())
     }
 
     #[tokio::test]
     #[ignore = "integration test — auto-starts REPL workspace"]
-    async fn test_docs() {
-        let client = ReplClient::connect(test_port()).await.unwrap();
+    async fn test_docs() -> Result<(), Box<dyn std::error::Error>> {
+        let client = ReplClient::connect(test_port()?).await?;
         let resp = client.docs("Integer", None).await.unwrap();
         assert!(!resp.is_error());
         assert!(resp.docs.is_some(), "should return docs");
         let docs = resp.docs.unwrap();
         assert!(!docs.is_empty(), "docs should not be empty");
+        Ok(())
     }
 
     #[tokio::test]
     #[ignore = "integration test — auto-starts REPL workspace"]
-    async fn test_value_string_formats_correctly() {
-        let client = ReplClient::connect(test_port()).await.unwrap();
+    async fn test_value_string_formats_correctly() -> Result<(), Box<dyn std::error::Error>> {
+        let client = ReplClient::connect(test_port()?).await?;
 
         // Integer value
         let resp = client.eval("42").await.unwrap();
@@ -545,6 +560,7 @@ mod tests {
         // Nil value
         let resp = client.eval("nil").await.unwrap();
         assert_eq!(resp.value_string(), "nil");
+        Ok(())
     }
 
     #[tokio::test]

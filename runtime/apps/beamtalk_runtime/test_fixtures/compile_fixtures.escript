@@ -110,6 +110,7 @@ collect_port_output(Port, Acc) ->
             iolist_to_binary(Acc)
     after 60000 ->
         io:format(standard_error, "beamtalk build timed out after 60s~n", []),
+        catch port_close(Port),
         iolist_to_binary(Acc)
     end.
 
