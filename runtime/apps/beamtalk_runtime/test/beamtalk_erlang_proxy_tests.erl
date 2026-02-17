@@ -256,18 +256,17 @@ dispatch_throw_wraps_as_throw_error_test() ->
 
 dispatch_badarith_wraps_as_type_error_test() ->
     %% error:badarith should be caught and wrapped as type_error
+    %% erlang:'+'(1, a) raises badarith
     Proxy = beamtalk_erlang_proxy:new(erlang),
     try
-        %% erlang:abs(not_a_number) → badarg, but erlang:'+'(1, a) → badarith
-        %% Use a direct call that produces badarith
-        beamtalk_erlang_proxy:dispatch('binary_to_integer:', [<<"not_a_number">>], Proxy),
+        beamtalk_erlang_proxy:dispatch('+:', [1, a], Proxy),
         ?assert(false)
     catch
         error:#{error := Inner} ->
-            %% binary_to_integer with invalid input raises badarg, not badarith
-            %% Just verify it's caught and wrapped
+            ?assertEqual(type_error, Inner#beamtalk_error.kind),
             ?assertEqual('ErlangModule', Inner#beamtalk_error.class),
-            ?assert(is_binary(Inner#beamtalk_error.hint))
+            Details = Inner#beamtalk_error.details,
+            ?assertEqual(badarith, maps:get(erlang_error, Details))
     end.
 
 dispatch_exit_preserves_details_test() ->
