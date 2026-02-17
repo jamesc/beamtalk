@@ -952,15 +952,18 @@ The extended proptest runs nightly alongside cargo-fuzz in the GitHub Actions wo
 
 **Success:** All 5 properties pass with 10,000 cases each.
 
-**Failure:** Proptest finds a failing input and shrinks it to the smallest reproducer. The shrunk case is printed in the test output. Example:
+**Failure:** Proptest finds a failing input and shrinks it to the smallest reproducer. The shrunk case and a seed are printed in the test output. Example:
 ```text
+proptest: Seed for failing test: 0x1234abcd...
 proptest: Shrink failed: parser panicked on input "\x00\xff"
 ```
 
-To reproduce a specific failure, use the seed shown in the output:
+To reproduce a specific failure, use the seed from the output with `PROPTEST_REPLAY`:
 ```bash
-PROPTEST_CASES=1 cargo test -p beamtalk-core property_tests -- parser_never_panics
+PROPTEST_REPLAY="0x1234abcd..." cargo test -p beamtalk-core property_tests -- parser_never_panics
 ```
+
+Proptest also persists failures in `proptest-regressions/` files, so they are automatically replayed on subsequent test runs.
 
 ### Standard CI vs Nightly
 
