@@ -93,8 +93,6 @@ If remote REPL access is added (e.g., `beamtalk repl --remote`), the following s
 
 ## References
 
-- [BT-184](https://linear.app/beamtalk/issue/BT-184): REPL security documentation
-- PR #122 code review (comment 2753831629): Original security observation
 - `runtime/apps/beamtalk_workspace/src/beamtalk_repl_server.erl`: REPL server implementation
 - `crates/beamtalk-cli/src/paths.rs`: Daemon socket path resolution
 - `crates/beamtalk-cli/src/commands/daemon/mod.rs`: Daemon architecture

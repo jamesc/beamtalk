@@ -192,8 +192,8 @@ Object subclass: Counter
 
 ## Language Documentation
 
-- Language features: https://beamtalk.dev/docs/language-features
-- Syntax rationale: https://beamtalk.dev/docs/syntax-rationale
+- Language features: https://jamesc.github.io/beamtalk/docs/language-features
+- Syntax rationale: https://jamesc.github.io/beamtalk/docs/syntax-rationale
 - Examples: see `src/` directory
 "#
     );
@@ -206,7 +206,7 @@ fn write_copilot_instructions(path: &Utf8Path, name: &str) -> Result<()> {
     let content = format!(
         r"# Copilot Instructions for {name}
 
-This is a [Beamtalk](https://beamtalk.dev) project that compiles to the BEAM virtual machine.
+This is a [Beamtalk](https://jamesc.github.io/beamtalk) project that compiles to the BEAM virtual machine.
 
 ## Key Conventions
 

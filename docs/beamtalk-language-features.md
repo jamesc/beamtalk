@@ -93,37 +93,9 @@ String operations respect Unicode grapheme clusters (user-perceived characters):
 
 Charlists are Erlang lists of integer codepoints. Beamtalk uses binaries for strings, but you can convert when needed for Erlang interop via `binary_to_list` / `list_to_binary`.
 
-### Implementation Status
-
-| Feature | Status |
-|---------|--------|
-| UTF-8 string literals | ✅ Implemented - Lexer and parser support |
-| String interpolation | ✅ Implemented (ADR 0023) - `"Hello, {name}!"` compiles to binary construction with `printString` dispatch |
-| Grapheme-aware length | ✅ Available via Erlang `:string` module |
-| Unicode normalization | ✅ Available via Erlang `:unicode` module |
-| Case folding | ✅ Available via Erlang `:string` module |
-| Binary pattern UTF-8 | ❌ Not yet implemented (BT-663) |
-
 ---
 
 ## Core Syntax
-
-### Implementation Status
-
-| Feature | Status | Test Coverage |
-|---------|--------|---------------|
-| Actor definition & spawning | ✅ Implemented | `actor_spawn`, `actor_spawn_with_args` |
-| Unary messages | ✅ Implemented | `async_unary_message`, `unary_operators` |
-| Binary messages/operators | ✅ Implemented | `binary_operators` |
-| Keyword messages | ✅ Implemented | `async_keyword_message`, `multi_keyword_complex_args` |
-| Cascades | ✅ Implemented | `cascades`, `cascade_complex` |
-| Blocks/closures | ✅ Implemented | `blocks_no_args`, `empty_blocks`, `nested_blocks` |
-| Field access & assignment | ✅ Implemented (with limitations) | `actor_state_mutation` |
-| Class definitions | ✅ Implemented | `class_definition` |
-| Map literals | ✅ Implemented | `map_literals` |
-| Pattern matching (`match:`) | ✅ Implemented | `pattern_matching` (stdlib + E2E) |
-| Comments | ✅ Implemented | `comment_handling` |
-| Async message sends | ✅ Implemented | `async_with_await`, `async_keyword_message` |
 
 ### Actor Definition
 
@@ -138,8 +110,6 @@ Actor subclass: Counter
 ```
 
 ### Value Types vs Actors
-
-**Status:** ✅ Implemented
 
 Beamtalk distinguishes between **value types** (immutable data) and **actors** (concurrent processes):
 
@@ -363,24 +333,23 @@ result := 0
 Mutations to actor state (`self.field`) work the same way:
 
 ```beamtalk
-Actor subclass: Counter [
-    state: value = 0
-    state: count = 0
-    
-    // ✅ Field mutation in control flow
-    increment =>
-        [self.value < 10] whileTrue: [
-            self.value := self.value + 1
-        ]
-        ^self.value
-    
-    // ✅ Multiple fields
-    incrementBoth =>
-        [self.value < 10] whileTrue: [
-            self.value := self.value + 1
-            self.count := self.count + 1
-        ]
-]
+Actor subclass: Counter
+  state: value = 0
+  state: count = 0
+
+  // Field mutation in control flow
+  increment =>
+    [self.value < 10] whileTrue: [
+      self.value := self.value + 1
+    ]
+    ^self.value
+
+  // Multiple fields
+  incrementBoth =>
+    [self.value < 10] whileTrue: [
+      self.value := self.value + 1
+      self.count := self.count + 1
+    ]
 ```
 
 ### Mixed Mutations
@@ -440,6 +409,12 @@ testCorrect =>
 ### Error Messages
 
 When you accidentally store a mutating closure, you get helpful guidance:
+
+```beamtalk
+// This won't compile — stored closure can't mutate fields
+myBlock := [:item | self.sum := self.sum + item]
+items do: myBlock
+```
 
 ```text
 Error: Cannot assign to field 'sum' inside a stored closure.
@@ -516,8 +491,6 @@ Smalltalk lacks pattern matching - this is a major ergonomic addition.
 
 ### Match Expression
 
-**Status:** ✅ Implemented
-
 The `match:` keyword message takes a block of pattern arms separated by `;`:
 
 ```beamtalk
@@ -573,9 +546,9 @@ Pattern matching can bind variables in match arms:
 42 match: [x -> x + 1]
 // => 43
 
-// Multiple arms with variable binding
-"hello" match: [s -> s size]
-// => 5
+// Variable binding with guard
+10 match: [x when: [x > 100] -> "big"; x when: [x > 5] -> "medium"; _ -> "small"]
+// => "medium"
 
 // Tuple destructuring in match arms (parser supports; runtime planned)
 // {1, 2} match: [{a, b} -> a + b]
@@ -591,16 +564,16 @@ Hot code reload with dedicated syntax.
 
 ```beamtalk
 // Patch a method on running actors
-patch Counter >> #increment {
+patch Counter >> #increment [
   Telemetry log: "incrementing"
   self.value := self.value + 1
-}
+]
 
 // Patch with state migration
-patch Agent >> state {
+patch Agent >> state [
   // Add new field, migrate existing
   self.memory := self.history ifNil: [OrderedCollection new]
-}
+]
 ```
 
 ---
@@ -616,14 +589,11 @@ patch Agent >> state {
 | Field write (`self.x := v`) | `maps:put('x', v, State)` |
 | Message send | Async: `gen_server:cast` + future |
 | Sync message | `gen_server:call` (opt-in) |
-| Future/Promise | Lightweight process or ref |
 | `await` | Block on future / `receive` |
-| `whenResolved:` | Callback on future completion |
 | Block | Erlang fun (closure) |
 | Image | Running node(s) |
 | Workspace | Connected REPL to live node |
-| Class browser | Code introspection via `code:` module |
-| Global variable | Registered process or application env |
+| Class browser | REPL introspection: `Beamtalk allClasses`, `:h Class` |
 
 ---
 
@@ -631,25 +601,22 @@ patch Agent >> state {
 
 Core classes implemented and tested:
 
-| Class | Status | Description | Test Coverage |
-|-------|--------|-------------|---------------|
-| **Actor** | ✅ Implemented | Base class for all actors (BEAM processes) | `actor_spawn`, `actor_state_mutation` |
-| **Block** | ✅ Implemented | First-class closures | `stdlib_block`, `blocks_no_args` |
-| **Boolean** | ✅ Implemented | `True` and `False` with control flow | `stdlib_boolean` |
-| **Integer** | ✅ Implemented | Arbitrary precision arithmetic | `stdlib_integer` |
-| **String** | ✅ Implemented | UTF-8 text with operations | `stdlib_string`, `string_operations` |
-| **Array** | 🔮 Planned | Fixed-size indexed collection (tuple-backed, O(1) access) | — |
-| **List** | ✅ Implemented | Linked list with fast prepend (`#()` syntax) | `stdlib_list`, `collections` |
-| **Dictionary** | ✅ Implemented | Key-value map | `stdlib_dictionary`, `map_literals` |
-| **Set** | ✅ Implemented | Unordered unique elements | `stdlib_set` |
-| **Stream** | ✅ Implemented | Lazy, closure-based sequences ([ADR 0021](ADR/0021-streams-and-io-design.md)) | `stream`, `stream_collections`, `file_stream` |
-| **Nil** | ✅ Implemented | Null object pattern | `stdlib_nil`, `stdlib_nil_object` |
+| Class | Description |
+|-------|-------------|
+| **Actor** | Base class for all actors (BEAM processes) |
+| **Block** | First-class closures |
+| **Boolean** | `True` and `False` with control flow |
+| **Integer** | Arbitrary precision arithmetic |
+| **String** | UTF-8 text with operations |
+| **List** | Linked list with fast prepend (`#()` syntax) |
+| **Dictionary** | Key-value map |
+| **Set** | Unordered unique elements |
+| **Stream** | Lazy, closure-based sequences ([ADR 0021](ADR/0021-streams-and-io-design.md)) |
+| **Nil** | Null object pattern |
 
-For detailed API documentation, see [beamtalk.dev/apidocs](https://beamtalk.dev/apidocs/).
+For detailed API documentation, see [API Reference](https://jamesc.github.io/beamtalk/apidocs/).
 
 ### Stream — Lazy Pipelines
-
-**Status:** ✅ Implemented ([ADR 0021](ADR/0021-streams-and-io-design.md))
 
 Stream is Beamtalk's universal interface for sequential data. A single, sealed, closure-based type that unifies collection processing, file I/O, and generators under one protocol.
 
@@ -791,8 +758,6 @@ If you need immediate side effects, use the eager collection method (`List do:`)
 
 ### Pragma Annotations (`@primitive` and `@intrinsic`)
 
-**Status:** ✅ Implemented ([ADR 0007](ADR/0007-compilable-stdlib-with-primitive-injection.md))
-
 The standard library uses pragma annotations to declare methods whose implementations are provided by the compiler or runtime rather than written in Beamtalk code.
 
 There are two pragma forms:
@@ -833,52 +798,18 @@ The full list of structural intrinsics: `actorSpawn`, `actorSpawnWith`, `blockVa
 
 Tooling is part of the language, not an afterthought. Beamtalk is designed to be used interactively.
 
-### VS Code Extension
-
-| Feature | Description | Status |
-|---------|-------------|--------|
-| **Live Agent Browser** | Tree view of running actors, supervisors, state | Planned |
-| **Click-to-Inspect** | Select any actor → see state, mailbox, methods | Planned |
-| **Hot-Patch Editor** | Edit method → Ctrl+S → live in <200ms | Planned |
-| **Message Timeline** | Sequence diagram of actor interactions | Planned |
-| **Distributed REPL** | Send messages to actors on any node | Planned |
-| **Syntax Highlighting** | Smalltalk-style message syntax | Planned |
-| **Autocomplete** | Message selectors, actor names, state fields | Planned |
-| **Go to Definition** | Jump to actor/method definitions | Planned |
-| **Error Diagnostics** | Inline errors with source spans | Planned |
-| **Hover Documentation** | Show method signatures and docs | Planned |
-
-### Web Dashboard (Phoenix LiveView)
-
-| Feature | Description |
-|---------|-------------|
-| **Cluster Topology** | Visual map of nodes, actors, supervision trees |
-| **Real-time Metrics** | Messages/sec, crash rates, mailbox depths |
-| **Process Inspector** | Click any process → state, mailbox, links |
-| **Browser-based Patching** | Edit and deploy code from browser |
-| **Telemetry Dashboard** | OpenTelemetry/Langfuse integration |
-| **Message Flow** | Live visualization of message passing |
-| **Memory/GC Stats** | Per-process memory, GC pauses |
-
 ### CLI Tools
 
 ```bash
-# Project management (implemented)
-beamtalk new myapp          # ✅ Create new project
-beamtalk build              # ✅ Compile to BEAM
-beamtalk run                # ✅ Compile and start
-beamtalk check              # ✅ Check for errors without compiling
-beamtalk daemon start/stop  # ✅ Manage compiler daemon
+# Project management
+beamtalk new myapp          # Create new project
+beamtalk build              # Compile to BEAM
+beamtalk run                # Compile and start
+beamtalk check              # Check for errors without compiling
+beamtalk daemon start/stop  # Manage compiler daemon
 
 # Development
-beamtalk repl               # ✅ Interactive REPL (basic implementation)
-beamtalk attach node@host   # ❌ Not yet implemented
-beamtalk inspect pid        # ❌ Not yet implemented
-
-# Debugging (planned)
-beamtalk trace actor        # ❌ Not yet implemented
-beamtalk profile            # ❌ Not yet implemented  
-beamtalk observer           # ❌ Not yet implemented
+beamtalk repl               # Interactive REPL
 ```
 
 ### REPL Features
@@ -888,48 +819,19 @@ beamtalk observer           # ❌ Not yet implemented
 counter := Counter spawn
 counter increment
 counter getValue await  // => 1
-
-// Inspect running actors
-counter inspect         // Opens browser
-counter state           // => {value: 1}
-counter mailbox peek    // => []
-
-// Hot patch
-patch Counter >> #increment {
-  Transcript log: "incrementing"
-  self.value := self.value + 1
-}
-
-// Evaluate in actor context
-counter eval: [self.value := 100]
 ```
 
-### Testing Framework (ADR 0014)
+### VS Code Extension
 
-Beamtalk includes a native test framework inspired by Smalltalk's SUnit. Tests are compiled directly to EUnit modules and run on BEAM — no REPL daemon needed.
+The [Beamtalk VS Code extension](https://github.com/jamesc/beamtalk/tree/main/editors/vscode) provides:
 
-#### Expression Tests (`// =>` assertions)
+- Syntax highlighting for `.bt` files
+- Language Server Protocol (LSP) integration
+- Error diagnostics with source spans
 
-The simplest way to test — expressions with expected results:
+### Testing Framework
 
-```beamtalk
-// tests/stdlib/arithmetic.bt
-
-1 + 2
-// => 3
-
-"hello" size
-// => 5
-
-"hello" ++ " world"
-// => hello world
-```
-
-Run with `just test-stdlib`.
-
-#### TestCase Classes (✅ Implemented)
-
-SUnit-style test classes with lifecycle methods and assertions:
+Beamtalk includes a native test framework inspired by Smalltalk's SUnit.
 
 ```beamtalk
 // test/counter_test.bt
@@ -943,7 +845,6 @@ TestCase subclass: CounterTest
     self assert: (Counter spawn increment await) equals: 1
 
   testMultipleIncrements =>
-    | counter |
     counter := Counter spawn
     3 timesRepeat: [counter increment await]
     self assert: (counter getValue await) equals: 3
@@ -964,17 +865,10 @@ Each test method gets a fresh instance with `setUp` → test → `tearDown` life
 #### Running Tests
 
 ```bash
-# Run TestCase tests in test/ directory
 beamtalk test
-
-# Run expression tests (stdlib)
-just test-stdlib
-
-# Run all tests (unit + stdlib + E2E + runtime)
-just test-all
 ```
 
-#### REPL Integration (✅ Implemented)
+#### REPL Integration
 
 Run tests interactively from the REPL:
 
@@ -992,519 +886,3 @@ Running 2 tests...
   ✓ testIncrement
 ```
 
-### Observability Integration
-
-| System | Integration |
-|--------|-------------|
-| **OpenTelemetry** | Automatic spans for message sends |
-| **Prometheus** | Metrics export (message rates, latencies) |
-| **Langfuse** | LLM agent tracing and prompt management |
-| **Grafana** | Dashboard templates for BEAM metrics |
-| **Honeycomb** | Distributed tracing across nodes |
-
-### Debug/Trace Syntax
-
-```beamtalk
-// Trace all messages to an actor
-counter trace: #all
-
-// Trace specific messages
-counter trace: [#increment, #getValue]
-
-// Conditional breakpoint
-counter breakOn: #increment when: [self.value > 100]
-
-// Log message flow
-Tracer enable: #messageFlow for: Counter
-```
-
----
-
-## Inspiration Sources
-
-### From Smalltalk/Newspeak
-- Message-based syntax
-- Live programming
-- Async actors (Newspeak)
-- Reflection
-
-### From Erlang
-- Pattern matching
-- Binary syntax
-- Process links/monitors
-- Distribution
-
-### From Elixir/Gleam
-- Exhaustive matching
-
-### From Dylan
-- Sealing
-
----
-
-## References
-
-- [Newspeak Language](https://newspeaklanguage.org/)
-- [Dylan Reference](https://opendylan.org/documentation/)
-- [Elixir Guides](https://elixir-lang.org/getting-started/)
-- [Gleam Language Tour](https://gleam.run/book/tour/)
-- [BEAM Book](https://blog.stenmans.org/theBeamBook/)
-
----
-
-## Reflection API
-
-**Status:** ✅ Implemented as of 2026-02-05
-
-All Beamtalk objects automatically respond to standard reflection messages. These are generated by the compiler for every actor class.
-
-### Core Reflection Methods
-
-#### `class`
-
-Returns the class name as an atom.
-
-```beamtalk
-counter := Counter spawn
-counter class    // => Counter
-```
-
-#### `respondsTo: selector`
-
-Checks if an object responds to a given method selector. Pass a symbol literal.
-
-```beamtalk
-counter respondsTo: #increment   // => true
-counter respondsTo: #nonExistent // => false
-```
-
-#### `instVarNames`
-
-Returns a list of instance variable (field) names. Internal fields (starting with `__`) are filtered out.
-
-```beamtalk
-counter instVarNames    // => ["value"]
-```
-
-#### `instVarAt: fieldName`
-
-Returns the value of an instance variable by name (symbol):
-
-```beamtalk
-counter instVarAt: #value    // => 0
-```
-
-Returns `{error, field_not_found}` if the field doesn't exist.
-
-#### `instVarAt:put:`
-
-Sets the value of an instance variable. Returns the new value.
-
-```beamtalk
-counter instVarAt: #value put: 42    // => 42
-```
-
-Returns `{error, field_not_found}` if the field doesn't exist.
-
-**Note:** Only works for mutable instance variables in actors. Primitives (integers, strings) are immutable.
-
-#### `perform:` and `perform:withArguments:`
-
-Dynamically dispatches to a method with the given selector:
-
-```beamtalk
-// Zero-arity method
-counter perform: #getValue    // => <current value>
-
-// Method with arguments (typically used in doesNotUnderstand:)
-doesNotUnderstand: selector args: arguments =>
-  self perform: selector withArguments: arguments
-```
-
-**Relationship to Smalltalk:** Beamtalk provides `perform:` for zero-arity methods and `perform:withArguments:` for methods with arguments, avoiding the proliferation of `perform:with:with:with:` variants.
-
-### Implementation Notes
-
-All reflection methods are automatically generated by the compiler for every actor class. They are added to the method table and dispatch logic at compile time.
-
-Reflection methods are declared in the stdlib via pragma annotations (see [ADR 0007](ADR/0007-compilable-stdlib-with-primitive-injection.md)). For example, `respondsTo:` and `instVarNames` are declared in `lib/Object.bt` with `@intrinsic respondsTo` and `@intrinsic instVarNames` pragmas that generate specialized compiler intrinsic code. The `perform:` and `perform:withArguments:` methods are declared in `lib/Object.bt` with `@intrinsic dynamicSend`, which generates code to send the target selector directly to the actor mailbox.
-
-### Limitations (As of 2026-02-05)
-
-- `instVarAt:` and `instVarAt:put:` require symbol field names (`#fieldName`)
-- No reflection on class methods (only instance methods)
-- No reflection on method metadata (arity, parameters, etc.)
-- Primitives don't support reflection yet
-
-**Note:** Symbol literals (`#selector`) work correctly. Future semantic validation will provide better error messages when users accidentally pass identifiers instead of symbols.
-
-### Future Enhancements
-
-- Reflection support for primitives
-- Better error messages for symbol validation (semantic analysis)
-- Class-level reflection (`allInstances`, `allSubclasses`)
-- Method metadata (`methodDict`, `sourceCodeAt:`)
-- Block reflection (`sourceNode`, `numArgs`)
-
-See [ADR 0005](ADR/0005-beam-object-model-pragmatic-hybrid.md) for full object model design.
-
-## Extension Methods
-
-Extension methods allow adding new methods to existing classes without subclassing.
-This follows Pharo's proven extension method design.
-
-### How Extensions Work
-
-Extensions are registered at runtime via the extension registry (`beamtalk_extensions`).
-When a message is sent that doesn't match a class's compiled methods, the dispatch
-checks the extension registry before walking to the superclass or raising a
-`does_not_understand` error.
-
-### Dispatch Priority
-
-For both Actor classes and value types, the dispatch order is:
-
-1. **Compiled methods** — Methods defined in the class source
-2. **Extension methods** — Methods registered via the extension registry (ADR 0005)
-3. **Inherited methods** — Methods from superclass chain (hierarchy walk)
-4. **doesNotUnderstand:args:** — Custom error handler if defined
-5. **Error** — Structured `#beamtalk_error{kind=does_not_understand}`
-
-### Supported Class Types
-
-| Class Type | Extension Support |
-|------------|-------------------|
-| **Value types** (Integer, String, Boolean, etc.) | ✅ Supported |
-| **Actor classes** (user-defined via `Actor subclass:`) | ✅ Supported |
-
-### Extension Function Signature
-
-Extension functions receive `(Args, Self)`:
-- `Args` — List of message arguments
-- `Self` — The receiver object (value for primitives, `#beamtalk_object{}` for actors)
-
-### Runtime Registration (Erlang API)
-
-```erlang
-%% Register an extension method
-Fun = fun([], Self) -> 42 end,
-beamtalk_extensions:register('Counter', myMethod, Fun, my_library).
-
-%% Check if extension exists
-beamtalk_extensions:has('Counter', myMethod).  % => true
-
-%% List all extensions on a class
-beamtalk_extensions:list('Counter').  % => [{myMethod, my_library}]
-```
-
-### Implementation Notes
-
-- Extensions use a global ETS-based registry with conflict tracking
-- Last-writer-wins policy for conflicting registrations
-- Provenance tracking records which library registered each extension
-- Generated dispatch includes try/catch for bootstrap safety (ETS table may not exist yet)
-
-### Future: `extend` Syntax
-
-A dedicated `extend` keyword message for defining extensions in Beamtalk source
-is planned but not yet implemented:
-
-```beamtalk
-// Future syntax (not yet available):
-Counter extend
-  reset => self setValue: 0
-
-Integer extend
-  factorial => self <= 1 ifTrue: [1] ifFalse: [self * (self - 1) factorial]
-```
-
-### References
-
-- Extension registry: `runtime/apps/beamtalk_runtime/src/beamtalk_extensions.erl`
-- ADR 0005: `docs/ADR/0005-beam-object-model-pragmatic-hybrid.md` (Q3: Extension methods)
-- Design doc: `docs/internal/design-self-as-object.md` (Section 3.3)
-
----
-
-## Not Yet Implemented
-
-> The following features are planned but not yet implemented. They are kept here for review and future reference.
-
-### Pattern Matching in Message Handlers
-
-```beamtalk
-// Match on message structure
-handle: {#ok, value} => self process: value
-handle: {#error, reason} => self logError: reason
-handle: _ => self handleUnknown
-
-// Match with guards
-process: n when: [n > 0] => self positive: n
-process: n when: [n < 0] => self negative: n
-process: 0 => self zero
-```
-
-### Destructuring Assignment
-
-```beamtalk
-// Destructure tuple
-{x, y, z} := point coordinates
-
-// Destructure in block
-results collect: [{#ok, v} -> v; {#error, _} -> nil]
-
-// Nested destructuring
-{name, {street, city}} := person address
-```
-
-### Pipe Operator (Elixir-inspired)
-
-Clean data flow through transformations.
-
-#### Sync Pipe
-
-```beamtalk
-data
-  |> Transform with: options
-  |> Filter where: [:x | x > 0]
-  |> Sort by: #name
-```
-
-#### Async Pipe
-
-```beamtalk
-// Each step returns future, flows through
-data
-  |>> agent1 process
-  |>> agent2 validate
-  |>> agent3 store
-```
-
----
-
-### With Blocks (Elixir/Gleam-inspired)
-
-Early exit on error without deep nesting.
-
-#### Problem: Nested Error Handling
-
-```beamtalk
-// Ugly pyramid of doom
-(file open: path) ifOk: [:f |
-  (f read) ifOk: [:data |
-    (Json parse: data) ifOk: [:json |
-      self process: json]]]
-```
-
-#### Solution: With Blocks
-
-```beamtalk
-with: [
-  file := File open: path
-  data := file read
-  json := Json parse: data
-] do: [
-  self process: json
-] else: [:error |
-  self handleError: error
-]
-```
-
----
-
-### Result Type (Gleam-inspired)
-
-Explicit error handling as alternative to exceptions.
-
-```beamtalk
-// Return Result instead of raising
-divide: a by: b -> Result =>
-  b = 0
-    ifTrue: [Error new: #divisionByZero]
-    ifFalse: [Ok new: a / b]
-
-// Chain with map
-(self divide: 10 by: x)
-  |> map: [:v | v * 2]
-  |> unwrapOr: 0
-
-// Pattern match on result
-result := self divide: a by: b
-result match: [
-  {#ok, v} -> self use: v
-  {#error, e} -> self report: e
-]
-```
-
----
-
-### Comprehensions (Elixir-inspired)
-
-Declarative iteration with filtering.
-
-```beamtalk
-// List comprehension with filter
-for: [x in: 1 to: 10; x > 5]
-yield: [x * 2]
-// => [12, 14, 16, 18, 20]
-
-// Multiple generators
-for: [x in: 1 to: 3; y in: 1 to: 3]
-yield: [{x, y}]
-
-// Parallel iteration
-for: [name in: names; age in: ages]
-yield: [Person new name: name age: age]
-```
-
----
-
-### Supervision (OTP-inspired)
-
-Declarative fault tolerance.
-
-```beamtalk
-Supervisor subclass: WebApp
-  children: [
-    {DatabasePool, scale: 10},
-    HTTPRouter spawn,
-    {MetricsCollector, interval: 5000}
-  ]
-  strategy: #oneForOne
-
-// Actor with supervision spec
-Actor subclass: Worker
-  supervisor: #transient  // Restart on crash, not normal exit
-  maxRestarts: 5
-  restartWindow: 60  // seconds
-```
-
----
-
-### Protocols (Elixir-inspired)
-
-Type-based dispatch for polymorphism.
-
-```beamtalk
-// Define protocol
-Protocol define: #Stringable
-  requiring: [#asString]
-
-// Implement for types
-Integer implements: #Stringable
-  asString => self printString
-
-Point implements: #Stringable
-  asString => "({self x}, {self y})"
-
-// Use generically
-items collect: [:x | x asString]
-```
-
----
-
-### Optional Type Annotations (Dylan-inspired)
-
-Types are optional - add them gradually for safety and optimization.
-
-#### Basic Annotations
-
-```beamtalk
-Actor subclass: Counter
-  state: value: Integer = 0
-
-  increment => self.value := self.value + 1
-  getValue -> Integer => ^self.value
-
-// Typed parameters
-transferFrom: source: Account amount: Money -> Boolean =>
-  source withdraw: amount
-  self deposit: amount
-  ^true
-```
-
-#### Limited Types
-
-```beamtalk
-// Singleton type - exactly one value
-state: direction: #north | #south | #east | #west
-
-// Union type
-state: result: Integer | Error
-
-// False-or type (Option/Maybe)
-state: cache: Integer | False = false
-
-// Subtype constraint
-process: items: <Collection> => ...
-```
-
-#### Sealing for Optimization
-
-```beamtalk
-// Sealed class - no subclasses, enables optimization
-sealed Actor subclass: Point
-  state: x: Float, y: Float
-
-  distanceTo: other: Point -> Float =>
-    ((self.x - other x) squared + (self.y - other y) squared) sqrt
-
-// Sealed method - final implementation
-Counter >> sealed getValue -> Integer => ^self.value
-```
-
-#### BEAM Integration
-
-- Generate Dialyzer `-spec` annotations
-- Type info becomes guards: `when is_integer(X)`
-- Sealed methods can bypass `gen_server` overhead
-
----
-
-### Conditions and Restarts (Dylan-inspired)
-
-Recoverable exceptions with options.
-
-#### Traditional Exception
-
-```beamtalk
-[file open: path]
-  on: FileNotFound
-  do: [:e | ^nil]
-```
-
-#### Conditions with Restarts
-
-```beamtalk
-// Handler chooses recovery option
-[file open: path]
-  on: FileNotFound
-  restarts: [
-    #useDefault -> [^self defaultFile],
-    #retry -> [^self open: (self promptForPath)],
-    #createNew -> [^File create: path]
-  ]
-
-// Signaler offers restart options
-FileNotFound signal: path
-  restarts: [#useDefault, #retry, #createNew]
-```
-
-#### BEAM Mapping
-
-- Conditions → `throw`/`catch` with restart metadata
-- Handler selects restart; execution continues
-- Unhandled → crash (supervisor takes over)
-
----
-
-### Binary Pattern Matching
-
-```beamtalk
-// Parse a network packet
-parsePacket: <<version: 8, length: 16/big, payload: length/binary, rest/binary>> =>
-  Packet new version: version payload: payload
-
-// Build binary
-packet := <<16r01, messageLength: 16/big, messageBytes/binary>>
-```

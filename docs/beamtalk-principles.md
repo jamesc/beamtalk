@@ -34,16 +34,17 @@ Code changes apply to the **running system** without restart.
 
 ---
 
-## 3. Actors Are Everything
+## 3. Actors for Concurrency, Values for Data
 
-Every entity is an **actor** - a BEAM process with state and a mailbox.
+Beamtalk has two kinds of objects: **value types** and **actors**.
 
-- There are no functions, methods, or procedures - only message sends between actors
-- Message sends become actual inter-process messages
-- Built-in fault isolation - one actor crashing doesn't take down others
+- **Value types** (Integer, String, Point, etc.) are plain BEAM terms — no process, no mailbox
+- **Actors** (Counter, Worker, etc.) are BEAM processes with state and a mailbox
+- Both respond to messages with the same syntax — the distinction is transparent to the sender
+- Actors get fault isolation — one actor crashing doesn't take down others
 - Unknown messages trigger `doesNotUnderstand:` for metaprogramming
 
-**Implication:** Object instantiation creates processes; all behavior is message dispatch.
+**Implication:** Actor instantiation creates processes; value types compile to direct BEAM operations.
 
 ---
 
@@ -87,23 +88,22 @@ Source code lives in the **filesystem**, not in a binary image.
 
 - No special syntax for "primitives" - even `+` is a message
 - Control flow via messages to booleans and blocks
-- Encapsulation enforced: only way to interact with object is via messages
-- Newspeak-style: no global namespace, all access through message chains
+- Encapsulation enforced: only way to interact with an object is via messages
 
 **Implication:** Even basic operations compile to message sends (optimized where possible).
 
 ---
 
-## 7. Async-First, Sync When Needed
+## 7. Async Actors, Sync Primitives
 
-Message sends are **asynchronous by default**, returning futures (like Newspeak, unlike traditional Smalltalk).
+Inter-actor message sends are **asynchronous**, returning futures. Primitive operations are synchronous.
 
-- Default sends return immediately with a **future/promise**, not a value
+- Sends to actors return immediately with a **future/promise**, not a value
 - Actors don't block waiting for responses - they continue processing
-- Sync sends available via explicit syntax for simple cases
+- Self-sends, primitive operations, and class methods are synchronous
 - BEAM actors shouldn't block on each other - defeats fault isolation
 
-**Implication:** All inter-actor communication is async; compiler generates futures.
+**Implication:** Inter-actor communication is async with futures; primitives and self-sends are direct calls.
 
 ---
 
@@ -138,7 +138,7 @@ Interop is not an afterthought — it's essential for adoption. The BEAM ecosyst
 - Phoenix, Ecto, Nx are too valuable to abandon
 - Gradual migration must be possible
 
-**Implication:** Generated code follows BEAM conventions exactly. Foreign function interface is simple and low-friction. Build tools integrate with Mix/Rebar3. BEAM interop design needs an ADR.
+**Implication:** Generated code follows BEAM conventions exactly. Foreign function interface is simple and low-friction. Build tools integrate with Mix/Rebar3.
 
 ---
 
@@ -155,32 +155,21 @@ Fault tolerance via **declarative supervision trees**, not library patterns.
 
 ---
 
-## 11. Live Patching is Syntax
+## 11. Live Patching is a Message Send
 
-Hot code reload has **dedicated language syntax**, not just VM capability.
+Hot code reload is just **message sends to class objects** — no special syntax.
 
-- `patch` expressions compile and upgrade running actors
+- Redefine a class to update all future instances
+- Replace individual methods with `Foo >> #selector put: [...]`
+- BEAM's built-in hot code loading provides the foundation
 - State preservation across code versions is automatic
 - Sub-200ms from edit to running in production
 
-**Implication:** Parser and compiler must handle `patch` expressions specially.
+**Implication:** No dedicated syntax needed — live patching falls out naturally from "everything is a message send."
 
 ---
 
-## 12. Agent Systems as Primary Use Case
-
-Beamtalk is designed for **multi-agent AI systems**.
-
-- Spawn swarms of LLM-powered actors (Claude, GPT, etc.)
-- Live inspection of agent reasoning, mailboxes, interactions
-- Edit agent prompts and behaviors while they run
-- Scale to millions of concurrent agents via BEAM's lightweight processes
-
-**Implication:** First-class support for LLM integration, tool use, agent coordination.
-
----
-
-## 13. Compiler is the Language Service (TypeScript Approach)
+## 12. Compiler is the Language Service (TypeScript Approach)
 
 The compiler is **architecturally designed for tooling**, not adapted for it later.
 

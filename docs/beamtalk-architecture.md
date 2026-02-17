@@ -532,37 +532,13 @@ Blocks compile to Erlang funs:
 
 **Beamtalk:**
 ```
-doubled := list collect: [:x | x * 2]
+doubled := #(1, 2, 3) collect: [:x | x * 2]
 ```
 
 **Core Erlang:**
 ```erlang
 let Fun = fun (X) -> call 'erlang':'*'(X, 2)
-in let Doubled = call 'lists':'map'(Fun, List)
-```
-
-### Pattern Matching
-
-Pattern matching compiles to Erlang's `case`:
-
-**Beamtalk:**
-```
-handle: {#ok, value} => self process: value
-handle: {#error, reason} => self logError: reason
-handle: _ => self handleUnknown
-```
-
-**Core Erlang:**
-```erlang
-'handle'/2 = fun (Msg, State) ->
-    case Msg of
-        {'ok', Value} ->
-            call 'dispatch'('process', [Value], State)
-        {'error', Reason} ->
-            call 'dispatch'('logError', [Reason], State)
-        _ ->
-            call 'dispatch'('handleUnknown', [], State)
-    end
+in let Doubled = call 'lists':'map'(Fun, #(1, 2, 3))
 ```
 
 ### Keyword Message Compilation
@@ -571,13 +547,13 @@ Keyword messages flatten to function calls:
 
 **Beamtalk:**
 ```
-array at: 1 put: 'hello'
+#{#x => 1} at: #x put: 'hello'
 ```
 
 **Core Erlang:**
 ```erlang
 %% Selector becomes 'at:put:'
-call 'dispatch'('at:put:', [1, <<"hello">>], ArrayPid)
+call 'dispatch'('at:put:', [#x, <<"hello">>], DictPid)
 ```
 
 ### Binary Operations with Math Precedence
@@ -623,35 +599,9 @@ code_change(OldVsn, State, Extra) ->
 
 **Current behavior:** The `beamtalk_hot_reload` domain service preserves state unchanged. Future enhancements will support automatic field migration.
 
-### Explicit State Migration in Beamtalk (Future Feature)
+### Explicit State Migration in Beamtalk
 
-**Note:** This is a planned feature. Currently, `beamtalk_hot_reload` preserves state unchanged.
-
-The `patch` syntax will include explicit migration:
-
-```
-// Patch with state migration
-patch Agent >> state {
-  // Add new field
-  self.memory := self.history ifNil: [OrderedCollection new]
-
-  // Remove old field
-  self removeField: #oldCache
-}
-```
-
-This will compile to a custom `code_change/3`:
-
-```erlang
-code_change(_OldVsn, State, _Extra) ->
-    %% Execute migration block
-    State1 = case maps:find('history', State) of
-        {ok, History} -> maps:put('memory', History, State);
-        error -> maps:put('memory', orderedcollection:new(), State)
-    end,
-    State2 = maps:remove('oldCache', State1),
-    {ok, State2}.
-```
+State migration during hot reload is handled by redefining the class with new state fields. The runtime's `beamtalk_hot_reload` module detects schema changes and applies them automatically.
 
 ### Automatic Field Migration
 
@@ -805,53 +755,6 @@ Value = receive
 after 30000 ->
     error(future_timeout)
 end
-```
-
-### Continuation Callbacks
-
-**Beamtalk:**
-```
-agent analyze: data
-  whenResolved: [:value | self process: value]
-  whenRejected: [:error | self handle: error]
-```
-
-**Compiles to:**
-```erlang
-FuturePid = beamtalk_future:new(),
-gen_server:cast(AgentPid, {'analyze:', [Data], FuturePid}),
-
-%% Register callbacks (non-blocking)
-FuturePid ! {add_callback, resolved,
-    fun(Value) -> dispatch('process:', [Value], self()) end},
-FuturePid ! {add_callback, rejected,
-    fun(Error) -> dispatch('handle:', [Error], self()) end}
-```
-
-### Async Pipe Implementation
-
-**Beamtalk:**
-```
-data
-  |>> agent1 process
-  |>> agent2 validate
-  |>> agent3 store
-```
-
-**Compiles to chained futures:**
-```erlang
-F1 = beamtalk_future:new(),
-gen_server:cast(Agent1, {'process', [Data], F1}),
-
-F2 = beamtalk_future:new(),
-F1 ! {add_callback, resolved,
-    fun(V1) -> gen_server:cast(Agent2, {'validate', [V1], F2}) end},
-
-F3 = beamtalk_future:new(),
-F2 ! {add_callback, resolved,
-    fun(V2) -> gen_server:cast(Agent3, {'store', [V2], F3}) end},
-
-F3  %% Return final future
 ```
 
 ### Future Cleanup

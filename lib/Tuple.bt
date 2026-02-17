@@ -1,17 +1,22 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// Tuple — Immutable fixed-size collection.
+/// Tuple — Erlang interop type for fixed-size tagged results.
 ///
-/// Tuples are backed by Erlang tuples. Particularly useful for
-/// Erlang interop with `{ok, Value}` and `{error, Reason}` patterns.
+/// Tuples exist primarily for interoperability with Erlang/OTP code.
+/// Many Erlang functions return `{ok, Value}` or `{error, Reason}` tuples.
+/// Use `isOk`, `isError`, `unwrap`, and `unwrapOr:` to work with these results.
+///
+/// For general-purpose collections, prefer List, Dictionary, or Array.
 ///
 /// ## BEAM Mapping
 /// Beamtalk tuples map directly to Erlang tuples.
 ///
 /// ## Examples
 /// ```beamtalk
-/// Tuple new: #(1, 2, 3)
+/// // Working with Erlang return values
+/// result isOk ifTrue: [result unwrap]
+/// result unwrapOr: 'default'
 /// ```
 sealed Collection subclass: Tuple
 
@@ -19,7 +24,7 @@ sealed Collection subclass: Tuple
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (Tuple new: #(1, 2, 3)) size   // => 3
+  /// result size   // => 2 (e.g., an {ok, Value} tuple)
   /// ```
   size -> Integer => @primitive "size"
 
@@ -27,7 +32,7 @@ sealed Collection subclass: Tuple
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (Tuple new: #(10, 20, 30)) at: 2   // => 20
+  /// result at: 2   // => the value from an {ok, Value} tuple
   /// ```
   at: index: Integer => @primitive "at:"
 
@@ -35,7 +40,7 @@ sealed Collection subclass: Tuple
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (Tuple new: #(#ok, 42)) isOk       // => true
+  /// result isOk       // => true when result is {ok, _}
   /// ```
   isOk -> Boolean => @primitive "isOk"
 
@@ -43,7 +48,7 @@ sealed Collection subclass: Tuple
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (Tuple new: #(#error, "oops")) isError   // => true
+  /// result isError   // => true when result is {error, _}
   /// ```
   isError -> Boolean => @primitive "isError"
 
@@ -51,7 +56,7 @@ sealed Collection subclass: Tuple
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (Tuple new: #(#ok, 42)) unwrap     // => 42
+  /// result unwrap     // => 42 when result is {ok, 42}
   /// ```
   unwrap => @primitive "unwrap"
 
@@ -59,7 +64,7 @@ sealed Collection subclass: Tuple
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (Tuple new: #(#error, "oops")) unwrapOr: 0   // => 0
+  /// result unwrapOr: 0   // => 0 when result is {error, _}
   /// ```
   unwrapOr: default => @primitive "unwrapOr:"
 
@@ -67,7 +72,7 @@ sealed Collection subclass: Tuple
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (Tuple new: #(#error, "oops")) unwrapOrElse: [0]   // => 0
+  /// result unwrapOrElse: [0]   // => 0 when result is {error, _}
   /// ```
   unwrapOrElse: block: Block => @primitive "unwrapOrElse:"
 
@@ -75,7 +80,7 @@ sealed Collection subclass: Tuple
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (Tuple new: #(1, 2)) asString
+  /// result asString   // => "{ok,42}"
   /// ```
   asString -> String => @primitive "asString"
 
@@ -83,7 +88,7 @@ sealed Collection subclass: Tuple
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (Tuple new) printString   // => "{}"
+  /// result printString   // => "{ok,42}"
   /// ```
   printString -> String => self asString
 
@@ -91,6 +96,6 @@ sealed Collection subclass: Tuple
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (Tuple new: #(1, 2, 3)) do: [:x | Transcript show: x]
+  /// result do: [:x | Transcript show: x]
   /// ```
   do: block: Block -> Nil => @primitive "do:"
