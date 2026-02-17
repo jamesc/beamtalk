@@ -551,8 +551,18 @@ erlang_class_dispatch(Self, Selector, Args) ->
                 {error, Error, _State} -> beamtalk_error:raise(Error)
             end;
         false ->
-            %% Unary message = module name → return ErlangModule proxy
-            beamtalk_erlang_proxy:new(Selector)
+            %% Only unary messages (no colon) create module proxies
+            SelectorStr = atom_to_list(Selector),
+            case lists:member($:, SelectorStr) of
+                true ->
+                    Error0 = beamtalk_error:new(does_not_understand, 'Erlang'),
+                    Error1 = beamtalk_error:with_selector(Error0, Selector),
+                    Error2 = beamtalk_error:with_hint(Error1,
+                        <<"Use unary message for module name: Erlang moduleName">>),
+                    beamtalk_error:raise(Error2);
+                false ->
+                    beamtalk_erlang_proxy:new(Selector)
+            end
     end.
 
 %% @doc Check if a value type responds to a selector.

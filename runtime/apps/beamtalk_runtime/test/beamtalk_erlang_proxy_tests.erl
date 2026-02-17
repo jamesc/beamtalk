@@ -178,3 +178,32 @@ responds_to_erlang_test() ->
     ErlangObj = #{'$beamtalk_class' => 'Erlang'},
     ?assert(beamtalk_primitive:responds_to(ErlangObj, 'class')),
     ?assert(beamtalk_primitive:responds_to(ErlangObj, 'lists')).
+
+%%% ===================================================================
+%%% Edge cases from adversarial review
+%%% ===================================================================
+
+erlang_keyword_selector_raises_test() ->
+    %% Keyword selectors on Erlang proxy should raise, not create invalid module
+    ErlangObj = #{'$beamtalk_class' => 'Erlang'},
+    try
+        beamtalk_primitive:send(ErlangObj, 'reverse:', [foo]),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(does_not_understand, Inner#beamtalk_error.kind),
+            ?assertEqual('Erlang', Inner#beamtalk_error.class)
+    end.
+
+dispatch_function_clause_error_wraps_test() ->
+    %% function_clause errors should be caught and wrapped
+    Proxy = beamtalk_erlang_proxy:new(lists),
+    try
+        %% lists:nth with invalid args triggers function_clause
+        beamtalk_erlang_proxy:dispatch('nth:', [0, [a]], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(type_error, Inner#beamtalk_error.kind),
+            ?assertEqual('ErlangModule', Inner#beamtalk_error.class)
+    end.

@@ -74,6 +74,18 @@ dispatch(Selector, Args, Self) ->
                     Error0 = beamtalk_error:new(type_error, 'ErlangModule'),
                     Error1 = beamtalk_error:with_selector(Error0, Selector),
                     Error2 = beamtalk_error:with_hint(Error1, <<"Bad argument in Erlang call">>),
+                    beamtalk_error:raise(Error2);
+                error:Reason ->
+                    Error0 = beamtalk_error:new(type_error, 'ErlangModule'),
+                    Error1 = beamtalk_error:with_selector(Error0, Selector),
+                    ReasonBin = iolist_to_binary(io_lib:format("~p", [Reason])),
+                    Hint2 = iolist_to_binary([
+                        <<"Erlang error in ">>,
+                        atom_to_binary(Module, utf8), <<":">>,
+                        atom_to_binary(FunName, utf8), <<": ">>,
+                        ReasonBin
+                    ]),
+                    Error2 = beamtalk_error:with_hint(Error1, Hint2),
                     beamtalk_error:raise(Error2)
             end
     end.
