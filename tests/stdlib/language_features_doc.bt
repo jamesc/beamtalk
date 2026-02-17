@@ -94,6 +94,13 @@
 [:x :y | x + y] value: 3 value: 4
 // => 7
 
+// BT-665: Uncomment when stored block local variable fix lands
+// Block with local variables
+// myBlock := [:x | temp := x * 2. temp + 1]
+// // => _
+// myBlock value: 5
+// // => 11
+
 // ===========================================================================
 // Pattern Matching — Match Expression
 // ===========================================================================
@@ -150,6 +157,41 @@
 // Multiple arms with variable binding
 "hello" match: [s -> s size]
 // => 5
+
+// ===========================================================================
+// Control Flow and Mutations
+// ===========================================================================
+
+// BT-665: Uncomment when local variable mutation fix lands
+// These examples are from the Control Flow section of the doc.
+// They require block analysis to distinguish new local definitions
+// from mutations of captured variables.
+
+// Simple counter with whileTrue:
+// count := 0
+// // => _
+// [count < 10] whileTrue: [count := count + 1]
+// // => _
+// count
+// // => 10
+
+// Collection iteration with do:
+// numbers := #(1, 2, 3, 4, 5)
+// // => _
+// total := 0
+// // => _
+// numbers do: [:n | total := total + n]
+// // => _
+// total
+// // => 15
+
+// Sum with to:do:
+// result := 0
+// // => _
+// 1 to: 10 do: [:n | result := result + n]
+// // => _
+// result
+// // => 55
 
 // ===========================================================================
 // Standard Library — Stream
