@@ -1006,8 +1006,8 @@ impl Parser {
             }
             self.advance(); // consume '=>'
 
-            // Parse value expression (unary only - stops at `,`, `}`)
-            let value = self.parse_unary_message();
+            // Parse value expression (binary to support operators like `+` in values)
+            let value = self.parse_binary_message();
 
             let pair_span = pair_start.merge(value.span());
             pairs.push(MapPair::new(key, value, pair_span));
@@ -1051,9 +1051,9 @@ impl Parser {
 
     /// Parses a list literal: `#(expr, expr, ...)` or `#(head | tail)` (cons)
     ///
-    /// List elements are parsed as unary expressions (primaries + unary messages),
-    /// which stops at binary operators like `,` and `|`. This matches map literal
-    /// parsing behavior.
+    /// List elements are parsed as binary expressions to support operators like `+`
+    /// and `->`. The `,` and `|` delimiters terminate parsing naturally since they
+    /// are not valid binary selectors in element context.
     fn parse_list_literal(&mut self) -> Expression {
         let start_token = self.expect(&TokenKind::ListOpen, "Expected '#('");
         let start = start_token.map_or_else(|| self.current_token().span(), |t: Token| t.span());

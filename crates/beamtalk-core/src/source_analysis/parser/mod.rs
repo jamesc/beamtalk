@@ -1731,6 +1731,90 @@ mod tests {
     }
 
     #[test]
+    fn parse_map_value_binary_expression() {
+        // BT-664: Map values should support binary expressions
+        let module = parse_ok("#{#x => 1 + 2}");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MapLiteral { pairs, .. } => {
+                assert_eq!(pairs.len(), 1);
+                assert!(
+                    matches!(&pairs[0].key, Expression::Literal(Literal::Symbol(s), _) if s == "x")
+                );
+                match &pairs[0].value {
+                    Expression::MessageSend {
+                        receiver,
+                        selector: MessageSelector::Binary(op),
+                        arguments,
+                        ..
+                    } => {
+                        assert!(matches!(
+                            **receiver,
+                            Expression::Literal(Literal::Integer(1), _)
+                        ));
+                        assert_eq!(op.as_str(), "+");
+                        assert_eq!(arguments.len(), 1);
+                        assert!(matches!(
+                            arguments[0],
+                            Expression::Literal(Literal::Integer(2), _)
+                        ));
+                    }
+                    _ => panic!("Expected binary message send as map value"),
+                }
+            }
+            _ => panic!("Expected MapLiteral"),
+        }
+    }
+
+    #[test]
+    fn parse_map_value_multiple_binary_expressions() {
+        // BT-664: Multiple map values with binary expressions
+        let module = parse_ok("#{#x => 1 + 2, #y => 3 * 4}");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MapLiteral { pairs, .. } => {
+                assert_eq!(pairs.len(), 2);
+                assert!(matches!(
+                    &pairs[0].value,
+                    Expression::MessageSend {
+                        selector: MessageSelector::Binary(op),
+                        ..
+                    } if op.as_str() == "+"
+                ));
+                assert!(matches!(
+                    &pairs[1].value,
+                    Expression::MessageSend {
+                        selector: MessageSelector::Binary(op),
+                        ..
+                    } if op.as_str() == "*"
+                ));
+            }
+            _ => panic!("Expected MapLiteral"),
+        }
+    }
+
+    #[test]
+    fn parse_map_value_unary_on_binary() {
+        // BT-664: Map values with unary messages on binary results
+        let module = parse_ok("#{#x => self x + other x}");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MapLiteral { pairs, .. } => {
+                assert_eq!(pairs.len(), 1);
+                // Value should be a binary message send (+)
+                assert!(matches!(
+                    &pairs[0].value,
+                    Expression::MessageSend {
+                        selector: MessageSelector::Binary(op),
+                        ..
+                    } if op.as_str() == "+"
+                ));
+            }
+            _ => panic!("Expected MapLiteral"),
+        }
+    }
+
+    #[test]
     fn parse_map_assignment() {
         let module = parse_ok("person := #{#name => \"Alice\"}");
         assert_eq!(module.expressions.len(), 1);
