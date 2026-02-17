@@ -172,7 +172,7 @@ Object subclass: Point
   state: y = 0
   
   // Methods return new instances (immutable)
-  plus: other => Point new: #{x => self.x + other.x, y => self.y + other.y}
+  plus: other => Point new: #{x => (self.x + other x), y => (self.y + other y)}
   describe => "Point({self.x}, {self.y})"
 
 // Actor - process with mailbox
