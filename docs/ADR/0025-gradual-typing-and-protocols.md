@@ -566,8 +566,8 @@ Union types, generic types, singleton types, type narrowing. Deferred to future 
 
 | Phase | Issue | Description | Size | Status |
 |-------|-------|-------------|------|--------|
-| 1 | TBD | Type inference from class definitions | M-L | Planned |
-| 2 | TBD | Optional type annotations + Dialyzer spec generation | M | Planned |
+| 1 | BT-587, BT-671, BT-672 | Type inference from class definitions; argument/return/state checks | M-L | In Progress |
+| 2 | BT-673 | Optional type annotations syntax + user-facing coverage (stdlib/docs/examples); Dialyzer spec generation pending | M | In Progress |
 | 3 | TBD | Protocol definitions and structural conformance | L | Planned |
 | 4 | TBD | Advanced types (union, generic, singleton, narrowing) | XL | Future |
 

@@ -36,6 +36,17 @@ $ beamtalk repl
 > :load examples/bank/transfer_agent.bt
 ```text
 
+Typed variant:
+
+```text
+> :load examples/bank/typed_account.bt
+> typed := TypedAccount spawn
+> typed deposit: 100
+100
+> typed balance
+100
+```text
+
 ### Create a bank and open accounts
 
 ```text

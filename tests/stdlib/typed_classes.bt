@@ -1,0 +1,37 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Typed class behavior smoke tests (BT-673)
+
+// @load tests/e2e/fixtures/typed_counter.bt
+// @load examples/bank/typed_account.bt
+
+counter := TypedCounter spawn
+// => #Actor<TypedCounter,_>
+
+counter increment await
+// => 1
+
+(counter add: 5) await
+// => 6
+
+counter current await
+// => 6
+
+account := TypedAccount spawn
+// => #Actor<TypedAccount,_>
+
+(account setOwner: "Alice") await
+// => Alice
+
+(account deposit: 10) await
+// => 10
+
+(account withdraw: 3) await
+// => 7
+
+account balance await
+// => 7
+
+account owner await
+// => Alice

@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+typed Object subclass: TypedMath
+  identity: value: Integer -> Integer => ^value
+
+  identityWithSpace: value : Integer -> Integer => ^value
+
+  + other : Number -> Number => ^other
+
+  sum: left: Integer with: right: Integer -> Integer => ^left + right
+
+  maybeName: flag: Boolean -> Integer | String => ^flag ifTrue: [1] ifFalse: ["none"]

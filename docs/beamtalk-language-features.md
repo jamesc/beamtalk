@@ -2,7 +2,7 @@
 
 Planned language features for beamtalk. See [beamtalk-principles.md](beamtalk-principles.md) for design philosophy and [beamtalk-syntax-rationale.md](beamtalk-syntax-rationale.md) for syntax design decisions.
 
-**Status:** Design phase - syntax and semantics subject to change.
+**Status:** Active development — implemented features are stable; planned sections are marked inline.
 
 **Syntax note:** Beamtalk uses a cleaned-up Smalltalk syntax: `//` comments (not `"..."`), standard math precedence (not left-to-right), and optional statement terminators (newlines work).
 
@@ -12,6 +12,7 @@ Planned language features for beamtalk. See [beamtalk-principles.md](beamtalk-pr
 
 - [String Encoding and UTF-8](#string-encoding-and-utf-8)
 - [Core Syntax](#core-syntax)
+- [Gradual Typing (ADR 0025)](#gradual-typing-adr-0025)
 - [Async Message Passing](#async-message-passing)
 - [Pattern Matching](#pattern-matching)
 - [Live Patching](#live-patching)
@@ -272,6 +273,56 @@ true ifTrue: [self.x := 5]
 // Block with local variables
 [:x | temp := x * 2. temp + 1]
 ```
+
+---
+
+## Gradual Typing (ADR 0025)
+
+Beamtalk supports **optional type annotations** and **typed classes**. Type checks are compile-time warnings (not hard errors), so interactive workflows remain fast.
+
+### Typed Class Syntax
+
+```beamtalk
+typed Actor subclass: TypedAccount
+  state: balance: Integer = 0
+  state: owner: String = ""
+
+  deposit: amount: Integer -> Integer =>
+    self.balance := self.balance + amount
+    ^self.balance
+
+  balance -> Integer => ^self.balance
+```
+
+### Annotation Forms
+
+```beamtalk
+// Unary return annotation
+getBalance -> Integer => self.balance
+
+// Keyword parameter annotation
+deposit: amount: Integer => self.balance := self.balance + amount
+
+// Keyword parameter annotation (space before colon also supported)
+deposit: amount : Integer => self.balance := self.balance + amount
+
+// Binary parameter + return annotation
++ other : Number -> Number => other
+
+// Multiple keyword parameters with annotations
+sum: left: Integer with: right: Integer -> Integer => left + right
+
+// Union type annotations parse (full checking is phased in)
+maybeName: flag: Boolean -> Integer | String =>
+  ^flag ifTrue: [1] ifFalse: ["none"]
+```
+
+### Current Semantics
+
+- Type diagnostics are warnings, never compile-stopping errors.
+- `typed` classes require parameter/return annotations on non-primitive methods.
+- State annotations (`state: value: Integer = 0`) are checked for defaults and `self.field := ...` assignments.
+- Complex annotations (e.g., unions/generics) are parsed and accepted; deeper checking is phased in.
 
 ---
 
@@ -884,4 +935,3 @@ Running 2 tests...
 > CounterTest run: #testIncrement
   ✓ testIncrement
 ```
-

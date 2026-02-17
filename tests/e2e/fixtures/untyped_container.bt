@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+Actor subclass: UntypedContainer
+  state: item = nil
+
+  setItem: value =>
+    self.item := value.
+    ^self.item

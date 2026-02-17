@@ -1,0 +1,49 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Regression coverage for permissive typing paths (BT-673)
+// These cases should compile and run cleanly with type checking enabled.
+
+// @load tests/e2e/fixtures/typed_ledger.bt
+// @load tests/e2e/fixtures/untyped_container.bt
+// @load tests/e2e/fixtures/typed_math.bt
+// @load examples/bank/typed_account.bt
+
+ledger := TypedLedger spawn
+// => #Actor<TypedLedger,_>
+
+ledger addOne await
+// => 1
+
+ledger addOne await
+// => 2
+
+untyped := UntypedContainer spawn
+// => #Actor<UntypedContainer,_>
+
+(untyped setItem: "hello") await
+// => hello
+
+(untyped setItem: 99) await
+// => 99
+
+typed := TypedAccount spawn
+// => #Actor<TypedAccount,_>
+
+(typed deposit: 20) await
+// => 20
+
+(typed deposit: (5 asType: Integer)) await
+// => 25
+
+typed balance await
+// => 25
+
+math2 := TypedMath new
+// => _
+
+math2 maybeName: false
+// => none
+
+math2 maybeName: true
+// => 1
