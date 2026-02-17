@@ -921,7 +921,7 @@ The simplest way to test — expressions with expected results:
 "hello" size
 // => 5
 
-"hello" , " world"
+"hello" ++ " world"
 // => hello world
 ```
 

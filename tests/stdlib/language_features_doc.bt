@@ -1,0 +1,191 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Auto-tests for examples in docs/beamtalk-language-features.md
+//
+// Each example is from a specific section of the language features doc.
+// If a test fails, the doc is out of date (or vice versa).
+// Keep this file in sync with the doc.
+
+// ===========================================================================
+// String Encoding and UTF-8
+// ===========================================================================
+
+// Length in graphemes, not bytes
+"Hello" length
+// => 5
+
+"世界" length
+// => 2
+
+// Slicing by grapheme
+"Hello" at: 1
+// => H
+
+"世界" at: 1
+// => 世
+
+// Case conversion
+"HELLO" lowercase
+// => hello
+
+"straße" uppercase
+// => STRASSE
+
+// ===========================================================================
+// Core Syntax — Binary Operators
+// ===========================================================================
+
+// Exponentiation
+2 ** 10
+// => 1024
+
+// Multiplicative
+3 * 4
+// => 12
+
+10 / 2
+// => 5.0
+
+17 % 5
+// => 2
+
+// Additive
+3 + 4
+// => 7
+
+10 - 3
+// => 7
+
+"Hello" ++ " World"
+// => Hello World
+
+// Comparison
+3 < 5
+// => true
+
+5 > 3
+// => true
+
+3 <= 3
+// => true
+
+5 >= 3
+// => true
+
+// Equality
+5 =:= 5
+// => true
+
+5 == 5.0
+// => true
+
+5 /= 6
+// => true
+
+5 =/= 6
+// => true
+
+// ===========================================================================
+// Blocks (Closures)
+// ===========================================================================
+
+// Block with arguments
+[:x :y | x + y] value: 3 value: 4
+// => 7
+
+// ===========================================================================
+// Pattern Matching — Match Expression
+// ===========================================================================
+
+// Variable binding in patterns
+42 match: [n -> n + 1]
+// => 43
+
+// Match on computed expression
+(3 + 4) match: [7 -> "correct"; _ -> "wrong"]
+// => correct
+
+// Integer literal matching
+1 match: [1 -> "one"; 2 -> "two"; _ -> "other"]
+// => one
+
+2 match: [1 -> "one"; 2 -> "two"; _ -> "other"]
+// => two
+
+3 match: [1 -> "one"; 2 -> "two"; _ -> "other"]
+// => other
+
+// Symbol matching
+#ok match: [#ok -> "success"; #error -> "failure"; _ -> "unknown"]
+// => success
+
+// String matching
+"hello" match: ["hello" -> "hi"; _ -> "huh?"]
+// => hi
+
+// Negative number patterns
+-1 match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
+// => minus one
+
+0 match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
+// => zero
+
+// Guard clauses with when:
+10 match: [n when: [n > 100] -> "big"; n when: [n > 5] -> "medium"; _ -> "small"]
+// => medium
+
+// Wildcard match
+42 match: [_ -> "matched"]
+// => matched
+
+// ===========================================================================
+// Destructuring in Match Arms
+// ===========================================================================
+
+// Variable captures the matched value
+42 match: [x -> x + 1]
+// => 43
+
+// Multiple arms with variable binding
+"hello" match: [s -> s size]
+// => 5
+
+// ===========================================================================
+// Standard Library — Stream
+// ===========================================================================
+
+// Terminal forces computation through the pipeline
+((Stream from: 1) select: [:n | n isEven]) take: 5
+// => [2,4,6,8,10]
+
+(Stream on: #(1, 2, 3, 4)) inject: 0 into: [:sum :n | sum + n]
+// => 10
+
+// Stream printString — pipeline inspection
+(Stream from: 1) printString
+// => Stream(from: 1)
+
+(Stream on: #(1, 2, 3)) printString
+// => Stream(on: [...])
+
+((Stream from: 1) select: [:n | n isEven]) printString
+// => Stream(from: 1) | select: [...]
+
+// Eager vs Lazy boundary
+#(1, 2, 3, 4, 5) select: [:n | n > 2]
+// => [3,4,5]
+
+// ===========================================================================
+// Testing Framework — Expression Tests
+// ===========================================================================
+
+// From the expression tests example
+1 + 2
+// => 3
+
+"hello" size
+// => 5
+
+"hello" ++ " world"
+// => hello world
