@@ -57,3 +57,16 @@ count := 0
 myBlock := [count := count + 1]
 // => ERROR: has no effect on outer scope
 
+// --- BT-665: New local definitions in stored closures ---
+
+// New local variable definition inside stored closure should work
+myBlock := [:x | temp := x * 2. temp + 1]
+// => _
+myBlock value: 5
+// => 11
+
+// Simple new local definition (no capture) should work
+myBlock := [temp := 42. temp]
+// => _
+myBlock value
+// => 42
