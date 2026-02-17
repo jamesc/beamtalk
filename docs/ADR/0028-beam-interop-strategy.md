@@ -82,7 +82,7 @@ Erlang string uppercase: "hello"
 > Erlang lists reverse: #(1, 2, 3)
 #(3, 2, 1)
 
-> Erlang lists seq: 1 to: 10
+> Erlang lists seq: 1 with: 10
 #(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 
 > proxy := Erlang maps
@@ -102,9 +102,9 @@ Beamtalk keyword messages map to Erlang functions by using the **first keyword a
 | Beamtalk message send | Erlang call | Rule |
 |---|---|---|
 | `Erlang lists reverse: xs` | `lists:reverse(Xs)` | Unary: keyword = function name |
-| `Erlang lists seq: 1 to: 10` | `lists:seq(1, 10)` | Multi-keyword: first keyword = function, rest = extra args |
+| `Erlang lists seq: 1 with: 10` | `lists:seq(1, 10)` | Multi-keyword: first keyword = function, rest = extra args |
 | `Erlang erlang now` | `erlang:now()` | Unary (no args): message name = function name |
-| `Erlang math pow: 2 exp: 10` | `math:pow(2, 10)` | First keyword = function, additional args positional |
+| `Erlang math pow: 2 with: 10` | `math:pow(2, 10)` | First keyword = function, additional args positional |
 
 **Escaping for unusual function names:**
 
@@ -195,8 +195,8 @@ proxy call: #printString args: #()    // => calls someModule:printString()
 Some Erlang functions have multiple arities (e.g., `lists:seq/2` and `lists:seq/3`). Arity is determined by the number of arguments in the message send — keyword count maps directly:
 
 ```beamtalk
-Erlang lists seq: 1 to: 10              // => lists:seq(1, 10) — arity 2
-Erlang lists seq: 1 to: 10 step: 2      // => lists:seq(1, 10, 2) — arity 3
+Erlang lists seq: 1 with: 10              // => lists:seq(1, 10) — arity 2
+Erlang lists seq: 1 with: 10 with: 2     // => lists:seq(1, 10, 2) — arity 3
 ```
 
 ### 2. FFI Philosophy: Transparent, Not Wrapper-Based
