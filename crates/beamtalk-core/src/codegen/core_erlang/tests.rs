@@ -1714,8 +1714,9 @@ fn test_validate_stored_closure_empty_block() {
 }
 
 #[test]
-fn test_validate_stored_closure_with_local_mutation() {
-    // Block with local variable assignment: [count := count + 1]
+fn test_validate_stored_closure_with_captured_mutation() {
+    // Block that reads and writes a captured variable: [count := count + 1]
+    // `count` is read (captured from outer scope) and written → should error
     let block = Block {
         parameters: vec![],
         body: vec![Expression::Assignment {
@@ -1723,20 +1724,98 @@ fn test_validate_stored_closure_with_local_mutation() {
                 "count",
                 Span::new(1, 6),
             ))),
-            value: Box::new(Expression::Literal(Literal::Integer(1), Span::new(10, 11))),
-            span: Span::new(1, 11),
+            value: Box::new(Expression::MessageSend {
+                receiver: Box::new(Expression::Identifier(Identifier::new(
+                    "count",
+                    Span::new(10, 15),
+                ))),
+                selector: MessageSelector::Binary("+".into()),
+                arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(18, 19))],
+                span: Span::new(10, 19),
+            }),
+            span: Span::new(1, 19),
         }],
-        span: Span::new(0, 12),
+        span: Span::new(0, 20),
     };
 
     let result = CoreErlangGenerator::validate_stored_closure(&block, "test".to_string());
-    assert!(result.is_err(), "Local mutation should produce error");
+    assert!(
+        result.is_err(),
+        "Captured variable mutation should produce error"
+    );
 
     if let Err(CodeGenError::LocalMutationInStoredClosure { variable, .. }) = result {
         assert_eq!(variable, "count");
     } else {
         panic!("Expected LocalMutationInStoredClosure error");
     }
+}
+
+#[test]
+fn test_validate_stored_closure_with_new_local_definition() {
+    // BT-665: Block with only new local variable definition: [temp := 1]
+    // `temp` is never read from outer scope → should be allowed
+    let block = Block {
+        parameters: vec![],
+        body: vec![Expression::Assignment {
+            target: Box::new(Expression::Identifier(Identifier::new(
+                "temp",
+                Span::new(1, 5),
+            ))),
+            value: Box::new(Expression::Literal(Literal::Integer(1), Span::new(9, 10))),
+            span: Span::new(1, 10),
+        }],
+        span: Span::new(0, 11),
+    };
+
+    let result = CoreErlangGenerator::validate_stored_closure(&block, "test".to_string());
+    assert!(
+        result.is_ok(),
+        "New local definition should be allowed in stored closure"
+    );
+}
+
+#[test]
+fn test_validate_stored_closure_with_new_local_used_later() {
+    // BT-665: Block defines a new local and uses it later: [:x | temp := x * 2. temp + 1]
+    // `temp` is defined then read — NOT a captured variable → should be allowed
+    let block = Block {
+        parameters: vec![BlockParameter::new("x", Span::new(1, 2))],
+        body: vec![
+            Expression::Assignment {
+                target: Box::new(Expression::Identifier(Identifier::new(
+                    "temp",
+                    Span::new(5, 9),
+                ))),
+                value: Box::new(Expression::MessageSend {
+                    receiver: Box::new(Expression::Identifier(Identifier::new(
+                        "x",
+                        Span::new(13, 14),
+                    ))),
+                    selector: MessageSelector::Binary("*".into()),
+                    arguments: vec![Expression::Literal(Literal::Integer(2), Span::new(17, 18))],
+                    span: Span::new(13, 18),
+                }),
+                span: Span::new(5, 18),
+            },
+            Expression::MessageSend {
+                receiver: Box::new(Expression::Identifier(Identifier::new(
+                    "temp",
+                    Span::new(20, 24),
+                ))),
+                selector: MessageSelector::Binary("+".into()),
+                arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(27, 28))],
+                span: Span::new(20, 28),
+            },
+        ],
+        span: Span::new(0, 29),
+    };
+
+    let result = CoreErlangGenerator::validate_stored_closure(&block, "test".to_string());
+    assert!(
+        result.is_ok(),
+        "Block with new local definition used later should be allowed"
+    );
 }
 
 #[test]
