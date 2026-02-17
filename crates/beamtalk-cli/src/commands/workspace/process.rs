@@ -94,14 +94,35 @@ pub fn is_node_running(info: &NodeInfo) -> bool {
 }
 
 /// Read the nonce from a port file that matches the given port.
+/// Scans all workspace directories since we don't know `workspace_id` here.
 /// Returns `None` if no matching port file found or on read error.
 fn read_port_file_nonce(port: u16) -> Option<String> {
-    // We don't know the workspace_id here, so we can't directly look up
-    // the port file. The nonce validation is best-effort.
-    // The caller (is_node_running) already has the nonce from NodeInfo.
-    // We validate by checking that the port file still exists and matches.
-    // This is a simplified check since we already did the TCP probe.
-    let _ = port;
+    #[derive(serde::Deserialize)]
+    struct PortFile {
+        port: u16,
+        nonce: String,
+    }
+
+    let home_dir = dirs::home_dir()?;
+    let workspaces_root = home_dir.join(".beamtalk").join("workspaces");
+
+    let entries = std::fs::read_dir(workspaces_root).ok()?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let port_file_path = path.join("port");
+        let Ok(contents) = std::fs::read_to_string(&port_file_path) else {
+            continue;
+        };
+        if let Ok(parsed) = serde_json::from_str::<PortFile>(&contents) {
+            if parsed.port == port {
+                return Some(parsed.nonce);
+            }
+        }
+    }
     None
 }
 

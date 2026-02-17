@@ -146,10 +146,28 @@ handle_protocol(Data, SessionPid, State) ->
     end.
 
 %% @private
-%% Handle shutdown op — cookie already validated at auth time.
+%% Handle shutdown op — re-validates cookie as an extra security measure.
+%% Even though WebSocket is already authenticated, shutdown is a privileged
+%% operation that requires explicit cookie authorization in the message.
 handle_shutdown(Msg, State) ->
-    ?LOG_INFO("Shutdown requested via WebSocket protocol", #{}),
-    erlang:send_after(100, self(), shutdown_requested),
-    Reply = beamtalk_repl_protocol:encode_status(ok, Msg,
-        fun beamtalk_repl_json:term_to_json/1),
-    {[{text, Reply}], State}.
+    Params = beamtalk_repl_protocol:get_params(Msg),
+    case maps:get(<<"cookie">>, Params, undefined) of
+        undefined ->
+            ?LOG_WARNING("Shutdown denied: missing cookie in message", #{}),
+            ErrorJson = beamtalk_repl_json:format_error(<<"Shutdown requires cookie">>),
+            {[{text, ErrorJson}], State};
+        ProvidedCookie ->
+            NodeCookie = atom_to_binary(erlang:get_cookie(), utf8),
+            case crypto:hash_equals(ProvidedCookie, NodeCookie) of
+                true ->
+                    ?LOG_INFO("Shutdown requested via WebSocket protocol", #{}),
+                    erlang:send_after(100, self(), shutdown_requested),
+                    Reply = beamtalk_repl_protocol:encode_status(ok, Msg,
+                        fun beamtalk_repl_json:term_to_json/1),
+                    {[{text, Reply}], State};
+                false ->
+                    ?LOG_WARNING("Shutdown denied: invalid cookie", #{}),
+                    ErrorJson = beamtalk_repl_json:format_error(<<"Invalid shutdown cookie">>),
+                    {[{text, ErrorJson}], State}
+            end
+    end.
