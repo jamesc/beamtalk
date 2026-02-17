@@ -122,19 +122,19 @@ Erlang io format: "~p~n" args: #(value)
 
 ```beamtalk
 > Erlang lists nonexistent: 42
-ERROR: #UndefinedFunctionError
+ERROR: #RuntimeError
   Module: lists
   Function: nonexistent/1
   Hint: This Erlang function does not exist. Check spelling and arity.
 
 > Erlang bogus_module reverse: #(1, 2, 3)
-ERROR: #UndefinedFunctionError
+ERROR: #RuntimeError
   Module: bogus_module
   Function: reverse/1
   Hint: Erlang module 'bogus_module' is not loaded. Is it on the code path?
 
 > Erlang lists reverse: 1 extra: 2
-ERROR: #UndefinedFunctionError
+ERROR: #RuntimeError
   Module: lists
   Function: reverse/2
   Hint: lists:reverse/1 exists but was called with 2 arguments.
@@ -144,28 +144,39 @@ Errors from Erlang calls are wrapped in structured Beamtalk exceptions, not raw 
 
 **Exception mapping:**
 
-Erlang functions can fail via `error`, `exit`, or `throw`. The proxy translates all three into structured Beamtalk exceptions:
+Erlang functions can fail via `error`, `exit`, or `throw`. Erlang `error` exceptions map to existing Beamtalk exception classes (they're conceptually the same errors). Erlang `exit` and `throw` are foreign concepts that map to a new `BEAMError` subclass hierarchy:
 
-| Erlang exception | Beamtalk exception | Example |
+| Erlang exception | Beamtalk exception | Rationale |
 |---|---|---|
-| `error:undef` | `#UndefinedFunctionError` | Module or function doesn't exist |
-| `error:badarg` | `#ArgumentError` | Wrong argument type |
-| `error:function_clause` | `#ArgumentError` | No clause matches |
-| `error:badarith` | `#ArithmeticError` | Invalid arithmetic operation |
-| `exit:Reason` | `#ExitError` | Process exit signal |
-| `throw:Value` | `#ThrowError` | Non-local return |
+| `error:undef` | `RuntimeError` (kind: `does_not_understand`) | Same concept as Beamtalk's "method not found" |
+| `error:badarg` | `TypeError` | Same concept as Beamtalk's type mismatch |
+| `error:function_clause` | `RuntimeError` (kind: `arity_mismatch`) | Pattern match / arity failure |
+| `error:badarith` | `TypeError` | Arithmetic type error |
+| `exit:Reason` | `ExitError` (subclass of `BEAMError`) | Foreign concept — BEAM process exit signal |
+| `throw:Value` | `ThrowError` (subclass of `BEAMError`) | Foreign concept — BEAM non-local return |
+
+**New exception hierarchy addition:**
+
+```
+Error
+└── BEAMError              ← base class for foreign BEAM-specific exceptions
+    ├── ExitError           ← exit:Reason
+    └── ThrowError          ← throw:Value
+```
+
+`BEAMError` exists because `exit` and `throw` have no Beamtalk equivalent — they are BEAM-specific control flow mechanisms. Standard Erlang `error` exceptions reuse existing Beamtalk classes since they represent the same concepts (type errors, missing functions, etc.).
 
 All exceptions include the original Erlang error in `details` for debugging:
 ```beamtalk
 > Erlang lists nth: 0 from: #(1, 2)
-ERROR: #ArgumentError
+ERROR: #RuntimeError
   Module: lists
   Function: nth/2
   Reason: function_clause
   Hint: Erlang function raised 'function_clause'. Check argument types and values.
 ```
 
-**Note:** Exception classes `UndefinedFunctionError`, `ArgumentError`, `ArithmeticError`, `ExitError`, and `ThrowError` are new — they extend ADR 0015's exception hierarchy. Implementation requires adding these classes to `lib/` and updating `beamtalk_exception_handler.erl`.
+**Note:** `BEAMError`, `ExitError`, and `ThrowError` are new classes extending ADR 0015's exception hierarchy. Implementation requires adding these classes to `lib/` and updating `beamtalk_exception_handler.erl`. Existing classes (`RuntimeError`, `TypeError`) are reused for Erlang `error:*` exceptions — no changes needed.
 
 **Proxy selector collision — reserved names:**
 
