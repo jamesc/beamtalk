@@ -106,7 +106,7 @@ build-vscode: build-lsp
     New-Item -ItemType Directory -Force -Path editors\vscode\bin | Out-Null
     Copy-Item target\debug\beamtalk-lsp.exe editors\vscode\bin\beamtalk-lsp.exe
     @echo "   Bundled debug beamtalk-lsp.exe"
-    Push-Location editors\vscode; npm install --quiet; npm run compile; Pop-Location
+    Push-Location editors\vscode; try { npm install --quiet; if ($LASTEXITCODE -ne 0) { throw "npm install failed" }; npm run compile; if ($LASTEXITCODE -ne 0) { throw "npm run compile failed" } } finally { Pop-Location }
     @echo "✅ VS Code extension built for local install from editors/vscode"
 
 # Build Erlang runtime
@@ -679,9 +679,9 @@ dist-vscode-platform target:
     @echo "📦 Building VS Code extension for {{target}}..."
     if (!(Get-Command npm -ErrorAction SilentlyContinue)) { Write-Error "npm not found"; exit 1 }
     $binName = if ("{{target}}" -like "win32-*") { "beamtalk-lsp.exe" } else { "beamtalk-lsp" }; $lspBin = "target\release\$binName"; if (!(Test-Path $lspBin)) { $lspBin = "target\x86_64-pc-windows-msvc\release\$binName" }; if (!(Test-Path $lspBin)) { Write-Error "LSP binary not found — run: cargo build --release --bin beamtalk-lsp"; exit 1 }; New-Item -ItemType Directory -Force -Path editors\vscode\bin | Out-Null; Copy-Item $lspBin "editors\vscode\bin\$binName"; Write-Host "   Bundled $binName"
-    Push-Location editors\vscode; npm install --quiet; npm run compile; Pop-Location
+    Push-Location editors\vscode; try { npm install --quiet; if ($LASTEXITCODE -ne 0) { throw "npm install failed" }; npm run compile; if ($LASTEXITCODE -ne 0) { throw "npm run compile failed" } } finally { Pop-Location }
     New-Item -ItemType Directory -Force -Path dist | Out-Null
-    Push-Location editors\vscode; npx --yes @vscode/vsce package --target "{{target}}" --out "..\..\dist\beamtalk-{{target}}.vsix"; Pop-Location
+    Push-Location editors\vscode; try { npx --yes @vscode/vsce package --target "{{target}}" --out "..\..\dist\beamtalk-{{target}}.vsix"; if ($LASTEXITCODE -ne 0) { throw "vsce package failed" } } finally { Pop-Location }
     Remove-Item -Recurse -Force editors\vscode\bin -ErrorAction SilentlyContinue
     @echo "✅ VS Code extension: dist/beamtalk-{{target}}.vsix"
 

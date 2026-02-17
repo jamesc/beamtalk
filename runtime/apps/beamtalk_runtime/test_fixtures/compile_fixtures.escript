@@ -31,7 +31,12 @@ main([]) ->
     CargoPort = open_port({spawn_executable, CargoBin},
                           [{args, ["build", "--bin", "beamtalk", "--quiet"]},
                            exit_status, stderr_to_stdout, binary]),
-    _CargoOutput = collect_port_output(CargoPort, []),
+    case collect_port_output(CargoPort, []) of
+        {ok, _} -> ok;
+        {error, Reason, Output} ->
+            io:format(standard_error, "cargo build failed (~p)~n~s", [Reason, Output]),
+            halt(1)
+    end,
 
     %% Verify the binary exists
     case filelib:is_regular(Beamtalk) of
@@ -92,10 +97,14 @@ run_beamtalk(Beamtalk, SrcFile) ->
     Port = open_port({spawn_executable, Beamtalk},
                      [{args, ["build", SrcFile]},
                       exit_status, stderr_to_stdout, binary]),
-    Output = collect_port_output(Port, []),
-    case Output of
-        <<>> -> ok;
-        _   -> io:put_chars(["beamtalk build ", filename:basename(SrcFile), ":\n", Output, "\n"])
+    case collect_port_output(Port, []) of
+        {ok, <<>>} -> ok;
+        {ok, Output} ->
+            io:put_chars(["beamtalk build ", filename:basename(SrcFile), ":\n", Output, "\n"]);
+        {error, Reason, Output} ->
+            io:put_chars(["beamtalk build ", filename:basename(SrcFile), ":\n", Output, "\n"]),
+            io:format(standard_error, "beamtalk build failed (~p)~n", [Reason]),
+            halt(1)
     end.
 
 %% @private Collect all output from an open_port until exit.
@@ -104,14 +113,12 @@ collect_port_output(Port, Acc) ->
         {Port, {data, Data}} ->
             collect_port_output(Port, [Acc, Data]);
         {Port, {exit_status, 0}} ->
-            iolist_to_binary(Acc);
+            {ok, iolist_to_binary(Acc)};
         {Port, {exit_status, Code}} ->
-            io:format(standard_error, "beamtalk build exited with code ~p~n", [Code]),
-            iolist_to_binary(Acc)
+            {error, {exit_status, Code}, iolist_to_binary(Acc)}
     after 60000 ->
-        io:format(standard_error, "beamtalk build timed out after 60s~n", []),
         catch port_close(Port),
-        iolist_to_binary(Acc)
+        {error, timeout, iolist_to_binary(Acc)}
     end.
 
 %% @private Delete a file if it exists.
