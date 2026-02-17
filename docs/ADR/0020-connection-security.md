@@ -508,7 +508,7 @@ This ADR does **not** cover:
 
 ## Implementation Tracking
 
-**Epic:** TBD (Phases 1–4)
+**Epic:** TBD (Phases 1–3)
 **Status:** Phase 0 Done
 
 | Phase | Issue | Title | Size | Status |
