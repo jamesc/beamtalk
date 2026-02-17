@@ -221,7 +221,7 @@ counter increment
 3 + 4
 
 // Keyword message
-array at: 1 put: "hello"
+dict at: #name put: "hello"
 
 // Cascade - multiple messages to same receiver
 Transcript show: "Hello"; cr; show: "World"
@@ -230,7 +230,7 @@ Transcript show: "Hello"; cr; show: "World"
 ### Message Precedence (high to low)
 1. Unary messages: `3 factorial`
 2. Binary messages: `3 + 4` (with standard math precedence within binary)
-3. Keyword messages: `array at: 1`
+3. Keyword messages: `dict at: #name`
 
 ### Binary Operators
 
