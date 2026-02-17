@@ -621,7 +621,13 @@ impl TypeAnnotation {
                 EcoString::from(format!("{}<{}>", base.name, params.join(", ")))
             }
             Self::FalseOr { inner, .. } => {
-                EcoString::from(format!("{} | False", inner.type_name()))
+                let inner_name = match inner.as_ref() {
+                    Self::Union { .. } | Self::FalseOr { .. } => {
+                        EcoString::from(format!("({})", inner.type_name()))
+                    }
+                    _ => inner.type_name(),
+                };
+                EcoString::from(format!("{inner_name} | False"))
             }
         }
     }
@@ -1682,6 +1688,19 @@ mod tests {
             Span::new(0, 15),
         );
         assert_eq!(false_or.type_name(), "Integer | False");
+
+        // FalseOr with union inner type should parenthesize
+        let false_or_union = TypeAnnotation::false_or(
+            TypeAnnotation::union(
+                vec![
+                    TypeAnnotation::simple("Integer", Span::new(0, 7)),
+                    TypeAnnotation::simple("String", Span::new(10, 16)),
+                ],
+                Span::new(0, 16),
+            ),
+            Span::new(0, 24),
+        );
+        assert_eq!(false_or_union.type_name(), "(Integer | String) | False");
     }
 
     #[test]
