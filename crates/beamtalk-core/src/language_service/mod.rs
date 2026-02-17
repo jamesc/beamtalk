@@ -56,7 +56,7 @@ mod value_objects;
 pub use project_index::ProjectIndex;
 pub use value_objects::{
     ByteOffset, Completion, CompletionKind, Diagnostic, DocumentSymbol, DocumentSymbolKind,
-    HoverInfo, Location, Position,
+    HoverInfo, Location, ParameterInfo, Position, SignatureHelp, SignatureInfo,
 };
 
 use crate::ast::{Expression, Identifier, Module};
@@ -92,6 +92,11 @@ pub trait LanguageService {
     ///
     /// Should respond in <50ms for typical file sizes.
     fn hover(&self, file: &Utf8PathBuf, position: Position) -> Option<HoverInfo>;
+
+    /// Returns signature help at a position.
+    ///
+    /// Should respond in <50ms for typical file sizes.
+    fn signature_help(&self, file: &Utf8PathBuf, position: Position) -> Option<SignatureHelp>;
 
     /// Returns the definition location of the symbol at the given position.
     ///
@@ -489,6 +494,17 @@ impl LanguageService for SimpleLanguageService {
         let file_data = self.get_file(file)?;
 
         crate::queries::hover_provider::compute_hover(
+            &file_data.module,
+            &file_data.source,
+            position,
+            self.project_index.hierarchy(),
+        )
+    }
+
+    fn signature_help(&self, file: &Utf8PathBuf, position: Position) -> Option<SignatureHelp> {
+        let file_data = self.get_file(file)?;
+
+        crate::queries::signature_help_provider::compute_signature_help(
             &file_data.module,
             &file_data.source,
             position,
