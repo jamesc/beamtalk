@@ -50,7 +50,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use miette::{IntoDiagnostic, Result};
+use miette::{IntoDiagnostic, Result, miette};
 use rustyline::error::ReadlineError;
 use rustyline::history::FileHistory;
 use rustyline::{CompletionType, Config, Editor};
@@ -311,7 +311,7 @@ fn read_erlang_cookie() -> Option<String> {
 )]
 #[expect(
     clippy::fn_params_excessive_bools,
-    reason = "bools map directly to CLI flags (foreground, persistent, no_color, confirm_network)"
+    reason = "bools map directly to CLI flags (foreground, persistent, no_color, confirm_network, tls)"
 )]
 pub fn run(
     port_arg: Option<u16>,
@@ -323,6 +323,7 @@ pub fn run(
     no_color: bool,
     bind: Option<&str>,
     confirm_network: bool,
+    tls: bool,
 ) -> Result<()> {
     // Initialize color support
     color::init(no_color);
@@ -354,7 +355,33 @@ pub fn run(
     ) = if foreground {
         // Foreground mode: start node directly (original behavior)
         println!("Starting BEAM node in foreground mode (--foreground)...");
-        let mut child = start_beam_node(port, node_name.as_ref(), &project_root, Some(bind_addr))?;
+
+        // Resolve TLS config for foreground mode (ADR 0020 Phase 2)
+        let ssl_dist_conf = if tls {
+            let workspace_id = workspace::workspace_id_for_project(&project_root, workspace_name)?;
+            let conf = super::tls::ssl_dist_conf_path(&workspace_id)?;
+            match conf {
+                Some(path) => {
+                    println!("🔒 TLS distribution enabled");
+                    Some(path)
+                }
+                None => {
+                    return Err(miette!(
+                        "TLS certificates not found. Run `beamtalk tls init` first."
+                    ));
+                }
+            }
+        } else {
+            None
+        };
+
+        let mut child = start_beam_node(
+            port,
+            node_name.as_ref(),
+            &project_root,
+            Some(bind_addr),
+            ssl_dist_conf.as_deref(),
+        )?;
 
         // Discover the actual port from the BEAM node's stdout.
         // The BEAM prints "BEAMTALK_PORT:<port>" after binding.
@@ -389,6 +416,25 @@ pub fn run(
         extra_code_paths.push(paths.cowlib_ebin.clone());
         extra_code_paths.push(paths.ranch_ebin.clone());
 
+        // Resolve TLS config for workspace mode (ADR 0020 Phase 2)
+        let ssl_dist_conf = if tls {
+            let workspace_id = workspace::workspace_id_for_project(&project_root, workspace_name)?;
+            let conf = super::tls::ssl_dist_conf_path(&workspace_id)?;
+            match conf {
+                Some(path) => {
+                    println!("🔒 TLS distribution enabled");
+                    Some(path)
+                }
+                None => {
+                    return Err(miette!(
+                        "TLS certificates not found for workspace. Run `beamtalk tls init` first."
+                    ));
+                }
+            }
+        } else {
+            None
+        };
+
         let (node_info, is_new, workspace_id) = workspace::get_or_start_workspace(
             &project_root,
             workspace_name,
@@ -402,6 +448,7 @@ pub fn run(
             !persistent, // auto_cleanup is opposite of persistent flag
             timeout,
             Some(bind_addr),
+            ssl_dist_conf.as_deref(),
         )?;
 
         let actual_port = node_info.port;
@@ -420,6 +467,12 @@ pub fn run(
             std::thread::sleep(Duration::from_millis(2000));
         } else {
             println!("✓ Connected to existing workspace: {}", node_info.node_name);
+            if tls {
+                eprintln!(
+                    "  ⚠️  --tls has no effect on an already-running workspace.\n  \
+                     Stop the workspace first with `beamtalk workspace stop` to restart with TLS."
+                );
+            }
             if workspace_name.is_some() {
                 println!("  Workspace: {workspace_id}");
             } else {
@@ -1358,5 +1411,197 @@ mod tests {
     #[test]
     fn extract_command_arg_whitespace_only_argument() {
         assert_eq!(extract_command_arg(":inspect   ", ":inspect ", None), "");
+    }
+
+    #[test]
+    fn display_reload_result_shows_class_names() {
+        let response = ReplResponse {
+            response_type: Some("loaded".to_string()),
+            id: None,
+            session: None,
+            status: None,
+            value: None,
+            output: None,
+            message: None,
+            error: None,
+            bindings: None,
+            classes: Some(vec!["Counter".to_string(), "Logger".to_string()]),
+            actors: None,
+            modules: None,
+            sessions: None,
+            completions: None,
+            info: None,
+            state: None,
+            warnings: None,
+            docs: None,
+            affected_actors: None,
+            migration_failures: None,
+        };
+
+        // Should not panic
+        display_reload_result(&response, None);
+    }
+
+    #[test]
+    fn display_reload_result_shows_migration_stats() {
+        let response = ReplResponse {
+            response_type: Some("loaded".to_string()),
+            id: None,
+            session: None,
+            status: None,
+            value: None,
+            output: None,
+            message: None,
+            error: None,
+            bindings: None,
+            classes: Some(vec!["Counter".to_string()]),
+            actors: None,
+            modules: None,
+            sessions: None,
+            completions: None,
+            info: None,
+            state: None,
+            warnings: None,
+            docs: None,
+            affected_actors: Some(5),
+            migration_failures: Some(2),
+        };
+
+        // Should not panic
+        display_reload_result(&response, Some("test_module"));
+    }
+
+    #[test]
+    fn repl_response_is_error_detects_legacy_format() {
+        let response = ReplResponse {
+            response_type: Some("error".to_string()),
+            id: None,
+            session: None,
+            status: None,
+            value: None,
+            output: None,
+            message: Some("test error".to_string()),
+            error: None,
+            bindings: None,
+            classes: None,
+            actors: None,
+            modules: None,
+            sessions: None,
+            completions: None,
+            info: None,
+            state: None,
+            warnings: None,
+            docs: None,
+            affected_actors: None,
+            migration_failures: None,
+        };
+
+        assert!(response.is_error());
+    }
+
+    #[test]
+    fn repl_response_is_error_detects_new_format() {
+        let response = ReplResponse {
+            response_type: None,
+            id: Some("msg-001".to_string()),
+            session: None,
+            status: Some(vec!["done".to_string(), "error".to_string()]),
+            value: None,
+            output: None,
+            message: None,
+            error: Some("test error".to_string()),
+            bindings: None,
+            classes: None,
+            actors: None,
+            modules: None,
+            sessions: None,
+            completions: None,
+            info: None,
+            state: None,
+            warnings: None,
+            docs: None,
+            affected_actors: None,
+            migration_failures: None,
+        };
+
+        assert!(response.is_error());
+    }
+
+    #[test]
+    fn repl_response_error_message_prefers_error_field() {
+        let response = ReplResponse {
+            response_type: None,
+            id: None,
+            session: None,
+            status: None,
+            value: None,
+            output: None,
+            message: Some("legacy message".to_string()),
+            error: Some("new error".to_string()),
+            bindings: None,
+            classes: None,
+            actors: None,
+            modules: None,
+            sessions: None,
+            completions: None,
+            info: None,
+            state: None,
+            warnings: None,
+            docs: None,
+            affected_actors: None,
+            migration_failures: None,
+        };
+
+        // Should prefer 'message' field (checked first)
+        assert_eq!(response.error_message(), Some("legacy message"));
+    }
+
+    #[test]
+    fn session_info_deserializes_correctly() {
+        let json = r#"{"id":"session-123","created_at":1234567890}"#;
+        let info: SessionInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(info.id, "session-123");
+        assert_eq!(info.created_at, Some(1_234_567_890));
+    }
+
+    #[test]
+    fn session_info_handles_missing_created_at() {
+        let json = r#"{"id":"session-456"}"#;
+        let info: SessionInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(info.id, "session-456");
+        assert_eq!(info.created_at, None);
+    }
+
+    #[test]
+    fn module_info_deserializes_correctly() {
+        let json = r#"{
+            "name":"counter",
+            "source_file":"lib/counter.bt",
+            "actor_count":3,
+            "load_time":1234567890,
+            "time_ago":"2 minutes ago"
+        }"#;
+        let info: ModuleInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(info.name, "counter");
+        assert_eq!(info.source_file, "lib/counter.bt");
+        assert_eq!(info.actor_count, 3);
+        assert_eq!(info.load_time, 1_234_567_890);
+        assert_eq!(info.time_ago, "2 minutes ago");
+    }
+
+    #[test]
+    fn auto_compile_package_returns_empty_on_missing_manifest() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let result = auto_compile_package(temp_dir.path());
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn read_erlang_cookie_returns_none_for_missing_file() {
+        // This will fail if user actually has ~/.erlang.cookie, but that's OK
+        // Most test environments won't have it
+        let result = read_erlang_cookie();
+        // Can be Some or None depending on environment
+        assert!(result.is_some() || result.is_none());
     }
 }

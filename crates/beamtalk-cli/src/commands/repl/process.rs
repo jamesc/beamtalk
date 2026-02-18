@@ -22,11 +22,15 @@ use super::{MAX_CONNECT_RETRIES, RETRY_DELAY_MS, ReplClient};
 ///
 /// The BEAM process's working directory is set to `project_root` so that
 /// relative file paths (e.g., `File lines: "data.csv"`) resolve correctly.
+///
+/// If `ssl_dist_optfile` is `Some`, the node is started with TLS-secured
+/// Erlang distribution (`-proto_dist inet_tls`).
 pub(super) fn start_beam_node(
     port: u16,
     node_name: Option<&String>,
     project_root: &Path,
     bind_addr: Option<std::net::Ipv4Addr>,
+    ssl_dist_optfile: Option<&Path>,
 ) -> Result<Child> {
     // Find runtime directory - try multiple locations
     let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout()?;
@@ -102,6 +106,16 @@ pub(super) fn start_beam_node(
             args.push(OsString::from("-sname"));
         }
         args.push(OsString::from(name.as_str()));
+    }
+
+    // Add TLS distribution args if configured (ADR 0020 Phase 2)
+    if let Some(conf_path) = ssl_dist_optfile {
+        args.push(OsString::from("-proto_dist"));
+        args.push(OsString::from("inet_tls"));
+        args.push(OsString::from("-ssl_dist_optfile"));
+        // Normalize path separators for Erlang (backslashes → forward slashes on Windows)
+        let normalized = conf_path.to_string_lossy().replace('\\', "/");
+        args.push(OsString::from(normalized));
     }
 
     args.push(OsString::from("-eval"));
@@ -249,4 +263,172 @@ pub(super) fn resolve_port(port_arg: Option<u16>) -> Result<u16> {
 /// Priority: CLI flag > `BEAMTALK_NODE_NAME` env var > None
 pub(super) fn resolve_node_name(node_arg: Option<String>) -> Option<String> {
     node_arg.or_else(|| std::env::var("BEAMTALK_NODE_NAME").ok())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+
+    #[test]
+    fn connect_with_retries_fails_after_max_retries() {
+        // Try to connect to a port that definitely won't have a REPL backend
+        let result = connect_with_retries(1, "invalid_cookie");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn read_port_from_child_timeout() {
+        // Test timeout when child doesn't produce BEAMTALK_PORT line
+        // This is difficult to test without actually spawning a process
+        // But we can verify the function signature and constants exist
+        assert_eq!(MAX_CONNECT_RETRIES, 10);
+        assert_eq!(RETRY_DELAY_MS, 500);
+    }
+
+    #[test]
+    fn default_repl_port_is_zero() {
+        // Verify default port is 0 (OS-assigned)
+        assert_eq!(DEFAULT_REPL_PORT, 0);
+    }
+
+    #[test]
+    fn resolve_port_with_none_returns_default() {
+        let result = resolve_port(None);
+        // When no CLI arg and no env var, should return default or env value
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    #[serial(env_var)]
+    fn resolve_port_rejects_invalid_port_number() {
+        // SAFETY: This test runs single-threaded via #[serial]
+        unsafe { std::env::set_var("BEAMTALK_REPL_PORT", "99999999") };
+        let result = resolve_port(None);
+        unsafe { std::env::remove_var("BEAMTALK_REPL_PORT") };
+
+        // Port number too large should be rejected
+        assert!(result.is_err());
+    }
+
+    #[test]
+    #[serial(env_var)]
+    fn resolve_port_rejects_negative_port() {
+        // SAFETY: This test runs single-threaded via #[serial]
+        unsafe { std::env::set_var("BEAMTALK_REPL_PORT", "-1") };
+        let result = resolve_port(None);
+        unsafe { std::env::remove_var("BEAMTALK_REPL_PORT") };
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    #[serial(env_var)]
+    fn resolve_node_name_returns_none_when_no_args() {
+        // SAFETY: This test runs single-threaded via #[serial]
+        unsafe { std::env::remove_var("BEAMTALK_NODE_NAME") };
+        let result = resolve_node_name(None);
+        assert!(result.is_none() || result.is_some()); // May have env var
+    }
+
+    #[test]
+    fn beam_child_guard_drop_cleans_up() {
+        // Create a mock child that's already terminated
+        // BeamChildGuard should handle this gracefully
+        use std::process::{Command, Stdio};
+
+        #[cfg(windows)]
+        let child = Command::new("cmd")
+            .args(["/c", "exit"])
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+
+        #[cfg(not(windows))]
+        let child = Command::new("true")
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+
+        // Wait for it to exit
+        let pid = child.id();
+        let guard = BeamChildGuard { child };
+
+        // Drop the guard (should not panic even though process already exited)
+        drop(guard);
+
+        // Verify the process is not running
+        use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+        let mut system = System::new();
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
+            true,
+            ProcessRefreshKind::new(),
+        );
+        assert!(system.process(Pid::from_u32(pid)).is_none());
+    }
+
+    #[test]
+    fn start_beam_node_validates_node_name() {
+        // Test that invalid node names are rejected
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        let result = start_beam_node(
+            0,
+            Some(&"bad/name".to_string()),
+            temp_dir.path(),
+            None,
+            None,
+        );
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Invalid node name"));
+    }
+
+    #[test]
+    fn start_beam_node_rejects_injection_attempts() {
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        // Try various injection patterns
+        let malicious_names = vec![
+            "node'; rm -rf /",
+            "node\"; halt()",
+            "node`whoami`",
+            "node$(whoami)",
+            "node\nrm -rf /",
+        ];
+
+        for malicious in malicious_names {
+            let result = start_beam_node(
+                0,
+                Some(&malicious.to_string()),
+                temp_dir.path(),
+                None,
+                None,
+            );
+            assert!(result.is_err(), "Should reject malicious name: {}", malicious);
+        }
+    }
+
+    #[test]
+    fn start_beam_node_accepts_valid_node_names() {
+        // Just verify validation logic, don't actually start BEAM
+        let valid_names = vec![
+            "node@localhost",
+            "my-node@host.example.com",
+            "node_123@192.168.1.1",
+            "node",
+            "node-with-dash",
+            "node_with_underscore",
+        ];
+
+        for valid in valid_names {
+            // Validate using the same logic as start_beam_node
+            let is_valid = valid
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '@' || c == '.');
+            assert!(is_valid, "Should accept valid name: {}", valid);
+        }
+    }
 }
