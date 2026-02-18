@@ -468,7 +468,7 @@ pub fn run(
         } else {
             println!("✓ Connected to existing workspace: {}", node_info.node_name);
             if tls {
-                println!(
+                eprintln!(
                     "  ⚠️  --tls has no effect on an already-running workspace.\n  \
                      Stop the workspace first with `beamtalk workspace stop` to restart with TLS."
                 );

@@ -70,7 +70,10 @@ fn init_tls(workspace_name: Option<&str>) -> Result<()> {
         // Regenerate ssl_dist.conf if missing (e.g. partial state)
         if !tls_dir.join("ssl_dist.conf").exists() {
             let conf_path = generate_ssl_dist_conf(&tls_dir)?;
-            println!("  ✓ Distribution config regenerated: {}", conf_path.display());
+            println!(
+                "  ✓ Distribution config regenerated: {}",
+                conf_path.display()
+            );
         }
         println!("  To regenerate, remove the tls/ directory first.");
         return Ok(());
@@ -203,7 +206,8 @@ pub fn generate_ssl_dist_conf(tls_dir: &Path) -> Result<PathBuf> {
 /// Get the path to the `ssl_dist.conf` for a workspace, if TLS is initialized.
 ///
 /// Returns `None` if TLS certificates have not been generated for the workspace.
-/// Returns an error if the conf file exists but referenced cert files are missing.
+/// Returns an error if the conf file exists but the expected TLS files in the
+/// workspace `tls/` directory are missing.
 pub fn ssl_dist_conf_path(workspace_id: &str) -> Result<Option<PathBuf>> {
     let tls_dir = storage::workspace_dir(workspace_id)?.join("tls");
     let conf_path = tls_dir.join("ssl_dist.conf");
