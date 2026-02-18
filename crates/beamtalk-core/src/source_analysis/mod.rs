@@ -43,6 +43,10 @@ mod parser;
 mod span;
 mod token;
 
+// Property-based tests for the lexer (ADR 0011 Phase 2)
+#[cfg(test)]
+mod lexer_property_tests;
+
 pub use error::{LexError, LexErrorKind};
 pub use lexer::{Lexer, lex, lex_with_eof};
 pub use parser::{Diagnostic, Severity, is_input_complete, parse};

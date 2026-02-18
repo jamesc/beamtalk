@@ -33,6 +33,10 @@ pub(crate) mod string_utils;
 pub mod type_checker;
 pub(crate) mod validators;
 
+// Property-based tests for semantic analysis (ADR 0011 Phase 2)
+#[cfg(test)]
+mod property_tests;
+
 pub use class_hierarchy::ClassHierarchy;
 pub use error::{SemanticError, SemanticErrorKind};
 pub use name_resolver::NameResolver;

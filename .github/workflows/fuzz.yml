@@ -221,7 +221,9 @@ jobs:
 
       - name: Run extended proptest (10,000 cases)
         id: proptest
-        run: cargo test -p beamtalk-core property_tests -- --nocapture
+        run: |
+          cargo test -p beamtalk-core property_tests -- --nocapture
+          cargo test -p beamtalk-compiler-port property_tests -- --nocapture
         env:
           PROPTEST_CASES: 10000
 
