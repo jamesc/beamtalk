@@ -22,7 +22,8 @@
 
 %% Public API
 -export([start_link/1, stop/1, eval/2, eval_async/3, interrupt/1, get_bindings/1, clear_bindings/1,
-         load_file/2, load_source/2, unload_module/2, get_module_tracker/1]).
+         load_file/2, load_source/2, unload_module/2, get_module_tracker/1,
+         show_codegen/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -50,6 +51,12 @@ eval(SessionPid, Expression) ->
 -spec eval_async(pid(), string(), pid()) -> ok.
 eval_async(SessionPid, Expression, Subscriber) ->
     gen_server:cast(SessionPid, {eval_async, Expression, Subscriber}).
+
+%% @doc Compile expression and return Core Erlang source (BT-700).
+%% Does NOT evaluate the code.
+-spec show_codegen(pid(), string()) -> {ok, binary(), [binary()]} | {error, term(), [binary()]}.
+show_codegen(SessionPid, Expression) ->
+    gen_server:call(SessionPid, {show_codegen, Expression}, 30000).
 
 %% @doc Interrupt a running evaluation in this session.
 %% If no evaluation is in progress, returns ok immediately.
@@ -202,6 +209,21 @@ handle_call({unload_module, Module}, _From, {SessionId, State, Worker}) ->
             Err = beamtalk_error:with_hint(Err1,
                 <<"Use :load <path> to load it first.">>),
             {reply, {error, Err}, {SessionId, State, Worker}}
+    end;
+
+handle_call({show_codegen, _Expression}, _From, {_SessionId, _State, {_Pid, _Ref, _}} = FullState) ->
+    %% Reject if eval is in progress
+    Err0 = beamtalk_error:new(eval_busy, 'REPL'),
+    Err1 = beamtalk_error:with_message(Err0, <<"An evaluation is already in progress">>),
+    Err2 = beamtalk_error:with_hint(Err1, <<"Wait for the current evaluation to complete.">>),
+    {reply, {error, Err2, []}, FullState};
+
+handle_call({show_codegen, Expression}, _From, {SessionId, State, undefined}) ->
+    case beamtalk_repl_eval:do_show_codegen(Expression, State) of
+        {ok, CoreErlang, Warnings, NewState} ->
+            {reply, {ok, CoreErlang, Warnings}, {SessionId, NewState, undefined}};
+        {error, Reason, Warnings, NewState} ->
+            {reply, {error, Reason, Warnings}, {SessionId, NewState, undefined}}
     end;
 
 handle_call(_Request, _From, State) ->
