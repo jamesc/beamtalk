@@ -258,6 +258,72 @@ main {
   font-size: 11px;
   color: #f9e2af;
 }
+/* Stop button — danger color */
+#stop-btn {
+  background: #f38ba8;
+  color: #1e1e2e;
+}
+#stop-btn:hover { background: #eba0ac; }
+
+/* Stdin prompt overlay */
+#stdin-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#stdin-panel {
+  background: #313244;
+  border: 1px solid #45475a;
+  padding: 24px 32px;
+  min-width: 320px;
+}
+#stdin-panel label {
+  display: block;
+  font-size: 13px;
+  color: #cdd6f4;
+  margin-bottom: 8px;
+}
+#stdin-input {
+  font-family: monospace;
+  font-size: 13px;
+  background: #1e1e2e;
+  color: #cdd6f4;
+  border: 1px solid #45475a;
+  padding: 6px 8px;
+  width: 100%;
+  margin-bottom: 8px;
+}
+#stdin-input:focus { outline: 1px solid #89b4fa; }
+#stdin-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* Test results in transcript */
+.test-summary { margin: 4px 0; }
+.test-pass { color: #a6e3a1; }
+.test-fail { color: #f38ba8; }
+.test-error-detail {
+  color: #f38ba8;
+  padding-left: 16px;
+  font-size: 12px;
+}
+
+/* Codegen output in inspector */
+.codegen-output {
+  white-space: pre-wrap;
+  font-size: 12px;
+  color: #cdd6f4;
+}
+
 .shortcut-hint {
   font-size: 11px;
   color: #6c7086;

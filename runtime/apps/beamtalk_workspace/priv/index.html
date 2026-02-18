@@ -30,6 +30,8 @@
       <button id="send-btn" onclick="sendEval()" disabled>Do It</button>
       <button onclick="sendPrintIt()" disabled id="print-btn">Print It</button>
       <button onclick="sendInspect()" disabled id="inspect-btn">Inspect It</button>
+      <button onclick="sendClear()" disabled id="clear-btn" title="Clear all variable bindings">Clear</button>
+      <button onclick="sendInterrupt()" id="stop-btn" style="display:none" title="Stop evaluation (Ctrl+.)">Stop</button>
     </div>
   </div>
 
@@ -44,6 +46,8 @@
       <textarea id="editor-input" placeholder="// Enter Beamtalk class definitions here…&#10;// Press Load or Ctrl+Shift+Enter to compile"></textarea>
       <div id="editor-toolbar">
         <span id="editor-status"></span>
+        <button id="test-btn" onclick="sendTest()" disabled title="Run BUnit tests for loaded class">Test</button>
+        <button id="codegen-btn" onclick="sendShowCodegen()" disabled title="Show generated Core Erlang">Codegen</button>
         <button id="load-btn" onclick="loadSource()" disabled>Load</button>
       </div>
     </div>
@@ -55,6 +59,17 @@
   </div>
 </main>
 
+<div id="stdin-overlay" style="display:none">
+  <div id="stdin-panel">
+    <label id="stdin-prompt">Input required:</label>
+    <input id="stdin-input" type="text" placeholder="Enter value…">
+    <div id="stdin-buttons">
+      <button onclick="submitStdin()">Submit</button>
+      <button onclick="submitStdinEof()">EOF</button>
+    </div>
+  </div>
+</div>
+
 <div id="shortcuts-overlay" style="display:none">
   <div id="shortcuts-panel">
     <h2>Keyboard Shortcuts</h2>
@@ -63,6 +78,7 @@
       <tr><td><kbd>Ctrl+D</kbd></td><td>Do It — evaluate expression</td></tr>
       <tr><td><kbd>Ctrl+P</kbd></td><td>Print It — evaluate and show result</td></tr>
       <tr><td><kbd>Ctrl+I</kbd></td><td>Inspect It — evaluate and inspect</td></tr>
+      <tr><td><kbd>Ctrl+.</kbd></td><td>Stop — interrupt evaluation</td></tr>
       <tr><td><kbd>Ctrl+Enter</kbd></td><td>Do It (alternative)</td></tr>
       <tr><td><kbd>Tab</kbd></td><td>Autocomplete</td></tr>
       <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Command history</td></tr>
