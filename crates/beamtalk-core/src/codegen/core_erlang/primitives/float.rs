@@ -38,9 +38,9 @@ pub(crate) fn generate_float_bif(selector: &str, params: &[String]) -> Option<Do
         "atan2:" => {
             let p0 = params.first()?;
             Some(docvec![
-                "call 'math':'atan2'(Self, ",
+                "call 'math':'atan2'(Self, call 'erlang':'float'(",
                 p0.clone(),
-                ")",
+                "))",
             ])
         }
         // Exponential / logarithmic — Erlang math module

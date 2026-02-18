@@ -60,11 +60,21 @@ pub(crate) fn generate_integer_bif(selector: &str, params: &[String]) -> Option<
             "call 'beamtalk_character':'is_whitespace'(Self)",
         )),
         // Exponential / logarithmic — convert to float, call math module
-        "sqrt" => Some(Document::Str("call 'math':'sqrt'(call 'erlang':'float'(Self))")),
-        "log" | "ln" => Some(Document::Str("call 'math':'log'(call 'erlang':'float'(Self))")),
-        "log2" => Some(Document::Str("call 'math':'log2'(call 'erlang':'float'(Self))")),
-        "log10" => Some(Document::Str("call 'math':'log10'(call 'erlang':'float'(Self))")),
-        "exp" => Some(Document::Str("call 'math':'exp'(call 'erlang':'float'(Self))")),
+        "sqrt" => Some(Document::Str(
+            "call 'math':'sqrt'(call 'erlang':'float'(Self))",
+        )),
+        "log" | "ln" => Some(Document::Str(
+            "call 'math':'log'(call 'erlang':'float'(Self))",
+        )),
+        "log2" => Some(Document::Str(
+            "call 'math':'log2'(call 'erlang':'float'(Self))",
+        )),
+        "log10" => Some(Document::Str(
+            "call 'math':'log10'(call 'erlang':'float'(Self))",
+        )),
+        "exp" => Some(Document::Str(
+            "call 'math':'exp'(call 'erlang':'float'(Self))",
+        )),
         "raisedTo:" => {
             let p0 = params.first()?;
             Some(docvec![

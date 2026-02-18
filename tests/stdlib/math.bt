@@ -50,6 +50,10 @@ Float e
 0.5 atan2: 0.5
 // => 0.7853981633974483
 
+// atan2 with Integer argument
+(1 asFloat) atan2: 2
+// => 0.4636476090008061
+
 // sin of small value
 0.5 sin
 // => 0.479425538604203
@@ -135,3 +139,39 @@ x := 0.5
 // => _
 ((x sin) * (x sin)) + ((x cos) * (x cos))
 // => 1.0
+
+// ===========================================================================
+// DOMAIN ERROR HANDLING
+// ===========================================================================
+
+// sqrt of negative number
+(-1 asFloat) sqrt
+// => ERROR: badarith
+
+// log of zero
+(0 asFloat) log
+// => ERROR: badarith
+
+// log of negative
+(-1 asFloat) log
+// => ERROR: badarith
+
+// ln of zero (alias for log)
+(0 asFloat) ln
+// => ERROR: badarith
+
+// log2 of zero
+(0 asFloat) log2
+// => ERROR: badarith
+
+// log10 of zero
+(0 asFloat) log10
+// => ERROR: badarith
+
+// asin outside [-1, 1] range
+(2 asFloat) asin
+// => ERROR: badarith
+
+// acos outside [-1, 1] range
+(2 asFloat) acos
+// => ERROR: badarith
