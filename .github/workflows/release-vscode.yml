@@ -57,10 +57,6 @@ jobs:
           - os: ubuntu-latest
             rust-target: x86_64-unknown-linux-gnu
             vsce-target: linux-x64
-          - os: ubuntu-latest
-            rust-target: aarch64-unknown-linux-gnu
-            vsce-target: linux-arm64
-            cross: true
           - os: macos-13
             rust-target: x86_64-apple-darwin
             vsce-target: darwin-x64
@@ -80,10 +76,6 @@ jobs:
         with:
           targets: ${{ matrix.rust-target }}
 
-      - name: Install cross (Linux ARM64)
-        if: matrix.cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
       - name: Cache cargo registry
         uses: actions/cache@v5
         with:
@@ -96,12 +88,7 @@ jobs:
             ${{ runner.os }}-${{ matrix.rust-target }}-cargo-release-
 
       - name: Build beamtalk-lsp
-        run: |
-          if [ "${{ matrix.cross }}" = "true" ]; then
-            cross build --release --bin beamtalk-lsp --target ${{ matrix.rust-target }}
-          else
-            cargo build --release --bin beamtalk-lsp --target ${{ matrix.rust-target }}
-          fi
+        run: cargo build --release --bin beamtalk-lsp --target ${{ matrix.rust-target }}
         shell: bash
 
       - name: Upload LSP binary
@@ -118,7 +105,7 @@ jobs:
     timeout-minutes: 15
     strategy:
       matrix:
-        vsce-target: [linux-x64, linux-arm64, darwin-x64, darwin-arm64, win32-x64]
+        vsce-target: [linux-x64, darwin-x64, darwin-arm64, win32-x64]
     steps:
       - uses: actions/checkout@v6
 
@@ -182,7 +169,6 @@ jobs:
         run: |
           npx --yes @vscode/vsce publish --packagePath \
             beamtalk-linux-x64.vsix \
-            beamtalk-linux-arm64.vsix \
             beamtalk-darwin-x64.vsix \
             beamtalk-darwin-arm64.vsix \
             beamtalk-win32-x64.vsix
