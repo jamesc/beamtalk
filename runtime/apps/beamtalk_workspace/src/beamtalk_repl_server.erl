@@ -595,9 +595,9 @@ handle_op(<<"docs">>, Params, Msg, _SessionPid) ->
 handle_op(<<"test">>, Params, Msg, _SessionPid) ->
     %% Run BUnit tests for a TestCase class (BT-699).
     %% Supports running all tests in a class or a single test method.
-    ClassName = maps:get(<<"class">>, Params, <<>>),
+    ClassBin = maps:get(<<"class">>, Params, <<>>),
     Method = maps:get(<<"method">>, Params, undefined),
-    case ClassName of
+    case ClassBin of
         <<>> ->
             Err0 = beamtalk_error:new(missing_parameter, 'REPL'),
             Err1 = beamtalk_error:with_message(Err0, <<"Missing required parameter: class">>),
@@ -605,21 +605,34 @@ handle_op(<<"test">>, Params, Msg, _SessionPid) ->
             beamtalk_repl_protocol:encode_error(
                 Err2, Msg, fun beamtalk_repl_json:format_error_message/1);
         _ ->
-            ClassAtom = binary_to_atom(ClassName, utf8),
-            try
-                Results = case Method of
-                    undefined ->
-                        beamtalk_test_case:run_all_structured(ClassAtom);
-                    MethodBin ->
-                        MethodAtom = binary_to_atom(MethodBin, utf8),
-                        beamtalk_test_case:run_single_structured(ClassAtom, MethodAtom)
-                end,
-                beamtalk_repl_protocol:encode_test_results(Results, Msg)
-            catch
-                error:Reason ->
-                    WrappedReason = ensure_structured_error(Reason),
+            case safe_to_existing_atom(ClassBin) of
+                {error, badarg} ->
                     beamtalk_repl_protocol:encode_error(
-                        WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1)
+                        make_class_not_found_error(ClassBin), Msg,
+                        fun beamtalk_repl_json:format_error_message/1);
+                {ok, ClassAtom} ->
+                    try
+                        Results = case Method of
+                            undefined ->
+                                beamtalk_test_case:run_all_structured(ClassAtom);
+                            MethodBin ->
+                                case safe_to_existing_atom(MethodBin) of
+                                    {error, badarg} ->
+                                        Err3 = beamtalk_error:new(does_not_understand, ClassAtom),
+                                        Err4 = beamtalk_error:with_message(Err3,
+                                            iolist_to_binary([<<"Method '">>, MethodBin, <<"' not found in ">>, ClassBin])),
+                                        error(Err4);
+                                    {ok, MethodAtom} ->
+                                        beamtalk_test_case:run_single_structured(ClassAtom, MethodAtom)
+                                end
+                        end,
+                        beamtalk_repl_protocol:encode_test_results(Results, Msg)
+                    catch
+                        error:Reason ->
+                            WrappedReason = ensure_structured_error(Reason),
+                            beamtalk_repl_protocol:encode_error(
+                                WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1)
+                    end
             end
     end;
 
