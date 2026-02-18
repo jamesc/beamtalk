@@ -371,9 +371,10 @@ pub fn run(
     let project_root = workspace::discovery::discover_project_root(&current_dir);
 
     // Choose startup mode: workspace (default) or foreground (debug)
-    let (beam_guard_opt, is_new_workspace, connect_port, cookie): (
+    let (beam_guard_opt, is_new_workspace, connect_host, connect_port, cookie): (
         Option<BeamChildGuard>,
         bool,
+        String,
         u16,
         String,
     ) = if foreground {
@@ -402,7 +403,20 @@ pub fn run(
         // Foreground mode: use Erlang cookie, or "nocookie" for nodes without -setcookie
         let fg_cookie = read_erlang_cookie().unwrap_or_else(|| "nocookie".to_string());
 
-        (Some(BeamChildGuard { child }), true, actual_port, fg_cookie)
+        // Foreground: compute connect host from bind_addr (BT-694)
+        let fg_host = if bind_addr == std::net::Ipv4Addr::UNSPECIFIED {
+            "127.0.0.1".to_string()
+        } else {
+            bind_addr.to_string()
+        };
+
+        (
+            Some(BeamChildGuard { child }),
+            true,
+            fg_host,
+            actual_port,
+            fg_cookie,
+        )
     } else {
         // Workspace mode: start or connect to detached node
 
@@ -487,11 +501,17 @@ pub fn run(
 
         println!();
 
-        (None, is_new, actual_port, ws_cookie) // No guard needed - node is detached
+        (
+            None,
+            is_new,
+            node_info.connect_host().to_string(),
+            actual_port,
+            ws_cookie,
+        ) // No guard needed - node is detached
     };
 
     // Connect to REPL backend
-    let mut client = connect_with_retries(connect_port, &cookie)?;
+    let mut client = connect_with_retries(&connect_host, connect_port, &cookie)?;
 
     println!("Connected to REPL backend on port {connect_port}.");
 
@@ -521,7 +541,7 @@ pub fn run(
     let config = Config::builder()
         .completion_type(CompletionType::List)
         .build();
-    let helper = ReplHelper::new(connect_port, &cookie);
+    let helper = ReplHelper::new(&connect_host, connect_port, &cookie);
     let mut rl: Editor<ReplHelper, FileHistory> = Editor::with_config(config).into_diagnostic()?;
     rl.set_helper(Some(helper));
 

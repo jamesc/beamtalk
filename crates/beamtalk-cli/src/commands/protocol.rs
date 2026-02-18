@@ -41,12 +41,17 @@ pub struct ProtocolClient {
 }
 
 impl ProtocolClient {
-    /// Connect to a workspace backend at `ws://127.0.0.1:{port}/ws` and
+    /// Connect to a workspace backend at `ws://{host}:{port}/ws` and
     /// authenticate with the given cookie.
     ///
     /// `read_timeout` sets the TCP read timeout (None for blocking reads).
-    pub fn connect(port: u16, cookie: &str, read_timeout: Option<Duration>) -> Result<Self> {
-        let addr = format!("127.0.0.1:{port}");
+    pub fn connect(
+        host: &str,
+        port: u16,
+        cookie: &str,
+        read_timeout: Option<Duration>,
+    ) -> Result<Self> {
+        let addr = format!("{host}:{port}");
         let tcp_stream = TcpStream::connect_timeout(
             &addr.parse().into_diagnostic()?,
             Duration::from_millis(CONNECT_TIMEOUT_MS),

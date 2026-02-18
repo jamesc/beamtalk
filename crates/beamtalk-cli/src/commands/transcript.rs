@@ -62,7 +62,7 @@ pub fn run(workspace_name: Option<&str>, recent: Option<usize>) -> Result<()> {
     }
 
     // Connect to workspace REPL backend
-    let mut client = TranscriptClient::connect(node_info.port, &cookie)?;
+    let mut client = TranscriptClient::connect(node_info.connect_host(), node_info.port, &cookie)?;
 
     // Set up Ctrl-C handler
     let running = Arc::new(AtomicBool::new(true));
@@ -132,10 +132,14 @@ struct TranscriptClient {
 }
 
 impl TranscriptClient {
-    /// Connect to the workspace backend at the given port.
-    fn connect(port: u16, cookie: &str) -> Result<Self> {
-        let inner =
-            ProtocolClient::connect(port, cookie, Some(Duration::from_millis(READ_TIMEOUT_MS)))?;
+    /// Connect to the workspace backend at the given host and port.
+    fn connect(host: &str, port: u16, cookie: &str) -> Result<Self> {
+        let inner = ProtocolClient::connect(
+            host,
+            port,
+            cookie,
+            Some(Duration::from_millis(READ_TIMEOUT_MS)),
+        )?;
         Ok(Self { inner })
     }
 

@@ -45,6 +45,26 @@ pub struct NodeInfo {
     /// `None` for backward compat with old port files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nonce: Option<String>,
+    /// Bind address the workspace is listening on (BT-694).
+    /// Stored so that reconnection uses the correct address instead of
+    /// hardcoding `127.0.0.1`. `None` defaults to `127.0.0.1` for backward
+    /// compat with old node.info files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bind_addr: Option<String>,
+}
+
+impl NodeInfo {
+    /// Return the host address to use when connecting to this workspace.
+    ///
+    /// Uses the stored `bind_addr` if present, falling back to `127.0.0.1`.
+    /// For `0.0.0.0` (all interfaces), connects via `127.0.0.1` since the
+    /// workspace is reachable on loopback.
+    pub fn connect_host(&self) -> &str {
+        match self.bind_addr.as_deref() {
+            Some("0.0.0.0") | None => "127.0.0.1",
+            Some(addr) => addr,
+        }
+    }
 }
 
 /// Generate a workspace ID from a project path.
