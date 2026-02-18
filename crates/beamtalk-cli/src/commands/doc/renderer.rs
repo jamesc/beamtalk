@@ -207,6 +207,13 @@ fn write_class_header(
         html.push_str("</div>\n");
     }
 
+    if class.is_sealed {
+        html.push_str("<span class=\"badge badge-sealed\">Sealed</span>\n");
+    }
+    if class.is_abstract {
+        html.push_str("<span class=\"badge badge-abstract\">Abstract</span>\n");
+    }
+
     if let Some(ref doc) = class.doc_comment {
         html.push_str("<div class=\"class-doc\">\n");
         html.push_str(&render_doc(doc));
@@ -312,6 +319,10 @@ fn write_method_html_with_source(
         "<span class=\"method-signature\">{}</span>",
         html_escape(&method.signature)
     );
+
+    if method.is_sealed {
+        html.push_str("<span class=\"badge badge-sealed\">Sealed</span>\n");
+    }
 
     if let (Some(file), Some(line)) = (source_file, method.line_number) {
         let root = source_root.unwrap_or("lib").trim_end_matches('/');
