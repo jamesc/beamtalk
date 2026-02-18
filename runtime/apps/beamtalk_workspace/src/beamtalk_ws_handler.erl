@@ -425,15 +425,23 @@ handle_shutdown(Msg, State) ->
 %% Used to send an initial snapshot on connect/resume so the browser
 %% sees actors that were already running before it subscribed.
 actor_snapshot_frames() ->
-    try beamtalk_repl_actors:list_actors(beamtalk_actor_registry) of
-        Actors ->
-            [{text, jsx:encode(#{<<"type">> => <<"push">>,
-                                 <<"channel">> => <<"actors">>,
-                                 <<"event">> => <<"spawned">>,
-                                 <<"data">> => encode_actor_metadata(M)})}
-             || M <- Actors]
-    catch
-        _:_ -> []
+    case whereis(beamtalk_actor_registry) of
+        RegPid when is_pid(RegPid) ->
+            try beamtalk_repl_actors:list_actors(RegPid) of
+                Actors ->
+                    [{text, jsx:encode(#{<<"type">> => <<"push">>,
+                                         <<"channel">> => <<"actors">>,
+                                         <<"event">> => <<"spawned">>,
+                                         <<"data">> => encode_actor_metadata(M)})}
+                     || M <- Actors]
+            catch
+                Class:Reason ->
+                    ?LOG_WARNING("Failed to snapshot actors", #{
+                        class => Class, reason => Reason}),
+                    []
+            end;
+        _ ->
+            []
     end.
 
 %% @private
@@ -449,11 +457,15 @@ encode_actor_metadata(#{pid := Pid, class := Class} = Meta) ->
 %% @private
 %% Encode actor stop info for push message JSON.
 encode_stop_info(#{pid := Pid, class := Class, reason := Reason}) ->
-    %% Limit reason string to prevent unbounded output from large terms
+    %% Limit reason: cap nesting depth, then enforce max byte length
     ReasonStr = iolist_to_binary(io_lib:format("~P", [Reason, 10])),
+    TruncatedReason = case byte_size(ReasonStr) > 4096 of
+        true -> binary:part(ReasonStr, 0, 4096);
+        false -> ReasonStr
+    end,
     #{<<"class">> => case Class of
                          undefined -> <<"unknown">>;
                          _ -> atom_to_binary(Class, utf8)
                      end,
       <<"pid">> => list_to_binary(pid_to_list(Pid)),
-      <<"reason">> => ReasonStr}.
+      <<"reason">> => TruncatedReason}.

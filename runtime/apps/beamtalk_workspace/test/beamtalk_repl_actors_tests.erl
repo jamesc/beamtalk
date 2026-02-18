@@ -373,7 +373,7 @@ subscriber_receives_actor_spawned_notification_test() ->
         {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []),
     try
         beamtalk_repl_actors:subscribe(),
-        timer:sleep(10),
+        sys:get_state(RegistryPid),  %% Sync point — ensures cast is processed
         
         {ok, ActorPid} = test_counter:start_link(0),
         ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
@@ -399,7 +399,7 @@ subscriber_receives_actor_stopped_notification_test() ->
         {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []),
     try
         beamtalk_repl_actors:subscribe(),
-        timer:sleep(10),
+        sys:get_state(RegistryPid),
         
         {ok, ActorPid} = test_counter:start_link(0),
         ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
@@ -427,10 +427,10 @@ unsubscribe_stops_notifications_test() ->
         {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []),
     try
         beamtalk_repl_actors:subscribe(),
-        timer:sleep(10),
+        sys:get_state(RegistryPid),
         
         beamtalk_repl_actors:unsubscribe(),
-        timer:sleep(10),
+        sys:get_state(RegistryPid),
         
         {ok, ActorPid} = test_counter:start_link(0),
         ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
@@ -459,10 +459,18 @@ dead_subscriber_auto_removed_test() ->
             receive stop -> ok end
         end),
         receive subscribed -> ok after 500 -> ok end,
-        timer:sleep(10),
+        sys:get_state(RegistryPid),  %% Sync: ensure subscribe cast processed
+        
+        %% Verify subscriber was added
+        {state, _A1, _M1, SubsBefore} = sys:get_state(RegistryPid),
+        ?assertEqual(1, maps:size(SubsBefore)),
         
         exit(SubPid, kill),
         timer:sleep(50),
+        
+        %% Verify subscriber was auto-removed
+        {state, _A2, _M2, SubsAfter} = sys:get_state(RegistryPid),
+        ?assertEqual(0, maps:size(SubsAfter)),
         
         {ok, ActorPid} = test_counter:start_link(0),
         ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
@@ -477,10 +485,14 @@ dead_subscriber_auto_removed_test() ->
 %% Helper: stop and unregister a named process if it's still alive.
 unregister_if_alive(Name) ->
     case whereis(Name) of
-        undefined -> ok;
+        undefined ->
+            ok;
         Pid ->
             try gen_server:stop(Pid) catch _:_ -> ok end,
-            timer:sleep(10)
+            case whereis(Name) of
+                Pid -> unregister(Name);
+                _ -> ok
+            end
     end.
 
 %% Helper: drain all messages from the test process mailbox.
