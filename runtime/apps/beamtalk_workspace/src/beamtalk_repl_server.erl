@@ -648,6 +648,34 @@ handle_op(<<"shutdown">>, Params, Msg, _SessionPid) ->
                 fun beamtalk_repl_json:format_error_message/1)
     end;
 
+handle_op(<<"show-codegen">>, Params, Msg, SessionPid) ->
+    %% BT-700: Compile expression and return Core Erlang source without evaluating.
+    Code = binary_to_list(maps:get(<<"code">>, Params, <<>>)),
+    case Code of
+        [] ->
+            Err = beamtalk_error:new(empty_expression, 'REPL'),
+            Err1 = beamtalk_error:with_message(Err, <<"Empty expression">>),
+            Err2 = beamtalk_error:with_hint(Err1, <<"Enter an expression to compile.">>),
+            beamtalk_repl_protocol:encode_error(
+                Err2, Msg, fun beamtalk_repl_json:format_error_message/1);
+        _ ->
+            case beamtalk_repl_shell:show_codegen(SessionPid, Code) of
+                {ok, CoreErlang, Warnings} ->
+                    Base = beamtalk_repl_protocol:base_response(Msg),
+                    Result = Base#{<<"core_erlang">> => CoreErlang,
+                                   <<"status">> => [<<"done">>]},
+                    Result1 = case Warnings of
+                        [] -> Result;
+                        _ -> Result#{<<"warnings">> => Warnings}
+                    end,
+                    jsx:encode(Result1);
+                {error, ErrorReason, Warnings} ->
+                    WrappedReason = ensure_structured_error(ErrorReason),
+                    beamtalk_repl_protocol:encode_error(
+                        WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1, <<>>, Warnings)
+            end
+    end;
+
 handle_op(Op, _Params, Msg, _SessionPid) ->
     Err0 = beamtalk_error:new(unknown_op, 'REPL'),
     Err1 = beamtalk_error:with_message(Err0,
@@ -684,6 +712,7 @@ describe_ops() ->
         <<"modules">>     => #{<<"params">> => []},
         <<"unload">>      => #{<<"params">> => [<<"module">>]},
         <<"health">>      => #{<<"params">> => []},
+        <<"show-codegen">> => #{<<"params">> => [<<"code">>]},
         <<"describe">>    => #{<<"params">> => []},
         <<"shutdown">>    => #{<<"params">> => [<<"cookie">>]}
     }.

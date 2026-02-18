@@ -14,7 +14,7 @@
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--export([do_eval/2, do_eval/3, handle_load/2, handle_load_source/3]).
+-export([do_eval/2, do_eval/3, do_show_codegen/2, handle_load/2, handle_load_source/3]).
 
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
@@ -145,6 +145,45 @@ do_eval(Expression, State, Subscriber) ->
             end;
         {error, Reason} ->
             {error, {compile_error, Reason}, <<>>, [], NewState}
+    end.
+
+%% @doc Compile a Beamtalk expression and return Core Erlang source (BT-700).
+%% Does NOT evaluate — only compiles and returns the generated Core Erlang.
+-spec do_show_codegen(string(), beamtalk_repl_state:state()) ->
+    {ok, binary(), [binary()], beamtalk_repl_state:state()} |
+    {error, term(), [binary()], beamtalk_repl_state:state()}.
+do_show_codegen(Expression, State) ->
+    Counter = beamtalk_repl_state:get_eval_counter(State),
+    ModuleName = list_to_atom("beamtalk_repl_codegen_" ++ integer_to_list(Counter)),
+    NewState = beamtalk_repl_state:increment_eval_counter(State),
+    Bindings = beamtalk_repl_state:get_bindings(State),
+    SourceBin = list_to_binary(Expression),
+    ModNameBin = atom_to_binary(ModuleName, utf8),
+    KnownVars = [atom_to_binary(K, utf8)
+                 || K <- maps:keys(Bindings),
+                    is_atom(K),
+                    not is_internal_key(K)],
+    try beamtalk_compiler:compile_expression(SourceBin, ModNameBin, KnownVars) of
+        {ok, class_definition, ClassInfo} ->
+            #{core_erlang := CoreErlang, warnings := Warnings} = ClassInfo,
+            {ok, CoreErlang, Warnings, NewState};
+        {ok, method_definition, _MethodInfo} ->
+            {error, <<"show-codegen does not support standalone method definitions">>, [], NewState};
+        {ok, CoreErlang, Warnings} ->
+            {ok, CoreErlang, Warnings, NewState};
+        {error, Diagnostics} ->
+            {error, format_formatted_diagnostics(Diagnostics), [], NewState}
+    catch
+        exit:{noproc, _} ->
+            {error, <<"Compiler not available. Ensure beamtalk_compiler application is started.">>, [], NewState};
+        exit:{timeout, _} ->
+            {error, <<"Compilation timed out.">>, [], NewState};
+        exit:{Reason, _} ->
+            {error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason])), [], NewState};
+        error:Reason ->
+            {error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason])), [], NewState};
+        throw:Reason ->
+            {error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason])), [], NewState}
     end.
 
 %% @doc Load a Beamtalk file and register its classes.

@@ -180,6 +180,34 @@ Get information about a symbol (class, method, variable).
 {"id": "msg-003", "info": {"found": true, "symbol": "Counter", "kind": "class"}, "status": ["done"]}
 ```
 
+#### `show-codegen` — Show Generated Core Erlang (BT-700)
+
+Compile a Beamtalk expression and return the generated Core Erlang source without evaluating it. Useful for debugging, learning, and understanding how Beamtalk compiles to BEAM.
+
+**Request:**
+```json
+{"op": "show-codegen", "id": "msg-100", "code": "1 + 2"}
+```
+
+**Response (success):**
+```json
+{"id": "msg-100", "core_erlang": "call 'erlang':'+'\n    (1, 2)", "status": ["done"]}
+```
+
+**Response (with warnings):**
+```json
+{"id": "msg-100", "core_erlang": "...", "warnings": ["..."], "status": ["done"]}
+```
+
+**Response (compile error):**
+```json
+{"id": "msg-100", "error": "Parse error: unexpected token", "status": ["done", "error"]}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `code` | string | **yes** | Beamtalk expression to compile |
+
 #### `load-file` — Load Source File
 
 Compile and load a `.bt` source file.
