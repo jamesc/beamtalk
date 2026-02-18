@@ -81,6 +81,11 @@ pub(super) fn print_help() {
     println!("  :kill <pid>     Kill an actor by PID");
     println!("  :inspect <pid>  Inspect an actor's state");
     println!("  :sessions       List active REPL sessions");
+    println!("  :test, :t       Run all tests for loaded TestCase classes");
+    println!("  :test <Class>   Run tests for a specific TestCase class");
+    println!("  :info <sym>, :i Get information about a symbol");
+    println!("  :show-codegen   Show generated Core Erlang for an expression");
+    println!("  :sc <expr>      Short alias for :show-codegen");
     println!();
     println!("Expression examples:");
     println!("  x := 42              # Variable assignment");
@@ -102,4 +107,138 @@ pub(super) fn print_help() {
     println!("Actor message sends return Futures, which are automatically");
     println!("awaited for synchronous REPL experience. If you store a Future");
     println!("in a binding before it resolves, you'll see #Future<pending>.");
+}
+
+/// Display test results from the REPL backend (BT-724).
+pub(super) fn display_test_results(results: &serde_json::Value) {
+    let total = results
+        .get("total")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let passed = results
+        .get("passed")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let failed = results
+        .get("failed")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let class = results
+        .get("class")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("Tests");
+
+    if let Some(tests) = results.get("tests").and_then(serde_json::Value::as_array) {
+        for test in tests {
+            let name = test
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("?");
+            let status = test
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("?");
+            // Include class name for test-all results
+            let test_class = test.get("class").and_then(serde_json::Value::as_str);
+            let display_name = if let Some(tc) = test_class {
+                format!("{tc} >> {name}")
+            } else {
+                name.to_string()
+            };
+
+            match status {
+                "pass" => {
+                    println!("  {} {display_name}", color::paint(color::GREEN, "✓"));
+                }
+                "fail" => {
+                    let error = test
+                        .get("error")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("");
+                    println!("  {} {display_name}", color::paint(color::RED, "✗"));
+                    if !error.is_empty() {
+                        println!("    {}", color::paint(color::DIM, &format!("→ {error}")));
+                    }
+                }
+                other => {
+                    println!("  ? {display_name} ({other})");
+                }
+            }
+        }
+    }
+
+    // Summary line
+    println!();
+    if failed == 0 {
+        println!(
+            "{class}: {} ({total} tests)",
+            color::paint(color::GREEN, "All tests passed")
+        );
+    } else {
+        println!(
+            "{class}: {}, {}",
+            color::paint(color::GREEN, &format!("{passed} passed")),
+            color::paint(color::RED, &format!("{failed} failed"))
+        );
+    }
+}
+
+/// Display generated Core Erlang source (BT-724).
+pub(super) fn display_codegen(core_erlang: &str) {
+    // Use cyan for Core Erlang source to distinguish from regular output
+    println!("{}", color::paint(color::CYAN, core_erlang));
+}
+
+/// Display symbol info from the :info command (BT-724).
+pub(super) fn display_info(info: &serde_json::Value) {
+    let found = info
+        .get("found")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let symbol = info
+        .get("symbol")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("?");
+
+    if !found {
+        println!("Symbol not found: {symbol}");
+        return;
+    }
+
+    let kind = info
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+
+    println!(
+        "{} {}",
+        color::paint(color::BOLD_CYAN, symbol),
+        color::paint(color::DIM, &format!("({kind})"))
+    );
+
+    // Display additional info fields if present
+    if let Some(obj) = info.as_object() {
+        for (key, value) in obj {
+            // Skip already-displayed fields
+            if matches!(key.as_str(), "found" | "symbol" | "kind") {
+                continue;
+            }
+            if let Some(s) = value.as_str() {
+                if !s.is_empty() {
+                    println!("  {}: {s}", color::paint(color::DIM, key));
+                }
+            } else if let Some(arr) = value.as_array() {
+                if !arr.is_empty() {
+                    println!("  {}:", color::paint(color::DIM, key));
+                    for item in arr {
+                        if let Some(s) = item.as_str() {
+                            println!("    {s}");
+                        } else {
+                            println!("    {item}");
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
