@@ -25,7 +25,7 @@
          encode_out/3,
          encode_bindings/3, encode_loaded/3, encode_actors/3,
          encode_modules/3, encode_sessions/3, encode_inspect/2, encode_inspect/3,
-         encode_docs/2,
+         encode_docs/2, encode_describe/3,
          is_legacy/1, get_op/1, get_id/1, get_session/1, get_params/1,
          base_response/1]).
 
@@ -295,6 +295,21 @@ encode_docs(DocText, Msg) ->
         false ->
             Base = base_response(Msg),
             jsx:encode(Base#{<<"docs">> => DocText, <<"status">> => [<<"done">>]})
+    end.
+
+%% @doc Encode a describe response with ops, versions, and capabilities.
+-spec encode_describe(map(), map(), protocol_msg()) -> binary().
+encode_describe(Ops, Versions, Msg) ->
+    case Msg#protocol_msg.legacy of
+        true ->
+            jsx:encode(#{<<"type">> => <<"describe">>,
+                         <<"ops">> => Ops,
+                         <<"versions">> => Versions});
+        false ->
+            Base = base_response(Msg),
+            jsx:encode(Base#{<<"ops">> => Ops,
+                             <<"versions">> => Versions,
+                             <<"status">> => [<<"done">>]})
     end.
 
 %%% Internal functions
