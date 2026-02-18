@@ -1260,6 +1260,7 @@ tcp_integration_test_() ->
           {"complete op (with prefix)", fun() -> tcp_complete_prefix_test(Port) end},
           {"info op (unknown symbol)", fun() -> tcp_info_unknown_test(Port) end},
           {"info op (known atom)", fun() -> tcp_info_known_atom_test(Port) end},
+          {"info op (class enriched)", fun() -> tcp_info_class_enriched_test(Port) end},
           {"unknown op", fun() -> tcp_unknown_op_test(Port) end},
           {"empty eval op", fun() -> tcp_eval_empty_test(Port) end},
           {"simple eval op", fun() -> tcp_eval_simple_test(Port) end},
@@ -1548,6 +1549,24 @@ tcp_info_known_atom_test(Port) ->
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t7b">>}, Resp),
     ?assert(maps:is_key(<<"info">>, Resp)).
+
+%% Test: info for a known class returns enriched metadata (BT-701)
+tcp_info_class_enriched_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"info">>, <<"id">> => <<"t7c">>, <<"symbol">> => <<"Integer">>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"t7c">>}, Resp),
+    Info = maps:get(<<"info">>, Resp),
+    %% Backward compatible: found and kind retained
+    ?assertEqual(true, maps:get(<<"found">>, Info)),
+    ?assertEqual(<<"class">>, maps:get(<<"kind">>, Info)),
+    ?assertEqual(<<"Integer">>, maps:get(<<"symbol">>, Info)),
+    %% Enriched: superclass chain
+    ?assertEqual(<<"Number">>, maps:get(<<"superclass">>, Info)),
+    ?assert(is_list(maps:get(<<"superclass_chain">>, Info))),
+    ?assert(length(maps:get(<<"superclass_chain">>, Info)) >= 1),
+    %% Enriched: methods list
+    ?assert(is_list(maps:get(<<"methods">>, Info))),
+    ?assert(length(maps:get(<<"methods">>, Info)) > 0).
 
 %% Test: complete with a non-empty prefix
 tcp_complete_prefix_test(Port) ->
@@ -2017,6 +2036,15 @@ get_symbol_info_unknown_atom_test() ->
 get_symbol_info_known_atom_not_class_test() ->
     Info = beamtalk_repl_server:get_symbol_info(<<"erlang">>),
     ?assertEqual(false, maps:get(<<"found">>, Info)).
+
+%% BT-701: Unknown symbol still has backward-compatible shape
+get_symbol_info_unknown_retains_symbol_test() ->
+    Info = beamtalk_repl_server:get_symbol_info(<<"nonexistent_xyz_42">>),
+    ?assertEqual(false, maps:get(<<"found">>, Info)),
+    ?assertEqual(<<"nonexistent_xyz_42">>, maps:get(<<"symbol">>, Info)),
+    %% Enriched fields should NOT be present for unknown symbols
+    ?assertEqual(error, maps:find(<<"superclass">>, Info)),
+    ?assertEqual(error, maps:find(<<"methods">>, Info)).
 
 %%% resolve_class_to_module/1 tests
 

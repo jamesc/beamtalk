@@ -168,17 +168,48 @@ Get completion suggestions for a partial expression.
 
 #### `info` — Symbol Information
 
-Get information about a symbol (class, method, variable).
+Get information about a symbol (class, method, variable). For class symbols, returns enriched metadata including superclass chain, method list, source location, and documentation.
 
 **Request:**
 ```json
 {"op": "info", "id": "msg-003", "symbol": "Counter"}
 ```
 
-**Response:**
+**Response (class found):**
 ```json
-{"id": "msg-003", "info": {"found": true, "symbol": "Counter", "kind": "class"}, "status": ["done"]}
+{
+  "id": "msg-003",
+  "info": {
+    "found": true,
+    "symbol": "Counter",
+    "kind": "class",
+    "superclass": "Actor",
+    "superclass_chain": ["Actor", "Object"],
+    "methods": ["decrement", "increment", "value"],
+    "source": "/path/to/examples/counter.bt",
+    "doc": "A simple counter actor"
+  },
+  "status": ["done"]
+}
 ```
+
+**Response (not found):**
+```json
+{"id": "msg-003", "info": {"found": false, "symbol": "Counter"}, "status": ["done"]}
+```
+
+**Enriched fields (present only when `found` is `true` and `kind` is `"class"`):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `superclass` | string \| null | Direct superclass name, or `null` if none |
+| `superclass_chain` | string[] | Full superclass chain from parent to root |
+| `methods` | string[] | Sorted list of all method selectors (own + inherited) |
+| `source` | string | Source file path (when available from compile info) |
+| `line` | number | Source line number (when available) |
+| `doc` | string | Class documentation from EEP-48 doc chunks (when present) |
+
+Optional fields (`source`, `line`, `doc`) are omitted when not available.
 
 #### `load-file` — Load Source File
 

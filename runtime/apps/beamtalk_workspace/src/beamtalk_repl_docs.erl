@@ -12,12 +12,13 @@
 
 -module(beamtalk_repl_docs).
 
--export([format_class_docs/1, format_method_doc/2]).
+-export([format_class_docs/1, format_method_doc/2,
+         get_module_doc/1, get_method_signatures/2]).
 
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
--export([safe_to_existing_atom/1, get_module_doc/1, get_doc_entries/1,
-         find_doc_entry/2, get_method_signatures/2, get_method_doc/2,
+-export([safe_to_existing_atom/1, get_doc_entries/1,
+         find_doc_entry/2, get_method_doc/2,
          group_by_class/1, format_class_output/5, format_superclass/1,
          format_method_output/4, format_metaclass_docs/0,
          format_metaclass_method_doc/1, metaclass_method_doc/1]).
