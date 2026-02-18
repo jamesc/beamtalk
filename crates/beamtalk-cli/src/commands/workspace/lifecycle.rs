@@ -233,6 +233,7 @@ pub fn stop_workspace(name_or_id: &str, force: bool) -> Result<()> {
 
     match node_info {
         Some(info) if is_node_running(&info) => {
+            let host = info.connect_host();
             if force {
                 // Force-kill: skip graceful shutdown, go straight to OS kill.
                 // On Windows PID may be 0 (sentinel) — fall back to graceful.
@@ -244,7 +245,7 @@ pub fn stop_workspace(name_or_id: &str, force: bool) -> Result<()> {
                 }
                 force_kill_process(info.pid)?;
                 // Ensure the node has actually released its port before returning.
-                wait_for_workspace_exit(info.port, 5).map_err(|_| {
+                wait_for_workspace_exit(host, info.port, 5).map_err(|_| {
                     miette!(
                         "Workspace did not release port {} within 5s after forced stop. \
                          It may still be shutting down; retry shortly.",
@@ -259,12 +260,12 @@ pub fn stop_workspace(name_or_id: &str, force: bool) -> Result<()> {
 
                 // Try graceful TCP shutdown first
                 let cookie = read_workspace_cookie(&workspace_id)?;
-                match tcp_send_shutdown(info.port, &cookie) {
+                match tcp_send_shutdown(host, info.port, &cookie) {
                     Ok(()) => {
                         // Wait for the workspace to actually exit.
                         // OTP init:stop() does orderly application teardown which
                         // can take 10+ seconds under load.
-                        if wait_for_workspace_exit(info.port, 15).is_err() {
+                        if wait_for_workspace_exit(host, info.port, 15).is_err() {
                             // Graceful shutdown acknowledged but process didn't exit
                             // Fall back to force-kill (if PID available)
                             if info.pid == 0 {
@@ -276,7 +277,7 @@ pub fn stop_workspace(name_or_id: &str, force: bool) -> Result<()> {
                             }
                             eprintln!("Graceful shutdown timed out, force-killing...");
                             force_kill_process(info.pid)?;
-                            wait_for_workspace_exit(info.port, 5).map_err(|_| {
+                            wait_for_workspace_exit(host, info.port, 5).map_err(|_| {
                                 miette!(
                                     "Workspace did not release port {} within 5s after forced stop. \
                                      It may still be shutting down; retry shortly.",
@@ -297,7 +298,7 @@ pub fn stop_workspace(name_or_id: &str, force: bool) -> Result<()> {
                         }
                         eprintln!("TCP shutdown failed ({e}), force-killing...");
                         force_kill_process(info.pid)?;
-                        wait_for_workspace_exit(info.port, 5).map_err(|_| {
+                        wait_for_workspace_exit(host, info.port, 5).map_err(|_| {
                             miette!(
                                 "Workspace did not release port {} within 5s after forced stop. \
                                  It may still be shutting down; retry shortly.",

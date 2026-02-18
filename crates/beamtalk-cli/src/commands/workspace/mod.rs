@@ -350,6 +350,7 @@ mod tests {
             pid: 12345,
             start_time: Some(987_654),
             nonce: None,
+            bind_addr: None,
         };
 
         save_node_info(&ws.id, &info).unwrap();
@@ -399,6 +400,7 @@ mod tests {
             pid: 99999,
             start_time: None,
             nonce: None,
+            bind_addr: None,
         };
         save_node_info(&ws.id, &info).unwrap();
         assert!(ws.dir().join("node.info").exists());
@@ -446,6 +448,7 @@ mod tests {
             pid: u32::MAX, // Very unlikely to be a real PID
             start_time: None,
             nonce: None,
+            bind_addr: None,
         };
         assert!(!is_node_running(&info));
     }
@@ -463,6 +466,7 @@ mod tests {
             pid: 1, // PID 1 exists but is init, not BEAM
             start_time: Some(999_999_999),
             nonce: None,
+            bind_addr: None,
         };
         assert!(!is_node_running(&info));
     }
@@ -475,6 +479,7 @@ mod tests {
             pid: u32::MAX,
             start_time: Some(12345),
             nonce: None,
+            bind_addr: None,
         };
         // PID doesn't exist at all
         assert!(!is_node_running(&info));
@@ -507,11 +512,86 @@ mod tests {
             pid: 42,
             start_time: Some(1_234_567_890),
             nonce: None,
+            bind_addr: None,
         };
         save_node_info(&ws.id, &info).unwrap();
 
         let loaded = get_node_info(&ws.id).unwrap().unwrap();
         assert_eq!(loaded.start_time, Some(1_234_567_890));
+    }
+
+    #[test]
+    fn test_node_info_backward_compat_without_bind_addr() {
+        // Old node.info format: no bind_addr field
+        let ws = TestWorkspace::new("compat_bind");
+        fs::create_dir_all(ws.dir()).unwrap();
+
+        let old_json =
+            r#"{"node_name":"old@localhost","port":9999,"pid":12345,"start_time":100}"#;
+        fs::write(ws.dir().join("node.info"), old_json).unwrap();
+
+        let loaded = get_node_info(&ws.id).unwrap().unwrap();
+        assert_eq!(loaded.bind_addr, None);
+        assert_eq!(loaded.connect_host(), "127.0.0.1");
+    }
+
+    #[test]
+    fn test_node_info_bind_addr_round_trips() {
+        let ws = TestWorkspace::new("bind_addr_rt");
+        fs::create_dir_all(ws.dir()).unwrap();
+
+        let info = NodeInfo {
+            node_name: "test@localhost".to_string(),
+            port: 8080,
+            pid: 42,
+            start_time: None,
+            nonce: None,
+            bind_addr: Some("192.168.1.5".to_string()),
+        };
+        save_node_info(&ws.id, &info).unwrap();
+
+        let loaded = get_node_info(&ws.id).unwrap().unwrap();
+        assert_eq!(loaded.bind_addr, Some("192.168.1.5".to_string()));
+        assert_eq!(loaded.connect_host(), "192.168.1.5");
+    }
+
+    #[test]
+    fn test_connect_host_defaults_to_loopback() {
+        let info = NodeInfo {
+            node_name: "test@localhost".to_string(),
+            port: 8080,
+            pid: 1,
+            start_time: None,
+            nonce: None,
+            bind_addr: None,
+        };
+        assert_eq!(info.connect_host(), "127.0.0.1");
+    }
+
+    #[test]
+    fn test_connect_host_uses_stored_address() {
+        let info = NodeInfo {
+            node_name: "test@localhost".to_string(),
+            port: 8080,
+            pid: 1,
+            start_time: None,
+            nonce: None,
+            bind_addr: Some("192.168.1.5".to_string()),
+        };
+        assert_eq!(info.connect_host(), "192.168.1.5");
+    }
+
+    #[test]
+    fn test_connect_host_maps_all_interfaces_to_loopback() {
+        let info = NodeInfo {
+            node_name: "test@localhost".to_string(),
+            port: 8080,
+            pid: 1,
+            start_time: None,
+            nonce: None,
+            bind_addr: Some("0.0.0.0".to_string()),
+        };
+        assert_eq!(info.connect_host(), "127.0.0.1");
     }
 
     #[cfg(target_os = "linux")]
@@ -946,7 +1026,7 @@ mod tests {
             process.kill();
         }
         // Wait for process to exit (TCP probe will fail once process is dead)
-        let _ = wait_for_workspace_exit(node_info.port, 5);
+        let _ = wait_for_workspace_exit(node_info.connect_host(), node_info.port, 5);
 
         // False case: node has been killed
         assert!(
@@ -1130,7 +1210,7 @@ mod tests {
         if let Some(process) = system.process(Pid::from_u32(node_info.pid)) {
             process.kill();
         }
-        let _ = wait_for_workspace_exit(node_info.port, 5);
+        let _ = wait_for_workspace_exit(node_info.connect_host(), node_info.port, 5);
 
         // list_workspaces should detect stale node.info and report Stopped
         let workspaces = list_workspaces().unwrap();

@@ -20,6 +20,8 @@ pub(super) struct ReplClient {
     last_loaded_file: Option<String>,
     /// Session ID assigned by the server (BT-666)
     session_id: Option<String>,
+    /// Host address for this connection (BT-694)
+    host: String,
     /// Port used for this connection (needed for interrupt connection)
     port: u16,
     /// Cookie used for this connection (needed for interrupt reconnection)
@@ -28,14 +30,15 @@ pub(super) struct ReplClient {
 
 impl ReplClient {
     /// Connect to the REPL backend.
-    pub(super) fn connect(port: u16, cookie: &str) -> Result<Self> {
-        let inner = ProtocolClient::connect(port, cookie, None)?;
+    pub(super) fn connect(host: &str, port: u16, cookie: &str) -> Result<Self> {
+        let inner = ProtocolClient::connect(host, port, cookie, None)?;
         let session_id = inner.session_id().map(String::from);
 
         Ok(Self {
             inner,
             last_loaded_file: None,
             session_id,
+            host: host.to_string(),
             port,
             cookie: cookie.to_string(),
         })
@@ -119,7 +122,7 @@ impl ReplClient {
         }
         // Open a new connection and send interrupt — best effort
         if let Ok(mut interrupt_client) =
-            ProtocolClient::connect(self.port, &self.cookie, Some(Duration::from_secs(2)))
+            ProtocolClient::connect(&self.host, self.port, &self.cookie, Some(Duration::from_secs(2)))
         {
             let _ = interrupt_client.send_request::<serde_json::Value>(&interrupt_req);
         }

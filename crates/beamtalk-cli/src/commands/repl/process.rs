@@ -149,9 +149,9 @@ pub(super) fn start_beam_node(
 }
 
 /// Connect to REPL backend with retries.
-pub(super) fn connect_with_retries(port: u16, cookie: &str) -> Result<ReplClient> {
+pub(super) fn connect_with_retries(host: &str, port: u16, cookie: &str) -> Result<ReplClient> {
     for attempt in 1..=MAX_CONNECT_RETRIES {
-        match ReplClient::connect(port, cookie) {
+        match ReplClient::connect(host, port, cookie) {
             Ok(client) => return Ok(client),
             Err(e) => {
                 if attempt == MAX_CONNECT_RETRIES {
