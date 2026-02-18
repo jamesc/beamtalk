@@ -152,42 +152,11 @@ handle_load(Path, State) ->
                     Source = binary_to_list(SourceBin),
                     %% Detect if file is from the stdlib (lib/ directory)
                     StdlibMode = is_stdlib_path(Path),
-                    %% Compile file via port backend
+                    %% Compile and load
                     case compile_file(Source, Path, StdlibMode) of
                         {ok, Binary, ClassNames, ModuleName} ->
-                            %% Load the module (persistent, not deleted)
-                            case code:load_binary(ModuleName, Path, Binary) of
-                                {module, ModuleName} ->
-                                    %% Activate module (register classes, hot reload, metadata)
-                                    activate_module(ModuleName, ClassNames),
-                                    %% Track loaded module (avoid duplicates on reload)
-                                    LoadedModules = beamtalk_repl_state:get_loaded_modules(State),
-                                    NewState1 = case lists:member(ModuleName, LoadedModules) of
-                                        true -> State;
-                                        false -> beamtalk_repl_state:add_loaded_module(ModuleName, State)
-                                    end,
-                                    %% Track module in module tracker
-                                    Tracker = beamtalk_repl_state:get_module_tracker(NewState1),
-                                    NewTracker = beamtalk_repl_modules:add_module(ModuleName, Path, Tracker),
-                                    NewState2 = beamtalk_repl_state:set_module_tracker(NewTracker, NewState1),
-                                    
-                                    %% BT-571: Store class source for method patching
-                                    %% ClassNames is a list of maps with atom keys
-                                    %% (name, superclass) whose values are strings
-                                    %% (from binary_to_list/1 in compile_file_via_port/3),
-                                    %% but class_sources lookups use binary keys
-                                    NewState3 = lists:foldl(
-                                        fun(#{name := Name}, AccState) ->
-                                            NameBin = list_to_binary(Name),
-                                            beamtalk_repl_state:set_class_source(
-                                                NameBin, Source, AccState)
-                                        end,
-                                        NewState2, ClassNames),
-                                    
-                                    {ok, ClassNames, NewState3};
-                                {error, Reason} ->
-                                    {error, {load_error, Reason}, State}
-                            end;
+                            load_compiled_module(Binary, ClassNames, ModuleName,
+                                                 Source, Path, State);
                         {error, Reason} ->
                             {error, Reason, State}
                     end
@@ -202,35 +171,46 @@ handle_load_source(SourceBin, Label, State) ->
     Source = binary_to_list(SourceBin),
     case compile_file(Source, Label, false) of
         {ok, Binary, ClassNames, ModuleName} ->
-            case code:load_binary(ModuleName, Label, Binary) of
-                {module, ModuleName} ->
-                    activate_module(ModuleName, ClassNames),
-                    LoadedModules = beamtalk_repl_state:get_loaded_modules(State),
-                    NewState1 = case lists:member(ModuleName, LoadedModules) of
-                        true -> State;
-                        false -> beamtalk_repl_state:add_loaded_module(ModuleName, State)
-                    end,
-                    %% Track module in module tracker (for modules/unload ops)
-                    Tracker = beamtalk_repl_state:get_module_tracker(NewState1),
-                    NewTracker = beamtalk_repl_modules:add_module(ModuleName, Label, Tracker),
-                    NewState2 = beamtalk_repl_state:set_module_tracker(NewTracker, NewState1),
-                    %% Store class source for method patching (BT-571)
-                    NewState3 = lists:foldl(
-                        fun(#{name := Name}, AccState) ->
-                            NameBin = list_to_binary(Name),
-                            beamtalk_repl_state:set_class_source(
-                                NameBin, Source, AccState)
-                        end,
-                        NewState2, ClassNames),
-                    {ok, ClassNames, NewState3};
-                {error, Reason} ->
-                    {error, {load_error, Reason}, State}
-            end;
+            load_compiled_module(Binary, ClassNames, ModuleName,
+                                 Source, undefined, State);
         {error, Reason} ->
             {error, Reason, State}
     end.
 
 %%% Internal functions
+
+%% @doc Load a compiled module, register classes, and update state.
+%% SourcePath is a file path (for file loads) or undefined (for inline loads).
+-spec load_compiled_module(binary(), [map()], atom(), string(),
+                           string() | undefined, beamtalk_repl_state:state()) ->
+    {ok, [map()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
+load_compiled_module(Binary, ClassNames, ModuleName, Source, SourcePath, State) ->
+    LoadPath = case SourcePath of undefined -> ""; _ -> SourcePath end,
+    case code:load_binary(ModuleName, LoadPath, Binary) of
+        {module, ModuleName} ->
+            activate_module(ModuleName, ClassNames),
+            %% Track loaded module (avoid duplicates on reload)
+            LoadedModules = beamtalk_repl_state:get_loaded_modules(State),
+            NewState1 = case lists:member(ModuleName, LoadedModules) of
+                true -> State;
+                false -> beamtalk_repl_state:add_loaded_module(ModuleName, State)
+            end,
+            %% Track module in module tracker (SourcePath may be undefined for inline loads)
+            Tracker = beamtalk_repl_state:get_module_tracker(NewState1),
+            NewTracker = beamtalk_repl_modules:add_module(ModuleName, SourcePath, Tracker),
+            NewState2 = beamtalk_repl_state:set_module_tracker(NewTracker, NewState1),
+            %% BT-571: Store class source for method patching
+            NewState3 = lists:foldl(
+                fun(#{name := Name}, AccState) ->
+                    NameBin = list_to_binary(Name),
+                    beamtalk_repl_state:set_class_source(
+                        NameBin, Source, AccState)
+                end,
+                NewState2, ClassNames),
+            {ok, ClassNames, NewState3};
+        {error, Reason} ->
+            {error, {load_error, Reason}, State}
+    end.
 
 %% BT-571: Handle inline class definition result.
 %% Loads the compiled class module, registers its classes, and stores source.

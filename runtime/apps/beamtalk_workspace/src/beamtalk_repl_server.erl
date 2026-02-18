@@ -648,6 +648,7 @@ handle_op(Op, _Params, Msg, _SessionPid) ->
     {clear_bindings} | 
     {get_bindings} | 
     {load_file, string()} | 
+    {load_source, binary()} |
     {list_actors} |
     {kill_actor, string()} |
     {list_modules} |
@@ -700,7 +701,8 @@ parse_request(Data) when is_binary(Data) ->
 %% @doc Translate a protocol operation name to an internal request tuple.
 -spec op_to_request(binary(), map()) ->
     {eval, string()} | {clear_bindings} | {get_bindings} |
-    {load_file, string()} | {list_actors} | {list_modules} |
+    {load_file, string()} | {load_source, binary()} |
+    {list_actors} | {list_modules} |
     {kill_actor, string()} | {unload_module, string()} |
     {get_docs, binary(), binary() | undefined} |
     {health} | {shutdown, string()} | {error, term()}.

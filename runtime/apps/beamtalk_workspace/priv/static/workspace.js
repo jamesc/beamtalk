@@ -27,6 +27,8 @@
   var msgId = 0;
   // Track pending inspect requests to route responses to Inspector
   var pendingInspects = {};
+  // Track pending load-source requests to route responses to Editor
+  var pendingLoads = {};
 
   function setStatus(text, color) {
     statusEl.textContent = text;
@@ -150,15 +152,16 @@
         return;
       }
 
-      // Load-source response → Editor status
-      if (msg.id && msg.id.indexOf('load-') === 0 && msg.classes) {
-        editorStatus.textContent = 'Loaded: ' + msg.classes.join(', ');
-        editorStatus.style.color = '#a6e3a1';
-        return;
-      }
-      if (msg.id && msg.id.indexOf('load-') === 0 && msg.error) {
-        editorStatus.textContent = msg.error;
-        editorStatus.style.color = '#f38ba8';
+      // Route load-source responses to Editor status
+      if (msg.id && pendingLoads[msg.id]) {
+        delete pendingLoads[msg.id];
+        if (msg.classes) {
+          editorStatus.textContent = 'Loaded: ' + msg.classes.join(', ');
+          editorStatus.style.color = '#a6e3a1';
+        } else if (msg.error) {
+          editorStatus.textContent = msg.error;
+          editorStatus.style.color = '#f38ba8';
+        }
         return;
       }
 
@@ -232,7 +235,9 @@
     editorStatus.textContent = 'Compiling…';
     editorStatus.style.color = '#f9e2af';
     msgId++;
-    ws.send(JSON.stringify({ op: 'load-source', id: 'load-' + msgId, source: source }));
+    var id = 'msg-' + msgId;
+    pendingLoads[id] = true;
+    ws.send(JSON.stringify({ op: 'load-source', id: id, source: source }));
   };
 
   // --- Keyboard shortcuts ---

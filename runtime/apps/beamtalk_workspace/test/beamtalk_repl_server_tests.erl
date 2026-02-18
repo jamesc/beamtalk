@@ -31,6 +31,10 @@ parse_request_load_test() ->
     Request = <<"{\"type\": \"load\", \"path\": \"examples/counter.bt\"}">>,
     ?assertEqual({load_file, "examples/counter.bt"}, beamtalk_repl_server:parse_request(Request)).
 
+parse_request_load_source_test() ->
+    Request = <<"{\"op\": \"load-source\", \"source\": \"Object subclass: Foo\"}">>,
+    ?assertEqual({load_source, <<"Object subclass: Foo">>}, beamtalk_repl_server:parse_request(Request)).
+
 parse_request_with_newline_test() ->
     Request = <<"{\"type\": \"eval\", \"expression\": \"1 + 2\"}\n">>,
     ?assertEqual({eval, "1 + 2"}, beamtalk_repl_server:parse_request(Request)).
