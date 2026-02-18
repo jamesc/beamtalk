@@ -583,10 +583,12 @@ fn build_detached_node_command(
         }
     }
 
-    // Set compiler port binary path (for runtime compilation support)
-    // In installed mode, it lives next to the beamtalk binary in bin/.
-    // In dev mode, it lives in target/{debug,release}/.
-    if let Ok(exe) = std::env::current_exe() {
+    // Set compiler port binary path (for runtime compilation support).
+    // Preserve any user-provided BEAMTALK_COMPILER_PORT_BIN (e.g. via Nix/Homebrew
+    // wrapper), falling back to auto-discovery next to the beamtalk binary.
+    if let Ok(user_compiler_port) = std::env::var("BEAMTALK_COMPILER_PORT_BIN") {
+        cmd.env("BEAMTALK_COMPILER_PORT_BIN", user_compiler_port);
+    } else if let Ok(exe) = std::env::current_exe() {
         if let Some(bin_dir) = exe.parent() {
             let compiler_name = if cfg!(windows) {
                 "beamtalk-compiler-port.exe"

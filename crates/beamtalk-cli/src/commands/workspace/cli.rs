@@ -241,11 +241,47 @@ fn run_create_background(
 ) -> Result<()> {
     use crate::commands::repl::bind::{resolve_bind_addr, validate_network_binding};
 
+    // Reject --web-port 0 (ephemeral web port can't be reported; BT-689)
+    if web_port == Some(0) {
+        return Err(miette::miette!(
+            "--web-port 0 is not supported. Specify an explicit port for the web interface."
+        ));
+    }
+
     let cwd = std::env::current_dir()
         .map_err(|e| miette::miette!("Could not determine current directory: {e}"))?;
     let project_root = discovery::discover_project_root(&cwd);
 
-    // Resolve bind address
+    // Check if workspace already exists and is running before validating
+    // startup-only flags (bind/TLS). This avoids errors like "missing TLS certs"
+    // when the user just wants to check that a workspace is running.
+    let workspace_id = super::workspace_id_for_project(&project_root, Some(name))?;
+    if let Ok(true) = super::storage::workspace_exists(&workspace_id) {
+        if let Ok(Some(info)) = super::storage::get_node_info(&workspace_id) {
+            if super::is_node_running(&info) {
+                println!("Workspace '{workspace_id}' already running");
+                let has_startup_flags = tls
+                    || bind.is_some()
+                    || port != 0
+                    || web_port.is_some()
+                    || persistent
+                    || idle_timeout.is_some();
+                if has_startup_flags {
+                    eprintln!(
+                        "  ⚠️  Startup flags (--port, --bind, --tls, --web-port, --persistent, \
+                         --idle-timeout) have no effect on an already-running workspace.\n  \
+                         Stop it first with `beamtalk workspace stop {name}` to restart with new settings."
+                    );
+                }
+                println!("Node:      {}", info.node_name);
+                println!("Port:      {}", info.port);
+                println!("\nAttach a REPL: beamtalk repl --workspace {workspace_id}");
+                return Ok(());
+            }
+        }
+    }
+
+    // Validate startup-only flags (only reached when we're actually starting a new node)
     let bind_addr = resolve_bind_addr(bind)?;
     validate_network_binding(bind_addr, confirm_network)?;
 
@@ -267,7 +303,7 @@ fn run_create_background(
         None
     };
 
-    let (node_info, is_new, workspace_id) = get_or_start_workspace(
+    let (node_info, _is_new, workspace_id) = get_or_start_workspace(
         &project_root,
         Some(name),
         port,
@@ -284,19 +320,7 @@ fn run_create_background(
         web_port,
     )?;
 
-    if is_new {
-        println!("Workspace '{workspace_id}' started");
-    } else {
-        println!("Workspace '{workspace_id}' already running");
-        // Warn that startup flags have no effect on a running workspace
-        if tls || bind.is_some() || port != 0 || web_port.is_some() {
-            eprintln!(
-                "  ⚠️  Startup flags (--port, --bind, --tls, --web-port) have no effect on an \
-                 already-running workspace.\n  \
-                 Stop it first with `beamtalk workspace stop {name}` to restart with new settings."
-            );
-        }
-    }
+    println!("Workspace '{workspace_id}' started");
     println!("Node:      {}", node_info.node_name);
     println!("Port:      {}", node_info.port);
     println!("\nAttach a REPL: beamtalk repl --workspace {workspace_id}");
