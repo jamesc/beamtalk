@@ -267,7 +267,7 @@ fn run_create_background(
         None
     };
 
-    let (node_info, _is_new, workspace_id) = get_or_start_workspace(
+    let (node_info, is_new, workspace_id) = get_or_start_workspace(
         &project_root,
         Some(name),
         port,
@@ -284,7 +284,19 @@ fn run_create_background(
         web_port,
     )?;
 
-    println!("Workspace '{workspace_id}' started");
+    if is_new {
+        println!("Workspace '{workspace_id}' started");
+    } else {
+        println!("Workspace '{workspace_id}' already running");
+        // Warn that startup flags have no effect on a running workspace
+        if tls || bind.is_some() || port != 0 || web_port.is_some() {
+            eprintln!(
+                "  ⚠️  Startup flags (--port, --bind, --tls, --web-port) have no effect on an \
+                 already-running workspace.\n  \
+                 Stop it first with `beamtalk workspace stop {name}` to restart with new settings."
+            );
+        }
+    }
     println!("Node:      {}", node_info.node_name);
     println!("Port:      {}", node_info.port);
     println!(

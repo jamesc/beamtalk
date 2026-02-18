@@ -542,6 +542,12 @@ fn build_detached_node_command(
     if let Ok(term) = std::env::var("TERM") {
         cmd.env("TERM", term);
     }
+    // Temp directory (used by Erlang's file module and System.getEnv:)
+    for var in &["TMPDIR", "TEMP", "TMP"] {
+        if let Ok(val) = std::env::var(var) {
+            cmd.env(var, val);
+        }
+    }
 
     cmd.args(&args)
         .current_dir(project_root)
@@ -568,7 +574,9 @@ fn build_detached_node_command(
             cmd.pre_exec(|| {
                 // Restrictive umask: workspace files are owner-only (0077)
                 libc::umask(0o077);
-                // New session: fully detach from controlling terminal
+                // New session: fully detach from controlling terminal.
+                // Note: -detached already calls setsid() internally; this is
+                // harmless (returns EPERM) but we need pre_exec for umask anyway.
                 libc::setsid();
                 Ok(())
             });
