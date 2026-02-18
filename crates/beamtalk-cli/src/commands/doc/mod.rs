@@ -65,6 +65,11 @@ const PROSE_PAGES: &[(&str, &str, &str)] = &[
         "agent-native-development.html",
         "Agent-Native Development",
     ),
+    (
+        "known-limitations.md",
+        "known-limitations.html",
+        "Known Limitations",
+    ),
 ];
 
 /// Generate HTML API documentation.
