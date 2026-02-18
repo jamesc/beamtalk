@@ -201,7 +201,7 @@ handle_protocol(Data, SessionPid, State) ->
 
 %% @private
 %% BT-696: Start async eval with this handler as the streaming subscriber.
-handle_eval_async(Msg, SessionPid, State) ->
+handle_eval_async(Msg, SessionPid, State = #ws_state{pending_eval = undefined}) ->
     Params = beamtalk_repl_protocol:get_params(Msg),
     Code = binary_to_list(maps:get(<<"code">>, Params, <<>>)),
     case Code of
@@ -216,7 +216,15 @@ handle_eval_async(Msg, SessionPid, State) ->
             %% Start async eval — results arrive via websocket_info
             beamtalk_repl_shell:eval_async(SessionPid, Code, self()),
             {ok, State#ws_state{pending_eval = Msg}}
-    end.
+    end;
+handle_eval_async(Msg, _SessionPid, State) ->
+    %% Already have a pending eval — reject to prevent mis-correlation
+    Err = beamtalk_error:new(eval_busy, 'REPL'),
+    Err1 = beamtalk_error:with_message(Err, <<"An evaluation is already in progress">>),
+    Err2 = beamtalk_error:with_hint(Err1, <<"Use Ctrl-C to interrupt the current evaluation.">>),
+    Response = beamtalk_repl_protocol:encode_error(
+        Err2, Msg, fun beamtalk_repl_json:format_error_message/1),
+    {[{text, Response}], State}.
 
 %% @private
 %% Handle shutdown op — re-validates cookie as an extra security measure.
