@@ -376,7 +376,7 @@ impl Parser {
                 let bad_token = self.advance();
                 let span = bad_token.span();
                 let message: EcoString =
-                    "Unexpected '#': expected '#(' for a list, '#{' for a map, or '#name'/'#\\'quoted\\'' for a symbol"
+                    "Unexpected '#': expected '#(' for a list, '#{' for a map, or '#name' / #'quoted' for a symbol"
                         .into();
                 self.diagnostics
                     .push(Diagnostic::error(message.clone(), span));
