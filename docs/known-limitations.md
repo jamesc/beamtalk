@@ -95,14 +95,14 @@ The following common utilities are not yet in the stdlib. All have clean workaro
 
 | Missing | Erlang FFI Workaround | Tracking |
 |---------|----------------------|----------|
-| Regular expressions | `Erlang re run: string pattern` | [BT-709](https://linear.app/beamtalk/issue/BT-709) |
+| Regular expressions | `Erlang re run: 'hello123' with: '[0-9]+'` | [BT-709](https://linear.app/beamtalk/issue/BT-709) |
 | Date/Time | `Erlang os system_time: #second` | [BT-710](https://linear.app/beamtalk/issue/BT-710) |
-| JSON | `Erlang json encode: data` (OTP 27+) | [BT-711](https://linear.app/beamtalk/issue/BT-711) |
+| JSON | `Erlang json encode: #{#name => 'Ada'}` (OTP 27+) | [BT-711](https://linear.app/beamtalk/issue/BT-711) |
 | Math functions | `Erlang math sqrt: 16` | [BT-712](https://linear.app/beamtalk/issue/BT-712) |
 | Environment variables | `Erlang os getenv: 'HOME'` | [BT-713](https://linear.app/beamtalk/issue/BT-713) |
 | HTTP client | `Erlang httpc` | — |
 
-### Pattern Matching
+## Pattern Matching
 
 Binary pattern matching is not yet implemented.
 
