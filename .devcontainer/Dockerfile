@@ -54,7 +54,7 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
 
 # Install cargo tools for development (using cargo-binstall for faster binary installs)
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash \
-    && cargo binstall -y cargo-watch cargo-nextest cargo-insta cargo-llvm-cov just
+    && cargo binstall -y cargo-watch cargo-nextest cargo-insta cargo-llvm-cov cargo-fuzz just
 
 # Install streamlinear CLI for Linear issue management (used by Copilot skill)
 RUN npm install -g streamlinear@github:obra/streamlinear --ignore-scripts
