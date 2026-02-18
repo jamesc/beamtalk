@@ -203,6 +203,7 @@ pub fn start_detached_node(
     auto_cleanup: bool,
     max_idle_seconds: Option<u64>,
     bind_addr: Option<Ipv4Addr>,
+    ssl_dist_optfile: Option<&Path>,
 ) -> Result<NodeInfo> {
     // Generate node name
     let node_name = format!("beamtalk_workspace_{workspace_id}@localhost");
@@ -259,6 +260,7 @@ pub fn start_detached_node(
         extra_code_paths,
         &eval_cmd,
         &project_path,
+        ssl_dist_optfile,
     );
 
     let child = cmd.spawn().map_err(|e| {
@@ -401,6 +403,7 @@ fn build_detached_node_command(
     extra_code_paths: &[PathBuf],
     eval_cmd: &str,
     project_root: &Path,
+    ssl_dist_optfile: Option<&Path>,
 ) -> Command {
     let (node_flag, node_arg) = if node_name.contains('@') {
         ("-name", node_name.to_string())
@@ -434,6 +437,14 @@ fn build_detached_node_command(
     for path in extra_code_paths {
         args.push("-pa".to_string());
         args.push(path_to_erlang_arg(path));
+    }
+
+    // Add TLS distribution args if configured (ADR 0020 Phase 2)
+    if let Some(conf_path) = ssl_dist_optfile {
+        args.push("-proto_dist".to_string());
+        args.push("inet_tls".to_string());
+        args.push("-ssl_dist_optfile".to_string());
+        args.push(path_to_erlang_arg(conf_path));
     }
 
     args.push("-eval".to_string());
