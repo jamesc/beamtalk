@@ -254,6 +254,9 @@ builtin_keywords() ->
      <<"subclass:">>, <<"spawn">>, <<"new">>].
 
 %% @private
+%% @doc Look up information about a symbol, returning enriched metadata for classes.
+%% Returns superclass, superclass chain, methods, source, and doc comments
+%% when the symbol is a known class.
 -spec get_symbol_info(binary()) -> map().
 get_symbol_info(Symbol) when is_binary(Symbol) ->
     SymAtom = try binary_to_existing_atom(Symbol, utf8)
@@ -263,25 +266,111 @@ get_symbol_info(Symbol) when is_binary(Symbol) ->
             #{<<"found">> => false,
               <<"symbol">> => Symbol};
         _ ->
-            IsClass = try
-                ClassPids2 = beamtalk_class_registry:all_classes(),
-                lists:any(fun(Pid) ->
-                    try
-                        beamtalk_object_class:class_name(Pid) =:= SymAtom
-                    catch _:_ -> false
-                    end
-                end, ClassPids2)
-            catch _:_ -> false end,
-            case IsClass of
-                true ->
-                    #{<<"found">> => true,
-                      <<"symbol">> => Symbol,
-                      <<"kind">> => <<"class">>};
-                false ->
+            %% Look up via class registry (O(1) instead of scanning all PIDs)
+            case try beamtalk_class_registry:whereis_class(SymAtom)
+                 catch _:_ -> undefined end of
+                undefined ->
                     #{<<"found">> => false,
-                      <<"symbol">> => Symbol}
+                      <<"symbol">> => Symbol};
+                ClassPid ->
+                    enrich_class_info(Symbol, SymAtom, ClassPid)
             end
     end.
+
+%% @private
+%% @doc Build enriched info map for a known class.
+-spec enrich_class_info(binary(), atom(), pid()) -> map().
+enrich_class_info(Symbol, _ClassName, ClassPid) ->
+    Base = #{<<"found">> => true,
+             <<"symbol">> => Symbol,
+             <<"kind">> => <<"class">>},
+    try
+        Superclass = beamtalk_object_class:superclass(ClassPid),
+        ModuleName = beamtalk_object_class:module_name(ClassPid),
+        Methods = beamtalk_object_class:methods(ClassPid),
+
+        %% All method selectors (own + inherited) as sorted binaries
+        Selectors = lists:sort(
+            [atom_to_binary(S, utf8) || S <- Methods]
+        ),
+
+        %% Superclass chain
+        Chain = build_superclass_chain(Superclass),
+
+        %% Source location from BEAM compile info
+        {Source, Line} = get_source_location(ModuleName),
+
+        %% Doc comment from EEP-48 chunks
+        Doc = try beamtalk_repl_docs:get_module_doc(ModuleName)
+              catch _:_ -> none end,
+
+        %% Build result with optional fields
+        Result0 = Base#{<<"superclass">> => format_class_name(Superclass),
+                        <<"methods">> => Selectors,
+                        <<"superclass_chain">> => Chain},
+        Result1 = maybe_add(<<"source">>, Source, Result0),
+        Result2 = maybe_add(<<"line">>, Line, Result1),
+        maybe_add(<<"doc">>, Doc, Result2)
+    catch
+        _:_ -> Base
+    end.
+
+%% @private
+%% @doc Walk the class hierarchy ETS table to build the superclass chain.
+-spec build_superclass_chain(atom() | none) -> [binary()].
+build_superclass_chain(none) -> [];
+build_superclass_chain(StartClass) ->
+    build_superclass_chain(StartClass, [], #{}).
+
+build_superclass_chain(none, Acc, _Seen) ->
+    lists:reverse(Acc);
+build_superclass_chain(ClassName, Acc, Seen) ->
+    case maps:is_key(ClassName, Seen) of
+        true ->
+            %% Cycle detected — stop to prevent infinite loop
+            lists:reverse(Acc);
+        false ->
+            case ets:info(beamtalk_class_hierarchy) of
+                undefined ->
+                    lists:reverse([atom_to_binary(ClassName, utf8) | Acc]);
+                _ ->
+                    case ets:lookup(beamtalk_class_hierarchy, ClassName) of
+                        [{_, SuperName}] ->
+                            build_superclass_chain(SuperName,
+                                [atom_to_binary(ClassName, utf8) | Acc],
+                                Seen#{ClassName => true});
+                        [] ->
+                            lists:reverse([atom_to_binary(ClassName, utf8) | Acc])
+                    end
+            end
+    end.
+
+%% @private
+%% @doc Get source file and line from BEAM module compile info.
+-spec get_source_location(atom()) -> {binary() | none, non_neg_integer() | none}.
+get_source_location(ModuleName) ->
+    try ModuleName:module_info(compile) of
+        CompileInfo ->
+            Source = case proplists:get_value(source, CompileInfo) of
+                undefined -> none;
+                Path when is_list(Path) -> list_to_binary(Path);
+                Path when is_binary(Path) -> Path
+            end,
+            {Source, none}
+    catch
+        _:_ -> {none, none}
+    end.
+
+%% @private
+-spec format_class_name(atom() | none) -> binary() | null.
+format_class_name(none) -> null;
+format_class_name(Name) -> atom_to_binary(Name, utf8).
+
+%% @private
+%% @doc Add a key to a map only if the value is not `none`.
+-spec maybe_add(binary(), term(), map()) -> map().
+maybe_add(_Key, none, Map) -> Map;
+maybe_add(Key, Value, Map) -> Map#{Key => Value}.
 
 %% @private
 -spec describe_ops() -> map().

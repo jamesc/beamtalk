@@ -471,6 +471,46 @@ ensure_wrapped_2_empty_stacktrace_test() ->
     ?assertMatch(#{stacktrace := []}, Result).
 
 %%% ===================================================================
+%%% ensure_wrapped/3 tests (BT-728 Erlang exception type)
+%%% ===================================================================
+
+ensure_wrapped_3_exit_wraps_as_exit_error_test() ->
+    Result = beamtalk_exception_handler:ensure_wrapped(exit, 1, []),
+    ?assertMatch(#{'$beamtalk_class' := 'ExitError', error := _}, Result),
+    #{error := Inner} = Result,
+    ?assertEqual(erlang_exit, Inner#beamtalk_error.kind).
+
+ensure_wrapped_3_throw_wraps_as_throw_error_test() ->
+    Result = beamtalk_exception_handler:ensure_wrapped(throw, 1, []),
+    ?assertMatch(#{'$beamtalk_class' := 'ThrowError', error := _}, Result),
+    #{error := Inner} = Result,
+    ?assertEqual(erlang_throw, Inner#beamtalk_error.kind).
+
+ensure_wrapped_3_error_wraps_as_runtime_error_test() ->
+    Result = beamtalk_exception_handler:ensure_wrapped(error, 1, []),
+    ?assertMatch(#{'$beamtalk_class' := 'RuntimeError', error := _}, Result),
+    #{error := Inner} = Result,
+    ?assertEqual(runtime_error, Inner#beamtalk_error.kind).
+
+ensure_wrapped_3_already_wrapped_passes_through_test() ->
+    Error = beamtalk_error:new(type_error, 'Integer'),
+    Wrapped = beamtalk_exception_handler:wrap(Error),
+    Result = beamtalk_exception_handler:ensure_wrapped(error, Wrapped, []),
+    ?assertMatch(#{'$beamtalk_class' := _, stacktrace := []}, Result).
+
+ensure_wrapped_3_beamtalk_error_wraps_correctly_test() ->
+    Error = beamtalk_error:new(does_not_understand, 'Counter'),
+    Result = beamtalk_exception_handler:ensure_wrapped(error, Error, []),
+    ?assertMatch(#{'$beamtalk_class' := 'RuntimeError', error := _}, Result),
+    #{error := Inner} = Result,
+    ?assertEqual(does_not_understand, Inner#beamtalk_error.kind).
+
+ensure_wrapped_3_exit_preserves_message_test() ->
+    Result = beamtalk_exception_handler:ensure_wrapped(exit, "shutdown", []),
+    #{error := Inner} = Result,
+    ?assert(is_binary(Inner#beamtalk_error.message)).
+
+%%% ===================================================================
 %%% wrap_raw/1 — badarity wrapping
 %%% ===================================================================
 
