@@ -604,6 +604,12 @@ handle_op(<<"test">>, Params, Msg, _SessionPid) ->
             Err2 = beamtalk_error:with_hint(Err1, <<"Provide a TestCase class name, e.g. {\"op\": \"test\", \"class\": \"CounterTest\"}">>),
             beamtalk_repl_protocol:encode_error(
                 Err2, Msg, fun beamtalk_repl_json:format_error_message/1);
+        _ when not is_binary(ClassBin) ->
+            Err0 = beamtalk_error:new(type_error, 'REPL'),
+            Err1 = beamtalk_error:with_message(Err0, <<"Parameter 'class' must be a string">>),
+            Err2 = beamtalk_error:with_hint(Err1, <<"Provide a TestCase class name.">>),
+            beamtalk_repl_protocol:encode_error(
+                Err2, Msg, fun beamtalk_repl_json:format_error_message/1);
         _ ->
             case safe_to_existing_atom(ClassBin) of
                 {error, badarg} ->
@@ -615,7 +621,7 @@ handle_op(<<"test">>, Params, Msg, _SessionPid) ->
                         Results = case Method of
                             undefined ->
                                 beamtalk_test_case:run_all_structured(ClassAtom);
-                            MethodBin ->
+                            MethodBin when is_binary(MethodBin) ->
                                 case safe_to_existing_atom(MethodBin) of
                                     {error, badarg} ->
                                         Err3 = beamtalk_error:new(does_not_understand, ClassAtom),
@@ -624,7 +630,11 @@ handle_op(<<"test">>, Params, Msg, _SessionPid) ->
                                         error(Err4);
                                     {ok, MethodAtom} ->
                                         beamtalk_test_case:run_single_structured(ClassAtom, MethodAtom)
-                                end
+                                end;
+                            _Other ->
+                                Err3 = beamtalk_error:new(type_error, 'REPL'),
+                                Err4 = beamtalk_error:with_message(Err3, <<"Parameter 'method' must be a string">>),
+                                error(Err4)
                         end,
                         beamtalk_repl_protocol:encode_test_results(Results, Msg)
                     catch

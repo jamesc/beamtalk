@@ -395,6 +395,7 @@ Run BUnit tests for a loaded TestCase subclass. Supports running all tests in a 
     "total": 3,
     "passed": 2,
     "failed": 1,
+    "duration": 0.1,
     "tests": [
       {"name": "testDecrement", "status": "pass"},
       {"name": "testIncrement", "status": "pass"},
