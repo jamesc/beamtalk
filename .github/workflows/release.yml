@@ -101,6 +101,7 @@ jobs:
           path: |
             ${{ steps.package.outputs.archive }}
             ${{ steps.package.outputs.archive }}.sha256
+          retention-days: 7
 
   # ─── Full distribution (macOS x86_64) ──────────────────────────────────
   macos-x86_64:
@@ -178,6 +179,7 @@ jobs:
           path: |
             ${{ steps.package.outputs.archive }}
             ${{ steps.package.outputs.archive }}.sha256
+          retention-days: 7
 
   # ─── Full distribution (macOS ARM64) ──────────────────────────────────
   macos-arm64:
@@ -255,6 +257,7 @@ jobs:
           path: |
             ${{ steps.package.outputs.archive }}
             ${{ steps.package.outputs.archive }}.sha256
+          retention-days: 7
 
   # ─── Full distribution (Windows x86_64) ────────────────────────────────
   windows-x86_64:
@@ -342,6 +345,7 @@ jobs:
           path: |
             ${{ steps.package.outputs.archive }}
             ${{ steps.package.outputs.archive }}.sha256
+          retention-days: 7
 
   # ─── Cross-compile beamtalk-lsp for per-platform VS Code extensions ───
   build-lsp:

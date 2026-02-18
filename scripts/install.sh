@@ -27,8 +27,12 @@ PREFIX="${BEAMTALK_PREFIX:-${DEFAULT_PREFIX}}"
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --version)  VERSION="$2"; shift 2 ;;
-        --prefix)   PREFIX="$2"; shift 2 ;;
+        --version)
+            if [ $# -lt 2 ]; then echo "Error: --version requires a value"; exit 1; fi
+            VERSION="$2"; shift 2 ;;
+        --prefix)
+            if [ $# -lt 2 ]; then echo "Error: --prefix requires a value"; exit 1; fi
+            PREFIX="$2"; shift 2 ;;
         --help)
             echo "Usage: install.sh [--version VERSION] [--prefix PATH]"
             echo ""
@@ -86,13 +90,16 @@ resolve_version() {
 
     echo "Fetching latest release..."
     if command -v curl >/dev/null 2>&1; then
-        TAG=$(curl -sS "${GITHUB_API}/repos/${REPO}/releases/latest" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
+        RELEASE_JSON=$(curl -sS "${GITHUB_API}/repos/${REPO}/releases/latest")
     elif command -v wget >/dev/null 2>&1; then
-        TAG=$(wget -qO- "${GITHUB_API}/repos/${REPO}/releases/latest" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
+        RELEASE_JSON=$(wget -qO- "${GITHUB_API}/repos/${REPO}/releases/latest")
     else
         echo "Error: curl or wget required"
         exit 1
     fi
+
+    # Parse tag_name from JSON (handles variable whitespace)
+    TAG=$(echo "${RELEASE_JSON}" | sed -n 's/.*"tag_name" *: *"\([^"]*\)".*/\1/p' | head -1)
 
     if [ -z "${TAG}" ]; then
         echo "Error: Could not determine latest version"
