@@ -3,7 +3,7 @@
 
 %%% @doc Regex class implementation — regular expressions via Erlang re module.
 %%%
-%%% **DDD Context:** Runtime Context
+%% **DDD Context:** Runtime Context
 %%%
 %%% Provides class-side constructors for compiling patterns and instance
 %%% methods for inspection. String-side regex operations (matchesRegex:,
@@ -109,7 +109,7 @@ has_method(_) -> false.
 
 %% @doc Test if string matches pattern (String or Regex).
 -spec matches_regex(binary(), binary() | map()) -> boolean().
-matches_regex(Str, #{compiled := MP}) when is_binary(Str) ->
+matches_regex(Str, #{'$beamtalk_class' := 'Regex', compiled := MP}) when is_binary(Str) ->
     re:run(Str, MP, [{capture, none}]) =:= match;
 matches_regex(Str, Pattern) when is_binary(Str), is_binary(Pattern) ->
     try re:run(Str, Pattern, [{capture, none}]) =:= match
@@ -136,7 +136,7 @@ matches_regex_options(_, _, _) ->
 
 %% @doc Find first match in string, return String or nil.
 -spec first_match(binary(), binary() | map()) -> binary() | nil.
-first_match(Str, #{compiled := MP}) when is_binary(Str) ->
+first_match(Str, #{'$beamtalk_class' := 'Regex', compiled := MP}) when is_binary(Str) ->
     case re:run(Str, MP, [{capture, first, binary}]) of
         {match, [Match]} -> Match;
         nomatch -> nil
@@ -157,7 +157,7 @@ first_match(_, _) ->
 
 %% @doc Find all matches in string, return List of Strings.
 -spec all_matches(binary(), binary() | map()) -> list().
-all_matches(Str, #{compiled := MP}) when is_binary(Str) ->
+all_matches(Str, #{'$beamtalk_class' := 'Regex', compiled := MP}) when is_binary(Str) ->
     case re:run(Str, MP, [global, {capture, first, binary}]) of
         {match, Matches} -> [M || [M] <- Matches];
         nomatch -> []
@@ -178,7 +178,7 @@ all_matches(_, _) ->
 
 %% @doc Replace first match with replacement string.
 -spec replace_regex(binary(), binary() | map(), binary()) -> binary().
-replace_regex(Str, #{compiled := MP}, Replacement) when is_binary(Str), is_binary(Replacement) ->
+replace_regex(Str, #{'$beamtalk_class' := 'Regex', compiled := MP}, Replacement) when is_binary(Str), is_binary(Replacement) ->
     re:replace(Str, MP, Replacement, [{return, binary}]);
 replace_regex(Str, Pattern, Replacement) when is_binary(Str), is_binary(Pattern), is_binary(Replacement) ->
     try re:replace(Str, Pattern, Replacement, [{return, binary}])
@@ -192,7 +192,7 @@ replace_regex(_, _, _) ->
 
 %% @doc Replace all matches with replacement string.
 -spec replace_all_regex(binary(), binary() | map(), binary()) -> binary().
-replace_all_regex(Str, #{compiled := MP}, Replacement) when is_binary(Str), is_binary(Replacement) ->
+replace_all_regex(Str, #{'$beamtalk_class' := 'Regex', compiled := MP}, Replacement) when is_binary(Str), is_binary(Replacement) ->
     re:replace(Str, MP, Replacement, [global, {return, binary}]);
 replace_all_regex(Str, Pattern, Replacement) when is_binary(Str), is_binary(Pattern), is_binary(Replacement) ->
     try re:replace(Str, Pattern, Replacement, [global, {return, binary}])
@@ -206,7 +206,7 @@ replace_all_regex(_, _, _) ->
 
 %% @doc Split string by regex pattern.
 -spec split_regex(binary(), binary() | map()) -> list().
-split_regex(Str, #{compiled := MP}) when is_binary(Str) ->
+split_regex(Str, #{'$beamtalk_class' := 'Regex', compiled := MP}) when is_binary(Str) ->
     re:split(Str, MP, [{return, binary}, trim]);
 split_regex(Str, Pattern) when is_binary(Str), is_binary(Pattern) ->
     try re:split(Str, Pattern, [{return, binary}, trim])

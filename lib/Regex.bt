@@ -35,7 +35,7 @@ sealed Object subclass: Regex
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Regex from: "[a-z]+" options: #(caseless)
+  /// Regex from: "[a-z]+" options: #(#caseless)
   /// ```
   class sealed from: pattern: String options: opts: List -> Regex => @primitive "from:options:"
 
