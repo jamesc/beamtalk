@@ -173,3 +173,93 @@ main {
 .inspector-field-value {
   color: #a6e3a1;
 }
+
+/* Completion dropdown */
+#completion-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 16px;
+  background: #313244;
+  border: 1px solid #45475a;
+  max-height: 150px;
+  overflow-y: auto;
+  z-index: 100;
+  min-width: 180px;
+}
+.completion-item {
+  padding: 4px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  color: #cdd6f4;
+}
+.completion-item:hover,
+.completion-item.selected {
+  background: #45475a;
+  color: #89b4fa;
+}
+
+/* Pane header button */
+.pane-btn {
+  font-size: 11px;
+  background: transparent;
+  color: #a6adc8;
+  padding: 2px 6px;
+  border: 1px solid #45475a;
+  cursor: pointer;
+}
+.pane-btn:hover {
+  background: #45475a;
+  color: #cdd6f4;
+}
+
+/* Shortcuts help overlay */
+#shortcuts-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#shortcuts-panel {
+  background: #313244;
+  border: 1px solid #45475a;
+  padding: 24px 32px;
+  max-width: 420px;
+}
+#shortcuts-panel h2 {
+  font-size: 14px;
+  color: #89b4fa;
+  margin-bottom: 12px;
+}
+#shortcuts-panel table {
+  width: 100%;
+  border-collapse: collapse;
+}
+#shortcuts-panel th {
+  text-align: left;
+  font-size: 11px;
+  color: #a6adc8;
+  padding: 4px 8px;
+  border-bottom: 1px solid #45475a;
+}
+#shortcuts-panel td {
+  font-size: 12px;
+  padding: 4px 8px;
+}
+#shortcuts-panel kbd {
+  background: #1e1e2e;
+  border: 1px solid #45475a;
+  padding: 1px 5px;
+  font-size: 11px;
+  color: #f9e2af;
+}
+.shortcut-hint {
+  font-size: 11px;
+  color: #6c7086;
+  margin-top: 8px;
+}
