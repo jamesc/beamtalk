@@ -83,8 +83,8 @@ pub(super) fn print_help() {
     println!("  :sessions       List active REPL sessions");
     println!("  :test, :t       Run all tests for loaded TestCase classes");
     println!("  :test <Class>   Run tests for a specific TestCase class");
-    println!("  :info <sym>, :i Get information about a symbol");
-    println!("  :show-codegen   Show generated Core Erlang for an expression");
+    println!("  :info, :i <sym> Get information about a symbol");
+    println!("  :show-codegen <expr>  Show generated Core Erlang for an expression");
     println!("  :sc <expr>      Short alias for :show-codegen");
     println!();
     println!("Expression examples:");

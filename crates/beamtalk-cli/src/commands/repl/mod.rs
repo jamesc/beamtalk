@@ -887,6 +887,12 @@ pub fn run(
                                     } else if let Some(ref core) = response.core_erlang {
                                         display::display_codegen(core);
                                     }
+                                    if !response.is_error()
+                                        && response.core_erlang.is_none()
+                                        && response.warnings.is_none()
+                                    {
+                                        println!("No code generated.");
+                                    }
                                     if let Some(ref warns) = response.warnings {
                                         for w in warns {
                                             eprintln!(
@@ -935,6 +941,8 @@ pub fn run(
                                         }
                                     } else if let Some(ref results) = response.results {
                                         display::display_test_results(results);
+                                    } else {
+                                        println!("No tests found for class {class_name}.");
                                     }
                                 }
                                 Err(e) => eprintln!("Error: {e}"),
@@ -960,6 +968,8 @@ pub fn run(
                                         }
                                     } else if let Some(ref info) = response.info {
                                         display::display_info(info);
+                                    } else {
+                                        println!("No information available for symbol {symbol}.");
                                     }
                                 }
                                 Err(e) => eprintln!("Error: {e}"),
