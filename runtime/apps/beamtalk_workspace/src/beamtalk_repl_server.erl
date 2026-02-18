@@ -592,6 +592,22 @@ handle_op(<<"docs">>, Params, Msg, _SessionPid) ->
             end
     end;
 
+handle_op(<<"describe">>, _Params, Msg, _SessionPid) ->
+    %% Capability discovery — returns supported ops, protocol version, and
+    %% server capabilities for the authenticated REPL connection (ADR 0020).
+    Ops = describe_ops(),
+    BeamtalkVsnBin =
+        case application:get_key(beamtalk_workspace, vsn) of
+            {ok, Vsn} when is_list(Vsn)   -> list_to_binary(Vsn);
+            {ok, Vsn} when is_binary(Vsn) -> Vsn;
+            _                             -> <<"0.1.0">>
+        end,
+    Versions = #{
+        <<"protocol">> => <<"1.0">>,
+        <<"beamtalk">> => BeamtalkVsnBin
+    },
+    beamtalk_repl_protocol:encode_describe(Ops, Versions, Msg);
+
 handle_op(<<"health">>, _Params, Msg, _SessionPid) ->
     %% Health probe — returns workspace_id and nonce for stale detection (BT-611).
     %% No authentication required (read-only, equivalent to filesystem info).
@@ -638,6 +654,38 @@ handle_op(Op, _Params, Msg, _SessionPid) ->
         iolist_to_binary([<<"Unknown operation: ">>, Op])),
     beamtalk_repl_protocol:encode_error(
         Err1, Msg, fun beamtalk_repl_json:format_error_message/1).
+
+%%% Describe Metadata
+
+%% @doc Returns the map of supported operations with their parameters.
+%% Centralised here so describe responses and future tests share a single source.
+-spec describe_ops() -> map().
+describe_ops() ->
+    #{
+        <<"eval">>        => #{<<"params">> => [<<"code">>]},
+        <<"complete">>    => #{<<"params">> => [<<"code">>]},
+        <<"info">>        => #{<<"params">> => [<<"symbol">>]},
+        <<"docs">>        => #{<<"params">> => [<<"class">>],
+                               <<"optional">> => [<<"selector">>]},
+        <<"load-file">>   => #{<<"params">> => [<<"path">>]},
+        <<"load-source">> => #{<<"params">> => [<<"source">>]},
+        <<"reload">>      => #{<<"params">> => [],
+                               <<"optional">> => [<<"module">>, <<"path">>]},
+        <<"clear">>       => #{<<"params">> => []},
+        <<"bindings">>    => #{<<"params">> => []},
+        <<"sessions">>    => #{<<"params">> => []},
+        <<"clone">>       => #{<<"params">> => []},
+        <<"close">>       => #{<<"params">> => []},
+        <<"actors">>      => #{<<"params">> => []},
+        <<"inspect">>     => #{<<"params">> => [<<"actor">>]},
+        <<"kill">>        => #{<<"params">> => [<<"actor">>]},
+        <<"interrupt">>   => #{<<"params">> => []},
+        <<"modules">>     => #{<<"params">> => []},
+        <<"unload">>      => #{<<"params">> => [<<"module">>]},
+        <<"health">>      => #{<<"params">> => []},
+        <<"describe">>    => #{<<"params">> => []},
+        <<"shutdown">>    => #{<<"params">> => [<<"cookie">>]}
+    }.
 
 %%% Protocol Parsing and Formatting
 

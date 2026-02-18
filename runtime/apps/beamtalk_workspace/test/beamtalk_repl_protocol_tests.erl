@@ -534,3 +534,31 @@ decode_json_string_returns_error_test() ->
 decode_json_number_returns_error_test() ->
     Result = beamtalk_repl_protocol:decode(<<"42">>),
     ?assertMatch({error, {invalid_request, non_object_json}}, Result).
+
+%%% encode_describe tests
+
+encode_describe_new_format_test() ->
+    Msg = make_msg(<<"describe">>, <<"msg-040">>, undefined, false),
+    Ops = #{<<"eval">> => #{<<"params">> => [<<"code">>]},
+            <<"describe">> => #{<<"params">> => []}},
+    Versions = #{<<"protocol">> => <<"1.0">>, <<"beamtalk">> => <<"0.1.0">>},
+    Result = beamtalk_repl_protocol:encode_describe(Ops, Versions, Msg),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual(<<"msg-040">>, maps:get(<<"id">>, Decoded)),
+    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
+    ?assert(is_map(maps:get(<<"ops">>, Decoded))),
+    ?assertEqual(#{<<"params">> => [<<"code">>]},
+                 maps:get(<<"eval">>, maps:get(<<"ops">>, Decoded))),
+    ?assertEqual(#{<<"protocol">> => <<"1.0">>, <<"beamtalk">> => <<"0.1.0">>},
+                 maps:get(<<"versions">>, Decoded)).
+
+encode_describe_legacy_format_test() ->
+    Msg = make_msg(<<"describe">>, undefined, undefined, true),
+    Ops = #{<<"health">> => #{<<"params">> => []}},
+    Versions = #{<<"protocol">> => <<"1.0">>, <<"beamtalk">> => <<"0.1.0">>},
+    Result = beamtalk_repl_protocol:encode_describe(Ops, Versions, Msg),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual(<<"describe">>, maps:get(<<"type">>, Decoded)),
+    ?assert(is_map(maps:get(<<"ops">>, Decoded))),
+    ?assertEqual(#{<<"protocol">> => <<"1.0">>, <<"beamtalk">> => <<"0.1.0">>},
+                 maps:get(<<"versions">>, Decoded)).
