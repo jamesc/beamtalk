@@ -270,32 +270,39 @@ impl CoreErlangGenerator {
                 CodeGenError::Internal("Expected class method 'new' not found".to_string())
             })?;
 
-        // Extract the primitive name from the method body
-        let primitive_name = new_method.body.iter().find_map(|expr| {
-            if let crate::ast::Expression::Primitive { name, .. } = expr {
-                Some(name.clone())
-            } else {
-                None
-            }
-        });
+        // Extract the primitive name from the method body; this is required for delegating `new`
+        let prim_name = new_method
+            .body
+            .iter()
+            .find_map(|expr| {
+                if let crate::ast::Expression::Primitive { name, .. } = expr {
+                    Some(name.clone())
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| {
+                CodeGenError::Internal(
+                    "Expected @primitive in class method 'new' for delegating constructor"
+                        .to_string(),
+                )
+            })?;
 
-        if let Some(prim_name) = primitive_name {
-            // Generate the BIF call for this primitive
-            if let Some(bif_doc) =
-                super::primitives::generate_primitive_bif(&class_name, &prim_name, &[])
-            {
-                return Ok(docvec![
-                    "'new'/0 = fun () ->\n",
-                    "    ",
-                    bif_doc,
-                    "\n",
-                    "\n",
-                ]);
-            }
-        }
+        // Generate the BIF call for this primitive; failure is a hard error
+        let bif_doc = super::primitives::generate_primitive_bif(&class_name, &prim_name, &[])
+            .ok_or_else(|| {
+                CodeGenError::Internal(format!(
+                    "Failed to generate BIF for primitive '{prim_name}' in class method 'new'"
+                ))
+            })?;
 
-        // Fallback: generate default constructor (shouldn't normally reach here)
-        self.generate_value_type_new(class)
+        Ok(docvec![
+            "'new'/0 = fun () ->\n",
+            "    ",
+            bif_doc,
+            "\n",
+            "\n",
+        ])
     }
 
     /// Generates the `new/1` function for a value type.

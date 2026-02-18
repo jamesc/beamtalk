@@ -26,8 +26,8 @@
 %%%
 %%% | Selector             | Description                         |
 %%% |----------------------|-------------------------------------|
-%%% | `instanceNext`       | Random float, advances state        |
-%%% | `instanceNextInteger:` | Random integer, advances state    |
+%%% | `next`               | Random float, pure on instance state|
+%%% | `nextInteger:`        | Random integer, pure on instance state|
 %%% | `printString`        | String representation               |
 
 -module(beamtalk_random).

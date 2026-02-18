@@ -66,7 +66,7 @@ sealed Object subclass: Random
   /// Create a new Random instance with a specific seed for reproducibility.
   ///
   /// Two instances created with the same seed will produce the same
-  /// sequence of random numbers.
+  /// deterministic values for `next` and `nextInteger:` (for a given max).
   ///
   /// ## Examples
   /// ```beamtalk

@@ -149,8 +149,17 @@ elem := #(10, 20, 30) atRandom
 #() atRandom
 // => ERROR: type_error
 
-// Tuple atRandom — Tuple has no literal syntax in Beamtalk.
-// Tuple atRandom is tested via Erlang runtime unit tests.
+// Tuple atRandom via Erlang interop — deterministic non-empty case
+tuple := Erlang erlang list_to_tuple: #(7, 7, 7)
+// => _
+tuple atRandom
+// => 7
+
+// Tuple atRandom via Erlang interop — empty tuple raises type_error
+emptyTuple := Erlang erlang list_to_tuple: #()
+// => _
+emptyTuple atRandom
+// => ERROR: type_error
 
 // ===========================================================================
 // ERROR HANDLING

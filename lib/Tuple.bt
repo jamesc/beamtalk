@@ -104,6 +104,6 @@ sealed Collection subclass: Tuple
   ///
   /// ## Examples
   /// ```beamtalk
-  /// {10, 20, 30} atRandom            // => one of 10, 20, 30
+  /// result atRandom            // => random element from result tuple
   /// ```
   atRandom => @primitive "atRandom"
