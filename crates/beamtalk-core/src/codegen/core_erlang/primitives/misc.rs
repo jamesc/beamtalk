@@ -197,6 +197,7 @@ pub(crate) fn generate_tuple_bif(selector: &str, params: &[String]) -> Option<Do
                 ")"
             ])
         }
+        "atRandom" => Some(Document::Str("call 'beamtalk_random':'atRandom'(Self)")),
         _ => None,
     }
 }
@@ -594,6 +595,39 @@ pub(crate) fn generate_system_bif(selector: &str, params: &[String]) -> Option<D
         "hostname" => Some(docvec!["call 'beamtalk_system':'hostname'()"]),
         "erlangVersion" => Some(docvec!["call 'beamtalk_system':'erlangVersion'()"]),
         "pid" => Some(docvec!["call 'beamtalk_system':'pid'()"]),
+        _ => None,
+    }
+}
+
+/// Random primitive implementations (BT-723).
+///
+/// Class-side methods use process dictionary seed via `rand:uniform`.
+/// Instance methods use explicit state via `rand:uniform_s`.
+/// Instance state is a tagged map with `$beamtalk_class => 'Random'`.
+pub(crate) fn generate_random_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
+    let p0 = params.first().map_or("_Arg0", String::as_str);
+    match selector {
+        // Class-side (process dictionary seed)
+        "next" => Some(Document::Str("call 'beamtalk_random':'next'()")),
+        "nextInteger:" => Some(docvec![
+            "call 'beamtalk_random':'nextInteger:'(",
+            p0.to_string(),
+            ")"
+        ]),
+        "new" => Some(Document::Str("call 'beamtalk_random':'new'()")),
+        "seed:" => Some(docvec![
+            "call 'beamtalk_random':'seed:'(",
+            p0.to_string(),
+            ")"
+        ]),
+        // Instance-side (explicit state)
+        "instanceNext" => Some(Document::Str("call 'beamtalk_random':'instanceNext'(Self)")),
+        "instanceNextInteger:" => Some(docvec![
+            "call 'beamtalk_random':'instanceNextInteger:'(Self, ",
+            p0.to_string(),
+            ")"
+        ]),
+        "printString" => Some(Document::Str("call 'beamtalk_random':'printString'(Self)")),
         _ => None,
     }
 }

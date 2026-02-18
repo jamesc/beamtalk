@@ -76,18 +76,27 @@ impl CoreErlangGenerator {
         // Check if the class explicitly defines new/new: methods
         // (e.g., Object.bt defines `new => @primitive basicNew`)
         // If so, skip auto-generating constructors to avoid duplicate definitions
-        // Only check Primary methods
+        // Only check Primary methods — check both instance and class methods
         let has_explicit_new = class.methods.iter().any(|m| {
+            m.kind == MethodKind::Primary
+                && matches!(&m.selector, MessageSelector::Unary(name) if name.as_str() == "new")
+        });
+        let has_explicit_class_new = class.class_methods.iter().any(|m| {
             m.kind == MethodKind::Primary
                 && matches!(&m.selector, MessageSelector::Unary(name) if name.as_str() == "new")
         });
         let has_explicit_new_with = class
             .methods
             .iter()
-            .any(|m| m.kind == MethodKind::Primary && m.selector.name() == "new:");
+            .any(|m| m.kind == MethodKind::Primary && m.selector.name() == "new:")
+            || class
+                .class_methods
+                .iter()
+                .any(|m| m.kind == MethodKind::Primary && m.selector.name() == "new:");
 
         // Collect method exports
         let mut exports = Vec::new();
+        // new/0 is always needed: either the default constructor or a delegating one
         if !has_explicit_new {
             exports.push("'new'/0".to_string());
         }
@@ -146,7 +155,13 @@ impl CoreErlangGenerator {
 
         // Generate new/0 - creates instance with default field values
         if !has_explicit_new {
-            docs.push(self.generate_value_type_new(class)?);
+            if has_explicit_class_new {
+                // Class defines `class sealed new => @primitive "..."`, so new/0
+                // delegates to the class method's primitive via class_new/2.
+                docs.push(self.generate_delegating_new(class)?);
+            } else {
+                docs.push(self.generate_value_type_new(class)?);
+            }
             docs.push(Document::Str("\n"));
         }
 
@@ -232,6 +247,55 @@ impl CoreErlangGenerator {
             "}~\n",
             "\n",
         ])
+    }
+
+    /// Generates `new/0` that delegates to a class method `new` primitive.
+    ///
+    /// When a class defines `class sealed new => @primitive "new"`, the auto-generated
+    /// `new/0` must call through to the primitive implementation rather than creating
+    /// an empty tagged map. This ensures `handle_new_compiled` (which calls `Module:new/0`)
+    /// uses the correct constructor.
+    fn generate_delegating_new(&mut self, class: &ClassDefinition) -> Result<Document<'static>> {
+        let class_name = self.class_name().clone();
+
+        // Find the class method `new` and its primitive selector
+        let new_method = class
+            .class_methods
+            .iter()
+            .find(|m| {
+                m.kind == MethodKind::Primary
+                    && matches!(&m.selector, MessageSelector::Unary(name) if name.as_str() == "new")
+            })
+            .ok_or_else(|| {
+                CodeGenError::Internal("Expected class method 'new' not found".to_string())
+            })?;
+
+        // Extract the primitive name from the method body
+        let primitive_name = new_method.body.iter().find_map(|expr| {
+            if let crate::ast::Expression::Primitive { name, .. } = expr {
+                Some(name.clone())
+            } else {
+                None
+            }
+        });
+
+        if let Some(prim_name) = primitive_name {
+            // Generate the BIF call for this primitive
+            if let Some(bif_doc) =
+                super::primitives::generate_primitive_bif(&class_name, &prim_name, &[])
+            {
+                return Ok(docvec![
+                    "'new'/0 = fun () ->\n",
+                    "    ",
+                    bif_doc,
+                    "\n",
+                    "\n",
+                ]);
+            }
+        }
+
+        // Fallback: generate default constructor (shouldn't normally reach here)
+        self.generate_value_type_new(class)
     }
 
     /// Generates the `new/1` function for a value type.

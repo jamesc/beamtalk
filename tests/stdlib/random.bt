@@ -1,0 +1,193 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for Random class (BT-723)
+// Tests random number generation via Erlang rand module.
+// Random values are non-deterministic, so we test ranges and types
+// rather than exact values. Seeded instances allow deterministic testing.
+
+// ===========================================================================
+// CLASS-SIDE — RANDOM FLOAT
+// ===========================================================================
+
+// Random next returns a Float
+(Random next) class
+// => Float
+
+// Random next returns value >= 0.0
+(Random next) >= 0.0
+// => true
+
+// Random next returns value < 1.0
+(Random next) < 1.0
+// => true
+
+// ===========================================================================
+// CLASS-SIDE — RANDOM INTEGER
+// ===========================================================================
+
+// Random nextInteger: 1 always returns 1
+Random nextInteger: 1
+// => 1
+
+// Random nextInteger: returns an Integer
+(Random nextInteger: 100) class
+// => Integer
+
+// Random nextInteger: returns value >= 1
+(Random nextInteger: 100) >= 1
+// => true
+
+// Random nextInteger: returns value <= max
+(Random nextInteger: 100) <= 100
+// => true
+
+// Random nextInteger: 6 returns between 1 and 6
+result := Random nextInteger: 6
+// => _
+(result >= 1) and: [result <= 6]
+// => true
+
+// ===========================================================================
+// INSTANCE-SIDE — NEW
+// ===========================================================================
+
+// Random new returns a Random instance
+(Random new) class
+// => Random
+
+// Random new printString
+(Random new) printString
+// => a Random
+
+// Random new describe
+(Random new) describe
+// => a Random
+
+// Instance next returns a Float
+rng := Random new
+// => _
+(rng next) class
+// => Float
+
+// Instance next returns value in range
+rng2 := Random new
+// => _
+v := rng2 next
+// => _
+(v >= 0.0) and: [v < 1.0]
+// => true
+
+// Instance nextInteger: returns an Integer
+rng3 := Random new
+// => _
+(rng3 nextInteger: 100) class
+// => Integer
+
+// Instance nextInteger: returns value in range
+rng4 := Random new
+// => _
+n := rng4 nextInteger: 50
+// => _
+(n >= 1) and: [n <= 50]
+// => true
+
+// ===========================================================================
+// INSTANCE-SIDE — SEEDED (DETERMINISTIC)
+// ===========================================================================
+
+// Two identically seeded instances produce the same first value
+a := Random seed: 42
+// => _
+b := Random seed: 42
+// => _
+(a next) =:= (b next)
+// => true
+
+// Two identically seeded instances produce the same integer
+c := Random seed: 99
+// => _
+d := Random seed: 99
+// => _
+(c nextInteger: 1000) =:= (d nextInteger: 1000)
+// => true
+
+// Differently seeded instances generally produce different values
+// (statistically extremely unlikely to be equal for float)
+e := Random seed: 1
+// => _
+f := Random seed: 999999
+// => _
+(e next) /= (f next)
+// => true
+
+// Same instance returns same value (immutable value type)
+g := Random seed: 42
+// => _
+(g next) =:= (g next)
+// => true
+
+// ===========================================================================
+// COLLECTION INTEGRATION — atRandom
+// ===========================================================================
+
+// List atRandom returns an element from the list
+#(10, 20, 30) atRandom class
+// => Integer
+
+// List atRandom returns value that is in the list
+elem := #(10, 20, 30) atRandom
+// => _
+#(10, 20, 30) includes: elem
+// => true
+
+// Single-element list always returns that element
+#(42) atRandom
+// => 42
+
+// Empty list atRandom raises type_error
+#() atRandom
+// => ERROR: type_error
+
+// Tuple atRandom — Tuple has no literal syntax in Beamtalk.
+// Tuple atRandom is tested via Erlang runtime unit tests.
+
+// ===========================================================================
+// ERROR HANDLING
+// ===========================================================================
+
+// nextInteger: with zero raises type_error
+Random nextInteger: 0
+// => ERROR: type_error
+
+// nextInteger: with negative raises type_error
+Random nextInteger: -5
+// => ERROR: type_error
+
+// nextInteger: with non-integer raises type_error
+Random nextInteger: "hello"
+// => ERROR: type_error
+
+// seed: with non-integer raises type_error
+Random seed: "bad"
+// => ERROR: type_error
+
+// Instance nextInteger: with zero raises type_error
+rng5 := Random new
+// => _
+rng5 nextInteger: 0
+// => ERROR: type_error
+
+// Instance nextInteger: with negative raises type_error
+rng6 := Random new
+// => _
+rng6 nextInteger: -1
+// => ERROR: type_error
+
+// ===========================================================================
+// CLASS IDENTITY
+// ===========================================================================
+
+// Random is a class — class on class returns Metaclass
+Random class
+// => Metaclass
