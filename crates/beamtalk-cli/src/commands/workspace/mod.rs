@@ -60,7 +60,8 @@ mod process;
 pub mod storage;
 
 pub use lifecycle::{
-    create_workspace, get_or_start_workspace, list_workspaces, stop_workspace, workspace_status,
+    WorkspaceStatus, WorkspaceSummary, create_workspace, get_or_start_workspace, list_workspaces,
+    resolve_workspace_id, stop_workspace, workspace_status,
 };
 pub use process::is_node_running;
 pub use storage::{

@@ -15,14 +15,14 @@ use crate::paths::beamtalk_dir;
 use super::color;
 
 /// Return the path to the REPL history file, creating the parent directory if needed.
-pub(super) fn history_path() -> Result<PathBuf> {
+pub(crate) fn history_path() -> Result<PathBuf> {
     let dir = beamtalk_dir()?;
     fs::create_dir_all(&dir).into_diagnostic()?;
     Ok(dir.join("repl_history"))
 }
 
 /// Format a value for REPL display with optional coloring.
-pub(super) fn format_value(value: &serde_json::Value) -> String {
+pub(crate) fn format_value(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::String(s) => {
             // Values are pre-formatted by the backend:
@@ -54,7 +54,7 @@ pub(super) fn format_value(value: &serde_json::Value) -> String {
 }
 
 /// Format an error message for REPL display.
-pub(super) fn format_error(msg: &str) -> String {
+pub(crate) fn format_error(msg: &str) -> String {
     if color::is_enabled() {
         format!("{}{}Error:{} {msg}", color::BOLD, color::RED, color::RESET)
     } else {
@@ -63,7 +63,7 @@ pub(super) fn format_error(msg: &str) -> String {
 }
 
 /// Print help message.
-pub(super) fn print_help() {
+pub(crate) fn print_help() {
     println!("Beamtalk REPL Commands:");
     println!();
     println!("  :help, :h       Show this help message");
@@ -110,7 +110,7 @@ pub(super) fn print_help() {
 }
 
 /// Display test results from the REPL backend (BT-724).
-pub(super) fn display_test_results(results: &serde_json::Value) {
+pub(crate) fn display_test_results(results: &serde_json::Value) {
     let total = results
         .get("total")
         .and_then(serde_json::Value::as_u64)
@@ -184,13 +184,13 @@ pub(super) fn display_test_results(results: &serde_json::Value) {
 }
 
 /// Display generated Core Erlang source (BT-724).
-pub(super) fn display_codegen(core_erlang: &str) {
+pub(crate) fn display_codegen(core_erlang: &str) {
     // Use cyan for Core Erlang source to distinguish from regular output
     println!("{}", color::paint(color::CYAN, core_erlang));
 }
 
 /// Display symbol info from the :info command (BT-724).
-pub(super) fn display_info(info: &serde_json::Value) {
+pub(crate) fn display_info(info: &serde_json::Value) {
     let found = info
         .get("found")
         .and_then(serde_json::Value::as_bool)

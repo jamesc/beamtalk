@@ -67,11 +67,11 @@ const MAX_CONNECT_RETRIES: u32 = 10;
 /// Delay between connection retries in milliseconds.
 const RETRY_DELAY_MS: u64 = 500;
 
-mod client;
-mod color;
-mod display;
-mod helper;
-mod process;
+pub(crate) mod client;
+pub(crate) mod color;
+pub(crate) mod display;
+pub(crate) mod helper;
+pub(crate) mod process;
 
 pub mod bind;
 
@@ -88,57 +88,57 @@ use process::{
 /// Supports both legacy format (type field) and new protocol format (status field).
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)] // fields populated by serde deserialization from REPL JSON protocol
-struct ReplResponse {
+pub(crate) struct ReplResponse {
     /// Legacy response type (result, error, bindings, loaded, actors, modules)
     #[serde(rename = "type")]
-    response_type: Option<String>,
+    pub(crate) response_type: Option<String>,
     /// New protocol: message correlation ID
-    id: Option<String>,
+    pub(crate) id: Option<String>,
     /// New protocol: session ID
-    session: Option<String>,
+    pub(crate) session: Option<String>,
     /// New protocol: status flags
-    status: Option<Vec<String>>,
+    pub(crate) status: Option<Vec<String>>,
     /// Result value (both formats)
-    value: Option<serde_json::Value>,
+    pub(crate) value: Option<serde_json::Value>,
     /// Captured stdout from evaluation (BT-355)
-    output: Option<String>,
+    pub(crate) output: Option<String>,
     /// Legacy: error message
-    message: Option<String>,
+    pub(crate) message: Option<String>,
     /// New protocol: error message
-    error: Option<String>,
+    pub(crate) error: Option<String>,
     /// Bindings map (both formats)
-    bindings: Option<serde_json::Value>,
+    pub(crate) bindings: Option<serde_json::Value>,
     /// Loaded classes (both formats)
-    classes: Option<Vec<String>>,
+    pub(crate) classes: Option<Vec<String>>,
     /// Actor list (both formats)
-    actors: Option<Vec<ActorInfo>>,
+    pub(crate) actors: Option<Vec<ActorInfo>>,
     /// Module list (both formats)
-    modules: Option<Vec<ModuleInfo>>,
+    pub(crate) modules: Option<Vec<ModuleInfo>>,
     /// Session list (new protocol)
-    sessions: Option<Vec<SessionInfo>>,
+    pub(crate) sessions: Option<Vec<SessionInfo>>,
     /// Completion suggestions (new protocol)
-    completions: Option<Vec<String>>,
+    pub(crate) completions: Option<Vec<String>>,
     /// Symbol info (new protocol)
-    info: Option<serde_json::Value>,
+    pub(crate) info: Option<serde_json::Value>,
     /// Actor state (new protocol: inspect op)
-    state: Option<serde_json::Value>,
+    pub(crate) state: Option<serde_json::Value>,
     /// Compilation warnings (BT-407)
-    warnings: Option<Vec<String>>,
+    pub(crate) warnings: Option<Vec<String>>,
     /// Documentation text (BT-500: :help command)
-    docs: Option<String>,
+    pub(crate) docs: Option<String>,
     /// Test results (BT-724: :test command)
-    results: Option<serde_json::Value>,
+    pub(crate) results: Option<serde_json::Value>,
     /// Generated Core Erlang source (BT-724: :show-codegen command)
-    core_erlang: Option<String>,
+    pub(crate) core_erlang: Option<String>,
     /// Number of actors affected by reload (BT-266)
-    affected_actors: Option<u32>,
+    pub(crate) affected_actors: Option<u32>,
     /// Number of actors that failed code migration (BT-266)
-    migration_failures: Option<u32>,
+    pub(crate) migration_failures: Option<u32>,
 }
 
 impl ReplResponse {
     /// Check if this is an error response (either format).
-    fn is_error(&self) -> bool {
+    pub(crate) fn is_error(&self) -> bool {
         if let Some(ref t) = self.response_type {
             return t == "error";
         }
@@ -149,7 +149,7 @@ impl ReplResponse {
     }
 
     /// Get the error message (either format).
-    fn error_message(&self) -> Option<&str> {
+    pub(crate) fn error_message(&self) -> Option<&str> {
         if let Some(ref msg) = self.message {
             return Some(msg.as_str());
         }
@@ -162,13 +162,13 @@ impl ReplResponse {
 
 /// Information about a running actor, deserialized from REPL JSON.
 #[derive(Debug, Deserialize)]
-struct ActorInfo {
+pub(crate) struct ActorInfo {
     /// Erlang process identifier string (e.g., `<0.123.0>`).
-    pid: String,
+    pub(crate) pid: String,
     /// Beamtalk class name of the actor (e.g., `Counter`).
-    class: String,
+    pub(crate) class: String,
     /// BEAM module backing the actor.
-    module: String,
+    pub(crate) module: String,
     /// Unix timestamp when the actor was spawned.
     #[allow(dead_code)] // deserialized from JSON, available for future use
     spawned_at: i64,
@@ -176,32 +176,32 @@ struct ActorInfo {
 
 /// Information about a loaded module, deserialized from REPL JSON.
 #[derive(Debug, Deserialize)]
-struct ModuleInfo {
+pub(crate) struct ModuleInfo {
     /// Module name as registered in the BEAM node.
-    name: String,
+    pub(crate) name: String,
     /// Path to the source `.bt` file that defined this module.
-    source_file: String,
+    pub(crate) source_file: String,
     /// Number of actors currently running from this module.
-    actor_count: u32,
+    pub(crate) actor_count: u32,
     /// Unix timestamp when the module was loaded.
     #[allow(dead_code)] // deserialized from JSON, available for future use
     load_time: i64,
     /// Human-readable relative time since load (e.g., `2 minutes ago`).
-    time_ago: String,
+    pub(crate) time_ago: String,
 }
 
 /// Information about an active REPL session, deserialized from REPL JSON.
 #[derive(Debug, Deserialize)]
-struct SessionInfo {
+pub(crate) struct SessionInfo {
     /// Unique session identifier.
-    id: String,
+    pub(crate) id: String,
     /// Unix timestamp when the session was created.
     #[allow(dead_code)] // deserialized from JSON, available for future use
     created_at: Option<i64>,
 }
 
 /// Display the result of a reload operation.
-fn display_reload_result(response: &ReplResponse, module_name: Option<&str>) {
+pub(crate) fn display_reload_result(response: &ReplResponse, module_name: Option<&str>) {
     if response.is_error() {
         if let Some(msg) = response.error_message() {
             eprintln!("{}", format_error(msg));
@@ -583,11 +583,38 @@ pub fn run(
 
     println!();
 
+    // Enter the shared REPL loop (also used by `beamtalk attach`)
+    repl_loop(&mut client, &connect_host, connect_port, &cookie)?;
+
+    // BEAM child is cleaned up automatically by BeamChildGuard::drop()
+    // Clean up BEAM node if in foreground mode
+    if let Some(guard) = beam_guard_opt {
+        drop(guard);
+    }
+
+    Ok(())
+}
+
+/// Shared REPL loop used by both `beamtalk repl` and `beamtalk attach`.
+///
+/// Sets up rustyline with tab completion and history, registers the SIGINT
+/// handler, then enters the read-eval-print loop. Returns when the user
+/// types `:exit` / `:quit`, presses Ctrl-D, or a communication error occurs.
+#[expect(
+    clippy::too_many_lines,
+    reason = "REPL main loop handles many commands"
+)]
+pub(crate) fn repl_loop(
+    client: &mut ReplClient,
+    host: &str,
+    port: u16,
+    cookie: &str,
+) -> Result<()> {
     // Set up rustyline editor with tab completion and syntax highlighting
     let config = Config::builder()
         .completion_type(CompletionType::List)
         .build();
-    let helper = ReplHelper::new(&connect_host, connect_port, &cookie);
+    let helper = ReplHelper::new(host, port, cookie);
     let mut rl: Editor<ReplHelper, FileHistory> = Editor::with_config(config).into_diagnostic()?;
     rl.set_helper(Some(helper));
 
@@ -1098,12 +1125,6 @@ pub fn run(
     // Save history
     let _ = rl.save_history(&history_file);
 
-    // BEAM child is cleaned up automatically by BeamChildGuard::drop()
-    // Clean up BEAM node if in foreground mode
-    if let Some(guard) = beam_guard_opt {
-        drop(guard);
-    }
-
     Ok(())
 }
 
@@ -1111,7 +1132,7 @@ pub fn run(
 ///
 /// Returns the trimmed argument string, or an empty string if the command
 /// doesn't match either prefix.
-fn extract_command_arg<'a>(
+pub(crate) fn extract_command_arg<'a>(
     line: &'a str,
     long_prefix: &str,
     short_prefix: Option<&str>,
