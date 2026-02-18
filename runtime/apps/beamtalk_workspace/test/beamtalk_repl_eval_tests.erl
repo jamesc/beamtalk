@@ -9,6 +9,21 @@
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================
+%% Helpers
+%%====================================================================
+
+%% Cross-platform temp directory (TMPDIR on Unix, TEMP on Windows)
+temp_dir() ->
+    case os:getenv("TMPDIR") of
+        false ->
+            case os:getenv("TEMP") of
+                false -> "/tmp";
+                Dir -> Dir
+            end;
+        Dir -> Dir
+    end.
+
+%%====================================================================
 %% Tests
 %%====================================================================
 
@@ -85,7 +100,7 @@ handle_load_file_not_found_test() ->
 handle_load_directory_test() ->
     %% Loading a directory should fail
     State = beamtalk_repl_state:new(undefined, 0),
-    Result = beamtalk_repl_eval:handle_load("/tmp", State),
+    Result = beamtalk_repl_eval:handle_load(temp_dir(), State),
     %% Should get read_error since it's a directory
     ?assertMatch({error, {read_error, _}, _}, Result).
 
@@ -127,7 +142,7 @@ handle_load_compile_error_test() ->
     %% Test with a file that exists but will fail compilation
     %% Use unique filename to avoid collisions in concurrent test runs
     UniqueId = erlang:unique_integer([positive]),
-    TempFile = filename:join(os:getenv("TMPDIR", "/tmp"), 
+    TempFile = filename:join(temp_dir(), 
                              io_lib:format("test_invalid_bt_~p.bt", [UniqueId])),
     ok = file:write_file(TempFile, <<"invalid beamtalk syntax @@@ ###">>),
     
@@ -494,7 +509,7 @@ do_eval_counter_increments_on_each_call_test() ->
 handle_load_empty_file_test() ->
     %% Empty file should attempt compile (and fail without compiler)
     UniqueId = erlang:unique_integer([positive]),
-    TempFile = filename:join(os:getenv("TMPDIR", "/tmp"),
+    TempFile = filename:join(temp_dir(),
                              io_lib:format("test_empty_~p.bt", [UniqueId])),
     ok = file:write_file(TempFile, <<>>),
     State = beamtalk_repl_state:new(undefined, 0),
@@ -597,7 +612,7 @@ handle_io_request_put_chars_mfa_error_test() ->
 
 handle_load_valid_file_no_compiler_test() ->
     UniqueId = erlang:unique_integer([positive]),
-    TempFile = filename:join(os:getenv("TMPDIR", "/tmp"),
+    TempFile = filename:join(temp_dir(),
                              io_lib:format("test_valid_~p.bt", [UniqueId])),
     ok = file:write_file(TempFile, <<"Object subclass: MyTest [\n]\n">>),
     State = beamtalk_repl_state:new(undefined, 0),

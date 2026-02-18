@@ -355,7 +355,10 @@ persist_and_restore_modules_test() ->
 load_corrupt_json_falls_back_test() ->
     %% Use a unique workspace ID
     WsId = <<"corrupt_test_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
-    Home = os:getenv("HOME", "/tmp"),
+    Home = case os:getenv("HOME") of
+        false -> os:getenv("USERPROFILE", "/tmp");
+        H -> H
+    end,
     MetaDir = filename:join([Home, ".beamtalk", "workspaces", binary_to_list(WsId)]),
     MetaFile = filename:join(MetaDir, "metadata.json"),
     
