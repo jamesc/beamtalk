@@ -23,11 +23,12 @@
 
 <main>
   <div class="pane" id="workspace-pane">
-    <div class="pane-header">Workspace</div>
+    <div class="pane-header">Workspace <button class="pane-btn" onclick="toggleShortcuts()" title="Keyboard shortcuts (Ctrl+/)">⌨</button></div>
     <div class="pane-content" id="repl-output"></div>
     <div id="eval-panel">
-      <textarea id="eval-input" rows="2" placeholder="Beamtalk expression… (Ctrl+Enter to eval)" disabled></textarea>
+      <textarea id="eval-input" rows="2" placeholder="Beamtalk expression… (Ctrl+D to eval)" disabled></textarea>
       <button id="send-btn" onclick="sendEval()" disabled>Do It</button>
+      <button onclick="sendPrintIt()" disabled id="print-btn">Print It</button>
       <button onclick="sendInspect()" disabled id="inspect-btn">Inspect It</button>
     </div>
   </div>
@@ -53,6 +54,25 @@
     <div class="pane-content" id="inspector"><span id="inspector-empty" class="pane-empty">Inspect results appear here…</span></div>
   </div>
 </main>
+
+<div id="shortcuts-overlay" style="display:none">
+  <div id="shortcuts-panel">
+    <h2>Keyboard Shortcuts</h2>
+    <table>
+      <tr><th>Shortcut</th><th>Action</th></tr>
+      <tr><td><kbd>Ctrl+D</kbd></td><td>Do It — evaluate expression</td></tr>
+      <tr><td><kbd>Ctrl+P</kbd></td><td>Print It — evaluate and show result</td></tr>
+      <tr><td><kbd>Ctrl+I</kbd></td><td>Inspect It — evaluate and inspect</td></tr>
+      <tr><td><kbd>Ctrl+Enter</kbd></td><td>Do It (alternative)</td></tr>
+      <tr><td><kbd>Tab</kbd></td><td>Autocomplete</td></tr>
+      <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Command history</td></tr>
+      <tr><td><kbd>Ctrl+/</kbd></td><td>Toggle this help</td></tr>
+      <tr><td><kbd>Ctrl+Shift+Enter</kbd></td><td>Load source (Editor)</td></tr>
+    </table>
+    <p class="shortcut-hint">On Mac, use <kbd>Cmd</kbd> instead of <kbd>Ctrl</kbd></p>
+    <p class="shortcut-hint">Click outside to close</p>
+  </div>
+</div>
 
 <script src="/static/workspace.js"></script>
 </body>

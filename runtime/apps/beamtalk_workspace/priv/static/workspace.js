@@ -22,6 +22,8 @@
   var editorInput = document.getElementById('editor-input');
   var loadBtn = document.getElementById('load-btn');
   var editorStatus = document.getElementById('editor-status');
+  var shortcutsOverlay = document.getElementById('shortcuts-overlay');
+  var printBtn = document.getElementById('print-btn');
 
   var ws = null;
   var msgId = 0;
@@ -29,6 +31,18 @@
   var pendingInspects = {};
   // Track pending load-source requests to route responses to Editor
   var pendingLoads = {};
+  // Track pending completion requests
+  var pendingComplete = {};
+  // Track pending print-it requests to route result back inline
+  var pendingPrintIt = {};
+
+  // Command history
+  var history = [];
+  var historyIndex = -1;
+  var historySaved = '';
+
+  // Session reconnection
+  var sessionId = null;
 
   function setStatus(text, color) {
     statusEl.textContent = text;
@@ -82,6 +96,18 @@
     }
   }
 
+  // --- Session ID from URL ---
+
+  function getSessionFromUrl() {
+    var hash = location.hash.replace(/^#/, '');
+    var params = new URLSearchParams(hash);
+    return params.get('session') || null;
+  }
+
+  function setSessionInUrl(id) {
+    location.hash = 'session=' + encodeURIComponent(id);
+  }
+
   // --- WebSocket connection ---
 
   window.connect = function() {
@@ -96,7 +122,13 @@
 
     ws.onopen = function() {
       setStatus('Authenticating…', '#f9e2af');
-      ws.send(JSON.stringify({ type: 'auth', cookie: cookie }));
+      var authMsg = { type: 'auth', cookie: cookie };
+      // Include session ID for resume if available
+      var resumeId = getSessionFromUrl();
+      if (resumeId) {
+        authMsg.resume = resumeId;
+      }
+      ws.send(JSON.stringify(authMsg));
     };
 
     ws.onmessage = function(ev) {
@@ -110,6 +142,8 @@
       }
       if (msg.type === 'auth_ok') {
         setStatus('Authenticated', '#a6e3a1');
+        // Save cookie for session reconnection
+        try { localStorage.setItem('beamtalk_cookie', cookieInput.value.trim()); } catch(e) {}
         return;
       }
       if (msg.type === 'auth_error') {
@@ -118,11 +152,14 @@
         return;
       }
       if (msg.op === 'session-started') {
-        var display = msg.session ? msg.session.slice(0, 8) + '…' : 'unknown';
+        sessionId = msg.session;
+        setSessionInUrl(sessionId);
+        var display = sessionId ? sessionId.slice(0, 8) + '…' : 'unknown';
         setStatus('Connected (session ' + display + ')', '#a6e3a1');
         authPanel.style.display = 'none';
         evalInput.disabled = false;
         sendBtn.disabled = false;
+        printBtn.disabled = false;
         inspectBtn.disabled = false;
         loadBtn.disabled = false;
         evalInput.focus();
@@ -133,6 +170,28 @@
       if (msg.push === 'transcript') {
         if (transcriptEmpty) transcriptEmpty.remove();
         appendTo(transcriptEl, msg.text, '#cdd6f4');
+        return;
+      }
+
+      // Route completion responses
+      if (msg.id && pendingComplete[msg.id]) {
+        delete pendingComplete[msg.id];
+        showCompletions(msg.completions || []);
+        return;
+      }
+
+      // Route print-it responses — append result inline
+      if (msg.id && pendingPrintIt[msg.id]) {
+        delete pendingPrintIt[msg.id];
+        var isErr = Array.isArray(msg.status) && msg.status.includes('error');
+        if (isErr && msg.error) {
+          appendTo(replOutput, 'Error: ' + msg.error + '\n', '#f38ba8');
+        } else {
+          var val = msg.value != null ? String(msg.value) : '';
+          if (val) {
+            appendTo(replOutput, val + '\n', '#a6e3a1');
+          }
+        }
         return;
       }
 
@@ -184,9 +243,10 @@
     };
 
     ws.onclose = function() {
-      setStatus('Disconnected', '#f38ba8');
+      setStatus('Disconnected — refresh to reconnect', '#f38ba8');
       evalInput.disabled = true;
       sendBtn.disabled = true;
+      printBtn.disabled = true;
       inspectBtn.disabled = true;
       loadBtn.disabled = true;
       connectBtn.disabled = false;
@@ -198,12 +258,35 @@
     };
   };
 
-  // --- Eval (Workspace pane) ---
+  // --- Eval / Do It (Workspace pane) ---
+
+  function getSelectedOrLine() {
+    var start = evalInput.selectionStart;
+    var end = evalInput.selectionEnd;
+    if (start !== end) {
+      return evalInput.value.substring(start, end);
+    }
+    // No selection — use current line
+    var text = evalInput.value;
+    var lineStart = text.lastIndexOf('\n', start - 1) + 1;
+    var lineEnd = text.indexOf('\n', start);
+    if (lineEnd === -1) lineEnd = text.length;
+    return text.substring(lineStart, lineEnd);
+  }
+
+  function pushHistory(code) {
+    if (code && (history.length === 0 || history[history.length - 1] !== code)) {
+      history.push(code);
+    }
+    historyIndex = -1;
+    historySaved = '';
+  }
 
   window.sendEval = function() {
     var code = evalInput.value.trim();
     if (!code || !ws || ws.readyState !== WebSocket.OPEN) return;
 
+    pushHistory(code);
     appendTo(replOutput, code + '\n', '#89b4fa');
     msgId++;
     ws.send(JSON.stringify({ op: 'eval', id: 'msg-' + msgId, code: code }));
@@ -211,18 +294,32 @@
     evalInput.focus();
   };
 
+  // --- Print It — eval selected text/line, append result inline ---
+
+  window.sendPrintIt = function() {
+    var code = getSelectedOrLine().trim();
+    if (!code || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+    pushHistory(code);
+    appendTo(replOutput, code + '\n', '#89b4fa');
+    msgId++;
+    var id = 'msg-' + msgId;
+    pendingPrintIt[id] = true;
+    ws.send(JSON.stringify({ op: 'eval', id: id, code: code }));
+  };
+
   // --- Inspect (sends inspect op, routes result to Inspector) ---
 
   window.sendInspect = function() {
-    var code = evalInput.value.trim();
+    var code = getSelectedOrLine().trim();
     if (!code || !ws || ws.readyState !== WebSocket.OPEN) return;
 
+    pushHistory(code);
     appendTo(replOutput, code + '\n', '#89b4fa');
     msgId++;
     var id = 'msg-' + msgId;
     pendingInspects[id] = true;
     ws.send(JSON.stringify({ op: 'eval', id: id, code: code }));
-    evalInput.value = '';
     evalInput.focus();
   };
 
@@ -240,12 +337,191 @@
     ws.send(JSON.stringify({ op: 'load-source', id: id, source: source }));
   };
 
+  // --- Tab Completion ---
+
+  function requestCompletion() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    // Extract word before cursor
+    var pos = evalInput.selectionStart;
+    var text = evalInput.value.substring(0, pos);
+    var match = text.match(/[A-Za-z_][A-Za-z0-9_:]*$/);
+    if (!match) return;
+    msgId++;
+    var id = 'msg-' + msgId;
+    pendingComplete[id] = true;
+    ws.send(JSON.stringify({ op: 'complete', id: id, code: match[0] }));
+  }
+
+  var completionDropdown = null;
+  var completionItems = [];
+  var completionSelectedIndex = 0;
+  var completionPrefix = '';
+
+  function showCompletions(items) {
+    hideCompletions();
+    if (!items || items.length === 0) return;
+
+    // Get prefix for replacement
+    var pos = evalInput.selectionStart;
+    var text = evalInput.value.substring(0, pos);
+    var match = text.match(/[A-Za-z_][A-Za-z0-9_:]*$/);
+    completionPrefix = match ? match[0] : '';
+
+    if (items.length === 1) {
+      // Single match — insert directly
+      insertCompletion(items[0]);
+      return;
+    }
+
+    completionItems = items;
+    completionSelectedIndex = 0;
+
+    completionDropdown = document.createElement('div');
+    completionDropdown.id = 'completion-dropdown';
+
+    for (var i = 0; i < items.length; i++) {
+      var item = document.createElement('div');
+      item.className = 'completion-item' + (i === 0 ? ' selected' : '');
+      item.textContent = items[i];
+      item.setAttribute('data-index', String(i));
+      item.addEventListener('click', function() {
+        insertCompletion(this.textContent);
+      });
+      completionDropdown.appendChild(item);
+    }
+
+    var evalPanel = document.getElementById('eval-panel');
+    evalPanel.style.position = 'relative';
+    evalPanel.appendChild(completionDropdown);
+  }
+
+  function hideCompletions() {
+    if (completionDropdown && completionDropdown.parentNode) {
+      completionDropdown.parentNode.removeChild(completionDropdown);
+    }
+    completionDropdown = null;
+    completionItems = [];
+    completionSelectedIndex = 0;
+  }
+
+  function insertCompletion(text) {
+    var pos = evalInput.selectionStart;
+    var before = evalInput.value.substring(0, pos);
+    var after = evalInput.value.substring(pos);
+    // Replace the prefix with the completion
+    var prefixLen = completionPrefix.length;
+    evalInput.value = before.substring(0, before.length - prefixLen) + text + after;
+    evalInput.selectionStart = evalInput.selectionEnd = pos - prefixLen + text.length;
+    hideCompletions();
+    evalInput.focus();
+  }
+
+  function navigateCompletion(delta) {
+    if (!completionDropdown || completionItems.length === 0) return false;
+    var items = completionDropdown.querySelectorAll('.completion-item');
+    items[completionSelectedIndex].classList.remove('selected');
+    completionSelectedIndex = (completionSelectedIndex + delta + completionItems.length) % completionItems.length;
+    items[completionSelectedIndex].classList.add('selected');
+    items[completionSelectedIndex].scrollIntoView({ block: 'nearest' });
+    return true;
+  }
+
+  // --- Command History ---
+
+  function historyUp() {
+    if (history.length === 0) return;
+    if (historyIndex === -1) {
+      historySaved = evalInput.value;
+      historyIndex = history.length - 1;
+    } else if (historyIndex > 0) {
+      historyIndex--;
+    }
+    evalInput.value = history[historyIndex];
+    evalInput.selectionStart = evalInput.selectionEnd = evalInput.value.length;
+  }
+
+  function historyDown() {
+    if (historyIndex === -1) return;
+    if (historyIndex < history.length - 1) {
+      historyIndex++;
+      evalInput.value = history[historyIndex];
+    } else {
+      historyIndex = -1;
+      evalInput.value = historySaved;
+    }
+    evalInput.selectionStart = evalInput.selectionEnd = evalInput.value.length;
+  }
+
+  // --- Shortcuts Help Overlay ---
+
+  window.toggleShortcuts = function() {
+    if (shortcutsOverlay) {
+      var visible = shortcutsOverlay.style.display !== 'none';
+      shortcutsOverlay.style.display = visible ? 'none' : 'flex';
+    }
+  };
+
   // --- Keyboard shortcuts ---
 
   evalInput.addEventListener('keydown', function(e) {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    var mod = e.ctrlKey || e.metaKey;
+
+    // Completion dropdown navigation
+    if (completionDropdown) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); navigateCompletion(1); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); navigateCompletion(-1); return; }
+      if (e.key === 'Enter') { e.preventDefault(); insertCompletion(completionItems[completionSelectedIndex]); return; }
+      if (e.key === 'Escape') { e.preventDefault(); hideCompletions(); return; }
+      // Any other key dismisses completion
+      hideCompletions();
+    }
+
+    // Ctrl+D / Cmd+D — Do It
+    if (mod && e.key === 'd') {
       e.preventDefault();
       sendEval();
+      return;
+    }
+    // Ctrl+P / Cmd+P — Print It
+    if (mod && e.key === 'p') {
+      e.preventDefault();
+      sendPrintIt();
+      return;
+    }
+    // Ctrl+I / Cmd+I — Inspect It
+    if (mod && e.key === 'i') {
+      e.preventDefault();
+      sendInspect();
+      return;
+    }
+    // Ctrl+Enter — Do It (existing)
+    if (mod && e.key === 'Enter') {
+      e.preventDefault();
+      sendEval();
+      return;
+    }
+    // Ctrl+/ — Toggle shortcuts help
+    if (mod && e.key === '/') {
+      e.preventDefault();
+      toggleShortcuts();
+      return;
+    }
+    // Tab — request completion
+    if (e.key === 'Tab' && !e.shiftKey) {
+      e.preventDefault();
+      requestCompletion();
+      return;
+    }
+    // Command history — Up/Down (only when single-line or at first/last line)
+    if (e.key === 'ArrowUp' && evalInput.selectionStart === 0) {
+      e.preventDefault();
+      historyUp();
+      return;
+    }
+    if (e.key === 'ArrowDown' && evalInput.selectionEnd === evalInput.value.length) {
+      e.preventDefault();
+      historyDown();
+      return;
     }
   });
 
@@ -264,4 +540,32 @@
       editorInput.selectionStart = editorInput.selectionEnd = start + 2;
     }
   });
+
+  // Global shortcut: Ctrl+/ toggles shortcuts help from anywhere
+  document.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+      e.preventDefault();
+      toggleShortcuts();
+    }
+  });
+
+  // Close shortcuts overlay on click
+  if (shortcutsOverlay) {
+    shortcutsOverlay.addEventListener('click', function(e) {
+      if (e.target === shortcutsOverlay) {
+        shortcutsOverlay.style.display = 'none';
+      }
+    });
+  }
+
+  // Auto-connect if session ID present in URL
+  var resumeSession = getSessionFromUrl();
+  if (resumeSession) {
+    // Pre-fill cookie from localStorage if available
+    var savedCookie = localStorage.getItem('beamtalk_cookie');
+    if (savedCookie) {
+      cookieInput.value = savedCookie;
+      connect();
+    }
+  }
 })();

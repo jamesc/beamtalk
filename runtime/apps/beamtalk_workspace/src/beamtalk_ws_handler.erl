@@ -84,7 +84,7 @@ terminate(_Reason, _Req, #ws_state{session_id = SessionId, session_pid = Session
 %% Expected: {"type":"auth","cookie":"<workspace cookie>"}
 handle_auth(Data, State) ->
     try jsx:decode(Data, [return_maps]) of
-        #{<<"type">> := <<"auth">>, <<"cookie">> := ProvidedCookie}
+        #{<<"type">> := <<"auth">>, <<"cookie">> := ProvidedCookie} = AuthMsg
                 when is_binary(ProvidedCookie) ->
             NodeCookie = atom_to_binary(erlang:get_cookie(), utf8),
             %% Timing-safe comparison to prevent side-channel attacks.
@@ -94,35 +94,9 @@ handle_auth(Data, State) ->
                 andalso crypto:hash_equals(ProvidedCookie, NodeCookie),
             case CookieValid of
                 true ->
-                    %% Auth succeeded — now create the session
-                    SessionId = beamtalk_repl_server:generate_session_id(),
-                    case beamtalk_session_sup:start_session(SessionId) of
-                        {ok, SessionPid} ->
-                            ets:insert(beamtalk_sessions, {SessionId, SessionPid}),
-                            ?LOG_INFO("WebSocket auth succeeded, session created", #{
-                                session => SessionId,
-                                session_pid => SessionPid,
-                                peer => State#ws_state.peer
-                            }),
-                            beamtalk_workspace_meta:update_activity(),
-                            %% Subscribe to Transcript for push messages (ADR 0017 Phase 0)
-                            beamtalk_transcript_stream:subscribe('Transcript'),
-                            AuthOk = jsx:encode(#{<<"type">> => <<"auth_ok">>}),
-                            SessionMsg = jsx:encode(#{<<"op">> => <<"session-started">>,
-                                                      <<"session">> => SessionId}),
-                            {[{text, AuthOk}, {text, SessionMsg}],
-                             State#ws_state{authenticated = true,
-                                            session_id = SessionId,
-                                            session_pid = SessionPid}};
-                        {error, Reason} ->
-                            ?LOG_ERROR("Session creation failed after auth", #{
-                                reason => Reason,
-                                peer => State#ws_state.peer
-                            }),
-                            ErrorJson = jsx:encode(#{<<"type">> => <<"auth_error">>,
-                                                     <<"message">> => <<"Session creation failed">>}),
-                            {[{text, ErrorJson}, {close, 1011, <<"Session creation failed">>}], State}
-                    end;
+                    %% Check for session resume request
+                    ResumeId = maps:get(<<"resume">>, AuthMsg, undefined),
+                    start_or_resume_session(ResumeId, State);
                 false ->
                     ?LOG_WARNING("WebSocket auth failed: invalid cookie", #{peer => State#ws_state.peer}),
                     Reply = jsx:encode(#{<<"type">> => <<"auth_error">>,
@@ -160,6 +134,80 @@ handle_protocol(Data, SessionPid, State) ->
         {error, DecodeError} ->
             ErrorJson = beamtalk_repl_json:format_error(DecodeError),
             {[{text, ErrorJson}], State}
+    end.
+
+%% @private
+%% Start a new session or resume an existing one if session ID is provided.
+start_or_resume_session(undefined, State) ->
+    %% No resume — create a new session
+    SessionId = beamtalk_repl_server:generate_session_id(),
+    create_session(SessionId, State);
+start_or_resume_session(ResumeId, State) when is_binary(ResumeId) ->
+    %% Try to resume existing session
+    case ets:lookup(beamtalk_sessions, ResumeId) of
+        [{ResumeId, Pid}] when is_pid(Pid) ->
+            case is_process_alive(Pid) of
+                true ->
+                    ?LOG_INFO("WebSocket session resumed", #{
+                        session => ResumeId,
+                        session_pid => Pid,
+                        peer => State#ws_state.peer
+                    }),
+                    beamtalk_workspace_meta:update_activity(),
+                    beamtalk_transcript_stream:subscribe('Transcript'),
+                    AuthOk = jsx:encode(#{<<"type">> => <<"auth_ok">>}),
+                    SessionMsg = jsx:encode(#{<<"op">> => <<"session-started">>,
+                                              <<"session">> => ResumeId}),
+                    {[{text, AuthOk}, {text, SessionMsg}],
+                     State#ws_state{authenticated = true,
+                                    session_id = ResumeId,
+                                    session_pid = Pid}};
+                false ->
+                    %% Session process died — clean up and create new
+                    ets:delete(beamtalk_sessions, ResumeId),
+                    ?LOG_INFO("Resumed session expired, creating new", #{
+                        old_session => ResumeId,
+                        peer => State#ws_state.peer
+                    }),
+                    create_session(beamtalk_repl_server:generate_session_id(), State)
+            end;
+        _ ->
+            %% Session not found — create new
+            ?LOG_INFO("Resume session not found, creating new", #{
+                requested_session => ResumeId,
+                peer => State#ws_state.peer
+            }),
+            create_session(beamtalk_repl_server:generate_session_id(), State)
+    end.
+
+%% @private
+%% Create a fresh session and send auth_ok + session-started messages.
+create_session(SessionId, State) ->
+    case beamtalk_session_sup:start_session(SessionId) of
+        {ok, SessionPid} ->
+            ets:insert(beamtalk_sessions, {SessionId, SessionPid}),
+            ?LOG_INFO("WebSocket auth succeeded, session created", #{
+                session => SessionId,
+                session_pid => SessionPid,
+                peer => State#ws_state.peer
+            }),
+            beamtalk_workspace_meta:update_activity(),
+            beamtalk_transcript_stream:subscribe('Transcript'),
+            AuthOk = jsx:encode(#{<<"type">> => <<"auth_ok">>}),
+            SessionMsg = jsx:encode(#{<<"op">> => <<"session-started">>,
+                                      <<"session">> => SessionId}),
+            {[{text, AuthOk}, {text, SessionMsg}],
+             State#ws_state{authenticated = true,
+                            session_id = SessionId,
+                            session_pid = SessionPid}};
+        {error, Reason} ->
+            ?LOG_ERROR("Session creation failed after auth", #{
+                reason => Reason,
+                peer => State#ws_state.peer
+            }),
+            ErrorJson = jsx:encode(#{<<"type">> => <<"auth_error">>,
+                                     <<"message">> => <<"Session creation failed">>}),
+            {[{text, ErrorJson}, {close, 1011, <<"Session creation failed">>}], State}
     end.
 
 %% @private
