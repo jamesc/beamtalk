@@ -353,7 +353,7 @@ Returns the list of supported operations with their parameters, protocol version
 {"op": "describe", "id": "msg-040"}
 ```
 
-**Response:**
+**Response (truncated — showing a subset of ops):**
 ```json
 {
   "id": "msg-040",
@@ -370,7 +370,7 @@ Returns the list of supported operations with their parameters, protocol version
 }
 ```
 
-The `ops` map contains every supported operation. Each entry lists required `params` and any `optional` parameters. The `versions` map includes the protocol version and the Beamtalk runtime version.
+The actual response includes all supported operations (e.g., `eval`, `complete`, `info`, `docs`, `load-file`, `load-source`, `reload`, `clear`, `bindings`, `sessions`, `clone`, `close`, `actors`, `inspect`, `kill`, `interrupt`, `modules`, `unload`, `health`, `describe`, `shutdown`). Each entry lists required `params` and any `optional` parameters. The `versions` map includes the protocol version and the Beamtalk runtime version.
 
 #### `health` — Health Probe
 

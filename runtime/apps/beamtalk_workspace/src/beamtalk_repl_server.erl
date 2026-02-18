@@ -594,33 +594,7 @@ handle_op(<<"docs">>, Params, Msg, _SessionPid) ->
 handle_op(<<"describe">>, _Params, Msg, _SessionPid) ->
     %% Capability discovery — returns supported ops, protocol version, and
     %% server capabilities. No authentication required (read-only metadata).
-    Ops = #{
-        <<"eval">>        => #{<<"params">> => [<<"code">>],
-                               <<"optional">> => [<<"session">>]},
-        <<"complete">>    => #{<<"params">> => [<<"code">>]},
-        <<"info">>        => #{<<"params">> => [<<"symbol">>]},
-        <<"docs">>        => #{<<"params">> => [<<"class">>],
-                               <<"optional">> => [<<"selector">>]},
-        <<"load-file">>   => #{<<"params">> => [<<"path">>]},
-        <<"load-source">> => #{<<"params">> => [<<"source">>]},
-        <<"reload">>      => #{<<"params">> => [<<"module">>],
-                               <<"optional">> => [<<"path">>]},
-        <<"clear">>       => #{<<"params">> => []},
-        <<"bindings">>    => #{<<"params">> => []},
-        <<"sessions">>    => #{<<"params">> => []},
-        <<"clone">>       => #{<<"params">> => []},
-        <<"close">>       => #{<<"params">> => []},
-        <<"actors">>      => #{<<"params">> => []},
-        <<"inspect">>     => #{<<"params">> => [<<"actor">>]},
-        <<"kill">>        => #{<<"params">> => [<<"actor">>]},
-        <<"interrupt">>   => #{<<"params">> => [],
-                               <<"optional">> => [<<"session">>]},
-        <<"modules">>     => #{<<"params">> => []},
-        <<"unload">>      => #{<<"params">> => [<<"module">>]},
-        <<"health">>      => #{<<"params">> => []},
-        <<"describe">>    => #{<<"params">> => []},
-        <<"shutdown">>    => #{<<"params">> => [<<"cookie">>]}
-    },
+    Ops = describe_ops(),
     Versions = #{
         <<"protocol">> => <<"1.0">>,
         <<"beamtalk">> => <<"0.1.0">>
@@ -673,6 +647,40 @@ handle_op(Op, _Params, Msg, _SessionPid) ->
         iolist_to_binary([<<"Unknown operation: ">>, Op])),
     beamtalk_repl_protocol:encode_error(
         Err1, Msg, fun beamtalk_repl_json:format_error_message/1).
+
+%%% Describe Metadata
+
+%% @doc Returns the map of supported operations with their parameters.
+%% Centralised here so describe responses and future tests share a single source.
+-spec describe_ops() -> map().
+describe_ops() ->
+    #{
+        <<"eval">>        => #{<<"params">> => [<<"code">>],
+                               <<"optional">> => [<<"session">>]},
+        <<"complete">>    => #{<<"params">> => [<<"code">>]},
+        <<"info">>        => #{<<"params">> => [<<"symbol">>]},
+        <<"docs">>        => #{<<"params">> => [<<"class">>],
+                               <<"optional">> => [<<"selector">>]},
+        <<"load-file">>   => #{<<"params">> => [<<"path">>]},
+        <<"load-source">> => #{<<"params">> => [<<"source">>]},
+        <<"reload">>      => #{<<"params">> => [<<"module">>],
+                               <<"optional">> => [<<"path">>]},
+        <<"clear">>       => #{<<"params">> => []},
+        <<"bindings">>    => #{<<"params">> => []},
+        <<"sessions">>    => #{<<"params">> => []},
+        <<"clone">>       => #{<<"params">> => []},
+        <<"close">>       => #{<<"params">> => []},
+        <<"actors">>      => #{<<"params">> => []},
+        <<"inspect">>     => #{<<"params">> => [<<"actor">>]},
+        <<"kill">>        => #{<<"params">> => [<<"actor">>]},
+        <<"interrupt">>   => #{<<"params">> => [],
+                               <<"optional">> => [<<"session">>]},
+        <<"modules">>     => #{<<"params">> => []},
+        <<"unload">>      => #{<<"params">> => [<<"module">>]},
+        <<"health">>      => #{<<"params">> => []},
+        <<"describe">>    => #{<<"params">> => []},
+        <<"shutdown">>    => #{<<"params">> => [<<"cookie">>]}
+    }.
 
 %%% Protocol Parsing and Formatting
 
