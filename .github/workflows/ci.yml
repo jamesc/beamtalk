@@ -84,7 +84,7 @@ jobs:
             ${{ runner.os }}-erlang-otp-27.0-
 
       - name: Build, lint, and fast tests
-        run: just build clippy fmt-check test
+        run: just clippy fmt-check build test
 
   # ─── Full test suite on Linux only (requires Erlang/OTP) ──────────────
   test:
@@ -118,6 +118,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-rebar3-3.23
             ${{ runner.os }}-erlang-otp-27.0-
+
+      - name: Cache Dialyzer PLT
+        uses: actions/cache@v5
+        with:
+          path: |
+            runtime/_build/default/*_plt
+          key: ${{ runner.os }}-dialyzer-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-rebar3-3.23
+          restore-keys: |
+            ${{ runner.os }}-dialyzer-otp-27.0-
 
       - name: Cache cargo registry
         uses: actions/cache@v5
@@ -155,10 +164,6 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Dialyzer type checking (Erlang runtime)
-        if: steps.erlang-changes.outputs.changed == 'true'
-        run: just dialyzer
-
       - name: Test Rust (unit + integration)
         run: just test-rust
 
@@ -167,6 +172,10 @@ jobs:
 
       - name: Test Erlang runtime (unit tests)
         run: just test-runtime
+
+      - name: Dialyzer type checking (Erlang runtime)
+        if: steps.erlang-changes.outputs.changed == 'true'
+        run: just dialyzer
 
       - name: Test workspace integration
         run: just test-integration
