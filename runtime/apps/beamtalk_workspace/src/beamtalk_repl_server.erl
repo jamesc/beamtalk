@@ -264,6 +264,26 @@ handle_op(<<"load-file">>, Params, Msg, SessionPid) ->
                 WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1)
     end;
 
+handle_op(<<"load-source">>, Params, Msg, SessionPid) ->
+    Source = maps:get(<<"source">>, Params, <<>>),
+    case Source of
+        <<>> ->
+            Err = beamtalk_error:new(empty_expression, 'REPL'),
+            Err1 = beamtalk_error:with_message(Err, <<"Empty source">>),
+            Err2 = beamtalk_error:with_hint(Err1, <<"Enter Beamtalk source code to compile.">>),
+            beamtalk_repl_protocol:encode_error(
+                Err2, Msg, fun beamtalk_repl_json:format_error_message/1);
+        _ ->
+            case beamtalk_repl_shell:load_source(SessionPid, Source) of
+                {ok, Classes} ->
+                    beamtalk_repl_protocol:encode_loaded(Classes, Msg, fun beamtalk_repl_json:term_to_json/1);
+                {error, Reason} ->
+                    WrappedReason = ensure_structured_error(Reason),
+                    beamtalk_repl_protocol:encode_error(
+                        WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1)
+            end
+    end;
+
 handle_op(<<"reload">>, Params, Msg, SessionPid) ->
     ModuleBin = maps:get(<<"module">>, Params, <<>>),
     case maps:get(<<"path">>, Params, undefined) of
@@ -694,6 +714,9 @@ op_to_request(<<"bindings">>, _Map) ->
 op_to_request(<<"load-file">>, Map) ->
     Path = maps:get(<<"path">>, Map, <<>>),
     {load_file, binary_to_list(Path)};
+op_to_request(<<"load-source">>, Map) ->
+    Source = maps:get(<<"source">>, Map, <<>>),
+    {load_source, Source};
 op_to_request(<<"actors">>, _Map) ->
     {list_actors};
 op_to_request(<<"modules">>, _Map) ->

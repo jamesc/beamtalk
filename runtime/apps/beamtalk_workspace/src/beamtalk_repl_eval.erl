@@ -14,7 +14,7 @@
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--export([do_eval/2, handle_load/2]).
+-export([do_eval/2, handle_load/2, handle_load_source/3]).
 
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
@@ -192,6 +192,42 @@ handle_load(Path, State) ->
                             {error, Reason, State}
                     end
             end
+    end.
+
+%% @doc Load Beamtalk source from an inline binary string (no file path).
+%% Used by the browser workspace Editor pane to compile and load classes.
+-spec handle_load_source(binary(), string(), beamtalk_repl_state:state()) -> 
+    {ok, [map()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
+handle_load_source(SourceBin, Label, State) ->
+    Source = binary_to_list(SourceBin),
+    case compile_file(Source, Label, false) of
+        {ok, Binary, ClassNames, ModuleName} ->
+            case code:load_binary(ModuleName, Label, Binary) of
+                {module, ModuleName} ->
+                    activate_module(ModuleName, ClassNames),
+                    LoadedModules = beamtalk_repl_state:get_loaded_modules(State),
+                    NewState1 = case lists:member(ModuleName, LoadedModules) of
+                        true -> State;
+                        false -> beamtalk_repl_state:add_loaded_module(ModuleName, State)
+                    end,
+                    %% Track module in module tracker (for modules/unload ops)
+                    Tracker = beamtalk_repl_state:get_module_tracker(NewState1),
+                    NewTracker = beamtalk_repl_modules:add_module(ModuleName, Label, Tracker),
+                    NewState2 = beamtalk_repl_state:set_module_tracker(NewTracker, NewState1),
+                    %% Store class source for method patching (BT-571)
+                    NewState3 = lists:foldl(
+                        fun(#{name := Name}, AccState) ->
+                            NameBin = list_to_binary(Name),
+                            beamtalk_repl_state:set_class_source(
+                                NameBin, Source, AccState)
+                        end,
+                        NewState2, ClassNames),
+                    {ok, ClassNames, NewState3};
+                {error, Reason} ->
+                    {error, {load_error, Reason}, State}
+            end;
+        {error, Reason} ->
+            {error, Reason, State}
     end.
 
 %%% Internal functions

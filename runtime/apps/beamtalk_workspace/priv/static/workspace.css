@@ -1,0 +1,175 @@
+/* Copyright 2026 James Casey */
+/* SPDX-License-Identifier: Apache-2.0 */
+
+/* Beamtalk Workspace — Four-pane layout */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: monospace;
+  background: #1e1e2e;
+  color: #cdd6f4;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* Header */
+header {
+  padding: 8px 16px;
+  background: #313244;
+  border-bottom: 1px solid #45475a;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+header h1 { font-size: 14px; color: #89b4fa; }
+#status { font-size: 12px; color: #a6adc8; }
+
+/* Auth panel */
+#auth-panel {
+  padding: 16px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  background: #181825;
+  border-bottom: 1px solid #45475a;
+}
+#auth-panel label { font-size: 12px; }
+#cookie-input {
+  font-family: monospace;
+  font-size: 12px;
+  background: #313244;
+  color: #cdd6f4;
+  border: 1px solid #45475a;
+  padding: 4px 8px;
+  width: 300px;
+}
+
+/* Buttons */
+button {
+  font-family: monospace;
+  font-size: 12px;
+  background: #89b4fa;
+  color: #1e1e2e;
+  border: none;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+button:hover { background: #74c7ec; }
+button:disabled { background: #45475a; color: #6c7086; cursor: default; }
+
+/* Main grid — 2x2 panes */
+main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  overflow: hidden;
+}
+
+/* Pane layout */
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid #45475a;
+}
+.pane-header {
+  padding: 4px 16px;
+  background: #313244;
+  font-size: 11px;
+  color: #a6adc8;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  border-bottom: 1px solid #45475a;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.pane-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 16px;
+  font-size: 13px;
+  white-space: pre-wrap;
+  background: #181825;
+}
+.pane-empty {
+  color: #6c7086;
+  font-style: italic;
+}
+
+/* Workspace pane — eval input at bottom */
+#workspace-pane { grid-area: 1 / 1 / 2 / 2; }
+#eval-panel {
+  display: flex;
+  gap: 8px;
+  padding: 8px 16px;
+  background: #1e1e2e;
+  border-top: 1px solid #45475a;
+}
+#eval-input {
+  flex: 1;
+  font-family: monospace;
+  font-size: 13px;
+  background: #313244;
+  color: #cdd6f4;
+  border: 1px solid #45475a;
+  padding: 8px;
+  resize: none;
+}
+#eval-input:focus { outline: 1px solid #89b4fa; }
+
+/* Transcript pane */
+#transcript-pane { grid-area: 1 / 2 / 2 / 2; }
+
+/* Editor pane — textarea with load button */
+#editor-pane { grid-area: 2 / 1 / 3 / 2; }
+#editor-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#editor-input {
+  flex: 1;
+  font-family: monospace;
+  font-size: 13px;
+  background: #181825;
+  color: #cdd6f4;
+  border: none;
+  padding: 8px 16px;
+  resize: none;
+  tab-size: 2;
+}
+#editor-input:focus { outline: none; }
+#editor-toolbar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 16px;
+  background: #1e1e2e;
+  border-top: 1px solid #45475a;
+  align-items: center;
+}
+#editor-status {
+  font-size: 12px;
+  color: #a6adc8;
+  flex: 1;
+}
+
+/* Inspector pane */
+#inspector-pane { grid-area: 2 / 2 / 3 / 2; }
+.inspector-field {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+}
+.inspector-field-name {
+  color: #89b4fa;
+  min-width: 80px;
+}
+.inspector-field-value {
+  color: #a6e3a1;
+}

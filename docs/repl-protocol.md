@@ -151,6 +151,25 @@ Compile and load a `.bt` source file.
 {"id": "msg-004", "classes": ["Counter"], "status": ["done"]}
 ```
 
+#### `load-source` — Load Inline Source
+
+Compile and load Beamtalk source from an inline string (no file path needed). Used by the browser workspace Editor pane.
+
+**Request:**
+```json
+{"op": "load-source", "id": "msg-005", "source": "Object subclass: Counter\n  state: count := 0\n  increment => self.count := self.count + 1\n  count => self.count"}
+```
+
+**Response:**
+```json
+{"id": "msg-005", "classes": ["Counter"], "status": ["done"]}
+```
+
+**Error (parse error):**
+```json
+{"id": "msg-005", "error": "Parse error: unexpected token...", "status": ["done", "error"]}
+```
+
 #### `reload` — Hot Reload Module
 
 Reload a previously loaded module (requires `path` parameter).
