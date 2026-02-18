@@ -57,10 +57,11 @@ impl Parser {
     /// even under `AddressSanitizer` during fuzzing).
     pub(super) fn parse_expression(&mut self) -> Expression {
         // Grow the stack on the heap when remaining space is low.
-        // 32 KiB red zone, 1 MiB new segment — mirrors Gleam's approach.
-        // Wraps the entire body (including nesting guard) so the stack
-        // extension happens before any per-frame work.
-        stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
+        // 32 KiB red zone, 256 KiB new segment.  Kept small because the
+        // nesting-depth guard (MAX_NESTING_DEPTH = 64) caps recursion,
+        // so we never need many segments, and a large segment size would
+        // cause OOM under AddressSanitizer during fuzzing.
+        stacker::maybe_grow(32 * 1024, 256 * 1024, || {
             // Guard against stack overflow from deeply nested input
             if let Err(error) = self.enter_nesting(self.current_token().span()) {
                 return error;
@@ -369,23 +370,17 @@ impl Parser {
             // String interpolation: "text {expr} more text"
             TokenKind::StringStart(_) => self.parse_string_interpolation(),
 
-            // Map literal: #{...}
+            // Standalone '#' is not a valid primary expression.
+            // (#( is already lexed as ListOpen, #{ as MapOpen, #name as Symbol)
             TokenKind::Hash => {
-                // Check if it's a map literal (followed by {)
-                if matches!(self.peek_kind(), Some(TokenKind::LeftBrace)) {
-                    self.parse_map_literal()
-                } else {
-                    // Standalone '#' is not a valid primary expression
-                    // (#( is already lexed as ListOpen, #{ as MapOpen, #name as Symbol)
-                    let bad_token = self.advance();
-                    let span = bad_token.span();
-                    let message: EcoString =
-                        "Unexpected '#': expected '#(' for a list, '#{' for a map, or '#name'/'#\\'quoted\\'' for a symbol"
-                            .into();
-                    self.diagnostics
-                        .push(Diagnostic::error(message.clone(), span));
-                    Expression::Error { message, span }
-                }
+                let bad_token = self.advance();
+                let span = bad_token.span();
+                let message: EcoString =
+                    "Unexpected '#': expected '#(' for a list, '#{' for a map, or '#name'/'#\\'quoted\\'' for a symbol"
+                        .into();
+                self.diagnostics
+                    .push(Diagnostic::error(message.clone(), span));
+                Expression::Error { message, span }
             }
 
             // Identifier or field access
@@ -631,8 +626,15 @@ impl Parser {
         // Parse block body — statements separated by periods or newlines (BT-360)
         let mut body = Vec::new();
         while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
+            let pos_before = self.current;
             let expr = self.parse_expression();
             body.push(expr);
+
+            // If parse_expression didn't consume any tokens (e.g. nesting
+            // depth exceeded), break to avoid an infinite loop.
+            if self.current == pos_before {
+                break;
+            }
 
             // Period or newline separates statements
             if self.match_token(&TokenKind::Period) {

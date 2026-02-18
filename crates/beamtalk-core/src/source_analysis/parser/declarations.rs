@@ -764,9 +764,16 @@ impl Parser {
             && !self.is_at_standalone_method_definition()
             && !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:")
         {
+            let pos_before = self.current;
             let expr = self.parse_expression();
             let is_error = expr.is_error();
             body.push(expr);
+
+            // If parse_expression didn't consume any tokens (e.g. nesting
+            // depth exceeded), break to avoid an infinite loop.
+            if self.current == pos_before {
+                break;
+            }
 
             // If we got an error, try to recover
             if is_error {
