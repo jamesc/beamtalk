@@ -1,0 +1,64 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Regex — Compiled regular expressions via Erlang re module (PCRE2).
+///
+/// Provides compiled regex objects for efficient reuse and inspection.
+/// String methods accept both String patterns (auto-compiled) and Regex objects.
+///
+/// ## Examples
+/// ```beamtalk
+/// pattern := Regex from: "[0-9]+"
+/// pattern source                              // => "[0-9]+"
+/// pattern printString                         // => "Regex([0-9]+)"
+/// "hello123" matchesRegex: pattern            // => true
+/// "hello123" firstMatch: pattern              // => "123"
+/// ```
+///
+/// ## Options
+/// ```beamtalk
+/// Regex from: "[a-z]+" options: #(#caseless)   // case-insensitive
+/// ```
+sealed Object subclass: Regex
+
+  /// Compile a regex pattern string into a Regex object (class method).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Regex from: "[0-9]+"                       // => Regex([0-9]+)
+  /// ```
+  class sealed from: pattern: String -> Regex => @primitive "from:"
+
+  /// Compile a regex pattern with PCRE options (class method).
+  ///
+  /// Options: caseless, multiline, dotall, extended, ungreedy.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Regex from: "[a-z]+" options: #(caseless)
+  /// ```
+  class sealed from: pattern: String options: opts: List -> Regex => @primitive "from:options:"
+
+  /// Return the original pattern source string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Regex from: "[0-9]+") source              // => "[0-9]+"
+  /// ```
+  source -> String => @primitive "source"
+
+  /// Human-readable representation: Regex(pattern).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Regex from: "[0-9]+") printString         // => "Regex([0-9]+)"
+  /// ```
+  printString -> String => @primitive "printString"
+
+  /// Describe this regex (same as printString).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Regex from: "[0-9]+") describe            // => "Regex([0-9]+)"
+  /// ```
+  describe -> String => @primitive "describe"

@@ -593,3 +593,32 @@ pub(crate) fn generate_json_bif(selector: &str, params: &[String]) -> Option<Doc
         _ => None,
     }
 }
+
+/// Regex primitive implementations (BT-709).
+///
+/// Regex class methods delegate to `beamtalk_regex` runtime module.
+/// Instance methods (source, printString, describe) operate on Self.
+pub(crate) fn generate_regex_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
+    let p0 = params.first().map_or("_Arg0", String::as_str);
+    match selector {
+        "from:" => Some(docvec![
+            "call 'beamtalk_regex':'from:'(",
+            p0.to_string(),
+            ")"
+        ]),
+        "from:options:" => {
+            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            Some(docvec![
+                "call 'beamtalk_regex':'from:options:'(",
+                p0.to_string(),
+                ", ",
+                p1.to_string(),
+                ")",
+            ])
+        }
+        "source" => Some(Document::Str("call 'beamtalk_regex':'source'(Self)")),
+        "printString" => Some(Document::Str("call 'beamtalk_regex':'printString'(Self)")),
+        "describe" => Some(Document::Str("call 'beamtalk_regex':'describe'(Self)")),
+        _ => None,
+    }
+}

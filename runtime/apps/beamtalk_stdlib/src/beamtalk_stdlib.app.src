@@ -32,6 +32,7 @@
         {'bt@stdlib@port', 'Port', 'Object'},
         {'bt@stdlib@proto_object', 'ProtoObject', 'none'},
         {'bt@stdlib@reference', 'Reference', 'Object'},
+        {'bt@stdlib@regex', 'Regex', 'Object'},
         {'bt@stdlib@runtime_error', 'RuntimeError', 'Error'},
         {'bt@stdlib@set', 'Set', 'Collection'},
         {'bt@stdlib@stack_frame', 'StackFrame', 'Object'},

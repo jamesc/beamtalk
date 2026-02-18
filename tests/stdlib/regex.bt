@@ -1,0 +1,177 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for Regex class (BT-709)
+// Tests regular expression matching, replacement, and splitting via Erlang re module.
+
+// ===========================================================================
+// REGEX CONSTRUCTION
+// ===========================================================================
+
+// Compile a regex pattern
+(Regex from: "[0-9]+") class
+// => Regex
+
+// Source returns the original pattern
+(Regex from: "[0-9]+") source
+// => [0-9]+
+
+// printString shows Regex(pattern)
+(Regex from: "[0-9]+") printString
+// => Regex([0-9]+)
+
+// describe is same as printString
+(Regex from: "[0-9]+") describe
+// => Regex([0-9]+)
+
+// Compile with options
+(Regex from: "[a-z]+" options: #(#caseless)) class
+// => Regex
+
+// ===========================================================================
+// STRING matchesRegex: — with String patterns
+// ===========================================================================
+
+// Simple digit match
+"hello123" matchesRegex: "[0-9]+"
+// => true
+
+// Full string match fails
+"hello123" matchesRegex: "^[0-9]+$"
+// => false
+
+// Full string match succeeds
+"12345" matchesRegex: "^[0-9]+$"
+// => true
+
+// Letters only
+"hello" matchesRegex: "^[a-z]+$"
+// => true
+
+// No match
+"hello" matchesRegex: "[0-9]+"
+// => false
+
+// ===========================================================================
+// STRING matchesRegex: — with compiled Regex objects
+// ===========================================================================
+
+// Match with compiled regex
+"hello123" matchesRegex: (Regex from: "[0-9]+")
+// => true
+
+// No match with compiled regex
+"hello" matchesRegex: (Regex from: "[0-9]+")
+// => false
+
+// ===========================================================================
+// STRING matchesRegex:options:
+// ===========================================================================
+
+// Case-insensitive matching
+"Hello" matchesRegex: "^[a-z]+$" options: #(#caseless)
+// => true
+
+// Without caseless, fails
+"Hello" matchesRegex: "^[a-z]+$"
+// => false
+
+// ===========================================================================
+// STRING firstMatch:
+// ===========================================================================
+
+// First match returns the matched string
+"hello123world456" firstMatch: "[0-9]+"
+// => 123
+
+// No match returns nil
+"hello" firstMatch: "[0-9]+"
+// => nil
+
+// First match with compiled regex
+"abc42def" firstMatch: (Regex from: "[0-9]+")
+// => 42
+
+// ===========================================================================
+// STRING allMatches:
+// ===========================================================================
+
+// All matches returns list of matched strings
+"a1b2c3" allMatches: "[0-9]+"
+// => ["1","2","3"]
+
+// No matches returns empty list
+"hello" allMatches: "[0-9]+"
+// => []
+
+// All matches with compiled regex
+"x10y20z30" allMatches: (Regex from: "[0-9]+")
+// => ["10","20","30"]
+
+// Single match returns single-element list
+"abc123def" allMatches: "[0-9]+"
+// => ["123"]
+
+// ===========================================================================
+// STRING replaceRegex:with:
+// ===========================================================================
+
+// Replace first match
+"hello world" replaceRegex: "[aeiou]" with: "*"
+// => h*llo world
+
+// No match leaves string unchanged
+"hello" replaceRegex: "[0-9]+" with: "X"
+// => hello
+
+// Replace first match with compiled regex
+"abc123def456" replaceRegex: (Regex from: "[0-9]+") with: "NUM"
+// => abcNUMdef456
+
+// ===========================================================================
+// STRING replaceAllRegex:with:
+// ===========================================================================
+
+// Replace all matches
+"hello world" replaceAllRegex: "[aeiou]" with: "*"
+// => h*ll* w*rld
+
+// No match leaves string unchanged
+"hello" replaceAllRegex: "[0-9]+" with: "X"
+// => hello
+
+// Replace all with compiled regex
+"a1b2c3" replaceAllRegex: (Regex from: "[0-9]+") with: "N"
+// => aNbNcN
+
+// ===========================================================================
+// STRING splitRegex:
+// ===========================================================================
+
+// Split on one or more commas
+"a,,b,,,c" splitRegex: ",+"
+// => ["a","b","c"]
+
+// Split on whitespace
+"hello   world   test" splitRegex: " +"
+// => ["hello","world","test"]
+
+// Split with compiled regex
+"a1b2c3" splitRegex: (Regex from: "[0-9]+")
+// => ["a","b","c"]
+
+// ===========================================================================
+// ERROR HANDLING
+// ===========================================================================
+
+// Invalid regex pattern produces regex_error
+Regex from: "[invalid"
+// => ERROR: regex_error
+
+// ===========================================================================
+// CLASS IDENTITY
+// ===========================================================================
+
+// Regex class identity
+Regex class
+// => Metaclass

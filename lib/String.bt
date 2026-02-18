@@ -418,6 +418,65 @@ sealed Object subclass: String
   /// ```
   stream -> Stream => @primitive "stream"
 
+  /// Test if the string matches a regular expression pattern.
+  /// Accepts a String pattern or compiled Regex object.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// "hello123" matchesRegex: "[0-9]+"          // => true
+  /// "hello" matchesRegex: "^[0-9]+$"           // => false
+  /// ```
+  matchesRegex: pattern -> Boolean => @primitive "matchesRegex:"
+
+  /// Test if the string matches a pattern with PCRE options.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// "Hello" matchesRegex: "[a-z]+" options: #(#caseless)  // => true
+  /// ```
+  matchesRegex: pattern options: opts: List -> Boolean => @primitive "matchesRegex:options:"
+
+  /// Find the first regex match, returning matched String or nil.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// "hello123world" firstMatch: "[0-9]+"       // => "123"
+  /// "hello" firstMatch: "[0-9]+"               // => nil
+  /// ```
+  firstMatch: pattern -> String | Nil => @primitive "firstMatch:"
+
+  /// Find all regex matches, returning a List of Strings.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// "a1b2c3" allMatches: "[0-9]+"              // => #("1", "2", "3")
+  /// ```
+  allMatches: pattern -> List => @primitive "allMatches:"
+
+  /// Replace the first regex match with a replacement string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// "hello world" replaceRegex: "[aeiou]" with: "*"      // => "h*llo world"
+  /// ```
+  replaceRegex: pattern with: replacement: String -> String => @primitive "replaceRegex:with:"
+
+  /// Replace all regex matches with a replacement string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// "hello world" replaceAllRegex: "[aeiou]" with: "*"   // => "h*ll* w*rld"
+  /// ```
+  replaceAllRegex: pattern with: replacement: String -> String => @primitive "replaceAllRegex:with:"
+
+  /// Split the string by a regex pattern.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// "a,,b,,,c" splitRegex: ",+"                // => #("a", "b", "c")
+  /// ```
+  splitRegex: pattern -> List => @primitive "splitRegex:"
+
   /// Return the string itself.
   ///
   /// ## Examples
