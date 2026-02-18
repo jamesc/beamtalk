@@ -24,8 +24,8 @@
 //! of _Result -> _Result
 //! catch <_Type, _Error, _RawStack> ->
 //!     let _BuiltStack = primop 'build_stacktrace'(_RawStack) in
-//!     let _ExObj = call 'beamtalk_exception_handler':'ensure_wrapped'(_Error, _BuiltStack) in
-//!     case matches_class(ExClass, Error) of
+//!     let _ExObj = call 'beamtalk_exception_handler':'ensure_wrapped'(_Type, _Error, _BuiltStack) in
+//!     case matches_class(ExClass, ExObj) of
 //!         true  -> apply _HandlerFun (_ExObj)
 //!         false -> primop 'raw_raise'(_Type, _Error, _RawStack)
 //! ```
@@ -136,11 +136,11 @@ impl CoreErlangGenerator {
             )),
             Document::String(format!(
                 "let {ex_obj_var} = call 'beamtalk_exception_handler':'ensure_wrapped'\
-                 ({error_var}, {built_stack_var}) in "
+                 ({type_var}, {error_var}, {built_stack_var}) in "
             )),
             Document::String(format!(
                 "let {match_var} = call 'beamtalk_exception_handler':'matches_class'\
-                 ({ex_class_var}, {error_var}) in "
+                 ({ex_class_var}, {ex_obj_var}) in "
             )),
             Document::String(format!("case {match_var} of ")),
             Document::Str("<'true'> when 'true' -> "),
@@ -168,8 +168,8 @@ impl CoreErlangGenerator {
     /// of StateAfterTry -> StateAfterTry
     /// catch <Type, Error, RawStack> ->
     ///     let BuiltStack = primop 'build_stacktrace'(RawStack) in
-    ///     let ExObj = call 'beamtalk_exception_handler':'ensure_wrapped'(Error, BuiltStack) in
-    ///     let Match = call 'beamtalk_exception_handler':'matches_class'(ExClass, Error) in
+    ///     let ExObj = call 'beamtalk_exception_handler':'ensure_wrapped'(Type, Error, BuiltStack) in
+    ///     let Match = call 'beamtalk_exception_handler':'matches_class'(ExClass, ExObj) in
     ///     case Match of
     ///         true  -> let _e = ExObj in <handler body with threading> StateAccM
     ///         false -> primop 'raw_raise'(Type, Error, RawStack)
@@ -226,11 +226,11 @@ impl CoreErlangGenerator {
             )),
             Document::String(format!(
                 "let {ex_obj_var} = call 'beamtalk_exception_handler':'ensure_wrapped'\
-                 ({error_var}, {built_stack_var}) in "
+                 ({type_var}, {error_var}, {built_stack_var}) in "
             )),
             Document::String(format!(
                 "let {match_var} = call 'beamtalk_exception_handler':'matches_class'\
-                 ({ex_class_var}, {error_var}) in "
+                 ({ex_class_var}, {ex_obj_var}) in "
             )),
             Document::String(format!("case {match_var} of ")),
             Document::Str("<'true'> when 'true' -> "),

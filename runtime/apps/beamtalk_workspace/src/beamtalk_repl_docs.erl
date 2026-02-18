@@ -18,8 +18,10 @@
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
 -export([safe_to_existing_atom/1, get_doc_entries/1,
-         find_doc_entry/2, get_method_doc/2,
-         group_by_class/1, format_class_output/5, format_superclass/1,
+         find_doc_entry/2,
+         get_method_signatures_with_sealed/3, get_method_doc/2,
+         group_by_class/1, format_class_output/6, format_superclass/1,
+         format_modifiers/1,
          format_method_output/4, format_metaclass_docs/0,
          format_metaclass_method_doc/1, metaclass_method_doc/1]).
 -endif.
@@ -37,6 +39,8 @@ format_class_docs(ClassName) ->
             try
                 ModuleName = gen_server:call(ClassPid, module_name, 5000),
                 Superclass = gen_server:call(ClassPid, superclass, 5000),
+                IsSealed = gen_server:call(ClassPid, is_sealed, 5000),
+                IsAbstract = gen_server:call(ClassPid, is_abstract, 5000),
                 {ok, Flattened} = gen_server:call(ClassPid, get_flattened_methods, 5000),
 
                 %% Get module doc from EEP-48 chunks
@@ -44,10 +48,11 @@ format_class_docs(ClassName) ->
 
                 %% Build method listing grouped by defining class
                 {Own, Inherited} = maps:fold(
-                    fun(Selector, {DefiningClass, _MethodInfo}, {OwnAcc, InhAcc}) ->
+                    fun(Selector, {DefiningClass, MethodInfo}, {OwnAcc, InhAcc}) ->
                         case DefiningClass of
                             ClassName ->
-                                {[Selector | OwnAcc], InhAcc};
+                                MethodSealed = maps:get(is_sealed, MethodInfo, false),
+                                {[{Selector, MethodSealed} | OwnAcc], InhAcc};
                             _ ->
                                 {OwnAcc, [{Selector, DefiningClass} | InhAcc]}
                         end
@@ -57,14 +62,18 @@ format_class_docs(ClassName) ->
                 ),
 
                 %% Get EEP-48 method signatures for own methods
-                OwnDocs = get_method_signatures(ModuleName, lists:sort(Own)),
+                OwnSelectors = lists:sort([S || {S, _} <- Own]),
+                SealedMap = maps:from_list(Own),
+                OwnDocs = get_method_signatures_with_sealed(
+                              ModuleName, OwnSelectors, SealedMap),
 
                 %% Group inherited by defining class
                 InheritedGrouped = group_by_class(lists:sort(Inherited)),
 
                 %% Format the output
-                Output = format_class_output(ClassName, Superclass, ModuleDoc,
-                                              OwnDocs, InheritedGrouped),
+                Modifiers = #{is_sealed => IsSealed, is_abstract => IsAbstract},
+                Output = format_class_output(ClassName, Superclass, Modifiers,
+                                              ModuleDoc, OwnDocs, InheritedGrouped),
                 {ok, Output}
             catch
                 exit:{timeout, _} ->
@@ -194,6 +203,19 @@ get_method_signatures(ModuleName, Selectors) ->
         Selectors
     ).
 
+%% @doc Get method signatures with sealed flags from EEP-48 doc entries.
+-spec get_method_signatures_with_sealed(atom(), [atom()], map()) ->
+    [{atom(), binary(), binary() | none, boolean()}].
+get_method_signatures_with_sealed(ModuleName, Selectors, SealedMap) ->
+    BaseDocs = get_method_signatures(ModuleName, Selectors),
+    lists:map(
+        fun({Selector, Signature, Doc}) ->
+            IsSealed = maps:get(Selector, SealedMap, false),
+            {Selector, Signature, Doc, IsSealed}
+        end,
+        BaseDocs
+    ).
+
 %% @doc Get full method doc (signature + doc text) for a specific selector.
 -spec get_method_doc(atom(), atom()) -> {binary(), binary() | none}.
 get_method_doc(ModuleName, Selector) ->
@@ -265,14 +287,18 @@ group_by_class(Methods) ->
     ).
 
 %% @doc Format the complete class documentation output.
--spec format_class_output(atom(), atom() | none, binary() | none,
-                          [{atom(), binary(), binary() | none}],
+-spec format_class_output(atom(), atom() | none, map(),
+                          binary() | none,
+                          [{atom(), binary(), binary() | none, boolean()}],
                           [{atom(), [atom()]}]) -> binary().
-format_class_output(ClassName, Superclass, ModuleDoc, OwnDocs, InheritedGrouped) ->
+format_class_output(ClassName, Superclass, Modifiers, ModuleDoc, OwnDocs, InheritedGrouped) ->
     Parts = [
         %% Header
         iolist_to_binary([<<"== ">>, atom_to_binary(ClassName, utf8),
                           format_superclass(Superclass), <<" ==">>]),
+
+        %% Class modifiers
+        format_modifiers(Modifiers),
 
         %% Module doc
         case ModuleDoc of
@@ -286,7 +312,9 @@ format_class_output(ClassName, Superclass, ModuleDoc, OwnDocs, InheritedGrouped)
             [] -> <<>>;
             _ ->
                 MethodLines = lists:map(
-                    fun({_Sel, Sig, _Doc}) ->
+                    fun({_Sel, Sig, _Doc, true}) ->
+                        iolist_to_binary([<<"  ">>, Sig, <<" [sealed]">>]);
+                       ({_Sel, Sig, _Doc, false}) ->
                         iolist_to_binary([<<"  ">>, Sig])
                     end,
                     OwnDocs
@@ -341,6 +369,17 @@ format_class_output(ClassName, Superclass, ModuleDoc, OwnDocs, InheritedGrouped)
 format_superclass(none) -> [];
 format_superclass(Superclass) ->
     [<<" < ">>, atom_to_binary(Superclass, utf8)].
+
+%% @doc Format class modifiers (sealed/abstract) for display.
+-spec format_modifiers(map()) -> binary().
+format_modifiers(#{is_sealed := true, is_abstract := true}) ->
+    <<"\n[sealed] [abstract]">>;
+format_modifiers(#{is_sealed := true}) ->
+    <<"\n[sealed]">>;
+format_modifiers(#{is_abstract := true}) ->
+    <<"\n[abstract]">>;
+format_modifiers(_) ->
+    <<>>.
 
 %% @doc Format method-specific documentation output.
 -spec format_method_output(atom(), binary(), atom(),
