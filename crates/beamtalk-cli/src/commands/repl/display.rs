@@ -238,6 +238,12 @@ pub(super) fn display_info(info: &serde_json::Value) {
                         }
                     }
                 }
+            } else {
+                println!(
+                    "  {}: {}",
+                    color::paint(color::DIM, key),
+                    format_value(value)
+                );
             }
         }
     }
