@@ -81,9 +81,9 @@
     method_source = #{} :: #{selector() => binary()},
     before_methods = #{} :: #{selector() => [fun()]},
     after_methods = #{} :: #{selector() => [fun()]},
-    dynamic_methods = #{} :: #{selector() => fun()},  % For dynamic classes: actual closures
-    flattened_methods = #{} :: #{selector() => {class_name(), method_info()}},  % ADR 0006 Phase 2: cached method table including inherited
-    flattened_class_methods = #{} :: #{selector() => {class_name(), method_info()}}  % BT-411: cached class method table including inherited
+    dynamic_methods = #{} :: #{selector() => fun()},
+    flattened_methods = #{} :: #{selector() => {class_name(), method_info()}},
+    flattened_class_methods = #{} :: #{selector() => {class_name(), method_info()}}
 }).
 
 %%====================================================================
@@ -233,7 +233,6 @@ add_after(ClassPid, Selector, Fun) ->
     gen_server:call(ClassPid, {add_after, Selector, Fun}).
 
 %% @doc Create a dynamic subclass at runtime.
-%%
 %% Delegates to beamtalk_class_instantiation (BT-704).
 -spec create_subclass(atom(), atom(), map()) -> {ok, pid()} | {error, term()}.
 create_subclass(SuperclassName, ClassName, ClassSpec) ->
@@ -280,9 +279,6 @@ init({ClassName, ClassInfo}) ->
     beamtalk_class_registry:invalidate_subclass_flattened_tables(ClassName),
     {ok, State}.
 
-%% BT-246: Actor spawn via dynamic class dispatch.
-%% Routes spawn/spawnWith: through class_send → {spawn, Args} protocol.
-%% Separate from {new, Args} to avoid confusion with value type new.
 handle_call({spawn, Args}, _From, #class_state{
     name = ClassName,
     module = Module,
@@ -291,15 +287,8 @@ handle_call({spawn, Args}, _From, #class_state{
     Result = beamtalk_class_instantiation:handle_spawn(Args, ClassName, Module, IsAbstract),
     {reply, Result, State};
 
-handle_call({new, Args}, _From, #class_state{
-    name = ClassName,
-    is_abstract = true
-} = State) ->
-    %% BT-105: Abstract classes cannot be instantiated
-    Selector = case Args of
-        [] -> 'new';
-        _ -> 'new:'
-    end,
+handle_call({new, Args}, _From, #class_state{name = ClassName, is_abstract = true} = State) ->
+    Selector = case Args of [] -> 'new'; _ -> 'new:' end,
     {reply, {error, beamtalk_class_instantiation:abstract_class_error(ClassName, Selector)}, State};
 
 handle_call({new, Args}, _From, #class_state{
@@ -319,7 +308,6 @@ handle_call({new, Args}, _From, #class_state{
     end;
 
 handle_call(methods, _From, #class_state{flattened_methods = Flattened} = State) ->
-    %% ADR 0006 Phase 2: Return all methods (local + inherited) from flattened table
     {reply, maps:keys(Flattened), State};
 
 handle_call(superclass, _From, #class_state{superclass = Super} = State) ->
@@ -411,12 +399,9 @@ handle_call({add_after, Selector, Fun}, _From, State) ->
     NewAfters = maps:put(Selector, Afters ++ [Fun], State#class_state.after_methods),
     {reply, ok, State#class_state{after_methods = NewAfters}};
 
-%% ADR 0006 Phase 2: Query for flattened methods (used by build_flattened_methods)
 handle_call(get_flattened_methods, _From, #class_state{flattened_methods = Flattened} = State) ->
     {reply, {ok, Flattened}, State};
 
-%% ADR 0006 Phase 2: Fast single-selector lookup in flattened table.
-%% Returns just the result to avoid copying the entire map to the caller.
 handle_call({lookup_flattened, Selector}, _From, #class_state{flattened_methods = Flattened} = State) ->
     Result = case maps:find(Selector, Flattened) of
         {ok, {DefiningClass, MethodInfo}} -> {ok, DefiningClass, MethodInfo};
@@ -443,30 +428,20 @@ handle_call({class_method_call, Selector, Args}, From,
             {reply, {error, not_found}, State}
     end;
 
-%% BT-411: Actor initialize protocol — should not reach class process.
 handle_call({initialize, _Args}, _From, #class_state{} = State) ->
     {reply, {ok, nil}, State};
 
-%% BT-411: Query for flattened class methods (for inheritance)
 handle_call(get_flattened_class_methods, _From, #class_state{flattened_class_methods = Flattened} = State) ->
     {reply, {ok, Flattened}, State};
 
-%% Internal query used by reflective method lookup to get behavior module
 handle_call(get_module, _From, #class_state{module = Module} = State) ->
     {reply, Module, State};
 
-%% BT-412: Get a class variable value
-handle_call({get_class_var, Name}, _From,
-            #class_state{class_variables = ClassVars} = State) ->
-    Value = maps:get(Name, ClassVars, nil),
-    {reply, Value, State};
+handle_call({get_class_var, Name}, _From, #class_state{class_variables = ClassVars} = State) ->
+    {reply, maps:get(Name, ClassVars, nil), State};
 
-%% BT-412: Set a class variable value
-handle_call({set_class_var, Name, Value}, _From,
-            #class_state{class_variables = ClassVars} = State) ->
-    NewClassVars = maps:put(Name, Value, ClassVars),
-    NewState = State#class_state{class_variables = NewClassVars},
-    {reply, Value, NewState}.
+handle_call({set_class_var, Name, Value}, _From, #class_state{class_variables = ClassVars} = State) ->
+    {reply, Value, State#class_state{class_variables = maps:put(Name, Value, ClassVars)}}.
 
 handle_cast(Msg, #class_state{flattened_methods = Flattened,
                               name = ClassName, superclass = Superclass,
