@@ -1296,7 +1296,14 @@ tcp_integration_test_() ->
           {"clone uniqueness", fun() -> tcp_clone_uniqueness_test(Port) end},
           %% BT-666: interrupt operation tests
           {"interrupt no eval", fun() -> tcp_interrupt_no_eval_test(Port) end},
-          {"interrupt unknown session", fun() -> tcp_interrupt_unknown_session_test(Port) end}
+          {"interrupt unknown session", fun() -> tcp_interrupt_unknown_session_test(Port) end},
+          %% BT-686: browser page tests
+          {"GET / returns HTML page", fun() -> http_index_page_test(Port) end},
+          {"HTML contains auth panel", fun() -> http_index_has_auth_panel_test(Port) end},
+          {"HTML contains transcript", fun() -> http_index_has_transcript_test(Port) end},
+          {"HTML contains eval panel", fun() -> http_index_has_eval_panel_test(Port) end},
+          {"HTML contains WebSocket JS", fun() -> http_index_has_websocket_js_test(Port) end},
+          {"GET /ws without upgrade returns error", fun() -> http_ws_no_upgrade_test(Port) end}
          ]
      end}.
 
@@ -2442,3 +2449,77 @@ tcp_interrupt_unknown_session_test(Port) ->
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"int2">>}, Resp),
     ?assert(lists:member(<<"done">>, maps:get(<<"status">>, Resp))).
+
+%%% BT-686: Browser page (index.html) tests
+%%% These verify the cowboy_static route serves the workspace browser UI
+%%% and that the HTML contains expected interactive elements.
+
+%% Helper: HTTP GET request via raw TCP (avoids inets dependency)
+http_get(Port, Path) ->
+    {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port,
+                                 [binary, {active, false}, {packet, raw}], 5000),
+    Req = [<<"GET ">>, Path, <<" HTTP/1.1\r\n">>,
+           <<"Host: 127.0.0.1:">>, integer_to_binary(Port), <<"\r\n">>,
+           <<"Connection: close\r\n">>,
+           <<"\r\n">>],
+    ok = gen_tcp:send(Sock, Req),
+    {ok, Response} = http_read_all(Sock, <<>>),
+    gen_tcp:close(Sock),
+    Response.
+
+http_read_all(Sock, Acc) ->
+    case gen_tcp:recv(Sock, 0, 5000) of
+        {ok, Data} -> http_read_all(Sock, <<Acc/binary, Data/binary>>);
+        {error, closed} -> {ok, Acc}
+    end.
+
+%% Extract HTTP body (everything after \r\n\r\n)
+http_body(Response) ->
+    case binary:match(Response, <<"\r\n\r\n">>) of
+        {Pos, Len} ->
+            Start = Pos + Len,
+            binary:part(Response, Start, byte_size(Response) - Start);
+        nomatch -> <<>>
+    end.
+
+%% Test: GET / returns 200 with HTML content
+http_index_page_test(Port) ->
+    Response = http_get(Port, <<"/">>),
+    ?assert(binary:match(Response, <<"200">>) =/= nomatch),
+    ?assert(binary:match(Response, <<"text/html">>) =/= nomatch),
+    Body = http_body(Response),
+    ?assert(binary:match(Body, <<"<!DOCTYPE html">>) =/= nomatch).
+
+%% Test: HTML contains cookie input and connect button (auth panel)
+http_index_has_auth_panel_test(Port) ->
+    Body = http_body(http_get(Port, <<"/">>)),
+    ?assert(binary:match(Body, <<"cookie-input">>) =/= nomatch),
+    ?assert(binary:match(Body, <<"connect-btn">>) =/= nomatch),
+    ?assert(binary:match(Body, <<"auth-panel">>) =/= nomatch).
+
+%% Test: HTML contains transcript pane
+http_index_has_transcript_test(Port) ->
+    Body = http_body(http_get(Port, <<"/">>)),
+    ?assert(binary:match(Body, <<"transcript">>) =/= nomatch),
+    ?assert(binary:match(Body, <<"Transcript">>) =/= nomatch).
+
+%% Test: HTML contains eval input and send button
+http_index_has_eval_panel_test(Port) ->
+    Body = http_body(http_get(Port, <<"/">>)),
+    ?assert(binary:match(Body, <<"eval-input">>) =/= nomatch),
+    ?assert(binary:match(Body, <<"send-btn">>) =/= nomatch),
+    ?assert(binary:match(Body, <<"eval-panel">>) =/= nomatch).
+
+%% Test: HTML contains WebSocket connection JS (connect function, ws:// protocol)
+http_index_has_websocket_js_test(Port) ->
+    Body = http_body(http_get(Port, <<"/">>)),
+    ?assert(binary:match(Body, <<"WebSocket">>) =/= nomatch),
+    ?assert(binary:match(Body, <<"ws:">>) =/= nomatch),
+    ?assert(binary:match(Body, <<"/ws">>) =/= nomatch),
+    ?assert(binary:match(Body, <<"auth">>) =/= nomatch).
+
+%% Test: GET /ws without WebSocket upgrade headers returns error (not 101)
+http_ws_no_upgrade_test(Port) ->
+    Response = http_get(Port, <<"/ws">>),
+    %% Without Upgrade: websocket header, cowboy should not return 101
+    ?assert(binary:match(Response, <<"101">>) =:= nomatch).

@@ -80,7 +80,11 @@ init(Config) ->
     %% --bind flag allows binding to other addresses (BT-691).
     %% Cookie handshake in beamtalk_ws_handler provides auth on shared machines.
     Dispatch = cowboy_router:compile([
-        {'_', [{"/ws", beamtalk_ws_handler, []}]}
+        {'_', [
+            {"/ws", beamtalk_ws_handler, []},
+            {"/", cowboy_static, {priv_file, beamtalk_workspace, "index.html"}},
+            {"/static/[...]", cowboy_static, {priv_dir, beamtalk_workspace, "static"}}
+        ]}
     ]),
     TransportOpts = #{
         socket_opts => [{ip, BindAddr}, {port, Port}],

@@ -596,11 +596,19 @@ impl ReplClient {
         })
     }
 
-    /// Read the next text message from the WebSocket.
+    /// Read the next text message from the WebSocket, skipping push messages.
     fn read_text(&mut self) -> Result<String, String> {
         loop {
             match self.ws.read() {
-                Ok(tungstenite::Message::Text(text)) => return Ok(text.to_string()),
+                Ok(tungstenite::Message::Text(text)) => {
+                    // Skip push messages (e.g. Transcript push from ADR 0017)
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if parsed.get("push").is_some() {
+                            continue;
+                        }
+                    }
+                    return Ok(text.to_string());
+                }
                 Ok(tungstenite::Message::Close(_)) => {
                     return Err("WebSocket connection closed".to_string());
                 }

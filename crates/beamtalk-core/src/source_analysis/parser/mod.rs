@@ -236,8 +236,15 @@ pub fn is_input_complete(source: &str) -> bool {
         }
 
         match kind {
-            // Error tokens indicate unterminated strings or other lexer failures
-            TokenKind::Error(_) => return false,
+            // Error tokens from unterminated literals (e.g., `"hello` without
+            // closing quote) indicate incomplete input.  Diagnostic errors with
+            // human-readable messages (e.g., "single-quoted strings are no longer
+            // supported") are complete-but-invalid — let the compiler report them.
+            TokenKind::Error(msg) => {
+                if !is_diagnostic_error(msg) {
+                    return false;
+                }
+            }
 
             // Opening delimiters
             TokenKind::LeftBracket => bracket_depth += 1,
@@ -305,6 +312,17 @@ pub fn is_input_complete(source: &str) -> bool {
     }
 
     true
+}
+
+/// Check if a lexer error message is a human-readable diagnostic (complete but
+/// invalid syntax) rather than a raw source fragment from an unterminated literal.
+///
+/// Unterminated literal errors contain the raw source text (e.g., `"hello` or `$\`),
+/// which starts with a delimiter character.  Diagnostic errors are English sentences
+/// that start with a lowercase letter (e.g., "single-quoted strings are no longer
+/// supported...").
+fn is_diagnostic_error(msg: &str) -> bool {
+    msg.starts_with(|c: char| c.is_ascii_lowercase())
 }
 
 /// A diagnostic message (error or warning).
@@ -3634,6 +3652,20 @@ Actor subclass: Counter
         assert!(!is_input_complete(
             "Object subclass: Config\n  state: opts = #{verbose => true}"
         ));
+    }
+
+    #[test]
+    fn single_quoted_string_is_complete() {
+        // Single-quoted strings are invalid (ADR 0023) but fully consumed by the
+        // lexer — the REPL should NOT wait for more input.
+        assert!(is_input_complete("'hello'"));
+        assert!(is_input_complete("Transcript show: 'hello'"));
+    }
+
+    #[test]
+    fn unknown_directive_is_complete() {
+        // Unknown directives like @foo are invalid but fully consumed
+        assert!(is_input_complete("@foo"));
     }
 
     // === Match expression parsing ===

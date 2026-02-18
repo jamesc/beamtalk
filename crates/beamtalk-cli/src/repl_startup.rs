@@ -156,12 +156,21 @@ pub fn format_bind_addr_erl(bind_addr: Option<Ipv4Addr>) -> String {
 /// The workspace uses a unique per-run ID and resolves the project path
 /// to an absolute directory at startup to avoid cross-run metadata reuse.
 ///
+/// Removes the default logger handler to prevent crashes when stdout/stderr
+/// are piped (BT-686). This means log messages during application startup
+/// (before the file logger is added in `beamtalk_workspace_sup:init/1`) will
+/// be discarded. This is acceptable because:
+/// 1. Application startup errors cause the entire VM to crash anyway (visible via stderr)
+/// 2. The file logger is set up very early in `workspace_sup:init/1`
+/// 3. The alternative (keeping default handler) crashes the logger on pipe close
+///
 /// Callers append their own shutdown logic (e.g. `receive stop -> ok end`
 /// or cover export).
 pub fn startup_prelude(port: u16, bind_addr: Option<Ipv4Addr>) -> String {
     let bind_addr_erl = format_bind_addr_erl(bind_addr);
     format!(
-        "application:set_env(beamtalk_runtime, repl_port, {port}), \
+        "logger:remove_handler(default), \
+         application:set_env(beamtalk_runtime, repl_port, {port}), \
          {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
          {{ok, Cwd}} = file:get_cwd(), \
          {{ok, _}} = beamtalk_workspace_sup:start_link(#{{ \

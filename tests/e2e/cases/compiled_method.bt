@@ -7,7 +7,6 @@
 // - Class stored in variable via Beamtalk classNamed:
 // - >> on variable returning CompiledMethod
 
-// @load lib/SystemDictionary.bt
 // @load tests/e2e/fixtures/counter.bt
 
 // ===========================================================================

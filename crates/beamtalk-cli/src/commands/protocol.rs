@@ -122,7 +122,7 @@ impl ProtocolClient {
             .into_diagnostic()
     }
 
-    /// Read a single JSON response from the WebSocket.
+    /// Read a single JSON response from the WebSocket, skipping push messages.
     fn read_response(&mut self) -> Result<serde_json::Value> {
         loop {
             let msg = self
@@ -131,8 +131,13 @@ impl ProtocolClient {
                 .map_err(|e| miette!("WebSocket read error: {e}"))?;
             match msg {
                 Message::Text(text) => {
-                    return serde_json::from_str(&text)
-                        .map_err(|e| miette!("Failed to parse response: {e}\nRaw: {text}"));
+                    let parsed: serde_json::Value = serde_json::from_str(&text)
+                        .map_err(|e| miette!("Failed to parse response: {e}\nRaw: {text}"))?;
+                    // Skip push messages (e.g. Transcript push from ADR 0017)
+                    if parsed.get("push").is_some() {
+                        continue;
+                    }
+                    return Ok(parsed);
                 }
                 Message::Close(_) => {
                     return Err(miette!("WebSocket connection closed by server"));
@@ -144,12 +149,21 @@ impl ProtocolClient {
     }
 
     /// Read a single response line from the connection (WebSocket text frame).
+    /// Skips push messages (server-initiated, e.g. Transcript).
     /// Returns `Ok(line)` on success, or an error.
     /// When a read timeout is set and expires, returns `Err` with `WouldBlock` kind.
     pub fn read_response_line(&mut self) -> std::io::Result<String> {
         loop {
             match self.ws.read() {
-                Ok(Message::Text(text)) => return Ok(text.to_string()),
+                Ok(Message::Text(text)) => {
+                    // Skip push messages (e.g. Transcript push from ADR 0017)
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if parsed.get("push").is_some() {
+                            continue;
+                        }
+                    }
+                    return Ok(text.to_string());
+                }
                 Ok(Message::Close(_)) => {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::ConnectionAborted,
@@ -192,6 +206,12 @@ impl ProtocolClient {
                 .map_err(|e| miette!("WebSocket read error: {e}"))?;
             match msg {
                 Message::Text(text) => {
+                    // Skip push messages (e.g. Transcript push from ADR 0017)
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if parsed.get("push").is_some() {
+                            continue;
+                        }
+                    }
                     return serde_json::from_str(&text)
                         .map_err(|e| miette!("Failed to parse response: {e}\nRaw: {text}"));
                 }

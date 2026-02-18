@@ -49,6 +49,8 @@ pulldown-cmark.workspace = true
 tempfile = "3.14"
 # why: WebSocket client for REPL protocol (ADR 0020)
 tungstenite.workspace = true
+# why: Cross-platform process management for Windows PID discovery (ADR 0027)
+sysinfo.workspace = true
 
 [dev-dependencies]
 serial_test = "3"

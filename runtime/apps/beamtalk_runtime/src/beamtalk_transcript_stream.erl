@@ -36,6 +36,7 @@
 -export([start_link/0, start_link/1, start_link/2, spawn/0, spawn/1]).
 -export([has_method/1, class_info/0]).
 -export([ensure_utf8/1]).
+-export([subscribe/1, unsubscribe/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
@@ -117,6 +118,22 @@ class_info() ->
         class_methods => #{},
         instance_variables => []
     }.
+
+%%% ============================================================================
+%%% Module-level subscribe/unsubscribe API
+%%% ============================================================================
+
+%% @doc Subscribe a process to Transcript push messages.
+%% The subscriber will receive `{transcript_output, Text}' messages.
+%% The Transcript must be a named process (e.g. registered as 'Transcript').
+-spec subscribe(pid() | atom()) -> ok.
+subscribe(TranscriptRef) ->
+    gen_server:cast(TranscriptRef, {subscribe, self()}).
+
+%% @doc Unsubscribe a process from Transcript push messages.
+-spec unsubscribe(pid() | atom()) -> ok.
+unsubscribe(TranscriptRef) ->
+    gen_server:cast(TranscriptRef, {unsubscribe, self()}).
 
 %%% ============================================================================
 %%% gen_server callbacks

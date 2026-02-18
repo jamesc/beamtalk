@@ -478,46 +478,42 @@ fn build_detached_node_command(
 
 /// Find the PID of a BEAM process by its node name.
 ///
-/// On Unix, uses `ps` to scan for BEAM processes. Only needed for force-kill
-/// fallback — normal operation uses TCP probes for liveness/shutdown.
-/// On non-Unix, returns sentinel PID 0 (force-kill uses `taskkill` with PID
-/// from OS-level process tracking).
-#[cfg_attr(not(unix), allow(clippy::unnecessary_wraps))]
+/// Uses `sysinfo` crate for cross-platform process scanning (ADR 0027).
+/// Only needed for force-kill fallback — normal operation uses TCP probes
+/// for liveness/shutdown.
 fn find_beam_pid_by_node(node_name: &str) -> Result<(u32, Option<u64>)> {
-    #[cfg(unix)]
-    {
-        let output = Command::new("ps")
-            .args(["-eo", "pid,command"])
-            .output()
-            .into_diagnostic()?;
+    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for line in stdout.lines() {
-            if line.contains("beam.smp") && line.contains(node_name) {
-                let pid_str = line
-                    .split_whitespace()
-                    .next()
-                    .ok_or_else(|| miette!("Failed to parse PID from ps output"))?;
-                let pid: u32 = pid_str.parse().into_diagnostic()?;
-                #[cfg(target_os = "linux")]
-                let start_time = read_proc_start_time(pid);
-                #[cfg(not(target_os = "linux"))]
-                let start_time = None;
-                return Ok((pid, start_time));
-            }
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::new().with_cmd(UpdateKind::Always),
+    );
+
+    for (pid, process) in system.processes() {
+        let cmd = process.cmd();
+        // Match "erl", "erl.exe", or "beam.smp" in command and node name in arguments
+        let is_beam = cmd.iter().any(|arg| {
+            let arg_str = arg.to_string_lossy();
+            arg_str.contains("erl") || arg_str.contains("beam.smp")
+        });
+        let has_node = cmd
+            .iter()
+            .any(|arg| arg.to_string_lossy().contains(node_name));
+
+        if is_beam && has_node {
+            // On Linux, try to read /proc start time for stale detection
+            #[cfg(target_os = "linux")]
+            let start_time = read_proc_start_time(pid.as_u32());
+            #[cfg(not(target_os = "linux"))]
+            let start_time = None;
+
+            return Ok((pid.as_u32(), start_time));
         }
-
-        Err(miette!("Could not find BEAM process for node {node_name}"))
     }
 
-    #[cfg(not(unix))]
-    {
-        let _ = node_name;
-        // Windows: PID tracking via ps not available; return sentinel.
-        // Workspace liveness is verified via TCP probe instead.
-        // Force-kill on Windows uses taskkill with PID from node.info.
-        Ok((0, None))
-    }
+    Err(miette!("Could not find BEAM process for node {node_name}"))
 }
 
 /// Poll until a workspace exits or timeout is reached.
@@ -552,10 +548,12 @@ pub(super) fn wait_for_workspace_exit(port: u16, timeout_secs: u64) -> Result<()
 
 /// Force-kill a process by PID.
 ///
-/// Cross-platform: uses `kill -9` on Unix, `taskkill /F /PID` on Windows.
+/// Cross-platform: uses `sysinfo` for reliable process termination (ADR 0027).
 /// Used as fallback when TCP graceful shutdown fails or times out.
 pub(super) fn force_kill_process(pid: u32) -> Result<()> {
-    // PID 0 is sentinel for Windows when PID tracking is unavailable
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+
+    // PID 0 is sentinel for when PID tracking is unavailable
     if pid == 0 {
         return Err(miette!(
             "Cannot force-kill: process ID unavailable. \
@@ -563,35 +561,22 @@ pub(super) fn force_kill_process(pid: u32) -> Result<()> {
         ));
     }
 
-    #[cfg(unix)]
-    {
-        let status = Command::new("kill")
-            .args(["-9", &pid.to_string()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .into_diagnostic()?;
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
+        true,
+        ProcessRefreshKind::new(),
+    );
 
-        if !status.success() {
-            return Err(miette!("Failed to kill process {pid}"));
+    if let Some(process) = system.process(Pid::from_u32(pid)) {
+        if process.kill() {
+            Ok(())
+        } else {
+            Err(miette!("Failed to kill process {pid}"))
         }
+    } else {
+        Err(miette!("Process {pid} not found"))
     }
-
-    #[cfg(not(unix))]
-    {
-        let status = Command::new("taskkill")
-            .args(["/F", "/PID", &pid.to_string()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .into_diagnostic()?;
-
-        if !status.success() {
-            return Err(miette!("Failed to kill process {pid}"));
-        }
-    }
-
-    Ok(())
 }
 
 /// Wait for a node name to be deregistered from `epmd`.

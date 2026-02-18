@@ -10,7 +10,6 @@
 // Key principle from ADR 0013: "runtime dispatch is the contract,
 // direct calls are the optimization."
 
-// @load lib/SystemDictionary.bt
 // @load tests/e2e/fixtures/point.bt
 // @load tests/e2e/fixtures/counter.bt
 
