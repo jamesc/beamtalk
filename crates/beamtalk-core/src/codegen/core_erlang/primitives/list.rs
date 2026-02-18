@@ -259,6 +259,7 @@ fn generate_list_misc_bif(selector: &str, params: &[String]) -> Option<Document<
             "call 'beamtalk_primitive':'print_string'(Self)",
         )),
         "stream" => Some(Document::Str("call 'beamtalk_stream':'on'(Self)")),
+        "atRandom" => Some(Document::Str("call 'beamtalk_random':'atRandom'(Self)")),
         _ => None,
     }
 }
