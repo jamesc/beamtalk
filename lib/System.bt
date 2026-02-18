@@ -1,0 +1,100 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// System — OS environment, platform detection, and process info.
+///
+/// Provides class methods for accessing environment variables,
+/// detecting the operating system and architecture, and querying
+/// process-level information. All methods are class-side — System
+/// has no instances.
+///
+/// ## Examples
+/// ```beamtalk
+/// System getEnv: "HOME"
+/// // => _
+/// System getEnv: "MISSING"
+/// // => nil
+/// System osPlatform
+/// // => _
+/// System osFamily
+/// // => _
+/// System pid
+/// // => _
+/// ```
+sealed Object subclass: System
+
+  /// Read an environment variable by name. Returns nil if not set.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// System getEnv: "HOME"
+  /// // => _
+  /// System getEnv: "NONEXISTENT_VAR_12345"
+  /// // => nil
+  /// ```
+  class sealed getEnv: name: String -> String | Nil => @primitive "getEnv:"
+
+  /// Read an environment variable with a default fallback.
+  ///
+  /// Returns the value if set, otherwise returns the default.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// System getEnv: "NONEXISTENT_VAR_12345" default: "8080"
+  /// // => "8080"
+  /// ```
+  class sealed getEnv: name: String default: fallback: String -> String => @primitive "getEnv:default:"
+
+  /// Return the OS platform name: "linux", "darwin", or "win32".
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// System osPlatform
+  /// // => _
+  /// ```
+  class sealed osPlatform -> String => @primitive "osPlatform"
+
+  /// Return the OS family: "unix" or "win32".
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// System osFamily
+  /// // => _
+  /// ```
+  class sealed osFamily -> String => @primitive "osFamily"
+
+  /// Return the system architecture string (e.g., "x86_64-pc-linux-gnu").
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// System architecture
+  /// // => _
+  /// ```
+  class sealed architecture -> String => @primitive "architecture"
+
+  /// Return the hostname of the current machine.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// System hostname
+  /// // => _
+  /// ```
+  class sealed hostname -> String => @primitive "hostname"
+
+  /// Return the OTP/Erlang version string (e.g., "27").
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// System erlangVersion
+  /// // => _
+  /// ```
+  class sealed erlangVersion -> String => @primitive "erlangVersion"
+
+  /// Return the OS process ID as an Integer.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// System pid
+  /// // => _
+  /// ```
+  class sealed pid -> Integer => @primitive "pid"
