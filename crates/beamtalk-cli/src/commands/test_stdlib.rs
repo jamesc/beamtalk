@@ -410,8 +410,12 @@ fn generate_eunit_wrapper(
     // expected values written as strings (like E2E tests) match correctly.
     erl.push_str(eunit_helper_functions());
 
-    // Single test function with all assertions (stateful test)
-    let _ = writeln!(erl, "{test_module_name}_test() ->");
+    // Test generator with timeout wrapper to avoid EUnit's 5s default (BT-729).
+    // Using _test_() makes this a generator; {timeout, 60, Fun} gives 60s per file.
+    let _ = writeln!(
+        erl,
+        "{test_module_name}_test_() ->\n    {{timeout, 60, fun() ->"
+    );
 
     // Initial empty bindings
     erl.push_str("    Bindings0 = #{},\n");
@@ -464,7 +468,7 @@ fn generate_eunit_wrapper(
         }
     }
 
-    erl.push_str("    ok.\n");
+    erl.push_str("    ok\n    end}.\n");
 
     erl
 }
