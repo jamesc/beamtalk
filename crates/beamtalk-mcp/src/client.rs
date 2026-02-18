@@ -98,6 +98,11 @@ impl ReplClient {
     ///
     /// Times out after [`REPL_IO_TIMEOUT`] to prevent hanging MCP calls
     /// if the REPL becomes unresponsive.
+    ///
+    /// The REPL protocol may send intermediate streaming messages (e.g.
+    /// `out` chunks) before the final response. This method loops until
+    /// it receives a message with a `status` field, which indicates the
+    /// final response.
     #[instrument(skip(self, request))]
     pub async fn send(&self, request: &serde_json::Value) -> Result<ReplResponse, String> {
         let mut inner = self.inner.lock().await;
@@ -112,10 +117,22 @@ impl ReplClient {
                 .await
                 .map_err(|e| format!("Failed to send: {e}"))?;
 
-            let response_text = read_text_message(&mut inner.ws).await?;
+            // Loop to skip intermediate streaming messages (e.g. `out` chunks).
+            // The final response always contains a `status` field.
+            loop {
+                let response_text = read_text_message(&mut inner.ws).await?;
 
-            serde_json::from_str(&response_text)
-                .map_err(|e| format!("Failed to parse response: {e}\nRaw: {response_text}"))
+                let parsed: serde_json::Value = serde_json::from_str(&response_text)
+                    .map_err(|e| format!("Failed to parse response: {e}\nRaw: {response_text}"))?;
+
+                // Intermediate streaming messages lack a `status` field
+                if parsed.get("status").is_some() {
+                    return serde_json::from_value(parsed).map_err(|e| {
+                        format!("Failed to deserialize response: {e}\nRaw: {response_text}")
+                    });
+                }
+                // Skip intermediate `out` messages and continue reading
+            }
         };
 
         tokio::time::timeout(REPL_IO_TIMEOUT, io_future)
