@@ -366,14 +366,8 @@ op_to_request(Op, _Map) ->
 %%% continue to work without modification.
 
 -ifdef(TEST).
-%% @private
--spec base_protocol_response(term()) -> map().
-base_protocol_response(Msg) ->
-    Id = beamtalk_repl_protocol:get_id(Msg),
-    Session = beamtalk_repl_protocol:get_session(Msg),
-    M0 = #{},
-    M1 = case Id of undefined -> M0; _ -> M0#{<<"id">> => Id} end,
-    case Session of undefined -> M1; _ -> M1#{<<"session">> => Session} end.
+%% @private Delegate to beamtalk_repl_ops_dev.
+base_protocol_response(Msg) -> beamtalk_repl_ops_dev:base_protocol_response(Msg).
 
 %% @private Delegate to beamtalk_repl_ops_actors.
 validate_actor_pid(PidStr) -> beamtalk_repl_ops_actors:validate_actor_pid(PidStr).

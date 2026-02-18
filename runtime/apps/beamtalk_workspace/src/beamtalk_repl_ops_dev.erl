@@ -11,7 +11,8 @@
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
--export([handle/4, get_completions/1, get_symbol_info/1, make_class_not_found_error/1]).
+-export([handle/4, get_completions/1, get_symbol_info/1, make_class_not_found_error/1,
+         base_protocol_response/1]).
 
 %% @doc Handle complete/info/docs/describe ops.
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
