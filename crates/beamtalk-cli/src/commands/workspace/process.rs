@@ -207,6 +207,7 @@ pub fn start_detached_node(
     max_idle_seconds: Option<u64>,
     bind_addr: Option<Ipv4Addr>,
     ssl_dist_optfile: Option<&Path>,
+    web_port: Option<u16>,
 ) -> Result<NodeInfo> {
     // Generate node name
     let node_name = format!("beamtalk_workspace_{workspace_id}@localhost");
@@ -235,15 +236,23 @@ pub fn start_detached_node(
     // Format bind address as Erlang tuple for cowboy socket_opts
     let bind_addr_erl = beamtalk_cli::repl_startup::format_bind_addr_erl(bind_addr);
 
+    // Format web_port for Erlang (BT-689)
+    let web_port_erl = match web_port {
+        Some(p) => format!("{p}"),
+        None => "undefined".to_string(),
+    };
+
     let eval_cmd = format!(
         "application:set_env(beamtalk_runtime, workspace_id, <<\"{workspace_id}\">>), \
          application:set_env(beamtalk_runtime, project_path, <<\"{project_path_str}\">>), \
          application:set_env(beamtalk_runtime, tcp_port, {port}), \
+         application:set_env(beamtalk_runtime, web_port, {web_port_erl}), \
          {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
          {{ok, _}} = beamtalk_workspace_sup:start_link(#{{workspace_id => <<\"{workspace_id}\">>, \
                                                           project_path => <<\"{project_path_str}\">>, \
                                                           tcp_port => {port}, \
                                                           bind_addr => {bind_addr_erl}, \
+                                                          web_port => {web_port_erl}, \
                                                           auto_cleanup => {auto_cleanup}, \
                                                           max_idle_seconds => {idle_timeout}}}), \
          {{ok, ActualPort}} = beamtalk_repl_server:get_port(), \
