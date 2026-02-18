@@ -76,9 +76,11 @@ For standalone BEAM nodes (no workspace), the default `~/.erlang.cookie` is used
 |------|---------|
 | `done` | Final message for this request |
 | `error` | Request failed |
+| `need-input` | Eval is waiting for stdin input (BT-698) |
 
 A response with `status: ["done"]` is a successful final response.
 A response with `status: ["done", "error"]` is an error final response.
+A response with `status: ["need-input"]` means the eval is blocked waiting for user input (see `stdin` operation).
 
 ## Operations
 
@@ -116,6 +118,39 @@ If the expression produces no stdout, the response is a single message (unchange
 ```json
 {"id": "msg-001", "error": "Undefined variable: foo", "status": ["done", "error"]}
 ```
+
+**Interactive input (stdin, BT-698):**
+
+When the evaluated expression calls `io:get_line` or similar input functions, the server sends a `need-input` status and the client can provide input via the `stdin` operation:
+
+```json
+Client → Server:  {"op": "eval", "id": "msg-001", "code": "name := Erlang io get_line: \"Name: \""}
+Server → Client:  {"id": "msg-001", "status": ["need-input"], "prompt": "Name: "}
+Client → Server:  {"op": "stdin", "id": "msg-001", "value": "Alice\n"}
+Server → Client:  {"id": "msg-001", "value": "\"Alice\\n\"", "status": ["done"]}
+```
+
+The `need-input` message includes a `prompt` field with the prompt string from the IO request. The eval remains blocked until the client responds with a `stdin` operation or the server-side timeout (30 seconds) expires.
+
+#### `stdin` — Provide Input (BT-698)
+
+Provide stdin input to a running evaluation that has requested it via `need-input` status.
+
+**Request:**
+```json
+{"op": "stdin", "id": "msg-001", "value": "user input\n"}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `value` | string | **yes** | The input text to provide. Use `"eof"` to signal end-of-file. |
+
+**Behavior:**
+- Only valid after receiving a `need-input` status for the same eval
+- The eval resumes with the provided input
+- Sending `"eof"` as the value signals end-of-file to the IO request
+- If no eval is waiting for input, returns an error response
+- Multiple `need-input` / `stdin` exchanges can occur during a single eval
 
 #### `complete` — Autocompletion
 

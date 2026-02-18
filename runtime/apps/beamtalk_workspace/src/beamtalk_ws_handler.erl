@@ -23,14 +23,19 @@
     authenticated :: boolean(),
     peer :: term(),
     %% BT-696: Pending eval request for streaming output correlation
-    pending_eval :: term() | undefined
+    pending_eval :: term() | undefined,
+    %% BT-698: IO capture process pid and correlation ref for stdin routing
+    io_capture_pid :: pid() | undefined,
+    stdin_ref :: reference() | undefined
 }).
 
 %% @doc HTTP upgrade to WebSocket.
 init(Req, _Opts) ->
     Peer = cowboy_req:peer(Req),
     {cowboy_websocket, Req, #ws_state{authenticated = false, peer = Peer,
-                                      pending_eval = undefined},
+                                      pending_eval = undefined,
+                                      io_capture_pid = undefined,
+                                      stdin_ref = undefined},
      #{idle_timeout => 300000, max_frame_size => 1048576}}.
 
 %% @doc WebSocket connection initialized — send auth challenge.
@@ -64,13 +69,25 @@ websocket_info({eval_out, Chunk}, State = #ws_state{authenticated = true,
         <<>> -> {ok, State};  %% Legacy client — skip streaming
         _ -> {[{text, Encoded}], State}
     end;
+%% BT-698: Eval code requests stdin input
+websocket_info({need_input, CapturePid, Ref, Prompt},
+               State = #ws_state{authenticated = true, pending_eval = Msg})
+        when Msg =/= undefined ->
+    Encoded = beamtalk_repl_protocol:encode_need_input(Prompt, Msg),
+    {[{text, Encoded}], State#ws_state{io_capture_pid = CapturePid,
+                                       stdin_ref = Ref}};
+%% BT-698: Late need_input after eval completed — drop silently
+websocket_info({need_input, _, _, _}, State = #ws_state{pending_eval = undefined}) ->
+    {ok, State};
 %% BT-696: Eval completed successfully
 websocket_info({eval_done, Value, Output, Warnings},
                State = #ws_state{authenticated = true, pending_eval = Msg})
         when Msg =/= undefined ->
     Response = beamtalk_repl_protocol:encode_result(
         Value, Msg, fun beamtalk_repl_json:term_to_json/1, Output, Warnings),
-    {[{text, Response}], State#ws_state{pending_eval = undefined}};
+    {[{text, Response}], State#ws_state{pending_eval = undefined,
+                                        io_capture_pid = undefined,
+                                        stdin_ref = undefined}};
 %% BT-696: Eval completed with error
 websocket_info({eval_error, Reason, Output, Warnings},
                State = #ws_state{authenticated = true, pending_eval = Msg})
@@ -78,7 +95,9 @@ websocket_info({eval_error, Reason, Output, Warnings},
     WrappedReason = beamtalk_repl_server:ensure_structured_error(Reason),
     Response = beamtalk_repl_protocol:encode_error(
         WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1, Output, Warnings),
-    {[{text, Response}], State#ws_state{pending_eval = undefined}};
+    {[{text, Response}], State#ws_state{pending_eval = undefined,
+                                        io_capture_pid = undefined,
+                                        stdin_ref = undefined}};
 %% BT-696: Late streaming messages after eval completed — drop silently
 websocket_info({eval_out, _Chunk}, State = #ws_state{pending_eval = undefined}) ->
     {ok, State};
@@ -172,6 +191,9 @@ handle_protocol(Data, SessionPid, State) ->
                 <<"eval">> ->
                     %% BT-696: Use async eval for streaming output
                     handle_eval_async(Msg, SessionPid, State);
+                <<"stdin">> ->
+                    %% BT-698: Route stdin input to IO capture process
+                    handle_stdin(Msg, State);
                 _ ->
                     Response = beamtalk_repl_server:handle_protocol_request(Msg, SessionPid),
                     {[{text, Response}], State}
@@ -307,6 +329,39 @@ handle_eval_async(Msg, _SessionPid, State) ->
     Err = beamtalk_error:new(eval_busy, 'REPL'),
     Err1 = beamtalk_error:with_message(Err, <<"An evaluation is already in progress">>),
     Err2 = beamtalk_error:with_hint(Err1, <<"Use Ctrl-C to interrupt the current evaluation.">>),
+    Response = beamtalk_repl_protocol:encode_error(
+        Err2, Msg, fun beamtalk_repl_json:format_error_message/1),
+    {[{text, Response}], State}.
+
+%% @private
+%% BT-698: Handle stdin op — route input to IO capture process with ref correlation.
+handle_stdin(Msg, State = #ws_state{io_capture_pid = CapturePid,
+                                    stdin_ref = Ref})
+        when is_pid(CapturePid), is_reference(Ref) ->
+    Params = beamtalk_repl_protocol:get_params(Msg),
+    Value = maps:get(<<"value">>, Params, <<>>),
+    case Value of
+        <<"eof">> ->
+            CapturePid ! {stdin_input, Ref, eof},
+            {ok, State#ws_state{io_capture_pid = undefined, stdin_ref = undefined}};
+        _ when is_binary(Value) ->
+            CapturePid ! {stdin_input, Ref, Value},
+            {ok, State#ws_state{io_capture_pid = undefined, stdin_ref = undefined}};
+        _ ->
+            %% Missing or non-binary value — return error, keep io_capture_pid
+            %% so client can retry with a valid value
+            Err = beamtalk_error:new(invalid_stdin, 'REPL'),
+            Err1 = beamtalk_error:with_message(Err, <<"stdin value must be a string or \"eof\"">>),
+            Err2 = beamtalk_error:with_hint(Err1, <<"Send {\"op\": \"stdin\", \"value\": \"your input\\n\"}">>),
+            Response = beamtalk_repl_protocol:encode_error(
+                Err2, Msg, fun beamtalk_repl_json:format_error_message/1),
+            {[{text, Response}], State}
+    end;
+handle_stdin(Msg, State) ->
+    %% No pending IO capture — stdin not expected
+    Err = beamtalk_error:new(no_pending_input, 'REPL'),
+    Err1 = beamtalk_error:with_message(Err, <<"No pending input request">>),
+    Err2 = beamtalk_error:with_hint(Err1, <<"stdin op is only valid after a need-input status.">>),
     Response = beamtalk_repl_protocol:encode_error(
         Err2, Msg, fun beamtalk_repl_json:format_error_message/1),
     {[{text, Response}], State}.

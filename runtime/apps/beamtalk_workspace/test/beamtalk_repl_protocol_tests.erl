@@ -621,3 +621,23 @@ encode_test_results_with_class_name_tag_test() ->
     R = maps:get(<<"results">>, Decoded),
     [Test] = maps:get(<<"tests">>, R),
     ?assertEqual(<<"FooTest">>, maps:get(<<"class">>, Test)).
+
+%%% encode_need_input tests (BT-698)
+
+encode_need_input_new_format_test() ->
+    Msg = make_msg(<<"eval">>, <<"msg-050">>, <<"sess1">>, false),
+    Result = beamtalk_repl_protocol:encode_need_input(<<"Name: ">>, Msg),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual(<<"msg-050">>, maps:get(<<"id">>, Decoded)),
+    ?assertEqual(<<"sess1">>, maps:get(<<"session">>, Decoded)),
+    ?assertEqual([<<"need-input">>], maps:get(<<"status">>, Decoded)),
+    ?assertEqual(<<"Name: ">>, maps:get(<<"prompt">>, Decoded)).
+
+encode_need_input_no_session_test() ->
+    Msg = make_msg(<<"eval">>, <<"msg-051">>, undefined, false),
+    Result = beamtalk_repl_protocol:encode_need_input(<<"? ">>, Msg),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual(<<"msg-051">>, maps:get(<<"id">>, Decoded)),
+    ?assertEqual([<<"need-input">>], maps:get(<<"status">>, Decoded)),
+    ?assertEqual(<<"? ">>, maps:get(<<"prompt">>, Decoded)),
+    ?assertEqual(error, maps:find(<<"session">>, Decoded)).
