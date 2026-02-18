@@ -402,3 +402,28 @@ format_error_message_module_not_loaded_test() ->
 format_error_message_invalid_module_name_test() ->
     Result = beamtalk_repl_json:format_error_message({invalid_module_name, <<"123bad">>}),
     ?assertMatch(<<"Invalid module name: ", _/binary>>, Result).
+
+%%% ============================================================================
+%%% encode_reloaded tests
+%%% ============================================================================
+
+encode_reloaded_test() ->
+    Classes = [#{name => "Counter"}],
+    Msg = {protocol_msg, <<"eval">>, <<"msg1">>, <<"sess1">>, #{}, false},
+    Result = beamtalk_repl_json:encode_reloaded(Classes, 5, [], Msg),
+    {ok, Decoded} = beamtalk_repl_json:parse_json(Result),
+    ?assertEqual([<<"Counter">>], maps:get(<<"classes">>, Decoded)),
+    ?assertEqual(5, maps:get(<<"affected_actors">>, Decoded)),
+    ?assertEqual(0, maps:get(<<"migration_failures">>, Decoded)),
+    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
+    ?assertEqual(<<"msg1">>, maps:get(<<"id">>, Decoded)).
+
+encode_reloaded_with_failures_test() ->
+    Classes = [#{name => "Counter"}, #{name => "Timer"}],
+    Msg = {protocol_msg, <<"reload">>, <<"msg2">>, undefined, #{}, false},
+    Failures = [{self(), some_error}],
+    Result = beamtalk_repl_json:encode_reloaded(Classes, 3, Failures, Msg),
+    {ok, Decoded} = beamtalk_repl_json:parse_json(Result),
+    ?assertEqual([<<"Counter">>, <<"Timer">>], maps:get(<<"classes">>, Decoded)),
+    ?assertEqual(3, maps:get(<<"affected_actors">>, Decoded)),
+    ?assertEqual(1, maps:get(<<"migration_failures">>, Decoded)).

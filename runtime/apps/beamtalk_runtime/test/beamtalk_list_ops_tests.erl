@@ -26,19 +26,35 @@ at_last_test() ->
     ?assertEqual(3, beamtalk_list_ops:at([1, 2, 3], 3)).
 
 at_out_of_bounds_test() ->
-    ?assertException(error, _,
+    ?assertException(error,
+                     #{'$beamtalk_class' := 'RuntimeError',
+                       error := #beamtalk_error{kind = does_not_understand,
+                                                class = 'List',
+                                                selector = 'at:'}},
                      beamtalk_list_ops:at([1, 2, 3], 10)).
 
 at_zero_index_test() ->
-    ?assertException(error, _,
+    ?assertException(error,
+                     #{'$beamtalk_class' := 'RuntimeError',
+                       error := #beamtalk_error{kind = does_not_understand,
+                                                class = 'List',
+                                                selector = 'at:'}},
                      beamtalk_list_ops:at([1, 2, 3], 0)).
 
 at_negative_index_test() ->
-    ?assertException(error, _,
+    ?assertException(error,
+                     #{'$beamtalk_class' := 'RuntimeError',
+                       error := #beamtalk_error{kind = does_not_understand,
+                                                class = 'List',
+                                                selector = 'at:'}},
                      beamtalk_list_ops:at([1, 2, 3], -1)).
 
 at_non_integer_test() ->
-    ?assertException(error, _,
+    ?assertException(error,
+                     #{'$beamtalk_class' := 'TypeError',
+                       error := #beamtalk_error{kind = type_error,
+                                                class = 'List',
+                                                selector = 'at:'}},
                      beamtalk_list_ops:at([1, 2, 3], foo)).
 
 %%% ============================================================================
@@ -54,12 +70,20 @@ detect_first_match_test() ->
                                              fun(X) -> X rem 2 =:= 0 end)).
 
 detect_not_found_test() ->
-    ?assertException(error, _,
+    ?assertException(error,
+                     #{'$beamtalk_class' := 'RuntimeError',
+                       error := #beamtalk_error{kind = does_not_understand,
+                                                class = 'List',
+                                                selector = 'detect:'}},
                      beamtalk_list_ops:detect([1, 2, 3],
                                               fun(X) -> X > 10 end)).
 
 detect_invalid_block_test() ->
-    ?assertException(error, _,
+    ?assertException(error,
+                     #{'$beamtalk_class' := 'TypeError',
+                       error := #beamtalk_error{kind = type_error,
+                                                class = 'List',
+                                                selector = 'detect:'}},
                      beamtalk_list_ops:detect([1, 2, 3], not_a_function)).
 
 %%% ============================================================================
@@ -82,7 +106,11 @@ detect_if_none_not_found_block_test() ->
                                                        fun() -> 42 end)).
 
 detect_if_none_invalid_block_test() ->
-    ?assertException(error, _,
+    ?assertException(error,
+                     #{'$beamtalk_class' := 'TypeError',
+                       error := #beamtalk_error{kind = type_error,
+                                                class = 'List',
+                                                selector = 'detect:ifNone:'}},
                      beamtalk_list_ops:detect_if_none([1, 2, 3],
                                                       not_a_function,
                                                       default)).
@@ -106,7 +134,11 @@ do_empty_list_test() ->
     ?assertEqual(nil, beamtalk_list_ops:do([], fun(_) -> ok end)).
 
 do_invalid_block_test() ->
-    ?assertException(error, _,
+    ?assertException(error,
+                     #{'$beamtalk_class' := 'TypeError',
+                       error := #beamtalk_error{kind = type_error,
+                                                class = 'List',
+                                                selector = 'do:'}},
                      beamtalk_list_ops:do([1, 2, 3], not_a_function)).
 
 %%% ============================================================================
@@ -129,7 +161,11 @@ reject_all_test() ->
                                           fun(_) -> true end)).
 
 reject_invalid_block_test() ->
-    ?assertException(error, _,
+    ?assertException(error,
+                     #{'$beamtalk_class' := 'TypeError',
+                       error := #beamtalk_error{kind = type_error,
+                                                class = 'List',
+                                                selector = 'reject:'}},
                      beamtalk_list_ops:reject([1, 2, 3], not_a_function)).
 
 %%% ============================================================================
@@ -146,10 +182,20 @@ take_more_than_length_test() ->
     ?assertEqual([1, 2, 3], beamtalk_list_ops:take([1, 2, 3], 10)).
 
 take_negative_test() ->
-    ?assertException(error, _, beamtalk_list_ops:take([1, 2, 3], -1)).
+    ?assertException(error,
+                     #{'$beamtalk_class' := 'TypeError',
+                       error := #beamtalk_error{kind = type_error,
+                                                class = 'List',
+                                                selector = 'take:'}},
+                     beamtalk_list_ops:take([1, 2, 3], -1)).
 
 take_non_integer_test() ->
-    ?assertException(error, _, beamtalk_list_ops:take([1, 2, 3], foo)).
+    ?assertException(error,
+                     #{'$beamtalk_class' := 'TypeError',
+                       error := #beamtalk_error{kind = type_error,
+                                                class = 'List',
+                                                selector = 'take:'}},
+                     beamtalk_list_ops:take([1, 2, 3], foo)).
 
 %%% ============================================================================
 %%% drop/2 tests
@@ -165,10 +211,20 @@ drop_more_than_length_test() ->
     ?assertEqual([], beamtalk_list_ops:drop([1, 2, 3], 10)).
 
 drop_negative_test() ->
-    ?assertException(error, _, beamtalk_list_ops:drop([1, 2, 3], -1)).
+    ?assertException(error,
+                     #{'$beamtalk_class' := 'TypeError',
+                       error := #beamtalk_error{kind = type_error,
+                                                class = 'List',
+                                                selector = 'drop:'}},
+                     beamtalk_list_ops:drop([1, 2, 3], -1)).
 
 drop_non_integer_test() ->
-    ?assertException(error, _, beamtalk_list_ops:drop([1, 2, 3], foo)).
+    ?assertException(error,
+                     #{'$beamtalk_class' := 'TypeError',
+                       error := #beamtalk_error{kind = type_error,
+                                                class = 'List',
+                                                selector = 'drop:'}},
+                     beamtalk_list_ops:drop([1, 2, 3], foo)).
 
 %%% ============================================================================
 %%% sort_with/2 tests
@@ -188,7 +244,12 @@ sort_with_empty_test() ->
     ?assertEqual([], beamtalk_list_ops:sort_with([], fun(A, B) -> A =< B end)).
 
 sort_with_invalid_block_test() ->
-    ?assertException(error, _, beamtalk_list_ops:sort_with([1, 2], not_a_function)).
+    ?assertException(error,
+                     #{'$beamtalk_class' := 'TypeError',
+                       error := #beamtalk_error{kind = type_error,
+                                                class = 'List',
+                                                selector = 'sort:'}},
+                     beamtalk_list_ops:sort_with([1, 2], not_a_function)).
 
 %%% ============================================================================
 %%% zip/2 tests
@@ -208,7 +269,12 @@ zip_empty_test() ->
     ?assertEqual([], beamtalk_list_ops:zip([], [1, 2])).
 
 zip_invalid_arg_test() ->
-    ?assertException(error, _, beamtalk_list_ops:zip([1, 2], not_a_list)).
+    ?assertException(error,
+                     #{'$beamtalk_class' := 'TypeError',
+                       error := #beamtalk_error{kind = type_error,
+                                                class = 'List',
+                                                selector = 'zip:'}},
+                     beamtalk_list_ops:zip([1, 2], not_a_list)).
 
 %%% ============================================================================
 %%% group_by/2 tests
@@ -224,7 +290,12 @@ group_by_empty_test() ->
     ?assertEqual(#{}, beamtalk_list_ops:group_by([], fun(X) -> X end)).
 
 group_by_invalid_block_test() ->
-    ?assertException(error, _, beamtalk_list_ops:group_by([1, 2], not_a_function)).
+    ?assertException(error,
+                     #{'$beamtalk_class' := 'TypeError',
+                       error := #beamtalk_error{kind = type_error,
+                                                class = 'List',
+                                                selector = 'groupBy:'}},
+                     beamtalk_list_ops:group_by([1, 2], not_a_function)).
 
 %%% ============================================================================
 %%% partition/2 tests
@@ -243,7 +314,12 @@ partition_none_match_test() ->
     ?assertEqual([1, 2, 3], maps:get(<<"nonMatching">>, Result)).
 
 partition_invalid_block_test() ->
-    ?assertException(error, _, beamtalk_list_ops:partition([1, 2], not_a_function)).
+    ?assertException(error,
+                     #{'$beamtalk_class' := 'TypeError',
+                       error := #beamtalk_error{kind = type_error,
+                                                class = 'List',
+                                                selector = 'partition:'}},
+                     beamtalk_list_ops:partition([1, 2], not_a_function)).
 
 %%% ============================================================================
 %%% intersperse/2 tests
@@ -276,13 +352,28 @@ from_to_end_before_start_test() ->
                  beamtalk_list_ops:from_to([1, 2, 3], 3, 1)).
 
 from_to_non_integer_start_test() ->
-    ?assertException(error, _, beamtalk_list_ops:from_to([1, 2, 3], foo, 2)).
+    ?assertException(error,
+                     #{'$beamtalk_class' := 'TypeError',
+                       error := #beamtalk_error{kind = type_error,
+                                                class = 'List',
+                                                selector = 'from:to:'}},
+                     beamtalk_list_ops:from_to([1, 2, 3], foo, 2)).
 
 from_to_non_integer_end_test() ->
-    ?assertException(error, _, beamtalk_list_ops:from_to([1, 2, 3], 1, foo)).
+    ?assertException(error,
+                     #{'$beamtalk_class' := 'TypeError',
+                       error := #beamtalk_error{kind = type_error,
+                                                class = 'List',
+                                                selector = 'from:to:'}},
+                     beamtalk_list_ops:from_to([1, 2, 3], 1, foo)).
 
 from_to_negative_start_test() ->
-    ?assertException(error, _, beamtalk_list_ops:from_to([1, 2, 3], -1, 2)).
+    ?assertException(error,
+                     #{'$beamtalk_class' := 'RuntimeError',
+                       error := #beamtalk_error{kind = does_not_understand,
+                                                class = 'List',
+                                                selector = 'from:to:'}},
+                     beamtalk_list_ops:from_to([1, 2, 3], -1, 2)).
 
 %%% ============================================================================
 %%% index_of/2 tests
@@ -323,5 +414,9 @@ each_with_index_empty_test() ->
     ?assertEqual(nil, beamtalk_list_ops:each_with_index([], fun(_, _) -> ok end)).
 
 each_with_index_invalid_block_test() ->
-    ?assertException(error, _,
+    ?assertException(error,
+                     #{'$beamtalk_class' := 'TypeError',
+                       error := #beamtalk_error{kind = type_error,
+                                                class = 'List',
+                                                selector = 'eachWithIndex:'}},
                      beamtalk_list_ops:each_with_index([1, 2], not_a_function)).
