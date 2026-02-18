@@ -864,4 +864,45 @@ mod tests {
         let _ = resp;
         Ok(())
     }
+
+    #[tokio::test]
+    #[ignore = "integration test — auto-starts REPL workspace"]
+    async fn test_test_all() -> Result<(), Box<dyn std::error::Error>> {
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie).await?;
+
+        // test-all returns results or an error — either is a valid response
+        let resp = client.test_all().await.unwrap();
+        // Verify we got a parseable response (not a connection error)
+        assert!(resp.status.is_some(), "should have a status");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test — auto-starts REPL workspace"]
+    async fn test_test_class() -> Result<(), Box<dyn std::error::Error>> {
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie).await?;
+
+        // Load BUnit test fixture first
+        let load_resp = client.load_file("test/arithmetic_test.bt").await.unwrap();
+        assert!(
+            !load_resp.is_error(),
+            "load should succeed: {:?}",
+            load_resp.error
+        );
+
+        // Run tests for the loaded class
+        let resp = client.test_class("ArithmeticTest").await.unwrap();
+        assert!(resp.status.is_some(), "should have a status");
+        // If the test infrastructure is available, results should be present
+        if !resp.is_error() {
+            assert!(resp.results.is_some(), "should return test results");
+            assert!(
+                !resp.has_test_error(),
+                "ArithmeticTest should pass without failures"
+            );
+        }
+        Ok(())
+    }
 }
