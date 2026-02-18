@@ -10,7 +10,10 @@
 use clap::Subcommand;
 use miette::Result;
 
-use super::{create_workspace, discovery, get_or_start_workspace, list_workspaces, stop_workspace, workspace_status};
+use super::{
+    create_workspace, discovery, get_or_start_workspace, list_workspaces, stop_workspace,
+    workspace_status,
+};
 
 /// Workspace management subcommands.
 #[derive(Debug, Subcommand)]
@@ -259,10 +262,7 @@ fn run_create_background(
 
     // Resolve TLS config if requested
     let ssl_dist_conf = if tls {
-        crate::commands::repl::resolve_ssl_dist_conf_for_workspace(
-            &project_root,
-            Some(name),
-        )?
+        crate::commands::repl::resolve_ssl_dist_conf_for_workspace(&project_root, Some(name))?
     } else {
         None
     };
@@ -299,9 +299,7 @@ fn run_create_background(
     }
     println!("Node:      {}", node_info.node_name);
     println!("Port:      {}", node_info.port);
-    println!(
-        "\nAttach a REPL: beamtalk repl --workspace {workspace_id}"
-    );
+    println!("\nAttach a REPL: beamtalk repl --workspace {workspace_id}");
 
     Ok(())
 }
