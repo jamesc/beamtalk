@@ -195,20 +195,12 @@ Multi-message responses require clients to handle message correlation (matching 
 | 🏭 **Operator** | "Single-message responses are easier to log, replay, and debug. Multi-message adds ordering concerns." |
 | 🎨 **Language designer** | "Separation of concerns: eval returns values, Transcript streams output. Mixing them in the eval response conflates two different concerns." |
 
-### Alternative B: Use Transcript Push for All Output
-
-| Cohort | Best argument |
-|--------|--------------|
-| 🧑‍💻 **Newcomer** | "I only need to handle two kinds of messages: responses and pushes. No multi-message eval complexity." |
-| 🎩 **Smalltalk purist** | "This IS the Smalltalk model! The Transcript is a workspace tool, not an eval artifact. Output goes to Transcript, values come from eval." |
-| ⚙️ **BEAM veteran** | "Reuses existing infrastructure. No new message types, no changes to the eval path." |
-| 🏭 **Operator** | "One channel for all output, one for results. Clean separation." |
-
 ### Tension Points
 
-- **Smalltalk purists** would prefer Transcript-only output (Alternative B), arguing that eval should return values, not output streams. This is a legitimate design — Transcript is just one workspace pane, and future panes (logging, actor announcements, message traces) will have their own subscription channels. But `out` captures **all stdout from eval**, not just `Transcript show:` calls — it includes `Erlang io format:`, OTP logger output, and anything else that goes through the group_leader. Workspace panes and eval output are orthogonal concerns.
 - **BEAM veterans** would accept status quo (Alternative A) since Erlang's shell doesn't have this problem (it writes directly to the terminal). But Beamtalk operates over a network protocol, not a local terminal.
 - **Newcomers and operators** strongly prefer streaming (the proposed decision) because it matches expectations from every other modern REPL (Jupyter, IPython, Node.js REPL).
+
+Note: Routing all output through Transcript push was considered but is the wrong model. Transcript is a workspace pane — one of many future subscription channels (logging, actor announcements, message traces). Eval stdout (`out`) and workspace panes are orthogonal concerns: `out` captures everything the eval wrote to stdout (including `io:format`, logger output, etc.), not just `Transcript show:` calls.
 
 ## Alternatives Considered
 
@@ -218,21 +210,7 @@ Keep the current buffer-then-send model. Output is only available after eval com
 
 **Rejected because:** Contradicts the Interactive-First principle. For any eval taking more than ~200ms, the user gets no feedback. This is particularly painful for actor-based workflows where eval may trigger multiple message sends and Transcript writes.
 
-### B: Route All Output Through Transcript Push
-
-Instead of adding `out` messages to eval responses, route all eval stdout through the existing Transcript push channel. The eval response only contains the final value.
-
-```
-Client → Server:  {"op": "eval", "id": "msg-1", "code": "Transcript show: 'hello'"}
-Server → Client:  {"push": "transcript", "text": "hello"}     ← push (async)
-Server → Client:  {"id": "msg-1", "value": "nil", "status": ["done"]}  ← eval result
-```
-
-**Rejected because:** Transcript push is workspace-global — all connected clients receive it. With multiple concurrent sessions, there's no way to correlate which eval produced which output. The `out` message with `id` correlation solves this.
-
-**However:** Transcript push remains valuable for its original purpose — workspace-wide visibility. `Transcript show:` should continue to trigger both a Transcript push AND an `out` message on the originating eval. These are complementary, not competing.
-
-### C: Client Opt-In Streaming
+### B: Client Opt-In Streaming
 
 Only stream output when the client explicitly requests it via `{"op": "eval", "streaming": true, ...}`. Default to single-message for backward compatibility.
 
