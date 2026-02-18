@@ -323,21 +323,31 @@ get_method_doc_not_found_test_() ->
 %%====================================================================
 
 integration_setup() ->
-    application:ensure_all_started(beamtalk_runtime),
-    case whereis(beamtalk_bootstrap) of
-        undefined ->
-            case beamtalk_bootstrap:start_link() of
-                {ok, _} -> ok;
-                {error, {already_started, _}} -> ok
-            end;
-        _ -> ok
-    end,
-    beamtalk_stdlib:init(),
-    %% Wait for Integer class to be registered
-    wait_for_class('Integer', 50),
-    ok.
+    case stdlib_setup() of
+        {skip, _} = Skip -> Skip;
+        ok ->
+            case code:which('bt@stdlib@integer') of
+                non_existing ->
+                    {skip, stdlib_not_built};
+                _ ->
+                    application:ensure_all_started(beamtalk_runtime),
+                    case whereis(beamtalk_bootstrap) of
+                        undefined ->
+                            case beamtalk_bootstrap:start_link() of
+                                {ok, _} -> ok;
+                                {error, {already_started, _}} -> ok
+                            end;
+                        _ -> ok
+                    end,
+                    beamtalk_stdlib:init(),
+                    %% Wait for Integer class to be registered
+                    wait_for_class('Integer', 50),
+                    ok
+            end
+    end.
 
-wait_for_class(_ClassName, 0) -> ok;
+wait_for_class(ClassName, 0) ->
+    error({class_not_registered, ClassName});
 wait_for_class(ClassName, Retries) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
