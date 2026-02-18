@@ -1,0 +1,177 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for transcendental math methods (BT-712)
+// Note: Avoid float literals like 0.0, 1.0 etc. as standalone receivers
+// due to a pre-existing codegen issue where they compile as integers.
+// Use expressions like (0 asFloat) or (1 asFloat) instead.
+
+// ===========================================================================
+// FLOAT CLASS-SIDE CONSTANTS
+// ===========================================================================
+
+// Pi
+Float pi
+// => 3.141592653589793
+
+// Euler's number
+Float e
+// => 2.718281828459045
+
+// ===========================================================================
+// TRIGONOMETRIC METHODS (Float instance)
+// ===========================================================================
+
+// sin of pi/2
+(Float pi / 2) sin
+// => 1.0
+
+// cos of pi
+(Float pi) cos
+// => -1.0
+
+// tan of pi/4 (should be close to 1.0)
+(Float pi / 4) tan
+// => 0.9999999999999999
+
+// asin of 0.5
+0.5 asin
+// => 0.5235987755982989
+
+// acos of 0.5
+0.5 acos
+// => 1.0471975511965979
+
+// atan of 0.5
+0.5 atan
+// => 0.4636476090008061
+
+// atan2
+0.5 atan2: 0.5
+// => 0.7853981633974483
+
+// atan2 with Integer argument
+(1 asFloat) atan2: 2
+// => 0.4636476090008061
+
+// sin of small value
+0.5 sin
+// => 0.479425538604203
+
+// cos of small value
+0.5 cos
+// => 0.8775825618903728
+
+// ===========================================================================
+// EXPONENTIAL / LOGARITHMIC METHODS (Float instance)
+// ===========================================================================
+
+// sqrt of 4.0
+4.0 sqrt
+// => 2.0
+
+// sqrt of 2.0
+2.0 sqrt
+// => 1.4142135623730951
+
+// log of e (natural)
+(Float e) log
+// => 1.0
+
+// ln of e (alias for log)
+(Float e) ln
+// => 1.0
+
+// log2
+8.0 log2
+// => 3.0
+
+// log10
+100.0 log10
+// => 2.0
+
+// exp of 0.5
+0.5 exp
+// => 1.6487212707001282
+
+// raisedTo:
+2.0 raisedTo: 10
+// => 1024.0
+
+// raisedTo: with float exponent
+4.0 raisedTo: 0.5
+// => 2.0
+
+// ===========================================================================
+// EXPONENTIAL / LOGARITHMIC METHODS (Integer instance)
+// ===========================================================================
+
+// Integer sqrt
+16 sqrt
+// => 4.0
+
+// Integer sqrt non-perfect
+2 sqrt
+// => 1.4142135623730951
+
+// Integer log2
+8 log2
+// => 3.0
+
+// Integer log10
+100 log10
+// => 2.0
+
+// Integer exp of 2
+2 exp
+// => 7.38905609893065
+
+// Integer raisedTo:
+2 raisedTo: 10
+// => 1024.0
+
+// ===========================================================================
+// TRIGONOMETRIC IDENTITIES
+// ===========================================================================
+
+// sin^2 + cos^2 = 1 (within float precision)
+x := 0.5
+// => _
+((x sin) * (x sin)) + ((x cos) * (x cos))
+// => 1.0
+
+// ===========================================================================
+// DOMAIN ERROR HANDLING
+// ===========================================================================
+
+// sqrt of negative number
+(-1 asFloat) sqrt
+// => ERROR: badarith
+
+// log of zero
+(0 asFloat) log
+// => ERROR: badarith
+
+// log of negative
+(-1 asFloat) log
+// => ERROR: badarith
+
+// ln of zero (alias for log)
+(0 asFloat) ln
+// => ERROR: badarith
+
+// log2 of zero
+(0 asFloat) log2
+// => ERROR: badarith
+
+// log10 of zero
+(0 asFloat) log10
+// => ERROR: badarith
+
+// asin outside [-1, 1] range
+(2 asFloat) asin
+// => ERROR: badarith
+
+// acos outside [-1, 1] range
+(2 asFloat) acos
+// => ERROR: badarith
