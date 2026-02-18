@@ -17,6 +17,9 @@ use std::time::Duration;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
+#[cfg(unix)]
+use std::os::unix::process::CommandExt as _;
+
 use miette::{IntoDiagnostic, Result, miette};
 use serde::Deserialize;
 
@@ -260,10 +263,13 @@ pub fn start_detached_node(
          receive stop -> ok end."
     );
 
+    // Write cookie to args file (BT-726: not visible in `ps aux`)
+    let cookie_args_file = write_cookie_args_file(workspace_id, &cookie)?;
+
     // Start detached BEAM node
     let mut cmd = build_detached_node_command(
         &node_name,
-        &cookie,
+        &cookie_args_file,
         runtime_beam_dir,
         repl_beam_dir,
         jsx_beam_dir,
@@ -401,14 +407,61 @@ fn wait_for_tcp_ready(host: &str, port: u16, pid: u32, cookie: &str) -> Result<(
     ))
 }
 
+/// Write an Erlang args file containing the cookie for secure distribution.
+///
+/// Uses `-args_file` instead of `-setcookie` on the command line to prevent
+/// the cookie from being visible in `ps aux` / `/proc/{pid}/cmdline` (BT-726).
+/// The file is created with mode 0600 on Unix for owner-only access.
+fn write_cookie_args_file(workspace_id: &str, cookie: &str) -> Result<PathBuf> {
+    let args_file_path = super::storage::workspace_dir(workspace_id)?.join("vm.args");
+    let content = format!("-setcookie {cookie}\n");
+
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&args_file_path)
+            .map_err(|e| miette!("Failed to write cookie args file: {e}"))?;
+
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| miette!("Failed to set cookie args file permissions: {e}"))?;
+
+        file.write_all(content.as_bytes())
+            .map_err(|e| miette!("Failed to write cookie args file: {e}"))?;
+    }
+
+    #[cfg(not(unix))]
+    {
+        std::fs::write(&args_file_path, content)
+            .map_err(|e| miette!("Failed to write cookie args file: {e}"))?;
+    }
+
+    Ok(args_file_path)
+}
+
 /// Build a `Command` for starting a detached BEAM workspace node.
 ///
 /// Extracted from `start_detached_node` so the command configuration
 /// (args, env vars) can be inspected in tests without spawning a process.
+///
+/// # Security hardening (BT-726)
+///
+/// - **Environment allowlist**: `env_clear()` prevents leaking sensitive env vars
+///   (`AWS_*`, `DATABASE_URL`, `SSH_AUTH_SOCK`, etc.) to the BEAM node.
+/// - **Cookie via args file**: Uses `-args_file` instead of `-setcookie` so the
+///   cookie is not visible in `ps aux` / `/proc/{pid}/cmdline`.
+/// - **Umask**: Set to 0077 on Unix so workspace files are owner-only.
+/// - **setsid**: Creates a new session on Unix for proper daemon detachment.
 #[allow(clippy::too_many_arguments)] // mirrors start_detached_node params for testability
 fn build_detached_node_command(
     node_name: &str,
-    cookie: &str,
+    cookie_args_file: &Path,
     runtime_beam_dir: &Path,
     repl_beam_dir: &Path,
     jsx_beam_dir: &Path,
@@ -433,8 +486,9 @@ fn build_detached_node_command(
         "-noshell".to_string(),
         node_flag.to_string(),
         node_arg,
-        "-setcookie".to_string(),
-        cookie.to_string(),
+        // Cookie via args file instead of -setcookie (BT-726: not visible in ps)
+        "-args_file".to_string(),
+        path_to_erlang_arg(cookie_args_file),
         "-pa".to_string(),
         path_to_erlang_arg(runtime_beam_dir),
         "-pa".to_string(),
@@ -465,6 +519,36 @@ fn build_detached_node_command(
     args.push(eval_cmd.to_string());
 
     let mut cmd = Command::new("erl");
+
+    // Security: clear inherited environment, then allowlist only required vars (BT-726).
+    // Prevents leaking AWS_*, DATABASE_URL, SSH_AUTH_SOCK, etc.
+    cmd.env_clear();
+
+    // Erlang needs PATH to find epmd and other tools
+    if let Ok(path) = std::env::var("PATH") {
+        cmd.env("PATH", path);
+    }
+    // HOME is needed for Erlang's ~/.erlang.cookie fallback and epmd
+    if let Ok(home) = std::env::var("HOME") {
+        cmd.env("HOME", home);
+    }
+    // Locale settings for proper string handling
+    for var in &["LANG", "LC_ALL"] {
+        if let Ok(val) = std::env::var(var) {
+            cmd.env(var, val);
+        }
+    }
+    // Terminal type (for erl console compatibility)
+    if let Ok(term) = std::env::var("TERM") {
+        cmd.env("TERM", term);
+    }
+    // Temp directory (used by Erlang's file module and System.getEnv:)
+    for var in &["TMPDIR", "TEMP", "TMP"] {
+        if let Ok(val) = std::env::var(var) {
+            cmd.env(var, val);
+        }
+    }
+
     cmd.args(&args)
         .current_dir(project_root)
         .stdin(Stdio::null())
@@ -481,10 +565,30 @@ fn build_detached_node_command(
         cmd.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
     }
 
-    // Set compiler port binary path (for runtime compilation support)
-    // In installed mode, it lives next to the beamtalk binary in bin/.
-    // In dev mode, it lives in target/{debug,release}/.
-    if let Ok(exe) = std::env::current_exe() {
+    // Security: set umask and create new session for proper daemon behavior (BT-726)
+    #[cfg(unix)]
+    {
+        // SAFETY: setsid() and umask() are async-signal-safe per POSIX.
+        // They are safe to call in pre_exec (between fork and exec).
+        unsafe {
+            cmd.pre_exec(|| {
+                // Restrictive umask: workspace files are owner-only (0077)
+                libc::umask(0o077);
+                // New session: fully detach from controlling terminal.
+                // Note: -detached already calls setsid() internally; this is
+                // harmless (returns EPERM) but we need pre_exec for umask anyway.
+                libc::setsid();
+                Ok(())
+            });
+        }
+    }
+
+    // Set compiler port binary path (for runtime compilation support).
+    // Preserve any user-provided BEAMTALK_COMPILER_PORT_BIN (e.g. via Nix/Homebrew
+    // wrapper), falling back to auto-discovery next to the beamtalk binary.
+    if let Ok(user_compiler_port) = std::env::var("BEAMTALK_COMPILER_PORT_BIN") {
+        cmd.env("BEAMTALK_COMPILER_PORT_BIN", user_compiler_port);
+    } else if let Ok(exe) = std::env::current_exe() {
         if let Some(bin_dir) = exe.parent() {
             let compiler_name = if cfg!(windows) {
                 "beamtalk-compiler-port.exe"

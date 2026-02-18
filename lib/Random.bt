@@ -1,0 +1,113 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Random — Random number generation.
+///
+/// Wraps Erlang's `rand` module for random number generation.
+/// Class-side methods use the process dictionary seed (simple, shared).
+/// Instance-side methods use explicit state (reproducible, isolated).
+///
+/// **NOT cryptographically secure** — use Erlang's `crypto` module for
+/// security-sensitive randomness.
+///
+/// ## BEAM Mapping
+/// Class methods use `rand:uniform/0` and `rand:uniform/1` (process dictionary).
+/// Instance methods use `rand:seed_s/1` and `rand:uniform_s/1` (explicit state).
+///
+/// ## Examples
+/// ```beamtalk
+/// // Class-side convenience (process dictionary seed)
+/// Random next                  // => 0.0..1.0 float
+/// Random nextInteger: 6        // => 1..6 integer
+///
+/// // Instance-based (own seed/stream)
+/// rng := Random new
+/// rng next                     // => 0.0..1.0 float
+/// rng nextInteger: 100         // => 1..100
+///
+/// // Seeded for reproducibility (testing)
+/// rng := Random seed: 42
+/// rng next                     // => deterministic value
+/// ```
+sealed Object subclass: Random
+
+  /// Return a random float between 0.0 (inclusive) and 1.0 (exclusive).
+  ///
+  /// Uses the process dictionary seed — convenient but shared state.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Random next                  // => a Float between 0.0 and 1.0
+  /// ```
+  class sealed next -> Float => @primitive "next"
+
+  /// Return a random integer between 1 and max (inclusive).
+  ///
+  /// Uses the process dictionary seed — convenient but shared state.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Random nextInteger: 6        // => 1..6
+  /// Random nextInteger: 100      // => 1..100
+  /// ```
+  class sealed nextInteger: max: Integer -> Integer => @primitive "nextInteger:"
+
+  /// Create a new Random instance with an auto-generated seed.
+  ///
+  /// The instance has its own isolated random state.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// rng := Random new
+  /// rng next                     // => 0.0..1.0
+  /// ```
+  class sealed new -> Random => @primitive "new"
+
+  /// Create a new Random instance with a specific seed for reproducibility.
+  ///
+  /// Two instances created with the same seed will produce the same
+  /// deterministic values for `next` and `nextInteger:` (for a given max).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// rng := Random seed: 42
+  /// rng next                     // => deterministic value
+  /// ```
+  class sealed seed: seed: Integer -> Random => @primitive "seed:"
+
+  /// Return a random float from the instance state.
+  ///
+  /// Note: Random instances are immutable value types. Calling `next`
+  /// repeatedly on the same instance returns the same value.
+  /// For sequences, use class-side `Random next` (process dictionary).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// rng := Random new
+  /// rng next                     // => 0.0..1.0
+  /// ```
+  next -> Float => @primitive "instanceNext"
+
+  /// Return a random integer between 1 and max from the instance state.
+  ///
+  /// Note: Random instances are immutable value types. Calling `nextInteger:`
+  /// repeatedly on the same instance returns the same value.
+  /// For sequences, use class-side `Random nextInteger:` (process dictionary).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// rng := Random new
+  /// rng nextInteger: 6           // => 1..6
+  /// ```
+  nextInteger: max: Integer -> Integer => @primitive "instanceNextInteger:"
+
+  /// Return a developer-readable string representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Random new) printString     // => "a Random"
+  /// ```
+  printString -> String => @primitive "printString"
+
+  /// Human-readable description of the receiver.
+  describe -> String => "a Random"

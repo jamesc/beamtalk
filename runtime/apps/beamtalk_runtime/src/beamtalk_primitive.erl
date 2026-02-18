@@ -270,6 +270,7 @@ module_for_value(X) when is_map(X) ->
         'Association' -> 'bt@stdlib@association';
         'Set' -> 'bt@stdlib@set';
         'Stream' -> 'bt@stdlib@stream';
+        'Random' -> 'bt@stdlib@random';
         'TestCase' -> 'bt@stdlib@test_case';
         'Regex' -> 'bt@stdlib@regex';
         undefined -> 'bt@stdlib@dictionary';

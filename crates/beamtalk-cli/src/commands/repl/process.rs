@@ -25,7 +25,7 @@ use super::{MAX_CONNECT_RETRIES, RETRY_DELAY_MS, ReplClient};
 ///
 /// If `ssl_dist_optfile` is `Some`, the node is started with TLS-secured
 /// Erlang distribution (`-proto_dist inet_tls`).
-pub(super) fn start_beam_node(
+pub(crate) fn start_beam_node(
     port: u16,
     node_name: Option<&String>,
     project_root: &Path,
@@ -150,7 +150,7 @@ pub(super) fn start_beam_node(
 }
 
 /// Connect to REPL backend with retries.
-pub(super) fn connect_with_retries(host: &str, port: u16, cookie: &str) -> Result<ReplClient> {
+pub(crate) fn connect_with_retries(host: &str, port: u16, cookie: &str) -> Result<ReplClient> {
     for attempt in 1..=MAX_CONNECT_RETRIES {
         match ReplClient::connect(host, port, cookie) {
             Ok(client) => return Ok(client),
@@ -166,9 +166,9 @@ pub(super) fn connect_with_retries(host: &str, port: u16, cookie: &str) -> Resul
 }
 
 /// Guard to ensure BEAM child process is killed on drop.
-pub(super) struct BeamChildGuard {
+pub(crate) struct BeamChildGuard {
     /// The managed BEAM child process.
-    pub(super) child: Child,
+    pub(crate) child: Child,
 }
 
 impl Drop for BeamChildGuard {
@@ -187,7 +187,7 @@ impl Drop for BeamChildGuard {
 /// the child blocks without producing a full line. Takes ownership of stdout
 /// via `take()` since it must be moved into the thread; this is fine because
 /// all further BEAM communication uses TCP, not stdout.
-pub(super) fn read_port_from_child(child: &mut Child) -> Result<u16> {
+pub(crate) fn read_port_from_child(child: &mut Child) -> Result<u16> {
     let stdout = child
         .stdout
         .take()
@@ -241,11 +241,11 @@ pub(super) fn read_port_from_child(child: &mut Child) -> Result<u16> {
 ///
 /// Using `0` eliminates port conflicts between multiple workspaces or other
 /// services. Override with the `BEAMTALK_REPL_PORT` env var or `--port` flag.
-pub(super) const DEFAULT_REPL_PORT: u16 = 0;
+pub(crate) const DEFAULT_REPL_PORT: u16 = 0;
 
 /// Resolve the REPL port from CLI arg and environment variable.
 /// Priority: CLI flag > `BEAMTALK_REPL_PORT` env var > default (0 = OS-assigned)
-pub(super) fn resolve_port(port_arg: Option<u16>) -> Result<u16> {
+pub(crate) fn resolve_port(port_arg: Option<u16>) -> Result<u16> {
     if let Some(p) = port_arg {
         // CLI flag explicitly set
         Ok(p)
@@ -262,6 +262,6 @@ pub(super) fn resolve_port(port_arg: Option<u16>) -> Result<u16> {
 
 /// Resolve the node name from CLI arg and environment variable.
 /// Priority: CLI flag > `BEAMTALK_NODE_NAME` env var > None
-pub(super) fn resolve_node_name(node_arg: Option<String>) -> Option<String> {
+pub(crate) fn resolve_node_name(node_arg: Option<String>) -> Option<String> {
     node_arg.or_else(|| std::env::var("BEAMTALK_NODE_NAME").ok())
 }

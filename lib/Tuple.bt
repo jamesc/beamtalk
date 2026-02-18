@@ -99,3 +99,11 @@ sealed Collection subclass: Tuple
   /// result do: [:x | Transcript show: x]
   /// ```
   do: block: Block -> Nil => @primitive "do:"
+
+  /// Return a random element from the tuple.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// result atRandom            // => random element from result tuple
+  /// ```
+  atRandom => @primitive "atRandom"

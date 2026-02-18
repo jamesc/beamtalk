@@ -326,6 +326,14 @@ sealed Collection subclass: List
   /// ```
   stream -> Stream => @primitive "stream"
 
+  /// Return a random element from the list.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(10, 20, 30) atRandom           // => one of 10, 20, 30
+  /// ```
+  atRandom => @primitive "atRandom"
+
   /// Human-readable description of the receiver.
   ///
   /// ## Examples

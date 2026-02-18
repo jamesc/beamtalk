@@ -440,7 +440,7 @@ pub(super) fn find_workspace_by_project_path(project_path: &Path) -> Result<Opti
 ///
 /// Validates the input using the same rules as workspace creation to ensure
 /// consistency and prevent path traversal attacks.
-pub(super) fn resolve_workspace_id(name_or_id: &str) -> Result<String> {
+pub fn resolve_workspace_id(name_or_id: &str) -> Result<String> {
     let candidate = name_or_id.trim();
 
     if candidate.is_empty() {

@@ -110,6 +110,19 @@ websocket_info({transcript_output, Text}, State = #ws_state{authenticated = true
     Push = jsx:encode(#{<<"push">> => <<"transcript">>,
                         <<"text">> => Text}),
     {[{text, Push}], State};
+%% BT-690: Actor lifecycle push messages (ADR 0017 Phase 2)
+websocket_info({actor_spawned, Metadata}, State = #ws_state{authenticated = true}) ->
+    Push = jsx:encode(#{<<"type">> => <<"push">>,
+                        <<"channel">> => <<"actors">>,
+                        <<"event">> => <<"spawned">>,
+                        <<"data">> => encode_actor_metadata(Metadata)}),
+    {[{text, Push}], State};
+websocket_info({actor_stopped, StopInfo}, State = #ws_state{authenticated = true}) ->
+    Push = jsx:encode(#{<<"type">> => <<"push">>,
+                        <<"channel">> => <<"actors">>,
+                        <<"event">> => <<"stopped">>,
+                        <<"data">> => encode_stop_info(StopInfo)}),
+    {[{text, Push}], State};
 %% Session process died — clean up ETS entry and close WebSocket
 websocket_info({'DOWN', MonRef, process, _Pid, _Reason},
                State = #ws_state{session_mon = MonRef, session_id = SessionId}) ->
@@ -134,6 +147,8 @@ terminate(_Reason, _Req, #ws_state{session_id = SessionId, session_pid = Session
     }),
     %% Unsubscribe from Transcript push messages (ADR 0017)
     beamtalk_transcript_stream:unsubscribe('Transcript'),
+    %% Unsubscribe from actor lifecycle push messages (BT-690)
+    beamtalk_repl_actors:unsubscribe(),
     %% Keep session alive for resume — session idle monitor handles cleanup.
     %% Don't delete from ETS or stop the process here.
     ok.
@@ -223,10 +238,12 @@ start_or_resume_session(ResumeId, State) when is_binary(ResumeId) ->
                     }),
                     beamtalk_workspace_meta:update_activity(),
                     beamtalk_transcript_stream:subscribe('Transcript'),
+                    beamtalk_repl_actors:subscribe(),
+                    InitialActors = actor_snapshot_frames(),
                     AuthOk = jsx:encode(#{<<"type">> => <<"auth_ok">>}),
                     SessionMsg = jsx:encode(#{<<"op">> => <<"session-started">>,
                                               <<"session">> => ResumeId}),
-                    {[{text, AuthOk}, {text, SessionMsg}],
+                    {[{text, AuthOk}, {text, SessionMsg}] ++ InitialActors,
                      State#ws_state{authenticated = true,
                                     session_id = ResumeId,
                                     session_pid = Pid,
@@ -267,10 +284,12 @@ create_session(SessionId, State) ->
             }),
             beamtalk_workspace_meta:update_activity(),
             beamtalk_transcript_stream:subscribe('Transcript'),
+            beamtalk_repl_actors:subscribe(),
+            InitialActors = actor_snapshot_frames(),
             AuthOk = jsx:encode(#{<<"type">> => <<"auth_ok">>}),
             SessionMsg = jsx:encode(#{<<"op">> => <<"session-started">>,
                                       <<"session">> => SessionId}),
-            {[{text, AuthOk}, {text, SessionMsg}],
+            {[{text, AuthOk}, {text, SessionMsg}] ++ InitialActors,
              State#ws_state{authenticated = true,
                             session_id = SessionId,
                             session_pid = SessionPid,
@@ -397,4 +416,65 @@ handle_shutdown(Msg, State) ->
             ?LOG_WARNING("Shutdown denied: invalid cookie type", #{}),
             ErrorJson = beamtalk_repl_json:format_error(<<"Invalid shutdown cookie">>),
             {[{text, ErrorJson}], State}
+    end.
+
+%%% Internal — Actor lifecycle encoding (BT-690)
+
+%% @private
+%% Build WebSocket text frames for all currently live actors.
+%% Used to send an initial snapshot on connect/resume so the browser
+%% sees actors that were already running before it subscribed.
+actor_snapshot_frames() ->
+    case whereis(beamtalk_actor_registry) of
+        RegPid when is_pid(RegPid) ->
+            try beamtalk_repl_actors:list_actors(RegPid) of
+                Actors ->
+                    [{text, jsx:encode(#{<<"type">> => <<"push">>,
+                                         <<"channel">> => <<"actors">>,
+                                         <<"event">> => <<"spawned">>,
+                                         <<"data">> => encode_actor_metadata(M)})}
+                     || M <- Actors]
+            catch
+                Class:Reason ->
+                    ?LOG_WARNING("Failed to snapshot actors", #{
+                        class => Class, reason => Reason}),
+                    []
+            end;
+        _ ->
+            []
+    end.
+
+%% @private
+%% Encode actor metadata for push message JSON.
+encode_actor_metadata(#{pid := Pid, class := Class} = Meta) ->
+    Base = #{<<"class">> => atom_to_binary(Class, utf8),
+             <<"pid">> => list_to_binary(pid_to_list(Pid))},
+    case maps:find(spawned_at, Meta) of
+        {ok, T} -> Base#{<<"spawned_at">> => T};
+        error -> Base
+    end.
+
+%% @private
+%% Encode actor stop info for push message JSON.
+encode_stop_info(#{pid := Pid, class := Class, reason := Reason}) ->
+    %% Limit reason: cap nesting depth, then enforce max byte length
+    ReasonStr = iolist_to_binary(io_lib:format("~P", [Reason, 10])),
+    TruncatedReason = truncate_utf8(ReasonStr, 4096),
+    #{<<"class">> => case Class of
+                         undefined -> <<"unknown">>;
+                         _ -> atom_to_binary(Class, utf8)
+                     end,
+      <<"pid">> => list_to_binary(pid_to_list(Pid)),
+      <<"reason">> => TruncatedReason}.
+
+%% @private
+%% Truncate binary to at most MaxBytes, respecting UTF-8 boundaries.
+truncate_utf8(Bin, MaxBytes) when byte_size(Bin) =< MaxBytes ->
+    Bin;
+truncate_utf8(Bin, MaxBytes) ->
+    Part = binary:part(Bin, 0, MaxBytes),
+    case unicode:characters_to_binary(Part, utf8, utf8) of
+        {incomplete, Valid, _} -> Valid;
+        {error, Valid, _} -> Valid;
+        Valid when is_binary(Valid) -> Valid
     end.

@@ -168,17 +168,48 @@ Get completion suggestions for a partial expression.
 
 #### `info` — Symbol Information
 
-Get information about a symbol (class, method, variable).
+Get information about a symbol (class, method, variable). For class symbols, returns enriched metadata including superclass chain, method list, source location, and documentation.
 
 **Request:**
 ```json
 {"op": "info", "id": "msg-003", "symbol": "Counter"}
 ```
 
-**Response:**
+**Response (class found):**
 ```json
-{"id": "msg-003", "info": {"found": true, "symbol": "Counter", "kind": "class"}, "status": ["done"]}
+{
+  "id": "msg-003",
+  "info": {
+    "found": true,
+    "symbol": "Counter",
+    "kind": "class",
+    "superclass": "Actor",
+    "superclass_chain": ["Actor", "Object"],
+    "methods": ["decrement", "increment", "value"],
+    "source": "/path/to/examples/counter.bt",
+    "doc": "A simple counter actor"
+  },
+  "status": ["done"]
+}
 ```
+
+**Response (not found):**
+```json
+{"id": "msg-003", "info": {"found": false, "symbol": "Counter"}, "status": ["done"]}
+```
+
+**Enriched fields (present only when `found` is `true` and `kind` is `"class"`):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `superclass` | string \| null | Direct superclass name, or `null` if none |
+| `superclass_chain` | string[] | Full superclass chain from parent to root |
+| `methods` | string[] | Sorted list of all method selectors (own + inherited) |
+| `source` | string | Source file path (when available from compile info) |
+| `line` | number | Reserved for future use; not currently populated by the server |
+| `doc` | string | Class documentation from EEP-48 doc chunks (when present) |
+
+Optional fields (`source`, `line`, `doc`) are omitted when not available.
 
 #### `show-codegen` — Show Generated Core Erlang (BT-700)
 
@@ -572,6 +603,60 @@ Initiates graceful OTP supervisor tree shutdown. Requires cookie authentication.
 ```json
 {"id": "msg-042", "error": "auth_error: Invalid cookie", "status": ["done", "error"]}
 ```
+
+## Push Messages
+
+Push messages are server-initiated messages sent to clients without a preceding request. They are used for real-time notifications.
+
+### Transcript Channel
+
+Transcript output from the workspace's `Transcript` object.
+
+```json
+{"push": "transcript", "text": "Hello from Transcript"}
+```
+
+### Actors Channel (BT-690)
+
+Actor lifecycle events pushed when actors spawn or stop in the workspace. Clients subscribe automatically on connection.
+
+**Actor Spawned:**
+```json
+{
+  "type": "push",
+  "channel": "actors",
+  "event": "spawned",
+  "data": {
+    "class": "Counter",
+    "pid": "<0.123.0>",
+    "spawned_at": 1234567890
+  }
+}
+```
+
+**Actor Stopped:**
+```json
+{
+  "type": "push",
+  "channel": "actors",
+  "event": "stopped",
+  "data": {
+    "class": "Counter",
+    "pid": "<0.123.0>",
+    "reason": "normal"
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | `"push"` | Identifies this as a push message |
+| `channel` | `"actors"` | Push channel name |
+| `event` | `"spawned"` \| `"stopped"` | Lifecycle event type |
+| `data.class` | string | Actor class name (e.g., `"Counter"`) |
+| `data.pid` | string | Erlang PID as string |
+| `data.spawned_at` | integer | Unix timestamp (seconds), present on `spawned` events |
+| `data.reason` | string | Termination reason, present on `stopped` events |
 
 ## Legacy Format (Backward Compatible)
 

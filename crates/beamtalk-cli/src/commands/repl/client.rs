@@ -15,7 +15,7 @@ use super::ReplResponse;
 use crate::commands::protocol::{self, ProtocolClient};
 
 /// REPL client that wraps [`ProtocolClient`] with REPL-specific operations.
-pub(super) struct ReplClient {
+pub(crate) struct ReplClient {
     inner: ProtocolClient,
     last_loaded_file: Option<String>,
     /// Session ID assigned by the server (BT-666)
@@ -30,7 +30,7 @@ pub(super) struct ReplClient {
 
 impl ReplClient {
     /// Connect to the REPL backend.
-    pub(super) fn connect(host: &str, port: u16, cookie: &str) -> Result<Self> {
+    pub(crate) fn connect(host: &str, port: u16, cookie: &str) -> Result<Self> {
         let inner = ProtocolClient::connect(host, port, cookie, None)?;
         let session_id = inner.session_id().map(String::from);
 
@@ -45,13 +45,13 @@ impl ReplClient {
     }
 
     /// Send a protocol request and receive the response.
-    pub(super) fn send_request(&mut self, request: &serde_json::Value) -> Result<ReplResponse> {
+    pub(crate) fn send_request(&mut self, request: &serde_json::Value) -> Result<ReplResponse> {
         self.inner.send_request(request)
     }
 
     /// Send an eval request and receive the response.
     #[allow(dead_code)] // Used in non-interruptible mode or tests
-    pub(super) fn eval(&mut self, expression: &str) -> Result<ReplResponse> {
+    pub(crate) fn eval(&mut self, expression: &str) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "eval",
             "id": protocol::next_msg_id(),
@@ -68,7 +68,7 @@ impl ReplClient {
     /// BT-696: Handles multi-message streaming responses. Intermediate
     /// messages with `out` field are printed incrementally. The final
     /// message with `status: ["done"]` is returned as the result.
-    pub(super) fn eval_interruptible(
+    pub(crate) fn eval_interruptible(
         &mut self,
         expression: &str,
         interrupted: &Arc<AtomicBool>,
@@ -214,7 +214,7 @@ impl ReplClient {
     }
 
     /// Send a clear bindings request.
-    pub(super) fn clear_bindings(&mut self) -> Result<ReplResponse> {
+    pub(crate) fn clear_bindings(&mut self) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "clear",
             "id": protocol::next_msg_id()
@@ -222,7 +222,7 @@ impl ReplClient {
     }
 
     /// Get current bindings.
-    pub(super) fn get_bindings(&mut self) -> Result<ReplResponse> {
+    pub(crate) fn get_bindings(&mut self) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "bindings",
             "id": protocol::next_msg_id()
@@ -230,7 +230,7 @@ impl ReplClient {
     }
 
     /// Load a Beamtalk file.
-    pub(super) fn load_file(&mut self, path: &str) -> Result<ReplResponse> {
+    pub(crate) fn load_file(&mut self, path: &str) -> Result<ReplResponse> {
         let response = self.send_request(&serde_json::json!({
             "op": "load-file",
             "id": protocol::next_msg_id(),
@@ -246,7 +246,7 @@ impl ReplClient {
     }
 
     /// Reload the last loaded file.
-    pub(super) fn reload_file(&mut self) -> Result<ReplResponse> {
+    pub(crate) fn reload_file(&mut self) -> Result<ReplResponse> {
         let path = self
             .last_loaded_file
             .clone()
@@ -255,7 +255,7 @@ impl ReplClient {
     }
 
     /// Reload a specific module by name (looks up source path on server).
-    pub(super) fn reload_module(&mut self, module_name: &str) -> Result<ReplResponse> {
+    pub(crate) fn reload_module(&mut self, module_name: &str) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "reload",
             "id": protocol::next_msg_id(),
@@ -264,7 +264,7 @@ impl ReplClient {
     }
 
     /// List running actors.
-    pub(super) fn list_actors(&mut self) -> Result<ReplResponse> {
+    pub(crate) fn list_actors(&mut self) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "actors",
             "id": protocol::next_msg_id()
@@ -272,7 +272,7 @@ impl ReplClient {
     }
 
     /// Kill an actor by PID string.
-    pub(super) fn kill_actor(&mut self, pid_str: &str) -> Result<ReplResponse> {
+    pub(crate) fn kill_actor(&mut self, pid_str: &str) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "kill",
             "id": protocol::next_msg_id(),
@@ -281,7 +281,7 @@ impl ReplClient {
     }
 
     /// List loaded modules.
-    pub(super) fn list_modules(&mut self) -> Result<ReplResponse> {
+    pub(crate) fn list_modules(&mut self) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "modules",
             "id": protocol::next_msg_id()
@@ -289,7 +289,7 @@ impl ReplClient {
     }
 
     /// Unload a module by name.
-    pub(super) fn unload_module(&mut self, module_name: &str) -> Result<ReplResponse> {
+    pub(crate) fn unload_module(&mut self, module_name: &str) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "unload",
             "id": protocol::next_msg_id(),
@@ -298,7 +298,7 @@ impl ReplClient {
     }
 
     /// List active sessions.
-    pub(super) fn list_sessions(&mut self) -> Result<ReplResponse> {
+    pub(crate) fn list_sessions(&mut self) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "sessions",
             "id": protocol::next_msg_id()
@@ -306,7 +306,7 @@ impl ReplClient {
     }
 
     /// Inspect an actor's state.
-    pub(super) fn inspect_actor(&mut self, pid_str: &str) -> Result<ReplResponse> {
+    pub(crate) fn inspect_actor(&mut self, pid_str: &str) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "inspect",
             "id": protocol::next_msg_id(),
@@ -317,7 +317,7 @@ impl ReplClient {
     /// Get completions for a prefix.
     ///
     #[allow(dead_code)] // API completeness — completions use separate ProtocolClient with short timeout
-    pub(super) fn complete(&mut self, prefix: &str) -> Result<ReplResponse> {
+    pub(crate) fn complete(&mut self, prefix: &str) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "complete",
             "id": protocol::next_msg_id(),
@@ -326,7 +326,7 @@ impl ReplClient {
     }
 
     /// Get documentation for a class or method.
-    pub(super) fn get_docs(&mut self, class: &str, selector: Option<&str>) -> Result<ReplResponse> {
+    pub(crate) fn get_docs(&mut self, class: &str, selector: Option<&str>) -> Result<ReplResponse> {
         let mut req = serde_json::json!({
             "op": "docs",
             "id": protocol::next_msg_id(),
@@ -339,7 +339,7 @@ impl ReplClient {
     }
 
     /// Show generated Core Erlang for an expression (BT-724).
-    pub(super) fn show_codegen(&mut self, code: &str) -> Result<ReplResponse> {
+    pub(crate) fn show_codegen(&mut self, code: &str) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "show-codegen",
             "id": protocol::next_msg_id(),
@@ -348,7 +348,7 @@ impl ReplClient {
     }
 
     /// Run tests for a specific class (BT-724).
-    pub(super) fn test_class(&mut self, class: &str) -> Result<ReplResponse> {
+    pub(crate) fn test_class(&mut self, class: &str) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "test",
             "id": protocol::next_msg_id(),
@@ -357,7 +357,7 @@ impl ReplClient {
     }
 
     /// Run all tests for all loaded `TestCase` classes (BT-724).
-    pub(super) fn test_all(&mut self) -> Result<ReplResponse> {
+    pub(crate) fn test_all(&mut self) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "test-all",
             "id": protocol::next_msg_id()
@@ -365,7 +365,7 @@ impl ReplClient {
     }
 
     /// Get information about a symbol (BT-724).
-    pub(super) fn info(&mut self, symbol: &str) -> Result<ReplResponse> {
+    pub(crate) fn info(&mut self, symbol: &str) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "info",
             "id": protocol::next_msg_id(),

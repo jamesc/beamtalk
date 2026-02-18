@@ -4,6 +4,7 @@
 //! CLI command implementations.
 
 pub mod app_file;
+pub mod attach;
 pub mod build;
 pub mod build_stdlib;
 pub mod doc;

@@ -195,9 +195,31 @@ enum Command {
         #[command(subcommand)]
         action: commands::tls::TlsCommand,
     },
+
+    /// Attach to a running workspace (without starting one)
+    Attach {
+        /// Workspace ID to connect to (from `beamtalk workspace list`)
+        workspace: Option<String>,
+
+        /// Connect to a workspace at an explicit localhost port
+        #[arg(long, conflicts_with = "workspace")]
+        port: Option<u16>,
+
+        /// Erlang cookie for authentication (required with --port)
+        #[arg(long, requires = "port")]
+        cookie: Option<String>,
+
+        /// Disable colored output (also respects `NO_COLOR` environment variable)
+        #[arg(long)]
+        no_color: bool,
+    },
 }
 
 /// CLI entry point: parse arguments and dispatch to the appropriate subcommand.
+#[expect(
+    clippy::too_many_lines,
+    reason = "top-level dispatch — each arm is a one-liner"
+)]
 fn main() -> Result<()> {
     // Initialize tracing subscriber only if RUST_LOG is explicitly set
     // This avoids stderr interference with E2E tests
@@ -296,6 +318,12 @@ fn main() -> Result<()> {
             }
         }
         Command::Tls { action } => commands::tls::run(action),
+        Command::Attach {
+            workspace,
+            port,
+            cookie,
+            no_color,
+        } => commands::attach::run(workspace.as_deref(), port, cookie.as_deref(), no_color),
     };
 
     // Exit with appropriate code

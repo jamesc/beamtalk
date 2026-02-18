@@ -45,6 +45,9 @@
   // Session reconnection
   var sessionId = null;
 
+  // BT-690: Live actor tracking
+  var liveActors = {};
+
   function setStatus(text, color) {
     statusEl.textContent = text;
     statusEl.style.color = color || '#a6adc8';
@@ -63,6 +66,59 @@
   }
 
   // --- Inspector rendering ---
+
+  // BT-690: Actor lifecycle push handling
+  function handleActorPush(event, data) {
+    if (!data) return;
+    var pid = data.pid;
+    if (event === 'spawned') {
+      liveActors[pid] = data;
+    } else if (event === 'stopped') {
+      delete liveActors[pid];
+    }
+    renderActorList();
+  }
+
+  function renderActorList() {
+    var pids = Object.keys(liveActors);
+    if (pids.length === 0) {
+      var existing = inspectorEl.querySelector('.inspector-actors');
+      if (existing) existing.remove();
+      return;
+    }
+
+    if (inspectorEmpty) inspectorEmpty.remove();
+
+    // Find or create actors section
+    var section = inspectorEl.querySelector('.inspector-actors');
+    if (!section) {
+      section = document.createElement('div');
+      section.className = 'inspector-actors';
+      inspectorEl.insertBefore(section, inspectorEl.firstChild);
+    }
+    section.innerHTML = '';
+
+    var header = document.createElement('div');
+    header.style.color = '#f9e2af';
+    header.style.marginBottom = '4px';
+    header.textContent = 'Live Actors (' + pids.length + ')';
+    section.appendChild(header);
+
+    for (var i = 0; i < pids.length; i++) {
+      var actor = liveActors[pids[i]];
+      var row = document.createElement('div');
+      row.className = 'inspector-field';
+      var nameSpan = document.createElement('span');
+      nameSpan.className = 'inspector-field-name';
+      nameSpan.textContent = actor['class'] || 'Unknown';
+      var valSpan = document.createElement('span');
+      valSpan.className = 'inspector-field-value';
+      valSpan.textContent = pids[i];
+      row.appendChild(nameSpan);
+      row.appendChild(valSpan);
+      section.appendChild(row);
+    }
+  }
 
   function renderInspect(data) {
     clearEl(inspectorEl);
@@ -174,6 +230,12 @@
         return;
       }
 
+      // BT-690: Actor lifecycle push messages → Inspector pane
+      if (msg.type === 'push' && msg.channel === 'actors') {
+        handleActorPush(msg.event, msg.data);
+        return;
+      }
+
       // BT-696: Streaming stdout chunk during eval
       if (msg.out && !msg.status) {
         appendTo(replOutput, msg.out, '#cdd6f4');
@@ -267,6 +329,9 @@
       loadBtn.disabled = true;
       connectBtn.disabled = false;
       authPanel.style.display = 'flex';
+      // BT-690: Clear actor state on disconnect
+      liveActors = {};
+      renderActorList();
     };
 
     ws.onerror = function() {
