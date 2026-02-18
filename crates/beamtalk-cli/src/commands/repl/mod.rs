@@ -50,7 +50,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use miette::{IntoDiagnostic, Result};
+use miette::{IntoDiagnostic, Result, miette};
 use rustyline::error::ReadlineError;
 use rustyline::history::FileHistory;
 use rustyline::{CompletionType, Config, Editor};
@@ -281,6 +281,30 @@ fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
     }
 }
 
+/// Resolve the TLS `ssl_dist.conf` path for a workspace, if `--tls` is enabled.
+///
+/// Returns `Some(path)` when TLS is requested and certs are found,
+/// `None` when TLS is not requested, or an error if certs are missing.
+fn resolve_ssl_dist_conf(
+    project_root: &Path,
+    workspace_name: Option<&str>,
+    tls: bool,
+) -> Result<Option<PathBuf>> {
+    if !tls {
+        return Ok(None);
+    }
+    let workspace_id = workspace::workspace_id_for_project(project_root, workspace_name)?;
+    match super::tls::ssl_dist_conf_path(&workspace_id)? {
+        Some(path) => {
+            println!("🔒 TLS distribution enabled");
+            Ok(Some(path))
+        }
+        None => Err(miette!(
+            "TLS certificates not found. Run `beamtalk tls init` first."
+        )),
+    }
+}
+
 /// Read the Erlang default cookie from ~/.erlang.cookie.
 /// Used for foreground mode where no workspace cookie exists.
 fn read_erlang_cookie() -> Option<String> {
@@ -311,7 +335,7 @@ fn read_erlang_cookie() -> Option<String> {
 )]
 #[expect(
     clippy::fn_params_excessive_bools,
-    reason = "bools map directly to CLI flags (foreground, persistent, no_color, confirm_network)"
+    reason = "bools map directly to CLI flags (foreground, persistent, no_color, confirm_network, tls)"
 )]
 pub fn run(
     port_arg: Option<u16>,
@@ -323,6 +347,7 @@ pub fn run(
     no_color: bool,
     bind: Option<&str>,
     confirm_network: bool,
+    tls: bool,
 ) -> Result<()> {
     // Initialize color support
     color::init(no_color);
@@ -354,7 +379,17 @@ pub fn run(
     ) = if foreground {
         // Foreground mode: start node directly (original behavior)
         println!("Starting BEAM node in foreground mode (--foreground)...");
-        let mut child = start_beam_node(port, node_name.as_ref(), &project_root, Some(bind_addr))?;
+
+        // Resolve TLS config for foreground mode (ADR 0020 Phase 2)
+        let ssl_dist_conf = resolve_ssl_dist_conf(&project_root, workspace_name, tls)?;
+
+        let mut child = start_beam_node(
+            port,
+            node_name.as_ref(),
+            &project_root,
+            Some(bind_addr),
+            ssl_dist_conf.as_deref(),
+        )?;
 
         // Discover the actual port from the BEAM node's stdout.
         // The BEAM prints "BEAMTALK_PORT:<port>" after binding.
@@ -389,6 +424,9 @@ pub fn run(
         extra_code_paths.push(paths.cowlib_ebin.clone());
         extra_code_paths.push(paths.ranch_ebin.clone());
 
+        // Resolve TLS config for workspace mode (ADR 0020 Phase 2)
+        let ssl_dist_conf = resolve_ssl_dist_conf(&project_root, workspace_name, tls)?;
+
         let (node_info, is_new, workspace_id) = workspace::get_or_start_workspace(
             &project_root,
             workspace_name,
@@ -402,6 +440,7 @@ pub fn run(
             !persistent, // auto_cleanup is opposite of persistent flag
             timeout,
             Some(bind_addr),
+            ssl_dist_conf.as_deref(),
         )?;
 
         let actual_port = node_info.port;
@@ -420,6 +459,12 @@ pub fn run(
             std::thread::sleep(Duration::from_millis(2000));
         } else {
             println!("✓ Connected to existing workspace: {}", node_info.node_name);
+            if tls {
+                eprintln!(
+                    "  ⚠️  --tls has no effect on an already-running workspace.\n  \
+                     Stop the workspace first with `beamtalk workspace stop` to restart with TLS."
+                );
+            }
             if workspace_name.is_some() {
                 println!("  Workspace: {workspace_id}");
             } else {

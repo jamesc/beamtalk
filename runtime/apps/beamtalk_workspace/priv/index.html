@@ -6,29 +6,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Beamtalk Workspace</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: monospace; background: #1e1e2e; color: #cdd6f4; display: flex; flex-direction: column; height: 100vh; }
-  header { padding: 8px 16px; background: #313244; border-bottom: 1px solid #45475a; display: flex; align-items: center; gap: 12px; }
-  header h1 { font-size: 14px; color: #89b4fa; }
-  #status { font-size: 12px; color: #a6adc8; }
-  #auth-panel { padding: 16px; display: flex; gap: 8px; align-items: center; background: #181825; border-bottom: 1px solid #45475a; }
-  #auth-panel label { font-size: 12px; }
-  #cookie-input { font-family: monospace; font-size: 12px; background: #313244; color: #cdd6f4; border: 1px solid #45475a; padding: 4px 8px; width: 300px; }
-  #connect-btn, #send-btn { font-family: monospace; font-size: 12px; background: #89b4fa; color: #1e1e2e; border: none; padding: 4px 12px; cursor: pointer; }
-  #connect-btn:hover, #send-btn:hover { background: #74c7ec; }
-  #connect-btn:disabled, #send-btn:disabled { background: #45475a; color: #6c7086; cursor: default; }
-  main { flex: 1; display: flex; overflow: hidden; }
-  .pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-  .pane + .pane { border-left: 1px solid #45475a; }
-  .pane-header { padding: 4px 16px; background: #313244; font-size: 11px; color: #a6adc8; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #45475a; }
-  .pane-content { flex: 1; overflow-y: auto; padding: 8px 16px; font-size: 13px; white-space: pre-wrap; background: #181825; }
-  #workspace-pane { display: flex; flex-direction: column; }
-  #eval-panel { display: flex; gap: 8px; padding: 8px 16px; background: #1e1e2e; border-top: 1px solid #45475a; }
-  #eval-input { flex: 1; font-family: monospace; font-size: 13px; background: #313244; color: #cdd6f4; border: 1px solid #45475a; padding: 8px; resize: none; }
-  #eval-input:focus { outline: 1px solid #89b4fa; }
-  #transcript-empty { color: #6c7086; font-style: italic; }
-</style>
+<link rel="stylesheet" href="/static/workspace.css">
 </head>
 <body>
 
@@ -48,146 +26,34 @@
     <div class="pane-header">Workspace</div>
     <div class="pane-content" id="repl-output"></div>
     <div id="eval-panel">
-      <textarea id="eval-input" rows="2" placeholder="Beamtalk expression…" disabled></textarea>
-      <button id="send-btn" onclick="sendEval()" disabled>Send</button>
+      <textarea id="eval-input" rows="2" placeholder="Beamtalk expression… (Ctrl+Enter to eval)" disabled></textarea>
+      <button id="send-btn" onclick="sendEval()" disabled>Do It</button>
+      <button onclick="sendInspect()" disabled id="inspect-btn">Inspect It</button>
     </div>
   </div>
-  <div class="pane">
+
+  <div class="pane" id="transcript-pane">
     <div class="pane-header">Transcript</div>
-    <div class="pane-content" id="transcript"><span id="transcript-empty">Transcript output appears here…</span></div>
+    <div class="pane-content" id="transcript"><span id="transcript-empty" class="pane-empty">Transcript output appears here…</span></div>
+  </div>
+
+  <div class="pane" id="editor-pane">
+    <div class="pane-header">Editor</div>
+    <div id="editor-area">
+      <textarea id="editor-input" placeholder="// Enter Beamtalk class definitions here…&#10;// Press Load or Ctrl+Shift+Enter to compile"></textarea>
+      <div id="editor-toolbar">
+        <span id="editor-status"></span>
+        <button id="load-btn" onclick="loadSource()" disabled>Load</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="pane" id="inspector-pane">
+    <div class="pane-header">Inspector</div>
+    <div class="pane-content" id="inspector"><span id="inspector-empty" class="pane-empty">Inspect results appear here…</span></div>
   </div>
 </main>
 
-<script>
-(function() {
-  const statusEl = document.getElementById('status');
-  const replOutput = document.getElementById('repl-output');
-  const transcriptEl = document.getElementById('transcript');
-  const evalInput = document.getElementById('eval-input');
-  const sendBtn = document.getElementById('send-btn');
-  const connectBtn = document.getElementById('connect-btn');
-  const cookieInput = document.getElementById('cookie-input');
-  const authPanel = document.getElementById('auth-panel');
-  const transcriptEmpty = document.getElementById('transcript-empty');
-
-  let ws = null;
-  let msgId = 0;
-  let sessionId = null;
-
-  function setStatus(text, color) {
-    statusEl.textContent = text;
-    statusEl.style.color = color || '#a6adc8';
-  }
-
-  function appendTo(el, text, cls) {
-    const span = document.createElement('span');
-    span.textContent = text;
-    if (cls) span.style.color = cls;
-    el.appendChild(span);
-    el.scrollTop = el.scrollHeight;
-  }
-
-  window.connect = function() {
-    const cookie = cookieInput.value.trim();
-    if (!cookie) { setStatus('Enter cookie first', '#f38ba8'); return; }
-
-    connectBtn.disabled = true;
-    setStatus('Connecting…', '#f9e2af');
-
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(proto + '//' + location.host + '/ws');
-
-    ws.onopen = function() {
-      setStatus('Authenticating…', '#f9e2af');
-      ws.send(JSON.stringify({ type: 'auth', cookie: cookie }));
-    };
-
-    ws.onmessage = function(ev) {
-      let msg;
-      try { msg = JSON.parse(ev.data); } catch(e) { return; }
-
-      // Auth flow
-      if (msg.op === 'auth-required') {
-        setStatus('Auth required', '#f9e2af');
-        return;
-      }
-      if (msg.type === 'auth_ok') {
-        setStatus('Authenticated', '#a6e3a1');
-        return;
-      }
-      if (msg.type === 'auth_error') {
-        setStatus('Auth failed: ' + msg.message, '#f38ba8');
-        ws.close();
-        return;
-      }
-      if (msg.op === 'session-started') {
-        sessionId = msg.session;
-        const display = sessionId ? sessionId.slice(0, 8) + '…' : 'unknown';
-        setStatus('Connected (session ' + display + ')', '#a6e3a1');
-        authPanel.style.display = 'none';
-        evalInput.disabled = false;
-        sendBtn.disabled = false;
-        evalInput.focus();
-        return;
-      }
-
-      // Push messages → Transcript pane
-      if (msg.push === 'transcript') {
-        if (transcriptEmpty) transcriptEmpty.remove();
-        appendTo(transcriptEl, msg.text, '#cdd6f4');
-        return;
-      }
-
-      // Eval response → Workspace pane
-      if (msg.id && msg.status) {
-        const isError = Array.isArray(msg.status) && msg.status.includes('error');
-        if (isError && msg.error) {
-          appendTo(replOutput, 'Error: ' + msg.error + '\n', '#f38ba8');
-        } else {
-          const value = msg.value != null ? String(msg.value) : '';
-          if (value) {
-            appendTo(replOutput, '=> ' + value + '\n', '#a6e3a1');
-          }
-        }
-      }
-      // Legacy error format (no id/status)
-      if (msg.type === 'error' && msg.message) {
-        appendTo(replOutput, 'Error: ' + msg.message + '\n', '#f38ba8');
-      }
-    };
-
-    ws.onclose = function() {
-      setStatus('Disconnected', '#f38ba8');
-      evalInput.disabled = true;
-      sendBtn.disabled = true;
-      connectBtn.disabled = false;
-      authPanel.style.display = 'flex';
-    };
-
-    ws.onerror = function() {
-      setStatus('Connection error', '#f38ba8');
-    };
-  };
-
-  window.sendEval = function() {
-    const code = evalInput.value.trim();
-    if (!code || !ws || ws.readyState !== WebSocket.OPEN) return;
-
-    appendTo(replOutput, code + '\n', '#89b4fa');
-    msgId++;
-    ws.send(JSON.stringify({ op: 'eval', id: 'msg-' + msgId, code: code }));
-    evalInput.value = '';
-    evalInput.focus();
-  };
-
-  // Ctrl+Enter / Cmd+Enter to send
-  evalInput.addEventListener('keydown', function(e) {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-      e.preventDefault();
-      sendEval();
-    }
-  });
-})();
-</script>
+<script src="/static/workspace.js"></script>
 </body>
 </html>
