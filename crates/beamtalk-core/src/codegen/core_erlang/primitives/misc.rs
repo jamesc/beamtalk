@@ -568,6 +568,36 @@ pub(crate) fn generate_stream_bif(selector: &str, params: &[String]) -> Option<D
     }
 }
 
+/// System primitive implementations (BT-713).
+///
+/// System class methods delegate directly to `beamtalk_system` runtime module.
+/// These are class-level methods (no Self parameter needed).
+pub(crate) fn generate_system_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
+    let p0 = params.first().map_or("_Arg0", String::as_str);
+    let p1 = params.get(1).map_or("_Arg1", String::as_str);
+    match selector {
+        "getEnv:" => Some(docvec![
+            "call 'beamtalk_system':'getEnv:'(",
+            p0.to_string(),
+            ")"
+        ]),
+        "getEnv:default:" => Some(docvec![
+            "call 'beamtalk_system':'getEnv:default:'(",
+            p0.to_string(),
+            ", ",
+            p1.to_string(),
+            ")"
+        ]),
+        "osPlatform" => Some(docvec!["call 'beamtalk_system':'osPlatform'()"]),
+        "osFamily" => Some(docvec!["call 'beamtalk_system':'osFamily'()"]),
+        "architecture" => Some(docvec!["call 'beamtalk_system':'architecture'()"]),
+        "hostname" => Some(docvec!["call 'beamtalk_system':'hostname'()"]),
+        "erlangVersion" => Some(docvec!["call 'beamtalk_system':'erlangVersion'()"]),
+        "pid" => Some(docvec!["call 'beamtalk_system':'pid'()"]),
+        _ => None,
+    }
+}
+
 /// JSON primitive implementations (BT-711).
 ///
 /// JSON class methods delegate directly to `beamtalk_json` runtime module.
@@ -590,6 +620,35 @@ pub(crate) fn generate_json_bif(selector: &str, params: &[String]) -> Option<Doc
             p0.to_string(),
             ")"
         ]),
+        _ => None,
+    }
+}
+
+/// Regex primitive implementations (BT-709).
+///
+/// Regex class methods delegate to `beamtalk_regex` runtime module.
+/// Instance methods (source, printString, describe) operate on Self.
+pub(crate) fn generate_regex_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
+    let p0 = params.first().map_or("_Arg0", String::as_str);
+    match selector {
+        "from:" => Some(docvec![
+            "call 'beamtalk_regex':'from:'(",
+            p0.to_string(),
+            ")"
+        ]),
+        "from:options:" => {
+            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            Some(docvec![
+                "call 'beamtalk_regex':'from:options:'(",
+                p0.to_string(),
+                ", ",
+                p1.to_string(),
+                ")",
+            ])
+        }
+        "source" => Some(Document::Str("call 'beamtalk_regex':'source'(Self)")),
+        "printString" => Some(Document::Str("call 'beamtalk_regex':'printString'(Self)")),
+        "describe" => Some(Document::Str("call 'beamtalk_regex':'describe'(Self)")),
         _ => None,
     }
 }

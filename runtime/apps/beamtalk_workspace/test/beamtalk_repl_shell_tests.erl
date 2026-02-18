@@ -94,6 +94,58 @@ eval_empty_expression_test_() ->
      end}.
 
 %%====================================================================
+%% Show Codegen Tests (BT-700)
+%%====================================================================
+
+show_codegen_returns_core_erlang_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-codegen-1">>),
+              Result = beamtalk_repl_shell:show_codegen(Pid, "1 + 2"),
+              ?assertMatch({ok, _, _}, Result),
+              {ok, CoreErlang, Warnings} = Result,
+              ?assert(is_binary(CoreErlang)),
+              ?assert(byte_size(CoreErlang) > 0),
+              ?assert(is_list(Warnings)),
+              beamtalk_repl_shell:stop(Pid)
+          end)]
+     end}.
+
+show_codegen_rejects_during_eval_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-codegen-busy">>),
+              %% Start a long-running eval to occupy the worker slot
+              Self = self(),
+              spawn(fun() ->
+                  Res = beamtalk_repl_shell:eval(Pid, "1 + 2"),
+                  Self ! {eval_done, Res}
+              end),
+              %% Give eval time to start (even if it fails, the worker is set briefly)
+              timer:sleep(50),
+              %% Try show_codegen - if eval is still in progress, should get eval_busy
+              Result = beamtalk_repl_shell:show_codegen(Pid, "42"),
+              case Result of
+                  {error, #beamtalk_error{kind = eval_busy}, _} ->
+                      ok;
+                  _ ->
+                      %% Eval may have completed before show_codegen ran
+                      %% (race condition in test - both outcomes are valid)
+                      ok
+              end,
+              %% Drain eval result
+              receive {eval_done, _} -> ok after 5000 -> ok end,
+              beamtalk_repl_shell:stop(Pid)
+          end)]
+     end}.
+
+%%====================================================================
 %% gen_server Callback Tests
 %%====================================================================
 

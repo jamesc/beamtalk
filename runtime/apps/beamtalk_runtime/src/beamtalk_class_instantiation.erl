@@ -30,7 +30,8 @@
     ensure_is_constructible/3,
     compute_is_constructible/2,
     abstract_class_error/2,
-    convert_methods_to_info/1
+    convert_methods_to_info/1,
+    create_subclass/3
 ]).
 
 -type class_name() :: atom().
@@ -247,3 +248,61 @@ convert_methods_to_info(Methods) ->
             block => Fun
         }
     end, Methods).
+
+%%====================================================================
+%% Dynamic Subclass Creation
+%%====================================================================
+
+%% @doc Create a dynamic subclass at runtime.
+%%
+%% Phase 1 implementation using interpreter-based dynamic classes.
+%% Methods are stored as closures and dispatch via apply/2.
+%%
+%% BT-704: Extracted from beamtalk_object_class.
+-spec create_subclass(atom(), atom(), map()) -> {ok, pid()} | {error, term()}.
+create_subclass(SuperclassName, ClassName, ClassSpec) ->
+    case beamtalk_class_registry:whereis_class(SuperclassName) of
+        undefined ->
+            Error0 = beamtalk_error:new(class_not_found, SuperclassName),
+            Error = beamtalk_error:with_hint(Error0, <<"Superclass must be registered before creating subclass">>),
+            {error, Error};
+        _SuperclassPid ->
+            InstanceVars = maps:get(instance_variables, ClassSpec, []),
+            InstanceMethods = maps:get(instance_methods, ClassSpec, #{}),
+            try convert_methods_to_info(InstanceMethods) of
+                MethodInfo ->
+                    ClassInfo = #{
+                        name => ClassName,
+                        module => beamtalk_dynamic_object,
+                        superclass => SuperclassName,
+                        instance_methods => MethodInfo,
+                        instance_variables => InstanceVars,
+                        class_methods => #{},
+                        dynamic_methods => InstanceMethods
+                    },
+                    case beamtalk_object_class:start_link(ClassName, ClassInfo) of
+                        {ok, ClassPid} ->
+                            {ok, ClassPid};
+                        {error, {already_started, _Pid}} ->
+                            Error0 = beamtalk_error:new(class_already_exists, ClassName),
+                            {error, Error0};
+                        {error, Reason} ->
+                            case Reason of
+                                #beamtalk_error{} -> {error, Reason};
+                                _ ->
+                                    Err0 = beamtalk_error:new(class_creation_failed, ClassName),
+                                    Err1 = beamtalk_error:with_hint(Err0, <<"Failed to start subclass">>),
+                                    {error, beamtalk_error:with_details(Err1, #{reason => Reason})}
+                            end
+                    end
+            catch
+                error:ErrorReason ->
+                    case ErrorReason of
+                        #beamtalk_error{} -> {error, ErrorReason};
+                        _ ->
+                            Err0 = beamtalk_error:new(class_creation_failed, ClassName),
+                            Err1 = beamtalk_error:with_hint(Err0, <<"Failed to start subclass">>),
+                            {error, beamtalk_error:with_details(Err1, #{reason => ErrorReason})}
+                    end
+            end
+    end.

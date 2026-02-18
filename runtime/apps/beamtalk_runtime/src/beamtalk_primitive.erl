@@ -271,6 +271,7 @@ module_for_value(X) when is_map(X) ->
         'Set' -> 'bt@stdlib@set';
         'Stream' -> 'bt@stdlib@stream';
         'TestCase' -> 'bt@stdlib@test_case';
+        'Regex' -> 'bt@stdlib@regex';
         undefined -> 'bt@stdlib@dictionary';
         _ -> undefined
     end;

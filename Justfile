@@ -170,9 +170,11 @@ test: test-rust test-stdlib test-runtime
 [unix]
 test-rust:
     #!/usr/bin/env bash
-    set -eo pipefail
+    set -o pipefail
     echo "🧪 Running Rust tests (fast)..."
-    cargo test --all-targets --quiet 2>&1 | grep -E '^test result:|FAILED|^error'
+    output=$(cargo test --all-targets --quiet 2>&1) && rc=0 || rc=$?
+    echo "$output" | grep -E '^test result:|FAILED|^error' || true
+    if [ $rc -ne 0 ]; then echo "$output"; exit $rc; fi
     echo "✅ Rust tests complete"
 
 [windows]
@@ -191,9 +193,11 @@ test-e2e: build-stdlib
 [unix]
 test-integration: build-stdlib
     #!/usr/bin/env bash
-    set -eo pipefail
+    set -o pipefail
     echo "🧪 Running workspace integration tests..."
-    cargo test --bin beamtalk -- --ignored --test-threads=1 2>&1 | grep -E '^test result:|FAILED|^error'
+    output=$(cargo test --bin beamtalk -- --ignored --test-threads=1 2>&1) && rc=0 || rc=$?
+    echo "$output" | grep -E '^test result:|FAILED|^error' || true
+    if [ $rc -ne 0 ]; then echo "$output"; exit $rc; fi
     echo "✅ Integration tests complete"
 
 [windows]
@@ -207,9 +211,11 @@ test-integration: build-stdlib
 [unix]
 test-mcp: build
     #!/usr/bin/env bash
-    set -eo pipefail
+    set -o pipefail
     echo "🧪 Running MCP server integration tests..."
-    cargo test -p beamtalk-mcp -- --ignored --test-threads=1 2>&1 | grep -E '^test result:|FAILED|^error'
+    output=$(cargo test -p beamtalk-mcp -- --ignored --test-threads=1 2>&1) && rc=0 || rc=$?
+    echo "$output" | grep -E '^test result:|FAILED|^error' || true
+    if [ $rc -ne 0 ]; then echo "$output"; exit $rc; fi
     echo "✅ MCP integration tests complete"
 
 [windows]

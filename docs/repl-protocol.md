@@ -211,6 +211,34 @@ Get information about a symbol (class, method, variable). For class symbols, ret
 
 Optional fields (`source`, `line`, `doc`) are omitted when not available.
 
+#### `show-codegen` — Show Generated Core Erlang (BT-700)
+
+Compile a Beamtalk expression and return the generated Core Erlang source without evaluating it. Useful for debugging, learning, and understanding how Beamtalk compiles to BEAM.
+
+**Request:**
+```json
+{"op": "show-codegen", "id": "msg-100", "code": "1 + 2"}
+```
+
+**Response (success):**
+```json
+{"id": "msg-100", "core_erlang": "call 'erlang':'+'\n    (1, 2)", "status": ["done"]}
+```
+
+**Response (with warnings):**
+```json
+{"id": "msg-100", "core_erlang": "...", "warnings": ["..."], "status": ["done"]}
+```
+
+**Response (compile error):**
+```json
+{"id": "msg-100", "error": "Parse error: unexpected token", "status": ["done", "error"]}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `code` | string | **yes** | Beamtalk expression to compile |
+
 #### `load-file` — Load Source File
 
 Compile and load a `.bt` source file.
@@ -416,6 +444,103 @@ Unload a module from the workspace. Uses `code:soft_purge/1` and `code:delete/1`
 {"id": "msg-031", "error": "module_not_loaded: Counter", "status": ["error"]}
 ```
 
+### Test Operations
+
+#### `test` — Run BUnit Tests
+
+Run BUnit tests for a loaded TestCase subclass. Supports running all tests in a class or a single test method. Returns structured results with per-test pass/fail details, suitable for IDE integration.
+
+**Request (all tests in class):**
+```json
+{"op": "test", "id": "msg-050", "class": "CounterTest"}
+```
+
+**Request (single test method):**
+```json
+{"op": "test", "id": "msg-051", "class": "CounterTest", "method": "testIncrement"}
+```
+
+**Response (all pass):**
+```json
+{
+  "id": "msg-050",
+  "results": {
+    "class": "CounterTest",
+    "total": 3,
+    "passed": 3,
+    "failed": 0,
+    "duration": 0.1,
+    "tests": [
+      {"name": "testDecrement", "status": "pass"},
+      {"name": "testIncrement", "status": "pass"},
+      {"name": "testReset", "status": "pass"}
+    ]
+  },
+  "status": ["done"]
+}
+```
+
+**Response (with failures):**
+```json
+{
+  "id": "msg-050",
+  "results": {
+    "class": "CounterTest",
+    "total": 3,
+    "passed": 2,
+    "failed": 1,
+    "duration": 0.1,
+    "tests": [
+      {"name": "testDecrement", "status": "pass"},
+      {"name": "testIncrement", "status": "pass"},
+      {"name": "testReset", "status": "fail", "error": "Expected 0, got 1"}
+    ]
+  },
+  "status": ["done", "test-error"]
+}
+```
+
+**Error (missing class parameter):**
+```json
+{"id": "msg-050", "error": "missing_parameter: Missing required parameter: class", "status": ["done", "error"]}
+```
+
+#### `test-all` — Run All Loaded Tests
+
+Run all loaded TestCase subclasses and return aggregated results. Each test entry includes a `class` field identifying which TestCase it belongs to.
+
+**Request:**
+```json
+{"op": "test-all", "id": "msg-052"}
+```
+
+**Response:**
+```json
+{
+  "id": "msg-052",
+  "results": {
+    "class": "All",
+    "total": 5,
+    "passed": 4,
+    "failed": 1,
+    "duration": 0.2,
+    "tests": [
+      {"name": "testIncrement", "status": "pass", "class": "CounterTest"},
+      {"name": "testDecrement", "status": "pass", "class": "CounterTest"},
+      {"name": "testAdd", "status": "pass", "class": "MathTest"},
+      {"name": "testSubtract", "status": "pass", "class": "MathTest"},
+      {"name": "testDivideByZero", "status": "fail", "error": "Division by zero", "class": "MathTest"}
+    ]
+  },
+  "status": ["done", "test-error"]
+}
+```
+
+**Response (no test classes loaded):**
+```json
+{"id": "msg-052", "results": {"class": "All", "total": 0, "passed": 0, "failed": 0, "duration": 0.0, "tests": []}, "status": ["done"]}
+```
+
 ### Server Operations
 
 #### `describe` — Capability Discovery
@@ -444,7 +569,7 @@ Returns the list of supported operations with their parameters, protocol version
 }
 ```
 
-The actual response includes all supported operations (e.g., `eval`, `complete`, `info`, `docs`, `load-file`, `load-source`, `reload`, `clear`, `bindings`, `sessions`, `clone`, `close`, `actors`, `inspect`, `kill`, `interrupt`, `modules`, `unload`, `health`, `describe`, `shutdown`). Each entry lists required `params` and any `optional` parameters. The `versions` map includes the protocol version and the Beamtalk runtime version.
+The actual response includes all supported operations (e.g., `eval`, `complete`, `info`, `docs`, `load-file`, `load-source`, `reload`, `clear`, `bindings`, `sessions`, `clone`, `close`, `actors`, `inspect`, `kill`, `interrupt`, `modules`, `unload`, `test`, `test-all`, `health`, `describe`, `shutdown`). Each entry lists required `params` and any `optional` parameters. The `versions` map includes the protocol version and the Beamtalk runtime version.
 
 #### `health` — Health Probe
 
