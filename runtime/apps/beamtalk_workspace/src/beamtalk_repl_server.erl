@@ -593,11 +593,17 @@ handle_op(<<"docs">>, Params, Msg, _SessionPid) ->
 
 handle_op(<<"describe">>, _Params, Msg, _SessionPid) ->
     %% Capability discovery — returns supported ops, protocol version, and
-    %% server capabilities. No authentication required (read-only metadata).
+    %% server capabilities for the authenticated REPL connection (ADR 0020).
     Ops = describe_ops(),
+    BeamtalkVsnBin =
+        case application:get_key(beamtalk_workspace, vsn) of
+            {ok, Vsn} when is_list(Vsn)   -> list_to_binary(Vsn);
+            {ok, Vsn} when is_binary(Vsn) -> Vsn;
+            _                             -> <<"0.1.0">>
+        end,
     Versions = #{
         <<"protocol">> => <<"1.0">>,
-        <<"beamtalk">> => <<"0.1.0">>
+        <<"beamtalk">> => BeamtalkVsnBin
     },
     beamtalk_repl_protocol:encode_describe(Ops, Versions, Msg);
 

@@ -346,7 +346,7 @@ Unload a module from the workspace. Uses `code:soft_purge/1` and `code:delete/1`
 
 #### `describe` — Capability Discovery
 
-Returns the list of supported operations with their parameters, protocol version, and server metadata. Enables tooling to dynamically discover server capabilities without hardcoding the op list. No authentication required.
+Returns the list of supported operations with their parameters, protocol version, and server metadata. Enables tooling to dynamically discover server capabilities without hardcoding the op list. Requires no additional authorization beyond the normal cookie-authenticated connection.
 
 **Request:**
 ```json
