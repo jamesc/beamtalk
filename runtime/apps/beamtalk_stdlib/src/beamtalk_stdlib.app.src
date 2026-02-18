@@ -38,6 +38,7 @@
         {'bt@stdlib@stream', 'Stream', 'Object'},
         {'bt@stdlib@string', 'String', 'Object'},
         {'bt@stdlib@symbol', 'Symbol', 'Object'},
+        {'bt@stdlib@system', 'System', 'Object'},
         {'bt@stdlib@system_dictionary', 'SystemDictionary', 'Actor'},
         {'bt@stdlib@test_case', 'TestCase', 'Object'},
         {'bt@stdlib@throw_error', 'ThrowError', 'BEAMError'},

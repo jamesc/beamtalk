@@ -51,6 +51,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Stream"
             | "String"
             | "Symbol"
+            | "System"
             | "SystemDictionary"
             | "TestCase"
             | "ThrowError"
@@ -999,6 +1000,31 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "hash".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Symbol".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![] },
             ],
             class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "System".into(),
+        ClassInfo {
+            name: "System".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "getEnv:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, return_type: Some("String | Nil".into()), param_types: vec![Some("String".into())] },
+                MethodInfo { selector: "getEnv:default:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![Some("String".into()), Some("String".into())] },
+                MethodInfo { selector: "osPlatform".into(), arity: 0, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "osFamily".into(), arity: 0, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "architecture".into(), arity: 0, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "hostname".into(), arity: 0, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "erlangVersion".into(), arity: 0, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "pid".into(), arity: 0, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, return_type: Some("Integer".into()), param_types: vec![] },
+            ],
             class_variables: vec![],
         },
     );
