@@ -281,8 +281,6 @@ fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
     }
 }
 
-/// Read the Erlang default cookie from ~/.erlang.cookie.
-/// Used for foreground mode where no workspace cookie exists.
 /// Resolve the TLS `ssl_dist.conf` path for a workspace, if `--tls` is enabled.
 ///
 /// Returns `Some(path)` when TLS is requested and certs are found,
@@ -307,6 +305,8 @@ fn resolve_ssl_dist_conf(
     }
 }
 
+/// Read the Erlang default cookie from ~/.erlang.cookie.
+/// Used for foreground mode where no workspace cookie exists.
 fn read_erlang_cookie() -> Option<String> {
     let home = dirs::home_dir()?;
     let cookie_path = home.join(".erlang.cookie");
