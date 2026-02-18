@@ -5,7 +5,7 @@ Proposed (2026-02-18)
 
 ## Context
 
-Beamtalk currently has a **flat global namespace**: all classes are registered as named processes in a single `beamtalk_class_registry` and are visible to all code. There is no `import`, `export`, or namespace syntax. Every class name must be globally unique.
+Beamtalk currently has a **flat global namespace**: each class is a named process registered in the Erlang process registry (with lookup utilities in `beamtalk_class_registry`) and visible to all code. There is no `import`, `export`, or namespace syntax. Every class name must be globally unique.
 
 This works today because:
 - The stdlib uses distinctive names (`Integer`, `Dictionary`, `Actor`) that users are unlikely to collide with
@@ -33,7 +33,7 @@ This is an **explicit design decision**, not an oversight:
 
 1. **Flat namespace is the v0.1 scope.** Class names must be unique across a package and its dependencies.
 2. **ADR 0016 naming prevents Erlang-level collisions.** Two packages can both define a `Counter` class — they compile to `bt@my_app@counter` and `bt@other_app@counter` respectively. The Beamtalk user sees `Counter`; the BEAM sees distinct modules.
-3. **Name collision within a workspace is a runtime error.** If two loaded packages both export `Counter`, the second `Counter` replaces the first. This is documented behavior, not a bug.
+3. **Name collision within a workspace is silent.** If two loaded packages both define `Counter`, the second definition hot-reloads over the first via `update_class` — no warning is emitted. This is a consequence of the `register_class/0` on-load codegen, which calls `beamtalk_object_class:start` and falls through to `update_class` on `already_started`. See Implementation item 4 for planned collision warnings.
 4. **v0.2 will introduce a module/import system.** The specific design (package-scoped imports vs. nested classes) is deferred until the language has more real-world usage to inform the decision. See Alternatives Considered below for the leading candidates.
 
 ### What v0.1 provides
@@ -58,6 +58,8 @@ c count
 ```
 // Loading a second package that also defines Counter:
 :load other-package/counter.bt
+// Currently: silently hot-reloads Counter with no warning
+// Planned (v0.1): emit a warning like:
 // ⚠️ Warning: Class 'Counter' redefined (was from my-app, now from other-package)
 ```
 
@@ -240,7 +242,9 @@ drawing Canvas new draw: circle
 - Name collisions between user code and third-party packages are possible (mitigated by small ecosystem)
 - No visibility control — all classes are public, all methods are public
 - Large projects have no organizational mechanism beyond filesystem conventions
-- "Last loaded wins" semantics for duplicate class names may surprise users
+- Silent hot-reload on duplicate class names may surprise users — no warning is emitted today
+- Tooling (LSP, IDE) must resolve ambiguous class names without namespace context; "go to definition" and error messages cannot distinguish same-named classes from different packages
+- A dependency could shadow stdlib class names (`Integer`, `Actor`) with no guardrail, creating a supply-chain risk
 
 ### Neutral
 - ADR 0016 internal naming (`bt@package@module`) is unaffected — it continues to work as designed
@@ -249,15 +253,19 @@ drawing Canvas new draw: circle
 
 ## Implementation
 
-v0.1 requires only documentation changes:
+v0.1 requires implementation of collision warnings plus documentation changes:
 
-1. **Document flat namespace as explicit design** in the language guide and getting-started docs
-2. **Document naming conventions** for avoiding collisions (e.g., prefix package-specific classes)
-3. **Document `:load` behavior** for loading multiple files — classes are globally registered
-4. **Add collision warning** when a class is redefined (if not already present)
-5. **Update known-limitations.md** to reference this ADR
+1. **Add collision warning** when a class is redefined during `:load` or module on-load. The `register_class/0` codegen currently falls through to `update_class` silently on `already_started` — add a `?LOG_WARNING` and surface the warning to REPL users (e.g., `⚠️ Class 'Counter' redefined`)
+2. **Prevent stdlib shadowing** — emit an error (not just a warning) if user code redefines a stdlib class name (`Integer`, `String`, `Actor`, etc.)
+3. **Document flat namespace as explicit design** in the language guide and getting-started docs
+4. **Document naming conventions** for avoiding collisions (e.g., prefix package-specific classes)
+5. **Document `:load` behavior** for loading multiple files — classes are globally registered
+6. **Update known-limitations.md** to reference this ADR
 
-For v0.2 (import system), the leading candidate is Option B (package-scoped imports), which builds naturally on ADR 0016 naming and ADR 0026 package definitions. A separate ADR will be drafted when v0.2 planning begins.
+For v0.2 (import system), the leading candidate is Option B (package-scoped imports), which builds naturally on ADR 0016 naming and ADR 0026 package definitions. A separate ADR will be drafted when v0.2 planning begins. Considerations for that ADR should include:
+- A qualified-name escape hatch (e.g., `MyApp::Counter`) for disambiguation without full imports
+- Whether collision policy should be configurable (error vs. warn vs. replace)
+- How class identity surfaces in tooling, error messages, and serialization
 
 ## Migration Path
 
