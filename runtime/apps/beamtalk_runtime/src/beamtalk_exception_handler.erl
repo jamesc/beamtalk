@@ -39,6 +39,7 @@
     wrap/1,
     ensure_wrapped/1,
     ensure_wrapped/2,
+    ensure_wrapped/3,
     matches_class/2,
     dispatch/3,
     has_method/1,
@@ -216,6 +217,44 @@ ensure_wrapped(Other) ->
 ensure_wrapped(#{'$beamtalk_class' := _} = Already, Stacktrace) ->
     Already#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)};
 ensure_wrapped(Other, Stacktrace) ->
+    Wrapped = wrap(Other),
+    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)}.
+
+%% @doc Idempotent exception wrapper with Erlang exception type (BT-728).
+%%
+%% Like ensure_wrapped/2 but also accepts the Erlang exception class atom
+%% (error, exit, throw) from the try/catch <Type, Error, Stack> triple.
+%% Maps exit → erlang_exit kind, throw → erlang_throw kind so that
+%% ExitError/ThrowError classes are used instead of RuntimeError.
+-spec ensure_wrapped(atom(), term(), list()) -> map().
+ensure_wrapped(_Type, #{'$beamtalk_class' := _} = Already, Stacktrace) ->
+    Already#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)};
+ensure_wrapped(_Type, #beamtalk_error{} = Error, Stacktrace) ->
+    Wrapped = wrap(Error),
+    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)};
+ensure_wrapped(exit, Reason, Stacktrace) ->
+    Error = #beamtalk_error{
+        kind = erlang_exit,
+        class = undefined,
+        selector = undefined,
+        message = iolist_to_binary(io_lib:format("~p", [Reason])),
+        hint = undefined,
+        details = #{reason => Reason}
+    },
+    Wrapped = wrap(Error),
+    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)};
+ensure_wrapped(throw, Reason, Stacktrace) ->
+    Error = #beamtalk_error{
+        kind = erlang_throw,
+        class = undefined,
+        selector = undefined,
+        message = iolist_to_binary(io_lib:format("~p", [Reason])),
+        hint = undefined,
+        details = #{reason => Reason}
+    },
+    Wrapped = wrap(Error),
+    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)};
+ensure_wrapped(_Type, Other, Stacktrace) ->
     Wrapped = wrap(Other),
     Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)}.
 
