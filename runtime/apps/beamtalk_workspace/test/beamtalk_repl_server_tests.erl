@@ -2381,6 +2381,50 @@ handle_op_sessions_no_sup_test() ->
     ?assertMatch(#{<<"id">> := <<"s1">>}, Decoded).
 
 %% ===================================================================
+%% show-codegen handle_op tests (BT-700)
+%% ===================================================================
+
+handle_op_show_codegen_empty_test() ->
+    %% Empty code should return error
+    Msg = make_proto_msg(<<"show-codegen">>, <<"sc1">>, #{<<"code">> => <<>>}),
+    Params = #{<<"code">> => <<>>},
+    Result = beamtalk_repl_server:handle_op(<<"show-codegen">>, Params, Msg, self()),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertMatch(#{<<"id">> := <<"sc1">>}, Decoded),
+    ?assert(maps:is_key(<<"error">>, Decoded)),
+    ?assertMatch(#{<<"status">> := [<<"done">>, <<"error">>]}, Decoded).
+
+handle_op_show_codegen_no_code_param_test() ->
+    %% Missing code param defaults to empty binary -> error
+    Msg = make_proto_msg(<<"show-codegen">>, <<"sc2">>),
+    Params = #{},
+    Result = beamtalk_repl_server:handle_op(<<"show-codegen">>, Params, Msg, self()),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertMatch(#{<<"id">> := <<"sc2">>}, Decoded),
+    ?assert(maps:is_key(<<"error">>, Decoded)).
+
+handle_op_show_codegen_dead_session_test() ->
+    %% Using a dead session PID should be caught by handle_protocol_request
+    DeadPid = spawn(fun() -> ok end),
+    timer:sleep(50),
+    Json = jsx:encode(#{<<"op">> => <<"show-codegen">>, <<"id">> => <<"sc3">>,
+                        <<"params">> => #{<<"code">> => <<"1 + 2">>}}),
+    {ok, Msg} = beamtalk_repl_protocol:decode(Json),
+    Result = beamtalk_repl_server:handle_protocol_request(Msg, DeadPid),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertMatch(#{<<"id">> := <<"sc3">>}, Decoded),
+    ?assert(maps:is_key(<<"error">>, Decoded)).
+
+handle_op_show_codegen_in_describe_test() ->
+    %% Verify show-codegen appears in describe ops
+    Msg = make_proto_msg(<<"describe">>, <<"d1">>),
+    Result = beamtalk_repl_server:handle_op(<<"describe">>, #{}, Msg, self()),
+    Decoded = jsx:decode(Result, [return_maps]),
+    Ops = maps:get(<<"ops">>, Decoded),
+    ?assert(maps:is_key(<<"show-codegen">>, Ops)),
+    ?assertMatch(#{<<"params">> := [<<"code">>]}, maps:get(<<"show-codegen">>, Ops)).
+
+%% ===================================================================
 %% handle_protocol_request direct test (BT-627)
 %% ===================================================================
 
