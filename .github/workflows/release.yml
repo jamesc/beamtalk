@@ -35,18 +35,7 @@ jobs:
 
       - name: Determine version
         id: version
-        run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            TAG="${{ github.event.release.tag_name }}"
-          elif [ -n "${{ inputs.tag }}" ]; then
-            TAG="${{ inputs.tag }}"
-          else
-            TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "dev")
-          fi
-          VERSION="${TAG#v}"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "📦 Building release: ${VERSION}"
+        run: scripts/ci/determine-version.sh "${{ github.event_name }}" "${{ github.event.release.tag_name }}" "${{ inputs.tag }}"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -92,11 +81,7 @@ jobs:
 
       - name: Package tarball
         id: package
-        run: |
-          ARCHIVE="beamtalk-${{ steps.version.outputs.version }}-linux-x86_64.tar.gz"
-          tar -czf "${ARCHIVE}" -C dist .
-          echo "archive=${ARCHIVE}" >> "$GITHUB_OUTPUT"
-          echo "📦 Created ${ARCHIVE} ($(du -h "${ARCHIVE}" | cut -f1))"
+        run: scripts/ci/package-release.sh "${{ steps.version.outputs.version }}" linux-x86_64
 
       - name: Upload release asset
         if: github.event_name == 'release'
@@ -105,6 +90,7 @@ jobs:
         run: |
           gh release upload "${{ steps.version.outputs.tag }}" \
             "${{ steps.package.outputs.archive }}" \
+            "${{ steps.package.outputs.archive }}.sha256" \
             --clobber
 
       - name: Upload artifact (workflow_dispatch)
@@ -112,8 +98,9 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: beamtalk-${{ steps.version.outputs.version }}-linux-x86_64
-          path: ${{ steps.package.outputs.archive }}
-          retention-days: 7
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.archive }}.sha256
 
   # ─── Full distribution (macOS x86_64) ──────────────────────────────────
   macos-x86_64:
@@ -126,18 +113,7 @@ jobs:
 
       - name: Determine version
         id: version
-        run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            TAG="${{ github.event.release.tag_name }}"
-          elif [ -n "${{ inputs.tag }}" ]; then
-            TAG="${{ inputs.tag }}"
-          else
-            TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "dev")
-          fi
-          VERSION="${TAG#v}"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "📦 Building release: ${VERSION}"
+        run: scripts/ci/determine-version.sh "${{ github.event_name }}" "${{ github.event.release.tag_name }}" "${{ inputs.tag }}"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -182,11 +158,7 @@ jobs:
 
       - name: Package tarball
         id: package
-        run: |
-          ARCHIVE="beamtalk-${{ steps.version.outputs.version }}-macos-x86_64.tar.gz"
-          tar -czf "${ARCHIVE}" -C dist .
-          echo "archive=${ARCHIVE}" >> "$GITHUB_OUTPUT"
-          echo "📦 Created ${ARCHIVE} ($(du -h "${ARCHIVE}" | cut -f1))"
+        run: scripts/ci/package-release.sh "${{ steps.version.outputs.version }}" macos-x86_64
 
       - name: Upload release asset
         if: github.event_name == 'release'
@@ -195,6 +167,7 @@ jobs:
         run: |
           gh release upload "${{ steps.version.outputs.tag }}" \
             "${{ steps.package.outputs.archive }}" \
+            "${{ steps.package.outputs.archive }}.sha256" \
             --clobber
 
       - name: Upload artifact (workflow_dispatch)
@@ -202,8 +175,9 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: beamtalk-${{ steps.version.outputs.version }}-macos-x86_64
-          path: ${{ steps.package.outputs.archive }}
-          retention-days: 7
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.archive }}.sha256
 
   # ─── Full distribution (macOS ARM64) ──────────────────────────────────
   macos-arm64:
@@ -216,18 +190,7 @@ jobs:
 
       - name: Determine version
         id: version
-        run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            TAG="${{ github.event.release.tag_name }}"
-          elif [ -n "${{ inputs.tag }}" ]; then
-            TAG="${{ inputs.tag }}"
-          else
-            TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "dev")
-          fi
-          VERSION="${TAG#v}"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "📦 Building release: ${VERSION}"
+        run: scripts/ci/determine-version.sh "${{ github.event_name }}" "${{ github.event.release.tag_name }}" "${{ inputs.tag }}"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -272,11 +235,7 @@ jobs:
 
       - name: Package tarball
         id: package
-        run: |
-          ARCHIVE="beamtalk-${{ steps.version.outputs.version }}-macos-arm64.tar.gz"
-          tar -czf "${ARCHIVE}" -C dist .
-          echo "archive=${ARCHIVE}" >> "$GITHUB_OUTPUT"
-          echo "📦 Created ${ARCHIVE} ($(du -h "${ARCHIVE}" | cut -f1))"
+        run: scripts/ci/package-release.sh "${{ steps.version.outputs.version }}" macos-arm64
 
       - name: Upload release asset
         if: github.event_name == 'release'
@@ -285,6 +244,7 @@ jobs:
         run: |
           gh release upload "${{ steps.version.outputs.tag }}" \
             "${{ steps.package.outputs.archive }}" \
+            "${{ steps.package.outputs.archive }}.sha256" \
             --clobber
 
       - name: Upload artifact (workflow_dispatch)
@@ -292,8 +252,9 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: beamtalk-${{ steps.version.outputs.version }}-macos-arm64
-          path: ${{ steps.package.outputs.archive }}
-          retention-days: 7
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.archive }}.sha256
 
   # ─── Full distribution (Windows x86_64) ────────────────────────────────
   windows-x86_64:
@@ -308,18 +269,7 @@ jobs:
       - name: Determine version
         id: version
         shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            TAG="${{ github.event.release.tag_name }}"
-          elif [ -n "${{ inputs.tag }}" ]; then
-            TAG="${{ inputs.tag }}"
-          else
-            TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "dev")
-          fi
-          VERSION="${TAG#v}"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "📦 Building release: ${VERSION}"
+        run: scripts/ci/determine-version.sh "${{ github.event_name }}" "${{ github.event.release.tag_name }}" "${{ inputs.tag }}"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -371,43 +321,7 @@ jobs:
       - name: Package zip
         id: package
         shell: bash
-        run: |
-          ARCHIVE="beamtalk-${{ steps.version.outputs.version }}-windows-x86_64.zip"
-          STAGING="beamtalk-staging"
-          mkdir -p "${STAGING}/bin" "${STAGING}/lib/beamtalk/lib"
-
-          # Binaries
-          cp target/release/beamtalk.exe "${STAGING}/bin/"
-          cp target/release/beamtalk-compiler-port.exe "${STAGING}/bin/"
-          cp target/release/beamtalk-lsp.exe "${STAGING}/bin/"
-          cp target/release/beamtalk-mcp.exe "${STAGING}/bin/"
-
-          # OTP application ebin directories
-          for app in beamtalk_runtime beamtalk_workspace beamtalk_compiler jsx; do
-            SRC="runtime/_build/default/lib/${app}/ebin"
-            if [ ! -d "${SRC}" ] || ! ls "${SRC}"/*.beam 1>/dev/null 2>&1; then
-              echo "❌ No .beam files found in ${SRC}. Erlang build may have failed."
-              exit 1
-            fi
-            mkdir -p "${STAGING}/lib/beamtalk/lib/${app}/ebin"
-            cp "${SRC}"/*.beam "${STAGING}/lib/beamtalk/lib/${app}/ebin/"
-            cp "${SRC}"/*.app "${STAGING}/lib/beamtalk/lib/${app}/ebin/" 2>/dev/null || true
-          done
-
-          # Stdlib
-          STDLIB_SRC="runtime/apps/beamtalk_stdlib/ebin"
-          if [ ! -d "${STDLIB_SRC}" ] || ! ls "${STDLIB_SRC}"/*.beam 1>/dev/null 2>&1; then
-            echo "❌ No stdlib .beam files found in ${STDLIB_SRC}. Stdlib build may have failed."
-            exit 1
-          fi
-          mkdir -p "${STAGING}/lib/beamtalk/lib/beamtalk_stdlib/ebin"
-          cp "${STDLIB_SRC}"/*.beam "${STAGING}/lib/beamtalk/lib/beamtalk_stdlib/ebin/"
-          cp "${STDLIB_SRC}"/*.app "${STAGING}/lib/beamtalk/lib/beamtalk_stdlib/ebin/" 2>/dev/null || true
-
-          # Create zip (from inside staging dir so paths are relative)
-          cd "${STAGING}" && 7z a "../${ARCHIVE}" . && cd ..
-          echo "archive=${ARCHIVE}" >> "$GITHUB_OUTPUT"
-          echo "📦 Created ${ARCHIVE}"
+        run: scripts/ci/package-release.sh "${{ steps.version.outputs.version }}" windows-x86_64
 
       - name: Upload release asset
         if: github.event_name == 'release'
@@ -417,6 +331,7 @@ jobs:
         run: |
           gh release upload "${{ steps.version.outputs.tag }}" \
             "${{ steps.package.outputs.archive }}" \
+            "${{ steps.package.outputs.archive }}.sha256" \
             --clobber
 
       - name: Upload artifact (workflow_dispatch)
@@ -424,8 +339,9 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: beamtalk-${{ steps.version.outputs.version }}-windows-x86_64
-          path: ${{ steps.package.outputs.archive }}
-          retention-days: 7
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.archive }}.sha256
 
   # ─── Cross-compile beamtalk-lsp for per-platform VS Code extensions ───
   build-lsp:
