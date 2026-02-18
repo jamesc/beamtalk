@@ -175,10 +175,6 @@ fn walk_expression(
         Expression::FieldAccess { receiver, .. } => {
             walk_expression(receiver, hierarchy, diagnostics, visitor);
         }
-        Expression::Pipe { value, target, .. } => {
-            walk_expression(value, hierarchy, diagnostics, visitor);
-            walk_expression(target, hierarchy, diagnostics, visitor);
-        }
         Expression::Match { value, arms, .. } => {
             walk_expression(value, hierarchy, diagnostics, visitor);
             for arm in arms {

@@ -12,19 +12,6 @@ All classes live in a flat global namespace. There is no `import`, `export`, or 
 
 **Tracking:** [BT-714](https://linear.app/beamtalk/issue/BT-714)
 
-### No Pipe Operators
-
-The `|>` and `|>>` pipe operators are not implemented. Use message chaining or intermediate variables instead.
-
-**Workaround:**
-```beamtalk
-// Instead of: list |> select: [:x | x > 0] |> collect: [:x | x * 2]
-// Use chaining:
-(list select: [:x | x > 0]) collect: [:x | x * 2]
-```
-
-**Tracking:** [BT-707](https://linear.app/beamtalk/issue/BT-707)
-
 ### No `try`/`catch` Keywords
 
 Exception handling uses block-based syntax only. There are no `try`, `catch`, or `throw` keywords.

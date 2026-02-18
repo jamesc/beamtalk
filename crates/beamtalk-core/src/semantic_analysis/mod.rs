@@ -469,11 +469,6 @@ impl Analyser {
                 self.analyse_expression(expression, parent_context);
             }
 
-            Pipe { value, target, .. } => {
-                self.analyse_expression(value, None);
-                self.analyse_expression(target, None);
-            }
-
             Match { value, arms, .. } => {
                 self.analyse_expression(value, None);
                 for arm in arms {

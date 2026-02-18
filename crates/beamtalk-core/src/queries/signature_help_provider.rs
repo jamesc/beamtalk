@@ -202,10 +202,6 @@ fn find_signature_in_expr(
             }
             None
         }
-        Expression::Pipe { value, target, .. } => {
-            find_signature_in_expr(value, offset, context, hierarchy, type_map)
-                .or_else(|| find_signature_in_expr(target, offset, context, hierarchy, type_map))
-        }
         Expression::Match { value, arms, .. } => {
             find_signature_in_expr(value, offset, context, hierarchy, type_map).or_else(|| {
                 arms.iter().find_map(|arm| {

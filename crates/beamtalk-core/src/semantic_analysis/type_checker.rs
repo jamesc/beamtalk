@@ -359,12 +359,6 @@ impl TypeChecker {
                 InferredType::Known("Block".into())
             }
 
-            // Pipe — infer both sides, result is target's return
-            Expression::Pipe { value, target, .. } => {
-                self.infer_expr(value, hierarchy, env, in_abstract_method);
-                self.infer_expr(target, hierarchy, env, in_abstract_method)
-            }
-
             // Match — result is Dynamic (branches may differ)
             Expression::Match { value, arms, .. } => {
                 self.infer_expr(value, hierarchy, env, in_abstract_method);

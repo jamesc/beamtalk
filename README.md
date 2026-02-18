@@ -705,7 +705,7 @@ Beamtalk combines ideas from:
 
 - **Smalltalk/Newspeak** — Live programming, message-based syntax, reflection (inspiration, not strict compatibility)
 - **Erlang/BEAM** — Actors, fault tolerance, hot code reload, distribution
-- **Elixir** — Pipe operator, protocols, comprehensions, with blocks
+- **Elixir** — Protocols, comprehensions, with blocks
 - **Gleam** — Result types, exhaustive pattern matching
 - **Dylan** — Sealing, conditions/restarts, method combinations
 - **TypeScript** — Compiler-as-language-service architecture
