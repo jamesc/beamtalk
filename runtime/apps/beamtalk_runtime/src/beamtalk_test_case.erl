@@ -23,7 +23,8 @@
     fail/1,
     run_all/1,
     run_single/2,
-    execute_tests/5
+    execute_tests/5,
+    spawn_test_execution/6
 ]).
 
 %% @doc Assert that a condition is true.
@@ -425,3 +426,21 @@ format_results(Results, Duration) ->
             [Summary, "\n\n" | Failures]
     end,
     unicode:characters_to_binary(IoList).
+
+%% @doc Spawn test execution in a separate process to avoid gen_server deadlock.
+%%
+%% BT-440/BT-704: Test execution calls back into the class system,
+%% so it must run outside the class process.
+-spec spawn_test_execution(atom(), list(), atom(), atom(), map(), {pid(), term()}) -> pid().
+spawn_test_execution(Selector, Args, ClassName, DefiningModule, FlatMethods, From) ->
+    spawn(fun() ->
+        try
+            Result = execute_tests(Selector, Args, ClassName, DefiningModule, FlatMethods),
+            gen_server:reply(From, {ok, Result})
+        catch
+            C:E ->
+                ?LOG_ERROR("Test execution ~p:~p failed: ~p:~p",
+                             [ClassName, Selector, C, E]),
+                gen_server:reply(From, {error, E})
+        end
+    end).

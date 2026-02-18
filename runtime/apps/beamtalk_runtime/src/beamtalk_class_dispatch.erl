@@ -19,7 +19,8 @@
     unwrap_class_call/1,
     class_method_fun_name/1,
     is_test_execution_selector/1,
-    handle_class_method_call/6
+    handle_class_method_call/6,
+    handle_async_dispatch/5
 ]).
 
 -type selector() :: atom().
@@ -165,3 +166,33 @@ class_method_fun_name(Selector) ->
 is_test_execution_selector(runAll) -> true;
 is_test_execution_selector('run:') -> true;
 is_test_execution_selector(_) -> false.
+
+%% @doc Handle async cast message dispatch for Future protocol.
+%%
+%% Dispatches class query messages asynchronously, resolving or rejecting
+%% the associated Future process.
+-spec handle_async_dispatch(
+    term(), class_name(),
+    #{selector() => {class_name(), term()}},
+    class_name() | none, atom()
+) -> ok.
+handle_async_dispatch({Selector, Args, FuturePid}, ClassName, Flattened, Superclass, Module) ->
+    case {Selector, Args} of
+        {methods, []} ->
+            FuturePid ! {resolve, maps:keys(Flattened)};
+        {superclass, []} ->
+            FuturePid ! {resolve, Superclass};
+        {class_name, []} ->
+            FuturePid ! {resolve, ClassName};
+        {module_name, []} ->
+            FuturePid ! {resolve, Module};
+        {{method, _MethodSelector}, _} ->
+            Error = beamtalk_error:new(type_error, ClassName),
+            FuturePid ! {reject, Error};
+        _ ->
+            Error = beamtalk_error:new(does_not_understand, ClassName, Selector),
+            FuturePid ! {reject, Error}
+    end,
+    ok;
+handle_async_dispatch(_Msg, _ClassName, _Flattened, _Superclass, _Module) ->
+    ok.
