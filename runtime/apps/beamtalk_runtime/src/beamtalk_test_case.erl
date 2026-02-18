@@ -432,10 +432,10 @@ format_results(Results, Duration) ->
 %% BT-440/BT-704: Test execution calls back into the class system,
 %% so it must run outside the class process.
 -spec spawn_test_execution(atom(), list(), atom(), atom(), map(), {pid(), term()}) -> pid().
-spawn_test_execution(Selector, Args, ClassName, DefiningModule, FlatMethods, From) ->
+spawn_test_execution(Selector, Args, ClassName, TestModule, FlatMethods, From) ->
     spawn(fun() ->
         try
-            Result = execute_tests(Selector, Args, ClassName, DefiningModule, FlatMethods),
+            Result = execute_tests(Selector, Args, ClassName, TestModule, FlatMethods),
             gen_server:reply(From, {ok, Result})
         catch
             C:E:ST ->

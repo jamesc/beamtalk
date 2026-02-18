@@ -113,7 +113,7 @@ unwrap_class_call({error, Error}) ->
     selector(), list(), class_name(), atom(),
     #{selector() => {class_name(), term()}},
     map()
-) -> {reply, term(), map()} | {test_spawn, atom()} | {error, not_found}.
+) -> {reply, term(), map()} | test_spawn | {error, not_found}.
 handle_class_method_call(Selector, Args, ClassName, Module, FlatClassMethods, ClassVars) ->
     case maps:find(Selector, FlatClassMethods) of
         {ok, {DefiningClass, _MethodInfo}} ->
@@ -134,7 +134,7 @@ handle_class_method_call(Selector, Args, ClassName, Module, FlatClassMethods, Cl
             case is_test_execution_selector(Selector) andalso
                  DefiningClass =:= 'TestCase' of
                 true ->
-                    {test_spawn, DefiningModule};
+                    test_spawn;
                 false ->
                     %% Build class self object for `self` reference in class methods
                     ClassSelf = {beamtalk_object, beamtalk_class_registry:class_object_tag(ClassName), DefiningModule, self()},

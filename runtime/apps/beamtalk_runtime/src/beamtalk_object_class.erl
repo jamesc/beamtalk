@@ -420,9 +420,9 @@ handle_call({class_method_call, Selector, Args}, From,
             Selector, Args, ClassName, Module, FlatClassMethods, ClassVars) of
         {reply, Result, NewClassVars} ->
             {reply, Result, State#class_state{class_variables = NewClassVars}};
-        {test_spawn, DefiningModule} ->
+        test_spawn ->
             beamtalk_test_case:spawn_test_execution(
-                Selector, Args, ClassName, DefiningModule, FlatMethods, From),
+                Selector, Args, ClassName, Module, FlatMethods, From),
             {noreply, State};
         {error, not_found} ->
             {reply, {error, not_found}, State}
