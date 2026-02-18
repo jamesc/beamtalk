@@ -26,6 +26,7 @@ Welcome to the Beamtalk documentation! This guide will help you navigate the des
 | [Language Features](beamtalk-language-features.md) | Complete syntax reference: messages, blocks, classes, strings |
 | [Syntax Rationale](beamtalk-syntax-rationale.md) | Why we keep certain Smalltalk conventions and diverge from others |
 | [Object Model](ADR/0005-beam-object-model-pragmatic-hybrid.md) | How "everything is an object" maps to the BEAM (ADR 0005) |
+| [Known Limitations](known-limitations.md) | What's not yet supported in v0.1, with workarounds |
 
 ### Architecture & Implementation
 

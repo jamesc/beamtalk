@@ -634,6 +634,7 @@ BEAMTALK_NODE_NAME=beamtalk_custom@localhost
 - [Language Features](docs/beamtalk-language-features.md) — Syntax, semantics, and examples
 - [Syntax Rationale](docs/beamtalk-syntax-rationale.md) — Why we keep/change Smalltalk conventions
 - [Object Model](docs/ADR/0005-beam-object-model-pragmatic-hybrid.md) — How Smalltalk objects map to BEAM
+- [Known Limitations](docs/known-limitations.md) — What's not yet supported in v0.1
 
 ### Architecture
 

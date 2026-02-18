@@ -445,6 +445,7 @@ Goodbye!
 - Try `examples/stream.bt` for lazy pipeline and file streaming examples
 - Read `docs/beamtalk-language-features.md` for full language syntax
 - Check out `docs/beamtalk-principles.md` to understand the design philosophy
+- Review `docs/known-limitations.md` for what's not yet supported
 - Try building your own actors and experimenting with message passing!
 
 ## Getting Help
