@@ -29,6 +29,9 @@ VERSION="${TAG#v}"
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
     echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
     echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+else
+    echo "tag=${TAG}"
+    echo "version=${VERSION}"
 fi
 
 echo "📦 Building release: ${VERSION}"

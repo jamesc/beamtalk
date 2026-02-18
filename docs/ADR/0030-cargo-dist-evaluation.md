@@ -2,11 +2,13 @@
 
 ## Status
 
-**Rejected** — cargo-dist is not viable for beamtalk's release packaging needs at this time.
+Rejected (2026-02-18)
 
 ## Context
 
 ### Problem
+
+cargo-dist is not viable for beamtalk's release packaging needs at this time.
 
 Beamtalk has a hand-written 566-line `release.yml` GitHub Actions workflow that builds platform-specific distribution tarballs/zips for 4 platforms (Linux x86_64, macOS x86_64, macOS ARM64, Windows x86_64) and bundles Erlang BEAM runtime files. This works but is custom CI to maintain.
 
@@ -16,8 +18,7 @@ Beamtalk has a hand-written 566-line `release.yml` GitHub Actions workflow that 
 
 Beamtalk's distribution requires a specific layout that bundles 4 Rust binaries alongside 8 Erlang OTP applications:
 
-```
-dist/
+```text
   bin/
     beamtalk
     beamtalk-compiler-port
@@ -138,6 +139,19 @@ The existing Windows build has special handling (explicit bash shell, manual art
 The fundamental blocker is that cargo-dist cannot include arbitrary directory trees (our `lib/beamtalk/lib/*/ebin/` structure) inside release archives. This is a core requirement for beamtalk — without bundled BEAM files, the distributed binary cannot function.
 
 The gains (checksums, install scripts, Homebrew) are valuable but can be added to the existing workflow incrementally without cargo-dist.
+
+## Prior Art
+
+- Existing custom GitHub Actions workflow: `.github/workflows/release.yml`, which builds multi-platform archives and bundles the Erlang BEAM runtime.
+- cargo-dist is widely used for Rust-only binary distribution but lacks support for bundling arbitrary `lib/` directory trees.
+
+## User Impact
+
+Rejecting cargo-dist has no immediate impact on end users: release artifacts, supported platforms, and archive contents remain the same. Improvements (checksums, install scripts) are added incrementally on top of the existing release process.
+
+## Steelman Analysis
+
+The strongest case for cargo-dist is standardized release packaging, automatic checksums and installers, and reduced CI maintenance via workflow regeneration. If cargo-dist could package arbitrary directory trees alongside binaries, beamtalk would benefit from a simpler release pipeline and alignment with Rust ecosystem practices. The tool is actively developed and may add this capability in the future.
 
 ## Alternatives Evaluated
 
@@ -270,6 +284,14 @@ This approach:
 - The existing `release.yml` workflow remains the source of truth for releases
 - No `dist-workspace.toml` or `[profile.dist]` configuration is added
 - Future improvements to the release pipeline should be made incrementally to the existing workflow
+
+## Implementation
+
+N/A for rejected ADR — no implementation work will be done to adopt cargo-dist.
+
+## Migration Path
+
+N/A for rejected ADR — the current release workflow is retained.
 
 ## References
 

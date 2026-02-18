@@ -79,6 +79,8 @@ fi
 
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
     echo "archive=${ARCHIVE}" >> "${GITHUB_OUTPUT}"
+else
+    echo "archive=${ARCHIVE}"
 fi
 
 echo "📦 Created ${ARCHIVE} ($(du -h "${ARCHIVE}" | cut -f1))"
