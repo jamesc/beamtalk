@@ -575,25 +575,6 @@ if ($env:GIT_SIGNING_KEY) {
 }
 } # End of: if (-not $skipWorktreeSetup)
 
-# Run project-specific hook if it exists (for custom per-worktree setup like env files)
-# Load from worktree (not mainRepo) so reconnects use the synced version
-$hookScript = Join-Path $worktreePath ".devcontainer\worktree-up-hook.ps1"
-if (Test-Path $hookScript) {
-    Write-Host "🔧 Running project hook..." -ForegroundColor Cyan
-    try {
-        & $hookScript -WorktreePath $worktreePath -Branch $Branch -MainRepo $mainRepo
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "✅ Project hook completed" -ForegroundColor Green
-        }
-        else {
-            Write-Host "⚠️  Project hook returned non-zero exit code" -ForegroundColor Yellow
-        }
-    }
-    catch {
-        Write-Host "⚠️  Project hook failed: $_" -ForegroundColor Yellow
-    }
-}
-
 Write-Host "`nStarting: $Command" -ForegroundColor Cyan
 
 # Connect to the container and run the command

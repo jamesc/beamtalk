@@ -140,12 +140,11 @@ For Erlang distribution, node names can be configured:
 
 ### Parallel Worktrees
 
-When running multiple Beamtalk instances in parallel worktrees, each instance automatically gets a unique port and node name:
+When running multiple Beamtalk instances in parallel worktrees, each instance uses an OS-assigned REPL port by default:
 
-- Worktree scripts create `.env` files with derived values
-- `BT-190` branch → port `9190`, node `beamtalk_bt190@localhost`
-- `BT-64` branch → port `9064`, node `beamtalk_bt64@localhost`
-- `main` branch → port `9000`, node `beamtalk@localhost`
+- Port defaults to `0` (ephemeral) to avoid collisions
+- Override with `beamtalk repl --port <port>` or `BEAMTALK_REPL_PORT`
+- Node name defaults to `beamtalk@localhost` unless overridden by `--node` or `BEAMTALK_NODE_NAME`
 
 See [Parallel Development with Worktrees](../AGENTS.md#parallel-development-with-worktrees) for details.
 

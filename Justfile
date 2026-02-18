@@ -482,7 +482,8 @@ coverage-runtime-open:
 # Clean Rust build artifacts
 clean-rust:
     @echo "🧹 Cleaning Rust artifacts..."
-    @cargo clean --quiet
+    # Devcontainers mount target as a volume cache; avoid deleting the mount point.
+    @if mountpoint -q target; then rm -rf target/* 2>/dev/null || true; else cargo clean --quiet; fi
     @echo "  ✅ Cleaned target/"
 
 # Clean Erlang build artifacts

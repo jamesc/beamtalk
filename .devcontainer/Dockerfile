@@ -2,7 +2,7 @@
 # 
 # This Dockerfile installs all core development dependencies:
 # - Rust compiler and cargo tools
-# - Erlang/OTP and rebar3 for BEAM bytecode
+# - Erlang/OTP for BEAM bytecode
 # - Node.js for build tooling
 # - GitHub CLI (gh)
 # - streamlinear CLI for Linear issue management
@@ -12,10 +12,21 @@
 
 FROM mcr.microsoft.com/devcontainers/rust:1-bookworm
 
-# Install Erlang/OTP, git, and networking/debugging tools
+# Install Erlang Solutions repository, Erlang/OTP, git, and networking/debugging tools
 RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     && apt-get install -y --no-install-recommends \
-        erlang rebar3 git gettext-base \
+        ca-certificates gnupg \
+    && curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 \
+        https://binaries2.erlang-solutions.com/GPG-KEY-pmanager.asc \
+        -o /tmp/GPG-KEY-pmanager.asc \
+    && grep -q "BEGIN PGP PUBLIC KEY BLOCK" /tmp/GPG-KEY-pmanager.asc \
+    && apt-key add /tmp/GPG-KEY-pmanager.asc \
+    && rm -f /tmp/GPG-KEY-pmanager.asc \
+    && echo "deb http://binaries2.erlang-solutions.com/debian/ bookworm-esl-erlang-27 contrib" \
+        > /etc/apt/sources.list.d/erlang-solutions.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        esl-erlang git gettext-base \
         socat netcat-openbsd lsof \
         curl wget jq htop strace \
     && apt-get clean \
@@ -48,12 +59,16 @@ RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/ca
 # Install streamlinear CLI for Linear issue management (used by Copilot skill)
 RUN npm install -g streamlinear@github:obra/streamlinear --ignore-scripts
 
+# Install rebar3
+RUN curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 \
+        https://s3.amazonaws.com/rebar3/rebar3 \
+        -o /usr/local/bin/rebar3 \
+    && chmod +x /usr/local/bin/rebar3
+
 # Verify installations
 RUN rustc --version && cargo --version && erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell \
-    && node --version && npm --version && gh --version && (streamlinear-cli --version 2>/dev/null || true)
-
-# Set up Erlang paths
-ENV PATH="/usr/lib/erlang/bin:${PATH}"
+    && node --version && npm --version && gh --version && (streamlinear-cli --version 2>/dev/null || true) \
+    && rebar3 --version
 
 # Pre-create cargo registry directory with correct ownership
 # This avoids needing sudo chown in postCreateCommand

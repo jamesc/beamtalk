@@ -31,17 +31,12 @@
         "rust-analyzer.check.command": "clippy",
         "rust-analyzer.cargo.features": "all",
         "editor.formatOnSave": true,
-        "[rust]": {
-          "editor.defaultFormatter": "rust-lang.rust-analyzer"
-        },
         "files.watcherExclude": {
           "**/target/**": true
         }
       }
     }
   },
-  // initializeCommand: Ensure .env file exists before container starts (--env-file requires it)
-  "initializeCommand": "pwsh -NoProfile -File ${localWorkspaceFolder}/.devcontainer/ensure-env-file.ps1",
   "postCreateCommand": "sudo chown -R vscode:vscode ${containerWorkspaceFolder} /usr/local/cargo/registry /home/vscode/.copilot && cargo fetch",
   "postStartCommand": "bash .devcontainer/setup-git-auth.sh || true",
   "remoteUser": "vscode",
@@ -70,7 +65,6 @@
     "CARGO_TARGET_DIR": "${containerWorkspaceFolder}/target"
   },
   "runArgs": [
-    "--env-file=${localWorkspaceFolder}/.env",
     "--label=git.worktree=${localWorkspaceFolderBasename}"
   ],
   "remoteEnv": {

@@ -36,7 +36,6 @@ On Unix-like platforms, the compiler daemon communicates via a **Unix domain soc
 - Socket file is created with the user's filesystem permissions
 - Only the owning user can connect (standard Unix permission model)
 - Session isolation: each terminal session gets its own daemon socket
-- On Unix platforms, the `BEAMTALK_DAEMON_SOCKET` environment variable can override the socket path
 
 ### Workspace Isolation
 
