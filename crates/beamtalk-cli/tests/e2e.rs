@@ -601,9 +601,14 @@ impl ReplClient {
         loop {
             match self.ws.read() {
                 Ok(tungstenite::Message::Text(text)) => {
-                    // Skip push messages (e.g. Transcript push from ADR 0017)
+                    // Skip push messages (e.g. Transcript push, actor lifecycle events)
                     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if parsed.get("push").is_some() {
+                        if parsed.get("push").is_some()
+                            || parsed
+                                .get("type")
+                                .and_then(|t| t.as_str())
+                                .is_some_and(|t| t == "push")
+                        {
                             continue;
                         }
                     }

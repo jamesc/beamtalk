@@ -98,6 +98,11 @@ impl ReplClient {
     ///
     /// Times out after [`REPL_IO_TIMEOUT`] to prevent hanging MCP calls
     /// if the REPL becomes unresponsive.
+    ///
+    /// The REPL protocol may send intermediate streaming messages (e.g.
+    /// `out` chunks) before the final response. This method loops until
+    /// it receives a message with a `status` field, which indicates the
+    /// final response.
     #[instrument(skip(self, request))]
     pub async fn send(&self, request: &serde_json::Value) -> Result<ReplResponse, String> {
         let mut inner = self.inner.lock().await;
@@ -112,10 +117,22 @@ impl ReplClient {
                 .await
                 .map_err(|e| format!("Failed to send: {e}"))?;
 
-            let response_text = read_text_message(&mut inner.ws).await?;
+            // Loop to skip intermediate streaming messages (e.g. `out` chunks).
+            // The final response always contains a `status` field.
+            loop {
+                let response_text = read_text_message(&mut inner.ws).await?;
 
-            serde_json::from_str(&response_text)
-                .map_err(|e| format!("Failed to parse response: {e}\nRaw: {response_text}"))
+                let parsed: serde_json::Value = serde_json::from_str(&response_text)
+                    .map_err(|e| format!("Failed to parse response: {e}\nRaw: {response_text}"))?;
+
+                // Intermediate streaming messages lack a `status` field
+                if parsed.get("status").is_some() {
+                    return serde_json::from_value(parsed).map_err(|e| {
+                        format!("Failed to deserialize response: {e}\nRaw: {response_text}")
+                    });
+                }
+                // Skip intermediate `out` messages and continue reading
+            }
         };
 
         tokio::time::timeout(REPL_IO_TIMEOUT, io_future)
@@ -205,6 +222,87 @@ impl ReplClient {
         self.send(&request).await
     }
 
+    /// Send a clear operation to reset REPL bindings.
+    pub async fn clear(&self) -> Result<ReplResponse, String> {
+        let request = serde_json::json!({
+            "op": "clear",
+            "id": next_msg_id()
+        });
+        self.send(&request).await
+    }
+
+    /// Send an unload operation to remove a module from the workspace.
+    pub async fn unload(&self, module: &str) -> Result<ReplResponse, String> {
+        let request = serde_json::json!({
+            "op": "unload",
+            "id": next_msg_id(),
+            "module": module
+        });
+        self.send(&request).await
+    }
+
+    /// Send an interrupt operation to cancel a running evaluation.
+    ///
+    /// Note: Since the MCP client uses a single Mutex-protected WebSocket,
+    /// interrupt cannot preempt an in-flight eval on the same connection.
+    /// This is suitable for canceling evaluations from separate MCP tool
+    /// invocations or when no eval is in progress.
+    pub async fn interrupt(&self) -> Result<ReplResponse, String> {
+        let request = serde_json::json!({
+            "op": "interrupt",
+            "id": next_msg_id()
+        });
+        self.send(&request).await
+    }
+
+    /// Send a show-codegen operation to inspect generated Core Erlang.
+    pub async fn show_codegen(&self, code: &str) -> Result<ReplResponse, String> {
+        let request = serde_json::json!({
+            "op": "show-codegen",
+            "id": next_msg_id(),
+            "code": code
+        });
+        self.send(&request).await
+    }
+
+    /// Send a test operation to run `BUnit` tests for a specific class.
+    pub async fn test_class(&self, class: &str) -> Result<ReplResponse, String> {
+        let request = serde_json::json!({
+            "op": "test",
+            "id": next_msg_id(),
+            "class": class
+        });
+        self.send(&request).await
+    }
+
+    /// Send a test-all operation to run all `BUnit` tests.
+    pub async fn test_all(&self) -> Result<ReplResponse, String> {
+        let request = serde_json::json!({
+            "op": "test-all",
+            "id": next_msg_id()
+        });
+        self.send(&request).await
+    }
+
+    /// Send an info operation to get enriched symbol information.
+    pub async fn info(&self, symbol: &str) -> Result<ReplResponse, String> {
+        let request = serde_json::json!({
+            "op": "info",
+            "id": next_msg_id(),
+            "symbol": symbol
+        });
+        self.send(&request).await
+    }
+
+    /// Send a describe operation for capability discovery.
+    pub async fn describe(&self) -> Result<ReplResponse, String> {
+        let request = serde_json::json!({
+            "op": "describe",
+            "id": next_msg_id()
+        });
+        self.send(&request).await
+    }
+
     /// Send a docs operation.
     pub async fn docs(&self, class: &str, selector: Option<&str>) -> Result<ReplResponse, String> {
         let mut request = serde_json::json!({
@@ -226,7 +324,7 @@ pub struct ReplResponse {
     pub id: Option<String>,
     /// Session ID.
     pub session: Option<String>,
-    /// Status flags: `["done"]` or `["done", "error"]`.
+    /// Status flags: `["done"]`, `["done", "error"]`, or `["done", "test-error"]`.
     pub status: Option<Vec<String>>,
     /// Result value.
     pub value: Option<serde_json::Value>,
@@ -256,6 +354,14 @@ pub struct ReplResponse {
     pub affected_actors: Option<u32>,
     /// Number of actors that failed code migration.
     pub migration_failures: Option<u32>,
+    /// Generated Core Erlang source (show-codegen op).
+    pub core_erlang: Option<String>,
+    /// Test results (test / test-all ops).
+    pub results: Option<serde_json::Value>,
+    /// Supported operations and protocol info (describe op).
+    pub ops: Option<serde_json::Value>,
+    /// Protocol and language versions (describe op).
+    pub versions: Option<serde_json::Value>,
 }
 
 impl ReplResponse {
@@ -263,6 +369,14 @@ impl ReplResponse {
     pub fn is_error(&self) -> bool {
         if let Some(ref status) = self.status {
             return status.iter().any(|s| s == "error");
+        }
+        false
+    }
+
+    /// Check if the response contains a test failure (`"test-error"` status).
+    pub fn has_test_error(&self) -> bool {
+        if let Some(ref status) = self.status {
+            return status.iter().any(|s| s == "test-error");
         }
         false
     }
@@ -667,5 +781,145 @@ mod tests {
         // Port 1 should never have a REPL running
         let result = ReplClient::connect(1, "dummy").await;
         assert!(result.is_err(), "connecting to port 1 should fail");
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test — auto-starts REPL workspace"]
+    async fn test_clear_bindings() -> Result<(), Box<dyn std::error::Error>> {
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie).await?;
+
+        // Set a binding, then clear
+        let _ = client.eval("clearTestVar := 42").await.unwrap();
+        let resp = client.clear().await.unwrap();
+        assert!(!resp.is_error(), "clear should succeed");
+
+        // Verify binding is gone
+        let resp = client.bindings().await.unwrap();
+        let bindings = resp
+            .bindings
+            .unwrap_or(serde_json::Value::Object(serde_json::Map::default()));
+        assert!(
+            bindings.get("clearTestVar").is_none(),
+            "clearTestVar should be cleared"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test — auto-starts REPL workspace"]
+    async fn test_show_codegen() -> Result<(), Box<dyn std::error::Error>> {
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie).await?;
+        let resp = client.show_codegen("1 + 2").await.unwrap();
+        assert!(
+            !resp.is_error(),
+            "show_codegen should succeed: {:?}",
+            resp.error
+        );
+        assert!(
+            resp.core_erlang.is_some(),
+            "should return core_erlang output"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test — auto-starts REPL workspace"]
+    async fn test_info() -> Result<(), Box<dyn std::error::Error>> {
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie).await?;
+        let resp = client.info("Integer").await.unwrap();
+        assert!(!resp.is_error(), "info should succeed: {:?}", resp.error);
+        assert!(resp.info.is_some(), "should return info");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test — auto-starts REPL workspace"]
+    async fn test_describe() -> Result<(), Box<dyn std::error::Error>> {
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie).await?;
+        let resp = client.describe().await.unwrap();
+        assert!(
+            !resp.is_error(),
+            "describe should succeed: {:?}",
+            resp.error
+        );
+        assert!(resp.ops.is_some(), "should return ops");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test — auto-starts REPL workspace"]
+    async fn test_unload_module() -> Result<(), Box<dyn std::error::Error>> {
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie).await?;
+
+        // Load a file first, then unload it
+        let resp = client.load_file("examples/counter.bt").await.unwrap();
+        assert!(!resp.is_error(), "load should succeed");
+        let classes = resp.classes.unwrap_or_default();
+        // Use the actual loaded class name as the module name
+        let module = classes
+            .first()
+            .expect("should have loaded at least one class");
+
+        let resp = client.unload(module).await.unwrap();
+        assert!(!resp.is_error(), "unload should succeed: {:?}", resp.error);
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test — auto-starts REPL workspace"]
+    async fn test_interrupt() -> Result<(), Box<dyn std::error::Error>> {
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie).await?;
+        // Interrupt when nothing is running should still succeed
+        let resp = client.interrupt().await.unwrap();
+        // It's OK if this returns an error (nothing to interrupt) — we just verify it doesn't crash
+        let _ = resp;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test — auto-starts REPL workspace"]
+    async fn test_test_all() -> Result<(), Box<dyn std::error::Error>> {
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie).await?;
+
+        // test-all returns results or an error — either is a valid response
+        let resp = client.test_all().await.unwrap();
+        // Verify we got a parseable response (not a connection error)
+        assert!(resp.status.is_some(), "should have a status");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test — auto-starts REPL workspace"]
+    async fn test_test_class() -> Result<(), Box<dyn std::error::Error>> {
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie).await?;
+
+        // Load BUnit test fixture first
+        let load_resp = client.load_file("test/arithmetic_test.bt").await.unwrap();
+        assert!(
+            !load_resp.is_error(),
+            "load should succeed: {:?}",
+            load_resp.error
+        );
+
+        // Run tests for the loaded class
+        let resp = client.test_class("ArithmeticTest").await.unwrap();
+        assert!(resp.status.is_some(), "should have a status");
+        // If the test infrastructure is available, results should be present
+        if !resp.is_error() {
+            assert!(resp.results.is_some(), "should return test results");
+            assert!(
+                !resp.has_test_error(),
+                "ArithmeticTest should pass without failures"
+            );
+        }
+        Ok(())
     }
 }

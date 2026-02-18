@@ -92,6 +92,38 @@ pub struct DocsParams {
     pub selector: Option<String>,
 }
 
+/// Parameters for the `show_codegen` MCP tool.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ShowCodegenParams {
+    /// Beamtalk code to compile and show the generated Core Erlang for.
+    #[schemars(description = "Beamtalk code to compile and show the generated Core Erlang for")]
+    pub code: String,
+}
+
+/// Parameters for the `test` MCP tool.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct TestParams {
+    /// Optional class name to run tests for. If omitted, runs all tests.
+    #[schemars(description = "Optional TestCase class name. If omitted, runs all BUnit tests.")]
+    pub class: Option<String>,
+}
+
+/// Parameters for the `info` MCP tool.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct InfoParams {
+    /// Symbol name to look up (e.g. a class name like "Integer" or "Counter").
+    #[schemars(description = "Symbol name to get information about (e.g. class name)")]
+    pub symbol: String,
+}
+
+/// Parameters for the `unload` MCP tool.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UnloadParams {
+    /// Name of the module to unload from the workspace.
+    #[schemars(description = "Name of the beamtalk module to unload from the workspace")]
+    pub module: String,
+}
+
 // --- MCP Tool implementations ---
 
 #[tool_router]
@@ -392,6 +424,217 @@ impl BeamtalkMcp {
 
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
+
+    /// Clear all variable bindings in the REPL session.
+    #[tool(
+        description = "Clear all variable bindings in the REPL session. Resets the workspace to a clean state."
+    )]
+    async fn clear(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let response = self
+            .client
+            .clear()
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        if response.is_error() {
+            let msg = response
+                .error_message()
+                .unwrap_or("Failed to clear bindings");
+            return Ok(error_result(format!("ERROR: {msg}")));
+        }
+
+        Ok(CallToolResult::success(vec![Content::text(
+            "Bindings cleared",
+        )]))
+    }
+
+    /// Unload a module from the workspace.
+    #[tool(
+        description = "Unload a module from the workspace. Removes the module and its classes. Does not affect running actors."
+    )]
+    async fn unload(
+        &self,
+        Parameters(params): Parameters<UnloadParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let response = self
+            .client
+            .unload(&params.module)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        if response.is_error() {
+            let msg = response
+                .error_message()
+                .unwrap_or("Failed to unload module");
+            return Ok(error_result(format!("ERROR: {msg}")));
+        }
+
+        Ok(CallToolResult::success(vec![Content::text(format!(
+            "Module '{}' unloaded",
+            params.module
+        ))]))
+    }
+
+    /// Interrupt a running evaluation.
+    #[tool(
+        description = "Interrupt a running evaluation in the REPL. Use this to cancel long-running or stuck evaluations."
+    )]
+    async fn interrupt(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let response = self
+            .client
+            .interrupt()
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        if response.is_error() {
+            let msg = response
+                .error_message()
+                .unwrap_or("Failed to send interrupt");
+            return Ok(error_result(format!("ERROR: {msg}")));
+        }
+
+        Ok(CallToolResult::success(vec![Content::text(
+            "Interrupt sent",
+        )]))
+    }
+
+    /// Inspect the generated Core Erlang code for a beamtalk expression.
+    #[tool(
+        description = "Show the generated Core Erlang code for a beamtalk expression or class definition. Useful for debugging codegen and understanding compilation."
+    )]
+    async fn show_codegen(
+        &self,
+        Parameters(params): Parameters<ShowCodegenParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let response = self
+            .client
+            .show_codegen(&params.code)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        if response.is_error() {
+            let msg = response
+                .error_message()
+                .unwrap_or("Failed to generate Core Erlang");
+            return Ok(error_result(format!("ERROR: {msg}")));
+        }
+
+        let mut parts = Vec::new();
+
+        if let Some(core_erlang) = response.core_erlang {
+            parts.push(Content::text(core_erlang));
+        } else {
+            parts.push(Content::text("No Core Erlang output"));
+        }
+
+        if let Some(warnings) = response.warnings {
+            for w in warnings {
+                parts.push(Content::text(format!("Warning: {w}")));
+            }
+        }
+
+        Ok(CallToolResult::success(parts))
+    }
+
+    /// Run `BUnit` tests.
+    #[tool(
+        description = "Run BUnit tests. Provide a class name to run tests for that class, or omit to run all tests. Returns structured results with pass/fail counts."
+    )]
+    async fn test(
+        &self,
+        Parameters(params): Parameters<TestParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let response = match params.class {
+            Some(ref class) => self.client.test_class(class).await,
+            None => self.client.test_all().await,
+        }
+        .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        if response.is_error() {
+            let msg = response.error_message().unwrap_or("Test execution failed");
+            return Ok(error_result(format!("ERROR: {msg}")));
+        }
+
+        let has_failures = response.has_test_error();
+
+        let text = match response.results {
+            Some(results) => {
+                serde_json::to_string_pretty(&results).unwrap_or_else(|_| results.to_string())
+            }
+            None => "Tests completed (no structured results)".to_string(),
+        };
+
+        if has_failures {
+            return Ok(error_result(format!("TEST FAILURES:\n{text}")));
+        }
+
+        Ok(CallToolResult::success(vec![Content::text(text)]))
+    }
+
+    /// Get enriched information about a beamtalk symbol.
+    #[tool(
+        description = "Get enriched information about a beamtalk symbol (class, method, etc.). Returns kind, superclass chain, methods, source location, and documentation."
+    )]
+    async fn info(
+        &self,
+        Parameters(params): Parameters<InfoParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let response = self
+            .client
+            .info(&params.symbol)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        if response.is_error() {
+            let msg = response.error_message().unwrap_or("Symbol not found");
+            return Ok(error_result(format!("ERROR: {msg}")));
+        }
+
+        let text = match response.info {
+            Some(info) => serde_json::to_string_pretty(&info).unwrap_or_else(|_| info.to_string()),
+            None => "No information available".to_string(),
+        };
+
+        Ok(CallToolResult::success(vec![Content::text(text)]))
+    }
+
+    /// Discover supported REPL operations and protocol version.
+    #[tool(
+        description = "Discover supported REPL operations and protocol version. Returns the list of available ops with their parameters, and version information."
+    )]
+    async fn describe(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let response = self
+            .client
+            .describe()
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        if response.is_error() {
+            let msg = response.error_message().unwrap_or("Describe failed");
+            return Ok(error_result(format!("ERROR: {msg}")));
+        }
+
+        let mut parts = Vec::new();
+
+        if let Some(ops) = response.ops {
+            parts.push(Content::text(format!(
+                "Supported operations:\n{}",
+                serde_json::to_string_pretty(&ops).unwrap_or_else(|_| ops.to_string())
+            )));
+        }
+        if let Some(versions) = response.versions {
+            parts.push(Content::text(format!(
+                "Versions: {}",
+                serde_json::to_string_pretty(&versions).unwrap_or_else(|_| versions.to_string())
+            )));
+        }
+
+        if parts.is_empty() {
+            parts.push(Content::text("No describe information available"));
+        }
+
+        Ok(CallToolResult::success(parts))
+    }
 }
 
 #[tool_handler]
@@ -403,7 +646,10 @@ impl ServerHandler for BeamtalkMcp {
                 "Beamtalk MCP server — interact with live beamtalk objects through the REPL. \
                  Use 'evaluate' to run beamtalk expressions, 'load_file' to load source code, \
                  'list_actors' to see running actors, 'inspect' to examine actor state, \
-                 and 'reload_module' for hot code reloading."
+                 'reload_module' for hot code reloading, 'test' to run BUnit tests, \
+                 'show_codegen' to inspect generated Core Erlang, 'info' for symbol details, \
+                 'describe' for capability discovery, 'clear' to reset bindings, \
+                 'unload' to remove a module, and 'interrupt' to cancel evaluations."
                     .to_string(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
