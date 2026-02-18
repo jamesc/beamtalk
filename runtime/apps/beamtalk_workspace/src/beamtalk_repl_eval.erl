@@ -22,22 +22,15 @@
          format_formatted_diagnostics/1,
          maybe_await_future/1, should_purge_module/2,
          strip_internal_bindings/1,
-         start_io_capture/0, start_io_capture/1,
-         stop_io_capture/1, io_capture_loop/2,
-         is_stdlib_path/1, reset_captured_group_leaders/2,
-         inject_output/3, handle_io_request/2,
+         is_stdlib_path/1,
+         inject_output/3,
          is_internal_key/1, activate_module/2,
          register_classes/2, trigger_hot_reload/2,
-         io_passthrough_loop/1,
-         is_stdin_request/1, handle_stdin_request/2, prompt_to_binary/1,
          handle_class_definition/4, handle_method_definition/4,
          compile_expression_via_port/3, compile_file_via_port/3]).
 -endif.
 
 -define(INTERNAL_REGISTRY_KEY, '__repl_actor_registry__').
--define(IO_CAPTURE_TIMEOUT, 5000).
-%% BT-698: Timeout for stdin input during eval (30 seconds)
--define(STDIN_TIMEOUT, 30000).
 
 %%% Public API
 
@@ -80,72 +73,89 @@ do_eval(Expression, State, Subscriber) ->
             %% Load the compiled module
             case code:load_binary(ModuleName, "", Binary) of
                 {module, ModuleName} ->
-                    %% Capture stdout during evaluation (BT-696: with streaming)
-                    CaptureRef = start_io_capture(Subscriber),
-                    EvalResult = try
-                        %% Add registry PID to bindings so generated code can access it
-                        BindingsWithRegistry = case RegistryPid of
-                            undefined -> Bindings;
-                            _ -> maps:put(?INTERNAL_REGISTRY_KEY, RegistryPid, Bindings)
-                        end,
-                        {RawResult, UpdatedBindings} = apply(ModuleName, eval, [BindingsWithRegistry]),
-                        %% Strip internal keys before persisting bindings
-                        CleanBindings = strip_internal_bindings(UpdatedBindings),
-                        %% Auto-await futures for synchronous REPL experience
-                        Result = maybe_await_future(RawResult),
-                        %% Check if result is a rejected future - treat as error
-                        case Result of
-                            {future_rejected, ErrorReason} ->
-                                %% ADR 0015: Wrap rejected future error and bind to _error
-                                FutExObj = beamtalk_exception_handler:ensure_wrapped(ErrorReason),
-                                FutBindings = maps:put('_error', FutExObj, CleanBindings),
-                                FinalState = beamtalk_repl_state:set_bindings(FutBindings, NewState),
-                                {error, FutExObj, FinalState};
-                            _ ->
-                                %% Normal result - check if this was an assignment
-                                case extract_assignment(Expression) of
-                                    {ok, VarName} ->
-                                        %% Assignment: merge updated bindings with new assignment
-                                        NewBindings = maps:put(VarName, Result, CleanBindings),
-                                        FinalState = beamtalk_repl_state:set_bindings(NewBindings, NewState),
-                                        {ok, Result, FinalState};
-                                    none ->
-                                        %% No assignment: use updated bindings from mutations
-                                        FinalState = beamtalk_repl_state:set_bindings(CleanBindings, NewState),
-                                        {ok, Result, FinalState}
-                                end
-                        end
-                    catch
-                        Class:Reason:_Stacktrace ->
-                            %% ADR 0015: Wrap error as Exception and bind to _error
-                            CaughtExObj = beamtalk_exception_handler:ensure_wrapped(Reason),
-                            CaughtBindings = maps:put('_error', CaughtExObj, Bindings),
-                            CaughtState = beamtalk_repl_state:set_bindings(CaughtBindings, NewState),
-                            {error, {eval_error, Class, CaughtExObj}, CaughtState}
-                    after
-                        %% Only purge module if it has no living actors
-                        case should_purge_module(ModuleName, RegistryPid) of
-                            true ->
-                                %% code:purge/1 returns true if successful, false if in use
-                                %% Must purge before delete to avoid "must be purged" error
-                                case code:purge(ModuleName) of
-                                    true -> code:delete(ModuleName);
-                                    false -> ok  %% Module in use, skip deletion
-                                end;
-                            false ->
-                                %% Module still has actors, keep it loaded
-                                ok
-                        end
-                    end,
-                    %% Retrieve captured output (always, even on error)
-                    Output = stop_io_capture(CaptureRef),
-                    inject_output(EvalResult, Output, Warnings);
+                    eval_loaded_module(ModuleName, Expression, Bindings,
+                                      RegistryPid, Subscriber, Warnings, NewState);
                 {error, Reason} ->
                     {error, {load_error, Reason}, <<>>, [], NewState}
             end;
         {error, Reason} ->
             {error, {compile_error, Reason}, <<>>, [], NewState}
     end.
+
+%% @doc Evaluate a loaded module: capture IO, execute, process result, cleanup.
+-spec eval_loaded_module(atom(), string(), map(), pid() | undefined,
+                         pid() | undefined, [binary()],
+                         beamtalk_repl_state:state()) ->
+    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()} |
+    {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+eval_loaded_module(ModuleName, Expression, Bindings, RegistryPid,
+                   Subscriber, Warnings, State) ->
+    CaptureRef = beamtalk_io_capture:start(Subscriber),
+    EvalResult = try
+        execute_and_process(ModuleName, Expression, Bindings, RegistryPid, State)
+    catch
+        Class:Reason:_Stacktrace ->
+            %% ADR 0015: Wrap error as Exception and bind to _error
+            CaughtExObj = beamtalk_exception_handler:ensure_wrapped(Reason),
+            CaughtBindings = maps:put('_error', CaughtExObj, Bindings),
+            CaughtState = beamtalk_repl_state:set_bindings(CaughtBindings, State),
+            {error, {eval_error, Class, CaughtExObj}, CaughtState}
+    after
+        cleanup_module(ModuleName, RegistryPid)
+    end,
+    Output = beamtalk_io_capture:stop(CaptureRef),
+    inject_output(EvalResult, Output, Warnings).
+
+%% @doc Execute module and process the result (assignment/future handling).
+-spec execute_and_process(atom(), string(), map(), pid() | undefined,
+                          beamtalk_repl_state:state()) ->
+    {ok, term(), beamtalk_repl_state:state()} |
+    {error, term(), beamtalk_repl_state:state()}.
+execute_and_process(ModuleName, Expression, Bindings, RegistryPid, State) ->
+    BindingsWithRegistry = case RegistryPid of
+        undefined -> Bindings;
+        _ -> maps:put(?INTERNAL_REGISTRY_KEY, RegistryPid, Bindings)
+    end,
+    {RawResult, UpdatedBindings} = apply(ModuleName, eval, [BindingsWithRegistry]),
+    CleanBindings = strip_internal_bindings(UpdatedBindings),
+    Result = maybe_await_future(RawResult),
+    process_eval_result(Result, Expression, CleanBindings, State).
+
+%% @doc Process evaluation result: handle rejected futures and assignments.
+-spec process_eval_result(term(), string(), map(),
+                          beamtalk_repl_state:state()) ->
+    {ok, term(), beamtalk_repl_state:state()} |
+    {error, term(), beamtalk_repl_state:state()}.
+process_eval_result({future_rejected, ErrorReason}, _Expression, CleanBindings, State) ->
+    %% ADR 0015: Wrap rejected future error and bind to _error
+    FutExObj = beamtalk_exception_handler:ensure_wrapped(ErrorReason),
+    FutBindings = maps:put('_error', FutExObj, CleanBindings),
+    FinalState = beamtalk_repl_state:set_bindings(FutBindings, State),
+    {error, FutExObj, FinalState};
+process_eval_result(Result, Expression, CleanBindings, State) ->
+    case extract_assignment(Expression) of
+        {ok, VarName} ->
+            NewBindings = maps:put(VarName, Result, CleanBindings),
+            FinalState = beamtalk_repl_state:set_bindings(NewBindings, State),
+            {ok, Result, FinalState};
+        none ->
+            FinalState = beamtalk_repl_state:set_bindings(CleanBindings, State),
+            {ok, Result, FinalState}
+    end.
+
+%% @doc Purge eval module if no living actors reference it.
+-spec cleanup_module(atom(), pid() | undefined) -> ok.
+cleanup_module(ModuleName, RegistryPid) ->
+    case should_purge_module(ModuleName, RegistryPid) of
+        true ->
+            case code:purge(ModuleName) of
+                true -> code:delete(ModuleName);
+                false -> ok
+            end;
+        false ->
+            ok
+    end,
+    ok.
 
 %% @doc Load a Beamtalk file and register its classes.
 -spec handle_load(string(), beamtalk_repl_state:state()) -> 
@@ -335,50 +345,41 @@ compile_expression_via_port(Expression, ModuleName, Bindings) ->
                  || K <- maps:keys(Bindings),
                     is_atom(K),
                     not is_internal_key(K)],
-    try beamtalk_compiler:compile_expression(SourceBin, ModNameBin, KnownVars) of
-        %% BT-571: Inline class definition
-        {ok, class_definition, ClassInfo} ->
-            #{core_erlang := CoreErlang, module_name := ClassModNameBin,
-              classes := Classes, warnings := Warnings} = ClassInfo,
-            ClassModName = binary_to_atom(ClassModNameBin, utf8),
-            case beamtalk_compiler:compile_core_erlang(CoreErlang) of
-                {ok, _CompiledMod, Binary} ->
-                    {ok, class_definition, #{binary => Binary, module_name => ClassModName,
-                                             classes => Classes}, Warnings};
-                {error, Reason} ->
-                    {error, iolist_to_binary(io_lib:format("Core Erlang compile error: ~p", [Reason]))}
-            end;
-        %% BT-571: Standalone method definition
-        {ok, method_definition, MethodInfo} ->
-            #{class_name := ClassName, selector := Selector,
-              is_class_method := IsClassMethod,
-              method_source := MethodSource} = MethodInfo,
-            Warnings = maps:get(warnings, MethodInfo, []),
-            {ok, method_definition, #{class_name => ClassName, selector => Selector,
-                                      is_class_method => IsClassMethod,
-                                      method_source => MethodSource}, Warnings};
-        %% Standard expression
-        {ok, CoreErlang, Warnings} ->
-            case beamtalk_compiler:compile_core_erlang(CoreErlang) of
-                {ok, _CompiledMod, Binary} ->
-                    {ok, Binary, {port_compiled}, Warnings};
-                {error, Reason} ->
-                    {error, iolist_to_binary(io_lib:format("Core Erlang compile error: ~p", [Reason]))}
-            end;
-        {error, Diagnostics} ->
-            {error, format_formatted_diagnostics(Diagnostics)}
-    catch
-        exit:{noproc, _} ->
-            {error, <<"Compiler not available. Ensure beamtalk_compiler application is started.">>};
-        exit:{timeout, _} ->
-            {error, <<"Compilation timed out.">>};
-        exit:{Reason, _} ->
-            {error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason]))};
-        error:Reason ->
-            {error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason]))};
-        throw:Reason ->
-            {error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason]))}
-    end.
+    wrap_compiler_errors(fun() ->
+        case beamtalk_compiler:compile_expression(SourceBin, ModNameBin, KnownVars) of
+            %% BT-571: Inline class definition
+            {ok, class_definition, ClassInfo} ->
+                #{core_erlang := CoreErlang, module_name := ClassModNameBin,
+                  classes := Classes, warnings := Warnings} = ClassInfo,
+                ClassModName = binary_to_atom(ClassModNameBin, utf8),
+                case beamtalk_compiler:compile_core_erlang(CoreErlang) of
+                    {ok, _CompiledMod, Binary} ->
+                        {ok, class_definition, #{binary => Binary, module_name => ClassModName,
+                                                 classes => Classes}, Warnings};
+                    {error, Reason} ->
+                        {error, iolist_to_binary(io_lib:format("Core Erlang compile error: ~p", [Reason]))}
+                end;
+            %% BT-571: Standalone method definition
+            {ok, method_definition, MethodInfo} ->
+                #{class_name := ClassName, selector := Selector,
+                  is_class_method := IsClassMethod,
+                  method_source := MethodSource} = MethodInfo,
+                Warnings = maps:get(warnings, MethodInfo, []),
+                {ok, method_definition, #{class_name => ClassName, selector => Selector,
+                                          is_class_method => IsClassMethod,
+                                          method_source => MethodSource}, Warnings};
+            %% Standard expression
+            {ok, CoreErlang, Warnings} ->
+                case beamtalk_compiler:compile_core_erlang(CoreErlang) of
+                    {ok, _CompiledMod, Binary} ->
+                        {ok, Binary, {port_compiled}, Warnings};
+                    {error, Reason} ->
+                        {error, iolist_to_binary(io_lib:format("Core Erlang compile error: ~p", [Reason]))}
+                end;
+            {error, Diagnostics} ->
+                {error, format_formatted_diagnostics(Diagnostics)}
+        end
+    end, direct).
 
 %% @doc Compile a file and extract class metadata via OTP Port backend.
 -spec compile_file(string(), string(), boolean()) ->
@@ -390,34 +391,49 @@ compile_file(Source, Path, StdlibMode) ->
 compile_file_via_port(Source, _Path, StdlibMode) ->
     SourceBin = list_to_binary(Source),
     Options = #{stdlib_mode => StdlibMode},
-    try beamtalk_compiler:compile(SourceBin, Options) of
-        {ok, #{core_erlang := CoreErlang, module_name := ModNameBin,
-               classes := Classes}} ->
-            ModuleName = binary_to_atom(ModNameBin, utf8),
-            case beamtalk_compiler:compile_core_erlang(CoreErlang) of
-                {ok, _CompiledMod, Binary} ->
-                    ClassNames = [#{
-                        name => binary_to_list(maps:get(name, C, <<"">>)),
-                        superclass => binary_to_list(maps:get(superclass, C, <<"Object">>))
-                    } || C <- Classes],
-                    {ok, Binary, ClassNames, ModuleName};
-                {error, Reason} ->
-                    {error, {core_compile_error, Reason}}
-            end;
-        {error, Diagnostics} ->
-            {error, {compile_error, format_formatted_diagnostics(Diagnostics)}}
+    wrap_compiler_errors(fun() ->
+        case beamtalk_compiler:compile(SourceBin, Options) of
+            {ok, #{core_erlang := CoreErlang, module_name := ModNameBin,
+                   classes := Classes}} ->
+                ModuleName = binary_to_atom(ModNameBin, utf8),
+                case beamtalk_compiler:compile_core_erlang(CoreErlang) of
+                    {ok, _CompiledMod, Binary} ->
+                        ClassNames = [#{
+                            name => binary_to_list(maps:get(name, C, <<"">>)),
+                            superclass => binary_to_list(maps:get(superclass, C, <<"Object">>))
+                        } || C <- Classes],
+                        {ok, Binary, ClassNames, ModuleName};
+                    {error, Reason} ->
+                        {error, {core_compile_error, Reason}}
+                end;
+            {error, Diagnostics} ->
+                {error, {compile_error, format_formatted_diagnostics(Diagnostics)}}
+        end
+    end, wrapped).
+
+%% @doc Wrap compiler calls with shared error handling for exit/error/throw.
+%% ErrorStyle controls error wrapping:
+%%   direct  - returns {error, Message} directly (for expression compilation)
+%%   wrapped - wraps as {error, {compile_error, Message}} (for file compilation)
+-spec wrap_compiler_errors(fun(() -> term()), direct | wrapped) -> term().
+wrap_compiler_errors(Fun, ErrorStyle) ->
+    try Fun()
     catch
         exit:{noproc, _} ->
-            {error, {compile_error, <<"Compiler not available. Ensure beamtalk_compiler application is started.">>}};
+            wrap_error(<<"Compiler not available. Ensure beamtalk_compiler application is started.">>, ErrorStyle);
         exit:{timeout, _} ->
-            {error, {compile_error, <<"Compilation timed out.">>}};
+            wrap_error(<<"Compilation timed out.">>, ErrorStyle);
         exit:{Reason, _} ->
-            {error, {compile_error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason]))}};
+            wrap_error(iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason])), ErrorStyle);
         error:Reason ->
-            {error, {compile_error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason]))}};
+            wrap_error(iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason])), ErrorStyle);
         throw:Reason ->
-            {error, {compile_error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason]))}}
+            wrap_error(iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason])), ErrorStyle)
     end.
+
+-spec wrap_error(binary(), direct | wrapped) -> {error, term()}.
+wrap_error(Msg, direct) -> {error, Msg};
+wrap_error(Msg, wrapped) -> {error, {compile_error, Msg}}.
 
 %% @doc Check if a binding key is internal (not a user variable).
 -spec is_internal_key(atom()) -> boolean().
@@ -592,209 +608,8 @@ should_purge_module(ModuleName, RegistryPid) ->
 strip_internal_bindings(Bindings) ->
     maps:remove(?INTERNAL_REGISTRY_KEY, Bindings).
 
-%%% IO Capture (BT-355)
-%%% Captures stdout during eval by temporarily replacing the group_leader
-%%% with a custom IO server process.
-%%% BT-696: Optionally forwards IO chunks to a subscriber for streaming.
-
-%% @doc Start capturing IO output for the current process.
-%% Returns an opaque reference to pass to stop_io_capture/1.
-%% Convenience wrapper for start_io_capture(undefined).
--dialyzer({no_unused, start_io_capture/0}).
--spec start_io_capture() -> {pid(), pid()}.
-start_io_capture() ->
-    start_io_capture(undefined).
-
-%% @doc Start capturing IO output with optional streaming subscriber (BT-696).
-%% When Subscriber is a pid, each IO chunk is forwarded as {eval_out, Chunk}.
--spec start_io_capture(pid() | undefined) -> {pid(), pid()}.
-start_io_capture(Subscriber) ->
-    OldGL = group_leader(),
-    CapturePid = spawn(fun() -> io_capture_loop(<<>>, Subscriber) end),
-    group_leader(CapturePid, self()),
-    {CapturePid, OldGL}.
-
-%% @doc Stop capturing IO and return all captured output as a binary.
-%% Restores the original group_leader. Returns <<>> on timeout or if
-%% the capture process has already exited.
-%%
-%% BT-358: After restoring the eval process's group_leader, also resets
-%% the group_leader of any processes that inherited the capture process
-%% as their group_leader during eval (e.g., spawned actors).
--spec stop_io_capture({pid(), pid()}) -> binary().
-stop_io_capture({CapturePid, OldGL}) ->
-    group_leader(OldGL, self()),
-    %% BT-358: Reset group_leader for any processes spawned during eval
-    %% that inherited the capture process as their group_leader.
-    reset_captured_group_leaders(CapturePid, OldGL),
-    case is_process_alive(CapturePid) of
-        true ->
-            CapturePid ! {get_captured, self(), OldGL},
-            receive
-                {captured_output, Output} -> Output
-            after ?IO_CAPTURE_TIMEOUT ->
-                ?LOG_WARNING("IO capture output retrieval timed out", #{}),
-                <<>>
-            end;
-        false ->
-            <<>>
-    end.
-
-%% @doc IO server loop that captures put_chars output.
-%% Handles both {put_chars, Enc, Chars} and {put_chars, Enc, Mod, Func, Args}
-%% (the latter is used by io:format).
-%% BT-696: When Subscriber is a pid, forwards each chunk as {eval_out, Chunk}.
-%% BT-698: When Subscriber is a pid, handles get_line/get_chars/get_until by
-%% sending {need_input, CapturePid, Prompt} to Subscriber and waiting for
-%% {stdin_input, Data} response.
-%% After capture stops, proxies IO to the original group_leader so that
-%% processes spawned during eval still have a working IO path.
--spec io_capture_loop(binary(), pid() | undefined) -> ok.
-io_capture_loop(Buffer, Subscriber) ->
-    receive
-        {io_request, From, ReplyAs, Request} ->
-            case is_stdin_request(Request) of
-                {true, Prompt} ->
-                    %% BT-698: Handle stdin request
-                    Reply = handle_stdin_request(Subscriber, Prompt),
-                    From ! {io_reply, ReplyAs, Reply},
-                    io_capture_loop(Buffer, Subscriber);
-                false ->
-                    {Reply, NewBuffer} = handle_io_request(Request, Buffer),
-                    From ! {io_reply, ReplyAs, Reply},
-                    %% BT-696: Forward new chunk to subscriber if present
-                    case is_pid(Subscriber) andalso byte_size(NewBuffer) > byte_size(Buffer) of
-                        true ->
-                            Chunk = binary:part(NewBuffer, byte_size(Buffer),
-                                                byte_size(NewBuffer) - byte_size(Buffer)),
-                            Subscriber ! {eval_out, Chunk};
-                        false ->
-                            ok
-                    end,
-                    io_capture_loop(NewBuffer, Subscriber)
-            end;
-        {get_captured, Pid, OldGL} ->
-            Pid ! {captured_output, Buffer},
-            io_passthrough_loop(OldGL)
-    end.
-
-%% @doc After capture, forward all IO to the original group_leader.
-%% Keeps this process alive so spawned children don't get a dead group_leader.
-%% Exits after 60 seconds of inactivity to avoid leaking processes.
--spec io_passthrough_loop(pid()) -> ok.
-io_passthrough_loop(OldGL) ->
-    receive
-        {io_request, From, ReplyAs, Request} ->
-            OldGL ! {io_request, From, ReplyAs, Request},
-            io_passthrough_loop(OldGL)
-    after 60000 ->
-        ok
-    end.
-
-%% @doc Reset group_leader for processes that inherited the capture process.
-%% Scans all processes to find those whose group_leader is the capture
-%% process and resets them to the original group_leader (BT-358).
--spec reset_captured_group_leaders(pid(), pid()) -> ok.
-reset_captured_group_leaders(CapturePid, OldGL) ->
-    lists:foreach(
-        fun(Pid) ->
-            case Pid =/= self() andalso is_process_alive(Pid) of
-                true ->
-                    case erlang:process_info(Pid, group_leader) of
-                        {group_leader, CapturePid} ->
-                            group_leader(OldGL, Pid);
-                        {group_leader, _} ->
-                            ok;  % Different GL, leave it alone
-                        undefined ->
-                            ok   % Process died between checks, nothing to do
-                    end;
-                false ->
-                    ok
-            end
-        end,
-        erlang:processes()
-    ).
-
-%% @doc Check if an IO request is a stdin (input) request.
-%% Returns {true, Prompt} for get_line/get_chars/get_until, false otherwise.
-%% BT-698: Supports the Erlang IO protocol input requests.
--spec is_stdin_request(term()) -> {true, binary()} | false.
-is_stdin_request({get_line, _Encoding, Prompt}) ->
-    {true, prompt_to_binary(Prompt)};
-is_stdin_request({get_line, Prompt}) ->
-    {true, prompt_to_binary(Prompt)};
-is_stdin_request({get_chars, _Encoding, Prompt, _Count}) ->
-    {true, prompt_to_binary(Prompt)};
-is_stdin_request({get_chars, Prompt, _Count}) ->
-    {true, prompt_to_binary(Prompt)};
-is_stdin_request({get_until, _Encoding, Prompt, _Mod, _Func, _Args}) ->
-    {true, prompt_to_binary(Prompt)};
-is_stdin_request({get_until, Prompt, _Mod, _Func, _Args}) ->
-    {true, prompt_to_binary(Prompt)};
-is_stdin_request(_) ->
-    false.
-
-%% @doc Convert an IO prompt to a binary string.
--spec prompt_to_binary(term()) -> binary().
-prompt_to_binary(Prompt) when is_binary(Prompt) -> Prompt;
-prompt_to_binary(Prompt) when is_list(Prompt) ->
-    try unicode:characters_to_binary(Prompt, utf8) of
-        Bin when is_binary(Bin) -> Bin;
-        _ -> <<"? ">>
-    catch _:_ -> <<"? ">>
-    end;
-prompt_to_binary(Prompt) when is_atom(Prompt) ->
-    atom_to_binary(Prompt, utf8);
-prompt_to_binary(_) -> <<"? ">>.
-
-%% @doc Handle a stdin IO request by notifying the subscriber and waiting for input.
-%% When no subscriber is present (sync eval), returns {error, enotsup}.
-%% BT-698: Sends {need_input, CapturePid, Ref, Prompt} to subscriber, waits for
-%% {stdin_input, Ref, Data} response with timeout. The Ref prevents late replies
-%% from a timed-out prompt being consumed by a subsequent prompt.
--spec handle_stdin_request(pid() | undefined, binary()) -> term().
-handle_stdin_request(undefined, _Prompt) ->
-    {error, enotsup};
-handle_stdin_request(Subscriber, Prompt) when is_pid(Subscriber) ->
-    Ref = make_ref(),
-    Subscriber ! {need_input, self(), Ref, Prompt},
-    receive
-        {stdin_input, Ref, Data} when is_binary(Data) ->
-            Data;
-        {stdin_input, Ref, eof} ->
-            eof
-    after ?STDIN_TIMEOUT ->
-        ?LOG_WARNING("Stdin input timed out after ~pms", [?STDIN_TIMEOUT]),
-        {error, timeout}
-    end.
-
-%% @doc Handle a single IO protocol request.
-%% Always replies ok for output requests to avoid changing program behavior.
--spec handle_io_request(term(), binary()) -> {term(), binary()}.
-handle_io_request({put_chars, Encoding, Chars}, Buffer) ->
-    try unicode:characters_to_binary(Chars, Encoding, utf8) of
-        Bin when is_binary(Bin) -> {ok, <<Buffer/binary, Bin/binary>>};
-        _ -> {ok, Buffer}
-    catch
-        _:_ -> {ok, Buffer}
-    end;
-handle_io_request({put_chars, Chars}, Buffer) ->
-    %% Legacy IO protocol form without encoding
-    try unicode:characters_to_binary(Chars, latin1, utf8) of
-        Bin when is_binary(Bin) -> {ok, <<Buffer/binary, Bin/binary>>};
-        _ -> {ok, Buffer}
-    catch
-        _:_ -> {ok, Buffer}
-    end;
-handle_io_request({put_chars, Encoding, Mod, Func, Args}, Buffer) ->
-    try unicode:characters_to_binary(apply(Mod, Func, Args), Encoding, utf8) of
-        Bin when is_binary(Bin) -> {ok, <<Buffer/binary, Bin/binary>>};
-        _ -> {ok, Buffer}
-    catch
-        _:_ -> {ok, Buffer}
-    end;
-handle_io_request(_Other, Buffer) ->
-    {{error, enotsup}, Buffer}.
+%%% IO Capture delegation (BT-706: extracted to beamtalk_io_capture.erl)
+%%% See beamtalk_io_capture module for start/stop/capture logic.
 
 %% @doc Inject captured output and warnings into an eval result tuple.
 -spec inject_output(tuple(), binary(), [binary()]) -> tuple().
