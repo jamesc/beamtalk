@@ -38,13 +38,17 @@
          get_pids_for_module/2,
          on_actor_spawned/4]).
 
+%% Subscriber API (ADR 0017 — actor lifecycle push messages)
+-export([subscribe/0, unsubscribe/0]).
+
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
 -record(state, {
     actors :: #{pid() => actor_metadata()},
-    monitors :: #{reference() => pid()}
+    monitors :: #{reference() => pid()},
+    subscribers :: #{pid() => reference()}
 }).
 
 -type actor_metadata() :: #{
@@ -62,6 +66,19 @@
 -spec start_link(registered) -> {ok, pid()} | {error, term()}.
 start_link(registered) ->
     gen_server:start_link({local, beamtalk_actor_registry}, ?MODULE, [], []).
+
+%% @doc Subscribe the calling process to actor lifecycle events.
+%% Subscriber receives:
+%%   `{actor_spawned, Metadata}' when an actor registers
+%%   `{actor_stopped, #{pid => Pid, class => Class, reason => Reason}}' when an actor terminates
+-spec subscribe() -> ok.
+subscribe() ->
+    gen_server:cast(beamtalk_actor_registry, {subscribe_lifecycle, self()}).
+
+%% @doc Unsubscribe the calling process from actor lifecycle events.
+-spec unsubscribe() -> ok.
+unsubscribe() ->
+    gen_server:cast(beamtalk_actor_registry, {unsubscribe_lifecycle, self()}).
 
 %% @doc Register an actor with the registry.
 %% Monitors the actor so it can be automatically unregistered on termination.
@@ -165,7 +182,7 @@ get_pids_for_module(RegistryPid, ModuleName) ->
 
 %% @private
 init([]) ->
-    {ok, #state{actors = #{}, monitors = #{}}}.
+    {ok, #state{actors = #{}, monitors = #{}, subscribers = #{}}}.
 
 %% @private
 handle_call({register, ActorPid, ClassName, ModuleName}, _From, State) ->
@@ -184,7 +201,10 @@ handle_call({register, ActorPid, ClassName, ModuleName}, _From, State) ->
     NewActors = maps:put(ActorPid, Metadata, Actors),
     NewMonitors = maps:put(MonitorRef, ActorPid, Monitors),
     
-    {reply, ok, State#state{actors = NewActors, monitors = NewMonitors}};
+    NewState = State#state{actors = NewActors, monitors = NewMonitors},
+    notify_subscribers({actor_spawned, Metadata}, NewState),
+    
+    {reply, ok, NewState};
 
 handle_call({unregister, ActorPid}, _From, State) ->
     #state{actors = Actors, monitors = Monitors} = State,
@@ -259,18 +279,53 @@ handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
 %% @private
+handle_cast({subscribe_lifecycle, Pid}, State) when is_pid(Pid) ->
+    #state{subscribers = Subs} = State,
+    case maps:is_key(Pid, Subs) of
+        true ->
+            {noreply, State};
+        false ->
+            Ref = erlang:monitor(process, Pid),
+            {noreply, State#state{subscribers = Subs#{Pid => Ref}}}
+    end;
+handle_cast({unsubscribe_lifecycle, Pid}, State) ->
+    #state{subscribers = Subs} = State,
+    case maps:find(Pid, Subs) of
+        {ok, Ref} ->
+            erlang:demonitor(Ref, [flush]),
+            {noreply, State#state{subscribers = maps:remove(Pid, Subs)}};
+        error ->
+            {noreply, State}
+    end;
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
 %% @private
-handle_info({'DOWN', MonitorRef, process, ActorPid, _Reason}, State) ->
-    %% Actor terminated - automatically unregister it
-    #state{actors = Actors, monitors = Monitors} = State,
-    
-    NewActors = maps:remove(ActorPid, Actors),
-    NewMonitors = maps:remove(MonitorRef, Monitors),
-    
-    {noreply, State#state{actors = NewActors, monitors = NewMonitors}};
+handle_info({'DOWN', MonitorRef, process, Pid, Reason}, State) ->
+    #state{actors = Actors, monitors = Monitors, subscribers = Subs} = State,
+    case maps:find(MonitorRef, Monitors) of
+        {ok, ActorPid} ->
+            %% Actor terminated — unregister and notify subscribers
+            StopInfo = case maps:find(ActorPid, Actors) of
+                {ok, #{class := ClassName}} ->
+                    #{pid => ActorPid, class => ClassName, reason => Reason};
+                error ->
+                    #{pid => ActorPid, class => undefined, reason => Reason}
+            end,
+            NewActors = maps:remove(ActorPid, Actors),
+            NewMonitors = maps:remove(MonitorRef, Monitors),
+            NewState = State#state{actors = NewActors, monitors = NewMonitors},
+            notify_subscribers({actor_stopped, StopInfo}, NewState),
+            {noreply, NewState};
+        error ->
+            %% Not an actor — check if it's a subscriber
+            case maps:is_key(Pid, Subs) of
+                true ->
+                    {noreply, State#state{subscribers = maps:remove(Pid, Subs)}};
+                false ->
+                    {noreply, State}
+            end
+    end;
 
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -285,6 +340,17 @@ terminate(_Reason, State) ->
         end,
         Actors
     ),
+    ok.
+
+%%% Internal Functions
+
+%% @private
+%% @doc Send lifecycle event to all subscribers.
+-spec notify_subscribers(term(), #state{}) -> ok.
+notify_subscribers(Event, #state{subscribers = Subs}) ->
+    maps:foreach(fun(Pid, _Ref) ->
+        Pid ! Event
+    end, Subs),
     ok.
 
 %% @private
