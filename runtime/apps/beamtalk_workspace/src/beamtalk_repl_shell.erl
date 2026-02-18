@@ -22,7 +22,7 @@
 
 %% Public API
 -export([start_link/1, stop/1, eval/2, interrupt/1, get_bindings/1, clear_bindings/1,
-         load_file/2, unload_module/2, get_module_tracker/1]).
+         load_file/2, load_source/2, unload_module/2, get_module_tracker/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -65,6 +65,11 @@ clear_bindings(SessionPid) ->
 -spec load_file(pid(), string()) -> {ok, [map()]} | {error, term()}.
 load_file(SessionPid, Path) ->
     gen_server:call(SessionPid, {load_file, Path}, 30000).
+
+%% @doc Load Beamtalk source from an inline binary string.
+-spec load_source(pid(), binary()) -> {ok, [map()]} | {error, term()}.
+load_source(SessionPid, Source) ->
+    gen_server:call(SessionPid, {load_source, Source}, 30000).
 
 %% @doc Get the module tracker for this session (user-loaded modules only).
 -spec get_module_tracker(pid()) -> {ok, beamtalk_repl_modules:module_tracker()}.
@@ -150,6 +155,14 @@ handle_call(clear_bindings, _From, {SessionId, State, Worker}) ->
 
 handle_call({load_file, Path}, _From, {SessionId, State, Worker}) ->
     case beamtalk_repl_eval:handle_load(Path, State) of
+        {ok, LoadedModules, NewState} ->
+            {reply, {ok, LoadedModules}, {SessionId, NewState, Worker}};
+        {error, Reason, NewState} ->
+            {reply, {error, Reason}, {SessionId, NewState, Worker}}
+    end;
+
+handle_call({load_source, Source}, _From, {SessionId, State, Worker}) ->
+    case beamtalk_repl_eval:handle_load_source(Source, "<editor>", State) of
         {ok, LoadedModules, NewState} ->
             {reply, {ok, LoadedModules}, {SessionId, NewState, Worker}};
         {error, Reason, NewState} ->
