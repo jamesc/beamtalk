@@ -22,6 +22,7 @@
 -export([decode/1, encode_result/3, encode_result/4, encode_result/5,
          encode_error/3, encode_error/4, encode_error/5,
          encode_status/3,
+         encode_out/3,
          encode_bindings/3, encode_loaded/3, encode_actors/3,
          encode_modules/3, encode_sessions/3, encode_inspect/2, encode_inspect/3,
          encode_docs/2, encode_describe/3,
@@ -147,6 +148,17 @@ encode_status(Status, Msg, TermToJson) ->
             Base = base_response(Msg),
             jsx:encode(Base#{<<"value">> => TermToJson(Status), <<"status">> => [<<"done">>]})
     end.
+
+%% @doc Encode a streaming stdout chunk (BT-696).
+%% Sent as an intermediate message during eval before the final done message.
+%% In legacy mode, this is a no-op (output is buffered in the final response).
+-spec encode_out(binary(), protocol_msg(), binary()) -> binary().
+encode_out(_Chunk, #protocol_msg{legacy = true}, _Stream) ->
+    %% Legacy clients don't support streaming — output will be in final response
+    <<>>;
+encode_out(Chunk, Msg, Stream) ->
+    Base = base_response(Msg),
+    jsx:encode(Base#{Stream => Chunk}).
 
 %% @doc Encode a bindings response.
 -spec encode_bindings(map(), protocol_msg(), fun((term()) -> term())) -> binary().

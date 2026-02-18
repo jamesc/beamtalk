@@ -142,10 +142,6 @@ fn collect_class_refs(
                 }
             }
         }
-        Expression::Pipe { value, target, .. } => {
-            collect_class_refs(value, class_name, file_path, results);
-            collect_class_refs(target, class_name, file_path, results);
-        }
         Expression::Match { value, arms, .. } => {
             collect_class_refs(value, class_name, file_path, results);
             for arm in arms {
@@ -300,10 +296,6 @@ fn collect_selector_refs(
         }
         Expression::FieldAccess { receiver, .. } => {
             collect_selector_refs(receiver, selector_name, file_path, results);
-        }
-        Expression::Pipe { value, target, .. } => {
-            collect_selector_refs(value, selector_name, file_path, results);
-            collect_selector_refs(target, selector_name, file_path, results);
         }
         Expression::Match { value, arms, .. } => {
             collect_selector_refs(value, selector_name, file_path, results);

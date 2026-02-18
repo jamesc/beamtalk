@@ -208,11 +208,6 @@ impl Analyser {
                 self.collect_captures_and_mutations(expression, captures, mutations);
             }
 
-            Pipe { value, target, .. } => {
-                self.collect_captures_and_mutations(value, captures, mutations);
-                self.collect_captures_and_mutations(target, captures, mutations);
-            }
-
             Match { value, arms, .. } => {
                 self.collect_captures_and_mutations(value, captures, mutations);
                 for arm in arms {

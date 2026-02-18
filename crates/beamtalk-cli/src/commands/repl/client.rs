@@ -61,6 +61,10 @@ impl ReplClient {
     /// Sets a read timeout on the socket and polls for the response while
     /// checking the `interrupted` flag. If the flag is set, sends an
     /// interrupt op on a separate connection to the backend.
+    ///
+    /// BT-696: Handles multi-message streaming responses. Intermediate
+    /// messages with `out` field are printed incrementally. The final
+    /// message with `status: ["done"]` is returned as the result.
     pub(super) fn eval_interruptible(
         &mut self,
         expression: &str,
@@ -78,12 +82,33 @@ impl ReplClient {
         self.inner
             .set_read_timeout(Some(Duration::from_millis(200)))?;
 
+        // BT-696: Track whether we received streaming output chunks
+        let mut streamed = false;
+
         let result = loop {
             match self.inner.read_response_line() {
                 Ok(line) => {
                     // Got a response — parse it
-                    let response: ReplResponse = serde_json::from_str(&line)
+                    let parsed: serde_json::Value = serde_json::from_str(&line)
                         .map_err(|e| miette!("Failed to parse response: {e}\nRaw: {line}"))?;
+
+                    // BT-696: Check for streaming output chunk
+                    if parsed.get("out").is_some() && parsed.get("status").is_none() {
+                        if let Some(chunk) = parsed["out"].as_str() {
+                            print!("{chunk}");
+                            let _ = std::io::Write::flush(&mut std::io::stdout());
+                        }
+                        streamed = true;
+                        continue;
+                    }
+
+                    // Final response with status
+                    let mut response: ReplResponse = serde_json::from_value(parsed)
+                        .map_err(|e| miette!("Failed to parse response: {e}\nRaw: {line}"))?;
+                    // BT-696: Clear output field if already streamed to avoid double-printing
+                    if streamed {
+                        response.output = None;
+                    }
                     break Ok(response);
                 }
                 Err(e)

@@ -123,6 +123,12 @@ build-stdlib: build-rust build-erlang
     @cargo run --bin beamtalk --quiet -- build-stdlib
     @echo "✅ Stdlib build complete"
 
+# Build all example programs (examples/**/*.bt → BEAM)
+build-examples: build-stdlib
+    @echo "🔨 Building examples..."
+    @cargo run --bin beamtalk --quiet -- build examples/
+    @echo "✅ Examples build complete"
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Lint and Format
 # ═══════════════════════════════════════════════════════════════════════════
