@@ -612,8 +612,9 @@ fn generate_doc_test_eunit_wrapper(
         let bindings_out = format!("Bindings{}", i + 1);
 
         // Build assertion comment showing Beamtalk source location (BT-729)
+        let escaped_file = source_file.replace('\\', "\\\\").replace('"', "\\\"");
         let escaped_expr = case.expression.replace('\\', "\\\\").replace('"', "\\\"");
-        let comment = format!("{source_file}:{} `{escaped_expr}`", case.source_line);
+        let comment = format!("{escaped_file}:{} `{escaped_expr}`", case.source_line);
         let comment_bin = format!("<<\"{comment}\">>");
 
         match &case.expected {
