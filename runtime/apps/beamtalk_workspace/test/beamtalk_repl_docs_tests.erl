@@ -326,19 +326,24 @@ integration_setup() ->
     case stdlib_setup() of
         {skip, _} = Skip -> Skip;
         ok ->
-            application:ensure_all_started(beamtalk_runtime),
-            case whereis(beamtalk_bootstrap) of
-                undefined ->
-                    case beamtalk_bootstrap:start_link() of
-                        {ok, _} -> ok;
-                        {error, {already_started, _}} -> ok
-                    end;
-                _ -> ok
-            end,
-            beamtalk_stdlib:init(),
-            %% Wait for Integer class to be registered
-            wait_for_class('Integer', 50),
-            ok
+            case code:which('bt@stdlib@integer') of
+                non_existing ->
+                    {skip, stdlib_not_built};
+                _ ->
+                    application:ensure_all_started(beamtalk_runtime),
+                    case whereis(beamtalk_bootstrap) of
+                        undefined ->
+                            case beamtalk_bootstrap:start_link() of
+                                {ok, _} -> ok;
+                                {error, {already_started, _}} -> ok
+                            end;
+                        _ -> ok
+                    end,
+                    beamtalk_stdlib:init(),
+                    %% Wait for Integer class to be registered
+                    wait_for_class('Integer', 50),
+                    ok
+            end
     end.
 
 wait_for_class(ClassName, 0) ->
