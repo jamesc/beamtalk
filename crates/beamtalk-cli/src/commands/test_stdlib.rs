@@ -530,7 +530,7 @@ struct CompiledTestFile {
 /// compiles expressions to Core Erlang, generates `EUnit` wrappers, and runs
 /// all tests in a single BEAM process.
 #[instrument(skip_all)]
-pub fn run_tests(path: &str, no_warnings: bool) -> Result<()> {
+pub fn run_tests(path: &str, no_warnings: bool, quiet: bool) -> Result<()> {
     info!("Starting stdlib test run");
 
     let test_dir = Utf8PathBuf::from(path);
@@ -545,7 +545,9 @@ pub fn run_tests(path: &str, no_warnings: bool) -> Result<()> {
         return Ok(());
     }
 
-    println!("Compiling {} test file(s)...", test_files.len());
+    if !quiet {
+        println!("Compiling {} test file(s)...", test_files.len());
+    }
 
     // Create temporary build directory
     let temp_dir = tempfile::tempdir()
@@ -615,10 +617,12 @@ pub fn run_tests(path: &str, no_warnings: bool) -> Result<()> {
             failed_details.push(format!("FAIL {}:\n  {}", compiled.source_file, failure));
         } else {
             total_passed += compiled.assertion_count;
-            println!(
-                "  {file_stem}: {} tests, {} passed ✓",
-                compiled.assertion_count, compiled.assertion_count
-            );
+            if !quiet {
+                println!(
+                    "  {file_stem}: {} tests, {} passed ✓",
+                    compiled.assertion_count, compiled.assertion_count
+                );
+            }
         }
     }
 

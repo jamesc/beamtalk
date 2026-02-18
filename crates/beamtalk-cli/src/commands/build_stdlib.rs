@@ -32,7 +32,7 @@ const STDLIB_EBIN_DIR: &str = "runtime/apps/beamtalk_stdlib/ebin";
 /// and writes `.beam` files to `runtime/apps/beamtalk_stdlib/ebin/`.
 /// Skips the build if all outputs are newer than all inputs (incremental).
 #[instrument(skip_all)]
-pub fn build_stdlib() -> Result<()> {
+pub fn build_stdlib(quiet: bool) -> Result<()> {
     info!("Starting stdlib build");
 
     let lib_dir = Utf8PathBuf::from(STDLIB_SOURCE_DIR);
@@ -66,7 +66,9 @@ pub fn build_stdlib() -> Result<()> {
     // Clean stale .beam files from previous builds (e.g. renamed/removed .bt sources)
     clean_ebin_dir(&ebin_dir)?;
 
-    println!("Compiling {} stdlib module(s)...", source_files.len());
+    if !quiet {
+        println!("Compiling {} stdlib module(s)...", source_files.len());
+    }
 
     // Create a temporary directory for .core files
     let temp_dir = tempfile::tempdir()
@@ -105,6 +107,9 @@ pub fn build_stdlib() -> Result<()> {
         let meta = extract_class_metadata(source_file, &module_name)?;
         class_metadata.push(meta);
 
+        if !quiet {
+            println!("  Compiling {source_file}...");
+        }
         compile_stdlib_file(source_file, &module_name, &core_file, &options, &bindings)?;
         core_files.push(core_file);
     }
@@ -305,7 +310,6 @@ fn compile_stdlib_file(
     options: &beamtalk_core::CompilerOptions,
     bindings: &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable,
 ) -> Result<()> {
-    println!("  Compiling {path}...");
     compile_source_with_bindings(path, module_name, core_file, options, bindings)
 }
 

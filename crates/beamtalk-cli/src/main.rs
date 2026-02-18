@@ -49,7 +49,11 @@ enum Command {
     },
 
     /// Compile the standard library (`lib/*.bt` → `runtime/apps/beamtalk_stdlib/ebin/`)
-    BuildStdlib,
+    BuildStdlib {
+        /// Suppress per-file compilation output
+        #[arg(long, short)]
+        quiet: bool,
+    },
 
     /// Compile and run a Beamtalk program
     Run {
@@ -145,6 +149,10 @@ enum Command {
         /// Suppress warning diagnostics when compiling test fixtures
         #[arg(long)]
         no_warnings: bool,
+
+        /// Suppress per-file output, show only summary
+        #[arg(long, short)]
+        quiet: bool,
     },
 
     /// Run `BUnit` tests — discover and run `TestCase` subclasses (ADR 0014 Phase 2)
@@ -221,7 +229,7 @@ fn main() -> Result<()> {
             };
             commands::build::build(&path, &options)
         }
-        Command::BuildStdlib => commands::build_stdlib::build_stdlib(),
+        Command::BuildStdlib { quiet } => commands::build_stdlib::build_stdlib(quiet),
         Command::Run { path } => commands::run::run(&path),
         Command::New { name } => commands::new::new_project(&name),
         Command::Repl {
@@ -256,9 +264,11 @@ fn main() -> Result<()> {
             Ok(())
         }
         Command::Workspace { action } => commands::workspace::cli::run(action),
-        Command::TestStdlib { path, no_warnings } => {
-            commands::test_stdlib::run_tests(&path, no_warnings)
-        }
+        Command::TestStdlib {
+            path,
+            no_warnings,
+            quiet,
+        } => commands::test_stdlib::run_tests(&path, no_warnings, quiet),
         Command::Test { path } => commands::test::run_tests(&path),
         Command::Doc {
             path,
