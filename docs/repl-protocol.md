@@ -358,7 +358,7 @@ Returns the list of supported operations with their parameters, protocol version
 {
   "id": "msg-040",
   "ops": {
-    "eval": {"params": ["code"], "optional": ["session"]},
+    "eval": {"params": ["code"]},
     "complete": {"params": ["code"]},
     "info": {"params": ["symbol"]},
     "docs": {"params": ["class"], "optional": ["selector"]},
