@@ -26,6 +26,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Character"
             | "Collection"
             | "CompiledMethod"
+            | "DateTime"
             | "Dictionary"
             | "Erlang"
             | "ErlangModule"
@@ -277,6 +278,49 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "CompiledMethod".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
             ],
             class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "DateTime".into(),
+        ClassInfo {
+            name: "DateTime".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "year".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![] },
+                MethodInfo { selector: "month".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![] },
+                MethodInfo { selector: "day".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![] },
+                MethodInfo { selector: "hour".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![] },
+                MethodInfo { selector: "minute".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![] },
+                MethodInfo { selector: "second".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![] },
+                MethodInfo { selector: "asTimestamp".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![] },
+                MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "addSeconds:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, return_type: Some("DateTime".into()), param_types: vec![Some("Integer".into())] },
+                MethodInfo { selector: "addDays:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, return_type: Some("DateTime".into()), param_types: vec![Some("Integer".into())] },
+                MethodInfo { selector: "diffSeconds:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![Some("DateTime".into())] },
+                MethodInfo { selector: "<".into(), arity: 1, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![Some("DateTime".into())] },
+                MethodInfo { selector: ">".into(), arity: 1, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![Some("DateTime".into())] },
+                MethodInfo { selector: "<=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![Some("DateTime".into())] },
+                MethodInfo { selector: ">=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![Some("DateTime".into())] },
+                MethodInfo { selector: "=:=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![Some("DateTime".into())] },
+                MethodInfo { selector: "/=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![Some("DateTime".into())] },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "now".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: true, return_type: Some("DateTime".into()), param_types: vec![] },
+                MethodInfo { selector: "monotonicNow".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: true, return_type: Some("Integer".into()), param_types: vec![] },
+                MethodInfo { selector: "year:month:day:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: true, return_type: Some("DateTime".into()), param_types: vec![Some("Integer".into()), Some("Integer".into()), Some("Integer".into())] },
+                MethodInfo { selector: "year:month:day:hour:minute:second:".into(), arity: 6, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: true, return_type: Some("DateTime".into()), param_types: vec![Some("Integer".into()), Some("Integer".into()), Some("Integer".into()), Some("Integer".into()), Some("Integer".into()), Some("Integer".into())] },
+                MethodInfo { selector: "fromTimestamp:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: true, return_type: Some("DateTime".into()), param_types: vec![Some("Integer".into())] },
+                MethodInfo { selector: "fromString:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: true, return_type: Some("DateTime".into()), param_types: vec![Some("String".into())] },
+            ],
             class_variables: vec![],
         },
     );

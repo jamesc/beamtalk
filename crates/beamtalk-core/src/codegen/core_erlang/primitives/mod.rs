@@ -66,6 +66,7 @@ pub fn generate_primitive_bif(
         "Random" => misc::generate_random_bif(selector, params),
         "Regex" => misc::generate_regex_bif(selector, params),
         "System" => misc::generate_system_bif(selector, params),
+        "DateTime" => misc::generate_datetime_bif(selector, params),
         "Collection" => collection::generate_collection_bif(selector, params),
         "StackFrame" => misc::generate_stack_frame_bif(selector, params),
         "Pid" => misc::generate_pid_bif(selector, params),

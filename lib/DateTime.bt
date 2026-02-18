@@ -1,0 +1,153 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// DateTime — UTC date and time via Erlang calendar/os modules.
+///
+/// Provides class-side constructors for creating UTC datetime values and
+/// instance methods for access, arithmetic, comparison, and formatting.
+///
+/// ## Examples
+/// ```beamtalk
+/// now := DateTime now                              // current UTC time
+/// dt := DateTime year: 2026 month: 2 day: 18
+/// dt year                                          // => 2026
+/// dt asString                                      // => "2026-02-18T00:00:00Z"
+/// dt addDays: 7                                    // => a DateTime(2026-02-25T00:00:00Z)
+/// ```
+sealed Object subclass: DateTime
+
+  // ===== Class Methods — Construction =====
+
+  /// Current UTC time.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// DateTime now                                   // => a DateTime(...)
+  /// ```
+  class sealed now -> DateTime => @primitive "now"
+
+  /// Monotonic clock value in nanoseconds (for measuring intervals).
+  /// Returns an Integer, not a DateTime.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// start := DateTime monotonicNow
+  /// // ... do work ...
+  /// elapsed := DateTime monotonicNow - start       // nanoseconds
+  /// ```
+  class sealed monotonicNow -> Integer => @primitive "monotonicNow"
+
+  /// Construct from year, month, day (time defaults to 00:00:00).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// DateTime year: 2026 month: 2 day: 18
+  /// // => a DateTime(2026-02-18T00:00:00Z)
+  /// ```
+  class sealed year: y: Integer month: m: Integer day: d: Integer -> DateTime => @primitive "year:month:day:"
+
+  /// Construct from year, month, day, hour, minute, second.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// DateTime year: 2026 month: 2 day: 18 hour: 10 minute: 30 second: 0
+  /// // => a DateTime(2026-02-18T10:30:00Z)
+  /// ```
+  class sealed year: y: Integer month: m: Integer day: d: Integer hour: h: Integer minute: mi: Integer second: s: Integer -> DateTime => @primitive "year:month:day:hour:minute:second:"
+
+  /// Construct from Unix epoch timestamp (seconds).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// DateTime fromTimestamp: 0
+  /// // => a DateTime(1970-01-01T00:00:00Z)
+  /// ```
+  class sealed fromTimestamp: ts: Integer -> DateTime => @primitive "fromTimestamp:"
+
+  /// Parse an ISO 8601 string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// DateTime fromString: '2026-02-18T10:30:00Z'
+  /// // => a DateTime(2026-02-18T10:30:00Z)
+  /// ```
+  class sealed fromString: str: String -> DateTime => @primitive "fromString:"
+
+  // ===== Instance Methods — Accessors =====
+
+  /// Year component.
+  year -> Integer => @primitive "year"
+
+  /// Month component (1-12).
+  month -> Integer => @primitive "month"
+
+  /// Day component (1-31).
+  day -> Integer => @primitive "day"
+
+  /// Hour component (0-23).
+  hour -> Integer => @primitive "hour"
+
+  /// Minute component (0-59).
+  minute -> Integer => @primitive "minute"
+
+  /// Second component (0-59).
+  second -> Integer => @primitive "second"
+
+  // ===== Instance Methods — Conversion =====
+
+  /// Convert to Unix epoch timestamp (seconds).
+  asTimestamp -> Integer => @primitive "asTimestamp"
+
+  /// Format as ISO 8601 string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (DateTime year: 2026 month: 2 day: 18) asString
+  /// // => "2026-02-18T00:00:00Z"
+  /// ```
+  asString -> String => @primitive "asString"
+
+  /// Human-readable representation.
+  printString -> String => @primitive "printString"
+
+  /// Describe protocol (same as asString).
+  describe -> String => @primitive "describe"
+
+  // ===== Instance Methods — Arithmetic =====
+
+  /// Add seconds, return new DateTime.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (DateTime year: 2026 month: 1 day: 1) addSeconds: 3600
+  /// // => a DateTime(2026-01-01T01:00:00Z)
+  /// ```
+  addSeconds: secs: Integer -> DateTime => @primitive "addSeconds:"
+
+  /// Add days, return new DateTime.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (DateTime year: 2026 month: 1 day: 1) addDays: 7
+  /// // => a DateTime(2026-01-08T00:00:00Z)
+  /// ```
+  addDays: days: Integer -> DateTime => @primitive "addDays:"
+
+  /// Difference in seconds between this and another DateTime.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// a := DateTime year: 2026 month: 1 day: 2
+  /// b := DateTime year: 2026 month: 1 day: 1
+  /// a diffSeconds: b                               // => 86400
+  /// ```
+  diffSeconds: other: DateTime -> Integer => @primitive "diffSeconds:"
+
+  // ===== Instance Methods — Comparison =====
+
+  < other: DateTime -> Boolean => @primitive "<"
+  > other: DateTime -> Boolean => @primitive ">"
+  <= other: DateTime -> Boolean => @primitive "<="
+  >= other: DateTime -> Boolean => @primitive ">="
+  =:= other: DateTime -> Boolean => @primitive "=:="
+  /= other: DateTime -> Boolean => @primitive "/="

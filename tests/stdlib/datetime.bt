@@ -1,0 +1,287 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for DateTime class (BT-710)
+// Tests date/time construction, accessors, arithmetic, comparison, and formatting.
+
+// ===========================================================================
+// CONSTRUCTION — year:month:day:
+// ===========================================================================
+
+// Construct a date-only DateTime
+dt := DateTime year: 2026 month: 2 day: 18
+// => _
+
+dt class
+// => DateTime
+
+// ===========================================================================
+// CONSTRUCTION — year:month:day:hour:minute:second:
+// ===========================================================================
+
+// Construct a full DateTime
+dt2 := DateTime year: 2026 month: 2 day: 18 hour: 10 minute: 30 second: 0
+// => _
+
+dt2 class
+// => DateTime
+
+// ===========================================================================
+// CONSTRUCTION — fromTimestamp:
+// ===========================================================================
+
+// Unix epoch is 1970-01-01
+epoch := DateTime fromTimestamp: 0
+// => _
+
+epoch year
+// => 1970
+
+epoch month
+// => 1
+
+epoch day
+// => 1
+
+epoch hour
+// => 0
+
+// ===========================================================================
+// CONSTRUCTION — fromString:
+// ===========================================================================
+
+// Parse ISO 8601 string
+parsed := DateTime fromString: "2026-02-18T10:30:00Z"
+// => _
+
+parsed year
+// => 2026
+
+parsed month
+// => 2
+
+parsed day
+// => 18
+
+parsed hour
+// => 10
+
+parsed minute
+// => 30
+
+parsed second
+// => 0
+
+// ===========================================================================
+// CONSTRUCTION — now
+// ===========================================================================
+
+// DateTime now returns a DateTime
+(DateTime now) class
+// => DateTime
+
+// now has a year >= 2026
+(DateTime now) year >= 2026
+// => true
+
+// ===========================================================================
+// CONSTRUCTION — monotonicNow
+// ===========================================================================
+
+// monotonicNow returns an Integer
+(DateTime monotonicNow) class =:= Integer
+// => true
+
+// ===========================================================================
+// ACCESSORS
+// ===========================================================================
+
+a := DateTime year: 2026 month: 3 day: 15 hour: 14 minute: 45 second: 30
+// => _
+
+a year
+// => 2026
+
+a month
+// => 3
+
+a day
+// => 15
+
+a hour
+// => 14
+
+a minute
+// => 45
+
+a second
+// => 30
+
+// ===========================================================================
+// CONVERSION — asTimestamp
+// ===========================================================================
+
+// Unix epoch round-trip
+(DateTime fromTimestamp: 0) asTimestamp
+// => 0
+
+// Known timestamp round-trip
+ts := (DateTime year: 2026 month: 1 day: 1) asTimestamp
+// => _
+
+(DateTime fromTimestamp: ts) year
+// => 2026
+
+(DateTime fromTimestamp: ts) month
+// => 1
+
+(DateTime fromTimestamp: ts) day
+// => 1
+
+// ===========================================================================
+// CONVERSION — asString
+// ===========================================================================
+
+// Date-only formats with zero time
+(DateTime year: 2026 month: 2 day: 18) asString
+// => 2026-02-18T00:00:00Z
+
+// Full datetime format
+(DateTime year: 2026 month: 2 day: 18 hour: 10 minute: 30 second: 0) asString
+// => 2026-02-18T10:30:00Z
+
+// ===========================================================================
+// CONVERSION — printString
+// ===========================================================================
+
+(DateTime year: 2026 month: 2 day: 18) printString
+// => a DateTime(2026-02-18T00:00:00Z)
+
+// ===========================================================================
+// CONVERSION — describe
+// ===========================================================================
+
+(DateTime year: 2026 month: 2 day: 18) describe
+// => 2026-02-18T00:00:00Z
+
+// ===========================================================================
+// ARITHMETIC — addSeconds:
+// ===========================================================================
+
+// Add one hour
+(DateTime year: 2026 month: 1 day: 1) addSeconds: 3600
+// => _
+
+((DateTime year: 2026 month: 1 day: 1) addSeconds: 3600) hour
+// => 1
+
+// Add negative seconds (subtract)
+((DateTime year: 2026 month: 1 day: 1 hour: 1 minute: 0 second: 0) addSeconds: -3600) hour
+// => 0
+
+// ===========================================================================
+// ARITHMETIC — addDays:
+// ===========================================================================
+
+// Add 7 days
+((DateTime year: 2026 month: 1 day: 1) addDays: 7) day
+// => 8
+
+// Add days across month boundary
+((DateTime year: 2026 month: 1 day: 30) addDays: 3) month
+// => 2
+
+((DateTime year: 2026 month: 1 day: 30) addDays: 3) day
+// => 2
+
+// ===========================================================================
+// ARITHMETIC — diffSeconds:
+// ===========================================================================
+
+// One day difference
+b := DateTime year: 2026 month: 1 day: 2
+// => _
+
+c := DateTime year: 2026 month: 1 day: 1
+// => _
+
+b diffSeconds: c
+// => 86400
+
+// Negative difference (reverse)
+c diffSeconds: b
+// => -86400
+
+// Zero difference
+c diffSeconds: c
+// => 0
+
+// ===========================================================================
+// COMPARISON
+// ===========================================================================
+
+d := DateTime year: 2026 month: 1 day: 1
+// => _
+
+e := DateTime year: 2026 month: 1 day: 2
+// => _
+
+d < e
+// => true
+
+e < d
+// => false
+
+d > e
+// => false
+
+e > d
+// => true
+
+d <= e
+// => true
+
+d <= d
+// => true
+
+d >= e
+// => false
+
+d >= d
+// => true
+
+d =:= d
+// => true
+
+d =:= e
+// => false
+
+d /= e
+// => true
+
+d /= d
+// => false
+
+// ===========================================================================
+// ERROR HANDLING
+// ===========================================================================
+
+// Invalid date raises error
+DateTime year: 2026 month: 13 day: 1
+// => ERROR: type_error
+
+// Invalid time raises error
+DateTime year: 2026 month: 1 day: 1 hour: 25 minute: 0 second: 0
+// => ERROR: type_error
+
+// Invalid string format raises error
+DateTime fromString: "not-a-date"
+// => ERROR: type_error
+
+// Non-integer argument raises error
+DateTime fromTimestamp: "hello"
+// => ERROR: type_error
+
+// diffSeconds: with non-DateTime raises error
+(DateTime year: 2026 month: 1 day: 1) diffSeconds: "hello"
+// => ERROR: type_error
