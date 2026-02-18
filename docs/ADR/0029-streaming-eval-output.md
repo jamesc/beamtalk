@@ -206,7 +206,7 @@ Multi-message responses require clients to handle message correlation (matching 
 
 ### Tension Points
 
-- **Smalltalk purists** would prefer Transcript-only output (Alternative B), arguing that eval should return values, not output streams. But this breaks when multiple sessions run concurrently — output from one session's eval appears in another session's Transcript, with no way to correlate it.
+- **Smalltalk purists** would prefer Transcript-only output (Alternative B), arguing that eval should return values, not output streams. This is a legitimate design — Transcript is just one workspace pane, and future panes (logging, actor announcements, message traces) will have their own subscription channels. But `out` captures **all stdout from eval**, not just `Transcript show:` calls — it includes `Erlang io format:`, OTP logger output, and anything else that goes through the group_leader. Workspace panes and eval output are orthogonal concerns.
 - **BEAM veterans** would accept status quo (Alternative A) since Erlang's shell doesn't have this problem (it writes directly to the terminal). But Beamtalk operates over a network protocol, not a local terminal.
 - **Newcomers and operators** strongly prefer streaming (the proposed decision) because it matches expectations from every other modern REPL (Jupyter, IPython, Node.js REPL).
 
