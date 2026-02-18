@@ -134,8 +134,12 @@ struct TranscriptClient {
 impl TranscriptClient {
     /// Connect to the workspace backend at the given host and port.
     fn connect(host: &str, port: u16, cookie: &str) -> Result<Self> {
-        let inner =
-            ProtocolClient::connect(host, port, cookie, Some(Duration::from_millis(READ_TIMEOUT_MS)))?;
+        let inner = ProtocolClient::connect(
+            host,
+            port,
+            cookie,
+            Some(Duration::from_millis(READ_TIMEOUT_MS)),
+        )?;
         Ok(Self { inner })
     }
 

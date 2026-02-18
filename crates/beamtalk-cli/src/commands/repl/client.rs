@@ -121,9 +121,12 @@ impl ReplClient {
             interrupt_req["session"] = serde_json::Value::String(session.clone());
         }
         // Open a new connection and send interrupt — best effort
-        if let Ok(mut interrupt_client) =
-            ProtocolClient::connect(&self.host, self.port, &self.cookie, Some(Duration::from_secs(2)))
-        {
+        if let Ok(mut interrupt_client) = ProtocolClient::connect(
+            &self.host,
+            self.port,
+            &self.cookie,
+            Some(Duration::from_secs(2)),
+        ) {
             let _ = interrupt_client.send_request::<serde_json::Value>(&interrupt_req);
         }
     }

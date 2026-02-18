@@ -526,8 +526,7 @@ mod tests {
         let ws = TestWorkspace::new("compat_bind");
         fs::create_dir_all(ws.dir()).unwrap();
 
-        let old_json =
-            r#"{"node_name":"old@localhost","port":9999,"pid":12345,"start_time":100}"#;
+        let old_json = r#"{"node_name":"old@localhost","port":9999,"pid":12345,"start_time":100}"#;
         fs::write(ws.dir().join("node.info"), old_json).unwrap();
 
         let loaded = get_node_info(&ws.id).unwrap().unwrap();

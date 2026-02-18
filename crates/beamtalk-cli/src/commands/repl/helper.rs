@@ -93,8 +93,13 @@ impl ReplHelper {
 
         // Try to reconnect if we don't have a client
         if client_ref.is_none() {
-            *client_ref =
-                ProtocolClient::connect(&self.host, self.port, &self.cookie, Some(COMPLETION_TIMEOUT)).ok();
+            *client_ref = ProtocolClient::connect(
+                &self.host,
+                self.port,
+                &self.cookie,
+                Some(COMPLETION_TIMEOUT),
+            )
+            .ok();
         }
 
         let Some(client) = client_ref.as_mut() else {

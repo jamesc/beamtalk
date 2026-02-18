@@ -410,7 +410,13 @@ pub fn run(
             bind_addr.to_string()
         };
 
-        (Some(BeamChildGuard { child }), true, fg_host, actual_port, fg_cookie)
+        (
+            Some(BeamChildGuard { child }),
+            true,
+            fg_host,
+            actual_port,
+            fg_cookie,
+        )
     } else {
         // Workspace mode: start or connect to detached node
 
@@ -495,7 +501,13 @@ pub fn run(
 
         println!();
 
-        (None, is_new, node_info.connect_host().to_string(), actual_port, ws_cookie) // No guard needed - node is detached
+        (
+            None,
+            is_new,
+            node_info.connect_host().to_string(),
+            actual_port,
+            ws_cookie,
+        ) // No guard needed - node is detached
     };
 
     // Connect to REPL backend
