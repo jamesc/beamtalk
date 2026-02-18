@@ -182,39 +182,39 @@ do_eval_rejected_future_becomes_error_test() ->
 
 io_capture_basic_put_chars_test() ->
     %% Test direct put_chars capture
-    {CapturePid, OldGL} = beamtalk_repl_eval:start_io_capture(),
+    {CapturePid, OldGL} = beamtalk_io_capture:start(),
     io:put_chars("hello"),
-    Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}),
+    Output = beamtalk_io_capture:stop({CapturePid, OldGL}),
     ?assertEqual(<<"hello">>, Output).
 
 io_capture_io_format_test() ->
     %% Test io:format which uses {put_chars, Enc, Mod, Func, Args}
-    {CapturePid, OldGL} = beamtalk_repl_eval:start_io_capture(),
+    {CapturePid, OldGL} = beamtalk_io_capture:start(),
     io:format("value: ~p~n", [42]),
-    Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}),
+    Output = beamtalk_io_capture:stop({CapturePid, OldGL}),
     ?assertEqual(<<"value: 42\n">>, Output).
 
 io_capture_empty_test() ->
     %% No output produces empty binary
-    {CapturePid, OldGL} = beamtalk_repl_eval:start_io_capture(),
-    Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}),
+    {CapturePid, OldGL} = beamtalk_io_capture:start(),
+    Output = beamtalk_io_capture:stop({CapturePid, OldGL}),
     ?assertEqual(<<>>, Output).
 
 io_capture_multiple_writes_test() ->
     %% Multiple writes are concatenated
-    {CapturePid, OldGL} = beamtalk_repl_eval:start_io_capture(),
+    {CapturePid, OldGL} = beamtalk_io_capture:start(),
     io:format("a"),
     io:format("b"),
     io:format("c"),
-    Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}),
+    Output = beamtalk_io_capture:stop({CapturePid, OldGL}),
     ?assertEqual(<<"abc">>, Output).
 
 io_capture_restores_group_leader_test() ->
     %% Verify group_leader is restored after capture
     OrigGL = group_leader(),
-    {CapturePid, OldGL} = beamtalk_repl_eval:start_io_capture(),
+    {CapturePid, OldGL} = beamtalk_io_capture:start(),
     ?assertNotEqual(OrigGL, group_leader()),
-    _Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}),
+    _Output = beamtalk_io_capture:stop({CapturePid, OldGL}),
     ?assertEqual(OrigGL, group_leader()).
 
 io_capture_dead_process_test() ->
@@ -222,7 +222,7 @@ io_capture_dead_process_test() ->
     OldGL = group_leader(),
     CapturePid = spawn(fun() -> ok end),
     timer:sleep(50),  %% Let it die
-    Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}),
+    Output = beamtalk_io_capture:stop({CapturePid, OldGL}),
     ?assertEqual(<<>>, Output).
 
 %% === BT-358: Group leader reset for spawned processes ===
@@ -231,14 +231,14 @@ io_capture_resets_spawned_process_group_leader_test() ->
     %% Verify that processes spawned during IO capture get their
     %% group_leader reset to the original GL when capture stops.
     OrigGL = group_leader(),
-    {CapturePid, _OldGL} = beamtalk_repl_eval:start_io_capture(),
+    {CapturePid, _OldGL} = beamtalk_io_capture:start(),
     %% Spawn a process that inherits the capture GL and stays alive
     SpawnedPid = spawn(fun() -> receive stop -> ok end end),
     %% Verify it inherited the capture process as GL
     {group_leader, SpawnedGL} = erlang:process_info(SpawnedPid, group_leader),
     ?assertEqual(CapturePid, SpawnedGL),
     %% Stop capture — should reset spawned process's GL
-    _Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OrigGL}),
+    _Output = beamtalk_io_capture:stop({CapturePid, OrigGL}),
     %% Verify spawned process now has the original stable GL
     {group_leader, RestoredGL} = erlang:process_info(SpawnedPid, group_leader),
     ?assertEqual(OrigGL, RestoredGL),
@@ -251,8 +251,8 @@ io_capture_reset_does_not_affect_unrelated_processes_test() ->
     PreExisting = spawn(fun() -> receive stop -> ok end end),
     {group_leader, PreGL} = erlang:process_info(PreExisting, group_leader),
     %% Start and stop capture
-    CaptureRef = beamtalk_repl_eval:start_io_capture(),
-    _Output = beamtalk_repl_eval:stop_io_capture(CaptureRef),
+    CaptureRef = beamtalk_io_capture:start(),
+    _Output = beamtalk_io_capture:stop(CaptureRef),
     %% Pre-existing process should keep its original GL
     {group_leader, PostGL} = erlang:process_info(PreExisting, group_leader),
     ?assertEqual(PreGL, PostGL),
@@ -417,43 +417,43 @@ extract_assignment_underscore_prefix_test() ->
 %%% handle_io_request tests
 
 handle_io_request_put_chars_utf8_test() ->
-    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request(
+    {Reply, Buffer} = beamtalk_io_capture:handle_io_request(
         {put_chars, unicode, <<"hello">>}, <<>>),
     ?assertEqual(ok, Reply),
     ?assertEqual(<<"hello">>, Buffer).
 
 handle_io_request_put_chars_latin1_test() ->
-    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request(
+    {Reply, Buffer} = beamtalk_io_capture:handle_io_request(
         {put_chars, latin1, <<"world">>}, <<>>),
     ?assertEqual(ok, Reply),
     ?assertEqual(<<"world">>, Buffer).
 
 handle_io_request_put_chars_legacy_test() ->
     %% Legacy form without encoding
-    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request(
+    {Reply, Buffer} = beamtalk_io_capture:handle_io_request(
         {put_chars, <<"legacy">>}, <<>>),
     ?assertEqual(ok, Reply),
     ?assertEqual(<<"legacy">>, Buffer).
 
 handle_io_request_put_chars_mfa_test() ->
     %% {put_chars, Enc, Mod, Func, Args} form used by io:format
-    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request(
+    {Reply, Buffer} = beamtalk_io_capture:handle_io_request(
         {put_chars, unicode, io_lib, format, ["val: ~p", [42]]}, <<>>),
     ?assertEqual(ok, Reply),
     ?assertEqual(<<"val: 42">>, Buffer).
 
 handle_io_request_unsupported_test() ->
     %% Unsupported IO request type
-    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request(
+    {Reply, Buffer} = beamtalk_io_capture:handle_io_request(
         {get_chars, unicode, <<"prompt">>, 1}, <<"existing">>),
     ?assertEqual({error, enotsup}, Reply),
     ?assertEqual(<<"existing">>, Buffer).
 
 handle_io_request_accumulates_buffer_test() ->
     %% Buffer should accumulate across calls
-    {ok, Buffer1} = beamtalk_repl_eval:handle_io_request(
+    {ok, Buffer1} = beamtalk_io_capture:handle_io_request(
         {put_chars, unicode, <<"one">>}, <<>>),
-    {ok, Buffer2} = beamtalk_repl_eval:handle_io_request(
+    {ok, Buffer2} = beamtalk_io_capture:handle_io_request(
         {put_chars, unicode, <<"two">>}, Buffer1),
     ?assertEqual(<<"onetwo">>, Buffer2).
 
@@ -579,7 +579,7 @@ activate_module_nonexistent_test() ->
 
 io_passthrough_forward_test() ->
     OldGL = group_leader(),
-    PassPid = spawn(fun() -> beamtalk_repl_eval:io_passthrough_loop(OldGL) end),
+    PassPid = spawn(fun() -> beamtalk_io_capture:io_passthrough_loop(OldGL) end),
     PassPid ! {io_request, self(), make_ref(), {put_chars, unicode, <<"test">>}},
     timer:sleep(50),
     ?assert(is_process_alive(PassPid)),
@@ -591,19 +591,19 @@ io_capture_dead_capture_process_test() ->
     CapturePid = spawn(fun() -> ok end),
     timer:sleep(10),
     OldGL = group_leader(),
-    Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}),
+    Output = beamtalk_io_capture:stop({CapturePid, OldGL}),
     ?assertEqual(<<>>, Output).
 
 %%% handle_io_request edge cases
 
 handle_io_request_put_chars_invalid_encoding_test() ->
-    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request(
+    {Reply, Buffer} = beamtalk_io_capture:handle_io_request(
         {put_chars, utf32, <<255, 254, 0, 0>>}, <<"existing">>),
     ?assertEqual(ok, Reply),
     ?assert(is_binary(Buffer)).
 
 handle_io_request_put_chars_mfa_error_test() ->
-    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request(
+    {Reply, Buffer} = beamtalk_io_capture:handle_io_request(
         {put_chars, utf8, erlang, error, [badarg]}, <<"existing">>),
     ?assertEqual(ok, Reply),
     ?assertEqual(<<"existing">>, Buffer).
@@ -794,40 +794,40 @@ maybe_await_future_beamtalk_object_v2_test() ->
 
 handle_io_request_put_chars_legacy_v2_test() ->
     %% Test the {put_chars, Chars} form without encoding (lines 668-675)
-    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request({put_chars, "hello"}, <<>>),
+    {Reply, Buffer} = beamtalk_io_capture:handle_io_request({put_chars, "hello"}, <<>>),
     ?assertEqual(ok, Reply),
     ?assertEqual(<<"hello">>, Buffer).
 
 handle_io_request_put_chars_legacy_binary_test() ->
     %% Test with binary input
-    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request({put_chars, <<"world">>}, <<"hi ">>),
+    {Reply, Buffer} = beamtalk_io_capture:handle_io_request({put_chars, <<"world">>}, <<"hi ">>),
     ?assertEqual(ok, Reply),
     ?assertEqual(<<"hi world">>, Buffer).
 
 handle_io_request_put_chars_mfa_v2_test() ->
     %% Test {put_chars, Encoding, Mod, Func, Args} form (lines 676-679)
-    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request(
+    {Reply, Buffer} = beamtalk_io_capture:handle_io_request(
         {put_chars, unicode, io_lib, format, ["~p", [42]]}, <<>>),
     ?assertEqual(ok, Reply),
     ?assertEqual(<<"42">>, Buffer).
 
 handle_io_request_put_chars_mfa_error_v2_test() ->
     %% Test with an MFA that crashes - covers catch clause (lines 680-681)
-    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request(
+    {Reply, Buffer} = beamtalk_io_capture:handle_io_request(
         {put_chars, unicode, erlang, error, [badarg]}, <<"existing">>),
     ?assertEqual(ok, Reply),
     ?assertEqual(<<"existing">>, Buffer).
 
 handle_io_request_unknown_test() ->
     %% Test unknown IO request type - covers catch-all (line 685)
-    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request({get_until, prompt, mod, func, []}, <<>>),
+    {Reply, Buffer} = beamtalk_io_capture:handle_io_request({get_until, prompt, mod, func, []}, <<>>),
     ?assertEqual({error, enotsup}, Reply),
     ?assertEqual(<<>>, Buffer).
 
 handle_io_request_put_chars_bad_encoding_test() ->
     %% Test put_chars with data that fails unicode conversion
     %% Covers the catch clause in handle_io_request (line 666)
-    {Reply, Buffer} = beamtalk_repl_eval:handle_io_request(
+    {Reply, Buffer} = beamtalk_io_capture:handle_io_request(
         {put_chars, utf32, <<255, 254, 0, 0>>}, <<"prev">>),
     ?assertEqual(ok, Reply),
     %% Buffer should remain unchanged on encoding error
@@ -841,7 +841,7 @@ reset_captured_group_leaders_no_matches_test() ->
     %% Test with a capture PID that no process has as group_leader
     FakePid = spawn(fun() -> receive stop -> ok after 5000 -> ok end end),
     OldGL = group_leader(),
-    ?assertEqual(ok, beamtalk_repl_eval:reset_captured_group_leaders(FakePid, OldGL)),
+    ?assertEqual(ok, beamtalk_io_capture:reset_captured_group_leaders(FakePid, OldGL)),
     FakePid ! stop.
 
 %% ===================================================================
@@ -850,11 +850,11 @@ reset_captured_group_leaders_no_matches_test() ->
 
 io_capture_with_output_test() ->
     %% Test full IO capture lifecycle covering start/stop paths
-    {CapturePid, OldGL} = beamtalk_repl_eval:start_io_capture(),
+    {CapturePid, OldGL} = beamtalk_io_capture:start(),
     ?assert(is_pid(CapturePid)),
     %% Write some output via io:format which goes through group_leader
     io:format("hello ~s", ["world"]),
-    Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}),
+    Output = beamtalk_io_capture:stop({CapturePid, OldGL}),
     ?assertEqual(<<"hello world">>, Output).
 
 io_capture_dead_capture_pid_test() ->
@@ -862,7 +862,7 @@ io_capture_dead_capture_pid_test() ->
     DeadPid = spawn(fun() -> ok end),
     timer:sleep(50),
     OldGL = group_leader(),
-    Output = beamtalk_repl_eval:stop_io_capture({DeadPid, OldGL}),
+    Output = beamtalk_io_capture:stop({DeadPid, OldGL}),
     ?assertEqual(<<>>, Output).
 
 %% ===================================================================
@@ -920,29 +920,29 @@ should_purge_module_with_registry_no_actors_test() ->
 
 is_stdin_request_get_line_with_encoding_test() ->
     ?assertMatch({true, <<"Name: ">>},
-                 beamtalk_repl_eval:is_stdin_request({get_line, unicode, <<"Name: ">>})).
+                 beamtalk_io_capture:is_stdin_request({get_line, unicode, <<"Name: ">>})).
 
 is_stdin_request_get_line_without_encoding_test() ->
     ?assertMatch({true, <<"Enter: ">>},
-                 beamtalk_repl_eval:is_stdin_request({get_line, <<"Enter: ">>})).
+                 beamtalk_io_capture:is_stdin_request({get_line, <<"Enter: ">>})).
 
 is_stdin_request_get_line_list_prompt_test() ->
     ?assertMatch({true, <<"Name: ">>},
-                 beamtalk_repl_eval:is_stdin_request({get_line, unicode, "Name: "})).
+                 beamtalk_io_capture:is_stdin_request({get_line, unicode, "Name: "})).
 
 is_stdin_request_get_chars_test() ->
     ?assertMatch({true, <<"Prompt">>},
-                 beamtalk_repl_eval:is_stdin_request({get_chars, unicode, <<"Prompt">>, 5})).
+                 beamtalk_io_capture:is_stdin_request({get_chars, unicode, <<"Prompt">>, 5})).
 
 is_stdin_request_get_until_test() ->
     ?assertMatch({true, <<"? ">>},
-                 beamtalk_repl_eval:is_stdin_request({get_until, unicode, <<"? ">>, io_lib, collect_line, []})).
+                 beamtalk_io_capture:is_stdin_request({get_until, unicode, <<"? ">>, io_lib, collect_line, []})).
 
 is_stdin_request_put_chars_test() ->
-    ?assertEqual(false, beamtalk_repl_eval:is_stdin_request({put_chars, unicode, <<"hello">>})).
+    ?assertEqual(false, beamtalk_io_capture:is_stdin_request({put_chars, unicode, <<"hello">>})).
 
 is_stdin_request_other_test() ->
-    ?assertEqual(false, beamtalk_repl_eval:is_stdin_request({some_other_request})).
+    ?assertEqual(false, beamtalk_io_capture:is_stdin_request({some_other_request})).
 
 %% ===================================================================
 %% Stdin request handling tests (BT-698)
@@ -950,7 +950,7 @@ is_stdin_request_other_test() ->
 
 handle_stdin_request_no_subscriber_test() ->
     %% Without subscriber, stdin returns enotsup
-    ?assertEqual({error, enotsup}, beamtalk_repl_eval:handle_stdin_request(undefined, <<"? ">>)).
+    ?assertEqual({error, enotsup}, beamtalk_io_capture:handle_stdin_request(undefined, <<"? ">>)).
 
 handle_stdin_request_with_subscriber_test() ->
     %% Test stdin handling with a subscriber that provides input
@@ -962,7 +962,7 @@ handle_stdin_request_with_subscriber_test() ->
                 Self ! subscriber_done
         end
     end),
-    Result = beamtalk_repl_eval:handle_stdin_request(Subscriber, <<"Name: ">>),
+    Result = beamtalk_io_capture:handle_stdin_request(Subscriber, <<"Name: ">>),
     ?assertEqual(<<"Alice\n">>, Result),
     receive subscriber_done -> ok after 1000 -> ?assert(false) end.
 
@@ -976,7 +976,7 @@ handle_stdin_request_eof_test() ->
                 Self ! subscriber_done
         end
     end),
-    Result = beamtalk_repl_eval:handle_stdin_request(Subscriber, <<"? ">>),
+    Result = beamtalk_io_capture:handle_stdin_request(Subscriber, <<"? ">>),
     ?assertEqual(eof, Result),
     receive subscriber_done -> ok after 1000 -> ?assert(false) end.
 
@@ -985,16 +985,16 @@ handle_stdin_request_eof_test() ->
 %% ===================================================================
 
 prompt_to_binary_binary_test() ->
-    ?assertEqual(<<"hello">>, beamtalk_repl_eval:prompt_to_binary(<<"hello">>)).
+    ?assertEqual(<<"hello">>, beamtalk_io_capture:prompt_to_binary(<<"hello">>)).
 
 prompt_to_binary_list_test() ->
-    ?assertEqual(<<"hello">>, beamtalk_repl_eval:prompt_to_binary("hello")).
+    ?assertEqual(<<"hello">>, beamtalk_io_capture:prompt_to_binary("hello")).
 
 prompt_to_binary_atom_test() ->
-    ?assertEqual(<<"ok">>, beamtalk_repl_eval:prompt_to_binary(ok)).
+    ?assertEqual(<<"ok">>, beamtalk_io_capture:prompt_to_binary(ok)).
 
 prompt_to_binary_other_test() ->
-    ?assertEqual(<<"? ">>, beamtalk_repl_eval:prompt_to_binary(42)).
+    ?assertEqual(<<"? ">>, beamtalk_io_capture:prompt_to_binary(42)).
 
 %% ===================================================================
 %% IO capture loop stdin integration tests (BT-698)
@@ -1004,7 +1004,7 @@ io_capture_stdin_with_subscriber_test() ->
     %% Test that io_capture_loop handles get_line by notifying subscriber
     Self = self(),
     %% Use self() as the subscriber — we'll handle the need_input message
-    {CapturePid, OldGL} = beamtalk_repl_eval:start_io_capture(Self),
+    {CapturePid, OldGL} = beamtalk_io_capture:start(Self),
     %% Send a get_line request to the IO capture process
     ReplyRef = make_ref(),
     CapturePid ! {io_request, self(), ReplyRef, {get_line, unicode, <<"Enter: ">>}},
@@ -1023,12 +1023,12 @@ io_capture_stdin_with_subscriber_test() ->
     after 5000 ->
         ?assert(false)
     end,
-    _Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}).
+    _Output = beamtalk_io_capture:stop({CapturePid, OldGL}).
 
 io_capture_stdin_stale_ref_ignored_test() ->
     %% A stdin_input with a wrong ref is ignored; the correct ref is accepted
     Self = self(),
-    {CapturePid, OldGL} = beamtalk_repl_eval:start_io_capture(Self),
+    {CapturePid, OldGL} = beamtalk_io_capture:start(Self),
     ReplyRef = make_ref(),
     CapturePid ! {io_request, self(), ReplyRef, {get_line, unicode, <<"Enter: ">>}},
     receive
@@ -1047,11 +1047,11 @@ io_capture_stdin_stale_ref_ignored_test() ->
     after 5000 ->
         ?assert(false)
     end,
-    _Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}).
+    _Output = beamtalk_io_capture:stop({CapturePid, OldGL}).
 
 io_capture_stdin_no_subscriber_test() ->
     %% Without subscriber, get_line returns {error, enotsup}
-    {CapturePid, OldGL} = beamtalk_repl_eval:start_io_capture(),
+    {CapturePid, OldGL} = beamtalk_io_capture:start(),
     ReplyRef = make_ref(),
     CapturePid ! {io_request, self(), ReplyRef, {get_line, unicode, <<"? ">>}},
     receive
@@ -1060,4 +1060,4 @@ io_capture_stdin_no_subscriber_test() ->
     after 5000 ->
         ?assert(false)
     end,
-    _Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}).
+    _Output = beamtalk_io_capture:stop({CapturePid, OldGL}).
