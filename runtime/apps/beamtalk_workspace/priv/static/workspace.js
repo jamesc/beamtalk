@@ -291,6 +291,7 @@
       // Route print-it responses — append result inline
       if (msg.id && pendingPrintIt[msg.id]) {
         delete pendingPrintIt[msg.id];
+        if (evalInProgress > 0) { evalInProgress--; updateStopButton(); }
         var isErr = Array.isArray(msg.status) && msg.status.includes('error');
         if (isErr && msg.error) {
           appendTo(replOutput, 'Error: ' + msg.error + '\n', '#f38ba8');
@@ -306,6 +307,7 @@
       // Route inspect responses to Inspector pane
       if (msg.id && pendingInspects[msg.id]) {
         delete pendingInspects[msg.id];
+        if (evalInProgress > 0) { evalInProgress--; updateStopButton(); }
         var isError = Array.isArray(msg.status) && msg.status.includes('error');
         if (isError && msg.error) {
           clearEl(inspectorEl);
@@ -445,6 +447,8 @@
     msgId++;
     var id = 'msg-' + msgId;
     pendingPrintIt[id] = true;
+    evalInProgress++;
+    updateStopButton();
     ws.send(JSON.stringify({ op: 'eval', id: id, code: code }));
   };
 
@@ -459,6 +463,8 @@
     msgId++;
     var id = 'msg-' + msgId;
     pendingInspects[id] = true;
+    evalInProgress++;
+    updateStopButton();
     ws.send(JSON.stringify({ op: 'eval', id: id, code: code }));
     evalInput.focus();
   };
@@ -520,11 +526,16 @@
     var source = editorInput.value;
     if (!source.trim() || !ws || ws.readyState !== WebSocket.OPEN) return;
 
-    // Extract class name from editor source
-    var classMatch = source.match(/(\w+)\s+subclass:\s+(\w+)/);
-    var className = classMatch ? classMatch[2] : null;
+    // Extract class name from editor source (last subclass definition wins)
+    var classMatches = source.match(/\w+\s+subclass:\s+(\w+)/g);
+    var className = null;
+    if (classMatches) {
+      var last = classMatches[classMatches.length - 1];
+      var nameMatch = last.match(/subclass:\s+(\w+)/);
+      className = nameMatch ? nameMatch[1] : null;
+    }
     if (!className) {
-      editorStatus.textContent = 'No class found in editor';
+      editorStatus.textContent = 'No class definition found (expected "X subclass: Y")';
       editorStatus.style.color = '#f38ba8';
       return;
     }
@@ -583,13 +594,13 @@
   // --- Show Codegen (BT-722) ---
 
   window.sendShowCodegen = function() {
-    var code = getSelectedOrLine().trim();
-    if (!code || !ws || ws.readyState !== WebSocket.OPEN) return;
+    var source = editorInput.value.trim();
+    if (!source || !ws || ws.readyState !== WebSocket.OPEN) return;
 
     msgId++;
     var id = 'msg-' + msgId;
     pendingCodegen[id] = true;
-    ws.send(JSON.stringify({ op: 'show-codegen', id: id, code: code }));
+    ws.send(JSON.stringify({ op: 'show-codegen', id: id, code: source }));
   };
 
   function renderCodegen(msg) {
@@ -845,13 +856,13 @@
   });
 
   // Global shortcut: Ctrl+/ toggles shortcuts help from anywhere
-  // Global shortcut: Ctrl+. interrupts evaluation from anywhere
+  // Global shortcut: Ctrl+. interrupts evaluation from anywhere (except from eval input, where it's already handled)
   document.addEventListener('keydown', function(e) {
     if ((e.ctrlKey || e.metaKey) && e.key === '/') {
       e.preventDefault();
       toggleShortcuts();
     }
-    if ((e.ctrlKey || e.metaKey) && e.key === '.') {
+    if ((e.ctrlKey || e.metaKey) && e.key === '.' && document.activeElement !== evalInput) {
       e.preventDefault();
       sendInterrupt();
     }
