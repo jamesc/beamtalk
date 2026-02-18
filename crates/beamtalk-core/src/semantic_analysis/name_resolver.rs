@@ -239,11 +239,6 @@ impl NameResolver {
                 self.resolve_expression(expression);
             }
 
-            Pipe { value, target, .. } => {
-                self.resolve_expression(value);
-                self.resolve_expression(target);
-            }
-
             Match { value, arms, .. } => {
                 self.resolve_expression(value);
                 for arm in arms {

@@ -63,9 +63,10 @@ For standalone BEAM nodes (no workspace), the default `~/.erlang.cookie` is used
 |-------|------|-------------|
 | `id` | string | Echoed from request (if provided) |
 | `session` | string | Echoed from request (if provided) |
-| `status` | string[] | Status flags: `["done"]` for final message |
+| `status` | string[] | Status flags: `["done"]` for final message. Absent on intermediate streaming messages. |
 | `value` | any | Result value (for eval, clear, kill) |
-| `output` | string | Captured stdout from evaluation (omitted if empty). Present when the evaluated expression writes to stdout (e.g., `Transcript show:`) |
+| `output` | string | Captured stdout from evaluation (omitted if empty). Present in the final message for backward compatibility. Streaming clients should prefer `out` messages. |
+| `out` | string | Streaming stdout chunk (BT-696). Sent as intermediate messages during eval, before the final `done` message. No `status` field. |
 | `error` | string | Error message (when status includes `"error"`) |
 | *result fields* | varies | Operation-specific fields (see below) |
 
@@ -92,17 +93,24 @@ Evaluate a Beamtalk expression in the current session.
 {"op": "eval", "id": "msg-001", "code": "1 + 2"}
 ```
 
-**Response (success):**
+**Response (success, no stdout):**
 ```json
 {"id": "msg-001", "value": 3, "status": ["done"]}
 ```
 
-**Response (with stdout output):**
+**Streaming response (with stdout output, BT-696):**
+
+When the evaluated expression writes to stdout (e.g., via `Transcript show:`), the server sends intermediate `out` messages as output is produced, followed by a final `done` message:
+
 ```json
+{"id": "msg-001", "out": "Hello, "}
+{"id": "msg-001", "out": "world!\n"}
 {"id": "msg-001", "value": "nil", "output": "Hello, world!\n", "status": ["done"]}
 ```
 
-The `output` field contains any text written to stdout during evaluation (e.g., via `Transcript show:`). It is omitted when empty.
+Intermediate `out` messages have no `status` field. The final `done` message still includes the full `output` field for backward compatibility with clients that don't support streaming.
+
+If the expression produces no stdout, the response is a single message (unchanged from pre-streaming behavior).
 
 **Response (error):**
 ```json
@@ -393,10 +401,10 @@ The protocol is implemented in:
 
 | File | Description |
 |------|-------------|
-| `runtime/apps/beamtalk_runtime/src/beamtalk_repl_protocol.erl` | Protocol encoder/decoder (incl. `output` field) |
-| `runtime/apps/beamtalk_runtime/src/beamtalk_repl_server.erl` | TCP server and request dispatch |
-| `runtime/apps/beamtalk_runtime/src/beamtalk_repl_eval.erl` | Expression evaluation and I/O capture |
-| `runtime/apps/beamtalk_runtime/src/beamtalk_repl_shell.erl` | Session state bridge |
+| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_protocol.erl` | Protocol encoder/decoder (incl. `output` field) |
+| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_server.erl` | WebSocket server and request dispatch |
+| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_eval.erl` | Expression evaluation and I/O capture |
+| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_shell.erl` | Session state bridge |
 | `crates/beamtalk-cli/src/commands/repl/mod.rs` | Rust CLI client |
 
 ## References

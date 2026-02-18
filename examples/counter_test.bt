@@ -24,13 +24,11 @@ TestCase subclass: ExampleCounterTest
     self assert: (Counter spawn decrement await) equals: -1
 
   testMultipleIncrements =>
-    | counter |
     counter := Counter spawn
     3 timesRepeat: [counter increment await]
     self assert: (counter getValue await) equals: 3
 
   testIncrementAndDecrement =>
-    | counter |
     counter := Counter spawn
     counter increment await
     counter increment await

@@ -172,10 +172,6 @@ fn validate_expr(
                 }
             }
         }
-        Expression::Pipe { value, target, .. } => {
-            validate_expr(value, is_stdlib, options, diagnostics);
-            validate_expr(target, is_stdlib, options, diagnostics);
-        }
         Expression::Match { value, arms, .. } => {
             validate_expr(value, is_stdlib, options, diagnostics);
             for arm in arms {

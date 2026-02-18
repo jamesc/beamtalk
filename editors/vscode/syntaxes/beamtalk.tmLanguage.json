@@ -155,10 +155,6 @@
           "match": "\\*\\*|\\+\\+|[+\\-*/%]"
         },
         {
-          "name": "keyword.operator.pipe.beamtalk",
-          "match": "\\|>"
-        },
-        {
           "name": "punctuation.separator.cascade.beamtalk",
           "match": ";"
         }

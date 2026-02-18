@@ -377,8 +377,6 @@ pub fn find_selector_lookup_in_expr(expr: &Expression, offset: u32) -> Option<Se
             find_selector_lookup_in_expr(expression, offset)
         }
         Expression::FieldAccess { receiver, .. } => find_selector_lookup_in_expr(receiver, offset),
-        Expression::Pipe { value, target, .. } => find_selector_lookup_in_expr(value, offset)
-            .or_else(|| find_selector_lookup_in_expr(target, offset)),
         Expression::Match { value, arms, .. } => {
             if let Some(result) = find_selector_lookup_in_expr(value, offset) {
                 return Some(result);

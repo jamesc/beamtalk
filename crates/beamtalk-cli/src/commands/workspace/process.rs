@@ -72,7 +72,8 @@ const EXIT_PROBE_CONNECT_TIMEOUT_MS: u64 = 500;
 /// workspace port is listening. If the workspace has a nonce, validates it
 /// against the port file nonce to detect stale entries (PID reuse after crash).
 pub fn is_node_running(info: &NodeInfo) -> bool {
-    let addr = format!("127.0.0.1:{}", info.port);
+    let host = info.connect_host();
+    let addr = format!("{host}:{}", info.port);
     let Ok(addr) = addr.parse::<std::net::SocketAddr>() else {
         return false;
     };
@@ -148,8 +149,9 @@ pub struct HealthProbeResponse {
 /// cookie, sends a `{"op":"health"}` message, and returns the parsed response
 /// containing `workspace_id` and `nonce`.
 #[allow(dead_code)] // Available for workspace lifecycle and integration tests
-pub fn tcp_health_probe(port: u16, cookie: &str) -> Result<HealthProbeResponse> {
+pub fn tcp_health_probe(host: &str, port: u16, cookie: &str) -> Result<HealthProbeResponse> {
     let mut client = ProtocolClient::connect(
+        host,
         port,
         cookie,
         Some(Duration::from_millis(TCP_READ_TIMEOUT_MS)),
@@ -168,8 +170,9 @@ pub fn tcp_health_probe(port: u16, cookie: &str) -> Result<HealthProbeResponse> 
 /// cookie, sends a `{"op":"shutdown","cookie":"..."}` message, and waits for
 /// acknowledgement. The workspace will call `init:stop()` for OTP-level
 /// graceful teardown.
-pub fn tcp_send_shutdown(port: u16, cookie: &str) -> Result<()> {
+pub fn tcp_send_shutdown(host: &str, port: u16, cookie: &str) -> Result<()> {
     let mut client = ProtocolClient::connect(
+        host,
         port,
         cookie,
         Some(Duration::from_millis(TCP_READ_TIMEOUT_MS)),
@@ -331,17 +334,18 @@ pub fn start_detached_node(
         }
     };
 
-    // Wait for WebSocket health endpoint to be fully ready before returning.
-    wait_for_tcp_ready(actual_port, pid, &cookie)?;
-
-    // Create node info
+    // Create node info (BT-694: store bind_addr for reconnection)
     let node_info = NodeInfo {
         node_name: node_name.clone(),
         port: actual_port,
         pid,
         start_time,
         nonce,
+        bind_addr: bind_addr.map(|a| a.to_string()),
     };
+
+    // Wait for WebSocket health endpoint to be fully ready before returning.
+    wait_for_tcp_ready(node_info.connect_host(), actual_port, pid, &cookie)?;
 
     // Save node info
     save_node_info(workspace_id, &node_info)?;
@@ -367,9 +371,10 @@ fn path_to_erlang_arg(path: &Path) -> String {
 /// Poll until the WebSocket health endpoint responds on the given port.
 ///
 /// Uses short per-attempt timeouts to keep the worst-case total bounded.
-fn wait_for_tcp_ready(port: u16, pid: u32, cookie: &str) -> Result<()> {
+fn wait_for_tcp_ready(host: &str, port: u16, pid: u32, cookie: &str) -> Result<()> {
     for _ in 0..READINESS_PROBE_MAX_RETRIES {
         if let Ok(mut client) = ProtocolClient::connect(
+            host,
             port,
             cookie,
             Some(Duration::from_millis(READINESS_READ_TIMEOUT_MS)),
@@ -532,10 +537,10 @@ fn find_beam_pid_by_node(node_name: &str) -> Result<(u32, Option<u64>)> {
 /// Uses a lightweight TCP connect probe to check liveness (cross-platform).
 /// Returns `Ok(())` if the workspace stops responding within `timeout_secs`,
 /// or an error suggesting `--force` if it doesn't.
-pub(super) fn wait_for_workspace_exit(port: u16, timeout_secs: u64) -> Result<()> {
+pub(super) fn wait_for_workspace_exit(host: &str, port: u16, timeout_secs: u64) -> Result<()> {
     let interval = Duration::from_millis(100);
     let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
-    let addr: std::net::SocketAddr = format!("127.0.0.1:{port}")
+    let addr: std::net::SocketAddr = format!("{host}:{port}")
         .parse()
         .map_err(|e| miette!("Invalid address: {e}"))?;
 

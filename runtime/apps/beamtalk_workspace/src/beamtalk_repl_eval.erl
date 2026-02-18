@@ -14,7 +14,7 @@
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--export([do_eval/2, handle_load/2, handle_load_source/3]).
+-export([do_eval/2, do_eval/3, handle_load/2, handle_load_source/3]).
 
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
@@ -22,7 +22,8 @@
          format_formatted_diagnostics/1,
          maybe_await_future/1, should_purge_module/2,
          strip_internal_bindings/1,
-         start_io_capture/0, stop_io_capture/1, io_capture_loop/1,
+         start_io_capture/0, start_io_capture/1,
+         stop_io_capture/1, io_capture_loop/2,
          is_stdlib_path/1, reset_captured_group_leaders/2,
          inject_output/3, handle_io_request/2,
          is_internal_key/1, activate_module/2,
@@ -46,6 +47,14 @@
     {ok, term(), binary(), [binary()], beamtalk_repl_state:state()} | 
     {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
 do_eval(Expression, State) ->
+    do_eval(Expression, State, undefined).
+
+%% @doc Evaluate with optional streaming subscriber (BT-696).
+%% When Subscriber is a pid, IO chunks are forwarded as {eval_out, Chunk}.
+-spec do_eval(string(), beamtalk_repl_state:state(), pid() | undefined) -> 
+    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()} | 
+    {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+do_eval(Expression, State, Subscriber) ->
     %% Generate unique module name for this evaluation
     Counter = beamtalk_repl_state:get_eval_counter(State),
     ModuleName = list_to_atom("beamtalk_repl_eval_" ++ integer_to_list(Counter)),
@@ -68,8 +77,8 @@ do_eval(Expression, State) ->
             %% Load the compiled module
             case code:load_binary(ModuleName, "", Binary) of
                 {module, ModuleName} ->
-                    %% Capture stdout during evaluation
-                    CaptureRef = start_io_capture(),
+                    %% Capture stdout during evaluation (BT-696: with streaming)
+                    CaptureRef = start_io_capture(Subscriber),
                     EvalResult = try
                         %% Add registry PID to bindings so generated code can access it
                         BindingsWithRegistry = case RegistryPid of
@@ -583,13 +592,22 @@ strip_internal_bindings(Bindings) ->
 %%% IO Capture (BT-355)
 %%% Captures stdout during eval by temporarily replacing the group_leader
 %%% with a custom IO server process.
+%%% BT-696: Optionally forwards IO chunks to a subscriber for streaming.
 
 %% @doc Start capturing IO output for the current process.
 %% Returns an opaque reference to pass to stop_io_capture/1.
+%% Convenience wrapper for start_io_capture(undefined).
+-dialyzer({no_unused, start_io_capture/0}).
 -spec start_io_capture() -> {pid(), pid()}.
 start_io_capture() ->
+    start_io_capture(undefined).
+
+%% @doc Start capturing IO output with optional streaming subscriber (BT-696).
+%% When Subscriber is a pid, each IO chunk is forwarded as {eval_out, Chunk}.
+-spec start_io_capture(pid() | undefined) -> {pid(), pid()}.
+start_io_capture(Subscriber) ->
     OldGL = group_leader(),
-    CapturePid = spawn(fun() -> io_capture_loop(<<>>) end),
+    CapturePid = spawn(fun() -> io_capture_loop(<<>>, Subscriber) end),
     group_leader(CapturePid, self()),
     {CapturePid, OldGL}.
 
@@ -622,15 +640,25 @@ stop_io_capture({CapturePid, OldGL}) ->
 %% @doc IO server loop that captures put_chars output.
 %% Handles both {put_chars, Enc, Chars} and {put_chars, Enc, Mod, Func, Args}
 %% (the latter is used by io:format).
+%% BT-696: When Subscriber is a pid, forwards each chunk as {eval_out, Chunk}.
 %% After capture stops, proxies IO to the original group_leader so that
 %% processes spawned during eval still have a working IO path.
--spec io_capture_loop(binary()) -> ok.
-io_capture_loop(Buffer) ->
+-spec io_capture_loop(binary(), pid() | undefined) -> ok.
+io_capture_loop(Buffer, Subscriber) ->
     receive
         {io_request, From, ReplyAs, Request} ->
             {Reply, NewBuffer} = handle_io_request(Request, Buffer),
             From ! {io_reply, ReplyAs, Reply},
-            io_capture_loop(NewBuffer);
+            %% BT-696: Forward new chunk to subscriber if present
+            case is_pid(Subscriber) andalso byte_size(NewBuffer) > byte_size(Buffer) of
+                true ->
+                    Chunk = binary:part(NewBuffer, byte_size(Buffer),
+                                        byte_size(NewBuffer) - byte_size(Buffer)),
+                    Subscriber ! {eval_out, Chunk};
+                false ->
+                    ok
+            end,
+            io_capture_loop(NewBuffer, Subscriber);
         {get_captured, Pid, OldGL} ->
             Pid ! {captured_output, Buffer},
             io_passthrough_loop(OldGL)

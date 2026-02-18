@@ -302,9 +302,6 @@ fn has_erlang_class_ref_at(expr: &Expression, offset: u32) -> bool {
                         .any(|a| has_erlang_class_ref_at(a, offset))
                 })
         }
-        Expression::Pipe { value, target, .. } => {
-            has_erlang_class_ref_at(value, offset) || has_erlang_class_ref_at(target, offset)
-        }
         Expression::Return { value, .. } => has_erlang_class_ref_at(value, offset),
         _ => false,
     }
@@ -455,10 +452,6 @@ fn collect_identifiers_from_expr(expr: &Expression, identifiers: &mut HashSet<Ec
                     collect_identifiers_from_expr(arg, identifiers);
                 }
             }
-        }
-        Expression::Pipe { value, target, .. } => {
-            collect_identifiers_from_expr(value, identifiers);
-            collect_identifiers_from_expr(target, identifiers);
         }
         Expression::Match { value, arms, .. } => {
             collect_identifiers_from_expr(value, identifiers);

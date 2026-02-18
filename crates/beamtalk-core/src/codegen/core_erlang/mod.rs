@@ -845,9 +845,9 @@ impl CoreErlangGenerator {
             Expression::StringInterpolation { segments, .. } => {
                 self.generate_string_interpolation(segments)
             }
-            _ => Err(CodeGenError::UnsupportedFeature {
-                feature: format!("expression type: {expr:?}"),
-                location: format!("{:?}", expr.span()),
+            Expression::Error { message, span, .. } => Err(CodeGenError::UnsupportedFeature {
+                feature: format!("expression error: {message}"),
+                location: format!("{span:?}"),
             }),
         }
     }

@@ -216,11 +216,6 @@ fn analyze_expression(
             analyze_expression(expression, analysis, ctx);
         }
 
-        Expression::Pipe { value, target, .. } => {
-            analyze_expression(value, analysis, ctx);
-            analyze_expression(target, analysis, ctx);
-        }
-
         Expression::Match { value, arms, .. } => {
             analyze_expression(value, analysis, ctx);
             for arm in arms {

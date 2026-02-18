@@ -63,6 +63,8 @@ const REPL_COMMANDS: &[&str] = &[
 pub(super) struct ReplHelper {
     /// Separate protocol client for completion requests (with short timeout).
     completion_client: RefCell<Option<ProtocolClient>>,
+    /// Host address for reconnection (BT-694).
+    host: String,
     /// Port for reconnection if the completion client disconnects.
     port: u16,
     /// Cookie for reconnection (ADR 0020).
@@ -71,10 +73,11 @@ pub(super) struct ReplHelper {
 
 impl ReplHelper {
     /// Create a new helper that connects to the backend on the given port.
-    pub(super) fn new(port: u16, cookie: &str) -> Self {
-        let client = ProtocolClient::connect(port, cookie, Some(COMPLETION_TIMEOUT)).ok();
+    pub(super) fn new(host: &str, port: u16, cookie: &str) -> Self {
+        let client = ProtocolClient::connect(host, port, cookie, Some(COMPLETION_TIMEOUT)).ok();
         Self {
             completion_client: RefCell::new(client),
+            host: host.to_string(),
             port,
             cookie: cookie.to_string(),
         }
@@ -90,8 +93,13 @@ impl ReplHelper {
 
         // Try to reconnect if we don't have a client
         if client_ref.is_none() {
-            *client_ref =
-                ProtocolClient::connect(self.port, &self.cookie, Some(COMPLETION_TIMEOUT)).ok();
+            *client_ref = ProtocolClient::connect(
+                &self.host,
+                self.port,
+                &self.cookie,
+                Some(COMPLETION_TIMEOUT),
+            )
+            .ok();
         }
 
         let Some(client) = client_ref.as_mut() else {

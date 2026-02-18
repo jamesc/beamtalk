@@ -174,6 +174,12 @@
         return;
       }
 
+      // BT-696: Streaming stdout chunk during eval
+      if (msg.out && !msg.status) {
+        appendTo(replOutput, msg.out, '#cdd6f4');
+        return;
+      }
+
       // Route completion responses
       if (msg.id && pendingComplete[msg.id]) {
         var expectedPrefix = pendingComplete[msg.id];

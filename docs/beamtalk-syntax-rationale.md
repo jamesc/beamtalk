@@ -455,15 +455,6 @@ Supervisor subclass: WebApp
   strategy: #oneForOne
 ```
 
-### Pipes
-
-```
-data
-  |> Transform with: options
-  |> Filter where: [:x | x > 0]
-  |> Sort by: #name
-```
-
 ---
 
 ## Rejected Alternatives
