@@ -148,11 +148,12 @@ proptest! {
             );
             // Output is already a String, so it's valid UTF-8 by construction.
             // But verify it contains the expected module header.
+            let snippet_end = output.floor_char_boundary(200);
             prop_assert!(
                 output.contains("module") || output.contains("'prop_test_module'"),
                 "Generated output doesn't look like Core Erlang for input {:?}: {}",
                 input,
-                &output[..output.len().min(200)],
+                &output[..snippet_end],
             );
         }
     }
