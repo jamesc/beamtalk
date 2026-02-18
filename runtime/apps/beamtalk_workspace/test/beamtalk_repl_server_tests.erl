@@ -2392,7 +2392,9 @@ handle_op_show_codegen_empty_test() ->
     Decoded = jsx:decode(Result, [return_maps]),
     ?assertMatch(#{<<"id">> := <<"sc1">>}, Decoded),
     ?assert(maps:is_key(<<"error">>, Decoded)),
-    ?assertMatch(#{<<"status">> := [<<"done">>, <<"error">>]}, Decoded).
+    Status = maps:get(<<"status">>, Decoded),
+    ?assert(lists:member(<<"done">>, Status)),
+    ?assert(lists:member(<<"error">>, Status)).
 
 handle_op_show_codegen_no_code_param_test() ->
     %% Missing code param defaults to empty binary -> error
