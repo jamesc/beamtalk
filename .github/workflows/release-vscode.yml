@@ -1,0 +1,188 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+#
+# VS Code Extension Release Pipeline
+# ====================================
+# Builds platform-specific beamtalk-lsp binaries, packages per-platform .vsix
+# files, and publishes to the VS Code Marketplace.
+#
+# This workflow is separate from the compiler/runtime release (release.yml) because:
+#   1. VS Code Marketplace is a different distribution channel
+#   2. Extension versioning may diverge from compiler versioning
+#   3. LSP-only bugfixes can ship without a full compiler release
+#
+# Trigger modes:
+#   - workflow_call: Invoked by release.yml during a full release (publishes by default)
+#   - workflow_dispatch: Manual trigger for independent extension releases
+#     (e.g., LSP-only bugfix without a full compiler release)
+#
+# Related: release.yml (compiler/runtime distribution)
+# Issue: BT-717
+
+name: Release VS Code Extension
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish to VS Code Marketplace (otherwise just build .vsix artifacts)'
+        required: false
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      publish:
+        description: 'Publish to VS Code Marketplace'
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      VSCE_PAT:
+        required: false
+
+concurrency:
+  group: release-vscode-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ─── Cross-compile beamtalk-lsp for per-platform VS Code extensions ───
+  build-lsp:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rust-target: x86_64-unknown-linux-gnu
+            vsce-target: linux-x64
+          - os: ubuntu-latest
+            rust-target: aarch64-unknown-linux-gnu
+            vsce-target: linux-arm64
+            cross: true
+          - os: macos-13
+            rust-target: x86_64-apple-darwin
+            vsce-target: darwin-x64
+          - os: macos-latest
+            rust-target: aarch64-apple-darwin
+            vsce-target: darwin-arm64
+          - os: windows-latest
+            rust-target: x86_64-pc-windows-msvc
+            vsce-target: win32-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
+
+      - name: Install cross (Linux ARM64)
+        if: matrix.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Cache cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.rust-target }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.rust-target }}-cargo-release-
+
+      - name: Build beamtalk-lsp
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cross build --release --bin beamtalk-lsp --target ${{ matrix.rust-target }}
+          else
+            cargo build --release --bin beamtalk-lsp --target ${{ matrix.rust-target }}
+          fi
+        shell: bash
+
+      - name: Upload LSP binary
+        uses: actions/upload-artifact@v6
+        with:
+          name: lsp-${{ matrix.vsce-target }}
+          path: target/${{ matrix.rust-target }}/release/beamtalk-lsp${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+          retention-days: 1
+
+  # ─── Package per-platform VS Code extensions ──────────────────────────
+  package-vscode:
+    needs: build-lsp
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        vsce-target: [linux-x64, linux-arm64, darwin-x64, darwin-arm64, win32-x64]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Download LSP binary
+        uses: actions/download-artifact@v6
+        with:
+          name: lsp-${{ matrix.vsce-target }}
+          path: editors/vscode/bin
+
+      - name: Prepare binary
+        run: |
+          ls -la editors/vscode/bin/
+          chmod +x editors/vscode/bin/beamtalk-lsp* || true
+        shell: bash
+
+      - name: Build extension
+        run: |
+          cd editors/vscode
+          npm install --quiet
+          npm run compile
+          ln -sf ../../LICENSE LICENSE
+          npx --yes @vscode/vsce package --target ${{ matrix.vsce-target }} --out ../../beamtalk-${{ matrix.vsce-target }}.vsix
+          rm -f LICENSE
+          rm -rf bin
+
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v6
+        with:
+          name: vsix-${{ matrix.vsce-target }}
+          path: beamtalk-${{ matrix.vsce-target }}.vsix
+          retention-days: 7
+
+  # ─── Publish VS Code extensions to marketplace ────────────────────────
+  publish-vscode:
+    needs: package-vscode
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.publish) ||
+      (github.event_name == 'workflow_call' && inputs.publish)
+    steps:
+      - name: Download all VSIXs
+        uses: actions/download-artifact@v6
+        with:
+          pattern: vsix-*
+          merge-multiple: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Publish to VS Code Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          npx --yes @vscode/vsce publish --packagePath \
+            beamtalk-linux-x64.vsix \
+            beamtalk-linux-arm64.vsix \
+            beamtalk-darwin-x64.vsix \
+            beamtalk-darwin-arm64.vsix \
+            beamtalk-win32-x64.vsix
