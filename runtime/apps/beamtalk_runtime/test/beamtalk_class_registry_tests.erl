@@ -102,19 +102,23 @@ ensure_pg_started_test() ->
 ensure_hierarchy_table_test_() ->
     {setup,
      fun() ->
-         %% Clean up any existing table
-         case ets:info(beamtalk_class_hierarchy, owner) of
-             undefined -> ok;
-             Self when Self =:= self() -> ets:delete(beamtalk_class_hierarchy);
-             _ -> ets:delete_all_objects(beamtalk_class_hierarchy)
+         %% Save existing entries to restore after test
+         case ets:info(beamtalk_class_hierarchy) of
+             undefined -> {missing, []};
+             _ -> {exists, ets:tab2list(beamtalk_class_hierarchy)}
          end
      end,
-     fun(_) ->
+     fun({missing, _}) ->
+         %% Table didn't exist before; delete if we created it and we own it
          case ets:info(beamtalk_class_hierarchy, owner) of
              undefined -> ok;
-             Self when Self =:= self() -> ets:delete(beamtalk_class_hierarchy);
-             _ -> ets:delete_all_objects(beamtalk_class_hierarchy)
-         end
+             Owner when Owner =:= self() -> ets:delete(beamtalk_class_hierarchy);
+             _ -> ok
+         end;
+        ({exists, Saved}) ->
+         %% Restore original entries
+         ets:delete_all_objects(beamtalk_class_hierarchy),
+         ets:insert(beamtalk_class_hierarchy, Saved)
      end,
      fun() ->
          ?assertEqual(ok, beamtalk_class_registry:ensure_hierarchy_table()),
@@ -131,12 +135,17 @@ inherits_from_test_() ->
     {setup,
      fun() ->
          beamtalk_class_registry:ensure_hierarchy_table(),
+         Saved = ets:tab2list(beamtalk_class_hierarchy),
+         ets:delete_all_objects(beamtalk_class_hierarchy),
          ets:insert(beamtalk_class_hierarchy, {'Object', none}),
          ets:insert(beamtalk_class_hierarchy, {'Actor', 'Object'}),
-         ets:insert(beamtalk_class_hierarchy, {'Counter', 'Actor'})
+         ets:insert(beamtalk_class_hierarchy, {'Counter', 'Actor'}),
+         Saved
      end,
-     fun(_) ->
-         ets:delete_all_objects(beamtalk_class_hierarchy)
+     fun(Saved) ->
+         %% Restore original state
+         ets:delete_all_objects(beamtalk_class_hierarchy),
+         ets:insert(beamtalk_class_hierarchy, Saved)
      end,
      [
       {"same class",
@@ -173,13 +182,17 @@ direct_subclasses_test_() ->
     {setup,
      fun() ->
          beamtalk_class_registry:ensure_hierarchy_table(),
+         Saved = ets:tab2list(beamtalk_class_hierarchy),
+         ets:delete_all_objects(beamtalk_class_hierarchy),
          ets:insert(beamtalk_class_hierarchy, {'Object', none}),
          ets:insert(beamtalk_class_hierarchy, {'Actor', 'Object'}),
          ets:insert(beamtalk_class_hierarchy, {'Counter', 'Actor'}),
-         ets:insert(beamtalk_class_hierarchy, {'Timer', 'Actor'})
+         ets:insert(beamtalk_class_hierarchy, {'Timer', 'Actor'}),
+         Saved
      end,
-     fun(_) ->
-         ets:delete_all_objects(beamtalk_class_hierarchy)
+     fun(Saved) ->
+         ets:delete_all_objects(beamtalk_class_hierarchy),
+         ets:insert(beamtalk_class_hierarchy, Saved)
      end,
      [
       {"direct children of Actor",
@@ -209,13 +222,17 @@ all_subclasses_test_() ->
     {setup,
      fun() ->
          beamtalk_class_registry:ensure_hierarchy_table(),
+         Saved = ets:tab2list(beamtalk_class_hierarchy),
+         ets:delete_all_objects(beamtalk_class_hierarchy),
          ets:insert(beamtalk_class_hierarchy, {'Object', none}),
          ets:insert(beamtalk_class_hierarchy, {'Actor', 'Object'}),
          ets:insert(beamtalk_class_hierarchy, {'Counter', 'Actor'}),
-         ets:insert(beamtalk_class_hierarchy, {'Timer', 'Actor'})
+         ets:insert(beamtalk_class_hierarchy, {'Timer', 'Actor'}),
+         Saved
      end,
-     fun(_) ->
-         ets:delete_all_objects(beamtalk_class_hierarchy)
+     fun(Saved) ->
+         ets:delete_all_objects(beamtalk_class_hierarchy),
+         ets:insert(beamtalk_class_hierarchy, Saved)
      end,
      [
       {"all subclasses of Object",
