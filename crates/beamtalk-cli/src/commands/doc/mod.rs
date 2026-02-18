@@ -65,6 +65,11 @@ const PROSE_PAGES: &[(&str, &str, &str)] = &[
         "agent-native-development.html",
         "Agent-Native Development",
     ),
+    (
+        "known-limitations.md",
+        "known-limitations.html",
+        "Known Limitations",
+    ),
 ];
 
 /// Generate HTML API documentation.
@@ -502,6 +507,11 @@ mod tests {
             "# Security\n\nSecurity model.",
         )
         .unwrap();
+        fs::write(
+            docs_dir.join("known-limitations.md"),
+            "# Known Limitations\n\nWhat's not yet supported.",
+        )
+        .unwrap();
 
         run_site(lib_dir.as_str(), docs_dir.as_str(), out_dir.as_str()).unwrap();
 
@@ -523,6 +533,7 @@ mod tests {
         // Prose docs
         assert!(out_dir.join("docs/language-features.html").exists());
         assert!(out_dir.join("docs/principles.html").exists());
+        assert!(out_dir.join("docs/known-limitations.html").exists());
 
         let prose = fs::read_to_string(out_dir.join("docs/language-features.html")).unwrap();
         assert!(prose.contains("Language Features"));

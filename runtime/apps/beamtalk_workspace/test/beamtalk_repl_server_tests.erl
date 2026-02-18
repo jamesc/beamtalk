@@ -31,6 +31,10 @@ parse_request_load_test() ->
     Request = <<"{\"type\": \"load\", \"path\": \"examples/counter.bt\"}">>,
     ?assertEqual({load_file, "examples/counter.bt"}, beamtalk_repl_server:parse_request(Request)).
 
+parse_request_load_source_test() ->
+    Request = <<"{\"op\": \"load-source\", \"source\": \"Object subclass: Foo\"}">>,
+    ?assertEqual({load_source, <<"Object subclass: Foo">>}, beamtalk_repl_server:parse_request(Request)).
+
 parse_request_with_newline_test() ->
     Request = <<"{\"type\": \"eval\", \"expression\": \"1 + 2\"}\n">>,
     ?assertEqual({eval, "1 + 2"}, beamtalk_repl_server:parse_request(Request)).
@@ -1302,7 +1306,7 @@ tcp_integration_test_() ->
           {"HTML contains auth panel", fun() -> http_index_has_auth_panel_test(Port) end},
           {"HTML contains transcript", fun() -> http_index_has_transcript_test(Port) end},
           {"HTML contains eval panel", fun() -> http_index_has_eval_panel_test(Port) end},
-          {"HTML contains WebSocket JS", fun() -> http_index_has_websocket_js_test(Port) end},
+          {"HTML serves workspace page with static JS", fun() -> http_index_has_websocket_js_test(Port) end},
           {"GET /ws without upgrade returns error", fun() -> http_ws_no_upgrade_test(Port) end}
          ]
      end}.
@@ -2510,12 +2514,12 @@ http_index_has_eval_panel_test(Port) ->
     ?assert(binary:match(Body, <<"send-btn">>) =/= nomatch),
     ?assert(binary:match(Body, <<"eval-panel">>) =/= nomatch).
 
-%% Test: HTML contains WebSocket connection JS (connect function, ws:// protocol)
+%% Test: HTML serves workspace page with static JS reference
 http_index_has_websocket_js_test(Port) ->
     Body = http_body(http_get(Port, <<"/">>)),
-    ?assert(binary:match(Body, <<"WebSocket">>) =/= nomatch),
-    ?assert(binary:match(Body, <<"ws:">>) =/= nomatch),
-    ?assert(binary:match(Body, <<"/ws">>) =/= nomatch),
+    ?assert(binary:match(Body, <<"workspace.js">>) =/= nomatch),
+    ?assert(binary:match(Body, <<"workspace.css">>) =/= nomatch),
+    ?assert(binary:match(Body, <<"Beamtalk Workspace">>) =/= nomatch),
     ?assert(binary:match(Body, <<"auth">>) =/= nomatch).
 
 %% Test: GET /ws without WebSocket upgrade headers returns error (not 101)

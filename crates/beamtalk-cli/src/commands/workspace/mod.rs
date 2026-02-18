@@ -31,7 +31,12 @@
 //!     └── abc123/              # Workspace ID (hash of project path)
 //!         ├── cookie           # Erlang cookie (chmod 600)
 //!         ├── node.info        # Node name, port, PID
-//!         └── metadata.json    # Project path, created_at
+//!         ├── metadata.json    # Project path, created_at
+//!         └── tls/             # TLS certificates (ADR 0020, optional)
+//!             ├── ca.pem
+//!             ├── node.pem
+//!             ├── node-key.pem # chmod 600
+//!             └── ssl_dist.conf
 //! ```
 //!
 //! # Usage
@@ -62,6 +67,17 @@ pub use storage::{
     cleanup_stale_node_info, get_node_info, get_workspace_metadata, read_workspace_cookie,
     workspace_exists, workspace_id_for,
 };
+
+/// Resolve a workspace ID from a project path and optional name.
+///
+/// Convenience wrapper around [`workspace_id_for`] for callers
+/// that already have a project path.
+pub fn workspace_id_for_project(
+    project_path: &std::path::Path,
+    workspace_name: Option<&str>,
+) -> miette::Result<String> {
+    storage::workspace_id_for(project_path, workspace_name)
+}
 
 #[cfg(test)]
 mod tests {
@@ -837,6 +853,7 @@ mod tests {
             false,
             Some(60),
             None,
+            None, // ssl_dist_optfile
         )
         .expect("start_detached_node should succeed");
         let _guard = NodeGuard { pid: node_info.pid };
@@ -907,6 +924,7 @@ mod tests {
             false,
             Some(60),
             None,
+            None, // ssl_dist_optfile
         )
         .expect("start_detached_node should succeed");
         let _guard = NodeGuard { pid: node_info.pid };
@@ -961,6 +979,7 @@ mod tests {
             false,
             Some(60),
             None,
+            None, // ssl_dist_optfile
         )
         .expect("first get_or_start should succeed");
         let _guard1 = NodeGuard { pid: info1.pid };
@@ -982,6 +1001,7 @@ mod tests {
             false,
             Some(60),
             None,
+            None, // ssl_dist_optfile
         )
         .expect("reconnect should succeed");
         assert!(!started2, "second call should reuse existing node");
@@ -1015,6 +1035,7 @@ mod tests {
             false,
             Some(60),
             None,
+            None, // ssl_dist_optfile
         )
         .expect("restart should succeed");
         let _guard3 = NodeGuard { pid: info3.pid };
@@ -1049,6 +1070,7 @@ mod tests {
             false,
             Some(60),
             None,
+            None, // ssl_dist_optfile
         )
         .expect("start_detached_node should succeed");
         let _guard = NodeGuard { pid: node_info.pid };
@@ -1094,6 +1116,7 @@ mod tests {
             false,
             Some(60),
             None,
+            None, // ssl_dist_optfile
         )
         .expect("start_detached_node should succeed");
 
@@ -1145,6 +1168,7 @@ mod tests {
             false,
             Some(60),
             None,
+            None, // ssl_dist_optfile
         )
         .expect("start_detached_node should succeed");
         let _guard = NodeGuard { pid: node_info.pid };
@@ -1186,6 +1210,7 @@ mod tests {
             false,
             Some(60),
             None,
+            None, // ssl_dist_optfile
         )
         .expect("start_detached_node should succeed");
         let _guard = NodeGuard { pid: node_info.pid };
@@ -1228,6 +1253,7 @@ mod tests {
             false,
             Some(60),
             None,
+            None, // ssl_dist_optfile
         )
         .expect("start_detached_node should succeed");
         // Safety net: NodeGuard ensures cleanup if test fails before stop_workspace runs.

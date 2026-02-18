@@ -9,6 +9,7 @@ on:
     paths:
       - 'lib/**'
       - 'docs/beamtalk-*.md'
+      - 'docs/known-limitations.md'
       - 'crates/beamtalk-cli/src/commands/doc.rs'
       - 'crates/beamtalk-cli/src/main.rs'
       - 'crates/beamtalk-core/src/codegen/core_erlang/doc_chunks.rs'

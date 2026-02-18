@@ -264,6 +264,26 @@ handle_op(<<"load-file">>, Params, Msg, SessionPid) ->
                 WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1)
     end;
 
+handle_op(<<"load-source">>, Params, Msg, SessionPid) ->
+    Source = maps:get(<<"source">>, Params, <<>>),
+    case Source of
+        <<>> ->
+            Err = beamtalk_error:new(empty_expression, 'REPL'),
+            Err1 = beamtalk_error:with_message(Err, <<"Empty source">>),
+            Err2 = beamtalk_error:with_hint(Err1, <<"Enter Beamtalk source code to compile.">>),
+            beamtalk_repl_protocol:encode_error(
+                Err2, Msg, fun beamtalk_repl_json:format_error_message/1);
+        _ ->
+            case beamtalk_repl_shell:load_source(SessionPid, Source) of
+                {ok, Classes} ->
+                    beamtalk_repl_protocol:encode_loaded(Classes, Msg, fun beamtalk_repl_json:term_to_json/1);
+                {error, Reason} ->
+                    WrappedReason = ensure_structured_error(Reason),
+                    beamtalk_repl_protocol:encode_error(
+                        WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1)
+            end
+    end;
+
 handle_op(<<"reload">>, Params, Msg, SessionPid) ->
     ModuleBin = maps:get(<<"module">>, Params, <<>>),
     case maps:get(<<"path">>, Params, undefined) of
@@ -628,6 +648,7 @@ handle_op(Op, _Params, Msg, _SessionPid) ->
     {clear_bindings} | 
     {get_bindings} | 
     {load_file, string()} | 
+    {load_source, binary()} |
     {list_actors} |
     {kill_actor, string()} |
     {list_modules} |
@@ -680,7 +701,8 @@ parse_request(Data) when is_binary(Data) ->
 %% @doc Translate a protocol operation name to an internal request tuple.
 -spec op_to_request(binary(), map()) ->
     {eval, string()} | {clear_bindings} | {get_bindings} |
-    {load_file, string()} | {list_actors} | {list_modules} |
+    {load_file, string()} | {load_source, binary()} |
+    {list_actors} | {list_modules} |
     {kill_actor, string()} | {unload_module, string()} |
     {get_docs, binary(), binary() | undefined} |
     {health} | {shutdown, string()} | {error, term()}.
@@ -694,6 +716,9 @@ op_to_request(<<"bindings">>, _Map) ->
 op_to_request(<<"load-file">>, Map) ->
     Path = maps:get(<<"path">>, Map, <<>>),
     {load_file, binary_to_list(Path)};
+op_to_request(<<"load-source">>, Map) ->
+    Source = maps:get(<<"source">>, Map, <<>>),
+    {load_source, Source};
 op_to_request(<<"actors">>, _Map) ->
     {list_actors};
 op_to_request(<<"modules">>, _Map) ->

@@ -83,6 +83,7 @@ pub fn get_or_start_workspace(
     auto_cleanup: bool,
     max_idle_seconds: Option<u64>,
     bind_addr: Option<Ipv4Addr>,
+    ssl_dist_optfile: Option<&Path>,
 ) -> Result<(NodeInfo, bool, String)> {
     // Create workspace if it doesn't exist
     let metadata = create_workspace(project_path, workspace_name)?;
@@ -111,6 +112,7 @@ pub fn get_or_start_workspace(
         auto_cleanup,
         max_idle_seconds,
         bind_addr,
+        ssl_dist_optfile,
     )?;
     Ok((node_info, true, workspace_id)) // New node started
 }

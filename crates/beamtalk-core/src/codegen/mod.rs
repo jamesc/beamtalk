@@ -13,3 +13,7 @@
 //! - **`wasm`**: WebAssembly code generation
 
 pub mod core_erlang;
+
+// Property-based tests for code generation (ADR 0011 Phase 2)
+#[cfg(test)]
+mod property_tests;
