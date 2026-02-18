@@ -382,7 +382,7 @@ The actual response includes all supported operations (e.g., `eval`, `complete`,
 
 #### `health` — Health Probe
 
-Returns workspace identity and a nonce for stale-workspace detection. No authentication required.
+Returns workspace identity and a nonce for stale-workspace detection. Requires no additional authorization beyond the normal cookie-authenticated connection.
 
 **Request:**
 ```json
