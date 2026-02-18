@@ -200,7 +200,12 @@ compile_modules_mixed(TmpDir) ->
 
 setup_temp_dir() ->
     TmpBase = case os:getenv("TMPDIR") of
-        false -> "/tmp";
+        false ->
+            case os:getenv("TEMP") of
+                false -> "/tmp";
+                "" -> "/tmp";
+                WinDir -> WinDir
+            end;
         "" -> "/tmp";
         Dir -> Dir
     end,

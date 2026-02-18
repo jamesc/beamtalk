@@ -120,7 +120,7 @@ build-erlang:
 # Build standard library (lib/*.bt → BEAM, incremental — skips if up to date)
 build-stdlib: build-rust build-erlang
     @echo "🔨 Building standard library..."
-    @cargo run --bin beamtalk --quiet -- build-stdlib
+    @cargo run --bin beamtalk --quiet -- build-stdlib --quiet
     @echo "✅ Stdlib build complete"
 
 # Build all example programs (examples/**/*.bt → BEAM)
@@ -166,16 +166,19 @@ dialyzer:
 test: test-rust test-stdlib test-runtime
 
 # Run Rust tests (unit + integration, skip slow E2E)
+# Output: summary lines + failures only (reduces ~74 lines to ~10)
 [unix]
 test-rust:
-    @echo "🧪 Running Rust tests (fast)..."
-    @cargo test --all-targets --quiet
-    @echo "✅ Rust tests complete"
+    #!/usr/bin/env bash
+    set -eo pipefail
+    echo "🧪 Running Rust tests (fast)..."
+    cargo test --all-targets --quiet 2>&1 | grep -E '^test result:|FAILED|^error'
+    echo "✅ Rust tests complete"
 
 [windows]
 test-rust:
     @echo "🧪 Running Rust tests (fast)..."
-    @cargo test --all-targets --quiet
+    @$output = cargo test --all-targets --quiet 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode }
     @echo "✅ Rust tests complete"
 
 # Run E2E tests (slow - full pipeline, ~50s)
@@ -184,15 +187,35 @@ test-e2e: build-stdlib
     cargo test --test e2e -- --ignored
 
 # Run workspace integration tests (requires Erlang/OTP runtime, ~10s)
+# Output: summary only on success, full output on failure
+[unix]
+test-integration: build-stdlib
+    #!/usr/bin/env bash
+    set -eo pipefail
+    echo "🧪 Running workspace integration tests..."
+    cargo test --bin beamtalk -- --ignored --test-threads=1 2>&1 | grep -E '^test result:|FAILED|^error'
+    echo "✅ Integration tests complete"
+
+[windows]
 test-integration: build-stdlib
     @echo "🧪 Running workspace integration tests..."
-    cargo test --bin beamtalk -- --ignored --test-threads=1
+    @$output = cargo test --bin beamtalk -- --ignored --test-threads=1 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode }
     @echo "✅ Integration tests complete"
 
 # Run MCP server integration tests (auto-starts REPL via test fixture, ~15s)
+# Output: summary only on success, full output on failure
+[unix]
+test-mcp: build
+    #!/usr/bin/env bash
+    set -eo pipefail
+    echo "🧪 Running MCP server integration tests..."
+    cargo test -p beamtalk-mcp -- --ignored --test-threads=1 2>&1 | grep -E '^test result:|FAILED|^error'
+    echo "✅ MCP integration tests complete"
+
+[windows]
 test-mcp: build
     @echo "🧪 Running MCP server integration tests..."
-    @cargo test -p beamtalk-mcp -- --ignored --test-threads=1
+    @$output = cargo test -p beamtalk-mcp -- --ignored --test-threads=1 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode }
     @echo "✅ MCP integration tests complete"
 
 # Run ALL tests (unit + integration + E2E + Erlang runtime)
@@ -241,25 +264,34 @@ test-install: build-release build-stdlib
     fi
 
 # Run compiled stdlib tests (ADR 0014 Phase 1, ~14s)
+# Output: summary only (--quiet suppresses per-file lines)
 test-stdlib: build-stdlib
     @echo "🧪 Running stdlib tests..."
-    @cargo run --bin beamtalk --quiet -- test-stdlib --no-warnings
+    @cargo run --bin beamtalk --quiet -- test-stdlib --no-warnings --quiet
     @echo "✅ Stdlib tests complete"
 
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
 # Run Erlang runtime unit tests
+# Output: summary only on success, full output on failure
 [unix]
 [working-directory: 'runtime']
 test-runtime: build-stdlib
-    @echo "🧪 Running Erlang runtime unit tests..."
-    @rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace
-    @echo "✅ Runtime tests complete"
+    #!/usr/bin/env bash
+    set -eo pipefail
+    echo "🧪 Running Erlang runtime unit tests..."
+    if OUTPUT=$(rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace 2>&1); then
+        echo "$OUTPUT" | tail -2
+    else
+        echo "$OUTPUT"
+        exit 1
+    fi
+    echo "✅ Runtime tests complete"
 
 [windows]
 [working-directory: 'runtime']
 test-runtime: build-stdlib
     @echo "🧪 Running Erlang runtime unit tests..."
-    @rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace
+    @$output = rebar3 eunit '--app=beamtalk_runtime,beamtalk_workspace' 2>&1 | Out-String; $exitCode = $LASTEXITCODE; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } else { ($output -split "`n") | Select-Object -Last 3 }
     @echo "✅ Runtime tests complete"
 
 # Run performance benchmarks (separate from unit tests, ~30s)
