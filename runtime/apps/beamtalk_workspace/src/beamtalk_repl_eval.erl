@@ -748,19 +748,20 @@ prompt_to_binary(Prompt) when is_atom(Prompt) ->
 prompt_to_binary(_) -> <<"? ">>.
 
 %% @doc Handle a stdin IO request by notifying the subscriber and waiting for input.
-%% When no subscriber is present (legacy/sync eval), returns {error, enotsup}.
-%% BT-698: Sends {need_input, CapturePid, Prompt} to subscriber, waits for
-%% {stdin_input, Data} response with timeout.
+%% When no subscriber is present (sync eval), returns {error, enotsup}.
+%% BT-698: Sends {need_input, CapturePid, Ref, Prompt} to subscriber, waits for
+%% {stdin_input, Ref, Data} response with timeout. The Ref prevents late replies
+%% from a timed-out prompt being consumed by a subsequent prompt.
 -spec handle_stdin_request(pid() | undefined, binary()) -> term().
 handle_stdin_request(undefined, _Prompt) ->
     {error, enotsup};
 handle_stdin_request(Subscriber, Prompt) when is_pid(Subscriber) ->
-    Subscriber ! {need_input, self(), Prompt},
+    Ref = make_ref(),
+    Subscriber ! {need_input, self(), Ref, Prompt},
     receive
-        {stdin_input, Data} when is_binary(Data) ->
-            %% Return the input data as the IO reply
+        {stdin_input, Ref, Data} when is_binary(Data) ->
             Data;
-        {stdin_input, eof} ->
+        {stdin_input, Ref, eof} ->
             eof
     after ?STDIN_TIMEOUT ->
         ?LOG_WARNING("Stdin input timed out after ~pms", [?STDIN_TIMEOUT]),

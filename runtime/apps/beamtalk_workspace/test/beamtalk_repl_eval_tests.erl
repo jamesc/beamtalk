@@ -942,8 +942,8 @@ handle_stdin_request_with_subscriber_test() ->
     Self = self(),
     Subscriber = spawn(fun() ->
         receive
-            {need_input, CapturePid, <<"Name: ">>} ->
-                CapturePid ! {stdin_input, <<"Alice\n">>},
+            {need_input, CapturePid, Ref, <<"Name: ">>} ->
+                CapturePid ! {stdin_input, Ref, <<"Alice\n">>},
                 Self ! subscriber_done
         end
     end),
@@ -956,8 +956,8 @@ handle_stdin_request_eof_test() ->
     Self = self(),
     Subscriber = spawn(fun() ->
         receive
-            {need_input, CapturePid, _Prompt} ->
-                CapturePid ! {stdin_input, eof},
+            {need_input, CapturePid, Ref, _Prompt} ->
+                CapturePid ! {stdin_input, Ref, eof},
                 Self ! subscriber_done
         end
     end),
@@ -995,9 +995,9 @@ io_capture_stdin_with_subscriber_test() ->
     CapturePid ! {io_request, self(), ReplyRef, {get_line, unicode, <<"Enter: ">>}},
     %% Receive the need_input request from the IO capture process
     receive
-        {need_input, IoCapPid, <<"Enter: ">>} ->
-            %% Provide stdin input
-            IoCapPid ! {stdin_input, <<"test input\n">>}
+        {need_input, IoCapPid, Ref, <<"Enter: ">>} ->
+            %% Provide stdin input with matching ref
+            IoCapPid ! {stdin_input, Ref, <<"test input\n">>}
     after 5000 ->
         ?assert(false)
     end,
@@ -1005,6 +1005,30 @@ io_capture_stdin_with_subscriber_test() ->
     receive
         {io_reply, ReplyRef, Reply} ->
             ?assertEqual(<<"test input\n">>, Reply)
+    after 5000 ->
+        ?assert(false)
+    end,
+    _Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}).
+
+io_capture_stdin_stale_ref_ignored_test() ->
+    %% A stdin_input with a wrong ref is ignored; the correct ref is accepted
+    Self = self(),
+    {CapturePid, OldGL} = beamtalk_repl_eval:start_io_capture(Self),
+    ReplyRef = make_ref(),
+    CapturePid ! {io_request, self(), ReplyRef, {get_line, unicode, <<"Enter: ">>}},
+    receive
+        {need_input, IoCapPid, Ref, <<"Enter: ">>} ->
+            %% Send a stale/wrong ref first — should be ignored
+            StaleRef = make_ref(),
+            IoCapPid ! {stdin_input, StaleRef, <<"stale data\n">>},
+            %% Then send the correct ref
+            IoCapPid ! {stdin_input, Ref, <<"correct data\n">>}
+    after 5000 ->
+        ?assert(false)
+    end,
+    receive
+        {io_reply, ReplyRef, Reply} ->
+            ?assertEqual(<<"correct data\n">>, Reply)
     after 5000 ->
         ?assert(false)
     end,

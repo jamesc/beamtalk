@@ -152,6 +152,11 @@ impl ReplClient {
         use std::io::{BufRead, Write};
 
         let prompt = parsed.get("prompt").and_then(|p| p.as_str()).unwrap_or("");
+        // Reuse the eval request id for correlation
+        let req_id = parsed
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map_or_else(protocol::next_msg_id, str::to_string);
 
         // Print the prompt
         print!("{prompt}");
@@ -165,14 +170,14 @@ impl ReplClient {
                 // EOF
                 self.inner.send_only(&serde_json::json!({
                     "op": "stdin",
-                    "id": protocol::next_msg_id(),
+                    "id": req_id,
                     "value": "eof"
                 }))?;
             }
             Ok(_) => {
                 self.inner.send_only(&serde_json::json!({
                     "op": "stdin",
-                    "id": protocol::next_msg_id(),
+                    "id": req_id,
                     "value": input
                 }))?;
             }
@@ -180,7 +185,7 @@ impl ReplClient {
                 eprintln!("Error reading stdin: {e}");
                 self.inner.send_only(&serde_json::json!({
                     "op": "stdin",
-                    "id": protocol::next_msg_id(),
+                    "id": req_id,
                     "value": "eof"
                 }))?;
             }
