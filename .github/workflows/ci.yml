@@ -84,7 +84,7 @@ jobs:
             ${{ runner.os }}-erlang-otp-27.0-
 
       - name: Build, lint, and fast tests
-        run: just build clippy fmt-check test
+        run: just clippy fmt-check build test
 
   # ─── Full test suite on Linux only (requires Erlang/OTP) ──────────────
   test:
