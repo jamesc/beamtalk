@@ -283,6 +283,30 @@ fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
 
 /// Read the Erlang default cookie from ~/.erlang.cookie.
 /// Used for foreground mode where no workspace cookie exists.
+/// Resolve the TLS `ssl_dist.conf` path for a workspace, if `--tls` is enabled.
+///
+/// Returns `Some(path)` when TLS is requested and certs are found,
+/// `None` when TLS is not requested, or an error if certs are missing.
+fn resolve_ssl_dist_conf(
+    project_root: &Path,
+    workspace_name: Option<&str>,
+    tls: bool,
+) -> Result<Option<PathBuf>> {
+    if !tls {
+        return Ok(None);
+    }
+    let workspace_id = workspace::workspace_id_for_project(project_root, workspace_name)?;
+    match super::tls::ssl_dist_conf_path(&workspace_id)? {
+        Some(path) => {
+            println!("🔒 TLS distribution enabled");
+            Ok(Some(path))
+        }
+        None => Err(miette!(
+            "TLS certificates not found. Run `beamtalk tls init` first."
+        )),
+    }
+}
+
 fn read_erlang_cookie() -> Option<String> {
     let home = dirs::home_dir()?;
     let cookie_path = home.join(".erlang.cookie");
@@ -357,23 +381,7 @@ pub fn run(
         println!("Starting BEAM node in foreground mode (--foreground)...");
 
         // Resolve TLS config for foreground mode (ADR 0020 Phase 2)
-        let ssl_dist_conf = if tls {
-            let workspace_id = workspace::workspace_id_for_project(&project_root, workspace_name)?;
-            let conf = super::tls::ssl_dist_conf_path(&workspace_id)?;
-            match conf {
-                Some(path) => {
-                    println!("🔒 TLS distribution enabled");
-                    Some(path)
-                }
-                None => {
-                    return Err(miette!(
-                        "TLS certificates not found. Run `beamtalk tls init` first."
-                    ));
-                }
-            }
-        } else {
-            None
-        };
+        let ssl_dist_conf = resolve_ssl_dist_conf(&project_root, workspace_name, tls)?;
 
         let mut child = start_beam_node(
             port,
@@ -417,23 +425,7 @@ pub fn run(
         extra_code_paths.push(paths.ranch_ebin.clone());
 
         // Resolve TLS config for workspace mode (ADR 0020 Phase 2)
-        let ssl_dist_conf = if tls {
-            let workspace_id = workspace::workspace_id_for_project(&project_root, workspace_name)?;
-            let conf = super::tls::ssl_dist_conf_path(&workspace_id)?;
-            match conf {
-                Some(path) => {
-                    println!("🔒 TLS distribution enabled");
-                    Some(path)
-                }
-                None => {
-                    return Err(miette!(
-                        "TLS certificates not found for workspace. Run `beamtalk tls init` first."
-                    ));
-                }
-            }
-        } else {
-            None
-        };
+        let ssl_dist_conf = resolve_ssl_dist_conf(&project_root, workspace_name, tls)?;
 
         let (node_info, is_new, workspace_id) = workspace::get_or_start_workspace(
             &project_root,
