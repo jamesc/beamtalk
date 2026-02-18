@@ -894,17 +894,29 @@ mod tests {
     ///
     /// Uses sysinfo for cross-platform process kill, then waits for the port
     /// to be released with a generous timeout for loaded CI machines.
+    /// Panics if the process cannot be found or killed.
     fn kill_node_raw(info: &NodeInfo) {
+        let pid = Pid::from_u32(info.pid);
         let mut system = System::new();
         system.refresh_processes_specifics(
-            ProcessesToUpdate::Some(&[Pid::from_u32(info.pid)]),
+            ProcessesToUpdate::Some(&[pid]),
             true,
             ProcessRefreshKind::new(),
         );
-        if let Some(process) = system.process(Pid::from_u32(info.pid)) {
-            process.kill();
-        }
-        let _ = wait_for_workspace_exit(info.connect_host(), info.port, 15);
+        let process = system
+            .process(pid)
+            .unwrap_or_else(|| panic!("BEAM process with pid {} not found", info.pid));
+        assert!(
+            process.kill(),
+            "failed to kill BEAM process with pid {}",
+            info.pid
+        );
+        wait_for_workspace_exit(info.connect_host(), info.port, 15).unwrap_or_else(|e| {
+            panic!(
+                "workspace did not exit after forced kill (pid {}, port {}): {e}",
+                info.pid, info.port
+            )
+        });
     }
 
     /// Assert that a node is no longer running, with retries.
@@ -921,6 +933,22 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(500));
         }
         panic!("{msg}");
+    }
+
+    /// Assert that `list_workspaces` reports the given workspace as `Stopped`,
+    /// with retries to handle port `TIME_WAIT` races.
+    #[track_caller]
+    fn assert_workspace_stopped(workspace_id: &str) {
+        for _ in 0..10 {
+            let workspaces = list_workspaces().unwrap();
+            if let Some(found) = workspaces.iter().find(|w| w.workspace_id == workspace_id) {
+                if found.status == WorkspaceStatus::Stopped {
+                    return;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+        panic!("Workspace '{workspace_id}' should be reported as Stopped");
     }
 
     /// Locate BEAM directories needed to start a workspace node.
@@ -1225,23 +1253,7 @@ mod tests {
         // Kill the node without cleanup (simulating crash)
         kill_node_raw(&node_info);
 
-        // Retry the stale-detection check: after force-kill the OS may keep the
-        // port in TIME_WAIT briefly, causing is_node_running to return true.
-        let mut detected_stopped = false;
-        for _ in 0..10 {
-            let workspaces = list_workspaces().unwrap();
-            if let Some(found) = workspaces.iter().find(|w| w.workspace_id == tw.id) {
-                if found.status == WorkspaceStatus::Stopped {
-                    detected_stopped = true;
-                    break;
-                }
-            }
-            std::thread::sleep(std::time::Duration::from_millis(500));
-        }
-        assert!(
-            detected_stopped,
-            "Stale workspace should be reported as Stopped"
-        );
+        assert_workspace_stopped(&tw.id);
     }
 
     #[test]
