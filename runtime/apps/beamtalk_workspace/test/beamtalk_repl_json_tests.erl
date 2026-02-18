@@ -409,7 +409,8 @@ format_error_message_invalid_module_name_test() ->
 
 encode_reloaded_test() ->
     Classes = [#{name => "Counter"}],
-    Msg = {protocol_msg, <<"eval">>, <<"msg1">>, <<"sess1">>, #{}, false},
+    {ok, Msg} = beamtalk_repl_protocol:decode(
+        <<"{\"op\":\"eval\",\"id\":\"msg1\",\"session\":\"sess1\"}">>),
     Result = beamtalk_repl_json:encode_reloaded(Classes, 5, [], Msg),
     {ok, Decoded} = beamtalk_repl_json:parse_json(Result),
     ?assertEqual([<<"Counter">>], maps:get(<<"classes">>, Decoded)),
@@ -420,7 +421,8 @@ encode_reloaded_test() ->
 
 encode_reloaded_with_failures_test() ->
     Classes = [#{name => "Counter"}, #{name => "Timer"}],
-    Msg = {protocol_msg, <<"reload">>, <<"msg2">>, undefined, #{}, false},
+    {ok, Msg} = beamtalk_repl_protocol:decode(
+        <<"{\"op\":\"reload\",\"id\":\"msg2\"}">>),
     Failures = [{self(), some_error}],
     Result = beamtalk_repl_json:encode_reloaded(Classes, 3, Failures, Msg),
     {ok, Decoded} = beamtalk_repl_json:parse_json(Result),

@@ -103,15 +103,17 @@ ensure_hierarchy_table_test_() ->
     {setup,
      fun() ->
          %% Clean up any existing table
-         case ets:info(beamtalk_class_hierarchy) of
+         case ets:info(beamtalk_class_hierarchy, owner) of
              undefined -> ok;
-             _ -> ets:delete(beamtalk_class_hierarchy)
+             Self when Self =:= self() -> ets:delete(beamtalk_class_hierarchy);
+             _ -> ets:delete_all_objects(beamtalk_class_hierarchy)
          end
      end,
      fun(_) ->
-         case ets:info(beamtalk_class_hierarchy) of
+         case ets:info(beamtalk_class_hierarchy, owner) of
              undefined -> ok;
-             _ -> ets:delete(beamtalk_class_hierarchy)
+             Self when Self =:= self() -> ets:delete(beamtalk_class_hierarchy);
+             _ -> ets:delete_all_objects(beamtalk_class_hierarchy)
          end
      end,
      fun() ->
@@ -134,7 +136,7 @@ inherits_from_test_() ->
          ets:insert(beamtalk_class_hierarchy, {'Counter', 'Actor'})
      end,
      fun(_) ->
-         ets:delete(beamtalk_class_hierarchy)
+         ets:delete_all_objects(beamtalk_class_hierarchy)
      end,
      [
       {"same class",
@@ -177,7 +179,7 @@ direct_subclasses_test_() ->
          ets:insert(beamtalk_class_hierarchy, {'Timer', 'Actor'})
      end,
      fun(_) ->
-         ets:delete(beamtalk_class_hierarchy)
+         ets:delete_all_objects(beamtalk_class_hierarchy)
      end,
      [
       {"direct children of Actor",
@@ -213,7 +215,7 @@ all_subclasses_test_() ->
          ets:insert(beamtalk_class_hierarchy, {'Timer', 'Actor'})
      end,
      fun(_) ->
-         ets:delete(beamtalk_class_hierarchy)
+         ets:delete_all_objects(beamtalk_class_hierarchy)
      end,
      [
       {"all subclasses of Object",
