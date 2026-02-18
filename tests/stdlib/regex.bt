@@ -168,6 +168,10 @@
 Regex from: "[invalid"
 // => ERROR: regex_error
 
+// Invalid pattern in String method also produces regex_error
+"hello" matchesRegex: "[invalid"
+// => ERROR: regex_error
+
 // ===========================================================================
 // CLASS IDENTITY
 // ===========================================================================

@@ -7,7 +7,8 @@
 %%%
 %%% Provides class-side constructors for compiling patterns and instance
 %%% methods for inspection. String-side regex operations (matchesRegex:,
-%%% firstMatch:, etc.) are in beamtalk_string_ops.
+%%% firstMatch:, etc.) are also in this module as helper functions called
+%%% by String's codegen.
 %%%
 %%% Regex objects are represented as tagged maps:
 %%% ```
@@ -95,10 +96,8 @@ source(#{source := Src}) -> Src.
 -spec describe(map()) -> binary().
 describe(Self) -> 'printString'(Self).
 
-%% @doc Check if Regex responds to the given selector.
+%% @doc Check if Regex responds to the given selector (instance methods).
 -spec has_method(atom()) -> boolean().
-has_method('from:') -> true;
-has_method('from:options:') -> true;
 has_method('source') -> true;
 has_method('printString') -> true;
 has_method('describe') -> true;
@@ -113,7 +112,9 @@ has_method(_) -> false.
 matches_regex(Str, #{compiled := MP}) when is_binary(Str) ->
     re:run(Str, MP, [{capture, none}]) =:= match;
 matches_regex(Str, Pattern) when is_binary(Str), is_binary(Pattern) ->
-    re:run(Str, Pattern, [{capture, none}]) =:= match;
+    try re:run(Str, Pattern, [{capture, none}]) =:= match
+    catch error:badarg -> raise_bad_pattern('matchesRegex:', Pattern)
+    end;
 matches_regex(_, _) ->
     Error0 = beamtalk_error:new(type_error, 'String'),
     Error1 = beamtalk_error:with_selector(Error0, 'matchesRegex:'),
@@ -124,7 +125,9 @@ matches_regex(_, _) ->
 -spec matches_regex_options(binary(), binary(), list()) -> boolean().
 matches_regex_options(Str, Pattern, Options) when is_binary(Str), is_binary(Pattern), is_list(Options) ->
     ErlOpts = [{capture, none} | translate_options(Options)],
-    re:run(Str, Pattern, ErlOpts) =:= match;
+    try re:run(Str, Pattern, ErlOpts) =:= match
+    catch error:badarg -> raise_bad_pattern('matchesRegex:options:', Pattern)
+    end;
 matches_regex_options(_, _, _) ->
     Error0 = beamtalk_error:new(type_error, 'String'),
     Error1 = beamtalk_error:with_selector(Error0, 'matchesRegex:options:'),
@@ -139,9 +142,12 @@ first_match(Str, #{compiled := MP}) when is_binary(Str) ->
         nomatch -> nil
     end;
 first_match(Str, Pattern) when is_binary(Str), is_binary(Pattern) ->
-    case re:run(Str, Pattern, [{capture, first, binary}]) of
-        {match, [Match]} -> Match;
-        nomatch -> nil
+    try
+        case re:run(Str, Pattern, [{capture, first, binary}]) of
+            {match, [Match]} -> Match;
+            nomatch -> nil
+        end
+    catch error:badarg -> raise_bad_pattern('firstMatch:', Pattern)
     end;
 first_match(_, _) ->
     Error0 = beamtalk_error:new(type_error, 'String'),
@@ -157,9 +163,12 @@ all_matches(Str, #{compiled := MP}) when is_binary(Str) ->
         nomatch -> []
     end;
 all_matches(Str, Pattern) when is_binary(Str), is_binary(Pattern) ->
-    case re:run(Str, Pattern, [global, {capture, first, binary}]) of
-        {match, Matches} -> [M || [M] <- Matches];
-        nomatch -> []
+    try
+        case re:run(Str, Pattern, [global, {capture, first, binary}]) of
+            {match, Matches} -> [M || [M] <- Matches];
+            nomatch -> []
+        end
+    catch error:badarg -> raise_bad_pattern('allMatches:', Pattern)
     end;
 all_matches(_, _) ->
     Error0 = beamtalk_error:new(type_error, 'String'),
@@ -170,9 +179,11 @@ all_matches(_, _) ->
 %% @doc Replace first match with replacement string.
 -spec replace_regex(binary(), binary() | map(), binary()) -> binary().
 replace_regex(Str, #{compiled := MP}, Replacement) when is_binary(Str), is_binary(Replacement) ->
-    iolist_to_binary(re:replace(Str, MP, Replacement, [{return, binary}]));
+    re:replace(Str, MP, Replacement, [{return, binary}]);
 replace_regex(Str, Pattern, Replacement) when is_binary(Str), is_binary(Pattern), is_binary(Replacement) ->
-    iolist_to_binary(re:replace(Str, Pattern, Replacement, [{return, binary}]));
+    try re:replace(Str, Pattern, Replacement, [{return, binary}])
+    catch error:badarg -> raise_bad_pattern('replaceRegex:with:', Pattern)
+    end;
 replace_regex(_, _, _) ->
     Error0 = beamtalk_error:new(type_error, 'String'),
     Error1 = beamtalk_error:with_selector(Error0, 'replaceRegex:with:'),
@@ -182,9 +193,11 @@ replace_regex(_, _, _) ->
 %% @doc Replace all matches with replacement string.
 -spec replace_all_regex(binary(), binary() | map(), binary()) -> binary().
 replace_all_regex(Str, #{compiled := MP}, Replacement) when is_binary(Str), is_binary(Replacement) ->
-    iolist_to_binary(re:replace(Str, MP, Replacement, [global, {return, binary}]));
+    re:replace(Str, MP, Replacement, [global, {return, binary}]);
 replace_all_regex(Str, Pattern, Replacement) when is_binary(Str), is_binary(Pattern), is_binary(Replacement) ->
-    iolist_to_binary(re:replace(Str, Pattern, Replacement, [global, {return, binary}]));
+    try re:replace(Str, Pattern, Replacement, [global, {return, binary}])
+    catch error:badarg -> raise_bad_pattern('replaceAllRegex:with:', Pattern)
+    end;
 replace_all_regex(_, _, _) ->
     Error0 = beamtalk_error:new(type_error, 'String'),
     Error1 = beamtalk_error:with_selector(Error0, 'replaceAllRegex:with:'),
@@ -196,7 +209,9 @@ replace_all_regex(_, _, _) ->
 split_regex(Str, #{compiled := MP}) when is_binary(Str) ->
     re:split(Str, MP, [{return, binary}, trim]);
 split_regex(Str, Pattern) when is_binary(Str), is_binary(Pattern) ->
-    re:split(Str, Pattern, [{return, binary}, trim]);
+    try re:split(Str, Pattern, [{return, binary}, trim])
+    catch error:badarg -> raise_bad_pattern('splitRegex:', Pattern)
+    end;
 split_regex(_, _) ->
     Error0 = beamtalk_error:new(type_error, 'String'),
     Error1 = beamtalk_error:with_selector(Error0, 'splitRegex:'),
@@ -206,6 +221,22 @@ split_regex(_, _) ->
 %%% ============================================================================
 %%% Internal Functions
 %%% ============================================================================
+
+%% @private
+%% @doc Raise a structured regex_error for invalid patterns in String methods.
+-spec raise_bad_pattern(atom(), binary()) -> no_return().
+raise_bad_pattern(Selector, Pattern) ->
+    %% Try re:compile to get a detailed error message
+    Hint = case re:compile(Pattern) of
+        {error, {ErrStr, Pos}} ->
+            iolist_to_binary(io_lib:format("Invalid pattern: ~s at position ~p", [ErrStr, Pos]));
+        _ ->
+            <<"Invalid regex pattern">>
+    end,
+    Error0 = beamtalk_error:new(regex_error, 'String'),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    Error2 = beamtalk_error:with_hint(Error1, Hint),
+    beamtalk_error:raise(Error2).
 
 %% @private
 %% @doc Translate Beamtalk option atoms to Erlang re compile options.
