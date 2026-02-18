@@ -113,7 +113,9 @@ pub(super) fn start_beam_node(
         args.push(OsString::from("-proto_dist"));
         args.push(OsString::from("inet_tls"));
         args.push(OsString::from("-ssl_dist_optfile"));
-        args.push(conf_path.as_os_str().to_os_string());
+        // Normalize path separators for Erlang (backslashes → forward slashes on Windows)
+        let normalized = conf_path.to_string_lossy().replace('\\', "/");
+        args.push(OsString::from(normalized));
     }
 
     args.push(OsString::from("-eval"));

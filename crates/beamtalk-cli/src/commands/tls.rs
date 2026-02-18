@@ -61,14 +61,14 @@ fn init_tls(workspace_name: Option<&str>) -> Result<()> {
     let tls_dir = storage::workspace_dir(&workspace_id)?.join("tls");
 
     // Check if certs already exist
-    if tls_dir.join("ca.pem").exists()
-        && tls_dir.join("node.pem").exists()
-        && tls_dir.join("node-key.pem").exists()
+    if tls_dir.join("ca.pem").is_file()
+        && tls_dir.join("node.pem").is_file()
+        && tls_dir.join("node-key.pem").is_file()
     {
         println!("TLS certificates already exist for workspace: {workspace_id}");
         println!("  Directory: {}", tls_dir.display());
         // Regenerate ssl_dist.conf if missing (e.g. partial state)
-        if !tls_dir.join("ssl_dist.conf").exists() {
+        if !tls_dir.join("ssl_dist.conf").is_file() {
             let conf_path = generate_ssl_dist_conf(&tls_dir)?;
             println!(
                 "  ✓ Distribution config regenerated: {}",
@@ -211,13 +211,13 @@ pub fn generate_ssl_dist_conf(tls_dir: &Path) -> Result<PathBuf> {
 pub fn ssl_dist_conf_path(workspace_id: &str) -> Result<Option<PathBuf>> {
     let tls_dir = storage::workspace_dir(workspace_id)?.join("tls");
     let conf_path = tls_dir.join("ssl_dist.conf");
-    if !conf_path.exists() {
+    if !conf_path.is_file() {
         return Ok(None);
     }
 
-    // Verify referenced cert files exist (catch stale/partial state)
+    // Verify expected cert files exist (catch stale/partial state)
     for file in &["ca.pem", "node.pem", "node-key.pem"] {
-        if !tls_dir.join(file).exists() {
+        if !tls_dir.join(file).is_file() {
             return Err(miette::miette!(
                 "TLS config exists but {file} is missing.\n\
                  Remove the tls/ directory and run `beamtalk tls init` to regenerate."
