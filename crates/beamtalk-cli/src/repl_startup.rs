@@ -99,13 +99,13 @@ pub fn beam_paths_for_layout(runtime_dir: &Path, layout: RuntimeLayout) -> BeamP
 ///    actor registry, session supervisor, and all singletons)
 /// 4. Prints a ready message
 /// 5. Blocks forever (the BEAM VM stays alive while the REPL runs)
-pub fn build_eval_cmd(port: u16, bind_addr: Option<Ipv4Addr>) -> String {
+pub fn build_eval_cmd(port: u16, bind_addr: Option<Ipv4Addr>, web_port: Option<u16>) -> String {
     format!(
         "{}, \
          {{ok, ActualPort}} = beamtalk_repl_server:get_port(), \
          io:format(\"BEAMTALK_PORT:~B~n\", [ActualPort]), \
          receive stop -> ok end.",
-        startup_prelude(port, bind_addr),
+        startup_prelude(port, bind_addr, web_port),
     )
 }
 
@@ -116,7 +116,12 @@ pub fn build_eval_cmd(port: u16, bind_addr: Option<Ipv4Addr>) -> String {
 ///
 /// The `node_name` is escaped for safe interpolation into an Erlang
 /// single-quoted atom literal.
-pub fn build_eval_cmd_with_node(port: u16, node_name: &str, bind_addr: Option<Ipv4Addr>) -> String {
+pub fn build_eval_cmd_with_node(
+    port: u16,
+    node_name: &str,
+    bind_addr: Option<Ipv4Addr>,
+    web_port: Option<u16>,
+) -> String {
     let safe_name = escape_erlang_atom(node_name);
     format!(
         "application:set_env(beamtalk_runtime, node_name, '{safe_name}'), \
@@ -124,7 +129,7 @@ pub fn build_eval_cmd_with_node(port: u16, node_name: &str, bind_addr: Option<Ip
          {{ok, ActualPort}} = beamtalk_repl_server:get_port(), \
          io:format(\"BEAMTALK_PORT:~B~n\", [ActualPort]), \
          receive stop -> ok end.",
-        startup_prelude(port, bind_addr),
+        startup_prelude(port, bind_addr, web_port),
     )
 }
 
@@ -166,11 +171,16 @@ pub fn format_bind_addr_erl(bind_addr: Option<Ipv4Addr>) -> String {
 ///
 /// Callers append their own shutdown logic (e.g. `receive stop -> ok end`
 /// or cover export).
-pub fn startup_prelude(port: u16, bind_addr: Option<Ipv4Addr>) -> String {
+pub fn startup_prelude(port: u16, bind_addr: Option<Ipv4Addr>, web_port: Option<u16>) -> String {
     let bind_addr_erl = format_bind_addr_erl(bind_addr);
+    let web_port_erl = match web_port {
+        Some(p) => format!("{p}"),
+        None => "undefined".to_string(),
+    };
     format!(
         "logger:remove_handler(default), \
          application:set_env(beamtalk_runtime, repl_port, {port}), \
+         application:set_env(beamtalk_runtime, web_port, {web_port_erl}), \
          {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
          {{ok, Cwd}} = file:get_cwd(), \
          {{ok, _}} = beamtalk_workspace_sup:start_link(#{{ \
@@ -178,6 +188,7 @@ pub fn startup_prelude(port: u16, bind_addr: Option<Ipv4Addr>) -> String {
              project_path => list_to_binary(Cwd), \
              tcp_port => {port}, \
              bind_addr => {bind_addr_erl}, \
+             web_port => {web_port_erl}, \
              auto_cleanup => false, \
              max_idle_seconds => 14400}})"
     )
@@ -316,7 +327,7 @@ mod tests {
 
     #[test]
     fn eval_cmd_contains_required_steps() {
-        let cmd = build_eval_cmd(9000, None);
+        let cmd = build_eval_cmd(9000, None, None);
         // Must set application env before starting apps
         assert!(cmd.contains("application:set_env(beamtalk_runtime, repl_port, 9000)"));
         // Must start the workspace OTP application
@@ -331,25 +342,27 @@ mod tests {
         assert!(cmd.contains("receive stop -> ok end"));
         // Default bind address should be loopback
         assert!(cmd.contains("bind_addr => {127,0,0,1}"));
+        // No web_port by default
+        assert!(cmd.contains("web_port => undefined"));
     }
 
     #[test]
     fn eval_cmd_with_node_includes_node_name() {
-        let cmd = build_eval_cmd_with_node(9000, "mynode", None);
+        let cmd = build_eval_cmd_with_node(9000, "mynode", None, None);
         assert!(cmd.contains("application:set_env(beamtalk_runtime, node_name, 'mynode')"));
         assert!(cmd.contains("beamtalk_workspace_sup:start_link"));
     }
 
     #[test]
     fn eval_cmd_with_node_escapes_special_chars() {
-        let cmd = build_eval_cmd_with_node(9000, "node'inject", None);
+        let cmd = build_eval_cmd_with_node(9000, "node'inject", None, None);
         assert!(cmd.contains("node\\'inject"));
         assert!(!cmd.contains("node'inject"));
     }
 
     #[test]
     fn startup_prelude_contains_set_env_and_ensure_started() {
-        let prelude = startup_prelude(9000, None);
+        let prelude = startup_prelude(9000, None, None);
         assert!(prelude.contains("application:set_env(beamtalk_runtime, repl_port, 9000)"));
         assert!(prelude.contains("application:ensure_all_started(beamtalk_workspace)"));
         // Must start workspace supervisor (which starts all singletons and services)
@@ -363,20 +376,35 @@ mod tests {
         assert!(!prelude.contains("receive"));
         // Default bind address
         assert!(prelude.contains("bind_addr => {127,0,0,1}"));
+        // No web_port by default
+        assert!(prelude.contains("web_port => undefined"));
     }
 
     #[test]
     fn startup_prelude_with_custom_bind_addr() {
         use std::net::Ipv4Addr;
-        let prelude = startup_prelude(9000, Some(Ipv4Addr::new(192, 168, 1, 5)));
+        let prelude = startup_prelude(9000, Some(Ipv4Addr::new(192, 168, 1, 5)), None);
         assert!(prelude.contains("bind_addr => {192,168,1,5}"));
     }
 
     #[test]
     fn startup_prelude_with_all_interfaces() {
         use std::net::Ipv4Addr;
-        let prelude = startup_prelude(9000, Some(Ipv4Addr::UNSPECIFIED));
+        let prelude = startup_prelude(9000, Some(Ipv4Addr::UNSPECIFIED), None);
         assert!(prelude.contains("bind_addr => {0,0,0,0}"));
+    }
+
+    #[test]
+    fn startup_prelude_with_web_port() {
+        let prelude = startup_prelude(9000, None, Some(8080));
+        assert!(prelude.contains("web_port => 8080"));
+        assert!(prelude.contains("application:set_env(beamtalk_runtime, web_port, 8080)"));
+    }
+
+    #[test]
+    fn eval_cmd_with_web_port() {
+        let cmd = build_eval_cmd(9000, None, Some(9090));
+        assert!(cmd.contains("web_port => 9090"));
     }
 
     #[test]

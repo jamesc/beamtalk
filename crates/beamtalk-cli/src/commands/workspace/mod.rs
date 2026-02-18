@@ -933,6 +933,7 @@ mod tests {
             Some(60),
             None,
             None, // ssl_dist_optfile
+            None, // web_port
         )
         .expect("start_detached_node should succeed");
         let _guard = NodeGuard { pid: node_info.pid };
@@ -1004,6 +1005,7 @@ mod tests {
             Some(60),
             None,
             None, // ssl_dist_optfile
+            None, // web_port
         )
         .expect("start_detached_node should succeed");
         let _guard = NodeGuard { pid: node_info.pid };
@@ -1059,6 +1061,7 @@ mod tests {
             Some(60),
             None,
             None, // ssl_dist_optfile
+            None, // web_port
         )
         .expect("first get_or_start should succeed");
         let _guard1 = NodeGuard { pid: info1.pid };
@@ -1081,6 +1084,7 @@ mod tests {
             Some(60),
             None,
             None, // ssl_dist_optfile
+            None, // web_port
         )
         .expect("reconnect should succeed");
         assert!(!started2, "second call should reuse existing node");
@@ -1115,6 +1119,7 @@ mod tests {
             Some(60),
             None,
             None, // ssl_dist_optfile
+            None, // web_port
         )
         .expect("restart should succeed");
         let _guard3 = NodeGuard { pid: info3.pid };
@@ -1150,6 +1155,7 @@ mod tests {
             Some(60),
             None,
             None, // ssl_dist_optfile
+            None, // web_port
         )
         .expect("start_detached_node should succeed");
         let _guard = NodeGuard { pid: node_info.pid };
@@ -1196,6 +1202,7 @@ mod tests {
             Some(60),
             None,
             None, // ssl_dist_optfile
+            None, // web_port
         )
         .expect("start_detached_node should succeed");
 
@@ -1248,6 +1255,7 @@ mod tests {
             Some(60),
             None,
             None, // ssl_dist_optfile
+            None, // web_port
         )
         .expect("start_detached_node should succeed");
         let _guard = NodeGuard { pid: node_info.pid };
@@ -1290,6 +1298,7 @@ mod tests {
             Some(60),
             None,
             None, // ssl_dist_optfile
+            None, // web_port
         )
         .expect("start_detached_node should succeed");
         let _guard = NodeGuard { pid: node_info.pid };
@@ -1333,6 +1342,7 @@ mod tests {
             Some(60),
             None,
             None, // ssl_dist_optfile
+            None, // web_port
         )
         .expect("start_detached_node should succeed");
         // Safety net: NodeGuard ensures cleanup if test fails before stop_workspace runs.

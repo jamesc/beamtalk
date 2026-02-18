@@ -335,7 +335,7 @@ fn read_erlang_cookie() -> Option<String> {
 )]
 #[expect(
     clippy::fn_params_excessive_bools,
-    reason = "bools map directly to CLI flags (foreground, persistent, no_color, confirm_network, tls)"
+    reason = "bools map directly to CLI flags (foreground, persistent, no_color, confirm_network, tls, web)"
 )]
 pub fn run(
     port_arg: Option<u16>,
@@ -348,9 +348,18 @@ pub fn run(
     bind: Option<&str>,
     confirm_network: bool,
     tls: bool,
+    web: bool,
+    web_port: Option<u16>,
 ) -> Result<()> {
     // Initialize color support
     color::init(no_color);
+
+    // BT-689: Reject --web-port 0 (ephemeral port cannot be reported to user)
+    if web_port == Some(0) {
+        return Err(miette!(
+            "--web-port must be > 0 (use --web without --web-port to reuse the REPL port)"
+        ));
+    }
 
     // Resolve bind address: --bind flag → IP address (ADR 0020)
     let bind_addr = resolve_bind_addr(bind)?;
@@ -390,6 +399,7 @@ pub fn run(
             &project_root,
             Some(bind_addr),
             ssl_dist_conf.as_deref(),
+            web_port,
         )?;
 
         // Discover the actual port from the BEAM node's stdout.
@@ -455,6 +465,7 @@ pub fn run(
             timeout,
             Some(bind_addr),
             ssl_dist_conf.as_deref(),
+            web_port,
         )?;
 
         let actual_port = node_info.port;
@@ -514,6 +525,26 @@ pub fn run(
     let mut client = connect_with_retries(&connect_host, connect_port, &cookie)?;
 
     println!("Connected to REPL backend on port {connect_port}.");
+
+    // BT-689: Print browser workspace URL when --web flag is used
+    if web {
+        if !is_new_workspace && beam_guard_opt.is_none() {
+            // Reconnecting to existing workspace — warn that --web/--web-port
+            // have no effect on already-running nodes
+            eprintln!(
+                "  ⚠️  --web has no effect on an already-running workspace.\n  \
+                 Stop the workspace first with `beamtalk workspace stop` to restart with --web."
+            );
+        } else {
+            let browser_port = web_port.unwrap_or(connect_port);
+            let browser_host = if connect_host == "127.0.0.1" || connect_host == "0.0.0.0" {
+                "localhost".to_string()
+            } else {
+                connect_host.clone()
+            };
+            println!("Browser workspace: http://{browser_host}:{browser_port}/");
+        }
+    }
 
     // If reconnecting to existing workspace, show available actors
     if beam_guard_opt.is_none() && !is_new_workspace {
