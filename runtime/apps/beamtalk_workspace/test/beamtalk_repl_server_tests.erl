@@ -2380,6 +2380,42 @@ handle_op_sessions_no_sup_test() ->
     Decoded = jsx:decode(Result, [return_maps]),
     ?assertMatch(#{<<"id">> := <<"s1">>}, Decoded).
 
+%% BT-699: test/test-all operation tests
+
+handle_op_test_missing_class_test() ->
+    Msg = make_proto_msg(<<"test">>, <<"t1">>),
+    Result = beamtalk_repl_server:handle_op(<<"test">>, #{}, Msg, self()),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertMatch(#{<<"id">> := <<"t1">>}, Decoded),
+    ?assert(maps:is_key(<<"error">>, Decoded)),
+    ?assertEqual([<<"done">>, <<"error">>], maps:get(<<"status">>, Decoded)).
+
+handle_op_test_nonexistent_class_test() ->
+    Msg = make_proto_msg(<<"test">>, <<"t2">>, #{<<"class">> => <<"NoSuchClass99">>}),
+    Params = #{<<"class">> => <<"NoSuchClass99">>},
+    Result = beamtalk_repl_server:handle_op(<<"test">>, Params, Msg, self()),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertMatch(#{<<"id">> := <<"t2">>}, Decoded),
+    ?assert(maps:is_key(<<"error">>, Decoded)).
+
+handle_op_test_non_binary_class_test() ->
+    Msg = make_proto_msg(<<"test">>, <<"t3">>, #{<<"class">> => 42}),
+    Params = #{<<"class">> => 42},
+    Result = beamtalk_repl_server:handle_op(<<"test">>, Params, Msg, self()),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertMatch(#{<<"id">> := <<"t3">>}, Decoded),
+    ?assert(maps:is_key(<<"error">>, Decoded)).
+
+handle_op_test_all_no_classes_test() ->
+    %% test-all with no TestCase subclasses loaded returns empty results
+    Msg = make_proto_msg(<<"test-all">>, <<"ta1">>),
+    Result = beamtalk_repl_server:handle_op(<<"test-all">>, #{}, Msg, self()),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertMatch(#{<<"id">> := <<"ta1">>}, Decoded),
+    R = maps:get(<<"results">>, Decoded),
+    ?assertEqual(0, maps:get(<<"total">>, R)),
+    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
+
 %% ===================================================================
 %% show-codegen handle_op tests (BT-700)
 %% ===================================================================
