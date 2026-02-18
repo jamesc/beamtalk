@@ -364,3 +364,63 @@ sealed Number subclass: Integer
   /// 65 isWhitespace // => false
   /// ```
   isWhitespace -> Boolean => @primitive "isWhitespace"
+
+  // === Exponential / logarithmic methods ===
+
+  /// Square root of the receiver (returns Float).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 16 sqrt           // => 4.0
+  /// 2 sqrt            // => 1.4142135623730951
+  /// ```
+  sqrt -> Float => @primitive "sqrt"
+
+  /// Natural logarithm (base e) of the receiver (returns Float).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 1 log             // => 0.0
+  /// ```
+  log -> Float => @primitive "log"
+
+  /// Natural logarithm (base e) of the receiver. Alias for `log`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 1 ln              // => 0.0
+  /// ```
+  ln -> Float => @primitive "ln"
+
+  /// Base-2 logarithm of the receiver (returns Float).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 8 log2            // => 3.0
+  /// ```
+  log2 -> Float => @primitive "log2"
+
+  /// Base-10 logarithm of the receiver (returns Float).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 100 log10         // => 2.0
+  /// ```
+  log10 -> Float => @primitive "log10"
+
+  /// Euler's number (e) raised to the power of the receiver (returns Float).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 0 exp             // => 1.0
+  /// 1 exp             // => 2.718281828459045
+  /// ```
+  exp -> Float => @primitive "exp"
+
+  /// Raise the receiver to the power of `exponent` (returns Float).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 2 raisedTo: 10    // => 1024.0
+  /// ```
+  raisedTo: exponent: Number -> Float => @primitive "raisedTo:"

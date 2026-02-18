@@ -604,62 +604,62 @@ handle_dnu(Selector, Args, Self, State) ->
     Methods = maps:get('__methods__', State),
     case maps:find('doesNotUnderstand:args:', Methods) of
         {ok, DnuFun} when is_function(DnuFun, 3) ->
-            %% New-style DNU handler with Self parameter
-            %% DNU handlers receive ([Selector, Args], Self, State) - 3 args
-            try
-                DnuFun([Selector, Args], Self, State)
-            catch
-                Class:Reason:_Stacktrace ->
-                    wrap_dnu_handler_error(Selector, State, Class, Reason)
-            end;
+            call_dnu_handler(DnuFun, [Selector, Args], Self, State, 3);
         {ok, DnuFun} when is_function(DnuFun, 2) ->
-            %% Old-style DNU handler (backward compatibility)
-            try
-                DnuFun([Selector, Args], State)
-            catch
-                Class:Reason:_Stacktrace ->
-                    wrap_dnu_handler_error(Selector, State, Class, Reason)
-            end;
+            call_dnu_handler(DnuFun, [Selector, Args], Self, State, 2);
         _ ->
-            %% No DNU handler — delegate to class hierarchy walk (BT-427)
-            %% This finds Object base methods (describe, inspect, respondsTo:, etc.)
-            ClassName = beamtalk_tagged_map:class_of(State, unknown),
-            try beamtalk_dispatch:lookup(Selector, Args, Self, State, ClassName) of
-                {reply, Result, NewState} ->
-                    {reply, Result, NewState};
-                {error, #beamtalk_error{kind = does_not_understand}} ->
-                    %% Method not found in hierarchy — fall back to Object dispatch
-                    object_fallback(Selector, Args, Self, State, ClassName);
-                {error, #beamtalk_error{kind = class_not_found}} ->
-                    %% Class not registered — fall back to Object dispatch
-                    object_fallback(Selector, Args, Self, State, ClassName);
-                {error, Error} ->
-                    %% Preserve legitimate errors from inherited methods
-                    {error, Error, State}
-            catch
-                exit:{noproc, _} ->
-                    %% Class registry not available (e.g., in unit tests without bootstrap)
-                    %% Fall back to Object dispatch directly
-                    object_fallback(Selector, Args, Self, State, ClassName);
-                exit:{normal, _} ->
-                    %% Class process terminated normally
-                    object_fallback(Selector, Args, Self, State, ClassName);
-                exit:{timeout, _} ->
-                    %% Class process lookup timed out
-                    ?LOG_WARNING("Class dispatch lookup timed out", #{
-                        selector => Selector,
-                        class => ClassName
-                    }),
-                    object_fallback(Selector, Args, Self, State, ClassName);
-                exit:{Reason, _} ->
-                    %% Other exit reasons (shutdown, killed, etc.)
-                    ?LOG_WARNING("Class dispatch lookup failed", #{
-                        selector => Selector,
-                        class => ClassName,
-                        reason => Reason
-                    }),
-                    object_fallback(Selector, Args, Self, State, ClassName)
-            end
+            dispatch_via_hierarchy(Selector, Args, Self, State)
+    end.
+
+%% @private
+%% @doc Call a doesNotUnderstand handler with error wrapping.
+-spec call_dnu_handler(function(), list(), #beamtalk_object{}, map(), 2 | 3) ->
+    {reply, term(), map()} | {noreply, map()} | {error, term(), map()}.
+call_dnu_handler(DnuFun, DnuArgs, Self, State, 3) ->
+    try DnuFun(DnuArgs, Self, State)
+    catch
+        error:#beamtalk_error{} = BtError:_ -> {error, BtError, State};
+        Class:Reason:_ -> wrap_dnu_handler_error(hd(DnuArgs), State, Class, Reason)
+    end;
+call_dnu_handler(DnuFun, DnuArgs, _Self, State, 2) ->
+    try DnuFun(DnuArgs, State)
+    catch
+        error:#beamtalk_error{} = BtError:_ -> {error, BtError, State};
+        Class:Reason:_ -> wrap_dnu_handler_error(hd(DnuArgs), State, Class, Reason)
+    end.
+
+%% @private
+%% @doc Dispatch via class hierarchy, falling back to Object on any failure.
+-spec dispatch_via_hierarchy(atom(), list(), #beamtalk_object{}, map()) ->
+    {reply, term(), map()} | {noreply, map()} | {error, term(), map()}.
+dispatch_via_hierarchy(Selector, Args, Self, State) ->
+    ClassName = beamtalk_tagged_map:class_of(State, unknown),
+    try beamtalk_dispatch:lookup(Selector, Args, Self, State, ClassName) of
+        {reply, Result, NewState} ->
+            {reply, Result, NewState};
+        {error, #beamtalk_error{kind = does_not_understand}} ->
+            object_fallback(Selector, Args, Self, State, ClassName);
+        {error, #beamtalk_error{kind = class_not_found}} ->
+            object_fallback(Selector, Args, Self, State, ClassName);
+        {error, Error} ->
+            {error, Error, State}
+    catch
+        exit:{noproc, _} ->
+            %% Class registry not available (e.g., in unit tests without bootstrap)
+            object_fallback(Selector, Args, Self, State, ClassName);
+        exit:{normal, _} ->
+            %% Class process terminated normally
+            object_fallback(Selector, Args, Self, State, ClassName);
+        exit:{timeout, _} ->
+            ?LOG_WARNING("Class dispatch lookup timed out", #{
+                selector => Selector, class => ClassName
+            }),
+            object_fallback(Selector, Args, Self, State, ClassName);
+        exit:{Reason, _} ->
+            ?LOG_WARNING("Class dispatch lookup failed", #{
+                selector => Selector, class => ClassName, reason => Reason
+            }),
+            object_fallback(Selector, Args, Self, State, ClassName)
     end.
 
 %% @private

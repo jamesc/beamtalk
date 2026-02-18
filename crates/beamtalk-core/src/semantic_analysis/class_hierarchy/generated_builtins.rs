@@ -52,6 +52,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Stream"
             | "String"
             | "Symbol"
+            | "System"
             | "SystemDictionary"
             | "TestCase"
             | "ThrowError"
@@ -493,8 +494,26 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
                 MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "sin".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
+                MethodInfo { selector: "cos".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
+                MethodInfo { selector: "tan".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
+                MethodInfo { selector: "asin".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
+                MethodInfo { selector: "acos".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
+                MethodInfo { selector: "atan".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
+                MethodInfo { selector: "atan2:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![Some("Number".into())] },
+                MethodInfo { selector: "sqrt".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
+                MethodInfo { selector: "log".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
+                MethodInfo { selector: "ln".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
+                MethodInfo { selector: "log2".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
+                MethodInfo { selector: "log10".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
+                MethodInfo { selector: "exp".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
+                MethodInfo { selector: "raisedTo:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![Some("Number".into())] },
             ],
-            class_methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "pi".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
+                MethodInfo { selector: "e".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
+                MethodInfo { selector: "infinity".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
+            ],
             class_variables: vec![],
         },
     );
@@ -567,6 +586,13 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "isUppercase".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![] },
                 MethodInfo { selector: "isLowercase".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![] },
                 MethodInfo { selector: "isWhitespace".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![] },
+                MethodInfo { selector: "sqrt".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
+                MethodInfo { selector: "log".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
+                MethodInfo { selector: "ln".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
+                MethodInfo { selector: "log2".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
+                MethodInfo { selector: "log10".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
+                MethodInfo { selector: "exp".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
+                MethodInfo { selector: "raisedTo:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![Some("Number".into())] },
             ],
             class_methods: vec![],
             class_variables: vec![],
@@ -1030,6 +1056,31 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "hash".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Symbol".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![] },
             ],
             class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "System".into(),
+        ClassInfo {
+            name: "System".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "getEnv:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, return_type: Some("String | Nil".into()), param_types: vec![Some("String".into())] },
+                MethodInfo { selector: "getEnv:default:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![Some("String".into()), Some("String".into())] },
+                MethodInfo { selector: "osPlatform".into(), arity: 0, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "osFamily".into(), arity: 0, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "architecture".into(), arity: 0, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "hostname".into(), arity: 0, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "erlangVersion".into(), arity: 0, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "pid".into(), arity: 0, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, return_type: Some("Integer".into()), param_types: vec![] },
+            ],
             class_variables: vec![],
         },
     );

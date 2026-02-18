@@ -225,3 +225,155 @@ sealed Number subclass: Float
   /// 3.14 describe    // => "3.14"
   /// ```
   describe -> String => self asString
+
+  // === Trigonometric methods ===
+
+  /// Sine of the receiver (in radians).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 0.0 sin              // => 0.0
+  /// (Float pi / 2) sin   // => 1.0
+  /// ```
+  sin -> Float => @primitive "sin"
+
+  /// Cosine of the receiver (in radians).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 0.0 cos              // => 1.0
+  /// ```
+  cos -> Float => @primitive "cos"
+
+  /// Tangent of the receiver (in radians).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 0.0 tan              // => 0.0
+  /// ```
+  tan -> Float => @primitive "tan"
+
+  /// Arcsine of the receiver. Result in radians.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 0.0 asin             // => 0.0
+  /// 1.0 asin             // => 1.5707963267948966
+  /// ```
+  asin -> Float => @primitive "asin"
+
+  /// Arccosine of the receiver. Result in radians.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 1.0 acos             // => 0.0
+  /// ```
+  acos -> Float => @primitive "acos"
+
+  /// Arctangent of the receiver. Result in radians.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 1.0 atan             // => 0.7853981633974483
+  /// ```
+  atan -> Float => @primitive "atan"
+
+  /// Two-argument arctangent. Returns the angle in radians between
+  /// the positive x-axis and the point (other, self).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 1.0 atan2: 1.0       // => 0.7853981633974483
+  /// ```
+  atan2: other: Number -> Float => @primitive "atan2:"
+
+  // === Exponential / logarithmic methods ===
+
+  /// Square root of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 4.0 sqrt             // => 2.0
+  /// 2.0 sqrt             // => 1.4142135623730951
+  /// ```
+  sqrt -> Float => @primitive "sqrt"
+
+  /// Natural logarithm (base e) of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 1.0 log              // => 0.0
+  /// (Float e) log        // => 1.0
+  /// ```
+  log -> Float => @primitive "log"
+
+  /// Natural logarithm (base e) of the receiver. Alias for `log`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 1.0 ln               // => 0.0
+  /// ```
+  ln -> Float => @primitive "ln"
+
+  /// Base-2 logarithm of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 8.0 log2             // => 3.0
+  /// ```
+  log2 -> Float => @primitive "log2"
+
+  /// Base-10 logarithm of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 100.0 log10          // => 2.0
+  /// ```
+  log10 -> Float => @primitive "log10"
+
+  /// Euler's number (e) raised to the power of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 0.0 exp              // => 1.0
+  /// 1.0 exp              // => 2.718281828459045
+  /// ```
+  exp -> Float => @primitive "exp"
+
+  /// Raise the receiver to the power of `exponent`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 2.0 raisedTo: 10     // => 1024.0
+  /// ```
+  raisedTo: exponent: Number -> Float => @primitive "raisedTo:"
+
+  // === Class-side constants ===
+
+  /// The mathematical constant pi (π ≈ 3.14159...).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Float pi             // => 3.141592653589793
+  /// ```
+  class pi -> Float => @primitive "pi"
+
+  /// Euler's number (e ≈ 2.71828...).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Float e              // => 2.718281828459045
+  /// ```
+  class e -> Float => @primitive "e"
+
+  /// Positive infinity.
+  ///
+  /// Note: BEAM does not support IEEE 754 infinity. This method
+  /// is provided for API completeness but will raise an error.
+  /// Use `isInfinite` to check (always returns false on BEAM).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Float infinity       // => ERROR: _
+  /// ```
+  class infinity -> Float => self error: "BEAM does not support IEEE 754 infinity"
