@@ -20,13 +20,16 @@
     session_id :: binary() | undefined,
     session_pid :: pid() | undefined,
     authenticated :: boolean(),
-    peer :: term()
+    peer :: term(),
+    %% BT-696: Pending eval request for streaming output correlation
+    pending_eval :: term() | undefined
 }).
 
 %% @doc HTTP upgrade to WebSocket.
 init(Req, _Opts) ->
     Peer = cowboy_req:peer(Req),
-    {cowboy_websocket, Req, #ws_state{authenticated = false, peer = Peer},
+    {cowboy_websocket, Req, #ws_state{authenticated = false, peer = Peer,
+                                      pending_eval = undefined},
      #{idle_timeout => 300000, max_frame_size => 1048576}}.
 
 %% @doc WebSocket connection initialized — send auth challenge.
@@ -50,6 +53,37 @@ websocket_handle(_Frame, State) ->
 websocket_info(shutdown_requested, State) ->
     ?LOG_INFO("Executing WebSocket-requested shutdown", #{}),
     init:stop(),
+    {ok, State};
+%% BT-696: Streaming stdout chunk from eval
+websocket_info({eval_out, Chunk}, State = #ws_state{authenticated = true,
+                                                     pending_eval = Msg})
+        when Msg =/= undefined ->
+    Encoded = beamtalk_repl_protocol:encode_out(Chunk, Msg, <<"out">>),
+    case Encoded of
+        <<>> -> {ok, State};  %% Legacy client — skip streaming
+        _ -> {[{text, Encoded}], State}
+    end;
+%% BT-696: Eval completed successfully
+websocket_info({eval_done, Value, Output, Warnings},
+               State = #ws_state{authenticated = true, pending_eval = Msg})
+        when Msg =/= undefined ->
+    Response = beamtalk_repl_protocol:encode_result(
+        Value, Msg, fun beamtalk_repl_json:term_to_json/1, Output, Warnings),
+    {[{text, Response}], State#ws_state{pending_eval = undefined}};
+%% BT-696: Eval completed with error
+websocket_info({eval_error, Reason, Output, Warnings},
+               State = #ws_state{authenticated = true, pending_eval = Msg})
+        when Msg =/= undefined ->
+    WrappedReason = beamtalk_repl_server:ensure_structured_error(Reason),
+    Response = beamtalk_repl_protocol:encode_error(
+        WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1, Output, Warnings),
+    {[{text, Response}], State#ws_state{pending_eval = undefined}};
+%% BT-696: Late streaming messages after eval completed — drop silently
+websocket_info({eval_out, _Chunk}, State = #ws_state{pending_eval = undefined}) ->
+    {ok, State};
+websocket_info({eval_done, _, _, _}, State = #ws_state{pending_eval = undefined}) ->
+    {ok, State};
+websocket_info({eval_error, _, _, _}, State = #ws_state{pending_eval = undefined}) ->
     {ok, State};
 %% Transcript push — forwarded from beamtalk_transcript_stream subscriber (ADR 0017)
 websocket_info({transcript_output, Text}, State = #ws_state{authenticated = true}) ->
@@ -153,6 +187,9 @@ handle_protocol(Data, SessionPid, State) ->
             case Op of
                 <<"shutdown">> ->
                     handle_shutdown(Msg, State);
+                <<"eval">> ->
+                    %% BT-696: Use async eval for streaming output
+                    handle_eval_async(Msg, SessionPid, State);
                 _ ->
                     Response = beamtalk_repl_server:handle_protocol_request(Msg, SessionPid),
                     {[{text, Response}], State}
@@ -161,6 +198,54 @@ handle_protocol(Data, SessionPid, State) ->
             ErrorJson = beamtalk_repl_json:format_error(DecodeError),
             {[{text, ErrorJson}], State}
     end.
+
+%% @private
+%% BT-696: Start async eval with this handler as the streaming subscriber.
+handle_eval_async(Msg, SessionPid, State = #ws_state{pending_eval = undefined}) ->
+    Params = beamtalk_repl_protocol:get_params(Msg),
+    case maps:get(<<"code">>, Params, <<>>) of
+        CodeBin when is_binary(CodeBin) ->
+            Code = binary_to_list(CodeBin),
+            case Code of
+                [] ->
+                    Err = beamtalk_error:new(empty_expression, 'REPL'),
+                    Err1 = beamtalk_error:with_message(Err, <<"Empty expression">>),
+                    Err2 = beamtalk_error:with_hint(Err1, <<"Enter an expression to evaluate.">>),
+                    Response = beamtalk_repl_protocol:encode_error(
+                        Err2, Msg, fun beamtalk_repl_json:format_error_message/1),
+                    {[{text, Response}], State};
+                _ ->
+                    case is_process_alive(SessionPid) of
+                        true ->
+                            beamtalk_repl_shell:eval_async(SessionPid, Code, self()),
+                            {ok, State#ws_state{pending_eval = Msg}};
+                        false ->
+                            Err = beamtalk_error:new(session_down, 'REPL'),
+                            Err1 = beamtalk_error:with_message(Err,
+                                <<"REPL session is not running">>),
+                            Err2 = beamtalk_error:with_hint(Err1,
+                                <<"Reconnect and retry the evaluation.">>),
+                            Response = beamtalk_repl_protocol:encode_error(
+                                Err2, Msg, fun beamtalk_repl_json:format_error_message/1),
+                            {[{text, Response}], State}
+                    end
+            end;
+        _ ->
+            Err = beamtalk_error:new(invalid_code, 'REPL'),
+            Err1 = beamtalk_error:with_message(Err, <<"Invalid code type">>),
+            Err2 = beamtalk_error:with_hint(Err1, <<"Code must be a string.">>),
+            Response = beamtalk_repl_protocol:encode_error(
+                Err2, Msg, fun beamtalk_repl_json:format_error_message/1),
+            {[{text, Response}], State}
+    end;
+handle_eval_async(Msg, _SessionPid, State) ->
+    %% Already have a pending eval — reject to prevent mis-correlation
+    Err = beamtalk_error:new(eval_busy, 'REPL'),
+    Err1 = beamtalk_error:with_message(Err, <<"An evaluation is already in progress">>),
+    Err2 = beamtalk_error:with_hint(Err1, <<"Use Ctrl-C to interrupt the current evaluation.">>),
+    Response = beamtalk_repl_protocol:encode_error(
+        Err2, Msg, fun beamtalk_repl_json:format_error_message/1),
+    {[{text, Response}], State}.
 
 %% @private
 %% Handle shutdown op — re-validates cookie as an extra security measure.
