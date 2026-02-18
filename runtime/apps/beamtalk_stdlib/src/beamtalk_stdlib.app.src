@@ -13,6 +13,7 @@
         {'bt@stdlib@character', 'Character', 'Object'},
         {'bt@stdlib@collection', 'Collection', 'Object'},
         {'bt@stdlib@compiled_method', 'CompiledMethod', 'Object'},
+        {'bt@stdlib@date_time', 'DateTime', 'Object'},
         {'bt@stdlib@dictionary', 'Dictionary', 'Collection'},
         {'bt@stdlib@erlang', 'Erlang', 'ProtoObject'},
         {'bt@stdlib@erlang_module', 'ErlangModule', 'ProtoObject'},
