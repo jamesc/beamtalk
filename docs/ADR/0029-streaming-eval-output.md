@@ -1,7 +1,7 @@
 # ADR 0029: Streaming Eval Output
 
 ## Status
-Proposed (2026-02-18)
+Accepted (2026-02-18)
 
 ## Context
 
