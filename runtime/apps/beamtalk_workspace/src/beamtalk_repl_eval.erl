@@ -29,12 +29,15 @@
          is_internal_key/1, activate_module/2,
          register_classes/2, trigger_hot_reload/2,
          io_passthrough_loop/1,
+         is_stdin_request/1, handle_stdin_request/2, prompt_to_binary/1,
          handle_class_definition/4, handle_method_definition/4,
          compile_expression_via_port/3, compile_file_via_port/3]).
 -endif.
 
 -define(INTERNAL_REGISTRY_KEY, '__repl_actor_registry__').
 -define(IO_CAPTURE_TIMEOUT, 5000).
+%% BT-698: Timeout for stdin input during eval (30 seconds)
+-define(STDIN_TIMEOUT, 30000).
 
 %%% Public API
 
@@ -641,24 +644,35 @@ stop_io_capture({CapturePid, OldGL}) ->
 %% Handles both {put_chars, Enc, Chars} and {put_chars, Enc, Mod, Func, Args}
 %% (the latter is used by io:format).
 %% BT-696: When Subscriber is a pid, forwards each chunk as {eval_out, Chunk}.
+%% BT-698: When Subscriber is a pid, handles get_line/get_chars/get_until by
+%% sending {need_input, CapturePid, Prompt} to Subscriber and waiting for
+%% {stdin_input, Data} response.
 %% After capture stops, proxies IO to the original group_leader so that
 %% processes spawned during eval still have a working IO path.
 -spec io_capture_loop(binary(), pid() | undefined) -> ok.
 io_capture_loop(Buffer, Subscriber) ->
     receive
         {io_request, From, ReplyAs, Request} ->
-            {Reply, NewBuffer} = handle_io_request(Request, Buffer),
-            From ! {io_reply, ReplyAs, Reply},
-            %% BT-696: Forward new chunk to subscriber if present
-            case is_pid(Subscriber) andalso byte_size(NewBuffer) > byte_size(Buffer) of
-                true ->
-                    Chunk = binary:part(NewBuffer, byte_size(Buffer),
-                                        byte_size(NewBuffer) - byte_size(Buffer)),
-                    Subscriber ! {eval_out, Chunk};
+            case is_stdin_request(Request) of
+                {true, Prompt} ->
+                    %% BT-698: Handle stdin request
+                    Reply = handle_stdin_request(Subscriber, Prompt),
+                    From ! {io_reply, ReplyAs, Reply},
+                    io_capture_loop(Buffer, Subscriber);
                 false ->
-                    ok
-            end,
-            io_capture_loop(NewBuffer, Subscriber);
+                    {Reply, NewBuffer} = handle_io_request(Request, Buffer),
+                    From ! {io_reply, ReplyAs, Reply},
+                    %% BT-696: Forward new chunk to subscriber if present
+                    case is_pid(Subscriber) andalso byte_size(NewBuffer) > byte_size(Buffer) of
+                        true ->
+                            Chunk = binary:part(NewBuffer, byte_size(Buffer),
+                                                byte_size(NewBuffer) - byte_size(Buffer)),
+                            Subscriber ! {eval_out, Chunk};
+                        false ->
+                            ok
+                    end,
+                    io_capture_loop(NewBuffer, Subscriber)
+            end;
         {get_captured, Pid, OldGL} ->
             Pid ! {captured_output, Buffer},
             io_passthrough_loop(OldGL)
@@ -700,6 +714,58 @@ reset_captured_group_leaders(CapturePid, OldGL) ->
         end,
         erlang:processes()
     ).
+
+%% @doc Check if an IO request is a stdin (input) request.
+%% Returns {true, Prompt} for get_line/get_chars/get_until, false otherwise.
+%% BT-698: Supports the Erlang IO protocol input requests.
+-spec is_stdin_request(term()) -> {true, binary()} | false.
+is_stdin_request({get_line, _Encoding, Prompt}) ->
+    {true, prompt_to_binary(Prompt)};
+is_stdin_request({get_line, Prompt}) ->
+    {true, prompt_to_binary(Prompt)};
+is_stdin_request({get_chars, _Encoding, Prompt, _Count}) ->
+    {true, prompt_to_binary(Prompt)};
+is_stdin_request({get_chars, Prompt, _Count}) ->
+    {true, prompt_to_binary(Prompt)};
+is_stdin_request({get_until, _Encoding, Prompt, _Mod, _Func, _Args}) ->
+    {true, prompt_to_binary(Prompt)};
+is_stdin_request({get_until, Prompt, _Mod, _Func, _Args}) ->
+    {true, prompt_to_binary(Prompt)};
+is_stdin_request(_) ->
+    false.
+
+%% @doc Convert an IO prompt to a binary string.
+-spec prompt_to_binary(term()) -> binary().
+prompt_to_binary(Prompt) when is_binary(Prompt) -> Prompt;
+prompt_to_binary(Prompt) when is_list(Prompt) ->
+    try unicode:characters_to_binary(Prompt, utf8) of
+        Bin when is_binary(Bin) -> Bin;
+        _ -> <<"? ">>
+    catch _:_ -> <<"? ">>
+    end;
+prompt_to_binary(Prompt) when is_atom(Prompt) ->
+    atom_to_binary(Prompt, utf8);
+prompt_to_binary(_) -> <<"? ">>.
+
+%% @doc Handle a stdin IO request by notifying the subscriber and waiting for input.
+%% When no subscriber is present (legacy/sync eval), returns {error, enotsup}.
+%% BT-698: Sends {need_input, CapturePid, Prompt} to subscriber, waits for
+%% {stdin_input, Data} response with timeout.
+-spec handle_stdin_request(pid() | undefined, binary()) -> term().
+handle_stdin_request(undefined, _Prompt) ->
+    {error, enotsup};
+handle_stdin_request(Subscriber, Prompt) when is_pid(Subscriber) ->
+    Subscriber ! {need_input, self(), Prompt},
+    receive
+        {stdin_input, Data} when is_binary(Data) ->
+            %% Return the input data as the IO reply
+            Data;
+        {stdin_input, eof} ->
+            eof
+    after ?STDIN_TIMEOUT ->
+        ?LOG_WARNING("Stdin input timed out after ~pms", [?STDIN_TIMEOUT]),
+        {error, timeout}
+    end.
 
 %% @doc Handle a single IO protocol request.
 %% Always replies ok for output requests to avoid changing program behavior.

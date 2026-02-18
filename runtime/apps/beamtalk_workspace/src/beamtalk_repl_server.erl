@@ -663,6 +663,7 @@ handle_op(Op, _Params, Msg, _SessionPid) ->
 describe_ops() ->
     #{
         <<"eval">>        => #{<<"params">> => [<<"code">>]},
+        <<"stdin">>       => #{<<"params">> => [<<"value">>]},
         <<"complete">>    => #{<<"params">> => [<<"code">>]},
         <<"info">>        => #{<<"params">> => [<<"symbol">>]},
         <<"docs">>        => #{<<"params">> => [<<"class">>],
