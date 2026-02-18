@@ -23,7 +23,10 @@
     fail/1,
     run_all/1,
     run_single/2,
-    execute_tests/5
+    execute_tests/5,
+    run_all_structured/1,
+    run_single_structured/2,
+    find_test_classes/0
 ]).
 
 %% @doc Assert that a condition is true.
@@ -230,6 +233,52 @@ run_single(ClassName, TestMethodName) when is_atom(TestMethodName) ->
     Duration = (EndTime - StartTime) / 1000.0,
     format_results([Result], Duration).
 
+%% @doc Run all tests for a class and return structured results (BT-699).
+%%
+%% Returns a map with per-test results suitable for JSON encoding.
+%% Uses the BIF fallback path (safe outside gen_server).
+-spec run_all_structured(atom()) ->
+    #{class := atom(), total := non_neg_integer(), passed := non_neg_integer(),
+      failed := non_neg_integer(), duration := float(),
+      tests := [#{name := atom(), status := pass | fail, error => binary()}]}.
+run_all_structured(ClassName) ->
+    Module = resolve_module(ClassName),
+    TestMethods = discover_test_methods_from_module(Module),
+    case TestMethods of
+        [] ->
+            #{class => ClassName, total => 0, passed => 0, failed => 0,
+              duration => 0.0, tests => []};
+        _ ->
+            StartTime = erlang:monotonic_time(millisecond),
+            Results = lists:map(fun(Method) ->
+                run_test_method(ClassName, Module, Method, none)
+            end, TestMethods),
+            EndTime = erlang:monotonic_time(millisecond),
+            Duration = (EndTime - StartTime) / 1000.0,
+            structure_results(ClassName, Results, Duration)
+    end.
+
+%% @doc Run a single test method and return structured results (BT-699).
+-spec run_single_structured(atom(), atom()) ->
+    #{class := atom(), total := non_neg_integer(), passed := non_neg_integer(),
+      failed := non_neg_integer(), duration := float(),
+      tests := [#{name := atom(), status := pass | fail, error => binary()}]}.
+run_single_structured(ClassName, TestMethodName) when is_atom(TestMethodName) ->
+    Module = resolve_module(ClassName),
+    StartTime = erlang:monotonic_time(millisecond),
+    Result = run_test_method(ClassName, Module, TestMethodName, none),
+    EndTime = erlang:monotonic_time(millisecond),
+    Duration = (EndTime - StartTime) / 1000.0,
+    structure_results(ClassName, [Result], Duration).
+
+%% @doc Find all loaded TestCase subclasses (BT-699).
+%%
+%% Uses the class hierarchy ETS table to find all classes that inherit
+%% from TestCase. Returns class names as atoms.
+-spec find_test_classes() -> [atom()].
+find_test_classes() ->
+    beamtalk_class_registry:all_subclasses('TestCase').
+
 %%% Internal helpers
 
 %% @doc Format a comparison error message.
@@ -425,3 +474,21 @@ format_results(Results, Duration) ->
             [Summary, "\n\n" | Failures]
     end,
     unicode:characters_to_binary(IoList).
+
+%% @doc Convert raw test results to structured map (BT-699).
+-spec structure_results(atom(), [{pass, atom()} | {fail, atom(), binary()}], float()) ->
+    #{class := atom(), total := non_neg_integer(), passed := non_neg_integer(),
+      failed := non_neg_integer(), duration := float(),
+      tests := [#{name := atom(), status := pass | fail, error => binary()}]}.
+structure_results(ClassName, Results, Duration) ->
+    Total = length(Results),
+    Passed = length([ok || {pass, _} <- Results]),
+    Failed = Total - Passed,
+    Tests = lists:map(fun
+        ({pass, Name}) ->
+            #{name => Name, status => pass};
+        ({fail, Name, Msg}) ->
+            #{name => Name, status => fail, error => Msg}
+    end, Results),
+    #{class => ClassName, total => Total, passed => Passed,
+      failed => Failed, duration => Duration, tests => Tests}.

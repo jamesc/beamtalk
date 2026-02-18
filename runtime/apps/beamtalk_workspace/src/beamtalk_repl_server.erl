@@ -592,6 +592,75 @@ handle_op(<<"docs">>, Params, Msg, _SessionPid) ->
             end
     end;
 
+handle_op(<<"test">>, Params, Msg, _SessionPid) ->
+    %% Run BUnit tests for a TestCase class (BT-699).
+    %% Supports running all tests in a class or a single test method.
+    ClassName = maps:get(<<"class">>, Params, <<>>),
+    Method = maps:get(<<"method">>, Params, undefined),
+    case ClassName of
+        <<>> ->
+            Err0 = beamtalk_error:new(missing_parameter, 'REPL'),
+            Err1 = beamtalk_error:with_message(Err0, <<"Missing required parameter: class">>),
+            Err2 = beamtalk_error:with_hint(Err1, <<"Provide a TestCase class name, e.g. {\"op\": \"test\", \"class\": \"CounterTest\"}">>),
+            beamtalk_repl_protocol:encode_error(
+                Err2, Msg, fun beamtalk_repl_json:format_error_message/1);
+        _ ->
+            ClassAtom = binary_to_atom(ClassName, utf8),
+            try
+                Results = case Method of
+                    undefined ->
+                        beamtalk_test_case:run_all_structured(ClassAtom);
+                    MethodBin ->
+                        MethodAtom = binary_to_atom(MethodBin, utf8),
+                        beamtalk_test_case:run_single_structured(ClassAtom, MethodAtom)
+                end,
+                beamtalk_repl_protocol:encode_test_results(Results, Msg)
+            catch
+                error:Reason ->
+                    WrappedReason = ensure_structured_error(Reason),
+                    beamtalk_repl_protocol:encode_error(
+                        WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1)
+            end
+    end;
+
+handle_op(<<"test-all">>, _Params, Msg, _SessionPid) ->
+    %% Run all loaded TestCase subclasses (BT-699).
+    TestClasses = beamtalk_test_case:find_test_classes(),
+    case TestClasses of
+        [] ->
+            %% No test classes loaded — return empty results
+            EmptyResults = #{class => 'All', total => 0, passed => 0,
+                             failed => 0, duration => 0.0, tests => []},
+            beamtalk_repl_protocol:encode_test_results(EmptyResults, Msg);
+        _ ->
+            try
+                StartTime = erlang:monotonic_time(millisecond),
+                AllResults = lists:map(fun(ClassName) ->
+                    beamtalk_test_case:run_all_structured(ClassName)
+                end, TestClasses),
+                EndTime = erlang:monotonic_time(millisecond),
+                Duration = (EndTime - StartTime) / 1000.0,
+                %% Merge all class results into a single summary
+                {TotalTests, TotalPassed, TotalFailed, AllTestDetails} =
+                    lists:foldl(fun(#{total := T, passed := P, failed := F,
+                                     tests := Tests, class := C}, {AT, AP, AF, ATests}) ->
+                        %% Tag each test with its class name
+                        TaggedTests = [Test#{class_name => C}
+                                       || Test <- Tests],
+                        {AT + T, AP + P, AF + F, ATests ++ TaggedTests}
+                    end, {0, 0, 0, []}, AllResults),
+                MergedResults = #{class => 'All', total => TotalTests,
+                                  passed => TotalPassed, failed => TotalFailed,
+                                  duration => Duration, tests => AllTestDetails},
+                beamtalk_repl_protocol:encode_test_results(MergedResults, Msg)
+            catch
+                error:Reason ->
+                    WrappedReason = ensure_structured_error(Reason),
+                    beamtalk_repl_protocol:encode_error(
+                        WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1)
+            end
+    end;
+
 handle_op(<<"describe">>, _Params, Msg, _SessionPid) ->
     %% Capability discovery — returns supported ops, protocol version, and
     %% server capabilities for the authenticated REPL connection (ADR 0020).
@@ -684,7 +753,10 @@ describe_ops() ->
         <<"unload">>      => #{<<"params">> => [<<"module">>]},
         <<"health">>      => #{<<"params">> => []},
         <<"describe">>    => #{<<"params">> => []},
-        <<"shutdown">>    => #{<<"params">> => [<<"cookie">>]}
+        <<"shutdown">>    => #{<<"params">> => [<<"cookie">>]},
+        <<"test">>        => #{<<"params">> => [<<"class">>],
+                               <<"optional">> => [<<"method">>]},
+        <<"test-all">>    => #{<<"params">> => []}
     }.
 
 %%% Protocol Parsing and Formatting
