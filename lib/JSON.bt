@@ -21,9 +21,12 @@
 ///
 /// ## Examples
 /// ```beamtalk
-/// JSON parse: '{"name": "Ada", "age": 36}'
-/// JSON generate: #{"name" => "Ada", "age" => 36}
+/// JSON parse: "42"                          // => 42
+/// JSON parse: "[1, 2, 3]"                   // => [1,2,3]
+/// JSON generate: #{"name" => "Ada"}
+/// // => _
 /// JSON prettyPrint: #{"name" => "Ada"}
+/// // => _
 /// ```
 sealed Object subclass: JSON
 
@@ -35,11 +38,9 @@ sealed Object subclass: JSON
   ///
   /// ## Examples
   /// ```beamtalk
-  /// JSON parse: '{"name": "Ada"}'      // => #{"name" => "Ada"}
-  /// JSON parse: '[1, 2, 3]'            // => [1, 2, 3]
-  /// JSON parse: '"hello"'              // => "hello"
-  /// JSON parse: '42'                   // => 42
-  /// JSON parse: 'null'                 // => nil
+  /// JSON parse: "[1, 2, 3]"            // => [1,2,3]
+  /// JSON parse: "42"                   // => 42
+  /// JSON parse: "null"                 // => nil
   /// ```
   class sealed parse: jsonString: String -> Object => @primitive "parse:"
 
@@ -51,9 +52,9 @@ sealed Object subclass: JSON
   ///
   /// ## Examples
   /// ```beamtalk
-  /// JSON generate: #{"name" => "Ada"}  // => '{"name":"Ada"}'
-  /// JSON generate: #(1, 2, 3)          // => '[1,2,3]'
-  /// JSON generate: nil                 // => 'null'
+  /// JSON generate: #(1, 2, 3)          // => [1,2,3]
+  /// JSON generate: nil                 // => null
+  /// JSON generate: 42                  // => 42
   /// ```
   class sealed generate: value: Object -> String => @primitive "generate:"
 
