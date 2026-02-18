@@ -600,17 +600,34 @@ fn generate_doc_test_eunit_wrapper(
     // Shared Erlang helpers
     erl.push_str(super::test_stdlib::eunit_helper_functions());
 
-    // Single test function with all assertions (stateful: bindings persist)
-    let _ = writeln!(erl, "'{module_name}_test'() ->");
+    // Test generator with timeout wrapper to avoid EUnit's 5s default (BT-729).
+    let _ = writeln!(
+        erl,
+        "'{module_name}_test_'() ->\n    {{timeout, 60, fun() ->"
+    );
     erl.push_str("    Bindings0 = #{},\n");
 
     for (i, (case, eval_mod)) in cases.iter().zip(eval_module_names.iter()).enumerate() {
         let bindings_in = format!("Bindings{i}");
         let bindings_out = format!("Bindings{}", i + 1);
 
+        // Build assertion comment showing Beamtalk source location (BT-729)
+        let escaped_file = source_file.replace('\\', "\\\\").replace('"', "\\\"");
+        let escaped_expr = case.expression.replace('\\', "\\\\").replace('"', "\\\"");
+        let comment = format!("{escaped_file}:{} `{escaped_expr}`", case.source_line);
+        let comment_bin = format!("<<\"{comment}\">>");
+
         match &case.expected {
             Expected::Error { kind } => {
-                write_error_assertion(&mut erl, i, eval_mod, kind, &bindings_in, &bindings_out);
+                write_error_assertion(
+                    &mut erl,
+                    i,
+                    eval_mod,
+                    kind,
+                    &bindings_in,
+                    &bindings_out,
+                    &comment,
+                );
             }
             Expected::Value(v) => {
                 let result_var = format!("Result{i}");
@@ -637,20 +654,20 @@ fn generate_doc_test_eunit_wrapper(
                     let expected_bin = expected_to_binary_literal(v);
                     let _ = writeln!(
                         erl,
-                        "    ?assert(matches_pattern({expected_bin}, format_result({result_var}))),"
+                        "    ?assert(matches_pattern({expected_bin}, format_result({result_var})), {comment_bin}),"
                     );
                 } else {
                     let expected_bin = expected_to_binary_literal(v);
                     let _ = writeln!(
                         erl,
-                        "    ?assertEqual({expected_bin}, format_result({result_var})),"
+                        "    ?assertEqual({expected_bin}, format_result({result_var}), {comment_bin}),"
                     );
                 }
             }
         }
     }
 
-    erl.push_str("    ok.\n");
+    erl.push_str("    ok\n    end}.\n");
     erl
 }
 
