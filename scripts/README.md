@@ -112,9 +112,7 @@ Shows orphaned containers with their worktree names and lets you confirm before 
 
 ---
 
-## Port and Node Name Auto-Assignment
-
-Each worktree automatically gets a unique Erlang node name and compiler daemon socket to avoid conflicts when running multiple parallel sessions.
+## REPL Port Assignment
 
 ### Port assignment
 
@@ -122,31 +120,14 @@ REPL ports are **OS-assigned** (ephemeral port 0) by default (BT-192). The OS pi
 
 To override: `beamtalk repl --port 9001` or set `BEAMTALK_REPL_PORT` env var.
 
-### Node name derivation
-
-- `BT-190` branch → `beamtalk_bt190@localhost`
-- `BT-64` branch → `beamtalk_bt64@localhost`
-- `main` branch → `beamtalk@localhost` (default)
-- Other branches → `beamtalk_<sanitized_name>@localhost`
-
-### Compiler daemon isolation
-
-Each worktree also gets its own compiler daemon socket:
-
-- `BT-190` branch → `~/.beamtalk/daemon-bt190.sock`
-- `main` branch → `~/.beamtalk/daemon.sock` (default)
-- Other branches → `~/.beamtalk/daemon-<sanitized_name>.sock`
-
-For long or conflicting names, the script may truncate the sanitized name to keep the socket path unique and within OS path-length limits. This means each worktree can run its own compiler daemon without conflicts.
-
 ### Priority order (highest to lowest)
 
-1. CLI flag: `beamtalk repl --port 9001 --node mynode@localhost`
-2. Environment variable: `BEAMTALK_REPL_PORT`, `BEAMTALK_NODE_NAME`, `BEAMTALK_DAEMON_SOCKET`
-3. Application config: `runtime/config/sys.config`
+1. CLI flag: `beamtalk repl --port 9001`
+2. Environment variable: `BEAMTALK_REPL_PORT`
+3. Application config: `runtime/config/sys.config` (`repl_port`)
 4. Default values
 
-The worktree scripts automatically set these in a `.env` file, which is loaded by the devcontainer.
+Worktree scripts do not write per-worktree REPL env overrides.
 
 ---
 

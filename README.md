@@ -340,21 +340,18 @@ Git worktrees enable **multiple Copilot agents working in parallel** on differen
 │
 ├── BT-99-feature/          # Worktree #1 (sibling directory)
 │   ├── .git                # File pointing to ../beamtalk/.git/worktrees/BT-99-feature
-│   ├── .env                # Auto-generated: REPL port, node name
 │   ├── crates/
 │   └── ...
 │
 └── BT-123-another/         # Worktree #2 (sibling directory)
     ├── .git                # File pointing to ../beamtalk/.git/worktrees/BT-123-another
-    ├── .env
     ├── crates/
     └── ...
 ```
 
 **Key points:**
 - Worktrees are created as **sibling directories** to the main repo
-- Each worktree has a `.env` file with unique REPL port and Erlang node name
-- `.env` files are in `.gitignore` and cleaned up when worktree is removed
+- Worktree scripts do not write per-worktree `.env` overrides
 
 #### Environment Variables
 
@@ -396,14 +393,12 @@ $env:GH_TOKEN = (gh auth token)  # Set for current session
 **What happens:**
 1. Creates worktree as sibling directory to main repo
 2. Checks out the branch (creates from base if new)
-3. Generates `.env` file with unique REPL port and Erlang node name
-4. Starts devcontainer with all services
-5. Opens bash shell inside container
+3. Starts devcontainer with all services
+4. Opens bash shell inside container
 
 **Port assignment:**
 - REPL ports are OS-assigned (ephemeral) by default — no port conflicts
 - Override with `--port` flag or `BEAMTALK_REPL_PORT` env var
-- Each worktree gets a unique node name and daemon socket for isolation
 
 #### Removing a Worktree
 
@@ -585,10 +580,9 @@ gh auth login
 
 #### Port conflicts
 
-If REPL port is already in use, override in `.env`:
+If you need a fixed REPL port, set an env var before launching REPL:
 ```bash
 BEAMTALK_REPL_PORT=9999
-BEAMTALK_NODE_NAME=beamtalk_custom@localhost
 ```
 
 ---

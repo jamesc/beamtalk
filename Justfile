@@ -480,6 +480,15 @@ coverage-runtime-open:
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Clean Rust build artifacts
+[unix]
+clean-rust:
+    @echo "🧹 Cleaning Rust artifacts..."
+    # Devcontainers mount target as a volume cache; avoid deleting the mount point.
+    @if command -v mountpoint >/dev/null 2>&1 && mountpoint -q target; then rm -rf target/* 2>/dev/null || true; else cargo clean --quiet; fi
+    @echo "  ✅ Cleaned target/"
+
+# Clean Rust build artifacts
+[windows]
 clean-rust:
     @echo "🧹 Cleaning Rust artifacts..."
     @cargo clean --quiet
