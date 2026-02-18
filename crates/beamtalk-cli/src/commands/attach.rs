@@ -56,19 +56,16 @@ fn attach_by_workspace_id(name_or_id: &str) -> Result<()> {
 
     if !workspace::workspace_exists(&workspace_id)? {
         return Err(miette!(
-            "Workspace '{name_or_id}' is not running. Start it with `beamtalk repl` or `beamtalk workspace create`"
+            "Workspace '{name_or_id}' does not exist. \
+             Create it with `beamtalk workspace create` or start a new one with `beamtalk repl`"
         ));
     }
 
-    let node_info = get_node_info(&workspace_id)?
-        .ok_or_else(|| miette!(
-            "Workspace '{name_or_id}' is not running. Start it with `beamtalk repl` or `beamtalk workspace create`"
-        ))?;
+    let node_info =
+        get_node_info(&workspace_id)?.ok_or_else(|| workspace_not_running(name_or_id))?;
 
     if !workspace::is_node_running(&node_info) {
-        return Err(miette!(
-            "Workspace '{name_or_id}' is not running. Start it with `beamtalk repl` or `beamtalk workspace create`"
-        ));
+        return Err(workspace_not_running(name_or_id));
     }
 
     let cookie = read_workspace_cookie(&workspace_id)?.trim().to_string();
@@ -121,10 +118,20 @@ fn attach_interactive() -> Result<()> {
     ))
 }
 
+/// Error for when a workspace exists but is not running.
+fn workspace_not_running(name_or_id: &str) -> miette::Report {
+    miette!(
+        "Workspace '{name_or_id}' is not running. \
+         Start it with `beamtalk repl` or `beamtalk workspace create`"
+    )
+}
+
 /// Connect to a REPL backend and enter the interactive loop.
 fn connect_and_run(host: &str, port: u16, cookie: &str) -> Result<()> {
-    let mut client = ReplClient::connect(host, port, cookie).map_err(|_| {
-        miette!("Connection refused at {host}:{port} — is a workspace running on that port?")
+    let mut client = ReplClient::connect(host, port, cookie).map_err(|e| {
+        miette!(
+            "Failed to connect to {host}:{port}: {e}\nHint: is a workspace running on that port?"
+        )
     })?;
 
     println!("Connected to REPL backend on port {port}.");

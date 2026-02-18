@@ -11,7 +11,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Global flag controlling whether color output is enabled.
-/// Made `pub(crate)` for test access in sibling modules.
+/// Kept `pub(crate)` for use across the CLI crate (`color::init` is called by attach command) and in tests.
 pub(crate) static COLOR_ENABLED: AtomicBool = AtomicBool::new(true);
 
 /// Initialize color support based on CLI flag and environment.

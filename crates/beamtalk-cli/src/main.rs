@@ -202,7 +202,7 @@ enum Command {
         workspace: Option<String>,
 
         /// Connect to a workspace at an explicit localhost port
-        #[arg(long)]
+        #[arg(long, conflicts_with = "workspace")]
         port: Option<u16>,
 
         /// Erlang cookie for authentication (required with --port)
