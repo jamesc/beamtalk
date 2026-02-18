@@ -13,6 +13,7 @@ on:
       - 'crates/beamtalk-cli/src/commands/doc.rs'
       - 'crates/beamtalk-cli/src/main.rs'
       - 'crates/beamtalk-core/src/codegen/core_erlang/doc_chunks.rs'
+      - 'scripts/install.sh'
   workflow_dispatch:
 
 concurrency:
@@ -80,6 +81,9 @@ jobs:
 
       - name: Generate documentation site
         run: cargo run --bin beamtalk -- doc lib/ --output _site/ --site --docs-path docs/
+
+      - name: Copy install script to site root
+        run: cp scripts/install.sh _site/install.sh
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

@@ -5,7 +5,7 @@
 # Beamtalk installer script
 #
 # Usage:
-#   curl --proto '=https' -LsSf https://raw.githubusercontent.com/jamesc/beamtalk/main/scripts/install.sh | sh
+#   curl -fsSL https://jamesc.github.io/beamtalk/install.sh | sh
 #   curl ... | sh -s -- --version v0.1.0         # specific version
 #   curl ... | sh -s -- --prefix /usr/local       # custom install location
 #
