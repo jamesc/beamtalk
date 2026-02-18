@@ -56,6 +56,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0027](0027-cross-platform-support.md) | Cross-Platform Support | Implemented | 2026-02-17 |
 | [0028](0028-beam-interop-strategy.md) | BEAM Interop Strategy | Accepted | 2026-02-17 |
 | [0029](0029-streaming-eval-output.md) | Streaming Eval Output | Accepted | 2026-02-18 |
+| [0030](0030-cargo-dist-evaluation.md) | cargo-dist Evaluation for Release Packaging | Rejected | 2026-02-18 |
 
 ## Creating New ADRs
 
