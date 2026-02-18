@@ -24,6 +24,7 @@
         {'bt@stdlib@float', 'Float', 'Number'},
         {'bt@stdlib@instantiation_error', 'InstantiationError', 'Error'},
         {'bt@stdlib@integer', 'Integer', 'Number'},
+        {'bt@stdlib@json', 'JSON', 'Object'},
         {'bt@stdlib@list', 'List', 'Collection'},
         {'bt@stdlib@number', 'Number', 'Object'},
         {'bt@stdlib@object', 'Object', 'ProtoObject'},
