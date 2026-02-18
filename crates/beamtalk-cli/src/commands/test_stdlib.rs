@@ -327,6 +327,7 @@ pub(crate) fn write_error_assertion(
     kind: &str,
     bindings_in: &str,
     bindings_out: &str,
+    comment: &str,
 ) {
     // Error assertion: wrap eval in try/catch, match on #beamtalk_error{kind}
     // Also handles plain atom errors (e.g., badarith, badarity)
@@ -356,15 +357,15 @@ pub(crate) fn write_error_assertion(
          \x20       end,\n\
          \x20       case TryResult{i} of\n\
          \x20           {{ok, _}} ->\n\
-         \x20               ?assert(false, <<\"Expected error '{kind}' but expression succeeded\">>),\n\
+         \x20               ?assert(false, <<\"{comment}: Expected error '{kind}' but expression succeeded\">>),\n\
          \x20               {bindings_in};\n\
          \x20           {{beamtalk_error, CaughtKind{i}}} ->\n\
-         \x20               ?assertEqual('{kind}', CaughtKind{i}),\n\
+         \x20               ?assertEqual('{kind}', CaughtKind{i}, <<\"{comment}\">>),\n\
          \x20               {bindings_in};\n\
          \x20           atom_error ->\n\
          \x20               {bindings_in};\n\
          \x20           {{other_error, CaughtReason{i}}} ->\n\
-         \x20               ?assertEqual('{kind}', CaughtReason{i}),\n\
+         \x20               ?assertEqual('{kind}', CaughtReason{i}, <<\"{comment}\">>),\n\
          \x20               {bindings_in}\n\
          \x20       end\n\
          \x20   end,"
@@ -424,9 +425,22 @@ fn generate_eunit_wrapper(
         let bindings_in = format!("Bindings{i}");
         let bindings_out = format!("Bindings{}", i + 1);
 
+        // Build assertion comment showing Beamtalk source location (BT-729)
+        let escaped_expr = case.expression.replace('\\', "\\\\").replace('"', "\\\"");
+        let comment = format!("{test_file_path}:{} `{escaped_expr}`", case.line);
+        let comment_bin = format!("<<\"{comment}\">>",);
+
         match &case.expected {
             Expected::Error { kind } => {
-                write_error_assertion(&mut erl, i, eval_mod, kind, &bindings_in, &bindings_out);
+                write_error_assertion(
+                    &mut erl,
+                    i,
+                    eval_mod,
+                    kind,
+                    &bindings_in,
+                    &bindings_out,
+                    &comment,
+                );
             }
             Expected::Value(v) => {
                 // Normal eval: call the module and extract result + bindings
@@ -455,13 +469,13 @@ fn generate_eunit_wrapper(
                     let expected_bin = expected_to_binary_literal(v);
                     let _ = writeln!(
                         erl,
-                        "    ?assert(matches_pattern({expected_bin}, format_result({result_var}))),"
+                        "    ?assert(matches_pattern({expected_bin}, format_result({result_var})), {comment_bin}),"
                     );
                 } else {
                     let expected_bin = expected_to_binary_literal(v);
                     let _ = writeln!(
                         erl,
-                        "    ?assertEqual({expected_bin}, format_result({result_var})),"
+                        "    ?assertEqual({expected_bin}, format_result({result_var}), {comment_bin}),"
                     );
                 }
             }
@@ -1112,6 +1126,8 @@ mod tests {
         // Verify timeout wrapper is generated (BT-729)
         assert!(wrapper.contains("_test_()"));
         assert!(wrapper.contains("timeout, 60"));
+        // Verify Beamtalk source location in assertion comment (BT-729)
+        assert!(wrapper.contains("test/arith.bt:1 `1 + 2`"));
     }
 
     #[test]
@@ -1221,6 +1237,8 @@ mod tests {
         assert!(wrapper.contains("CaughtKind0"));
         // Error wrapper catches future_rejected throws (actor errors via await)
         assert!(wrapper.contains("throw:{future_rejected, {beamtalk_error,"));
+        // Verify Beamtalk source location in error assertion comment (BT-729)
+        assert!(wrapper.contains("test/err.bt:1 `42 foo`"));
     }
 
     #[test]

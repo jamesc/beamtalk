@@ -611,9 +611,22 @@ fn generate_doc_test_eunit_wrapper(
         let bindings_in = format!("Bindings{i}");
         let bindings_out = format!("Bindings{}", i + 1);
 
+        // Build assertion comment showing Beamtalk source location (BT-729)
+        let escaped_expr = case.expression.replace('\\', "\\\\").replace('"', "\\\"");
+        let comment = format!("{source_file}:{} `{escaped_expr}`", case.source_line);
+        let comment_bin = format!("<<\"{comment}\">>");
+
         match &case.expected {
             Expected::Error { kind } => {
-                write_error_assertion(&mut erl, i, eval_mod, kind, &bindings_in, &bindings_out);
+                write_error_assertion(
+                    &mut erl,
+                    i,
+                    eval_mod,
+                    kind,
+                    &bindings_in,
+                    &bindings_out,
+                    &comment,
+                );
             }
             Expected::Value(v) => {
                 let result_var = format!("Result{i}");
@@ -640,13 +653,13 @@ fn generate_doc_test_eunit_wrapper(
                     let expected_bin = expected_to_binary_literal(v);
                     let _ = writeln!(
                         erl,
-                        "    ?assert(matches_pattern({expected_bin}, format_result({result_var}))),"
+                        "    ?assert(matches_pattern({expected_bin}, format_result({result_var})), {comment_bin}),"
                     );
                 } else {
                     let expected_bin = expected_to_binary_literal(v);
                     let _ = writeln!(
                         erl,
-                        "    ?assertEqual({expected_bin}, format_result({result_var})),"
+                        "    ?assertEqual({expected_bin}, format_result({result_var}), {comment_bin}),"
                     );
                 }
             }
