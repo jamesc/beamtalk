@@ -7,7 +7,7 @@
 //!
 //! Contains BIF generators for smaller primitive classes:
 //! `File`, `Exception`, `Symbol`, `Tuple`, `Object`, `Association`, `Set`,
-//! `CompiledMethod`, `TestCase`, `Stream`, `StackFrame`.
+//! `CompiledMethod`, `TestCase`, `Stream`, `StackFrame`, `JSON`.
 
 use super::super::document::Document;
 use super::{binary_bif, ops_dispatch};
@@ -564,6 +564,32 @@ pub(crate) fn generate_stream_bif(selector: &str, params: &[String]) -> Option<D
             ")"
         ]),
         "printString" => Some(Document::Str("call 'beamtalk_stream':'print_string'(Self)")),
+        _ => None,
+    }
+}
+
+/// JSON primitive implementations (BT-711).
+///
+/// JSON class methods delegate directly to `beamtalk_json` runtime module.
+/// These are class-level methods (no Self parameter needed).
+pub(crate) fn generate_json_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
+    let p0 = params.first().map_or("_Arg0", String::as_str);
+    match selector {
+        "parse:" => Some(docvec![
+            "call 'beamtalk_json':'parse:'(",
+            p0.to_string(),
+            ")"
+        ]),
+        "generate:" => Some(docvec![
+            "call 'beamtalk_json':'generate:'(",
+            p0.to_string(),
+            ")"
+        ]),
+        "prettyPrint:" => Some(docvec![
+            "call 'beamtalk_json':'prettyPrint:'(",
+            p0.to_string(),
+            ")"
+        ]),
         _ => None,
     }
 }

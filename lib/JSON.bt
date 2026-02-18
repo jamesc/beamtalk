@@ -1,0 +1,66 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// JSON — JSON encoding and decoding.
+///
+/// Provides class methods for parsing JSON strings into Beamtalk values
+/// and generating JSON strings from Beamtalk values. Uses `jsx` as the
+/// underlying JSON library.
+///
+/// ## Type Mapping
+///
+/// | JSON          | Beamtalk     |
+/// |---------------|--------------|
+/// | object        | Dictionary   |
+/// | array         | List         |
+/// | string        | String       |
+/// | number (int)  | Integer      |
+/// | number (float)| Float        |
+/// | true/false    | True/False   |
+/// | null          | nil          |
+///
+/// ## Examples
+/// ```beamtalk
+/// JSON parse: '{"name": "Ada", "age": 36}'
+/// JSON generate: #{"name" => "Ada", "age" => 36}
+/// JSON prettyPrint: #{"name" => "Ada"}
+/// ```
+sealed Object subclass: JSON
+
+  /// Parse a JSON string into a Beamtalk value (class method).
+  ///
+  /// JSON objects become Dictionaries with String keys, arrays become
+  /// Lists, strings become Strings, numbers become Integer or Float,
+  /// booleans stay as True/False, null becomes nil.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// JSON parse: '{"name": "Ada"}'      // => #{"name" => "Ada"}
+  /// JSON parse: '[1, 2, 3]'            // => [1, 2, 3]
+  /// JSON parse: '"hello"'              // => "hello"
+  /// JSON parse: '42'                   // => 42
+  /// JSON parse: 'null'                 // => nil
+  /// ```
+  class sealed parse: jsonString: String -> Object => @primitive "parse:"
+
+  /// Generate a JSON string from a Beamtalk value (class method).
+  ///
+  /// Dictionaries become JSON objects, Lists become arrays, Strings
+  /// become JSON strings, Integer/Float become numbers, True/False
+  /// become JSON booleans, nil becomes null.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// JSON generate: #{"name" => "Ada"}  // => '{"name":"Ada"}'
+  /// JSON generate: #(1, 2, 3)          // => '[1,2,3]'
+  /// JSON generate: nil                 // => 'null'
+  /// ```
+  class sealed generate: value: Object -> String => @primitive "generate:"
+
+  /// Generate a pretty-printed JSON string with indentation (class method).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// JSON prettyPrint: #{"name" => "Ada", "age" => 36}
+  /// ```
+  class sealed prettyPrint: value: Object -> String => @primitive "prettyPrint:"
