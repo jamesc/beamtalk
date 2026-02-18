@@ -459,13 +459,22 @@ encode_actor_metadata(#{pid := Pid, class := Class} = Meta) ->
 encode_stop_info(#{pid := Pid, class := Class, reason := Reason}) ->
     %% Limit reason: cap nesting depth, then enforce max byte length
     ReasonStr = iolist_to_binary(io_lib:format("~P", [Reason, 10])),
-    TruncatedReason = case byte_size(ReasonStr) > 4096 of
-        true -> binary:part(ReasonStr, 0, 4096);
-        false -> ReasonStr
-    end,
+    TruncatedReason = truncate_utf8(ReasonStr, 4096),
     #{<<"class">> => case Class of
                          undefined -> <<"unknown">>;
                          _ -> atom_to_binary(Class, utf8)
                      end,
       <<"pid">> => list_to_binary(pid_to_list(Pid)),
       <<"reason">> => TruncatedReason}.
+
+%% @private
+%% Truncate binary to at most MaxBytes, respecting UTF-8 boundaries.
+truncate_utf8(Bin, MaxBytes) when byte_size(Bin) =< MaxBytes ->
+    Bin;
+truncate_utf8(Bin, MaxBytes) ->
+    Part = binary:part(Bin, 0, MaxBytes),
+    case unicode:characters_to_binary(Part, utf8, utf8) of
+        {incomplete, Valid, _} -> Valid;
+        {error, Valid, _} -> Valid;
+        Valid when is_binary(Valid) -> Valid
+    end.
