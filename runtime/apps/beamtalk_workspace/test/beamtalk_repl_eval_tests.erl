@@ -913,3 +913,151 @@ should_purge_module_with_registry_no_actors_test() ->
     {ok, Pid} = gen_server:start_link(beamtalk_repl_actors, [], []),
     ?assertEqual(true, beamtalk_repl_eval:should_purge_module(some_module, Pid)),
     gen_server:stop(Pid).
+
+%% ===================================================================
+%% Stdin request detection tests (BT-698)
+%% ===================================================================
+
+is_stdin_request_get_line_with_encoding_test() ->
+    ?assertMatch({true, <<"Name: ">>},
+                 beamtalk_repl_eval:is_stdin_request({get_line, unicode, <<"Name: ">>})).
+
+is_stdin_request_get_line_without_encoding_test() ->
+    ?assertMatch({true, <<"Enter: ">>},
+                 beamtalk_repl_eval:is_stdin_request({get_line, <<"Enter: ">>})).
+
+is_stdin_request_get_line_list_prompt_test() ->
+    ?assertMatch({true, <<"Name: ">>},
+                 beamtalk_repl_eval:is_stdin_request({get_line, unicode, "Name: "})).
+
+is_stdin_request_get_chars_test() ->
+    ?assertMatch({true, <<"Prompt">>},
+                 beamtalk_repl_eval:is_stdin_request({get_chars, unicode, <<"Prompt">>, 5})).
+
+is_stdin_request_get_until_test() ->
+    ?assertMatch({true, <<"? ">>},
+                 beamtalk_repl_eval:is_stdin_request({get_until, unicode, <<"? ">>, io_lib, collect_line, []})).
+
+is_stdin_request_put_chars_test() ->
+    ?assertEqual(false, beamtalk_repl_eval:is_stdin_request({put_chars, unicode, <<"hello">>})).
+
+is_stdin_request_other_test() ->
+    ?assertEqual(false, beamtalk_repl_eval:is_stdin_request({some_other_request})).
+
+%% ===================================================================
+%% Stdin request handling tests (BT-698)
+%% ===================================================================
+
+handle_stdin_request_no_subscriber_test() ->
+    %% Without subscriber, stdin returns enotsup
+    ?assertEqual({error, enotsup}, beamtalk_repl_eval:handle_stdin_request(undefined, <<"? ">>)).
+
+handle_stdin_request_with_subscriber_test() ->
+    %% Test stdin handling with a subscriber that provides input
+    Self = self(),
+    Subscriber = spawn(fun() ->
+        receive
+            {need_input, CapturePid, Ref, <<"Name: ">>} ->
+                CapturePid ! {stdin_input, Ref, <<"Alice\n">>},
+                Self ! subscriber_done
+        end
+    end),
+    Result = beamtalk_repl_eval:handle_stdin_request(Subscriber, <<"Name: ">>),
+    ?assertEqual(<<"Alice\n">>, Result),
+    receive subscriber_done -> ok after 1000 -> ?assert(false) end.
+
+handle_stdin_request_eof_test() ->
+    %% Test stdin EOF handling
+    Self = self(),
+    Subscriber = spawn(fun() ->
+        receive
+            {need_input, CapturePid, Ref, _Prompt} ->
+                CapturePid ! {stdin_input, Ref, eof},
+                Self ! subscriber_done
+        end
+    end),
+    Result = beamtalk_repl_eval:handle_stdin_request(Subscriber, <<"? ">>),
+    ?assertEqual(eof, Result),
+    receive subscriber_done -> ok after 1000 -> ?assert(false) end.
+
+%% ===================================================================
+%% Prompt conversion tests (BT-698)
+%% ===================================================================
+
+prompt_to_binary_binary_test() ->
+    ?assertEqual(<<"hello">>, beamtalk_repl_eval:prompt_to_binary(<<"hello">>)).
+
+prompt_to_binary_list_test() ->
+    ?assertEqual(<<"hello">>, beamtalk_repl_eval:prompt_to_binary("hello")).
+
+prompt_to_binary_atom_test() ->
+    ?assertEqual(<<"ok">>, beamtalk_repl_eval:prompt_to_binary(ok)).
+
+prompt_to_binary_other_test() ->
+    ?assertEqual(<<"? ">>, beamtalk_repl_eval:prompt_to_binary(42)).
+
+%% ===================================================================
+%% IO capture loop stdin integration tests (BT-698)
+%% ===================================================================
+
+io_capture_stdin_with_subscriber_test() ->
+    %% Test that io_capture_loop handles get_line by notifying subscriber
+    Self = self(),
+    %% Use self() as the subscriber — we'll handle the need_input message
+    {CapturePid, OldGL} = beamtalk_repl_eval:start_io_capture(Self),
+    %% Send a get_line request to the IO capture process
+    ReplyRef = make_ref(),
+    CapturePid ! {io_request, self(), ReplyRef, {get_line, unicode, <<"Enter: ">>}},
+    %% Receive the need_input request from the IO capture process
+    receive
+        {need_input, IoCapPid, Ref, <<"Enter: ">>} ->
+            %% Provide stdin input with matching ref
+            IoCapPid ! {stdin_input, Ref, <<"test input\n">>}
+    after 5000 ->
+        ?assert(false)
+    end,
+    %% Receive the io_reply
+    receive
+        {io_reply, ReplyRef, Reply} ->
+            ?assertEqual(<<"test input\n">>, Reply)
+    after 5000 ->
+        ?assert(false)
+    end,
+    _Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}).
+
+io_capture_stdin_stale_ref_ignored_test() ->
+    %% A stdin_input with a wrong ref is ignored; the correct ref is accepted
+    Self = self(),
+    {CapturePid, OldGL} = beamtalk_repl_eval:start_io_capture(Self),
+    ReplyRef = make_ref(),
+    CapturePid ! {io_request, self(), ReplyRef, {get_line, unicode, <<"Enter: ">>}},
+    receive
+        {need_input, IoCapPid, Ref, <<"Enter: ">>} ->
+            %% Send a stale/wrong ref first — should be ignored
+            StaleRef = make_ref(),
+            IoCapPid ! {stdin_input, StaleRef, <<"stale data\n">>},
+            %% Then send the correct ref
+            IoCapPid ! {stdin_input, Ref, <<"correct data\n">>}
+    after 5000 ->
+        ?assert(false)
+    end,
+    receive
+        {io_reply, ReplyRef, Reply} ->
+            ?assertEqual(<<"correct data\n">>, Reply)
+    after 5000 ->
+        ?assert(false)
+    end,
+    _Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}).
+
+io_capture_stdin_no_subscriber_test() ->
+    %% Without subscriber, get_line returns {error, enotsup}
+    {CapturePid, OldGL} = beamtalk_repl_eval:start_io_capture(),
+    ReplyRef = make_ref(),
+    CapturePid ! {io_request, self(), ReplyRef, {get_line, unicode, <<"? ">>}},
+    receive
+        {io_reply, ReplyRef, Reply} ->
+            ?assertEqual({error, enotsup}, Reply)
+    after 5000 ->
+        ?assert(false)
+    end,
+    _Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}).

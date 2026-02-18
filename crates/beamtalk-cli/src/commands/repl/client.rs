@@ -105,6 +105,16 @@ impl ReplClient {
                         continue;
                     }
 
+                    // BT-698: Check for need-input status (stdin request)
+                    if let Some(status) = parsed.get("status").and_then(|s| s.as_array()) {
+                        let has_need_input =
+                            status.iter().any(|s| s.as_str() == Some("need-input"));
+                        if has_need_input {
+                            self.handle_stdin_request(&parsed)?;
+                            continue;
+                        }
+                    }
+
                     // Final response with status
                     let mut response: ReplResponse = serde_json::from_value(parsed)
                         .map_err(|e| miette!("Failed to parse response: {e}\nRaw: {line}"))?;
@@ -134,6 +144,53 @@ impl ReplClient {
         // Restore blocking read timeout
         self.inner.set_read_timeout(None)?;
         result
+    }
+
+    /// Handle a need-input request from the server (BT-698).
+    /// Prints the prompt, reads a line from stdin, and sends it back.
+    fn handle_stdin_request(&mut self, parsed: &serde_json::Value) -> Result<()> {
+        use std::io::{BufRead, Write};
+
+        let prompt = parsed.get("prompt").and_then(|p| p.as_str()).unwrap_or("");
+        // Reuse the eval request id for correlation
+        let req_id = parsed
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map_or_else(protocol::next_msg_id, str::to_string);
+
+        // Print the prompt
+        print!("{prompt}");
+        let _ = std::io::stdout().flush();
+
+        // Read a line from stdin
+        let mut input = String::new();
+        let stdin = std::io::stdin();
+        match stdin.lock().read_line(&mut input) {
+            Ok(0) => {
+                // EOF
+                self.inner.send_only(&serde_json::json!({
+                    "op": "stdin",
+                    "id": req_id,
+                    "value": "eof"
+                }))?;
+            }
+            Ok(_) => {
+                self.inner.send_only(&serde_json::json!({
+                    "op": "stdin",
+                    "id": req_id,
+                    "value": input
+                }))?;
+            }
+            Err(e) => {
+                eprintln!("Error reading stdin: {e}");
+                self.inner.send_only(&serde_json::json!({
+                    "op": "stdin",
+                    "id": req_id,
+                    "value": "eof"
+                }))?;
+            }
+        }
+        Ok(())
     }
 
     /// Send an interrupt request on a separate WebSocket connection (BT-666).
