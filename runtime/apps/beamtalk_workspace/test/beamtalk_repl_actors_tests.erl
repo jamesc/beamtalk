@@ -363,6 +363,131 @@ unknown_info_is_ignored_test() ->
     gen_server:stop(RegistryPid).
 
 %%% ===========================================================================
+%%% Subscriber Lifecycle Notification Tests (BT-690)
+%%% ===========================================================================
+
+subscriber_receives_actor_spawned_notification_test() ->
+    process_flag(trap_exit, true),
+    unregister_if_alive(beamtalk_actor_registry),
+    {ok, RegistryPid} = gen_server:start_link(
+        {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []),
+    try
+        beamtalk_repl_actors:subscribe(),
+        timer:sleep(10),
+        
+        {ok, ActorPid} = test_counter:start_link(0),
+        ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
+        
+        receive
+            {actor_spawned, Metadata} ->
+                ?assertEqual(ActorPid, maps:get(pid, Metadata)),
+                ?assertEqual('Counter', maps:get(class, Metadata)),
+                ?assertEqual(test_counter, maps:get(module, Metadata))
+        after 500 ->
+            ?assert(false)
+        end,
+        gen_server:stop(ActorPid)
+    after
+        gen_server:stop(RegistryPid),
+        flush_messages()
+    end.
+
+subscriber_receives_actor_stopped_notification_test() ->
+    process_flag(trap_exit, true),
+    unregister_if_alive(beamtalk_actor_registry),
+    {ok, RegistryPid} = gen_server:start_link(
+        {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []),
+    try
+        beamtalk_repl_actors:subscribe(),
+        timer:sleep(10),
+        
+        {ok, ActorPid} = test_counter:start_link(0),
+        ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
+        
+        receive {actor_spawned, _} -> ok after 500 -> ok end,
+        
+        gen_server:stop(ActorPid),
+        
+        receive
+            {actor_stopped, StopInfo} ->
+                ?assertEqual(ActorPid, maps:get(pid, StopInfo)),
+                ?assertEqual('Counter', maps:get(class, StopInfo))
+        after 500 ->
+            ?assert(false)
+        end
+    after
+        gen_server:stop(RegistryPid),
+        flush_messages()
+    end.
+
+unsubscribe_stops_notifications_test() ->
+    process_flag(trap_exit, true),
+    unregister_if_alive(beamtalk_actor_registry),
+    {ok, RegistryPid} = gen_server:start_link(
+        {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []),
+    try
+        beamtalk_repl_actors:subscribe(),
+        timer:sleep(10),
+        
+        beamtalk_repl_actors:unsubscribe(),
+        timer:sleep(10),
+        
+        {ok, ActorPid} = test_counter:start_link(0),
+        ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
+        
+        receive
+            {actor_spawned, _} -> ?assert(false)
+        after 100 ->
+            ok
+        end,
+        gen_server:stop(ActorPid)
+    after
+        gen_server:stop(RegistryPid),
+        flush_messages()
+    end.
+
+dead_subscriber_auto_removed_test() ->
+    process_flag(trap_exit, true),
+    unregister_if_alive(beamtalk_actor_registry),
+    {ok, RegistryPid} = gen_server:start_link(
+        {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []),
+    try
+        Self = self(),
+        SubPid = spawn(fun() ->
+            beamtalk_repl_actors:subscribe(),
+            Self ! subscribed,
+            receive stop -> ok end
+        end),
+        receive subscribed -> ok after 500 -> ok end,
+        timer:sleep(10),
+        
+        exit(SubPid, kill),
+        timer:sleep(50),
+        
+        {ok, ActorPid} = test_counter:start_link(0),
+        ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
+        
+        ?assert(is_process_alive(RegistryPid)),
+        gen_server:stop(ActorPid)
+    after
+        gen_server:stop(RegistryPid),
+        flush_messages()
+    end.
+
+%% Helper: stop and unregister a named process if it's still alive.
+unregister_if_alive(Name) ->
+    case whereis(Name) of
+        undefined -> ok;
+        Pid ->
+            try gen_server:stop(Pid) catch _:_ -> ok end,
+            timer:sleep(10)
+    end.
+
+%% Helper: drain all messages from the test process mailbox.
+flush_messages() ->
+    receive _ -> flush_messages() after 0 -> ok end.
+
+%%% ===========================================================================
 %%% Workspace App Callback Env Tests
 %%% ===========================================================================
 

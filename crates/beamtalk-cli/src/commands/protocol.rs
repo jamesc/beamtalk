@@ -138,8 +138,10 @@ impl ProtocolClient {
                 Message::Text(text) => {
                     let parsed: serde_json::Value = serde_json::from_str(&text)
                         .map_err(|e| miette!("Failed to parse response: {e}\nRaw: {text}"))?;
-                    // Skip push messages (e.g. Transcript push from ADR 0017)
-                    if parsed.get("push").is_some() {
+                    // Skip push messages (e.g. Transcript, actor lifecycle from ADR 0017)
+                    if parsed.get("push").is_some()
+                        || parsed.get("type").and_then(|v| v.as_str()) == Some("push")
+                    {
                         continue;
                     }
                     return Ok(parsed);
@@ -161,9 +163,11 @@ impl ProtocolClient {
         loop {
             match self.ws.read() {
                 Ok(Message::Text(text)) => {
-                    // Skip push messages (e.g. Transcript push from ADR 0017)
+                    // Skip push messages (e.g. Transcript, actor lifecycle from ADR 0017)
                     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if parsed.get("push").is_some() {
+                        if parsed.get("push").is_some()
+                            || parsed.get("type").and_then(|v| v.as_str()) == Some("push")
+                        {
                             continue;
                         }
                     }
@@ -211,9 +215,11 @@ impl ProtocolClient {
                 .map_err(|e| miette!("WebSocket read error: {e}"))?;
             match msg {
                 Message::Text(text) => {
-                    // Skip push messages (e.g. Transcript push from ADR 0017)
+                    // Skip push messages (e.g. Transcript, actor lifecycle from ADR 0017)
                     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if parsed.get("push").is_some() {
+                        if parsed.get("push").is_some()
+                            || parsed.get("type").and_then(|v| v.as_str()) == Some("push")
+                        {
                             continue;
                         }
                     }

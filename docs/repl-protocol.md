@@ -573,6 +573,60 @@ Initiates graceful OTP supervisor tree shutdown. Requires cookie authentication.
 {"id": "msg-042", "error": "auth_error: Invalid cookie", "status": ["done", "error"]}
 ```
 
+## Push Messages
+
+Push messages are server-initiated messages sent to clients without a preceding request. They are used for real-time notifications.
+
+### Transcript Channel
+
+Transcript output from the workspace's `Transcript` object.
+
+```json
+{"push": "transcript", "text": "Hello from Transcript"}
+```
+
+### Actors Channel (BT-690)
+
+Actor lifecycle events pushed when actors spawn or stop in the workspace. Clients subscribe automatically on connection.
+
+**Actor Spawned:**
+```json
+{
+  "type": "push",
+  "channel": "actors",
+  "event": "spawned",
+  "data": {
+    "class": "Counter",
+    "pid": "<0.123.0>",
+    "spawned_at": 1234567890
+  }
+}
+```
+
+**Actor Stopped:**
+```json
+{
+  "type": "push",
+  "channel": "actors",
+  "event": "stopped",
+  "data": {
+    "class": "Counter",
+    "pid": "<0.123.0>",
+    "reason": "normal"
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | `"push"` | Identifies this as a push message |
+| `channel` | `"actors"` | Push channel name |
+| `event` | `"spawned"` \| `"stopped"` | Lifecycle event type |
+| `data.class` | string | Actor class name (e.g., `"Counter"`) |
+| `data.pid` | string | Erlang PID as string |
+| `data.spawned_at` | integer | Unix timestamp (seconds), present on `spawned` events |
+| `data.reason` | string | Termination reason, present on `stopped` events |
+
 ## Legacy Format (Backward Compatible)
 
 The server also accepts the legacy format for backward compatibility:
