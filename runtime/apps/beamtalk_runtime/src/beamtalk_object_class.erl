@@ -207,69 +207,10 @@ module_name(ClassPid) ->
 
 %% @doc Send a message to a class object synchronously (BT-246 / ADR 0013 Phase 1).
 %%
-%% Dispatches messages to the class gen_server, translating the Beamtalk
-%% message protocol ({Selector, Args}) to the class process message format.
-%% Unwraps {ok, Value} / {error, Error} results for seamless integration.
+%% Delegates to beamtalk_class_dispatch (BT-704).
 -spec class_send(pid() | undefined, atom(), list()) -> term().
-class_send(undefined, Selector, _Args) ->
-    Error = beamtalk_error:new(class_not_found, unknown, Selector),
-    beamtalk_error:raise(Error);
-class_send(ClassPid, 'new', []) ->
-    unwrap_class_call(gen_server:call(ClassPid, {new, []}));
-class_send(ClassPid, 'new:', [Map]) ->
-    unwrap_class_call(gen_server:call(ClassPid, {new, [Map]}));
-class_send(ClassPid, spawn, []) ->
-    unwrap_class_call(gen_server:call(ClassPid, {spawn, []}));
-class_send(ClassPid, 'spawnWith:', [Map]) ->
-    unwrap_class_call(gen_server:call(ClassPid, {spawn, [Map]}));
-class_send(ClassPid, methods, []) ->
-    gen_server:call(ClassPid, methods);
-class_send(ClassPid, superclass, []) ->
-    case gen_server:call(ClassPid, superclass) of
-        none -> nil;  % Beamtalk nil, not Erlang 'none'
-        Super -> Super
-    end;
-class_send(ClassPid, class_name, []) ->
-    gen_server:call(ClassPid, class_name);
-class_send(ClassPid, module_name, []) ->
-    gen_server:call(ClassPid, module_name);
-class_send(ClassPid, 'printString', []) ->
-    %% BT-477: Class objects return their display name as a string.
-    %% e.g., Integer printString → <<"Integer">>, Counter printString → <<"Counter">>
-    %% Enables Object >> printString => 'a ' ++ self class printString
-    ClassName = gen_server:call(ClassPid, class_name),
-    atom_to_binary(ClassName, utf8);
-class_send(_ClassPid, class, []) ->
-    %% BT-412: Metaclass terminal — returns 'Metaclass' sentinel atom.
-    %% The metaclass tower terminates here (no infinite regression).
-    'Metaclass';
-class_send(ClassPid, subclasses, []) ->
-    %% BT-573: Return direct subclass names as a sorted list.
-    ClassName = gen_server:call(ClassPid, class_name),
-    beamtalk_class_registry:direct_subclasses(ClassName);
-class_send(ClassPid, allSubclasses, []) ->
-    %% BT-573: Return all subclass names recursively as a sorted list.
-    ClassName = gen_server:call(ClassPid, class_name),
-    beamtalk_class_registry:all_subclasses(ClassName);
 class_send(ClassPid, Selector, Args) ->
-    %% BT-411: Try user-defined class methods before raising does_not_understand
-    %% BT-440: Test execution may take a long time; use longer timeout.
-    Timeout = case is_test_execution_selector(Selector) of
-        true -> 300000;  % 5 minutes for test suites
-        false -> 5000    % default gen_server timeout
-    end,
-    case gen_server:call(ClassPid, {class_method_call, Selector, Args}, Timeout) of
-        {ok, Result} -> Result;
-        {error, not_found} ->
-            ClassName = gen_server:call(ClassPid, class_name),
-            Error = beamtalk_error:new(
-                does_not_understand,
-                ClassName,
-                Selector,
-                <<"Class does not understand this message">>),
-            beamtalk_error:raise(Error);
-        Other -> unwrap_class_call(Other)
-    end.
+    beamtalk_class_dispatch:class_send(ClassPid, Selector, Args).
 
 %% @doc Get a compiled method object.
 %%
@@ -458,8 +399,8 @@ init({ClassName, ClassInfo}) ->
     ets:insert(beamtalk_class_hierarchy, {ClassName, Superclass}),
     
     %% Build flattened method tables (ADR 0006 Phase 2)
-    FlattenedMethods = build_flattened_methods(ClassName, Superclass, InstanceMethods),
-    FlattenedClassMethods = build_flattened_methods(ClassName, Superclass, ClassMethods, get_flattened_class_methods),
+    FlattenedMethods = beamtalk_class_hierarchy:build_flattened_methods(ClassName, Superclass, InstanceMethods),
+    FlattenedClassMethods = beamtalk_class_hierarchy:build_flattened_methods(ClassName, Superclass, ClassMethods, get_flattened_class_methods),
     
     %% Build state
     %% BT-474: is_constructible starts as undefined — computed lazily on first
@@ -564,7 +505,7 @@ handle_call({put_method, Selector, Fun, Source}, _From, State) ->
     NewSource = maps:put(Selector, Source, State#class_state.method_source),
     
     %% ADR 0006 Phase 2: Rebuild flattened methods when method added/changed
-    NewFlattened = build_flattened_methods(
+    NewFlattened = beamtalk_class_hierarchy:build_flattened_methods(
         State#class_state.name,
         State#class_state.superclass,
         NewMethods
@@ -594,9 +535,9 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
     NewModule = maps:get(module, ClassInfo, State#class_state.module),
 
     %% Rebuild flattened method tables with new methods
-    NewFlattened = build_flattened_methods(
+    NewFlattened = beamtalk_class_hierarchy:build_flattened_methods(
         ClassName, State#class_state.superclass, NewInstanceMethods),
-    NewFlattenedClass = build_flattened_methods(
+    NewFlattenedClass = beamtalk_class_hierarchy:build_flattened_methods(
         ClassName, State#class_state.superclass, NewClassMethods, get_flattened_class_methods),
 
     NewState = State#class_state{
@@ -656,68 +597,32 @@ handle_call({lookup_flattened, Selector}, _From, #class_state{flattened_methods 
     end,
     {reply, Result, State};
 
-%% BT-411: User-defined class method dispatch.
-%% BT-412: Passes class variables to method and handles updates.
-%% Looks up selector in flattened_class_methods and calls the module function.
-%%
-%% BT-440: For runAll and run: (test execution), we spawn test execution in
-%% a separate process using {noreply, State} to avoid gen_server deadlock,
-%% since test execution needs to call back into the class system.
+%% BT-411/BT-412/BT-440: Class method dispatch.
+%% Delegates to beamtalk_class_dispatch (BT-704).
 handle_call({class_method_call, Selector, Args}, From,
             #class_state{flattened_class_methods = FlatClassMethods,
                          flattened_methods = FlatMethods,
                          name = ClassName, module = Module,
                          class_variables = ClassVars} = State) ->
-    case maps:find(Selector, FlatClassMethods) of
-        {ok, {DefiningClass, _MethodInfo}} ->
-            %% Resolve the module for the defining class (may differ for inherited methods)
-            DefiningModule = case DefiningClass of
-                ClassName -> Module;
-                _ ->
-                    case beamtalk_class_registry:whereis_class(DefiningClass) of
-                        undefined -> Module;
-                        DefPid -> gen_server:call(DefPid, get_module, 5000)
-                    end
-            end,
-            %% BT-440: For test execution (runAll, run:) inherited from TestCase,
-            %% spawn in separate process to avoid gen_server deadlock when
-            %% test execution calls class_send.
-            case is_test_execution_selector(Selector) andalso
-                 DefiningClass =:= 'TestCase' of
-                true ->
-                    spawn(fun() ->
-                        try
-                            Result = beamtalk_test_case:execute_tests(
-                                Selector, Args, ClassName, Module, FlatMethods),
-                            gen_server:reply(From, {ok, Result})
-                        catch
-                            C:E ->
-                                ?LOG_ERROR("Test execution ~p:~p failed: ~p:~p",
-                                             [ClassName, Selector, C, E]),
-                                gen_server:reply(From, {error, E})
-                        end
-                    end),
-                    {noreply, State};
-                false ->
-                    %% Build class self object for `self` reference in class methods
-                    ClassSelf = {beamtalk_object, beamtalk_class_registry:class_object_tag(ClassName), DefiningModule, self()},
-                    %% Class method function name: class_<selector>
-                    FunName = class_method_fun_name(Selector),
-                    %% BT-412: Pass class variables; handle {Result, NewClassVars} returns
-                    try erlang:apply(DefiningModule, FunName, [ClassSelf, ClassVars | Args]) of
-                        {class_var_result, Result, NewClassVars} ->
-                            NewState = State#class_state{class_variables = NewClassVars},
-                            {reply, {ok, Result}, NewState};
-                        Result ->
-                            {reply, {ok, Result}, State}
-                    catch
-                        Class:Error ->
-                            ?LOG_ERROR("Class method ~p:~p failed: ~p:~p",
-                                         [ClassName, Selector, Class, Error]),
-                            {reply, {error, Error}, State}
-                    end
-            end;
-        error ->
+    case beamtalk_class_dispatch:handle_class_method_call(
+            Selector, Args, ClassName, Module, FlatClassMethods, ClassVars) of
+        {reply, Result, NewClassVars} ->
+            {reply, Result, State#class_state{class_variables = NewClassVars}};
+        {test_spawn, DefiningModule} ->
+            spawn(fun() ->
+                try
+                    Result = beamtalk_test_case:execute_tests(
+                        Selector, Args, ClassName, DefiningModule, FlatMethods),
+                    gen_server:reply(From, {ok, Result})
+                catch
+                    C:E ->
+                        ?LOG_ERROR("Test execution ~p:~p failed: ~p:~p",
+                                     [ClassName, Selector, C, E]),
+                        gen_server:reply(From, {error, E})
+                end
+            end),
+            {noreply, State};
+        {error, not_found} ->
             {reply, {error, not_found}, State}
     end;
 
@@ -824,32 +729,20 @@ code_change(OldVsn, State, Extra) ->
 %%====================================================================
 
 %% @private
-%% @doc Unwrap a class gen_server call result for use in class_send.
-%%
-%% Translates {ok, Value} → Value, {error, Error} → re-raise as exception.
-%% Handles both raw #beamtalk_error{} records and already-wrapped Exception
-%% maps (from raise/1 inside handle_call). Uses ensure_wrapped/1 for
-%% idempotent wrapping (BT-525).
--spec unwrap_class_call(term()) -> term().
-unwrap_class_call({ok, Value}) -> Value;
-unwrap_class_call({error, Error}) ->
-    Wrapped = beamtalk_exception_handler:ensure_wrapped(Error),
-    error(Wrapped).
-
-%% @private
 %% @doc Rebuild both instance and class flattened method tables from State.
 %%
 %% Returns updated State with new flattened_methods and flattened_class_methods.
-%% DRYs the repeated rebuild in code_change and handle_info({rebuild_flattened,...}).
+%% Delegates to beamtalk_class_hierarchy (BT-704).
 -spec rebuild_all_flattened_tables(#class_state{}) -> #class_state{}.
 rebuild_all_flattened_tables(#class_state{
     name = Name,
     superclass = Superclass,
     instance_methods = InstanceMethods,
-    class_methods = ClassMethods
+    class_methods = ClassMethods,
+    flattened_methods = OldFlattened
 } = State) ->
-    NewFlattened = build_flattened_methods(Name, Superclass, InstanceMethods),
-    NewFlattenedClass = build_flattened_methods(Name, Superclass, ClassMethods, get_flattened_class_methods),
+    {NewFlattened, NewFlattenedClass} = beamtalk_class_hierarchy:rebuild_all_flattened_tables(
+        Name, Superclass, InstanceMethods, ClassMethods, OldFlattened),
     State#class_state{
         flattened_methods = NewFlattened,
         flattened_class_methods = NewFlattenedClass
@@ -860,94 +753,3 @@ notify_instances(_ClassName, _NewMethods) ->
     %% this will broadcast method table updates to running instances.
     %% For now, this is a no-op.
     ok.
-
-%% @private
-%% @doc Build flattened method table by walking hierarchy and merging methods.
-%%
-%% ADR 0006 Phase 2: Pre-compute all methods (local + inherited) at class
-%% registration time for O(1) lookup. Child methods override parent methods.
-%%
-%% Returns a map of {Selector => {DefiningClass, MethodInfo}} where DefiningClass
-%% is the class that actually defines the method.
-%%
-%% ## Algorithm
-%%
-%% 1. Start with empty accumulator
-%% 2. Walk from current class up to root (none)
-%% 3. At each level, add methods from that class (if not already present)
-%% 4. Child methods naturally override parent (first-seen wins)
-%%
-%% ## Example
-%%
-%% ```
-%% Counter (defines: increment, getValue)
-%%   → Actor (defines: spawn)
-%%     → Object (defines: class, respondsTo:)
-%%
-%% Flattened table for Counter:
-%% #{
-%%   increment => {'Counter', #{arity => 0, ...}},
-%%   getValue => {'Counter', #{arity => 0, ...}},
-%%   spawn => {'Actor', #{arity => 1, ...}},
-%%   class => {'Object', #{arity => 0, ...}},
-%%   respondsTo: => {'Object', #{arity => 1, ...}}
-%% }
-%% ```
--spec build_flattened_methods(class_name(), class_name() | none, #{selector() => method_info()}) ->
-    #{selector() => {class_name(), method_info()}}.
-build_flattened_methods(CurrentClass, Superclass, LocalMethods) ->
-    build_flattened_methods(CurrentClass, Superclass, LocalMethods, get_flattened_methods).
-
-%% @doc Build flattened method table with configurable superclass query message.
-%% Used for both instance methods (get_flattened_methods) and class methods
-%% (get_flattened_class_methods).
--spec build_flattened_methods(class_name(), class_name() | none, #{selector() => method_info()}, atom()) ->
-    #{selector() => {class_name(), method_info()}}.
-build_flattened_methods(CurrentClass, Superclass, LocalMethods, QueryMsg) ->
-    %% Start with local methods (maps each selector to {CurrentClass, MethodInfo})
-    LocalFlattened = maps:fold(fun(Selector, MethodInfo, Acc) ->
-        maps:put(Selector, {CurrentClass, MethodInfo}, Acc)
-    end, #{}, LocalMethods),
-    
-    %% Walk up the hierarchy and merge inherited methods
-    case Superclass of
-        none ->
-            %% At root - return local methods
-            LocalFlattened;
-        SuperclassName ->
-            %% Get inherited methods from superclass
-            case beamtalk_class_registry:whereis_class(SuperclassName) of
-                undefined ->
-                    %% BT-510: Superclass not registered yet (out-of-order loading).
-                    %% Return local methods only; invalidate_subclass_flattened_tables
-                    %% will trigger a rebuild once the superclass registers.
-                    ?LOG_DEBUG("Superclass unavailable during init, flattened methods incomplete",
-                                 #{class => CurrentClass, superclass => SuperclassName}),
-                    LocalFlattened;
-                SuperclassPid ->
-                    SuperclassFlattenedMethods = try gen_server:call(SuperclassPid, QueryMsg, 5000) of
-                        {ok, Methods} -> Methods;
-                        _ -> #{}
-                    catch
-                        _:_ -> #{}
-                    end,
-                    
-                    %% Merge: local methods override inherited
-                    maps:merge(SuperclassFlattenedMethods, LocalFlattened)
-            end
-    end.
-
-%% @doc Convert a class method selector to its module function name.
-%% Class methods are generated with a 'class_' prefix, e.g.
-%% `class defaultValue => 42` becomes `class_defaultValue/1`.
-%% Uses list_to_existing_atom to prevent atom table exhaustion from unknown selectors.
--spec class_method_fun_name(selector()) -> atom().
-class_method_fun_name(Selector) ->
-    list_to_existing_atom("class_" ++ atom_to_list(Selector)).
-
-%% BT-440: Check if a class method selector is a test execution command.
-%% These selectors need special handling to avoid gen_server deadlock
-%% (test execution calls back into the class system).
-is_test_execution_selector(runAll) -> true;
-is_test_execution_selector('run:') -> true;
-is_test_execution_selector(_) -> false.
