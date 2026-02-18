@@ -40,6 +40,7 @@
   var history = [];
   var historyIndex = -1;
   var historySaved = '';
+  var MAX_HISTORY = 200;
 
   // Session reconnection
   var sessionId = null;
@@ -277,6 +278,9 @@
   function pushHistory(code) {
     if (code && (history.length === 0 || history[history.length - 1] !== code)) {
       history.push(code);
+      if (history.length > MAX_HISTORY) {
+        history.shift();
+      }
     }
     historyIndex = -1;
     historySaved = '';
@@ -339,6 +343,8 @@
 
   // --- Tab Completion ---
 
+  var completionTimer = null;
+
   function requestCompletion() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     // Extract word before cursor
@@ -346,10 +352,15 @@
     var text = evalInput.value.substring(0, pos);
     var match = text.match(/[A-Za-z_][A-Za-z0-9_:]*$/);
     if (!match) return;
-    msgId++;
-    var id = 'msg-' + msgId;
-    pendingComplete[id] = true;
-    ws.send(JSON.stringify({ op: 'complete', id: id, code: match[0] }));
+    // Debounce: cancel any pending completion request
+    if (completionTimer) clearTimeout(completionTimer);
+    completionTimer = setTimeout(function() {
+      completionTimer = null;
+      msgId++;
+      var id = 'msg-' + msgId;
+      pendingComplete[id] = true;
+      ws.send(JSON.stringify({ op: 'complete', id: id, code: match[0] }));
+    }, 150);
   }
 
   var completionDropdown = null;

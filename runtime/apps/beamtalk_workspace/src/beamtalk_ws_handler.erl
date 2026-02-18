@@ -59,7 +59,7 @@ websocket_info({transcript_output, Text}, State = #ws_state{authenticated = true
 websocket_info(_Info, State) ->
     {ok, State}.
 
-%% @doc Connection terminated — clean up session.
+%% @doc Connection terminated — clean up or keep session for resume.
 terminate(_Reason, _Req, #ws_state{session_id = undefined}) ->
     ok;
 terminate(_Reason, _Req, #ws_state{session_id = SessionId, session_pid = SessionPid, peer = Peer}) ->
@@ -70,11 +70,8 @@ terminate(_Reason, _Req, #ws_state{session_id = SessionId, session_pid = Session
     }),
     %% Unsubscribe from Transcript push messages (ADR 0017)
     beamtalk_transcript_stream:unsubscribe('Transcript'),
-    ets:delete(beamtalk_sessions, SessionId),
-    case is_pid(SessionPid) andalso is_process_alive(SessionPid) of
-        true -> beamtalk_repl_shell:stop(SessionPid);
-        false -> ok
-    end,
+    %% Keep session alive for resume — session idle monitor handles cleanup.
+    %% Don't delete from ETS or stop the process here.
     ok.
 
 %%% Internal — Authentication
@@ -178,7 +175,11 @@ start_or_resume_session(ResumeId, State) when is_binary(ResumeId) ->
                 peer => State#ws_state.peer
             }),
             create_session(beamtalk_repl_server:generate_session_id(), State)
-    end.
+    end;
+start_or_resume_session(_Invalid, State) ->
+    %% Non-binary resume value (e.g. number, list) — ignore and create new
+    SessionId = beamtalk_repl_server:generate_session_id(),
+    create_session(SessionId, State).
 
 %% @private
 %% Create a fresh session and send auth_ok + session-started messages.
