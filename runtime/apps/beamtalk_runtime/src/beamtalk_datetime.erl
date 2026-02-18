@@ -181,22 +181,40 @@ describe(Self) -> 'asString'(Self).
 %%% ============================================================================
 
 -spec '<'(map(), map()) -> boolean().
-'<'(Self, Other) -> 'asTimestamp'(Self) < 'asTimestamp'(Other).
+'<'(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
+    'asTimestamp'(Self) < 'asTimestamp'(Other);
+'<'(_, _) ->
+    raise_type_error('<', <<"Argument must be a DateTime">>).
 
 -spec '>'(map(), map()) -> boolean().
-'>'(Self, Other) -> 'asTimestamp'(Self) > 'asTimestamp'(Other).
+'>'(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
+    'asTimestamp'(Self) > 'asTimestamp'(Other);
+'>'(_, _) ->
+    raise_type_error('>', <<"Argument must be a DateTime">>).
 
 -spec '=<'(map(), map()) -> boolean().
-'=<'(Self, Other) -> 'asTimestamp'(Self) =< 'asTimestamp'(Other).
+'=<'(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
+    'asTimestamp'(Self) =< 'asTimestamp'(Other);
+'=<'(_, _) ->
+    raise_type_error('=<', <<"Argument must be a DateTime">>).
 
 -spec '>='(map(), map()) -> boolean().
-'>='(Self, Other) -> 'asTimestamp'(Self) >= 'asTimestamp'(Other).
+'>='(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
+    'asTimestamp'(Self) >= 'asTimestamp'(Other);
+'>='(_, _) ->
+    raise_type_error('>=', <<"Argument must be a DateTime">>).
 
 -spec '=:='(map(), map()) -> boolean().
-'=:='(Self, Other) -> 'asTimestamp'(Self) =:= 'asTimestamp'(Other).
+'=:='(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
+    'asTimestamp'(Self) =:= 'asTimestamp'(Other);
+'=:='(_, _) ->
+    raise_type_error('=:=', <<"Argument must be a DateTime">>).
 
 -spec '/='(map(), map()) -> boolean().
-'/='(Self, Other) -> 'asTimestamp'(Self) /= 'asTimestamp'(Other).
+'/='(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
+    'asTimestamp'(Self) /= 'asTimestamp'(Other);
+'/='(_, _) ->
+    raise_type_error('/=', <<"Argument must be a DateTime">>).
 
 %%% ============================================================================
 %%% has_method/1
