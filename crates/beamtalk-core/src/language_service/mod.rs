@@ -416,8 +416,6 @@ impl SimpleLanguageService {
                         .find_map(|arg| Self::find_identifier_in_expr(arg, offset))
                 })
             }),
-            Expression::Pipe { value, target, .. } => Self::find_identifier_in_expr(value, offset)
-                .or_else(|| Self::find_identifier_in_expr(target, offset)),
             Expression::Match { value, arms, .. } => Self::find_identifier_in_expr(value, offset)
                 .or_else(|| {
                     arms.iter()
@@ -487,10 +485,6 @@ impl SimpleLanguageService {
                         Self::collect_identifiers(arg, name, results);
                     }
                 }
-            }
-            Expression::Pipe { value, target, .. } => {
-                Self::collect_identifiers(value, name, results);
-                Self::collect_identifiers(target, name, results);
             }
             Expression::Match { value, arms, .. } => {
                 Self::collect_identifiers(value, name, results);

@@ -743,20 +743,6 @@ pub enum Expression {
         span: Span,
     },
 
-    /// A pipe expression (`data |> transform`).
-    ///
-    /// Pipes pass the left side as the first argument to the right side.
-    Pipe {
-        /// The value being piped.
-        value: Box<Expression>,
-        /// The pipe operator (sync or async).
-        operator: PipeOperator,
-        /// The function/message to pipe into.
-        target: Box<Expression>,
-        /// Source location of the entire pipe expression.
-        span: Span,
-    },
-
     /// A pattern match expression.
     ///
     /// Example: `value match: [{#ok, x} -> x; {#error, e} -> nil]`
@@ -847,7 +833,6 @@ impl Expression {
             | Self::Return { span, .. }
             | Self::Cascade { span, .. }
             | Self::Parenthesized { span, .. }
-            | Self::Pipe { span, .. }
             | Self::Match { span, .. }
             | Self::MapLiteral { span, .. }
             | Self::ListLiteral { span, .. }
@@ -863,26 +848,6 @@ impl Expression {
     #[must_use]
     pub const fn is_error(&self) -> bool {
         matches!(self, Self::Error { .. })
-    }
-}
-
-/// Pipe operators for data flow.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PipeOperator {
-    /// Synchronous pipe (`|>`).
-    Sync,
-    /// Asynchronous pipe (`|>>`).
-    Async,
-}
-
-impl PipeOperator {
-    /// Returns the string representation of the operator.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Sync => "|>",
-            Self::Async => "|>>",
-        }
     }
 }
 
@@ -1504,31 +1469,6 @@ mod tests {
             span: Span::new(0, 10),
         };
         assert_eq!(expr.span(), Span::new(0, 10));
-    }
-
-    #[test]
-    fn pipe_operators() {
-        assert_eq!(PipeOperator::Sync.as_str(), "|>");
-        assert_eq!(PipeOperator::Async.as_str(), "|>>");
-    }
-
-    #[test]
-    fn pipe_expression() {
-        let value = Box::new(Expression::Identifier(Identifier::new(
-            "data",
-            Span::new(0, 4),
-        )));
-        let target = Box::new(Expression::Identifier(Identifier::new(
-            "transform",
-            Span::new(8, 17),
-        )));
-        let expr = Expression::Pipe {
-            value,
-            operator: PipeOperator::Sync,
-            target,
-            span: Span::new(0, 17),
-        };
-        assert_eq!(expr.span(), Span::new(0, 17));
     }
 
     #[test]

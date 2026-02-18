@@ -166,7 +166,6 @@ fn has_error_node(expr: &Expression) -> bool {
                     .iter()
                     .any(|m| m.arguments.iter().any(has_error_node))
         }
-        Expression::Pipe { value, target, .. } => has_error_node(value) || has_error_node(target),
         Expression::Match { value, arms, .. } => {
             has_error_node(value)
                 || arms.iter().any(|arm| {
