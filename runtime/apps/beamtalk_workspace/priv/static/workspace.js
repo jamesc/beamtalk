@@ -46,6 +46,9 @@
   var pendingTest = {};
   // Track pending show-codegen requests
   var pendingCodegen = {};
+  // Track pending interrupt/clear requests (to swallow ok responses)
+  var pendingInterrupt = {};
+  var pendingClear = {};
   // Track whether an eval is in progress (for Stop button visibility)
   var evalInProgress = 0;
 
@@ -348,6 +351,22 @@
         return;
       }
 
+      // BT-722: Swallow interrupt/clear ok responses (already shown locally)
+      if (msg.id && pendingInterrupt[msg.id]) {
+        delete pendingInterrupt[msg.id];
+        if (Array.isArray(msg.status) && msg.status.includes('error') && msg.error) {
+          appendTo(replOutput, 'Interrupt error: ' + msg.error + '\n', '#f38ba8');
+        }
+        return;
+      }
+      if (msg.id && pendingClear[msg.id]) {
+        delete pendingClear[msg.id];
+        if (Array.isArray(msg.status) && msg.status.includes('error') && msg.error) {
+          appendTo(replOutput, 'Clear error: ' + msg.error + '\n', '#f38ba8');
+        }
+        return;
+      }
+
       // Eval response → Workspace pane
       if (msg.id && msg.status) {
         // Eval completed — decrement in-progress counter
@@ -488,7 +507,9 @@
   window.sendInterrupt = function() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     msgId++;
-    ws.send(JSON.stringify({ op: 'interrupt', id: 'msg-' + msgId }));
+    var id = 'msg-' + msgId;
+    pendingInterrupt[id] = true;
+    ws.send(JSON.stringify({ op: 'interrupt', id: id }));
     appendTo(replOutput, '(interrupted)\n', '#f9e2af');
     evalInProgress = 0;
     updateStopButton();
@@ -499,7 +520,9 @@
   window.sendClear = function() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     msgId++;
-    ws.send(JSON.stringify({ op: 'clear', id: 'msg-' + msgId }));
+    var id = 'msg-' + msgId;
+    pendingClear[id] = true;
+    ws.send(JSON.stringify({ op: 'clear', id: id }));
     appendTo(replOutput, '(bindings cleared)\n', '#f9e2af');
   };
 
@@ -507,7 +530,7 @@
 
   window.submitStdin = function() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    var value = stdinInput.value;
+    var value = stdinInput.value + '\n';
     stdinOverlay.style.display = 'none';
     msgId++;
     ws.send(JSON.stringify({ op: 'stdin', id: 'msg-' + msgId, value: value }));
@@ -563,7 +586,7 @@
     // Summary line
     var allPassed = results.failed === 0;
     var summary = results['class'] + ': ' + results.passed + '/' + results.total + ' passed';
-    if (results.duration) summary += ' (' + results.duration + 'ms)';
+    if (results.duration) summary += ' (' + results.duration + 's)';
     var div = document.createElement('div');
     div.className = 'test-summary ' + (allPassed ? 'test-pass' : 'test-fail');
     div.textContent = summary;
@@ -573,9 +596,10 @@
     var tests = results.tests || [];
     for (var i = 0; i < tests.length; i++) {
       var t = tests[i];
-      var icon = t.status === 'passed' ? '✓' : '✗';
+      var isPass = (t.status === 'pass' || t.status === 'passed');
+      var icon = isPass ? '✓' : '✗';
       var row = document.createElement('div');
-      row.className = t.status === 'passed' ? 'test-pass' : 'test-fail';
+      row.className = isPass ? 'test-pass' : 'test-fail';
       row.textContent = '  ' + icon + ' ' + t.name;
       transcriptEl.appendChild(row);
       if (t.error) {
