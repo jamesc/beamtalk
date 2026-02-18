@@ -60,3 +60,35 @@
 // ThrowError signal preserves kind as signal
 [ThrowError new signal: "test"] on: Exception do: [:e | e kind]
 // => signal
+
+// ===========================================================================
+// ERLANG FFI EXIT/THROW — ACTUAL BEAM EXCEPTIONS (BT-728)
+// ===========================================================================
+
+// Erlang exit caught by ExitError handler
+[Erlang erlang exit: 1] on: ExitError do: [:e | e message]
+// => 1
+
+// Erlang exit caught by BEAMError handler (superclass)
+[Erlang erlang exit: 1] on: BEAMError do: [:e | e message]
+// => 1
+
+// Erlang exit caught by Error handler (ancestor)
+[Erlang erlang exit: 1] on: Error do: [:e | e message]
+// => 1
+
+// Erlang throw caught by ThrowError handler
+[Erlang erlang throw: 1] on: ThrowError do: [:e | e message]
+// => 1
+
+// Erlang throw caught by BEAMError handler (superclass)
+[Erlang erlang throw: 1] on: BEAMError do: [:e | e message]
+// => 1
+
+// Erlang throw caught by Error handler (ancestor)
+[Erlang erlang throw: 1] on: Error do: [:e | e message]
+// => 1
+
+// Erlang error still caught by Error handler (no regression)
+[Erlang erlang error: 1] on: Error do: [:e | e message]
+// => 1
