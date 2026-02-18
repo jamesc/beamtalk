@@ -10,7 +10,7 @@
 use clap::Subcommand;
 use miette::Result;
 
-use super::{create_workspace, discovery, list_workspaces, stop_workspace, workspace_status};
+use super::{create_workspace, discovery, get_or_start_workspace, list_workspaces, stop_workspace, workspace_status};
 
 /// Workspace management subcommands.
 #[derive(Debug, Subcommand)]
@@ -42,6 +42,38 @@ pub enum WorkspaceCommand {
     Create {
         /// Name for the workspace
         name: String,
+
+        /// Start the workspace node in the background after creation
+        #[arg(long)]
+        background: bool,
+
+        /// TCP port for the workspace WebSocket server (0 = OS-assigned)
+        #[arg(long, default_value = "0")]
+        port: u16,
+
+        /// Network bind address (default: 127.0.0.1)
+        #[arg(long)]
+        bind: Option<String>,
+
+        /// Keep workspace running indefinitely (no idle timeout)
+        #[arg(long)]
+        persistent: bool,
+
+        /// Max idle seconds before auto-stop (default: 4 hours)
+        #[arg(long)]
+        idle_timeout: Option<u64>,
+
+        /// Enable TLS for Erlang distribution
+        #[arg(long)]
+        tls: bool,
+
+        /// Port for the web interface
+        #[arg(long)]
+        web_port: Option<u16>,
+
+        /// Confirm binding to a non-loopback network address
+        #[arg(long)]
+        confirm_network: bool,
     },
 }
 
@@ -51,7 +83,32 @@ pub fn run(command: WorkspaceCommand) -> Result<()> {
         WorkspaceCommand::List { json } => run_list(json),
         WorkspaceCommand::Stop { name, force } => stop_workspace(&name, force),
         WorkspaceCommand::Status { name } => run_status(name.as_deref()),
-        WorkspaceCommand::Create { name } => run_create(&name),
+        WorkspaceCommand::Create {
+            name,
+            background,
+            port,
+            bind,
+            persistent,
+            idle_timeout,
+            tls,
+            web_port,
+            confirm_network,
+        } => {
+            if background {
+                run_create_background(
+                    &name,
+                    port,
+                    bind.as_deref(),
+                    persistent,
+                    idle_timeout,
+                    tls,
+                    web_port,
+                    confirm_network,
+                )
+            } else {
+                run_create(&name)
+            }
+        }
     }
 }
 
@@ -159,6 +216,79 @@ fn run_create(name: &str) -> Result<()> {
     println!(
         "\nStart a REPL session: beamtalk repl --workspace {}",
         metadata.workspace_id
+    );
+
+    Ok(())
+}
+
+/// Create a workspace and start it in the background.
+///
+/// Loads runtime beam paths, starts a detached BEAM node, and outputs
+/// workspace ID, port, and node name for scripting/CI use.
+#[allow(clippy::too_many_arguments)]
+fn run_create_background(
+    name: &str,
+    port: u16,
+    bind: Option<&str>,
+    persistent: bool,
+    idle_timeout: Option<u64>,
+    tls: bool,
+    web_port: Option<u16>,
+    confirm_network: bool,
+) -> Result<()> {
+    use crate::commands::repl::bind::{resolve_bind_addr, validate_network_binding};
+
+    let cwd = std::env::current_dir()
+        .map_err(|e| miette::miette!("Could not determine current directory: {e}"))?;
+    let project_root = discovery::discover_project_root(&cwd);
+
+    // Resolve bind address
+    let bind_addr = resolve_bind_addr(bind)?;
+    validate_network_binding(bind_addr, confirm_network)?;
+
+    // Load runtime beam paths
+    let (runtime_dir, layout) = beamtalk_cli::repl_startup::find_runtime_dir_with_layout()?;
+    let paths = beamtalk_cli::repl_startup::beam_paths_for_layout(&runtime_dir, layout);
+
+    // Cowboy/cowlib/ranch are needed for the WebSocket transport (ADR 0020)
+    let extra_code_paths = vec![
+        paths.cowboy_ebin.clone(),
+        paths.cowlib_ebin.clone(),
+        paths.ranch_ebin.clone(),
+    ];
+
+    // Resolve TLS config if requested
+    let ssl_dist_conf = if tls {
+        crate::commands::repl::resolve_ssl_dist_conf_for_workspace(
+            &project_root,
+            Some(name),
+        )?
+    } else {
+        None
+    };
+
+    let (node_info, _is_new, workspace_id) = get_or_start_workspace(
+        &project_root,
+        Some(name),
+        port,
+        &paths.runtime_ebin,
+        &paths.workspace_ebin,
+        &paths.jsx_ebin,
+        &paths.compiler_ebin,
+        &paths.stdlib_ebin,
+        &extra_code_paths,
+        !persistent,
+        idle_timeout,
+        Some(bind_addr),
+        ssl_dist_conf.as_deref(),
+        web_port,
+    )?;
+
+    println!("Workspace '{workspace_id}' started");
+    println!("Node:      {}", node_info.node_name);
+    println!("Port:      {}", node_info.port);
+    println!(
+        "\nAttach a REPL: beamtalk repl --workspace {workspace_id}"
     );
 
     Ok(())
