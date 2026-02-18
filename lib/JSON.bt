@@ -16,7 +16,7 @@
 /// | string        | String       |
 /// | number (int)  | Integer      |
 /// | number (float)| Float        |
-/// | true/false    | True/False   |
+/// | true/false    | true/false   |
 /// | null          | nil          |
 ///
 /// ## Examples
@@ -34,7 +34,7 @@ sealed Object subclass: JSON
   ///
   /// JSON objects become Dictionaries with String keys, arrays become
   /// Lists, strings become Strings, numbers become Integer or Float,
-  /// booleans stay as True/False, null becomes nil.
+  /// booleans stay as true/false, null becomes nil.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -47,7 +47,7 @@ sealed Object subclass: JSON
   /// Generate a JSON string from a Beamtalk value (class method).
   ///
   /// Dictionaries become JSON objects, Lists become arrays, Strings
-  /// become JSON strings, Integer/Float become numbers, True/False
+  /// become JSON strings, Integer/Float become numbers, true/false
   /// become JSON booleans, nil becomes null.
   ///
   /// ## Examples
