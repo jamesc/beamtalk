@@ -121,7 +121,7 @@ enum Command {
 
         /// Port for the browser workspace HTTP server (default: same as REPL WebSocket port).
         /// Only used with --web.
-        #[arg(long)]
+        #[arg(long, requires = "web")]
         web_port: Option<u16>,
     },
 

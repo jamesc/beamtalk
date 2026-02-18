@@ -354,6 +354,13 @@ pub fn run(
     // Initialize color support
     color::init(no_color);
 
+    // BT-689: Reject --web-port 0 (ephemeral port cannot be reported to user)
+    if web_port == Some(0) {
+        return Err(miette!(
+            "--web-port must be > 0 (use --web without --web-port to reuse the REPL port)"
+        ));
+    }
+
     // Resolve bind address: --bind flag → IP address (ADR 0020)
     let bind_addr = resolve_bind_addr(bind)?;
     validate_network_binding(bind_addr, confirm_network)?;
