@@ -136,6 +136,12 @@
         return;
       }
 
+      // BT-696: Streaming stdout chunk during eval
+      if (msg.out && !msg.status) {
+        appendTo(replOutput, msg.out, '#cdd6f4');
+        return;
+      }
+
       // Route inspect responses to Inspector pane
       if (msg.id && pendingInspects[msg.id]) {
         delete pendingInspects[msg.id];
