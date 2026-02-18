@@ -23,7 +23,7 @@
 
 <main>
   <div class="pane" id="workspace-pane">
-    <div class="pane-header">Workspace <button class="pane-btn" onclick="toggleShortcuts()" title="Keyboard shortcuts (Ctrl+/)">⌨</button></div>
+    <div class="pane-header">Workspace <button class="pane-btn" type="button" onclick="toggleShortcuts()" title="Keyboard shortcuts (Ctrl+/)" aria-label="Keyboard shortcuts">⌨</button></div>
     <div class="pane-content" id="repl-output"></div>
     <div id="eval-panel">
       <textarea id="eval-input" rows="2" placeholder="Beamtalk expression… (Ctrl+D to eval)" disabled></textarea>

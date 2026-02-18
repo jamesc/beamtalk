@@ -302,14 +302,17 @@
   }
 
   window.sendEval = function() {
-    var code = evalInput.value.trim();
+    var code = getSelectedOrLine().trim();
     if (!code || !ws || ws.readyState !== WebSocket.OPEN) return;
 
     pushHistory(code);
     appendTo(replOutput, code + '\n', '#89b4fa');
     msgId++;
     ws.send(JSON.stringify({ op: 'eval', id: 'msg-' + msgId, code: code }));
-    evalInput.value = '';
+    // Clear input only if no selection (evaluated entire content)
+    if (evalInput.selectionStart === evalInput.selectionEnd) {
+      evalInput.value = '';
+    }
     evalInput.focus();
   };
 
@@ -501,6 +504,10 @@
         hideCompletions();
         // Don't return — let the key be processed normally
       }
+      // Dismiss on printable character input to avoid stale prefix insertion
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        hideCompletions();
+      }
     }
 
     // Ctrl+D / Cmd+D — Do It
@@ -525,12 +532,6 @@
     if (mod && e.key === 'Enter') {
       e.preventDefault();
       sendEval();
-      return;
-    }
-    // Ctrl+/ — Toggle shortcuts help
-    if (mod && e.key === '/') {
-      e.preventDefault();
-      toggleShortcuts();
       return;
     }
     // Tab — request completion

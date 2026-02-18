@@ -91,12 +91,16 @@ websocket_info({transcript_output, Text}, State = #ws_state{authenticated = true
     Push = jsx:encode(#{<<"push">> => <<"transcript">>,
                         <<"text">> => Text}),
     {[{text, Push}], State};
-%% Session process died — clean up ETS entry
+%% Session process died — clean up ETS entry and close WebSocket
 websocket_info({'DOWN', MonRef, process, _Pid, _Reason},
                State = #ws_state{session_mon = MonRef, session_id = SessionId}) ->
-    ?LOG_INFO("Session process terminated, cleaning up ETS", #{session => SessionId}),
+    ?LOG_INFO("Session process terminated, closing WebSocket", #{session => SessionId}),
     ets:delete(beamtalk_sessions, SessionId),
-    {ok, State#ws_state{session_pid = undefined, session_mon = undefined}};
+    {[{close, 1011, <<"Session terminated">>}],
+     State#ws_state{authenticated = false,
+                    session_id = undefined,
+                    session_pid = undefined,
+                    session_mon = undefined}};
 websocket_info(_Info, State) ->
     {ok, State}.
 
