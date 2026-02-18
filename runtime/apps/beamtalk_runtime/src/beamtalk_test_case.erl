@@ -438,9 +438,20 @@ spawn_test_execution(Selector, Args, ClassName, DefiningModule, FlatMethods, Fro
             Result = execute_tests(Selector, Args, ClassName, DefiningModule, FlatMethods),
             gen_server:reply(From, {ok, Result})
         catch
-            C:E ->
+            C:E:ST ->
+                Error = case E of
+                    #beamtalk_error{} -> E;
+                    _ ->
+                        Err0 = beamtalk_error:new(test_execution_failed, ClassName),
+                        beamtalk_error:with_selector(Err0, Selector)
+                end,
                 ?LOG_ERROR("Test execution ~p:~p failed: ~p:~p",
-                             [ClassName, Selector, C, E]),
-                gen_server:reply(From, {error, E})
+                             [ClassName, Selector, C, E],
+                             #{class => ClassName,
+                               selector => Selector,
+                               error_class => C,
+                               error => E,
+                               stacktrace => ST}),
+                gen_server:reply(From, {error, Error})
         end
     end).

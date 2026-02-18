@@ -286,11 +286,23 @@ create_subclass(SuperclassName, ClassName, ClassSpec) ->
                         {error, {already_started, _Pid}} ->
                             Error0 = beamtalk_error:new(class_already_exists, ClassName),
                             {error, Error0};
-                        Error ->
-                            Error
+                        {error, Reason} ->
+                            case Reason of
+                                #beamtalk_error{} -> {error, Reason};
+                                _ ->
+                                    Err0 = beamtalk_error:new(class_creation_failed, ClassName),
+                                    Err1 = beamtalk_error:with_hint(Err0, <<"Failed to start subclass">>),
+                                    {error, beamtalk_error:with_details(Err1, #{reason => Reason})}
+                            end
                     end
             catch
                 error:ErrorReason ->
-                    {error, ErrorReason}
+                    case ErrorReason of
+                        #beamtalk_error{} -> {error, ErrorReason};
+                        _ ->
+                            Err0 = beamtalk_error:new(class_creation_failed, ClassName),
+                            Err1 = beamtalk_error:with_hint(Err0, <<"Failed to start subclass">>),
+                            {error, beamtalk_error:with_details(Err1, #{reason => ErrorReason})}
+                    end
             end
     end.

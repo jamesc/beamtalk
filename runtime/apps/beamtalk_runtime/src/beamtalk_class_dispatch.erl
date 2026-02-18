@@ -123,7 +123,10 @@ handle_class_method_call(Selector, Args, ClassName, Module, FlatClassMethods, Cl
                 _ ->
                     case beamtalk_class_registry:whereis_class(DefiningClass) of
                         undefined -> Module;
-                        DefPid -> gen_server:call(DefPid, get_module, 5000)
+                        DefPid ->
+                            try gen_server:call(DefPid, get_module, 5000)
+                            catch _:_ -> Module
+                            end
                     end
             end,
             %% BT-440: For test execution (runAll, run:) inherited from TestCase,
@@ -143,9 +146,14 @@ handle_class_method_call(Selector, Args, ClassName, Module, FlatClassMethods, Cl
                         Result ->
                             {reply, {ok, Result}, ClassVars}
                     catch
-                        Class:Error ->
+                        Class:Error:ST ->
                             ?LOG_ERROR("Class method ~p:~p failed: ~p:~p",
-                                         [ClassName, Selector, Class, Error]),
+                                         [ClassName, Selector, Class, Error],
+                                         #{class => ClassName,
+                                           selector => Selector,
+                                           error_class => Class,
+                                           error => Error,
+                                           stacktrace => ST}),
                             {reply, {error, Error}, ClassVars}
                     end
             end;
@@ -181,7 +189,8 @@ handle_async_dispatch({Selector, Args, FuturePid}, ClassName, Flattened, Supercl
         {methods, []} ->
             FuturePid ! {resolve, maps:keys(Flattened)};
         {superclass, []} ->
-            FuturePid ! {resolve, Superclass};
+            Resolved = case Superclass of none -> nil; _ -> Superclass end,
+            FuturePid ! {resolve, Resolved};
         {class_name, []} ->
             FuturePid ! {resolve, ClassName};
         {module_name, []} ->
