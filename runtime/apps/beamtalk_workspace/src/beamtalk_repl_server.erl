@@ -1021,7 +1021,7 @@ builtin_keywords() ->
 
 %% @private
 %% @doc Look up information about a symbol, returning enriched metadata for classes.
-%% Returns source location, method signatures, doc comments, and superclass chain
+%% Returns superclass, superclass chain, methods, source, and doc comments
 %% when the symbol is a known class.
 -spec get_symbol_info(binary()) -> map().
 get_symbol_info(Symbol) when is_binary(Symbol) ->
@@ -1046,7 +1046,7 @@ get_symbol_info(Symbol) when is_binary(Symbol) ->
 %% @private
 %% @doc Build enriched info map for a known class.
 -spec enrich_class_info(binary(), atom(), pid()) -> map().
-enrich_class_info(Symbol, ClassName, ClassPid) ->
+enrich_class_info(Symbol, _ClassName, ClassPid) ->
     Base = #{<<"found">> => true,
              <<"symbol">> => Symbol,
              <<"kind">> => <<"class">>},
@@ -1055,8 +1055,8 @@ enrich_class_info(Symbol, ClassName, ClassPid) ->
         ModuleName = beamtalk_object_class:module_name(ClassPid),
         Methods = beamtalk_object_class:methods(ClassPid),
 
-        %% Own method selectors as sorted binaries
-        OwnSelectors = lists:sort(
+        %% All method selectors (own + inherited) as sorted binaries
+        Selectors = lists:sort(
             [atom_to_binary(S, utf8) || S <- Methods]
         ),
 
@@ -1072,7 +1072,7 @@ enrich_class_info(Symbol, ClassName, ClassPid) ->
 
         %% Build result with optional fields
         Result0 = Base#{<<"superclass">> => format_class_name(Superclass),
-                        <<"methods">> => OwnSelectors,
+                        <<"methods">> => Selectors,
                         <<"superclass_chain">> => Chain},
         Result1 = maybe_add(<<"source">>, Source, Result0),
         Result2 = maybe_add(<<"line">>, Line, Result1),

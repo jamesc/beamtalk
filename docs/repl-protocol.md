@@ -206,7 +206,7 @@ Get information about a symbol (class, method, variable). For class symbols, ret
 | `superclass_chain` | string[] | Full superclass chain from parent to root |
 | `methods` | string[] | Sorted list of all method selectors (own + inherited) |
 | `source` | string | Source file path (when available from compile info) |
-| `line` | number | Source line number (when available) |
+| `line` | number | Reserved for future use; not currently populated by the server |
 | `doc` | string | Class documentation from EEP-48 doc chunks (when present) |
 
 Optional fields (`source`, `line`, `doc`) are omitted when not available.
