@@ -3,7 +3,7 @@
 # ADR 0028: BEAM Interop Strategy
 
 ## Status
-Accepted (2026-02-17)
+Implemented (2026-02-18)
 
 ## Context
 
@@ -516,14 +516,14 @@ No existing user code is affected. This ADR introduces new capabilities without 
 
 **Epic:** BT-675
 **Issues:** BT-676, BT-677, BT-678, BT-679, BT-680, BT-681, BT-682
-**Status:** Planned
+**Status:** ✅ Done
 
-| Phase | Issue | Title | Size | Blocked by |
-|-------|-------|-------|------|------------|
-| 0 | BT-676 | Runtime: ErlangModule proxy dispatch | M | — |
-| 0 | BT-677 | Codegen + Stdlib: End-to-end Erlang interop | L | BT-676 |
-| 1 | BT-678 | Exception mapping for Erlang calls | M | BT-676 |
-| 1 | BT-679 | Export introspection and arity validation | M | BT-676 |
-| 1 | BT-680 | LSP: Completions for Erlang module exports | M | BT-679 |
-| 2 | BT-681 | Pid/Port/Reference basic methods | M | — |
-| 3 | BT-682 | Compiler optimization: direct BEAM calls | M | BT-677 |
+| Phase | Issue | Title | Size | Status |
+|-------|-------|-------|------|--------|
+| 0 | BT-676 | Runtime: ErlangModule proxy dispatch | M | Done |
+| 0 | BT-677 | Codegen + Stdlib: End-to-end Erlang interop | L | Done |
+| 1 | BT-678 | Exception mapping for Erlang calls | M | Done |
+| 1 | BT-679 | Export introspection and arity validation | M | Done |
+| 1 | BT-680 | LSP: Completions for Erlang module exports | M | Done |
+| 2 | BT-681 | Pid/Port/Reference basic methods | M | Done |
+| 3 | BT-682 | Compiler optimization: direct BEAM calls | M | Done |

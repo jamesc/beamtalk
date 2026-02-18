@@ -46,7 +46,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0017](0017-browser-connectivity-to-running-workspaces.md) | Browser Connectivity to Running Workspaces | Accepted | 2026-02-17 |
 | [0018](0018-document-tree-codegen.md) | Document Tree Code Generation (Wadler-Lindig Pretty Printer) | Implemented | 2026-02-15 |
 | [0019](0019-singleton-class-variables.md) | Singleton Access via Class Variables | Implemented | 2026-02-15 |
-| [0020](0020-connection-security.md) | Connection Security — mTLS, Proxies, and Network Overlays | Accepted | 2026-02-17 |
+| [0020](0020-connection-security.md) | Connection Security — mTLS, Proxies, and Network Overlays | Implemented | 2026-02-17 |
 | [0021](0021-streams-and-io-design.md) | Stream — Universal Data Interface | Implemented | 2026-02-15 |
 | [0022](0022-embedded-compiler-via-otp-port.md) | Embedded Compiler via OTP Port (with NIF option) | Implemented | 2026-02-15 |
 | [0023](0023-string-interpolation-and-binaries.md) | String Interpolation Syntax and Compilation | Implemented | 2026-02-17 |
@@ -54,8 +54,8 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0025](0025-gradual-typing-and-protocols.md) | Gradual Typing and Protocols | Accepted | 2026-02-15 |
 | [0026](0026-package-definition-and-project-manifest.md) | Package Definition and Project Manifest | Implemented | 2026-02-17 |
 | [0027](0027-cross-platform-support.md) | Cross-Platform Support | Implemented | 2026-02-17 |
-| [0028](0028-beam-interop-strategy.md) | BEAM Interop Strategy | Accepted | 2026-02-17 |
-| [0029](0029-streaming-eval-output.md) | Streaming Eval Output | Accepted | 2026-02-18 |
+| [0028](0028-beam-interop-strategy.md) | BEAM Interop Strategy | Implemented | 2026-02-17 |
+| [0029](0029-streaming-eval-output.md) | Streaming Eval Output | Implemented | 2026-02-18 |
 | [0030](0030-cargo-dist-evaluation.md) | cargo-dist Evaluation for Release Packaging | Rejected | 2026-02-18 |
 
 ## Creating New ADRs

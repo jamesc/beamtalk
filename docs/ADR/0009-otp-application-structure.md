@@ -453,19 +453,16 @@ This is an internal restructuring — no user-facing changes. All module names r
 ## Implementation Tracking
 
 **Epic:** [BT-378](https://linear.app/beamtalk/issue/BT-378)
-**Status:** Planned
+**Status:** ✅ Done (implemented as BT-351)
 
-| Phase | Issue | Title | Size |
-|-------|-------|-------|------|
-| 1 | BT-383 | Create beamtalk_workspace OTP app skeleton | S |
-| 2 | BT-379 | Decouple actor registration from REPL with optional callback | M |
-| 3a | BT-382 | Move REPL/workspace modules to beamtalk_workspace app | M |
-| 3b | BT-380 | Move REPL/workspace test files to beamtalk_workspace | S |
-| 4 | BT-381 | Update Rust CLI startup for workspace app split | M |
-| 5 | BT-384 | Verify OTP split and update documentation | S |
-
-**Dependency chain:** BT-383 → BT-379 → BT-382 → BT-380 → BT-381 → BT-384
-**Start with:** BT-383 (no dependencies)
+| Phase | Issue | Title | Size | Status |
+|-------|-------|-------|------|--------|
+| 1 | BT-383 | Create beamtalk_workspace OTP app skeleton | S | Done |
+| 2 | BT-379 | Decouple actor registration from REPL with optional callback | M | Done |
+| 3a | BT-382 | Move REPL/workspace modules to beamtalk_workspace app | M | Done |
+| 3b | BT-380 | Move REPL/workspace test files to beamtalk_workspace | S | Done |
+| 4 | BT-381 | Update Rust CLI startup for workspace app split | M | Done |
+| 5 | BT-384 | Verify OTP split and update documentation | S | Done |
 
 ## References
 

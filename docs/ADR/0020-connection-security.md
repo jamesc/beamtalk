@@ -1,9 +1,10 @@
 # ADR 0020: Connection Security — mTLS, Proxies, and Network Overlays
 
 ## Status
-Accepted (2026-02-17)
+Implemented (2026-02-18)
 
 **Update (2026-02-17):** Phase 0 (WebSocket transport + cookie auth) implemented in BT-683. ADR accepted based on validated implementation.
+**Update (2026-02-18):** Phases 0–2 complete (BT-683, BT-691, BT-692). Phase 3 (SPIFFE/SPIRE) remains future.
 
 ## Context
 
@@ -509,13 +510,13 @@ This ADR does **not** cover:
 ## Implementation Tracking
 
 **Epic:** BT-685
-**Status:** Phase 0 Done
+**Status:** Phases 0–2 Done
 
 | Phase | Issue | Title | Size | Status |
 |-------|-------|-------|------|--------|
 | 0 | BT-683 | Migrate REPL transport from TCP to WebSocket with cookie auth | L | Done |
-| 1 | BT-691 | Network bind options and reverse proxy documentation | M | Planned |
-| 2 | BT-692 | mTLS for Erlang distribution | L | Blocked by BT-691 |
+| 1 | BT-691 | Network bind options and reverse proxy documentation | M | Done |
+| 2 | BT-692 | mTLS for Erlang distribution | L | Done |
 | 3 | BT-693 | SPIFFE/SPIRE workload identity integration | XL | Future |
 
 ## References

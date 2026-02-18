@@ -316,15 +316,15 @@ Recommended migration order:
 ## Implementation Tracking
 
 **Epic:** [BT-496](https://linear.app/beamtalk/issue/BT-496) — Doc Comments and API Documentation
-**Status:** Planned
+**Status:** ✅ Done
 
 | Phase | Issue | Title | Size | Status |
 |-------|-------|-------|------|--------|
-| 1 (parallel) | BT-497 | Add `///` doc comments to all 26 stdlib files | M | ⏳ |
-| 1 (parallel) | BT-498 | Parse `///` as doc comments and attach to AST nodes | S | ⏳ |
-| 2 | BT-499 | Generate EEP-48 doc chunks in compiled `.beam` files | M | ⏳ |
-| 2 | BT-500 | Implement REPL `:help` command for class and method docs | M | ⏳ |
-| 3 | BT-501 | Add `beamtalk doc` CLI command for HTML doc generation | M | ⏳ |
+| 1 (parallel) | BT-497 | Add `///` doc comments to all 26 stdlib files | M | Done |
+| 1 (parallel) | BT-498 | Parse `///` as doc comments and attach to AST nodes | S | Done |
+| 2 | BT-499 | Generate EEP-48 doc chunks in compiled `.beam` files | M | Done |
+| 2 | BT-500 | Implement REPL `:help` command for class and method docs | M | Done |
+| 3 | BT-501 | Add `beamtalk doc` CLI command for HTML doc generation | M | Done |
 
 **Dependencies:** BT-497 + BT-498 → BT-499 → BT-500, BT-501
 **Related:** BT-441 (doctest extraction)
