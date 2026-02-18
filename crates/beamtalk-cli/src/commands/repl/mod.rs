@@ -309,6 +309,17 @@ fn resolve_ssl_dist_conf(
     }
 }
 
+/// Public wrapper for resolving TLS distribution config for workspace startup.
+///
+/// Used by `workspace create --background` to resolve TLS config without
+/// going through the REPL startup flow.
+pub fn resolve_ssl_dist_conf_for_workspace(
+    project_root: &Path,
+    workspace_name: Option<&str>,
+) -> Result<Option<PathBuf>> {
+    resolve_ssl_dist_conf(project_root, workspace_name, true)
+}
+
 /// Read the Erlang default cookie from ~/.erlang.cookie.
 /// Used for foreground mode where no workspace cookie exists.
 fn read_erlang_cookie() -> Option<String> {
