@@ -111,8 +111,8 @@ The REPL backend TCP port can be configured via:
 **Priority order** (highest to lowest):
 1. CLI flag: `beamtalk repl --port 9001`
 2. Environment variable: `BEAMTALK_REPL_PORT`
-3. Application config: `application:get_env(beamtalk_runtime, repl_port, 9000)`
-4. Default: `9000`
+3. Application config: `application:get_env(beamtalk_runtime, repl_port, 0)`
+4. Default: `0` (ephemeral)
 
 **Example sys.config for OTP releases:**
 ```erlang

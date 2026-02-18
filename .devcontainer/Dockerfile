@@ -16,13 +16,14 @@ FROM mcr.microsoft.com/devcontainers/rust:1-bookworm
 RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     && apt-get install -y --no-install-recommends \
         ca-certificates gnupg \
+    && mkdir -p /etc/apt/keyrings \
     && curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 \
         https://binaries2.erlang-solutions.com/GPG-KEY-pmanager.asc \
         -o /tmp/GPG-KEY-pmanager.asc \
     && grep -q "BEGIN PGP PUBLIC KEY BLOCK" /tmp/GPG-KEY-pmanager.asc \
-    && apt-key add /tmp/GPG-KEY-pmanager.asc \
+    && gpg --dearmor -o /etc/apt/keyrings/erlang-solutions.gpg /tmp/GPG-KEY-pmanager.asc \
     && rm -f /tmp/GPG-KEY-pmanager.asc \
-    && echo "deb http://binaries2.erlang-solutions.com/debian/ bookworm-esl-erlang-27 contrib" \
+    && echo "deb [signed-by=/etc/apt/keyrings/erlang-solutions.gpg] http://binaries2.erlang-solutions.com/debian/ bookworm-esl-erlang-27 contrib" \
         > /etc/apt/sources.list.d/erlang-solutions.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -59,11 +60,14 @@ RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/ca
 # Install streamlinear CLI for Linear issue management (used by Copilot skill)
 RUN npm install -g streamlinear@github:obra/streamlinear --ignore-scripts
 
-# Install rebar3
-RUN curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 \
-        https://s3.amazonaws.com/rebar3/rebar3 \
-        -o /usr/local/bin/rebar3 \
-    && chmod +x /usr/local/bin/rebar3
+# Install rebar3 (pinned version for reproducible builds)
+ARG REBAR3_VERSION=3.26.0
+RUN git clone --depth 1 --branch ${REBAR3_VERSION} https://github.com/erlang/rebar3.git /tmp/rebar3 \
+    && cd /tmp/rebar3 \
+    && ./bootstrap \
+    && install -m 755 rebar3 /usr/local/bin/rebar3 \
+    && cd / \
+    && rm -rf /tmp/rebar3
 
 # Verify installations
 RUN rustc --version && cargo --version && erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell \
