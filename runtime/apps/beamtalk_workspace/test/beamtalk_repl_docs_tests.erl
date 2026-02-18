@@ -41,6 +41,26 @@ format_superclass_with_class_test() ->
     ?assertEqual(<<" < Object">>, Result).
 
 %%====================================================================
+%% format_modifiers tests
+%%====================================================================
+
+format_modifiers_none_test() ->
+    ?assertEqual(<<>>, beamtalk_repl_docs:format_modifiers(
+        #{is_sealed => false, is_abstract => false})).
+
+format_modifiers_sealed_test() ->
+    ?assertEqual(<<"[sealed]">>, beamtalk_repl_docs:format_modifiers(
+        #{is_sealed => true, is_abstract => false})).
+
+format_modifiers_abstract_test() ->
+    ?assertEqual(<<"[abstract]">>, beamtalk_repl_docs:format_modifiers(
+        #{is_sealed => false, is_abstract => true})).
+
+format_modifiers_sealed_and_abstract_test() ->
+    ?assertEqual(<<"[sealed] [abstract]">>, beamtalk_repl_docs:format_modifiers(
+        #{is_sealed => true, is_abstract => true})).
+
+%%====================================================================
 %% group_by_class tests
 %%====================================================================
 
@@ -70,28 +90,34 @@ group_by_class_sorted_output_test() ->
 format_class_output_minimal_test() ->
     %% Class with no docs, no methods
     Result = beamtalk_repl_docs:format_class_output(
-        'Empty', none, none, [], []),
+        'Empty', none, #{is_sealed => false, is_abstract => false},
+        none, [], []),
     ?assert(binary:match(Result, <<"== Empty ==">>)       =/= nomatch),
-    ?assert(binary:match(Result, <<":help">>)             =/= nomatch).
+    ?assert(binary:match(Result, <<":help">>)             =/= nomatch),
+    ?assertEqual(nomatch, binary:match(Result, <<"[sealed]">>)),
+    ?assertEqual(nomatch, binary:match(Result, <<"[abstract]">>)).
 
 format_class_output_with_superclass_test() ->
     Result = beamtalk_repl_docs:format_class_output(
-        'Counter', 'Actor', none, [], []),
+        'Counter', 'Actor', #{is_sealed => false, is_abstract => false},
+        none, [], []),
     ?assert(binary:match(Result, <<"== Counter < Actor ==">>)  =/= nomatch).
 
 format_class_output_with_module_doc_test() ->
     Result = beamtalk_repl_docs:format_class_output(
-        'Integer', 'Number', <<"Whole number arithmetic.">>, [], []),
+        'Integer', 'Number', #{is_sealed => false, is_abstract => false},
+        <<"Whole number arithmetic.">>, [], []),
     ?assert(binary:match(Result, <<"== Integer < Number ==">>)      =/= nomatch),
     ?assert(binary:match(Result, <<"Whole number arithmetic.">>)    =/= nomatch).
 
 format_class_output_with_own_methods_test() ->
     OwnDocs = [
-        {'+', <<"+ other">>, <<"Add two numbers.">>},
-        {'-', <<"- other">>, none}
+        {'+', <<"+ other">>, <<"Add two numbers.">>, false},
+        {'-', <<"- other">>, none, false}
     ],
     Result = beamtalk_repl_docs:format_class_output(
-        'Integer', 'Number', none, OwnDocs, []),
+        'Integer', 'Number', #{is_sealed => false, is_abstract => false},
+        none, OwnDocs, []),
     ?assert(binary:match(Result, <<"Instance methods:">>)  =/= nomatch),
     ?assert(binary:match(Result, <<"+ other">>)            =/= nomatch),
     ?assert(binary:match(Result, <<"- other">>)            =/= nomatch).
@@ -99,7 +125,8 @@ format_class_output_with_own_methods_test() ->
 format_class_output_with_inherited_methods_test() ->
     InheritedGrouped = [{'Object', [class, respondsTo]}],
     Result = beamtalk_repl_docs:format_class_output(
-        'Integer', 'Number', none, [], InheritedGrouped),
+        'Integer', 'Number', #{is_sealed => false, is_abstract => false},
+        none, [], InheritedGrouped),
     ?assert(binary:match(Result, <<"Inherited from Object (2 methods)">>)  =/= nomatch),
     ?assert(binary:match(Result, <<"class, respondsTo">>)                  =/= nomatch).
 
@@ -107,7 +134,8 @@ format_class_output_inherited_truncation_test() ->
     %% More than 5 inherited methods should show "... (N more)"
     InheritedGrouped = [{'Object', [a, b, c, d, e, f, g]}],
     Result = beamtalk_repl_docs:format_class_output(
-        'MyClass', none, none, [], InheritedGrouped),
+        'MyClass', none, #{is_sealed => false, is_abstract => false},
+        none, [], InheritedGrouped),
     ?assert(binary:match(Result, <<"7 methods">>)    =/= nomatch),
     ?assert(binary:match(Result, <<"4 more)">>)      =/= nomatch).
 
@@ -115,10 +143,37 @@ format_class_output_inherited_five_or_fewer_test() ->
     %% Exactly 5 methods should show all, no truncation
     InheritedGrouped = [{'Object', [a, b, c, d, e]}],
     Result = beamtalk_repl_docs:format_class_output(
-        'MyClass', none, none, [], InheritedGrouped),
+        'MyClass', none, #{is_sealed => false, is_abstract => false},
+        none, [], InheritedGrouped),
     ?assert(binary:match(Result, <<"5 methods">>)         =/= nomatch),
     ?assert(binary:match(Result, <<"a, b, c, d, e">>)     =/= nomatch),
     ?assertEqual(nomatch, binary:match(Result, <<"more)">>)).
+
+format_class_output_sealed_class_test() ->
+    Result = beamtalk_repl_docs:format_class_output(
+        'Integer', 'Number', #{is_sealed => true, is_abstract => false},
+        none, [], []),
+    ?assert(binary:match(Result, <<"[sealed]">>)    =/= nomatch),
+    ?assertEqual(nomatch, binary:match(Result, <<"[abstract]">>)).
+
+format_class_output_abstract_class_test() ->
+    Result = beamtalk_repl_docs:format_class_output(
+        'ProtoObject', none, #{is_sealed => false, is_abstract => true},
+        none, [], []),
+    ?assert(binary:match(Result, <<"[abstract]">>)  =/= nomatch),
+    ?assertEqual(nomatch, binary:match(Result, <<"[sealed]">>)).
+
+format_class_output_sealed_method_test() ->
+    OwnDocs = [
+        {'+', <<"+ other">>, none, true},
+        {'-', <<"- other">>, none, false}
+    ],
+    Result = beamtalk_repl_docs:format_class_output(
+        'Integer', 'Number', #{is_sealed => false, is_abstract => false},
+        none, OwnDocs, []),
+    ?assert(binary:match(Result, <<"+ other [sealed]">>)  =/= nomatch),
+    %% Non-sealed method should not have [sealed]
+    ?assertEqual(nomatch, binary:match(Result, <<"- other [sealed]">>)).
 
 %%====================================================================
 %% format_method_output tests (pure formatting)

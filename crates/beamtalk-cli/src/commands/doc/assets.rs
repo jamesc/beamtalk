@@ -281,6 +281,23 @@ tbody tr:nth-child(even) { background: var(--code-bg); }
   border-radius: 999px;
 }
 
+.badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  vertical-align: middle;
+}
+.badge-sealed {
+  background: var(--accent-bg);
+  color: var(--fg-muted);
+}
+.badge-abstract {
+  background: var(--accent-bg);
+  color: var(--fg-muted);
+}
+
 /* --- Methods --- */
 .method {
   background: var(--method-bg);

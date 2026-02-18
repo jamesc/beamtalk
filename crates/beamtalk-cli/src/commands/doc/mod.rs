@@ -263,9 +263,44 @@ mod tests {
         let info = parse_class_info(&dir, &file).unwrap().unwrap();
         assert_eq!(info.name, "Counter");
         assert_eq!(info.superclass.as_deref(), Some("Actor"));
+        assert!(!info.is_sealed);
+        assert!(!info.is_abstract);
         assert!(info.doc_comment.unwrap().contains("simple counter"));
         assert_eq!(info.methods.len(), 1);
         assert_eq!(info.methods[0].signature, "increment");
+        assert!(!info.methods[0].is_sealed);
+    }
+
+    #[test]
+    fn test_parse_class_info_sealed() {
+        let temp = TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let file = dir.join("Leaf.bt");
+        fs::write(
+            &file,
+            "sealed Object subclass: Leaf\n  sealed value => 42\n",
+        )
+        .unwrap();
+
+        let info = parse_class_info(&dir, &file).unwrap().unwrap();
+        assert_eq!(info.name, "Leaf");
+        assert!(info.is_sealed);
+        assert!(!info.is_abstract);
+        assert_eq!(info.methods.len(), 1);
+        assert!(info.methods[0].is_sealed);
+    }
+
+    #[test]
+    fn test_parse_class_info_abstract() {
+        let temp = TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let file = dir.join("Base.bt");
+        fs::write(&file, "abstract Object subclass: Base\n  greet => nil\n").unwrap();
+
+        let info = parse_class_info(&dir, &file).unwrap().unwrap();
+        assert_eq!(info.name, "Base");
+        assert!(!info.is_sealed);
+        assert!(info.is_abstract);
     }
 
     #[test]
@@ -370,11 +405,14 @@ mod tests {
         let parent = ClassInfo {
             name: "Parent".into(),
             superclass: None,
+            is_sealed: false,
+            is_abstract: false,
             doc_comment: None,
             methods: vec![MethodInfo {
                 signature: "parentMethod".into(),
                 doc_comment: None,
                 line_number: None,
+                is_sealed: false,
             }],
             class_methods: vec![],
             source_file: None,
@@ -383,6 +421,8 @@ mod tests {
         let child = ClassInfo {
             name: "Child".into(),
             superclass: Some("Parent".into()),
+            is_sealed: false,
+            is_abstract: false,
             doc_comment: None,
             methods: vec![],
             class_methods: vec![],
@@ -431,6 +471,40 @@ mod tests {
         assert!(class_page.contains("increment"));
         assert!(class_page.contains("Increment by one."));
         assert!(class_page.contains("Actor"));
+        // Non-sealed, non-abstract class should not have badges
+        assert!(!class_page.contains("badge-sealed"));
+        assert!(!class_page.contains("badge-abstract"));
+    }
+
+    #[test]
+    fn test_generate_docs_sealed_abstract_badges() {
+        let temp = TempDir::new().unwrap();
+        let src_dir = Utf8PathBuf::from_path_buf(temp.path().join("src")).unwrap();
+        let out_dir = Utf8PathBuf::from_path_buf(temp.path().join("out")).unwrap();
+        fs::create_dir_all(&src_dir).unwrap();
+
+        fs::write(
+            src_dir.join("Leaf.bt"),
+            "sealed Object subclass: Leaf\n  sealed value => 42\n  name => nil\n",
+        )
+        .unwrap();
+        fs::write(
+            src_dir.join("Base.bt"),
+            "abstract Object subclass: Base\n  greet => nil\n",
+        )
+        .unwrap();
+
+        run(src_dir.as_str(), out_dir.as_str()).unwrap();
+
+        let leaf_page = fs::read_to_string(out_dir.join("Leaf.html")).unwrap();
+        assert!(leaf_page.contains("badge-sealed"));
+        assert!(!leaf_page.contains("badge-abstract"));
+        // Sealed method should have a badge
+        assert!(leaf_page.contains("value"));
+
+        let base_page = fs::read_to_string(out_dir.join("Base.html")).unwrap();
+        assert!(base_page.contains("badge-abstract"));
+        assert!(!base_page.contains("badge-sealed"));
     }
 
     #[test]
