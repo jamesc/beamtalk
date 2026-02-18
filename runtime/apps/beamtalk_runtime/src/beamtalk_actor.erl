@@ -617,11 +617,15 @@ handle_dnu(Selector, Args, Self, State) ->
     {reply, term(), map()} | {noreply, map()} | {error, term(), map()}.
 call_dnu_handler(DnuFun, DnuArgs, Self, State, 3) ->
     try DnuFun(DnuArgs, Self, State)
-    catch Class:Reason:_ -> wrap_dnu_handler_error(hd(DnuArgs), State, Class, Reason)
+    catch
+        error:#beamtalk_error{} = BtError:_ -> {error, BtError, State};
+        Class:Reason:_ -> wrap_dnu_handler_error(hd(DnuArgs), State, Class, Reason)
     end;
 call_dnu_handler(DnuFun, DnuArgs, _Self, State, 2) ->
     try DnuFun(DnuArgs, State)
-    catch Class:Reason:_ -> wrap_dnu_handler_error(hd(DnuArgs), State, Class, Reason)
+    catch
+        error:#beamtalk_error{} = BtError:_ -> {error, BtError, State};
+        Class:Reason:_ -> wrap_dnu_handler_error(hd(DnuArgs), State, Class, Reason)
     end.
 
 %% @private
