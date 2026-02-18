@@ -60,7 +60,7 @@ const REPL_COMMANDS: &[&str] = &[
 ///
 /// Uses a separate WebSocket connection for completion requests so the main
 /// REPL connection isn't affected by timeouts or errors.
-pub(super) struct ReplHelper {
+pub(crate) struct ReplHelper {
     /// Separate protocol client for completion requests (with short timeout).
     completion_client: RefCell<Option<ProtocolClient>>,
     /// Host address for reconnection (BT-694).
@@ -73,7 +73,7 @@ pub(super) struct ReplHelper {
 
 impl ReplHelper {
     /// Create a new helper that connects to the backend on the given port.
-    pub(super) fn new(host: &str, port: u16, cookie: &str) -> Self {
+    pub(crate) fn new(host: &str, port: u16, cookie: &str) -> Self {
         let client = ProtocolClient::connect(host, port, cookie, Some(COMPLETION_TIMEOUT)).ok();
         Self {
             completion_client: RefCell::new(client),
