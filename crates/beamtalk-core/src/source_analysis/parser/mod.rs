@@ -4029,7 +4029,9 @@ Actor subclass: Counter
         // parse_map_literal (expected MapOpen, got Hash).
         let diagnostics = parse_err("#\n{");
         assert!(
-            diagnostics.iter().any(|d| d.message.contains("Unexpected '#'")),
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("Unexpected '#'")),
             "Expected unexpected '#' error, got: {diagnostics:?}"
         );
     }
@@ -4039,10 +4041,7 @@ Actor subclass: Counter
         // Fuzz regression: deeply nested unclosed '[' inside a method
         // body could spin the parse_method_body loop infinitely because
         // synchronize() can return without advancing when in_method_body.
-        let source = format!(
-            "Object subclass: Foo\n  bar => {}",
-            "[".repeat(100)
-        );
+        let source = format!("Object subclass: Foo\n  bar => {}", "[".repeat(100));
         let diagnostics = parse_err(&source);
         assert!(
             diagnostics.iter().any(|d| d.message.contains("nesting")),
