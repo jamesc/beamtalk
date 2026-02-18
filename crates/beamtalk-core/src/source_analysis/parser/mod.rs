@@ -4010,6 +4010,46 @@ Actor subclass: Counter
     }
 
     #[test]
+    fn unclosed_deeply_nested_blocks_does_not_oom() {
+        // Fuzz regression: 158 unclosed '[' caused OOM because the
+        // nesting guard returned Error without consuming tokens and the
+        // parse_block body loop spun infinitely.
+        let source = "[".repeat(158);
+        let diagnostics = parse_err(&source);
+        assert!(
+            diagnostics.iter().any(|d| d.message.contains("nesting")),
+            "Expected nesting depth error, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn hash_newline_brace_does_not_stack_overflow() {
+        // Fuzz regression: "#\n{" caused infinite mutual recursion
+        // between parse_primary (Hash+LeftBrace lookahead) and
+        // parse_map_literal (expected MapOpen, got Hash).
+        let diagnostics = parse_err("#\n{");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("Unexpected '#'")),
+            "Expected unexpected '#' error, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn unclosed_nested_blocks_in_method_body_does_not_oom() {
+        // Fuzz regression: deeply nested unclosed '[' inside a method
+        // body could spin the parse_method_body loop infinitely because
+        // synchronize() can return without advancing when in_method_body.
+        let source = format!("Object subclass: Foo\n  bar => {}", "[".repeat(100));
+        let diagnostics = parse_err(&source);
+        assert!(
+            diagnostics.iter().any(|d| d.message.contains("nesting")),
+            "Expected nesting depth error, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
     fn parse_typed_class() {
         let module = parse_ok(
             "typed Actor subclass: StrictCounter
