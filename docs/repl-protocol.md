@@ -393,10 +393,10 @@ The protocol is implemented in:
 
 | File | Description |
 |------|-------------|
-| `runtime/apps/beamtalk_runtime/src/beamtalk_repl_protocol.erl` | Protocol encoder/decoder (incl. `output` field) |
-| `runtime/apps/beamtalk_runtime/src/beamtalk_repl_server.erl` | TCP server and request dispatch |
-| `runtime/apps/beamtalk_runtime/src/beamtalk_repl_eval.erl` | Expression evaluation and I/O capture |
-| `runtime/apps/beamtalk_runtime/src/beamtalk_repl_shell.erl` | Session state bridge |
+| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_protocol.erl` | Protocol encoder/decoder (incl. `output` field) |
+| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_server.erl` | WebSocket server and request dispatch |
+| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_eval.erl` | Expression evaluation and I/O capture |
+| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_shell.erl` | Session state bridge |
 | `crates/beamtalk-cli/src/commands/repl/mod.rs` | Rust CLI client |
 
 ## References
