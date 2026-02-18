@@ -65,6 +65,7 @@ init(Config) ->
     ProjectPath = maps:get(project_path, Config),
     TcpPort = maps:get(tcp_port, Config),
     BindAddr = maps:get(bind_addr, Config, {127, 0, 0, 1}),
+    WebPort = maps:get(web_port, Config, undefined),
     AutoCleanup = maps:get(auto_cleanup, Config, true),
     MaxIdleSeconds = maps:get(max_idle_seconds, Config, 3600 * 4),
     
@@ -121,7 +122,7 @@ init(Config) ->
         %% REPL TCP server (session-per-connection architecture)
         #{
             id => beamtalk_repl_server,
-            start => {beamtalk_repl_server, start_link, [#{port => TcpPort, workspace_id => WorkspaceId, bind_addr => BindAddr}]},
+            start => {beamtalk_repl_server, start_link, [#{port => TcpPort, workspace_id => WorkspaceId, bind_addr => BindAddr, web_port => WebPort}]},
             restart => permanent,
             shutdown => 5000,
             type => worker,
