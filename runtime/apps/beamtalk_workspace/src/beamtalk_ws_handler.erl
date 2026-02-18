@@ -203,19 +203,40 @@ handle_protocol(Data, SessionPid, State) ->
 %% BT-696: Start async eval with this handler as the streaming subscriber.
 handle_eval_async(Msg, SessionPid, State = #ws_state{pending_eval = undefined}) ->
     Params = beamtalk_repl_protocol:get_params(Msg),
-    Code = binary_to_list(maps:get(<<"code">>, Params, <<>>)),
-    case Code of
-        [] ->
-            Err = beamtalk_error:new(empty_expression, 'REPL'),
-            Err1 = beamtalk_error:with_message(Err, <<"Empty expression">>),
-            Err2 = beamtalk_error:with_hint(Err1, <<"Enter an expression to evaluate.">>),
+    case maps:get(<<"code">>, Params, <<>>) of
+        CodeBin when is_binary(CodeBin) ->
+            Code = binary_to_list(CodeBin),
+            case Code of
+                [] ->
+                    Err = beamtalk_error:new(empty_expression, 'REPL'),
+                    Err1 = beamtalk_error:with_message(Err, <<"Empty expression">>),
+                    Err2 = beamtalk_error:with_hint(Err1, <<"Enter an expression to evaluate.">>),
+                    Response = beamtalk_repl_protocol:encode_error(
+                        Err2, Msg, fun beamtalk_repl_json:format_error_message/1),
+                    {[{text, Response}], State};
+                _ ->
+                    case is_process_alive(SessionPid) of
+                        true ->
+                            beamtalk_repl_shell:eval_async(SessionPid, Code, self()),
+                            {ok, State#ws_state{pending_eval = Msg}};
+                        false ->
+                            Err = beamtalk_error:new(session_down, 'REPL'),
+                            Err1 = beamtalk_error:with_message(Err,
+                                <<"REPL session is not running">>),
+                            Err2 = beamtalk_error:with_hint(Err1,
+                                <<"Reconnect and retry the evaluation.">>),
+                            Response = beamtalk_repl_protocol:encode_error(
+                                Err2, Msg, fun beamtalk_repl_json:format_error_message/1),
+                            {[{text, Response}], State}
+                    end
+            end;
+        _ ->
+            Err = beamtalk_error:new(invalid_code, 'REPL'),
+            Err1 = beamtalk_error:with_message(Err, <<"Invalid code type">>),
+            Err2 = beamtalk_error:with_hint(Err1, <<"Code must be a string.">>),
             Response = beamtalk_repl_protocol:encode_error(
                 Err2, Msg, fun beamtalk_repl_json:format_error_message/1),
-            {[{text, Response}], State};
-        _ ->
-            %% Start async eval — results arrive via websocket_info
-            beamtalk_repl_shell:eval_async(SessionPid, Code, self()),
-            {ok, State#ws_state{pending_eval = Msg}}
+            {[{text, Response}], State}
     end;
 handle_eval_async(Msg, _SessionPid, State) ->
     %% Already have a pending eval — reject to prevent mis-correlation
