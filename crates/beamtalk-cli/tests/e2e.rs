@@ -284,7 +284,7 @@ fn beam_eval_cmd(
         // Cover mode wraps instrumentation BEFORE starting the workspace.
         // Cover-compiling must happen before the workspace supervisor spawns
         // the acceptor process, otherwise spawned closures use uninstrumented code.
-        let prelude = repl_startup::startup_prelude(REPL_PORT, None);
+        let prelude = repl_startup::startup_prelude(REPL_PORT, None, None);
         format!(
             "cover:start(), \
              case cover:compile_beam_directory(\"{ebin}\") of \
@@ -311,7 +311,7 @@ fn beam_eval_cmd(
              init:stop().",
         )
     } else {
-        repl_startup::build_eval_cmd(REPL_PORT, None)
+        repl_startup::build_eval_cmd(REPL_PORT, None, None)
     }
 }
 

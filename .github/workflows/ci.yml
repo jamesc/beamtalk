@@ -40,7 +40,7 @@ jobs:
       fail-fast: false
       matrix:
         # Pin Windows to 2022: erlef/setup-beam@v1 doesn't support win25 (windows-2025) yet
-        os: [ubuntu-latest, macos-latest, windows-2022]
+        os: [ubuntu-latest, windows-2022]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:

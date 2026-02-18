@@ -172,6 +172,7 @@ get_symbol_info(Symbol) when is_binary(Symbol) ->
 describe_ops() ->
     #{
         <<"eval">>        => #{<<"params">> => [<<"code">>]},
+        <<"stdin">>       => #{<<"params">> => [<<"value">>]},
         <<"complete">>    => #{<<"params">> => [<<"code">>]},
         <<"info">>        => #{<<"params">> => [<<"symbol">>]},
         <<"docs">>        => #{<<"params">> => [<<"class">>],
