@@ -49,15 +49,15 @@ format_modifiers_none_test() ->
         #{is_sealed => false, is_abstract => false})).
 
 format_modifiers_sealed_test() ->
-    ?assertEqual(<<"[sealed]">>, beamtalk_repl_docs:format_modifiers(
+    ?assertEqual(<<"\n[sealed]">>, beamtalk_repl_docs:format_modifiers(
         #{is_sealed => true, is_abstract => false})).
 
 format_modifiers_abstract_test() ->
-    ?assertEqual(<<"[abstract]">>, beamtalk_repl_docs:format_modifiers(
+    ?assertEqual(<<"\n[abstract]">>, beamtalk_repl_docs:format_modifiers(
         #{is_sealed => false, is_abstract => true})).
 
 format_modifiers_sealed_and_abstract_test() ->
-    ?assertEqual(<<"[sealed] [abstract]">>, beamtalk_repl_docs:format_modifiers(
+    ?assertEqual(<<"\n[sealed] [abstract]">>, beamtalk_repl_docs:format_modifiers(
         #{is_sealed => true, is_abstract => true})).
 
 %%====================================================================

@@ -372,11 +372,11 @@ format_superclass(Superclass) ->
 %% @doc Format class modifiers (sealed/abstract) for display.
 -spec format_modifiers(map()) -> binary().
 format_modifiers(#{is_sealed := true, is_abstract := true}) ->
-    <<"[sealed] [abstract]">>;
+    <<"\n[sealed] [abstract]">>;
 format_modifiers(#{is_sealed := true}) ->
-    <<"[sealed]">>;
+    <<"\n[sealed]">>;
 format_modifiers(#{is_abstract := true}) ->
-    <<"[abstract]">>;
+    <<"\n[abstract]">>;
 format_modifiers(_) ->
     <<>>.
 

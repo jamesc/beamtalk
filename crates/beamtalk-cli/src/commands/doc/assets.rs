@@ -30,6 +30,10 @@ const CSS_STYLESHEET: &str = r":root {
   --shadow: 0 1px 3px rgba(0,0,0,0.08);
   --radius: 8px;
 
+  /* Badge colors */
+  --badge-abstract-bg: #fef3e2;
+  --badge-abstract-fg: #b35c00;
+
   /* Syntax highlighting */
   --hl-keyword: #8839ef;
   --hl-string: #40a02b;
@@ -54,6 +58,9 @@ const CSS_STYLESHEET: &str = r":root {
     --method-bg: #24273a;
     --sidebar-bg: #181825;
     --shadow: 0 1px 3px rgba(0,0,0,0.3);
+
+    --badge-abstract-bg: #3d2e1a;
+    --badge-abstract-fg: #fab387;
 
     --hl-keyword: #cba6f7;
     --hl-string: #a6e3a1;
@@ -294,8 +301,8 @@ tbody tr:nth-child(even) { background: var(--code-bg); }
   color: var(--fg-muted);
 }
 .badge-abstract {
-  background: var(--accent-bg);
-  color: var(--fg-muted);
+  background: var(--badge-abstract-bg);
+  color: var(--badge-abstract-fg);
 }
 
 /* --- Methods --- */
