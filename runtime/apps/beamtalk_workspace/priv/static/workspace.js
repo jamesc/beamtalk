@@ -143,8 +143,8 @@
       }
       if (msg.type === 'auth_ok') {
         setStatus('Authenticated', '#a6e3a1');
-        // Save cookie for session reconnection
-        try { localStorage.setItem('beamtalk_cookie', cookieInput.value.trim()); } catch(e) {}
+        // Save cookie to sessionStorage for reconnection (cleared on tab close)
+        try { sessionStorage.setItem('beamtalk_cookie', cookieInput.value.trim()); } catch(e) {}
         return;
       }
       if (msg.type === 'auth_error') {
@@ -176,7 +176,16 @@
 
       // Route completion responses
       if (msg.id && pendingComplete[msg.id]) {
+        var expectedPrefix = pendingComplete[msg.id];
         delete pendingComplete[msg.id];
+        // Guard against stale completions: verify prefix still matches cursor text
+        if (typeof expectedPrefix === 'string') {
+          var curPos = evalInput.selectionStart;
+          var curText = evalInput.value.substring(0, curPos);
+          var curMatch = curText.match(/[A-Za-z_][A-Za-z0-9_:]*$/);
+          var curPrefix = curMatch ? curMatch[0] : '';
+          if (curPrefix !== expectedPrefix) return;
+        }
         showCompletions(msg.completions || []);
         return;
       }
@@ -358,7 +367,7 @@
       completionTimer = null;
       msgId++;
       var id = 'msg-' + msgId;
-      pendingComplete[id] = true;
+      pendingComplete[id] = match[0];
       ws.send(JSON.stringify({ op: 'complete', id: id, code: match[0] }));
     }, 150);
   }
@@ -482,9 +491,10 @@
       if (e.key === 'ArrowDown') { e.preventDefault(); navigateCompletion(1); return; }
       if (e.key === 'ArrowUp') { e.preventDefault(); navigateCompletion(-1); return; }
       if (e.key === 'Enter') { e.preventDefault(); insertCompletion(completionItems[completionSelectedIndex]); return; }
-      if (e.key === 'Escape') { e.preventDefault(); hideCompletions(); return; }
-      // Any other key dismisses completion
-      hideCompletions();
+      if (e.key === 'Escape' || e.key === ' ' || e.key === '(' || e.key === ')' || e.key === '.') {
+        hideCompletions();
+        // Don't return — let the key be processed normally
+      }
     }
 
     // Ctrl+D / Cmd+D — Do It
@@ -523,13 +533,17 @@
       requestCompletion();
       return;
     }
-    // Command history — Up/Down (only when single-line or at first/last line)
-    if (e.key === 'ArrowUp' && evalInput.selectionStart === 0) {
+    // Command history — Up/Down (only when no selection and cursor at start/end)
+    if (e.key === 'ArrowUp' &&
+        evalInput.selectionStart === evalInput.selectionEnd &&
+        evalInput.selectionStart === 0) {
       e.preventDefault();
       historyUp();
       return;
     }
-    if (e.key === 'ArrowDown' && evalInput.selectionEnd === evalInput.value.length) {
+    if (e.key === 'ArrowDown' &&
+        evalInput.selectionStart === evalInput.selectionEnd &&
+        evalInput.selectionEnd === evalInput.value.length) {
       e.preventDefault();
       historyDown();
       return;
@@ -572,8 +586,8 @@
   // Auto-connect if session ID present in URL
   var resumeSession = getSessionFromUrl();
   if (resumeSession) {
-    // Pre-fill cookie from localStorage if available
-    var savedCookie = localStorage.getItem('beamtalk_cookie');
+    // Pre-fill cookie from sessionStorage if available
+    var savedCookie = sessionStorage.getItem('beamtalk_cookie');
     if (savedCookie) {
       cookieInput.value = savedCookie;
       connect();

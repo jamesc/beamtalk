@@ -19,6 +19,7 @@
 -record(ws_state, {
     session_id :: binary() | undefined,
     session_pid :: pid() | undefined,
+    session_mon :: reference() | undefined,
     authenticated :: boolean(),
     peer :: term()
 }).
@@ -56,6 +57,12 @@ websocket_info({transcript_output, Text}, State = #ws_state{authenticated = true
     Push = jsx:encode(#{<<"push">> => <<"transcript">>,
                         <<"text">> => Text}),
     {[{text, Push}], State};
+%% Session process died — clean up ETS entry
+websocket_info({'DOWN', MonRef, process, _Pid, _Reason},
+               State = #ws_state{session_mon = MonRef, session_id = SessionId}) ->
+    ?LOG_INFO("Session process terminated, cleaning up ETS", #{session => SessionId}),
+    ets:delete(beamtalk_sessions, SessionId),
+    {ok, State#ws_state{session_pid = undefined, session_mon = undefined}};
 websocket_info(_Info, State) ->
     {ok, State}.
 
@@ -145,6 +152,7 @@ start_or_resume_session(ResumeId, State) when is_binary(ResumeId) ->
         [{ResumeId, Pid}] when is_pid(Pid) ->
             case is_process_alive(Pid) of
                 true ->
+                    MonRef = erlang:monitor(process, Pid),
                     ?LOG_INFO("WebSocket session resumed", #{
                         session => ResumeId,
                         session_pid => Pid,
@@ -158,7 +166,8 @@ start_or_resume_session(ResumeId, State) when is_binary(ResumeId) ->
                     {[{text, AuthOk}, {text, SessionMsg}],
                      State#ws_state{authenticated = true,
                                     session_id = ResumeId,
-                                    session_pid = Pid}};
+                                    session_pid = Pid,
+                                    session_mon = MonRef}};
                 false ->
                     %% Session process died — clean up and create new
                     ets:delete(beamtalk_sessions, ResumeId),
@@ -186,6 +195,7 @@ start_or_resume_session(_Invalid, State) ->
 create_session(SessionId, State) ->
     case beamtalk_session_sup:start_session(SessionId) of
         {ok, SessionPid} ->
+            MonRef = erlang:monitor(process, SessionPid),
             ets:insert(beamtalk_sessions, {SessionId, SessionPid}),
             ?LOG_INFO("WebSocket auth succeeded, session created", #{
                 session => SessionId,
@@ -200,7 +210,8 @@ create_session(SessionId, State) ->
             {[{text, AuthOk}, {text, SessionMsg}],
              State#ws_state{authenticated = true,
                             session_id = SessionId,
-                            session_pid = SessionPid}};
+                            session_pid = SessionPid,
+                            session_mon = MonRef}};
         {error, Reason} ->
             ?LOG_ERROR("Session creation failed after auth", #{
                 reason => Reason,
