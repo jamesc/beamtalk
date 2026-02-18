@@ -890,6 +890,39 @@ mod tests {
         }
     }
 
+    /// Kill a BEAM node without cleanup (simulates a crash).
+    ///
+    /// Uses sysinfo for cross-platform process kill, then waits for the port
+    /// to be released with a generous timeout for loaded CI machines.
+    fn kill_node_raw(info: &NodeInfo) {
+        let mut system = System::new();
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[Pid::from_u32(info.pid)]),
+            true,
+            ProcessRefreshKind::new(),
+        );
+        if let Some(process) = system.process(Pid::from_u32(info.pid)) {
+            process.kill();
+        }
+        let _ = wait_for_workspace_exit(info.connect_host(), info.port, 15);
+    }
+
+    /// Assert that a node is no longer running, with retries.
+    ///
+    /// After a kill or stop, the OS may keep the port in `TIME_WAIT` briefly,
+    /// causing `is_node_running` to see a spurious TCP connect success.
+    /// Retries up to 10 × 500ms = 5s before failing.
+    #[track_caller]
+    fn assert_node_stopped(info: &NodeInfo, msg: &str) {
+        for _ in 0..10 {
+            if !is_node_running(info) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+        panic!("{msg}");
+    }
+
     /// Locate BEAM directories needed to start a workspace node.
     fn beam_dirs_for_tests() -> (PathBuf, PathBuf, PathBuf, PathBuf, PathBuf, Vec<PathBuf>) {
         let runtime_dir = beamtalk_cli::repl_startup::find_runtime_dir()
@@ -1017,23 +1050,9 @@ mod tests {
         );
 
         // Kill the node using sysinfo (cross-platform)
-        let mut system = System::new();
-        system.refresh_processes_specifics(
-            ProcessesToUpdate::Some(&[Pid::from_u32(node_info.pid)]),
-            true,
-            ProcessRefreshKind::new(),
-        );
-        if let Some(process) = system.process(Pid::from_u32(node_info.pid)) {
-            process.kill();
-        }
-        // Wait for process to exit (TCP probe will fail once process is dead)
-        let _ = wait_for_workspace_exit(node_info.connect_host(), node_info.port, 5);
+        kill_node_raw(&node_info);
 
-        // False case: node has been killed
-        assert!(
-            !is_node_running(&node_info),
-            "is_node_running should be false after kill"
-        );
+        assert_node_stopped(&node_info, "is_node_running should be false after kill");
     }
 
     #[test]
@@ -1093,10 +1112,7 @@ mod tests {
 
         // Step 3: Stop the node gracefully via TCP shutdown
         stop_workspace(&tw.id, false).expect("graceful stop should succeed");
-        assert!(
-            !is_node_running(&info1),
-            "node should not be running after stop"
-        );
+        assert_node_stopped(&info1, "node should not be running after stop");
 
         // Wait for epmd to deregister the old node name before restarting.
         // After force-kill, epmd may still hold the registration briefly,
@@ -1206,28 +1222,24 @@ mod tests {
         )
         .expect("start_detached_node should succeed");
 
-        // Kill the node without cleanup (simulating crash) using sysinfo
-        let mut system = System::new();
-        system.refresh_processes_specifics(
-            ProcessesToUpdate::Some(&[Pid::from_u32(node_info.pid)]),
-            true,
-            ProcessRefreshKind::new(),
-        );
-        if let Some(process) = system.process(Pid::from_u32(node_info.pid)) {
-            process.kill();
+        // Kill the node without cleanup (simulating crash)
+        kill_node_raw(&node_info);
+
+        // Retry the stale-detection check: after force-kill the OS may keep the
+        // port in TIME_WAIT briefly, causing is_node_running to return true.
+        let mut detected_stopped = false;
+        for _ in 0..10 {
+            let workspaces = list_workspaces().unwrap();
+            if let Some(found) = workspaces.iter().find(|w| w.workspace_id == tw.id) {
+                if found.status == WorkspaceStatus::Stopped {
+                    detected_stopped = true;
+                    break;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
         }
-        let _ = wait_for_workspace_exit(node_info.connect_host(), node_info.port, 5);
-
-        // list_workspaces should detect stale node.info and report Stopped
-        let workspaces = list_workspaces().unwrap();
-        let found = workspaces
-            .iter()
-            .find(|w| w.workspace_id == tw.id)
-            .expect("Should find the workspace in list");
-
-        assert_eq!(
-            found.status,
-            WorkspaceStatus::Stopped,
+        assert!(
+            detected_stopped,
             "Stale workspace should be reported as Stopped"
         );
     }
@@ -1312,11 +1324,7 @@ mod tests {
             result.err()
         );
 
-        // Node should no longer be running after graceful stop
-        assert!(
-            !is_node_running(&node_info),
-            "Node should not be running after graceful stop"
-        );
+        assert_node_stopped(&node_info, "Node should not be running after graceful stop");
     }
 
     #[test]
@@ -1363,11 +1371,7 @@ mod tests {
             result.err()
         );
 
-        // Node should no longer be running
-        assert!(
-            !is_node_running(&node_info),
-            "Node should not be running after force stop"
-        );
+        assert_node_stopped(&node_info, "Node should not be running after force stop");
     }
 
     #[test]
