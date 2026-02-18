@@ -113,7 +113,7 @@ unwrap_class_call({error, Error}) ->
     selector(), list(), class_name(), atom(),
     #{selector() => {class_name(), term()}},
     map()
-) -> {reply, term()} | {test_spawn, fun()} | {error, not_found}.
+) -> {reply, term(), map()} | {test_spawn, atom()} | {error, not_found}.
 handle_class_method_call(Selector, Args, ClassName, Module, FlatClassMethods, ClassVars) ->
     case maps:find(Selector, FlatClassMethods) of
         {ok, {DefiningClass, _MethodInfo}} ->

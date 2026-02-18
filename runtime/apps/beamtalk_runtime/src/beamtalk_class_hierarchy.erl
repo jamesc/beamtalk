@@ -17,7 +17,7 @@
 -export([
     build_flattened_methods/3,
     build_flattened_methods/4,
-    rebuild_all_flattened_tables/5
+    rebuild_all_flattened_tables/4
 ]).
 
 -type class_name() :: atom().
@@ -34,10 +34,9 @@
 -spec rebuild_all_flattened_tables(
     class_name(), class_name() | none,
     #{selector() => method_info()},
-    #{selector() => method_info()},
     #{selector() => method_info()}
 ) -> {#{selector() => {class_name(), method_info()}}, #{selector() => {class_name(), method_info()}}}.
-rebuild_all_flattened_tables(Name, Superclass, InstanceMethods, ClassMethods, _OldFlattened) ->
+rebuild_all_flattened_tables(Name, Superclass, InstanceMethods, ClassMethods) ->
     NewFlattened = build_flattened_methods(Name, Superclass, InstanceMethods),
     NewFlattenedClass = build_flattened_methods(Name, Superclass, ClassMethods, get_flattened_class_methods),
     {NewFlattened, NewFlattenedClass}.

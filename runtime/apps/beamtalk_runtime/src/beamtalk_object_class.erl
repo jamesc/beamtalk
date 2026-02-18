@@ -482,11 +482,10 @@ rebuild_all_flattened_tables(#class_state{
     name = Name,
     superclass = Superclass,
     instance_methods = InstanceMethods,
-    class_methods = ClassMethods,
-    flattened_methods = OldFlattened
+    class_methods = ClassMethods
 } = State) ->
     {NewFlattened, NewFlattenedClass} = beamtalk_class_hierarchy:rebuild_all_flattened_tables(
-        Name, Superclass, InstanceMethods, ClassMethods, OldFlattened),
+        Name, Superclass, InstanceMethods, ClassMethods),
     State#class_state{
         flattened_methods = NewFlattened,
         flattened_class_methods = NewFlattenedClass
