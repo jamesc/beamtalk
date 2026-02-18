@@ -139,12 +139,131 @@ The fundamental blocker is that cargo-dist cannot include arbitrary directory tr
 
 The gains (checksums, install scripts, Homebrew) are valuable but can be added to the existing workflow incrementally without cargo-dist.
 
+## Alternatives Evaluated
+
+### 1. GoReleaser (Most Promising) ⭐
+
+[GoReleaser](https://goreleaser.com/) added Rust support in v2.5 via `cargo-zigbuild`. It's the most feature-rich option and **can handle beamtalk's requirements**.
+
+**Why it could work:**
+- **Custom archive layout**: `files` entries support `src`/`dst` mapping — can place BEAM files at `lib/beamtalk/lib/*/ebin/` inside the archive
+- **Global `before` hooks**: Run `rebar3 compile` and `beamtalk build-stdlib` before archiving
+- **Build hooks**: Pre/post build hooks for Erlang setup
+- **Recursive directory inclusion**: Adding a directory path includes its full tree
+- **Built-in features**: Checksums, Homebrew taps, shell install scripts, changelogs, Docker images, SBOMs
+
+**Example `.goreleaser.yaml` sketch:**
+```yaml
+before:
+  hooks:
+    - rebar3 compile
+    - ./target/release/beamtalk build-stdlib
+
+builds:
+  - builder: rust
+    binary: beamtalk
+    targets:
+      - x86_64-unknown-linux-gnu
+      - x86_64-apple-darwin
+      - aarch64-apple-darwin
+      - x86_64-pc-windows-msvc
+
+archives:
+  - format: tar.gz
+    files:
+      - src: runtime/_build/default/lib/beamtalk_runtime/ebin
+        dst: lib/beamtalk/lib/beamtalk_runtime/ebin
+      - src: runtime/_build/default/lib/beamtalk_workspace/ebin
+        dst: lib/beamtalk/lib/beamtalk_workspace/ebin
+      # ... remaining apps
+      - src: runtime/apps/beamtalk_stdlib/ebin
+        dst: lib/beamtalk/lib/beamtalk_stdlib/ebin
+```
+
+**Concerns:**
+- Rust support is relatively new (v2.5, ~2024) — may have rough edges
+- Some `src`/`dst` features may require GoReleaser Pro ($) for templated paths
+- GoReleaser is a Go tool — adds a non-Rust dependency to CI
+- Multiple binaries from a Cargo workspace need careful config (one `builds` entry per binary, or workspace-aware setup)
+- Erlang/OTP 27 still needs GitHub Actions setup step (not handled by GoReleaser itself)
+- VS Code extension pipeline would remain custom regardless
+
+**Verdict:** Worth a deeper spike. If `src`/`dst` mapping works in the free version for directory trees, this could replace the existing workflow. Create a follow-up issue for a hands-on evaluation.
+
+### 2. nFPM (Linux Package Formats Only)
+
+[nFPM](https://nfpm.goreleaser.com/) (from GoReleaser team) creates `.deb`, `.rpm`, `.apk`, and tarballs with full control over directory layout via `contents` entries with `src`/`dst` and `type: tree`.
+
+**Why it's interesting:**
+- Perfect `src`/`dst` control with recursive directory support
+- Can produce proper Linux packages (`.deb`, `.rpm`) in addition to tarballs
+- Lightweight, single-purpose tool
+
+**Why it's insufficient alone:**
+- No macOS or Windows support (Linux package formats only)
+- No CI workflow generation, checksums, install scripts, or GitHub Release integration
+- Would need to be combined with other tools for a complete solution
+
+**Verdict:** Useful as a complement for Linux package distribution, not a standalone replacement.
+
+### 3. Earthly CI (Build Orchestration)
+
+[Earthly](https://earthly.dev/) provides Dockerfile-meets-Makefile build definitions with cross-platform support. Good for multi-language projects (Rust + Erlang).
+
+**Why it's interesting:**
+- Reproducible, containerized builds
+- Natural fit for Rust + Erlang multi-language builds
+- Cross-platform via QEMU/buildx
+
+**Why it doesn't fit:**
+- Build orchestration tool, not a release packager — still need packaging logic
+- Adds significant infrastructure complexity (Docker, QEMU)
+- Doesn't provide installers, checksums, Homebrew, or GitHub Release integration
+- Overkill for our needs — we already have working CI, we need better packaging
+
+**Verdict:** Not the right tool for this problem. Solves build reproducibility, not release packaging.
+
+### 4. Nix Flakes (Reproducible Builds)
+
+Nix can build both Rust (`buildRustPackage`) and Erlang (`beamPackages`) with full reproducibility, including ERTS bundling.
+
+**Why it's interesting:**
+- Hermetic, reproducible builds for both Rust and BEAM
+- Can produce self-contained release bundles
+- Natural multi-language support
+
+**Why it doesn't fit:**
+- Steep learning curve, Nix-specific tooling
+- Cross-compilation support is complex
+- No GitHub Release integration, install scripts, or Homebrew generation
+- Requires Nix on CI runners (additional setup)
+- Better suited for deployment than distribution packaging
+
+**Verdict:** Would be great for internal reproducibility but wrong abstraction for end-user distribution.
+
+### 5. Incremental Improvements to Existing Workflow (Recommended for Now) ⭐
+
+Rather than replacing the workflow, add the missing features identified in the cargo-dist evaluation:
+
+| Feature | Approach | Effort |
+|---------|----------|--------|
+| **SHA-256 checksums** | Add `sha256sum` step after packaging, upload `.sha256` files | Small (~10 lines) |
+| **Install script** | Create `scripts/install.sh` that detects OS/arch, downloads correct archive from GitHub Releases | Medium (~100 lines) |
+| **Homebrew tap** | Create `jamesc/homebrew-beamtalk` repo, auto-update formula on release | Medium (new repo + ~30 lines of workflow) |
+
+This approach:
+- Preserves the working, well-understood workflow
+- Adds the three most valuable features cargo-dist would have provided
+- Has zero risk of breaking existing release process
+- Can be done incrementally (one feature per PR)
+
 ## Recommended Follow-Up Actions
 
 1. **Add checksums** to existing `release.yml` — generate SHA-256 for each archive and upload alongside (small change)
 2. **Add install script** — create a standalone `install.sh` that downloads the correct platform archive from GitHub Releases
-3. **Monitor cargo-dist** — [Issue #934](https://github.com/axodotdev/cargo-dist/issues/934) tracks `lib/` directory support; re-evaluate when this lands
+3. **Evaluate GoReleaser** — the most promising full replacement; create a spike issue to test `src`/`dst` archive mapping with beamtalk's `lib/` tree using the free version
 4. **Consider Homebrew formula** — can be maintained independently as a tap repository
+5. **Monitor cargo-dist** — [Issue #934](https://github.com/axodotdev/cargo-dist/issues/934) tracks `lib/` directory support; re-evaluate when this lands
 
 ## Consequences
 
