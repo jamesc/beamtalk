@@ -21,7 +21,7 @@
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %% Public API
--export([start_link/1, stop/1, eval/2, interrupt/1, get_bindings/1, clear_bindings/1,
+-export([start_link/1, stop/1, eval/2, eval_async/3, interrupt/1, get_bindings/1, clear_bindings/1,
          load_file/2, load_source/2, unload_module/2, get_module_tracker/1]).
 
 %% gen_server callbacks
@@ -44,6 +44,12 @@ stop(SessionPid) ->
 -spec eval(pid(), string()) -> {ok, term(), binary(), [binary()]} | {error, term(), binary(), [binary()]}.
 eval(SessionPid, Expression) ->
     gen_server:call(SessionPid, {eval, Expression}, 30000).
+
+%% @doc Evaluate an expression with streaming subscriber (BT-696).
+%% Subscriber receives {eval_out, Chunk} messages during eval.
+-spec eval_async(pid(), string(), pid()) -> ok.
+eval_async(SessionPid, Expression, Subscriber) ->
+    gen_server:cast(SessionPid, {eval_async, Expression, Subscriber}).
 
 %% @doc Interrupt a running evaluation in this session.
 %% If no evaluation is in progress, returns ok immediately.
@@ -135,7 +141,7 @@ handle_call(interrupt, _From, {SessionId, State, {WorkerPid, MonRef, EvalFrom}})
     end,
     Err0 = beamtalk_error:new(interrupted, 'REPL'),
     Err1 = beamtalk_error:with_message(Err0, <<"Interrupted">>),
-    gen_server:reply(EvalFrom, {error, Err1, <<>>, []}),
+    reply_eval(EvalFrom, {eval_error, Err1, <<>>, []}),
     {reply, ok, {SessionId, State, undefined}};
 
 handle_call(interrupt, _From, {_SessionId, _State, undefined} = FullState) ->
@@ -202,6 +208,21 @@ handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
 %% @private
+%% BT-696: Async eval with streaming subscriber
+handle_cast({eval_async, Expression, Subscriber}, {SessionId, State, undefined}) ->
+    Self = self(),
+    {WorkerPid, MonRef} = spawn_monitor(fun() ->
+        Result = beamtalk_repl_eval:do_eval(Expression, State, Subscriber),
+        Self ! {eval_result, self(), Result}
+    end),
+    {noreply, {SessionId, State, {WorkerPid, MonRef, {async, Subscriber}}}};
+handle_cast({eval_async, _Expression, Subscriber}, {_SessionId, _State, {_Pid, _Ref, _}} = FullState) ->
+    %% Already evaluating — reject concurrent eval
+    Err0 = beamtalk_error:new(eval_busy, 'REPL'),
+    Err1 = beamtalk_error:with_message(Err0, <<"An evaluation is already in progress">>),
+    Err2 = beamtalk_error:with_hint(Err1, <<"Use Ctrl-C to interrupt the current evaluation.">>),
+    Subscriber ! {eval_error, Err2, <<>>, []},
+    {noreply, FullState};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -211,10 +232,10 @@ handle_info({eval_result, WorkerPid, Result}, {SessionId, _State, {WorkerPid, Mo
     erlang:demonitor(MonRef, [flush]),
     case Result of
         {ok, Value, Output, Warnings, NewState} ->
-            gen_server:reply(From, {ok, Value, Output, Warnings}),
+            reply_eval(From, {eval_done, Value, Output, Warnings}),
             {noreply, {SessionId, NewState, undefined}};
         {error, Reason, Output, Warnings, NewState} ->
-            gen_server:reply(From, {error, Reason, Output, Warnings}),
+            reply_eval(From, {eval_error, Reason, Output, Warnings}),
             {noreply, {SessionId, NewState, undefined}}
     end;
 
@@ -224,7 +245,7 @@ handle_info({'DOWN', MonRef, process, WorkerPid, Reason},
     Err0 = beamtalk_error:new(eval_crashed, 'REPL'),
     Err1 = beamtalk_error:with_message(Err0,
         iolist_to_binary(io_lib:format("Evaluation crashed: ~p", [Reason]))),
-    gen_server:reply(From, {error, Err1, <<>>, []}),
+    reply_eval(From, {eval_error, Err1, <<>>, []}),
     {noreply, {SessionId, State, undefined}};
 
 handle_info(_Info, State) ->
@@ -266,3 +287,12 @@ inject_workspace_bindings(Bindings) ->
         Bindings,
         beamtalk_workspace_config:singletons()
     ).
+
+%% @private BT-696: Dispatch eval result to sync caller or async subscriber.
+reply_eval({async, Subscriber}, Msg) ->
+    Subscriber ! Msg,
+    ok;
+reply_eval(From, {eval_done, Value, Output, Warnings}) ->
+    gen_server:reply(From, {ok, Value, Output, Warnings});
+reply_eval(From, {eval_error, Reason, Output, Warnings}) ->
+    gen_server:reply(From, {error, Reason, Output, Warnings}).
