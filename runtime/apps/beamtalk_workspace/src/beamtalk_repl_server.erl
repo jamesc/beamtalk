@@ -15,7 +15,7 @@
 %%% - beamtalk_repl_ops_load: load-file, load-source, reload, unload, modules
 %%% - beamtalk_repl_ops_actors: actors, inspect, kill, interrupt
 %%% - beamtalk_repl_ops_session: sessions, clone, close, health, shutdown
-%%% - beamtalk_repl_ops_dev: complete, info, docs, describe
+%%% - beamtalk_repl_ops_dev: complete, info, docs, describe, test, test-all, show-codegen
 
 -module(beamtalk_repl_server).
 -behaviour(gen_server).
@@ -300,7 +300,10 @@ handle_op(Op, Params, Msg, SessionPid) when
     beamtalk_repl_ops_session:handle(Op, Params, Msg, SessionPid);
 handle_op(Op, Params, Msg, SessionPid) when
         Op =:= <<"complete">>; Op =:= <<"info">>; Op =:= <<"docs">>;
-        Op =:= <<"describe">> ->
+        Op =:= <<"describe">>; Op =:= <<"show-codegen">> ->
+    beamtalk_repl_ops_dev:handle(Op, Params, Msg, SessionPid);
+handle_op(Op, Params, Msg, SessionPid) when
+        Op =:= <<"test">>; Op =:= <<"test-all">> ->
     beamtalk_repl_ops_dev:handle(Op, Params, Msg, SessionPid);
 handle_op(Op, _Params, Msg, _SessionPid) ->
     Err0 = beamtalk_error:new(unknown_op, 'REPL'),
@@ -308,7 +311,6 @@ handle_op(Op, _Params, Msg, _SessionPid) ->
         iolist_to_binary([<<"Unknown operation: ">>, Op])),
     beamtalk_repl_protocol:encode_error(
         Err1, Msg, fun beamtalk_repl_json:format_error_message/1).
-
 
 %%% Protocol Parsing and Formatting
 

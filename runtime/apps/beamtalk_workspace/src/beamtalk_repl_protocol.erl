@@ -27,6 +27,7 @@
          encode_bindings/3, encode_loaded/3, encode_actors/3,
          encode_modules/3, encode_sessions/3, encode_inspect/2, encode_inspect/3,
          encode_docs/2, encode_describe/3,
+         encode_test_results/2,
          is_legacy/1, get_op/1, get_id/1, get_session/1, get_params/1,
          base_response/1]).
 
@@ -320,6 +321,26 @@ encode_describe(Ops, Versions, Msg) ->
                              <<"status">> => [<<"done">>]})
     end.
 
+%% @doc Encode test results response (BT-699).
+%%
+%% Encodes structured test results from beamtalk_test_case into JSON.
+-spec encode_test_results(map(), protocol_msg()) -> binary().
+encode_test_results(Results, Msg) ->
+    JsonResults = encode_test_results_map(Results),
+    Status = case maps:get(failed, Results) of
+        0 -> [<<"done">>];
+        _ -> [<<"done">>, <<"test-error">>]
+    end,
+    case Msg#protocol_msg.legacy of
+        true ->
+            jsx:encode(#{<<"type">> => <<"test-results">>,
+                         <<"results">> => JsonResults});
+        false ->
+            Base = base_response(Msg),
+            jsx:encode(Base#{<<"results">> => JsonResults,
+                             <<"status">> => Status})
+    end.
+
 %%% Internal functions
 
 %% @private
@@ -422,3 +443,29 @@ maybe_add_output(Map, Output) when is_binary(Output) ->
 maybe_add_warnings(Map, []) -> Map;
 maybe_add_warnings(Map, Warnings) ->
     Map#{<<"warnings">> => Warnings}.
+
+%% @private
+%% @doc Encode structured test results map to JSON-encodable format (BT-699).
+-spec encode_test_results_map(map()) -> map().
+encode_test_results_map(#{class := Class, total := Total, passed := Passed,
+                          failed := Failed, duration := Duration,
+                          tests := Tests}) ->
+    JsonTests = lists:map(fun(Test) ->
+        Base = #{<<"name">> => atom_to_binary(maps:get(name, Test), utf8),
+                 <<"status">> => atom_to_binary(maps:get(status, Test), utf8)},
+        B1 = case maps:find(error, Test) of
+            {ok, Err} -> Base#{<<"error">> => Err};
+            error -> Base
+        end,
+        %% Add class name if present (test-all tags each test)
+        case maps:find(class_name, Test) of
+            {ok, CN} -> B1#{<<"class">> => atom_to_binary(CN, utf8)};
+            error -> B1
+        end
+    end, Tests),
+    #{<<"class">> => atom_to_binary(Class, utf8),
+      <<"total">> => Total,
+      <<"passed">> => Passed,
+      <<"failed">> => Failed,
+      <<"duration">> => Duration,
+      <<"tests">> => JsonTests}.

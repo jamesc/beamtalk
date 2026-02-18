@@ -563,6 +563,65 @@ encode_describe_legacy_format_test() ->
     ?assertEqual(#{<<"protocol">> => <<"1.0">>, <<"beamtalk">> => <<"0.1.0">>},
                  maps:get(<<"versions">>, Decoded)).
 
+%%% encode_test_results tests (BT-699)
+
+encode_test_results_all_pass_test() ->
+    Msg = make_msg(<<"test">>, <<"msg-050">>, undefined, false),
+    Results = #{class => 'CounterTest', total => 2, passed => 2, failed => 0,
+                duration => 0.1,
+                tests => [#{name => testA, status => pass},
+                           #{name => testB, status => pass}]},
+    Result = beamtalk_repl_protocol:encode_test_results(Results, Msg),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual(<<"msg-050">>, maps:get(<<"id">>, Decoded)),
+    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
+    R = maps:get(<<"results">>, Decoded),
+    ?assertEqual(<<"CounterTest">>, maps:get(<<"class">>, R)),
+    ?assertEqual(2, maps:get(<<"total">>, R)),
+    ?assertEqual(2, maps:get(<<"passed">>, R)),
+    ?assertEqual(0, maps:get(<<"failed">>, R)),
+    ?assertEqual(2, length(maps:get(<<"tests">>, R))).
+
+encode_test_results_with_failures_test() ->
+    Msg = make_msg(<<"test">>, <<"msg-051">>, undefined, false),
+    Results = #{class => 'MathTest', total => 2, passed => 1, failed => 1,
+                duration => 0.2,
+                tests => [#{name => testOk, status => pass},
+                           #{name => testFail, status => fail,
+                             error => <<"Expected 0">>}]},
+    Result = beamtalk_repl_protocol:encode_test_results(Results, Msg),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual([<<"done">>, <<"test-error">>], maps:get(<<"status">>, Decoded)),
+    R = maps:get(<<"results">>, Decoded),
+    ?assertEqual(1, maps:get(<<"failed">>, R)),
+    Tests = maps:get(<<"tests">>, R),
+    FailTest = lists:keyfind(<<"testFail">>, 1,
+        [{maps:get(<<"name">>, T), T} || T <- Tests]),
+    {_, FT} = FailTest,
+    ?assertEqual(<<"fail">>, maps:get(<<"status">>, FT)),
+    ?assertEqual(<<"Expected 0">>, maps:get(<<"error">>, FT)).
+
+encode_test_results_legacy_format_test() ->
+    Msg = make_msg(<<"test">>, undefined, undefined, true),
+    Results = #{class => 'X', total => 1, passed => 1, failed => 0,
+                duration => 0.0, tests => [#{name => testOne, status => pass}]},
+    Result = beamtalk_repl_protocol:encode_test_results(Results, Msg),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual(<<"test-results">>, maps:get(<<"type">>, Decoded)),
+    ?assert(is_map(maps:get(<<"results">>, Decoded))).
+
+encode_test_results_with_class_name_tag_test() ->
+    Msg = make_msg(<<"test-all">>, <<"msg-052">>, undefined, false),
+    Results = #{class => 'All', total => 1, passed => 1, failed => 0,
+                duration => 0.1,
+                tests => [#{name => testA, status => pass,
+                             class_name => 'FooTest'}]},
+    Result = beamtalk_repl_protocol:encode_test_results(Results, Msg),
+    Decoded = jsx:decode(Result, [return_maps]),
+    R = maps:get(<<"results">>, Decoded),
+    [Test] = maps:get(<<"tests">>, R),
+    ?assertEqual(<<"FooTest">>, maps:get(<<"class">>, Test)).
+
 %%% encode_need_input tests (BT-698)
 
 encode_need_input_new_format_test() ->

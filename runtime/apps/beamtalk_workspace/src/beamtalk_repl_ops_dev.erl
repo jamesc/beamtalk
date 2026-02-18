@@ -1,7 +1,7 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Op handlers for complete, info, docs, and describe operations.
+%%% @doc Op handlers for complete, info, docs, describe, test, and show-codegen operations.
 %%%
 %%% **DDD Context:** REPL
 %%%
@@ -75,6 +75,122 @@ handle(<<"docs">>, Params, Msg, _SessionPid) ->
                             beamtalk_repl_protocol:encode_error(
                                 Err3, Msg, fun beamtalk_repl_json:format_error_message/1)
                     end
+            end
+    end;
+
+handle(<<"test">>, Params, Msg, _SessionPid) ->
+    %% Run BUnit tests for a TestCase class (BT-699).
+    ClassBin = maps:get(<<"class">>, Params, <<>>),
+    Method = maps:get(<<"method">>, Params, undefined),
+    case ClassBin of
+        <<>> ->
+            Err0 = beamtalk_error:new(missing_parameter, 'REPL'),
+            Err1 = beamtalk_error:with_message(Err0, <<"Missing required parameter: class">>),
+            Err2 = beamtalk_error:with_hint(Err1, <<"Provide a TestCase class name, e.g. {\"op\": \"test\", \"class\": \"CounterTest\"}">>),
+            beamtalk_repl_protocol:encode_error(
+                Err2, Msg, fun beamtalk_repl_json:format_error_message/1);
+        _ when not is_binary(ClassBin) ->
+            Err0 = beamtalk_error:new(type_error, 'REPL'),
+            Err1 = beamtalk_error:with_message(Err0, <<"Parameter 'class' must be a string">>),
+            Err2 = beamtalk_error:with_hint(Err1, <<"Provide a TestCase class name.">>),
+            beamtalk_repl_protocol:encode_error(
+                Err2, Msg, fun beamtalk_repl_json:format_error_message/1);
+        _ ->
+            case beamtalk_repl_server:safe_to_existing_atom(ClassBin) of
+                {error, badarg} ->
+                    beamtalk_repl_protocol:encode_error(
+                        make_class_not_found_error(ClassBin), Msg,
+                        fun beamtalk_repl_json:format_error_message/1);
+                {ok, ClassAtom} ->
+                    try
+                        Results = case Method of
+                            undefined ->
+                                beamtalk_test_case:run_all_structured(ClassAtom);
+                            MethodBin when is_binary(MethodBin) ->
+                                case beamtalk_repl_server:safe_to_existing_atom(MethodBin) of
+                                    {error, badarg} ->
+                                        Err3 = beamtalk_error:new(does_not_understand, ClassAtom),
+                                        Err4 = beamtalk_error:with_message(Err3,
+                                            iolist_to_binary([<<"Method '">>, MethodBin, <<"' not found in ">>, ClassBin])),
+                                        error(Err4);
+                                    {ok, MethodAtom} ->
+                                        beamtalk_test_case:run_single_structured(ClassAtom, MethodAtom)
+                                end;
+                            _Other ->
+                                Err3 = beamtalk_error:new(type_error, 'REPL'),
+                                Err4 = beamtalk_error:with_message(Err3, <<"Parameter 'method' must be a string">>),
+                                error(Err4)
+                        end,
+                        beamtalk_repl_protocol:encode_test_results(Results, Msg)
+                    catch
+                        error:Reason ->
+                            WrappedReason = beamtalk_repl_server:ensure_structured_error(Reason),
+                            beamtalk_repl_protocol:encode_error(
+                                WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1)
+                    end
+            end
+    end;
+
+handle(<<"test-all">>, _Params, Msg, _SessionPid) ->
+    %% Run all loaded TestCase subclasses (BT-699).
+    TestClasses = beamtalk_test_case:find_test_classes(),
+    case TestClasses of
+        [] ->
+            EmptyResults = #{class => 'All', total => 0, passed => 0,
+                             failed => 0, duration => 0.0, tests => []},
+            beamtalk_repl_protocol:encode_test_results(EmptyResults, Msg);
+        _ ->
+            try
+                StartTime = erlang:monotonic_time(millisecond),
+                AllResults = lists:map(fun(ClassName) ->
+                    beamtalk_test_case:run_all_structured(ClassName)
+                end, TestClasses),
+                EndTime = erlang:monotonic_time(millisecond),
+                Duration = (EndTime - StartTime) / 1000.0,
+                {TotalTests, TotalPassed, TotalFailed, AllTestDetails} =
+                    lists:foldl(fun(#{total := T, passed := P, failed := F,
+                                     tests := Tests, class := C}, {AT, AP, AF, ATests}) ->
+                        TaggedTests = [Test#{class_name => C}
+                                       || Test <- Tests],
+                        {AT + T, AP + P, AF + F, ATests ++ TaggedTests}
+                    end, {0, 0, 0, []}, AllResults),
+                MergedResults = #{class => 'All', total => TotalTests,
+                                  passed => TotalPassed, failed => TotalFailed,
+                                  duration => Duration, tests => AllTestDetails},
+                beamtalk_repl_protocol:encode_test_results(MergedResults, Msg)
+            catch
+                error:Reason ->
+                    WrappedReason = beamtalk_repl_server:ensure_structured_error(Reason),
+                    beamtalk_repl_protocol:encode_error(
+                        WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1)
+            end
+    end;
+
+handle(<<"show-codegen">>, Params, Msg, SessionPid) ->
+    %% BT-700: Compile expression and return Core Erlang source without evaluating.
+    Code = binary_to_list(maps:get(<<"code">>, Params, <<>>)),
+    case Code of
+        [] ->
+            Err = beamtalk_error:new(empty_expression, 'REPL'),
+            Err1 = beamtalk_error:with_message(Err, <<"Empty expression">>),
+            Err2 = beamtalk_error:with_hint(Err1, <<"Enter an expression to compile.">>),
+            beamtalk_repl_protocol:encode_error(
+                Err2, Msg, fun beamtalk_repl_json:format_error_message/1);
+        _ ->
+            case beamtalk_repl_shell:show_codegen(SessionPid, Code) of
+                {ok, CoreErlang, Warnings} ->
+                    Base = beamtalk_repl_protocol:base_response(Msg),
+                    Result = Base#{<<"core_erlang">> => CoreErlang,
+                                   <<"status">> => [<<"done">>]},
+                    Result1 = case Warnings of
+                        [] -> Result;
+                        _ -> Result#{<<"warnings">> => Warnings}
+                    end,
+                    jsx:encode(Result1);
+                {error, ErrorReason, Warnings} ->
+                    WrappedReason = beamtalk_repl_server:ensure_structured_error(ErrorReason),
+                    beamtalk_repl_protocol:encode_error(
+                        WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1, <<>>, Warnings)
             end
     end;
 
@@ -193,8 +309,12 @@ describe_ops() ->
         <<"modules">>     => #{<<"params">> => []},
         <<"unload">>      => #{<<"params">> => [<<"module">>]},
         <<"health">>      => #{<<"params">> => []},
+        <<"show-codegen">> => #{<<"params">> => [<<"code">>]},
         <<"describe">>    => #{<<"params">> => []},
-        <<"shutdown">>    => #{<<"params">> => [<<"cookie">>]}
+        <<"shutdown">>    => #{<<"params">> => [<<"cookie">>]},
+        <<"test">>        => #{<<"params">> => [<<"class">>],
+                               <<"optional">> => [<<"method">>]},
+        <<"test-all">>    => #{<<"params">> => []}
     }.
 
 %% @private
