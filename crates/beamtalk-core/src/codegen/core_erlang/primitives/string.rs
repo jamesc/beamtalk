@@ -23,6 +23,14 @@ pub(crate) fn generate_string_bif(selector: &str, params: &[String]) -> Option<D
         | "drop:" | "padLeft:" | "padRight:" | "padLeft:with:" | "padRight:with:" => {
             generate_string_search_bif(selector, params)
         }
+        // Regex operations (BT-709)
+        "matchesRegex:"
+        | "matchesRegex:options:"
+        | "firstMatch:"
+        | "allMatches:"
+        | "replaceRegex:with:"
+        | "replaceAllRegex:with:"
+        | "splitRegex:" => generate_string_regex_bif(selector, params),
         // Testing, conversion, iteration, streaming
         _ => generate_string_misc_bif(selector, params),
     }
@@ -194,6 +202,67 @@ fn generate_string_misc_bif(selector: &str, params: &[String]) -> Option<Documen
             ")"
         ]),
         "stream" => Some(Document::Str("call 'beamtalk_stream':'on'(Self)")),
+        _ => None,
+    }
+}
+
+/// String regex primitive implementations (BT-709).
+///
+/// These delegate to `beamtalk_regex` helper functions that accept both
+/// String patterns and compiled Regex objects.
+fn generate_string_regex_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
+    let p0 = params.first().map_or("_Arg0", String::as_str);
+    match selector {
+        "matchesRegex:" => Some(docvec![
+            "call 'beamtalk_regex':'matches_regex'(Self, ",
+            p0.to_string(),
+            ")"
+        ]),
+        "matchesRegex:options:" => {
+            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            Some(docvec![
+                "call 'beamtalk_regex':'matches_regex_options'(Self, ",
+                p0.to_string(),
+                ", ",
+                p1.to_string(),
+                ")",
+            ])
+        }
+        "firstMatch:" => Some(docvec![
+            "call 'beamtalk_regex':'first_match'(Self, ",
+            p0.to_string(),
+            ")"
+        ]),
+        "allMatches:" => Some(docvec![
+            "call 'beamtalk_regex':'all_matches'(Self, ",
+            p0.to_string(),
+            ")"
+        ]),
+        "replaceRegex:with:" => {
+            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            Some(docvec![
+                "call 'beamtalk_regex':'replace_regex'(Self, ",
+                p0.to_string(),
+                ", ",
+                p1.to_string(),
+                ")",
+            ])
+        }
+        "replaceAllRegex:with:" => {
+            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            Some(docvec![
+                "call 'beamtalk_regex':'replace_all_regex'(Self, ",
+                p0.to_string(),
+                ", ",
+                p1.to_string(),
+                ")",
+            ])
+        }
+        "splitRegex:" => Some(docvec![
+            "call 'beamtalk_regex':'split_regex'(Self, ",
+            p0.to_string(),
+            ")"
+        ]),
         _ => None,
     }
 }

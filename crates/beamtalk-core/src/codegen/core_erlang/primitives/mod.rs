@@ -63,6 +63,7 @@ pub fn generate_primitive_bif(
         "TestCase" => misc::generate_test_case_bif(selector, params),
         "Stream" => misc::generate_stream_bif(selector, params),
         "JSON" => misc::generate_json_bif(selector, params),
+        "Regex" => misc::generate_regex_bif(selector, params),
         "System" => misc::generate_system_bif(selector, params),
         "Collection" => collection::generate_collection_bif(selector, params),
         "StackFrame" => misc::generate_stack_frame_bif(selector, params),
