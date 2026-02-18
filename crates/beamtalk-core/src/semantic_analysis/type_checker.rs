@@ -543,9 +543,9 @@ impl TypeChecker {
             return InferredType::Dynamic;
         }
 
-        // Check if class-side method exists
+        // Check if class-side method exists (skip warning for DNU override classes)
         let has_class_method = hierarchy.find_class_method(class_name, selector).is_some();
-        if !has_class_method {
+        if !has_class_method && !hierarchy.has_class_dnu_override(class_name) {
             // Also check instance-side (some methods are both)
             if !hierarchy.resolves_selector(class_name, selector) {
                 self.emit_unknown_selector_warning(class_name, selector, span, hierarchy, true);
@@ -578,8 +578,8 @@ impl TypeChecker {
             return;
         }
 
-        // Classes with doesNotUnderstand: override accept any message
-        if hierarchy.has_dnu_override(class_name) {
+        // Classes with instance-side doesNotUnderstand: override accept any message
+        if hierarchy.has_instance_dnu_override(class_name) {
             return;
         }
 
@@ -1222,6 +1222,29 @@ mod tests {
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         assert!(checker.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn test_class_side_dnu_suppresses_warning() {
+        // Erlang erlang  ← Erlang has class-side doesNotUnderstand:args:
+        // Should NOT produce "does not understand" warning
+        let module = make_module(vec![msg_send(
+            class_ref("Erlang"),
+            MessageSelector::Unary("erlang".into()),
+            vec![],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let dnu_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu_warnings.is_empty(),
+            "Erlang class-side DNU should suppress warnings, got: {dnu_warnings:?}"
+        );
     }
 
     #[test]

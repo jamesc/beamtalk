@@ -126,6 +126,10 @@ struct ReplResponse {
     warnings: Option<Vec<String>>,
     /// Documentation text (BT-500: :help command)
     docs: Option<String>,
+    /// Test results (BT-724: :test command)
+    results: Option<serde_json::Value>,
+    /// Generated Core Erlang source (BT-724: :show-codegen command)
+    core_erlang: Option<String>,
     /// Number of actors affected by reload (BT-266)
     affected_actors: Option<u32>,
     /// Number of actors that failed code migration (BT-266)
@@ -863,6 +867,115 @@ pub fn run(
                             }
                             continue;
                         }
+                        // BT-724: :show-codegen / :sc command
+                        ":show-codegen" | ":sc" => {
+                            eprintln!("Usage: :show-codegen <expression>");
+                            continue;
+                        }
+                        _ if line.starts_with(":show-codegen ") || line.starts_with(":sc ") => {
+                            let code = extract_command_arg(line, ":show-codegen ", Some(":sc "));
+                            if code.is_empty() {
+                                eprintln!("Usage: :show-codegen <expression>");
+                                continue;
+                            }
+                            match client.show_codegen(code) {
+                                Ok(response) => {
+                                    if response.is_error() {
+                                        if let Some(msg) = response.error_message() {
+                                            eprintln!("{}", display::format_error(msg));
+                                        }
+                                    } else if let Some(ref core) = response.core_erlang {
+                                        display::display_codegen(core);
+                                    }
+                                    if !response.is_error()
+                                        && response.core_erlang.is_none()
+                                        && response.warnings.is_none()
+                                    {
+                                        println!("No code generated.");
+                                    }
+                                    if let Some(ref warns) = response.warnings {
+                                        for w in warns {
+                                            eprintln!(
+                                                "{}",
+                                                color::paint(
+                                                    color::YELLOW,
+                                                    &format!("Warning: {w}")
+                                                )
+                                            );
+                                        }
+                                    }
+                                }
+                                Err(e) => eprintln!("Error: {e}"),
+                            }
+                            continue;
+                        }
+                        // BT-724: :test / :t command
+                        ":test" | ":t" => {
+                            match client.test_all() {
+                                Ok(response) => {
+                                    if response.is_error() {
+                                        if let Some(msg) = response.error_message() {
+                                            eprintln!("{}", display::format_error(msg));
+                                        }
+                                    } else if let Some(ref results) = response.results {
+                                        display::display_test_results(results);
+                                    } else {
+                                        println!("No test classes found.");
+                                    }
+                                }
+                                Err(e) => eprintln!("Error: {e}"),
+                            }
+                            continue;
+                        }
+                        _ if line.starts_with(":test ") || line.starts_with(":t ") => {
+                            let class_name = extract_command_arg(line, ":test ", Some(":t "));
+                            if class_name.is_empty() {
+                                eprintln!("Usage: :test <ClassName>");
+                                continue;
+                            }
+                            match client.test_class(class_name) {
+                                Ok(response) => {
+                                    if response.is_error() {
+                                        if let Some(msg) = response.error_message() {
+                                            eprintln!("{}", display::format_error(msg));
+                                        }
+                                    } else if let Some(ref results) = response.results {
+                                        display::display_test_results(results);
+                                    } else {
+                                        println!("No tests found for class {class_name}.");
+                                    }
+                                }
+                                Err(e) => eprintln!("Error: {e}"),
+                            }
+                            continue;
+                        }
+                        // BT-724: :info / :i command
+                        ":info" | ":i" => {
+                            eprintln!("Usage: :info <symbol>");
+                            continue;
+                        }
+                        _ if line.starts_with(":info ") || line.starts_with(":i ") => {
+                            let symbol = extract_command_arg(line, ":info ", Some(":i "));
+                            if symbol.is_empty() {
+                                eprintln!("Usage: :info <symbol>");
+                                continue;
+                            }
+                            match client.info(symbol) {
+                                Ok(response) => {
+                                    if response.is_error() {
+                                        if let Some(msg) = response.error_message() {
+                                            eprintln!("{}", display::format_error(msg));
+                                        }
+                                    } else if let Some(ref info) = response.info {
+                                        display::display_info(info);
+                                    } else {
+                                        println!("No information available for symbol {symbol}.");
+                                    }
+                                }
+                                Err(e) => eprintln!("Error: {e}"),
+                            }
+                            continue;
+                        }
                         _ => {}
                     }
 
@@ -883,6 +996,9 @@ pub fn run(
                         "kill" => Some(":kill"),
                         "inspect" => Some(":inspect"),
                         "sessions" => Some(":sessions"),
+                        "test" => Some(":test"),
+                        "info" => Some(":info"),
+                        "show-codegen" => Some(":show-codegen"),
                         _ => None,
                     } {
                         eprintln!(

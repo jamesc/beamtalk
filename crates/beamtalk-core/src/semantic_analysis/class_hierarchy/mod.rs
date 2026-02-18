@@ -446,14 +446,31 @@ impl ClassHierarchy {
         None
     }
 
-    /// Check if a class explicitly overrides `doesNotUnderstand:args:`.
+    /// Check if a class explicitly overrides `doesNotUnderstand:args:` on the instance side.
     ///
     /// Returns true only if the class itself (not an ancestor) defines the method.
-    /// Classes with DNU override accept any message, so type warnings are suppressed.
+    /// Classes with instance-side DNU override accept any instance message.
     #[must_use]
-    pub fn has_dnu_override(&self, class_name: &str) -> bool {
+    pub fn has_instance_dnu_override(&self, class_name: &str) -> bool {
+        self.has_dnu_override_in(class_name, |info| &info.methods)
+    }
+
+    /// Check if a class explicitly overrides `doesNotUnderstand:args:` on the class side.
+    ///
+    /// Returns true only if the class itself (not an ancestor) defines the method.
+    /// Classes with class-side DNU override accept any class message (e.g., `Erlang`).
+    #[must_use]
+    pub fn has_class_dnu_override(&self, class_name: &str) -> bool {
+        self.has_dnu_override_in(class_name, |info| &info.class_methods)
+    }
+
+    fn has_dnu_override_in(
+        &self,
+        class_name: &str,
+        get_methods: impl Fn(&ClassInfo) -> &Vec<MethodInfo>,
+    ) -> bool {
         self.classes.get(class_name).is_some_and(|info| {
-            info.methods.iter().any(|m| {
+            get_methods(info).iter().any(|m| {
                 m.selector.as_str() == "doesNotUnderstand:args:"
                     && m.kind == MethodKind::Primary
                     && m.defined_in.as_str() == class_name
@@ -1877,6 +1894,49 @@ mod tests {
         assert_eq!(
             h.state_field_type("TypedParent", "count"),
             Some(EcoString::from("Integer"))
+        );
+    }
+
+    #[test]
+    fn has_class_dnu_override_detects_erlang() {
+        // Erlang has doesNotUnderstand:args: as a class method.
+        let h = ClassHierarchy::with_builtins();
+        assert!(
+            h.has_class_dnu_override("Erlang"),
+            "Erlang class-side DNU override should be detected"
+        );
+        // Erlang has no instance-side DNU
+        assert!(
+            !h.has_instance_dnu_override("Erlang"),
+            "Erlang should not have instance-side DNU override"
+        );
+    }
+
+    #[test]
+    fn has_instance_dnu_override_detects_erlang_module() {
+        // ErlangModule has doesNotUnderstand:args: as an instance method.
+        let h = ClassHierarchy::with_builtins();
+        assert!(
+            h.has_instance_dnu_override("ErlangModule"),
+            "ErlangModule instance-side DNU override should be detected"
+        );
+        // ErlangModule has no class-side DNU
+        assert!(
+            !h.has_class_dnu_override("ErlangModule"),
+            "ErlangModule should not have class-side DNU override"
+        );
+    }
+
+    #[test]
+    fn has_dnu_override_false_for_normal_class() {
+        let h = ClassHierarchy::with_builtins();
+        assert!(
+            !h.has_instance_dnu_override("Integer"),
+            "Integer should not have instance DNU override"
+        );
+        assert!(
+            !h.has_class_dnu_override("Integer"),
+            "Integer should not have class DNU override"
         );
     }
 }

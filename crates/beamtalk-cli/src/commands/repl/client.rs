@@ -337,4 +337,39 @@ impl ReplClient {
         }
         self.send_request(&req)
     }
+
+    /// Show generated Core Erlang for an expression (BT-724).
+    pub(super) fn show_codegen(&mut self, code: &str) -> Result<ReplResponse> {
+        self.send_request(&serde_json::json!({
+            "op": "show-codegen",
+            "id": protocol::next_msg_id(),
+            "code": code
+        }))
+    }
+
+    /// Run tests for a specific class (BT-724).
+    pub(super) fn test_class(&mut self, class: &str) -> Result<ReplResponse> {
+        self.send_request(&serde_json::json!({
+            "op": "test",
+            "id": protocol::next_msg_id(),
+            "class": class
+        }))
+    }
+
+    /// Run all tests for all loaded `TestCase` classes (BT-724).
+    pub(super) fn test_all(&mut self) -> Result<ReplResponse> {
+        self.send_request(&serde_json::json!({
+            "op": "test-all",
+            "id": protocol::next_msg_id()
+        }))
+    }
+
+    /// Get information about a symbol (BT-724).
+    pub(super) fn info(&mut self, symbol: &str) -> Result<ReplResponse> {
+        self.send_request(&serde_json::json!({
+            "op": "info",
+            "id": protocol::next_msg_id(),
+            "symbol": symbol
+        }))
+    }
 }

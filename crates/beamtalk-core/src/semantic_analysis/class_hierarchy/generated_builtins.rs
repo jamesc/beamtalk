@@ -46,6 +46,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "ProtoObject"
             | "Random"
             | "Reference"
+            | "Regex"
             | "RuntimeError"
             | "Set"
             | "StackFrame"
@@ -859,6 +860,29 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     classes.insert(
+        "Regex".into(),
+        ClassInfo {
+            name: "Regex".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "source".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Regex".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Regex".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Regex".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "from:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Regex".into(), is_sealed: true, return_type: Some("Regex".into()), param_types: vec![Some("String".into())] },
+                MethodInfo { selector: "from:options:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Regex".into(), is_sealed: true, return_type: Some("Regex".into()), param_types: vec![Some("String".into()), Some("List".into())] },
+            ],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
         "RuntimeError".into(),
         ClassInfo {
             name: "RuntimeError".into(),
@@ -1026,6 +1050,13 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "select:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![Some("Block".into())] },
                 MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
                 MethodInfo { selector: "stream".into(), arity: 0, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("Stream".into()), param_types: vec![] },
+                MethodInfo { selector: "matchesRegex:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![None] },
+                MethodInfo { selector: "matchesRegex:options:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![None, Some("List".into())] },
+                MethodInfo { selector: "firstMatch:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String | Nil".into()), param_types: vec![None] },
+                MethodInfo { selector: "allMatches:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![None] },
+                MethodInfo { selector: "replaceRegex:with:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![None, Some("String".into())] },
+                MethodInfo { selector: "replaceAllRegex:with:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![None, Some("String".into())] },
+                MethodInfo { selector: "splitRegex:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![None] },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
             ],
             class_methods: vec![],

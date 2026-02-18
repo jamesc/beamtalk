@@ -17,6 +17,10 @@ pub struct ClassInfo {
     pub name: String,
     /// The superclass name, if any (e.g., `Actor`).
     pub superclass: Option<String>,
+    /// Whether this is a sealed class (cannot be subclassed).
+    pub is_sealed: bool,
+    /// Whether this is an abstract class (cannot be instantiated).
+    pub is_abstract: bool,
     /// The class-level doc comment extracted from source.
     pub doc_comment: Option<String>,
     /// Instance methods defined on the class.
@@ -34,6 +38,8 @@ pub struct MethodInfo {
     /// The method-level doc comment extracted from source.
     pub doc_comment: Option<String>,
     pub line_number: Option<usize>,
+    /// Whether this method is sealed (cannot be overridden).
+    pub is_sealed: bool,
 }
 
 /// Find all `.bt` source files in a path.
@@ -98,12 +104,13 @@ pub(super) fn parse_class_info(root: &Utf8Path, path: &Utf8Path) -> Result<Optio
     let make_method_info = |m: &beamtalk_core::ast::MethodDefinition| {
         let line_number = {
             let offset = m.span.start() as usize;
-            source[..offset].lines().count() + 1
+            source[..offset].lines().count()
         };
         MethodInfo {
             signature: format_signature(&m.selector, &m.parameters),
             doc_comment: m.doc_comment.clone(),
             line_number: Some(line_number),
+            is_sealed: m.is_sealed,
         }
     };
 
@@ -113,6 +120,8 @@ pub(super) fn parse_class_info(root: &Utf8Path, path: &Utf8Path) -> Result<Optio
     Ok(Some(ClassInfo {
         name: class.name.name.to_string(),
         superclass: class.superclass.as_ref().map(|s| s.name.to_string()),
+        is_sealed: class.is_sealed,
+        is_abstract: class.is_abstract,
         doc_comment: class.doc_comment.clone(),
         methods,
         class_methods,
