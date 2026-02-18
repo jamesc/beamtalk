@@ -591,6 +591,42 @@ handle_op(<<"docs">>, Params, Msg, _SessionPid) ->
             end
     end;
 
+handle_op(<<"describe">>, _Params, Msg, _SessionPid) ->
+    %% Capability discovery — returns supported ops, protocol version, and
+    %% server capabilities. No authentication required (read-only metadata).
+    Ops = #{
+        <<"eval">>        => #{<<"params">> => [<<"code">>],
+                               <<"optional">> => [<<"session">>]},
+        <<"complete">>    => #{<<"params">> => [<<"code">>]},
+        <<"info">>        => #{<<"params">> => [<<"symbol">>]},
+        <<"docs">>        => #{<<"params">> => [<<"class">>],
+                               <<"optional">> => [<<"selector">>]},
+        <<"load-file">>   => #{<<"params">> => [<<"path">>]},
+        <<"load-source">> => #{<<"params">> => [<<"source">>]},
+        <<"reload">>      => #{<<"params">> => [<<"module">>],
+                               <<"optional">> => [<<"path">>]},
+        <<"clear">>       => #{<<"params">> => []},
+        <<"bindings">>    => #{<<"params">> => []},
+        <<"sessions">>    => #{<<"params">> => []},
+        <<"clone">>       => #{<<"params">> => []},
+        <<"close">>       => #{<<"params">> => []},
+        <<"actors">>      => #{<<"params">> => []},
+        <<"inspect">>     => #{<<"params">> => [<<"actor">>]},
+        <<"kill">>        => #{<<"params">> => [<<"actor">>]},
+        <<"interrupt">>   => #{<<"params">> => [],
+                               <<"optional">> => [<<"session">>]},
+        <<"modules">>     => #{<<"params">> => []},
+        <<"unload">>      => #{<<"params">> => [<<"module">>]},
+        <<"health">>      => #{<<"params">> => []},
+        <<"describe">>    => #{<<"params">> => []},
+        <<"shutdown">>    => #{<<"params">> => [<<"cookie">>]}
+    },
+    Versions = #{
+        <<"protocol">> => <<"1.0">>,
+        <<"beamtalk">> => <<"0.1.0">>
+    },
+    beamtalk_repl_protocol:encode_describe(Ops, Versions, Msg);
+
 handle_op(<<"health">>, _Params, Msg, _SessionPid) ->
     %% Health probe — returns workspace_id and nonce for stale detection (BT-611).
     %% No authentication required (read-only, equivalent to filesystem info).

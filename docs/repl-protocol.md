@@ -342,6 +342,69 @@ Unload a module from the workspace. Uses `code:soft_purge/1` and `code:delete/1`
 {"id": "msg-031", "error": "module_not_loaded: Counter", "status": ["error"]}
 ```
 
+### Server Operations
+
+#### `describe` — Capability Discovery
+
+Returns the list of supported operations with their parameters, protocol version, and server metadata. Enables tooling to dynamically discover server capabilities without hardcoding the op list. No authentication required.
+
+**Request:**
+```json
+{"op": "describe", "id": "msg-040"}
+```
+
+**Response:**
+```json
+{
+  "id": "msg-040",
+  "ops": {
+    "eval": {"params": ["code"], "optional": ["session"]},
+    "complete": {"params": ["code"]},
+    "info": {"params": ["symbol"]},
+    "docs": {"params": ["class"], "optional": ["selector"]},
+    "describe": {"params": []},
+    "health": {"params": []}
+  },
+  "versions": {"protocol": "1.0", "beamtalk": "0.1.0"},
+  "status": ["done"]
+}
+```
+
+The `ops` map contains every supported operation. Each entry lists required `params` and any `optional` parameters. The `versions` map includes the protocol version and the Beamtalk runtime version.
+
+#### `health` — Health Probe
+
+Returns workspace identity and a nonce for stale-workspace detection. No authentication required.
+
+**Request:**
+```json
+{"op": "health", "id": "msg-041"}
+```
+
+**Response:**
+```json
+{"id": "msg-041", "workspace_id": "abc123", "nonce": "xyz789", "status": ["done"]}
+```
+
+#### `shutdown` — Graceful Shutdown
+
+Initiates graceful OTP supervisor tree shutdown. Requires cookie authentication.
+
+**Request:**
+```json
+{"op": "shutdown", "id": "msg-042", "cookie": "<node-cookie>"}
+```
+
+**Response (success):**
+```json
+{"id": "msg-042", "value": "ok", "status": ["done"]}
+```
+
+**Response (auth failure):**
+```json
+{"id": "msg-042", "error": "auth_error: Invalid cookie", "status": ["done", "error"]}
+```
+
 ## Legacy Format (Backward Compatible)
 
 The server also accepts the legacy format for backward compatibility:
@@ -393,10 +456,10 @@ The protocol is implemented in:
 
 | File | Description |
 |------|-------------|
-| `runtime/apps/beamtalk_runtime/src/beamtalk_repl_protocol.erl` | Protocol encoder/decoder (incl. `output` field) |
-| `runtime/apps/beamtalk_runtime/src/beamtalk_repl_server.erl` | TCP server and request dispatch |
-| `runtime/apps/beamtalk_runtime/src/beamtalk_repl_eval.erl` | Expression evaluation and I/O capture |
-| `runtime/apps/beamtalk_runtime/src/beamtalk_repl_shell.erl` | Session state bridge |
+| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_protocol.erl` | Protocol encoder/decoder (incl. `output` field) |
+| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_server.erl` | TCP server and request dispatch |
+| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_eval.erl` | Expression evaluation and I/O capture |
+| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_shell.erl` | Session state bridge |
 | `crates/beamtalk-cli/src/commands/repl/mod.rs` | Rust CLI client |
 
 ## References
