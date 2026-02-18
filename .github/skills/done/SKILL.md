@@ -40,18 +40,11 @@ When activated, execute this workflow to complete work and push:
    done
    ```
    - If `DOC_ONLY=true`: Skip CI checks entirely (no build/test needed)
-   - If `DOC_ONLY=false`: Run full CI checks:
+   - If `DOC_ONLY=false`: Run fast static checks only (tests should have been run during development):
    ```bash
-   just ci
+   just build && just clippy && just fmt-check
    ```
-   This runs all CI checks (build, clippy, fmt-check, test, test-e2e) that must match exactly what CI runs.
    If any check fails, report the errors and stop.
-
-   Then run coverage and check thresholds:
-   ```bash
-   just coverage
-   ```
-   Report the coverage summary. If coverage drops significantly below the thresholds (70% Rust line, 50% Erlang line), warn the user but don't block the push.
 
 6. **Generate commit message**: Based on the staged diff (`git diff --cached`), create a conventional commit message:
    - Use format: `type: short description BT-{number}` (include issue ID when available)
