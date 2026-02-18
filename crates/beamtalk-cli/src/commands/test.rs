@@ -600,8 +600,11 @@ fn generate_doc_test_eunit_wrapper(
     // Shared Erlang helpers
     erl.push_str(super::test_stdlib::eunit_helper_functions());
 
-    // Single test function with all assertions (stateful: bindings persist)
-    let _ = writeln!(erl, "'{module_name}_test'() ->");
+    // Test generator with timeout wrapper to avoid EUnit's 5s default (BT-729).
+    let _ = writeln!(
+        erl,
+        "'{module_name}_test_'() ->\n    {{timeout, 60, fun() ->"
+    );
     erl.push_str("    Bindings0 = #{},\n");
 
     for (i, (case, eval_mod)) in cases.iter().zip(eval_module_names.iter()).enumerate() {
@@ -650,7 +653,7 @@ fn generate_doc_test_eunit_wrapper(
         }
     }
 
-    erl.push_str("    ok.\n");
+    erl.push_str("    ok\n    end}.\n");
     erl
 }
 

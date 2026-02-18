@@ -1109,6 +1109,9 @@ mod tests {
         assert!(wrapper.contains("-module('arith_tests')."));
         assert!(wrapper.contains("?assertEqual"));
         assert!(wrapper.contains("test_arith_0"));
+        // Verify timeout wrapper is generated (BT-729)
+        assert!(wrapper.contains("_test_()"));
+        assert!(wrapper.contains("timeout, 60"));
     }
 
     #[test]
