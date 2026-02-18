@@ -582,14 +582,10 @@ Build the workspace experience on Phase 0's validated transport. The browser mus
 
 **Frontend complexity cutoff:** Phase 1 is the last phase with vanilla JS. No new JS dependencies (CodeMirror, etc.) after Phase 1. The vanilla JS frontend is intentionally minimal and disposable — it validates the protocol and workspace experience, not the UI technology. Syntax highlighting, pop-out windows, and rich editing wait for Phoenix (Phase 3).
 
-### Phase 2: Live Updates + Authentication (Size: L)
+### Phase 2: Live Updates (Size: M)
 
 - Actor registry notification infrastructure (new: subscribe to spawn/stop events)
 - `actor-spawned` and `actor-stopped` push messages
-- Auto-refreshing Inspector
-- Token-based authentication (workspace generates token on startup, printed to stdout)
-- HTTPS/WSS support (TLS termination or reverse proxy guidance)
-- Bind to `0.0.0.0` when `--web-remote` flag is used
 
 ### Phase 3: Phoenix LiveView IDE (Size: XL)
 
@@ -598,25 +594,28 @@ Build the workspace experience on Phase 0's validated transport. The browser mus
 - Method editor with hot-reload
 - Debugger integration (pause, inspect, resume)
 - Message Timeline visualization
-- PubSub integration for live actor state updates
+- PubSub integration for live actor state updates (auto-refreshing Inspector)
 - Pop-out windows (LiveView naturally supports multi-window via PubSub)
 - Syntax highlighting (CodeMirror or LiveView-native)
+- Token-based authentication (Guardian/phx.gen.auth)
+- HTTPS/WSS support
 
 **Note on Phoenix migration:** Phase 1 keeps frontend complexity minimal — no JS framework, no build toolchain. The Cowboy WebSocket handler and protocol extensions carry over directly into Phoenix; only the HTML/JS frontend is replaced.
 
 ## Implementation Tracking
 
 **Epic:** BT-684
-**Status:** Planned
+**Status:** Done (Phases 0–2 complete; Phase 3 is a separate Phoenix epic)
 
 | Phase | Issue | Title | Size | Status |
 |-------|-------|-------|------|--------|
 | 0 | BT-683 | Migrate REPL transport from TCP to WebSocket with cookie auth | L | Done |
-| 0 | BT-686 | Browser wire check with Transcript push | M | Planned |
-| 1 | BT-687 | Load-source operation and multi-pane browser workspace | L | Blocked by BT-686 |
-| 1 | BT-688 | Browser workspace keyboard shortcuts, completion, and history | M | Blocked by BT-687 |
-| 1 | BT-689 | CLI --web and --web-port flags for browser workspace | S | Blocked by BT-686 |
-| 2 | BT-690 | Actor lifecycle push messages for browser workspace | M | Blocked by BT-687 |
+| 0 | BT-686 | Browser wire check with Transcript push | M | Done |
+| 1 | BT-687 | Load-source operation and multi-pane browser workspace | L | Done |
+| 1 | BT-688 | Browser workspace keyboard shortcuts, completion, and history | M | Done |
+| 1 | BT-689 | CLI --web and --web-port flags for browser workspace | S | Done |
+| 1 | BT-722 | Wire new nREPL ops into browser workspace | M | Done |
+| 2 | BT-690 | Actor lifecycle push messages for browser workspace | M | Done |
 
 ## Migration Path
 
