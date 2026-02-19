@@ -90,8 +90,8 @@ enum Command {
         #[arg(long)]
         persistent: bool,
 
-        /// Stop the node when the REPL exits (ephemeral mode).
-        /// Ephemeral mode ensures the BEAM node is always stopped after the REPL session ends, even if the workspace would otherwise persist.
+        /// Request automatic cleanup of detached workspace on REPL exit (ephemeral mode).
+        /// In detached workspace mode (default, without --foreground), attempts to stop the associated BEAM node when the REPL session ends; failures are logged to stderr.
         #[arg(long, short = 'e')]
         ephemeral: bool,
 
