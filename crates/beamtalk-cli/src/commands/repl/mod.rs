@@ -590,7 +590,7 @@ pub fn run(
     // BEAM child is cleaned up automatically by BeamChildGuard::drop()
     // Clean up BEAM node if in foreground mode
     if let Some(ref guard) = beam_guard_opt {
-        drop(guard);
+        let _ = guard;
     }
 
     // Ephemeral mode: stop workspace node on REPL exit (only in workspace mode)
