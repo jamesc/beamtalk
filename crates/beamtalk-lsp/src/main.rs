@@ -29,11 +29,7 @@ struct Cli {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
-    let default_directive = match cli.verbose {
-        0 => "beamtalk=info",
-        1 => "beamtalk=debug",
-        _ => "beamtalk=trace",
-    };
+    let default_directive = directive_for_verbosity(cli.verbose);
 
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -49,4 +45,24 @@ async fn main() {
 
     let (service, socket) = LspService::new(server::Backend::new);
     Server::new(stdin, stdout, socket).serve(service).await;
+}
+
+fn directive_for_verbosity(v: u8) -> &'static str {
+    match v {
+        0 => "beamtalk=info",
+        1 => "beamtalk=debug",
+        _ => "beamtalk=trace",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn directive_defaults() {
+        assert_eq!(directive_for_verbosity(0), "beamtalk=info");
+        assert_eq!(directive_for_verbosity(1), "beamtalk=debug");
+        assert_eq!(directive_for_verbosity(2), "beamtalk=trace");
+    }
 }
