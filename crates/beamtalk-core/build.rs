@@ -130,6 +130,16 @@ fn generate_builtin_class_methods(dispatch_erl: &Path) {
         .collect::<Vec<_>>()
         .join(" |\n");
 
+    // Guard against empty extraction which would produce invalid Rust like
+    // `matches!(selector, )`. Fail fast with a clear message so the build
+    // author knows to check the Erlang source.
+    if methods.is_empty() {
+        panic!(
+            "No builtin class methods found in {} — ensure class_send() calls exist in the source.",
+            dispatch_erl.display()
+        );
+    }
+
     let code = format!(
         "// Auto-generated from beamtalk_class_dispatch.erl — do not edit manually (BT-722).\n\
          matches!(\n\
