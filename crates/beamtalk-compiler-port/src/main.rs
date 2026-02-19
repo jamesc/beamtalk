@@ -13,6 +13,9 @@
 
 use std::io::{self, Read, Write};
 
+use clap::{ArgAction, Parser};
+use tracing_subscriber::{self, EnvFilter};
+
 use eetf::{Atom, Binary, List, Map, Term};
 
 /// Read a {packet, 4} framed message from stdin.
@@ -608,7 +611,28 @@ fn handle_request(request_term: &Term) -> Term {
     }
 }
 
+#[derive(Debug, Parser)]
+#[command(name = "beamtalk-compiler-port", about = "Beamtalk compiler port")] 
+struct Cli {
+    /// Increase logging verbosity (-v: debug, -vv+: trace)
+    #[arg(short, long, action = ArgAction::Count)]
+    verbose: u8,
+}
+
 fn main() {
+    let cli = Cli::parse();
+    let default_directive = match cli.verbose {
+        0 => "beamtalk=info",
+        1 => "beamtalk=debug",
+        _ => "beamtalk=trace",
+    };
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_directive)),
+        )
+        .with_writer(std::io::stderr)
+        .with_ansi(false)
+        .init();
     let mut stdin = io::stdin().lock();
     let mut stdout = io::stdout().lock();
 

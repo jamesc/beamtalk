@@ -61,9 +61,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Log to stderr (stdout is the MCP stdio transport)
     let default_directive = match args.verbose {
-        0 => "beamtalk_mcp=info",
-        1 => "beamtalk_mcp=debug",
-        _ => "beamtalk_mcp=trace",
+        0 => "beamtalk=info",
+        1 => "beamtalk=debug",
+        _ => "beamtalk=trace",
     };
     tracing_subscriber::fmt()
         .with_env_filter(

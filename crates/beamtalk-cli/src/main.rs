@@ -241,9 +241,9 @@ fn main() -> Result<()> {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"))
         } else {
             let directive = if cli.verbose == 1 {
-                "beamtalk_cli=debug"
+                "beamtalk=debug"
             } else {
-                "beamtalk_cli=trace"
+                "beamtalk=trace"
             };
             tracing_subscriber::EnvFilter::new(directive)
         };
