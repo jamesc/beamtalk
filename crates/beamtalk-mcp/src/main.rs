@@ -30,7 +30,7 @@ mod workspace;
 
 use std::sync::Arc;
 
-use clap::Parser;
+use clap::{ArgAction, Parser};
 use rmcp::{ServiceExt, transport::stdio};
 use tracing_subscriber::{self, EnvFilter};
 
@@ -41,6 +41,10 @@ use tracing_subscriber::{self, EnvFilter};
     about = "MCP server for beamtalk REPL — agent interaction with live objects"
 )]
 struct Args {
+    /// Increase logging verbosity (-v: debug, -vv+: trace)
+    #[arg(short, long, action = ArgAction::Count)]
+    verbose: u8,
+
     /// REPL server port (overrides workspace discovery).
     #[arg(short, long)]
     port: Option<u16>,
@@ -53,16 +57,22 @@ struct Args {
 /// Entry point: parse CLI args, connect to the REPL, and start the MCP server.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
+
     // Log to stderr (stdout is the MCP stdio transport)
+    let default_directive = match args.verbose {
+        0 => "beamtalk_mcp=info",
+        1 => "beamtalk_mcp=debug",
+        _ => "beamtalk_mcp=trace",
+    };
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::from_default_env().add_directive("beamtalk_mcp=info".parse().unwrap()),
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new(default_directive)),
         )
         .with_writer(std::io::stderr)
         .with_ansi(false)
         .init();
-
-    let args = Args::parse();
 
     // Resolve REPL port and cookie
     let (port, cookie) = resolve_port_and_cookie(&args)?;
