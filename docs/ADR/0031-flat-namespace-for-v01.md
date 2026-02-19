@@ -40,11 +40,10 @@ This is an **explicit design decision**, not an oversight:
 
 ```beamtalk
 // All classes are globally visible — no import needed
-Object subclass: Counter [
-  | count |
+Object subclass: Counter
   count => count
   increment => count := count + 1
-]
+
 
 // Reference any class by name
 c := Counter new
@@ -184,9 +183,9 @@ Classes within a package see each other automatically. Cross-package references 
 import json        // Makes JSON class available from the json package
 import http.{Request, Response}  // Selective import
 
-Object subclass: MyApp [
+Object subclass: MyApp
   run => JSON parse: (Request get: "https://api.example.com")
-]
+
 ```
 
 **Semantics:**
@@ -204,20 +203,15 @@ Object subclass: MyApp [
 Top-level classes define module boundaries. Classes nested within them form the module's API. Dependencies are passed as constructor parameters:
 
 ```beamtalk
-Object subclass: DrawingModule [
-  | shapes |
+Object subclass: DrawingModule
 
   class new: aShapeFactory => self basicNew shapes: aShapeFactory
 
-  Object subclass: Circle [
-    | radius |
+  Object subclass: Circle
     area => Float pi * (radius * radius)
-  ]
 
-  Object subclass: Canvas [
+  Object subclass: Canvas
     draw: aShape => "..."
-  ]
-]
 
 // Usage — explicit dependency wiring
 drawing := DrawingModule new: ShapeFactory
