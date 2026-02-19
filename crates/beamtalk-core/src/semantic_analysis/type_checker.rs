@@ -977,22 +977,9 @@ impl TypeChecker {
     }
 
     /// Check if a selector is a built-in class method available on all classes.
+    /// Auto-generated from `beamtalk_class_dispatch.erl` via build.rs (BT-722).
     fn is_builtin_class_method(selector: &str) -> bool {
-        matches!(
-            selector,
-            "new"
-                | "new:"
-                | "spawn"
-                | "spawnWith:"
-                | "methods"
-                | "superclass"
-                | "class_name"
-                | "module_name"
-                | "printString"
-                | "class"
-                | "subclasses"
-                | "allSubclasses"
-        )
+        include!(concat!(env!("OUT_DIR"), "/builtin_class_methods.rs"))
     }
 
     /// Find a similar selector for "did you mean" hints.
