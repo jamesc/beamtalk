@@ -90,6 +90,11 @@ enum Command {
         #[arg(long)]
         persistent: bool,
 
+        /// Request automatic cleanup of detached workspace on REPL exit (ephemeral mode).
+        /// In detached workspace mode (default, without --foreground), attempts to stop the associated BEAM node when the REPL session ends; failures are logged to stderr.
+        #[arg(long, short = 'e')]
+        ephemeral: bool,
+
         /// Maximum idle timeout in seconds before auto-cleanup (default: 14400 = 4 hours)
         /// Can also be set via `BEAMTALK_WORKSPACE_TIMEOUT` environment variable
         #[arg(long)]
@@ -269,6 +274,7 @@ fn main() -> Result<()> {
             foreground,
             workspace,
             persistent,
+            ephemeral,
             timeout,
             no_color,
             bind,
@@ -282,6 +288,7 @@ fn main() -> Result<()> {
             foreground,
             workspace.as_deref(),
             persistent,
+            ephemeral,
             timeout,
             no_color,
             bind.as_deref(),

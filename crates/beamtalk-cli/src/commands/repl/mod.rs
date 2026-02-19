@@ -336,6 +336,12 @@ fn read_erlang_cookie() -> Option<String> {
     }
 }
 
+/// Decide whether ephemeral cleanup should stop a workspace node.
+/// Returns true when ephemeral flag is set and there is no local BEAM child guard (detached workspace).
+pub(crate) fn should_stop_workspace(ephemeral: bool, beam_guard_present: bool) -> bool {
+    ephemeral && !beam_guard_present
+}
+
 /// Start the interactive REPL session.
 ///
 /// Connects to (or spawns) a workspace BEAM node, then enters the
@@ -358,6 +364,7 @@ pub fn run(
     foreground: bool,
     workspace_name: Option<&str>,
     persistent: bool,
+    ephemeral: bool,
     timeout: Option<u64>,
     no_color: bool,
     bind: Option<&str>,
@@ -395,9 +402,10 @@ pub fn run(
     let project_root = workspace::discovery::discover_project_root(&current_dir);
 
     // Choose startup mode: workspace (default) or foreground (debug)
-    let (beam_guard_opt, is_new_workspace, connect_host, connect_port, cookie): (
+    let (beam_guard_opt, is_new_workspace, workspace_id_opt, connect_host, connect_port, cookie): (
         Option<BeamChildGuard>,
         bool,
+        Option<String>,
         String,
         u16,
         String,
@@ -438,6 +446,7 @@ pub fn run(
         (
             Some(BeamChildGuard { child }),
             true,
+            None,
             fg_host,
             actual_port,
             fg_cookie,
@@ -530,6 +539,7 @@ pub fn run(
         (
             None,
             is_new,
+            Some(workspace_id),
             node_info.connect_host().to_string(),
             actual_port,
             ws_cookie,
@@ -584,15 +594,42 @@ pub fn run(
     println!();
 
     // Enter the shared REPL loop (also used by `beamtalk attach`)
-    repl_loop(&mut client, &connect_host, connect_port, &cookie)?;
+    let repl_res = repl_loop(&mut client, &connect_host, connect_port, &cookie);
 
     // BEAM child is cleaned up automatically by BeamChildGuard::drop()
-    // Clean up BEAM node if in foreground mode
-    if let Some(guard) = beam_guard_opt {
-        drop(guard);
+
+    // Ephemeral mode: stop workspace node on REPL exit (only in workspace mode)
+    if should_stop_workspace(ephemeral, beam_guard_opt.is_some()) {
+        if let Some(workspace_id) = workspace_id_opt {
+            if let Err(e) = crate::commands::workspace::stop_workspace(&workspace_id, false) {
+                eprintln!("Warning: failed to stop workspace {workspace_id}: {e}");
+            }
+        }
     }
 
+    repl_res?;
+
     Ok(())
+}
+
+#[cfg(test)]
+mod ephemeral_tests {
+    use super::should_stop_workspace;
+
+    #[test]
+    fn stops_when_ephemeral_and_no_guard() {
+        assert!(should_stop_workspace(true, false));
+    }
+
+    #[test]
+    fn not_stop_when_not_ephemeral() {
+        assert!(!should_stop_workspace(false, false));
+    }
+
+    #[test]
+    fn not_stop_when_guard_present() {
+        assert!(!should_stop_workspace(true, true));
+    }
 }
 
 /// Shared REPL loop used by both `beamtalk repl` and `beamtalk attach`.
