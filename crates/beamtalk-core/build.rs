@@ -133,7 +133,8 @@ fn generate_builtin_class_methods(dispatch_erl: &Path) {
     // Guard against empty extraction which would produce invalid Rust like
     // `matches!(selector, )`. Fail fast with a clear message so the build
     // author knows to check the Erlang source.
-    assert!(!methods.is_empty(),
+    assert!(
+        !methods.is_empty(),
         "No builtin class methods found in {} — ensure class_send() calls exist in the source.",
         dispatch_erl.display()
     );
