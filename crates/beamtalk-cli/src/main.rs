@@ -90,6 +90,11 @@ enum Command {
         #[arg(long)]
         persistent: bool,
 
+        /// Stop the node when the REPL exits (ephemeral mode).
+        /// Ephemeral mode ensures the BEAM node is always stopped after the REPL session ends, even if the workspace would otherwise persist.
+        #[arg(long)]
+        ephemeral: bool,
+
         /// Maximum idle timeout in seconds before auto-cleanup (default: 14400 = 4 hours)
         /// Can also be set via `BEAMTALK_WORKSPACE_TIMEOUT` environment variable
         #[arg(long)]
@@ -269,6 +274,7 @@ fn main() -> Result<()> {
             foreground,
             workspace,
             persistent,
+            ephemeral,
             timeout,
             no_color,
             bind,
@@ -282,6 +288,7 @@ fn main() -> Result<()> {
             foreground,
             workspace.as_deref(),
             persistent,
+            ephemeral,
             timeout,
             no_color,
             bind.as_deref(),

@@ -358,6 +358,7 @@ pub fn run(
     foreground: bool,
     workspace_name: Option<&str>,
     persistent: bool,
+    ephemeral: bool,
     timeout: Option<u64>,
     no_color: bool,
     bind: Option<&str>,
@@ -588,8 +589,19 @@ pub fn run(
 
     // BEAM child is cleaned up automatically by BeamChildGuard::drop()
     // Clean up BEAM node if in foreground mode
-    if let Some(guard) = beam_guard_opt {
+    if let Some(ref guard) = beam_guard_opt {
         drop(guard);
+    }
+
+    // Ephemeral mode: stop workspace node on REPL exit (only in workspace mode)
+    if ephemeral && beam_guard_opt.is_none() {
+        // Use the workspace_id from above (only available in workspace mode)
+        if let Some(workspace_id) = if foreground { None } else {
+            // Recompute workspace_id for current project_root and workspace_name
+            workspace::workspace_id_for_project(&project_root, workspace_name).ok()
+        } {
+            let _ = crate::commands::workspace::stop_workspace(&workspace_id, false);
+        }
     }
 
     Ok(())
