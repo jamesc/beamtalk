@@ -51,6 +51,19 @@ impl ProtocolClient {
         cookie: &str,
         read_timeout: Option<Duration>,
     ) -> Result<Self> {
+        // Delegate to connect_with_resume with no resume requested.
+        Self::connect_with_resume(host, port, cookie, read_timeout, None)
+    }
+
+    /// Connect with optional session resume. If `resume` is Some(session_id),
+    /// the auth handshake will request session resumption on the server side.
+    pub fn connect_with_resume(
+        host: &str,
+        port: u16,
+        cookie: &str,
+        read_timeout: Option<Duration>,
+        resume: Option<&str>,
+    ) -> Result<Self> {
         let addr = format!("{host}:{port}");
         let tcp_stream = TcpStream::connect_timeout(
             &addr.parse().into_diagnostic()?,
@@ -80,8 +93,14 @@ impl ProtocolClient {
             _ => return Err(miette!("Unexpected pre-auth message: {auth_required}")),
         }
 
-        // ADR 0020: Cookie handshake — first message must be auth
-        let auth_msg = serde_json::json!({"type": "auth", "cookie": cookie});
+        // Build auth message with optional resume field
+        let mut auth_map = serde_json::Map::new();
+        auth_map.insert("type".to_string(), serde_json::Value::String("auth".to_string()));
+        auth_map.insert("cookie".to_string(), serde_json::Value::String(cookie.to_string()));
+        if let Some(res) = resume {
+            auth_map.insert("resume".to_string(), serde_json::Value::String(res.to_string()));
+        }
+        let auth_msg = serde_json::Value::Object(auth_map);
         client.send_only(&auth_msg)?;
 
         // Read auth response
