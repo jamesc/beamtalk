@@ -202,13 +202,19 @@ responds_to(Selector, ClassName) ->
     end.
 
 %% @private
-%% @doc Slow path for responds_to: walk hierarchy checking each class.
+%% @doc Slow path for responds_to: walk hierarchy checking each class's flattened table.
+%%
+%% This is the fallback when try_flattened_lookup fails. It manually walks the
+%% hierarchy at each level, checking the class's flattened methods table.
+%% Returns true if the method is found in any class's flattened table.
 -spec responds_to_slow(selector(), pid()) -> boolean().
 responds_to_slow(Selector, ClassPid) ->
-    case beamtalk_object_class:has_method(ClassPid, Selector) of
-        true ->
+    %% Try this class's flattened table
+    case try_flattened_lookup(ClassPid, Selector) of
+        {ok, _, _} ->
             true;
-        false ->
+        not_found ->
+            %% Not in this class, check superclass
             case beamtalk_object_class:superclass(ClassPid) of
                 none -> false;
                 SuperclassName ->

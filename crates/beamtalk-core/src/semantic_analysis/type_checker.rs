@@ -545,7 +545,12 @@ impl TypeChecker {
 
         // Check if class-side method exists (skip warning for DNU override classes)
         let has_class_method = hierarchy.find_class_method(class_name, selector).is_some();
-        if !has_class_method && !hierarchy.has_class_dnu_override(class_name) {
+        let has_builtin_class_method = Self::is_builtin_class_method(selector);
+
+        if !has_class_method
+            && !has_builtin_class_method
+            && !hierarchy.has_class_dnu_override(class_name)
+        {
             // Also check instance-side (some methods are both)
             if !hierarchy.resolves_selector(class_name, selector) {
                 self.emit_unknown_selector_warning(class_name, selector, span, hierarchy, true);
@@ -969,6 +974,25 @@ impl TypeChecker {
         }
 
         self.diagnostics.push(diag);
+    }
+
+    /// Check if a selector is a built-in class method available on all classes.
+    fn is_builtin_class_method(selector: &str) -> bool {
+        matches!(
+            selector,
+            "new"
+                | "new:"
+                | "spawn"
+                | "spawnWith:"
+                | "methods"
+                | "superclass"
+                | "class_name"
+                | "module_name"
+                | "printString"
+                | "class"
+                | "subclasses"
+                | "allSubclasses"
+        )
     }
 
     /// Find a similar selector for "did you mean" hints.
