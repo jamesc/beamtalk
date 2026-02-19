@@ -19,7 +19,7 @@ use tracing_subscriber::{self, EnvFilter};
 ///
 /// Initialises tracing, creates the LSP service, and serves over stdin/stdout.
 #[derive(Debug, Parser)]
-#[command(name = "beamtalk-lsp", about = "Beamtalk Language Server")] 
+#[command(name = "beamtalk-lsp", about = "Beamtalk Language Server")]
 struct Cli {
     /// Increase logging verbosity (-v: debug, -vv+: trace)
     #[arg(short, long, action = ArgAction::Count)]

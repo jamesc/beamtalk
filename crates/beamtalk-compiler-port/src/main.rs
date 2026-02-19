@@ -612,7 +612,7 @@ fn handle_request(request_term: &Term) -> Term {
 }
 
 #[derive(Debug, Parser)]
-#[command(name = "beamtalk-compiler-port", about = "Beamtalk compiler port")] 
+#[command(name = "beamtalk-compiler-port", about = "Beamtalk compiler port")]
 struct Cli {
     /// Increase logging verbosity (-v: debug, -vv+: trace)
     #[arg(short, long, action = ArgAction::Count)]
