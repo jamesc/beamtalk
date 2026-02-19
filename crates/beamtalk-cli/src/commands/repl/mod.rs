@@ -396,9 +396,10 @@ pub fn run(
     let project_root = workspace::discovery::discover_project_root(&current_dir);
 
     // Choose startup mode: workspace (default) or foreground (debug)
-    let (beam_guard_opt, is_new_workspace, connect_host, connect_port, cookie): (
+    let (beam_guard_opt, is_new_workspace, workspace_id_opt, connect_host, connect_port, cookie): (
         Option<BeamChildGuard>,
         bool,
+        Option<String>,
         String,
         u16,
         String,
@@ -439,6 +440,7 @@ pub fn run(
         (
             Some(BeamChildGuard { child }),
             true,
+            None,
             fg_host,
             actual_port,
             fg_cookie,
@@ -531,6 +533,7 @@ pub fn run(
         (
             None,
             is_new,
+            Some(workspace_id),
             node_info.connect_host().to_string(),
             actual_port,
             ws_cookie,
@@ -588,19 +591,13 @@ pub fn run(
     repl_loop(&mut client, &connect_host, connect_port, &cookie)?;
 
     // BEAM child is cleaned up automatically by BeamChildGuard::drop()
-    // Clean up BEAM node if in foreground mode
-    if let Some(ref guard) = beam_guard_opt {
-        let _ = guard;
-    }
 
     // Ephemeral mode: stop workspace node on REPL exit (only in workspace mode)
     if ephemeral && beam_guard_opt.is_none() {
-        // Use the workspace_id from above (only available in workspace mode)
-        if let Some(workspace_id) = if foreground { None } else {
-            // Recompute workspace_id for current project_root and workspace_name
-            workspace::workspace_id_for_project(&project_root, workspace_name).ok()
-        } {
-            let _ = crate::commands::workspace::stop_workspace(&workspace_id, false);
+        if let Some(workspace_id) = workspace_id_opt {
+            if let Err(e) = crate::commands::workspace::stop_workspace(&workspace_id, false) {
+                eprintln!("Warning: failed to stop workspace {workspace_id}: {e}");
+            }
         }
     }
 

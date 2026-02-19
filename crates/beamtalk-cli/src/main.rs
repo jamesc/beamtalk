@@ -92,7 +92,7 @@ enum Command {
 
         /// Stop the node when the REPL exits (ephemeral mode).
         /// Ephemeral mode ensures the BEAM node is always stopped after the REPL session ends, even if the workspace would otherwise persist.
-        #[arg(long)]
+        #[arg(long, short = 'e')]
         ephemeral: bool,
 
         /// Maximum idle timeout in seconds before auto-cleanup (default: 14400 = 4 hours)
