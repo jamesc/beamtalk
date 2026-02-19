@@ -613,7 +613,7 @@ pub fn run(
 }
 
 #[cfg(test)]
-mod tests {
+mod ephemeral_tests {
     use super::should_stop_workspace;
 
     #[test]
