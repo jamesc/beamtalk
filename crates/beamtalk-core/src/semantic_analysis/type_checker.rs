@@ -545,7 +545,12 @@ impl TypeChecker {
 
         // Check if class-side method exists (skip warning for DNU override classes)
         let has_class_method = hierarchy.find_class_method(class_name, selector).is_some();
-        if !has_class_method && !hierarchy.has_class_dnu_override(class_name) {
+        let has_builtin_class_method = Self::is_builtin_class_method(selector);
+
+        if !has_class_method
+            && !has_builtin_class_method
+            && !hierarchy.has_class_dnu_override(class_name)
+        {
             // Also check instance-side (some methods are both)
             if !hierarchy.resolves_selector(class_name, selector) {
                 self.emit_unknown_selector_warning(class_name, selector, span, hierarchy, true);
@@ -969,6 +974,12 @@ impl TypeChecker {
         }
 
         self.diagnostics.push(diag);
+    }
+
+    /// Check if a selector is a built-in class method available on all classes.
+    /// Auto-generated from `beamtalk_class_dispatch.erl` via build.rs (BT-722).
+    fn is_builtin_class_method(selector: &str) -> bool {
+        include!(concat!(env!("OUT_DIR"), "/builtin_class_methods.rs"))
     }
 
     /// Find a similar selector for "did you mean" hints.
