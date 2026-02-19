@@ -87,7 +87,7 @@ beamtalk-mcp [OPTIONS]
 Options:
   -p, --port <PORT>                  REPL server port (overrides workspace discovery)
   -w, --workspace-id <WORKSPACE_ID>  Workspace ID for port discovery
-  -v, --verbose...                   Increase logging verbosity (-v debug, -vv trace)
+  -v, --verbose...                   Increase logging verbosity (-v debug, -vv+ trace)
   -h, --help                         Print help
 ```
 

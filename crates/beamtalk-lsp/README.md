@@ -10,4 +10,4 @@ Provides IDE features for `.bt` files via the LSP protocol:
 - Diagnostics (errors and warnings)
 - Document symbols (outline)
 
-Usage: Run the LSP server (beamtalk-lsp). Use `-v`/`--verbose` to increase logging to stderr (one `-v` → debug, `-vv` → trace).
+Usage: Run the LSP server (beamtalk-lsp). Use `-v`/`--verbose` to increase logging to stderr (one `-v` → debug, `-vv+` → trace).

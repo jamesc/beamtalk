@@ -5,4 +5,4 @@ from stdin ({packet, 4} framing) and writes ETF-encoded responses to stdout.
 
 See [ADR 0022](../../docs/ADR/0022-embedded-compiler-via-otp-port.md) for architecture details.
 
-Usage: beamtalk-compiler-port reads ETF-framed requests from stdin and writes responses to stdout. Use `-v`/`--verbose` to increase logging to stderr (one `-v` → debug, `-vv` → trace).
+Usage: beamtalk-compiler-port reads ETF-framed requests from stdin and writes responses to stdout. Use `-v`/`--verbose` to increase logging to stderr (one `-v` → debug, `-vv+` → trace).

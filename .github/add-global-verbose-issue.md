@@ -1,4 +1,6 @@
 Title: Add global -v/--verbose and map to beamtalk logging for all CLI binaries
+
+> DRAFT: This file is a local draft used to create Linear issue BT-730; consider moving to the official Linear issue tracker or `.github/skills/` for operational workflows.
 Team: BT
 Assignee: jamesc.000@gmail.com
 Agent State: agent-ready
