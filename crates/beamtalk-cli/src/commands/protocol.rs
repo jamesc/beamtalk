@@ -38,6 +38,12 @@ pub struct ProtocolClient {
     ws: WebSocket<TcpStream>,
     /// Session ID from the server welcome message (BT-666).
     session_id: Option<String>,
+    /// Connection parameters for reconnects.
+    host: String,
+    port: u16,
+    cookie: String,
+    /// Read timeout to reapply on reconnect.
+    read_timeout: Option<Duration>,
 }
 
 impl ProtocolClient {
@@ -84,6 +90,10 @@ impl ProtocolClient {
         let mut client = Self {
             ws,
             session_id: None,
+            host: host.to_string(),
+            port,
+            cookie: cookie.to_string(),
+            read_timeout,
         };
 
         // Read auth-required message (pre-auth, no session yet)
@@ -131,6 +141,17 @@ impl ProtocolClient {
             .map(String::from);
 
         Ok(client)
+    }
+
+    /// Attempt to reconnect the underlying WebSocket and resume the session
+    /// using the last-known session id if present.
+    pub fn reconnect(&mut self) -> Result<()> {
+        // Use stored connection parameters to re-establish connection.
+        let new_client = Self::connect_with_resume(&self.host, self.port, &self.cookie, self.read_timeout, self.session_id.as_deref())?;
+        // Swap in websocket and session id
+        self.ws = new_client.ws;
+        self.session_id = new_client.session_id;
+        Ok(())
     }
 
     /// Get the session ID assigned by the server during connection.
@@ -226,30 +247,51 @@ impl ProtocolClient {
         &mut self,
         request: &serde_json::Value,
     ) -> Result<T> {
-        self.send_only(request)?;
-        loop {
-            let msg = self
-                .ws
-                .read()
-                .map_err(|e| miette!("WebSocket read error: {e}"))?;
-            match msg {
-                Message::Text(text) => {
-                    // Skip push messages (e.g. Transcript, actor lifecycle from ADR 0017)
-                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if parsed.get("push").is_some()
-                            || parsed.get("type").and_then(|v| v.as_str()) == Some("push")
-                        {
-                            continue;
+        // Attempt once, and on communication failure try reconnect + retry once.
+        for attempt in 0..2 {
+            self.send_only(request)?;
+            loop {
+                match self.ws.read() {
+                    Ok(Message::Text(text)) => {
+                        // Skip push messages (e.g. Transcript, actor lifecycle from ADR 0017)
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
+                            if parsed.get("push").is_some()
+                                || parsed.get("type").and_then(|v| v.as_str()) == Some("push")
+                            {
+                                continue;
+                            }
                         }
+                        return serde_json::from_str(&text)
+                            .map_err(|e| miette!("Failed to parse response: {e}\nRaw: {text}"));
                     }
-                    return serde_json::from_str(&text)
-                        .map_err(|e| miette!("Failed to parse response: {e}\nRaw: {text}"));
+                    Ok(Message::Close(_)) => {
+                        if attempt == 0 {
+                            // Try to reconnect and retry once
+                            self.reconnect()?;
+                            break; // retry outer loop
+                        }
+                        return Err(miette!("WebSocket connection closed by server"));
+                    }
+                    Ok(_) => {}
+                    Err(tungstenite::Error::Io(io_err)) => {
+                        if attempt == 0 {
+                            // Attempt reconnect
+                            self.reconnect()?;
+                            break; // retry outer loop
+                        }
+                        return Err(miette!("WebSocket read error: {io_err}"));
+                    }
+                    Err(e) => {
+                        // Other errors
+                        if attempt == 0 {
+                            self.reconnect()?;
+                            break;
+                        }
+                        return Err(miette!("WebSocket read error: {e}"));
+                    }
                 }
-                Message::Close(_) => {
-                    return Err(miette!("WebSocket connection closed by server"));
-                }
-                _ => {}
             }
         }
+        Err(miette!("WebSocket request failed after reconnect"))
     }
 }
