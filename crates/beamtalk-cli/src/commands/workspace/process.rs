@@ -102,12 +102,6 @@ pub fn is_node_running(info: &NodeInfo) -> bool {
 /// Scans all workspace directories since we don't know `workspace_id` here.
 /// Returns `None` if no matching port file found or on read error.
 fn read_port_file_nonce(port: u16) -> Option<String> {
-    #[derive(serde::Deserialize)]
-    struct PortFile {
-        port: u16,
-        nonce: String,
-    }
-
     let home_dir = dirs::home_dir()?;
     let workspaces_root = home_dir.join(".beamtalk").join("workspaces");
 
@@ -122,9 +116,16 @@ fn read_port_file_nonce(port: u16) -> Option<String> {
         let Ok(contents) = std::fs::read_to_string(&port_file_path) else {
             continue;
         };
-        if let Ok(parsed) = serde_json::from_str::<PortFile>(&contents) {
-            if parsed.port == port {
-                return Some(parsed.nonce);
+        // Port file format (BT-611): PORT\nNONCE (two lines of plain text)
+        let mut lines = contents.lines();
+        if let Some(port_line) = lines.next() {
+            if let Ok(file_port) = port_line.trim().parse::<u16>() {
+                if file_port == port {
+                    return lines
+                        .next()
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty());
+                }
             }
         }
     }
@@ -285,14 +286,15 @@ pub fn start_detached_node(
         miette!("Failed to start detached BEAM node: {e}\nIs Erlang/OTP installed?")
     })?;
 
-    // Windows-specific handling (BT-662 fix):
+    // Windows-specific handling (BT-662, BT-727):
     // On Windows, Erlang's -detached flag doesn't work when spawned from Rust Command::spawn().
     // Instead, we omit -detached and use CREATE_NO_WINDOW + CREATE_NEW_PROCESS_GROUP flags
-    // to achieve similar behavior. We must use mem::forget() to prevent Rust from killing
-    // the process when the Child handle is dropped.
+    // to achieve similar behavior. Dropping the Child handle closes the OS handle via
+    // CloseHandle() without terminating the process — the BEAM node continues running.
+    // (Previously used mem::forget which leaked the handle.)
     #[cfg(windows)]
     {
-        std::mem::forget(child);
+        drop(child);
     }
     #[cfg(not(windows))]
     {
@@ -548,6 +550,15 @@ fn build_detached_node_command(
             cmd.env(var, val);
         }
     }
+    // Windows-specific system variables required for reliable BEAM startup (BT-727).
+    // USERPROFILE is the Windows equivalent of HOME; SystemRoot, COMSPEC, PATHEXT,
+    // and APPDATA are needed by Erlang and child processes on Windows.
+    #[cfg(windows)]
+    for var in &["USERPROFILE", "SystemRoot", "COMSPEC", "PATHEXT", "APPDATA"] {
+        if let Ok(val) = std::env::var(var) {
+            cmd.env(var, val);
+        }
+    }
 
     cmd.args(&args)
         .current_dir(project_root)
@@ -765,4 +776,126 @@ pub(super) fn wait_for_epmd_deregistration(node_name: &str, timeout_secs: u64) -
         short_name,
         timeout_secs
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+
+    /// Helper: build a test command and return its env vars and args.
+    fn build_test_command() -> Command {
+        let tmp = std::env::temp_dir();
+        let cookie_file = tmp.join("test_cookie_args");
+        let beam_dir = tmp.join("test_beam");
+        build_detached_node_command(
+            "test_node@localhost",
+            &cookie_file,
+            &beam_dir,
+            &beam_dir,
+            &beam_dir,
+            &beam_dir,
+            &beam_dir,
+            &[],
+            "ok.",
+            &tmp,
+            None,
+        )
+    }
+
+    #[test]
+    fn build_command_clears_env_and_restores_path() {
+        // After env_clear(), PATH should be restored from current process
+        let cmd = build_test_command();
+        let envs: Vec<_> = cmd.get_envs().collect();
+        let has_path = envs.iter().any(|(k, _)| k == &OsStr::new("PATH"));
+        assert!(has_path, "PATH must be in the env allowlist");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn build_command_restores_windows_env_vars() {
+        let cmd = build_test_command();
+        let env_keys: Vec<_> = cmd
+            .get_envs()
+            .map(|(k, _)| k.to_string_lossy().to_string())
+            .collect();
+        for var in &["USERPROFILE", "SystemRoot", "COMSPEC", "PATHEXT", "APPDATA"] {
+            // Only assert presence if the var exists in the current env
+            if std::env::var(var).is_ok() {
+                assert!(
+                    env_keys.contains(&var.to_string()),
+                    "{var} must be in the env allowlist on Windows"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn build_command_includes_eval_arg() {
+        let cmd = build_test_command();
+        let args: Vec<_> = cmd.get_args().collect();
+        assert!(
+            args.contains(&OsStr::new("-eval")),
+            "must include -eval arg"
+        );
+        assert!(
+            args.contains(&OsStr::new("ok.")),
+            "must include the eval command"
+        );
+    }
+
+    #[test]
+    fn read_port_file_nonce_from_plain_text() {
+        // Set up a temp workspace dir with a plain-text port file
+        let home = dirs::home_dir().expect("HOME must be set");
+        let ws_id = format!("test_nonce_{}", std::process::id());
+        let ws_dir = home.join(".beamtalk").join("workspaces").join(&ws_id);
+        std::fs::create_dir_all(&ws_dir).unwrap();
+
+        let port_file = ws_dir.join("port");
+        std::fs::write(&port_file, "12345\nabc123def456\n").unwrap();
+
+        let nonce = read_port_file_nonce(12345);
+        assert_eq!(nonce, Some("abc123def456".to_string()));
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&ws_dir);
+    }
+
+    #[test]
+    fn read_port_file_nonce_wrong_port() {
+        let home = dirs::home_dir().expect("HOME must be set");
+        let ws_id = format!("test_nonce_wrong_{}", std::process::id());
+        let ws_dir = home.join(".beamtalk").join("workspaces").join(&ws_id);
+        std::fs::create_dir_all(&ws_dir).unwrap();
+
+        let port_file = ws_dir.join("port");
+        std::fs::write(&port_file, "12345\nnonce_value\n").unwrap();
+
+        // Looking for a different port should return None
+        let nonce = read_port_file_nonce(54321);
+        assert_eq!(nonce, None);
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&ws_dir);
+    }
+
+    #[test]
+    fn read_port_file_nonce_no_nonce_line() {
+        let home = dirs::home_dir().expect("HOME must be set");
+        let ws_id = format!("test_nonce_none_{}", std::process::id());
+        let ws_dir = home.join(".beamtalk").join("workspaces").join(&ws_id);
+        std::fs::create_dir_all(&ws_dir).unwrap();
+
+        // Port file with only port, no nonce (use unique port to avoid scan collisions)
+        let port_file = ws_dir.join("port");
+        std::fs::write(&port_file, "11111\n").unwrap();
+
+        let nonce = read_port_file_nonce(11111);
+        assert_eq!(nonce, None, "Missing nonce line should return None");
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&ws_dir);
+    }
 }

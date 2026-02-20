@@ -41,9 +41,11 @@ fn workspace_dir(workspace_id: &str) -> Option<PathBuf> {
 }
 
 /// Read the port file for a workspace.
+/// Port file format (BT-611): `PORT\nNONCE` (two lines). Only the port is returned.
 pub fn read_port_file(workspace_id: &str) -> Option<u16> {
     let port_file = workspace_dir(workspace_id)?.join("port");
     let content = std::fs::read_to_string(port_file).ok()?;
+    // Parse only the first line (port number); second line is nonce for stale detection
     content.lines().next()?.trim().parse().ok()
 }
 
@@ -96,6 +98,7 @@ pub fn discover_any_port_and_cookie() -> Option<(u16, String)> {
         if is_dir {
             let port_file = entry.path().join("port");
             if let Ok(content) = std::fs::read_to_string(port_file) {
+                // Parse only the first line (port); second line is nonce (BT-611)
                 if let Some(port) = content
                     .lines()
                     .next()
@@ -188,6 +191,21 @@ mod tests {
 
         let result = read_port_file(&workspace_id);
         assert_eq!(result, Some(9876));
+
+        // Cleanup
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_read_port_file_two_line_format() {
+        let workspace_id = format!("test_mcp_twoln_{}", std::process::id());
+        let dir = workspaces_dir().unwrap().join(&workspace_id);
+        fs::create_dir_all(&dir).unwrap();
+        // BT-727: port file has PORT\nNONCE format; reader must parse only first line
+        fs::write(dir.join("port"), "9876\nabc123nonce\n").unwrap();
+
+        let result = read_port_file(&workspace_id);
+        assert_eq!(result, Some(9876), "Should parse port from first line only");
 
         // Cleanup
         let _ = fs::remove_dir_all(&dir);
