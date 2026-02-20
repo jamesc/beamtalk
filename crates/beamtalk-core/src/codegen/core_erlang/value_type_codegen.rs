@@ -439,6 +439,23 @@ impl CoreErlangGenerator {
                     body_parts.push(Document::Str("    "));
                 }
                 body_parts.push(Document::String(expr_code));
+            } else if Self::is_local_var_assignment(expr) {
+                // BT-744: Local variable assignment — create a proper Core Erlang
+                // let binding so the variable is accessible in subsequent expressions.
+                if let Expression::Assignment { target, value, .. } = expr {
+                    if let Expression::Block(block) = value.as_ref() {
+                        Self::validate_stored_closure(block, format!("{:?}", expr.span()))?;
+                    }
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        let var_name = &id.name;
+                        let core_var = self
+                            .lookup_var(var_name)
+                            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+                        let val_doc = self.expression_doc(value)?;
+                        self.bind_var(var_name, &core_var);
+                        body_parts.push(docvec!["    let ", core_var, " = ", val_doc, " in\n",]);
+                    }
+                }
             } else {
                 // Non-last expressions: wrap in let to sequence side effects
                 let tmp_var = self.fresh_temp_var("seq");
