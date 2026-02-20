@@ -715,7 +715,10 @@ pub(super) fn force_kill_process(pid: u32) -> Result<()> {
             Err(miette!("Failed to kill process {pid}"))
         }
     } else {
-        Err(miette!("Process {pid} not found"))
+        // Process already exited — the goal of ensuring it is not running is achieved.
+        // This is the expected outcome when graceful shutdown succeeds just after a
+        // wait_for_workspace_exit timeout (race: BEAM exits naturally before we SIGKILL).
+        Ok(())
     }
 }
 
