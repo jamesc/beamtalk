@@ -126,57 +126,130 @@ unwrap_class_call({error, Error}) ->
 %% BT-440: For test execution (runAll, run:), spawns in a separate process
 %% to avoid gen_server deadlock.
 %%
-%% Returns {reply, Result, NewState} or {noreply, State} for async test execution.
+%% ADR 0032 Phase 1: Receives local class_methods (not flattened table).
+%% Walks the superclass chain if the method is not found locally.
+%%
+%% Returns {reply, Result, NewState} or test_spawn or {error, not_found}.
 -spec handle_class_method_call(
     selector(), list(), class_name(), atom(),
-    #{selector() => {class_name(), term()}},
+    #{selector() => term()},
     map()
 ) -> {reply, term(), map()} | test_spawn | {error, not_found}.
-handle_class_method_call(Selector, Args, ClassName, Module, FlatClassMethods, ClassVars) ->
-    case maps:find(Selector, FlatClassMethods) of
-        {ok, {DefiningClass, _MethodInfo}} ->
-            %% Resolve the module for the defining class (may differ for inherited methods)
-            DefiningModule = case DefiningClass of
-                ClassName -> Module;
-                _ ->
-                    case beamtalk_class_registry:whereis_class(DefiningClass) of
-                        undefined -> Module;
-                        DefPid ->
-                            try gen_server:call(DefPid, get_module, 5000)
-                            catch _:_ -> Module
-                            end
-                    end
-            end,
-            %% BT-440: For test execution (runAll, run:) inherited from TestCase,
-            %% return a spawn request so the gen_server can handle noreply.
-            case is_test_execution_selector(Selector) andalso
-                 DefiningClass =:= 'TestCase' of
+handle_class_method_call(Selector, Args, ClassName, Module, LocalClassMethods, ClassVars) ->
+    case maps:is_key(Selector, LocalClassMethods) of
+        true ->
+            %% Local class method found — invoke directly.
+            invoke_class_method(Selector, Args, ClassName, Module, ClassName, Module, ClassVars);
+        false ->
+            %% Not found locally — walk the superclass chain for inherited class methods.
+            case find_class_method_in_chain(Selector, ClassName) of
+                {ok, DefiningClass, DefiningModule} ->
+                    invoke_class_method(Selector, Args, ClassName, Module, DefiningClass, DefiningModule, ClassVars);
+                not_found ->
+                    {error, not_found}
+            end
+    end.
+
+%% @private
+%% @doc Invoke a class method (local or inherited), handling test execution specially.
+-spec invoke_class_method(selector(), list(), class_name(), atom(),
+                          class_name(), atom(), map()) ->
+    {reply, term(), map()} | test_spawn.
+invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningModule, ClassVars) ->
+    %% BT-440: For test execution (runAll, run:) inherited from TestCase,
+    %% return a spawn request so the gen_server can handle noreply.
+    case is_test_execution_selector(Selector) andalso DefiningClass =:= 'TestCase' of
+        true ->
+            test_spawn;
+        false ->
+            %% Build class self object for `self` reference in class methods
+            ClassSelf = #beamtalk_object{
+                class = beamtalk_class_registry:class_object_tag(ClassName),
+                class_mod = DefiningModule,
+                pid = self()
+            },
+            FunName = class_method_fun_name(Selector),
+            %% BT-412: Pass class variables; handle {Result, NewClassVars} returns
+            try erlang:apply(DefiningModule, FunName, [ClassSelf, ClassVars | Args]) of
+                {class_var_result, Result, NewClassVars} ->
+                    {reply, {ok, Result}, NewClassVars};
+                Result ->
+                    {reply, {ok, Result}, ClassVars}
+            catch
+                Class:Error:ST ->
+                    ?LOG_ERROR("Class method ~p:~p failed: ~p:~p",
+                                 [ClassName, Selector, Class, Error],
+                                 #{class => ClassName,
+                                   selector => Selector,
+                                   error_class => Class,
+                                   error => Error,
+                                   stacktrace => ST}),
+                    {reply, {error, Error}, ClassVars}
+            end
+    end.
+
+%% @private
+%% @doc Walk the superclass chain to find an inherited class method.
+%%
+%% Uses the ETS hierarchy table for O(1) superclass lookup per level.
+%% Makes gen_server calls to each ancestor to check its local class_methods.
+%% Safe to call from within a gen_server handle_call because we only walk
+%% UP the hierarchy (no circular dependency possible).
+-spec find_class_method_in_chain(selector(), class_name()) ->
+    {ok, class_name(), atom()} | not_found.
+find_class_method_in_chain(Selector, ClassName) ->
+    SuperclassName = superclass_from_ets(ClassName),
+    find_class_method_in_ancestors(Selector, SuperclassName).
+
+-spec find_class_method_in_ancestors(selector(), class_name() | none) ->
+    {ok, class_name(), atom()} | not_found.
+find_class_method_in_ancestors(_Selector, none) ->
+    not_found;
+find_class_method_in_ancestors(Selector, AncestorName) ->
+    case beamtalk_class_registry:whereis_class(AncestorName) of
+        undefined ->
+            not_found;
+        AncestorPid ->
+            %% Query ancestor's local class_methods
+            AncestorClassMethods = try gen_server:call(AncestorPid, get_local_class_methods, 5000)
+                                   catch Class:Reason ->
+                                       ?LOG_WARNING("Class chain walk: failed to query ~p class_methods: ~p:~p",
+                                                    [AncestorName, Class, Reason]),
+                                       #{}
+                                   end,
+            case maps:is_key(Selector, AncestorClassMethods) of
                 true ->
-                    test_spawn;
+                    AncestorModule = try gen_server:call(AncestorPid, module_name, 5000)
+                                     catch Class2:Reason2 ->
+                                         ?LOG_WARNING("Class chain walk: failed to get module for ~p: ~p:~p",
+                                                      [AncestorName, Class2, Reason2]),
+                                         undefined
+                                     end,
+                    case AncestorModule of
+                        undefined ->
+                            %% Class has method in metadata but no module — skip and continue up.
+                            Next = superclass_from_ets(AncestorName),
+                            find_class_method_in_ancestors(Selector, Next);
+                        _ ->
+                            {ok, AncestorName, AncestorModule}
+                    end;
                 false ->
-                    %% Build class self object for `self` reference in class methods
-                    ClassSelf = {beamtalk_object, beamtalk_class_registry:class_object_tag(ClassName), DefiningModule, self()},
-                    FunName = class_method_fun_name(Selector),
-                    %% BT-412: Pass class variables; handle {Result, NewClassVars} returns
-                    try erlang:apply(DefiningModule, FunName, [ClassSelf, ClassVars | Args]) of
-                        {class_var_result, Result, NewClassVars} ->
-                            {reply, {ok, Result}, NewClassVars};
-                        Result ->
-                            {reply, {ok, Result}, ClassVars}
-                    catch
-                        Class:Error:ST ->
-                            ?LOG_ERROR("Class method ~p:~p failed: ~p:~p",
-                                         [ClassName, Selector, Class, Error],
-                                         #{class => ClassName,
-                                           selector => Selector,
-                                           error_class => Class,
-                                           error => Error,
-                                           stacktrace => ST}),
-                            {reply, {error, Error}, ClassVars}
-                    end
-            end;
-        error ->
-            {error, not_found}
+                    Next = superclass_from_ets(AncestorName),
+                    find_class_method_in_ancestors(Selector, Next)
+            end
+    end.
+
+%% @private
+%% @doc Read the superclass name from the ETS hierarchy table (no gen_server call).
+-spec superclass_from_ets(class_name()) -> class_name() | none.
+superclass_from_ets(ClassName) ->
+    case ets:info(beamtalk_class_hierarchy) of
+        undefined -> none;
+        _ ->
+            case ets:lookup(beamtalk_class_hierarchy, ClassName) of
+                [{_, Super}] -> Super;
+                [] -> none
+            end
     end.
 
 %% @doc Convert a class method selector to its module function name.
@@ -197,15 +270,19 @@ is_test_execution_selector(_) -> false.
 %%
 %% Dispatches class query messages asynchronously, resolving or rejecting
 %% the associated Future process.
+%%
+%% ADR 0032 Phase 1: Receives local instance_methods (not flattened table).
+%% The methods response returns local-only selectors; full hierarchy walk
+%% will be done by Behaviour.methods in Phase 2.
 -spec handle_async_dispatch(
     term(), class_name(),
-    #{selector() => {class_name(), term()}},
+    #{selector() => term()},
     class_name() | none, atom()
 ) -> ok.
-handle_async_dispatch({Selector, Args, FuturePid}, ClassName, Flattened, Superclass, Module) ->
+handle_async_dispatch({Selector, Args, FuturePid}, ClassName, InstanceMethods, Superclass, Module) ->
     case {Selector, Args} of
         {methods, []} ->
-            FuturePid ! {resolve, maps:keys(Flattened)};
+            FuturePid ! {resolve, maps:keys(InstanceMethods)};
         {superclass, []} ->
             Resolved = case Superclass of none -> nil; _ -> Superclass end,
             FuturePid ! {resolve, Resolved};
@@ -221,7 +298,7 @@ handle_async_dispatch({Selector, Args, FuturePid}, ClassName, Flattened, Supercl
             FuturePid ! {reject, Error}
     end,
     ok;
-handle_async_dispatch(_Msg, _ClassName, _Flattened, _Superclass, _Module) ->
+handle_async_dispatch(_Msg, _ClassName, _InstanceMethods, _Superclass, _Module) ->
     ok.
 
 %%% ============================================================================

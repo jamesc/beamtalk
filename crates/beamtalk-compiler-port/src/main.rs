@@ -476,6 +476,16 @@ fn handle_compile(request: &Map) -> Term {
         );
     all_diagnostics.extend(primitive_diags);
 
+    // BT-738: Warn when user code shadows a stdlib class name (not for stdlib itself).
+    if !stdlib_mode {
+        let mut stdlib_shadow_diags = Vec::new();
+        beamtalk_core::semantic_analysis::check_stdlib_name_shadowing(
+            &module,
+            &mut stdlib_shadow_diags,
+        );
+        all_diagnostics.extend(stdlib_shadow_diags);
+    }
+
     let (errors, mut warnings) = partition_diagnostics(&all_diagnostics);
 
     if !errors.is_empty() {

@@ -20,6 +20,8 @@ setup() ->
     end.
 
 teardown(_) ->
+    %% Clean up ETS pending load errors table entries (BT-738)
+    try ets:delete_all_objects(beamtalk_pending_load_errors) catch _:_ -> ok end,
     %% Clean up all registered class processes by getting all from pg group
     Members = try
         pg:get_members(beamtalk_classes)
@@ -70,7 +72,8 @@ teardown(_) ->
          beamtalk_class_HierRoot, beamtalk_class_HierMid, beamtalk_class_HierLeaf,
          beamtalk_class_HierOrphan, beamtalk_class_HierParent, beamtalk_class_HierChild,
          beamtalk_class_NewErrorTestClass, beamtalk_class_DoubleWrapTestClass,
-         beamtalk_class_PrimTestInteger]
+         beamtalk_class_PrimTestInteger,
+         beamtalk_class_StdlibShadowTest]
     ),
     %% Clean up ETS hierarchy table entries
     try ets:delete_all_objects(beamtalk_class_hierarchy) catch _:_ -> ok end,
@@ -869,49 +872,45 @@ hierarchy_inherits_from_test_() ->
                  end)]
      end}.
 
-%% BT-510: Test that methods includes inherited methods even with out-of-order registration
+%% ADR 0032 Phase 1: methods/1 returns local-only selectors.
+%% Out-of-order registration no longer affects the methods list;
+%% hierarchy walk happens at dispatch time via beamtalk_dispatch:responds_to/2.
 hierarchy_methods_inherited_test_() ->
     {setup,
      fun setup/0,
      fun teardown/1,
      fun(_) ->
          [
-          %% Register child BEFORE parent — methods should still include inherited
           ?_test(begin
                      {ok, ChildPid} = beamtalk_object_class:start_link('HierChild', #{
                          name => 'HierChild', module => hier_child,
                          superclass => 'HierParent',
                          instance_methods => #{childMethod => #{arity => 0}}
                      }),
-                     %% Before parent registered — only local methods
+                     %% methods/1 returns local-only selectors — never inherited
                      MethodsBefore = beamtalk_object_class:methods(ChildPid),
                      ?assert(lists:member(childMethod, MethodsBefore)),
                      ?assertNot(lists:member(parentMethod, MethodsBefore)),
 
-                     %% Register parent — triggers rebuild_flattened broadcast
+                     %% Register parent
                      {ok, _ParentPid} = beamtalk_object_class:start_link('HierParent', #{
                          name => 'HierParent', module => hier_parent,
                          superclass => none,
                          instance_methods => #{parentMethod => #{arity => 0}}
                      }),
 
-                     %% Wait until rebuild is processed (bounded retry)
-                     WaitForInherited = fun Wait(0) ->
-                                                ?assert(false);
-                                            Wait(N) ->
-                                                M = beamtalk_object_class:methods(ChildPid),
-                                                case lists:member(parentMethod, M) of
-                                                    true -> M;
-                                                    false -> timer:sleep(10), Wait(N - 1)
-                                                end
-                                        end,
-                     MethodsAfter = WaitForInherited(50),
+                     %% methods/1 still returns only local selectors after parent is registered
+                     MethodsAfter = beamtalk_object_class:methods(ChildPid),
                      ?assert(lists:member(childMethod, MethodsAfter)),
-                     ?assert(lists:member(parentMethod, MethodsAfter))
+                     ?assertNot(lists:member(parentMethod, MethodsAfter)),
+
+                     %% Inherited method is found via responds_to (chain walk at dispatch time)
+                     ?assert(beamtalk_dispatch:responds_to(parentMethod, 'HierChild'))
                  end)]
      end}.
 
-%% BT-510: Normal order — parent first, child inherits immediately
+%% ADR 0032 Phase 1: Normal order — parent first, child local-only in methods/1.
+%% Inherited method is visible via responds_to (chain walk), not methods/1.
 hierarchy_methods_normal_order_test_() ->
     {setup,
      fun setup/0,
@@ -929,9 +928,12 @@ hierarchy_methods_normal_order_test_() ->
                          superclass => 'HierParent',
                          instance_methods => #{childMethod => #{arity => 0}}
                      }),
+                     %% methods/1 returns local-only selectors
                      Methods = beamtalk_object_class:methods(ChildPid),
                      ?assert(lists:member(childMethod, Methods)),
-                     ?assert(lists:member(parentMethod, Methods))
+                     ?assertNot(lists:member(parentMethod, Methods)),
+                     %% Inherited method found via responds_to (chain walk)
+                     ?assert(beamtalk_dispatch:responds_to(parentMethod, 'HierChild'))
                  end)]
      end}.
 
@@ -1163,5 +1165,113 @@ new_on_primitive_not_double_wrapped_test_() ->
               #{error := Inner} = CaughtError,
               ?assert(is_record(Inner, beamtalk_error)),
               ?assertEqual(instantiation_error, Inner#beamtalk_error.kind)
+          end)]
+     end}.
+
+%%====================================================================
+%% BT-738: Stdlib class shadowing protection tests
+%%====================================================================
+
+%% Test that update_class returns a structured error when user code tries
+%% to shadow a stdlib class (bt@stdlib@* module → non-stdlib module).
+update_class_stdlib_shadowing_returns_error_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              %% Ensure the pending errors ETS table exists and is clean
+              beamtalk_class_registry:record_pending_load_error('__warmup__', #beamtalk_error{}),
+              ets:delete_all_objects(beamtalk_pending_load_errors),
+
+              %% Register a class with a stdlib module (simulating a loaded stdlib class)
+              ClassInfo = #{
+                  name => 'StdlibShadowTest',
+                  module => 'bt@stdlib@integer',
+                  superclass => none,
+                  instance_methods => #{}
+              },
+              {ok, _Pid} = beamtalk_object_class:start_link('StdlibShadowTest', ClassInfo),
+
+              %% Attempt to update_class with a non-stdlib module (user code shadowing)
+              UserInfo = ClassInfo#{module => 'bt@user_app@integer'},
+              Result = beamtalk_object_class:update_class('StdlibShadowTest', UserInfo),
+
+              %% Must return a structured stdlib_shadowing error
+              ?assertMatch({error, #beamtalk_error{kind = stdlib_shadowing}}, Result),
+
+              %% Error must be recorded in the pending errors ETS table
+              Errors = beamtalk_class_registry:drain_pending_load_errors_by_names(['StdlibShadowTest']),
+              ?assertMatch([{'StdlibShadowTest', #beamtalk_error{kind = stdlib_shadowing}}], Errors)
+          end)]
+     end}.
+
+%% Test that update_class with a stdlib-to-stdlib reload does NOT return an error.
+%% (E.g. hot-reloading the stdlib itself is allowed.)
+update_class_stdlib_to_stdlib_no_error_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              %% Ensure the pending errors ETS table exists and is clean
+              beamtalk_class_registry:record_pending_load_error('__warmup__', #beamtalk_error{}),
+              ets:delete_all_objects(beamtalk_pending_load_errors),
+
+              %% Register a class with a stdlib module
+              ClassInfo = #{
+                  name => 'StdlibShadowTest',
+                  module => 'bt@stdlib@integer',
+                  superclass => none,
+                  instance_methods => #{}
+              },
+              {ok, _Pid} = beamtalk_object_class:start_link('StdlibShadowTest', ClassInfo),
+
+              %% Update with the SAME stdlib module (hot-reload — allowed)
+              NewStdlibInfo = ClassInfo#{module => 'bt@stdlib@integer'},
+              Result = beamtalk_object_class:update_class('StdlibShadowTest', NewStdlibInfo),
+
+              %% Must succeed (ok or warning, but not stdlib_shadowing error)
+              ?assertNotMatch({error, #beamtalk_error{kind = stdlib_shadowing}}, Result),
+
+              %% No pending error should be recorded
+              Errors = beamtalk_class_registry:drain_pending_load_errors_by_names(['StdlibShadowTest']),
+              ?assertEqual([], Errors)
+          end)]
+     end}.
+
+%% Test that update_class with two non-stdlib modules does NOT trigger stdlib
+%% shadowing protection — it only emits a cross-package collision warning (BT-737).
+update_class_non_stdlib_no_shadowing_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              %% Ensure ETS tables are clean
+              beamtalk_class_registry:ensure_class_warnings_table(),
+              ets:delete_all_objects(beamtalk_class_warnings),
+              beamtalk_class_registry:record_pending_load_error('__warmup__', #beamtalk_error{}),
+              ets:delete_all_objects(beamtalk_pending_load_errors),
+
+              %% Register a class with a non-stdlib module
+              ClassInfo = #{
+                  name => 'StdlibShadowTest',
+                  module => 'bt@pkg_a@counter',
+                  superclass => none,
+                  instance_methods => #{}
+              },
+              {ok, _Pid} = beamtalk_object_class:start_link('StdlibShadowTest', ClassInfo),
+
+              %% Update with a different non-stdlib module (cross-package collision)
+              NewInfo = ClassInfo#{module => 'bt@pkg_b@counter'},
+              Result = beamtalk_object_class:update_class('StdlibShadowTest', NewInfo),
+
+              %% Must succeed (returns ok with instance vars) — stdlib shadowing NOT triggered
+              ?assertNotMatch({error, #beamtalk_error{kind = stdlib_shadowing}}, Result),
+
+              %% No pending stdlib error
+              Errors = beamtalk_class_registry:drain_pending_load_errors_by_names(['StdlibShadowTest']),
+              ?assertEqual([], Errors)
           end)]
      end}.

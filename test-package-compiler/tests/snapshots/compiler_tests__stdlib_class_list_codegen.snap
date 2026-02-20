@@ -1,5 +1,6 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 76
 expression: core_erlang
 ---
 module 'stdlib_class_list' ['new'/0, 'new'/1, 'size'/1, 'isEmpty'/1, 'first'/1, 'rest'/1, 'last'/1, 'at:'/2, 'includes:'/2, 'sort'/1, 'sort:'/2, 'reversed'/1, 'unique'/1, 'detect:'/2, 'detect:ifNone:'/3, 'do:'/2, 'collect:'/2, 'select:'/2, 'reject:'/2, 'inject:into:'/3, 'take:'/2, 'drop:'/2, 'flatten'/1, 'flatMap:'/2, 'count:'/2, 'anySatisfy:'/2, 'allSatisfy:'/2, '++'/2, 'from:to:'/3, 'indexOf:'/2, 'eachWithIndex:'/2, 'zip:'/2, 'groupBy:'/2, 'partition:'/2, 'takeWhile:'/2, 'dropWhile:'/2, 'intersperse:'/2, 'add:'/2, 'describe'/1, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0]
@@ -309,11 +310,14 @@ call 'erlang':'++'(Self, [_item30|[]])
         in let _Reg0 = case call 'beamtalk_object_class':'start'('List', ClassInfo0) of
             <{'ok', _Pid0}> when 'true' -> 'ok'
             <{'error', {'already_started', _Existing0}}> when 'true' ->
-                call 'beamtalk_object_class':'update_class'('List', ClassInfo0)
+                let _UpdRes0 = call 'beamtalk_object_class':'update_class'('List', ClassInfo0) in case _UpdRes0 of
+                    <{'ok', _}> when 'true' -> 'ok'
+                    <{'error', _UpdErr0}> when 'true' -> {'error', _UpdErr0}
+                end
             <{'error', _Reason0}> when 'true' -> 'ok'
         end
 
-        in 'ok'
+        in _Reg0
     of RegResult -> RegResult
     catch <CatchType, CatchError, CatchStack> -> 'ok'
 

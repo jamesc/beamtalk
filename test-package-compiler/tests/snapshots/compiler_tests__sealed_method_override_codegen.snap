@@ -1,5 +1,6 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 76
 expression: core_erlang
 ---
 module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0]
@@ -97,7 +98,10 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
         in let _Reg0 = case call 'beamtalk_object_class':'start'('Parent', ClassInfo0) of
             <{'ok', _Pid0}> when 'true' -> 'ok'
             <{'error', {'already_started', _Existing0}}> when 'true' ->
-                call 'beamtalk_object_class':'update_class'('Parent', ClassInfo0)
+                let _UpdRes0 = call 'beamtalk_object_class':'update_class'('Parent', ClassInfo0) in case _UpdRes0 of
+                    <{'ok', _}> when 'true' -> 'ok'
+                    <{'error', _UpdErr0}> when 'true' -> {'error', _UpdErr0}
+                end
             <{'error', _Reason0}> when 'true' -> 'ok'
         end
         in let ClassInfo1 = ~{
@@ -119,7 +123,10 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
         in let _Reg1 = case call 'beamtalk_object_class':'start'('AllowedChild', ClassInfo1) of
             <{'ok', _Pid1}> when 'true' -> 'ok'
             <{'error', {'already_started', _Existing1}}> when 'true' ->
-                call 'beamtalk_object_class':'update_class'('AllowedChild', ClassInfo1)
+                let _UpdRes1 = call 'beamtalk_object_class':'update_class'('AllowedChild', ClassInfo1) in case _UpdRes1 of
+                    <{'ok', _}> when 'true' -> 'ok'
+                    <{'error', _UpdErr1}> when 'true' -> {'error', _UpdErr1}
+                end
             <{'error', _Reason1}> when 'true' -> 'ok'
         end
         in let ClassInfo2 = ~{
@@ -141,11 +148,14 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
         in let _Reg2 = case call 'beamtalk_object_class':'start'('Child', ClassInfo2) of
             <{'ok', _Pid2}> when 'true' -> 'ok'
             <{'error', {'already_started', _Existing2}}> when 'true' ->
-                call 'beamtalk_object_class':'update_class'('Child', ClassInfo2)
+                let _UpdRes2 = call 'beamtalk_object_class':'update_class'('Child', ClassInfo2) in case _UpdRes2 of
+                    <{'ok', _}> when 'true' -> 'ok'
+                    <{'error', _UpdErr2}> when 'true' -> {'error', _UpdErr2}
+                end
             <{'error', _Reason2}> when 'true' -> 'ok'
         end
 
-        in 'ok'
+        in _Reg2
     of RegResult -> RegResult
     catch <CatchType, CatchError, CatchStack> -> 'ok'
 

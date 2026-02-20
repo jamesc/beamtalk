@@ -1,5 +1,6 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 76
 expression: core_erlang
 ---
 module 'method_lookup' ['new'/0, 'new'/1, 'lookupLiteral'/1, 'lookupVariable:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0]
@@ -103,11 +104,14 @@ call 'beamtalk_method_resolver':'resolve'(_cls1, 'getValue')
         in let _Reg0 = case call 'beamtalk_object_class':'start'('MethodLookupTest', ClassInfo0) of
             <{'ok', _Pid0}> when 'true' -> 'ok'
             <{'error', {'already_started', _Existing0}}> when 'true' ->
-                call 'beamtalk_object_class':'update_class'('MethodLookupTest', ClassInfo0)
+                let _UpdRes0 = call 'beamtalk_object_class':'update_class'('MethodLookupTest', ClassInfo0) in case _UpdRes0 of
+                    <{'ok', _}> when 'true' -> 'ok'
+                    <{'error', _UpdErr0}> when 'true' -> {'error', _UpdErr0}
+                end
             <{'error', _Reason0}> when 'true' -> 'ok'
         end
 
-        in 'ok'
+        in _Reg0
     of RegResult -> RegResult
     catch <CatchType, CatchError, CatchStack> -> 'ok'
 
