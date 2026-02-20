@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// String doubled-delimiter escape tests (BT-743)
+// Doubling the delimiter ("") inside a string produces a literal double-quote.
+
+// Single embedded double-quote
+""""
+// => "
+
+// Size of a 1-char string containing `"`
+"""" size
+// => 1
+
+// Embedded quotes in the middle of a string
+"say ""hello"" please"
+// => say "hello" please
+
+// Multiple embedded quotes
+"one "" two "" three"
+// => one " two " three
+
+// String containing two double-quotes
+""""""
+// => ""
