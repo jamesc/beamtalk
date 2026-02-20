@@ -231,7 +231,7 @@ all expressions within that file. Loaded modules also persist for the file's dur
 
 1. Create a new `.bt` file in `tests/e2e/cases/`
 2. Add expressions with `// =>` expected results
-3. Run `cargo test --test e2e` to verify
+3. Run `just test-e2e` to verify
 
 ### Guidelines
 
