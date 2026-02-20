@@ -47,7 +47,13 @@ impl ReplClient {
     /// Reconnect to the REPL backend, attempting to resume the previous session if possible.
     pub(crate) fn reconnect(&mut self) -> Result<()> {
         for attempt in 1..=super::MAX_CONNECT_RETRIES {
-            match ProtocolClient::connect_with_resume(&self.host, self.port, &self.cookie, None, self.session_id.as_deref()) {
+            match ProtocolClient::connect_with_resume(
+                &self.host,
+                self.port,
+                &self.cookie,
+                None,
+                self.session_id.as_deref(),
+            ) {
                 Ok(inner) => {
                     self.inner = inner;
                     self.session_id = self.inner.session_id().map(String::from);
@@ -71,9 +77,7 @@ impl ReplClient {
             Ok(resp) => Ok(resp),
             Err(_e) => {
                 // Try to reconnect and retry once
-                if let Err(re) = self.reconnect() {
-                    return Err(re);
-                }
+                self.reconnect()?;
                 self.inner.send_request::<ReplResponse>(request)
             }
         }

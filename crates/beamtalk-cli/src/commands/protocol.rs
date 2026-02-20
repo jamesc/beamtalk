@@ -61,7 +61,7 @@ impl ProtocolClient {
         Self::connect_with_resume(host, port, cookie, read_timeout, None)
     }
 
-    /// Connect with optional session resume. If `resume` is Some(session_id),
+    /// Connect with optional session resume. If `resume` is `Some(session_id)`,
     /// the auth handshake will request session resumption on the server side.
     pub fn connect_with_resume(
         host: &str,
@@ -105,10 +105,19 @@ impl ProtocolClient {
 
         // Build auth message with optional resume field
         let mut auth_map = serde_json::Map::new();
-        auth_map.insert("type".to_string(), serde_json::Value::String("auth".to_string()));
-        auth_map.insert("cookie".to_string(), serde_json::Value::String(cookie.to_string()));
+        auth_map.insert(
+            "type".to_string(),
+            serde_json::Value::String("auth".to_string()),
+        );
+        auth_map.insert(
+            "cookie".to_string(),
+            serde_json::Value::String(cookie.to_string()),
+        );
         if let Some(res) = resume {
-            auth_map.insert("resume".to_string(), serde_json::Value::String(res.to_string()));
+            auth_map.insert(
+                "resume".to_string(),
+                serde_json::Value::String(res.to_string()),
+            );
         }
         let auth_msg = serde_json::Value::Object(auth_map);
         client.send_only(&auth_msg)?;
@@ -147,7 +156,13 @@ impl ProtocolClient {
     /// using the last-known session id if present.
     pub fn reconnect(&mut self) -> Result<()> {
         // Use stored connection parameters to re-establish connection.
-        let new_client = Self::connect_with_resume(&self.host, self.port, &self.cookie, self.read_timeout, self.session_id.as_deref())?;
+        let new_client = Self::connect_with_resume(
+            &self.host,
+            self.port,
+            &self.cookie,
+            self.read_timeout,
+            self.session_id.as_deref(),
+        )?;
         // Swap in websocket and session id
         self.ws = new_client.ws;
         self.session_id = new_client.session_id;

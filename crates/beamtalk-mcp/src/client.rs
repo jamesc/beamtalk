@@ -229,8 +229,10 @@ impl ReplClient {
                 loop {
                     let response_text = read_text_message(&mut inner.ws).await?;
 
-                    let parsed: serde_json::Value = serde_json::from_str(&response_text)
-                        .map_err(|e| format!("Failed to parse response: {e}\nRaw: {response_text}"))?;
+                    let parsed: serde_json::Value =
+                        serde_json::from_str(&response_text).map_err(|e| {
+                            format!("Failed to parse response: {e}\nRaw: {response_text}")
+                        })?;
 
                     // Intermediate streaming messages lack a `status` field
                     if parsed.get("status").is_some() {
@@ -248,13 +250,12 @@ impl ReplClient {
                     // Communication error — try reconnect once
                     if attempt == 0 {
                         drop(inner); // release lock before reconnecting
-                        let _ = tracing::warn!("Send failed, attempting reconnect: {}", e);
+                        tracing::warn!("Send failed, attempting reconnect: {e}");
                         if let Err(re) = self.reconnect().await {
-                            return Err(format!("Send failed: {}; reconnect failed: {}", e, re));
+                            return Err(format!("Send failed: {e}; reconnect failed: {re}"));
                         }
-                        // Retry loop
-                        continue;
-                    } else {
+                    }
+                    if attempt != 0 {
                         return Err(e);
                     }
                 }
@@ -265,12 +266,12 @@ impl ReplClient {
                     );
                     if attempt == 0 {
                         drop(inner);
-                        tracing::warn!("{} — attempting reconnect", timeout_err);
+                        tracing::warn!("{timeout_err} — attempting reconnect");
                         if let Err(re) = self.reconnect().await {
-                            return Err(format!("{}; reconnect failed: {}", timeout_err, re));
+                            return Err(format!("{timeout_err}; reconnect failed: {re}"));
                         }
-                        continue;
-                    } else {
+                    }
+                    if attempt != 0 {
                         return Err(timeout_err);
                     }
                 }
@@ -888,7 +889,7 @@ mod tests {
             // a missing-class error as a soft skip.
             if let Some(err) = resp.error_message() {
                 if err.contains("Unknown class") {
-                    eprintln!("docs skipped: {}", err);
+                    eprintln!("docs skipped: {err}");
                     return Ok(());
                 }
             }
@@ -1086,8 +1087,13 @@ mod tests {
 
         // Now perform an operation which should trigger reconnect and resume
         let resp = client.bindings().await?;
-        assert!(!resp.is_error(), "bindings should be returned after reconnect");
-        let bindings = resp.bindings.unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+        assert!(
+            !resp.is_error(),
+            "bindings should be returned after reconnect"
+        );
+        let bindings = resp
+            .bindings
+            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
         assert!(
             bindings.get("reconnectTest").is_some(),
             "reconnectTest binding should persist after reconnect: {bindings:?}"
@@ -1095,4 +1101,3 @@ mod tests {
         Ok(())
     }
 }
-

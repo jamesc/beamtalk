@@ -1096,7 +1096,7 @@ pub(crate) fn repl_loop(
                         eprintln!("Communication error: {e}");
                         eprintln!("Attempting to reconnect to REPL backend...");
                         match client.reconnect() {
-                            Ok(_) => {
+                            Ok(()) => {
                                 eprintln!("Reconnected. Retrying evaluation...");
                                 match client.eval_interruptible(&accumulated, &interrupted) {
                                     Ok(response) => {
@@ -1107,7 +1107,8 @@ pub(crate) fn repl_loop(
                                                 if !output.ends_with('\n') {
                                                     println!();
                                                 }
-                                                let _ = std::io::Write::flush(&mut std::io::stdout());
+                                                let _ =
+                                                    std::io::Write::flush(&mut std::io::stdout());
                                             }
                                         }
                                         // Display compilation warnings (BT-407)
