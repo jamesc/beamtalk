@@ -62,7 +62,7 @@ init(Config) ->
     
     %% Extract configuration
     WorkspaceId = maps:get(workspace_id, Config),
-    ProjectPath = maps:get(project_path, Config),
+    ProjectPath = maps:get(project_path, Config, undefined),
     TcpPort = maps:get(tcp_port, Config),
     BindAddr = maps:get(bind_addr, Config, {127, 0, 0, 1}),
     WebPort = maps:get(web_port, Config, undefined),
@@ -108,11 +108,12 @@ init(Config) ->
         ] ++ singleton_child_specs() ++ [
         
         %% Bootstrap worker — sets singleton class variables (ADR 0019 Phase 2)
+        %% and activates compiled project modules (BT-739).
         %% Must start after all singletons but before REPL server accepts connections.
         %% Monitors singleton PIDs and re-sets class vars on restart.
         #{
             id => beamtalk_workspace_bootstrap,
-            start => {beamtalk_workspace_bootstrap, start_link, []},
+            start => {beamtalk_workspace_bootstrap, start_link, [ProjectPath]},
             restart => permanent,
             shutdown => 5000,
             type => worker,

@@ -240,3 +240,100 @@ terminate_ok_test_() ->
               ?assertNot(is_process_alive(BPid))
           end)]
      end}.
+
+%%====================================================================
+%% Tests for project module discovery (BT-739)
+%%====================================================================
+
+%% Test that find_bt_modules_in_dir returns bt@* modules from a directory.
+find_bt_modules_returns_project_modules_test() ->
+    Dir = make_temp_beam_dir([
+        "bt@MyClass.beam",
+        "bt@AnotherClass.beam",
+        "other_module.beam"
+    ]),
+    try
+        Result = beamtalk_workspace_bootstrap:find_bt_modules_in_dir(Dir),
+        ?assertEqual(lists:sort(['bt@AnotherClass', 'bt@MyClass']), lists:sort(Result))
+    after
+        remove_temp_dir(Dir)
+    end.
+
+%% Test that find_bt_modules_in_dir excludes bt@stdlib@* modules.
+find_bt_modules_excludes_stdlib_test() ->
+    Dir = make_temp_beam_dir([
+        "bt@MyClass.beam",
+        "bt@stdlib@String.beam",
+        "bt@stdlib@Integer.beam"
+    ]),
+    try
+        Result = beamtalk_workspace_bootstrap:find_bt_modules_in_dir(Dir),
+        ?assertEqual(['bt@MyClass'], Result)
+    after
+        remove_temp_dir(Dir)
+    end.
+
+%% Test that find_bt_modules_in_dir returns [] for a nonexistent directory.
+find_bt_modules_missing_dir_test() ->
+    Result = beamtalk_workspace_bootstrap:find_bt_modules_in_dir("/nonexistent/path/xyz"),
+    ?assertEqual([], Result).
+
+%% Test that find_bt_modules_in_dir returns [] for an empty directory.
+find_bt_modules_empty_dir_test() ->
+    Dir = make_temp_beam_dir([]),
+    try
+        Result = beamtalk_workspace_bootstrap:find_bt_modules_in_dir(Dir),
+        ?assertEqual([], Result)
+    after
+        remove_temp_dir(Dir)
+    end.
+
+%% Test that find_bt_modules_in_dir ignores non-.beam files.
+find_bt_modules_ignores_non_beam_test() ->
+    Dir = make_temp_beam_dir([
+        "bt@MyClass.beam",
+        "bt@MyClass.erl",
+        "bt@MyClass.app"
+    ]),
+    try
+        Result = beamtalk_workspace_bootstrap:find_bt_modules_in_dir(Dir),
+        ?assertEqual(['bt@MyClass'], Result)
+    after
+        remove_temp_dir(Dir)
+    end.
+
+%% Test that bootstrap starts without error even with no project modules on path.
+bootstrap_starts_with_no_project_modules_test_() ->
+    {setup,
+     fun() -> ensure_runtime() end,
+     fun(_) -> cleanup_all() end,
+     fun(_) ->
+         [?_test(begin
+              {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
+              ?assert(is_process_alive(BPid))
+          end)]
+     end}.
+
+%%====================================================================
+%% Test helpers for temp directories
+%%====================================================================
+
+make_temp_beam_dir(FileNames) ->
+    Dir = filename:join(os:getenv("TMPDIR", "/tmp"),
+                        "beamtalk_bootstrap_test_" ++ integer_to_list(erlang:unique_integer([positive]))),
+    ok = file:make_dir(Dir),
+    lists:foreach(
+        fun(Name) ->
+            file:write_file(filename:join(Dir, Name), <<>>)
+        end,
+        FileNames
+    ),
+    Dir.
+
+remove_temp_dir(Dir) ->
+    Files = case file:list_dir(Dir) of
+        {ok, Fs} -> Fs;
+        _ -> []
+    end,
+    lists:foreach(fun(F) -> file:delete(filename:join(Dir, F)) end, Files),
+    file:del_dir(Dir).
