@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for BT-737 class collision warning test.
+// Defines CollisionTestClass — used to verify that loading this class
+// after it has been registered with a different module atom emits a warning.
+
+Object subclass: CollisionTestClass
+  greet => "hello"

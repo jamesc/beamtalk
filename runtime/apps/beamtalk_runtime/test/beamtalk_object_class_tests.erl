@@ -57,6 +57,7 @@ teardown(_) ->
         end,
         [beamtalk_class_StartLinkTestClass, beamtalk_class_RegistryTestClass,
          beamtalk_class_PgMembershipTestClass, beamtalk_class_DuplicateTestClass,
+         beamtalk_class_CollisionTestClass,
          beamtalk_class_TestClassA, beamtalk_class_TestClassB,
          beamtalk_class_Counter, beamtalk_class_ProtoObject, beamtalk_class_LoggingCounter,
          beamtalk_class_CounterNoMethods,
@@ -73,6 +74,8 @@ teardown(_) ->
     ),
     %% Clean up ETS hierarchy table entries
     try ets:delete_all_objects(beamtalk_class_hierarchy) catch _:_ -> ok end,
+    %% BT-737: Clean up collision warnings table entries
+    try ets:delete_all_objects(beamtalk_class_warnings) catch _:_ -> ok end,
     ok.
 
 %%====================================================================
@@ -1054,6 +1057,70 @@ new_with_non_map_not_double_wrapped_test_() ->
               %% Verify the inner error has the expected fields
               ?assertEqual(type_error, Inner#beamtalk_error.kind),
               ?assertEqual('new:', Inner#beamtalk_error.selector)
+          end)]
+     end}.
+
+%%====================================================================
+%% BT-737: Class Collision Warning Tests
+%%====================================================================
+
+%% Test that update_class with DIFFERENT module emits a warning in ETS.
+update_class_different_module_records_warning_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              %% Ensure warnings table exists
+              beamtalk_class_registry:ensure_class_warnings_table(),
+              ets:delete_all_objects(beamtalk_class_warnings),
+
+              %% Start class with module_a
+              ClassInfo = #{
+                  name => 'DuplicateTestClass',
+                  module => module_a,
+                  superclass => none,
+                  instance_methods => #{}
+              },
+              {ok, _Pid} = beamtalk_object_class:start_link('DuplicateTestClass', ClassInfo),
+
+              %% Call update_class with module_b (cross-package collision)
+              NewInfo = ClassInfo#{module => module_b},
+              {ok, _IVars} = beamtalk_object_class:update_class('DuplicateTestClass', NewInfo),
+
+              %% Warning should be recorded in ETS keyed by class name
+              Warnings = beamtalk_class_registry:drain_class_warnings_by_names(['DuplicateTestClass']),
+              ?assertEqual([{'DuplicateTestClass', module_a, module_b}], Warnings)
+          end)]
+     end}.
+
+%% Test that update_class with SAME module does NOT emit a warning.
+update_class_same_module_no_warning_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              %% Ensure warnings table exists and is clean
+              beamtalk_class_registry:ensure_class_warnings_table(),
+              ets:delete_all_objects(beamtalk_class_warnings),
+
+              %% Start class with same_module
+              ClassInfo = #{
+                  name => 'DuplicateTestClass',
+                  module => same_module,
+                  superclass => none,
+                  instance_methods => #{}
+              },
+              {ok, _Pid} = beamtalk_object_class:start_link('DuplicateTestClass', ClassInfo),
+
+              %% Call update_class with the SAME module (hot reload — no warning)
+              NewInfo = ClassInfo#{instance_methods => #{greet => #{arity => 0}}},
+              {ok, _IVars} = beamtalk_object_class:update_class('DuplicateTestClass', NewInfo),
+
+              %% No warning should be recorded
+              Warnings = beamtalk_class_registry:drain_class_warnings_by_names(['DuplicateTestClass']),
+              ?assertEqual([], Warnings)
           end)]
      end}.
 

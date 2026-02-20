@@ -16,6 +16,7 @@ Planned language features for beamtalk. See [beamtalk-principles.md](beamtalk-pr
 - [Async Message Passing](#async-message-passing)
 - [Pattern Matching](#pattern-matching)
 - [Live Patching](#live-patching)
+- [Namespace and Class Visibility](#namespace-and-class-visibility)
 - [Smalltalk + BEAM Mapping](#smalltalk--beam-mapping)
 - [Tooling](#tooling)
 - [Inspiration Sources](#inspiration-sources)
@@ -625,6 +626,71 @@ Actor subclass: Counter
   increment => self.value := self.value + 1
   getValue => ^self.value
 ```
+
+---
+
+## Namespace and Class Visibility
+
+Beamtalk v0.1 uses a **flat global namespace** (ADR 0031). All classes are globally
+visible — no `import`, `export`, or namespace declaration is needed or available.
+
+### How `:load` works
+
+When you use `:load path/to/file.bt` in the REPL:
+
+1. The file is compiled to a BEAM module named `bt@class_name` (ADR 0016)
+2. The module's `on_load` hook registers each class with the class registry
+3. If a class with the same name already exists (from a previous `:load`), the new
+   definition **hot-reloads** the class — existing actors continue to run with the
+   new code on their next message
+
+```beamtalk
+:load examples/counter.bt
+// => Loaded: Counter
+
+c := Counter spawn
+c increment
+// => 1
+
+// Reloading the same file updates the class silently (same BEAM module)
+:load examples/counter.bt
+// => Loaded: Counter
+```
+
+### Class collision warnings
+
+If two files from **different packages** define the same class name, the BEAM module
+atoms differ (e.g. `bt@counter` vs `bt@other_pkg@counter`), and Beamtalk emits a
+warning to alert you to the collision:
+
+```
+:load my_app/counter.bt
+// => Loaded: Counter
+
+:load other_pkg/counter.bt
+// => Loaded: Counter
+// warning: Class 'Counter' redefined (was bt@counter, now bt@other_pkg@counter)
+```
+
+The second definition wins — the class is hot-reloaded with the new implementation.
+
+### Naming conventions
+
+To avoid collisions, use **package-specific prefixes** for classes that might conflict:
+
+```beamtalk
+// ❌ Too generic — likely to collide with other packages
+Object subclass: Logger ...
+
+// ✓ Package-scoped name — unlikely to collide
+Object subclass: MyAppLogger ...
+```
+
+### v0.2 plan
+
+A `import`/module system is planned for v0.2. Until then, class names must be
+globally unique. See [known-limitations.md](known-limitations.md) and
+[ADR 0031](ADR/0031-flat-namespace-for-v01.md) for details.
 
 ---
 

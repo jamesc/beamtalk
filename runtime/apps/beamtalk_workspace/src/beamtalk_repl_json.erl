@@ -19,7 +19,7 @@
          format_bindings/1, format_loaded/1, format_actors/1,
          format_modules/1, format_docs/1,
          term_to_json/1, format_error_message/1,
-         parse_json/1, encode_reloaded/4]).
+         parse_json/1, encode_reloaded/4, encode_reloaded/5]).
 
 %%% JSON Parsing
 
@@ -179,13 +179,26 @@ format_modules(ModulesWithInfo) ->
 -spec encode_reloaded([map()], non_neg_integer(), [{pid(), term()}],
     beamtalk_repl_protocol:protocol_msg()) -> binary().
 encode_reloaded(Classes, ActorCount, MigrationFailures, Msg) ->
+    encode_reloaded(Classes, ActorCount, MigrationFailures, Msg, []).
+
+%% @doc Encode a reload response with optional class collision warnings.
+%% BT-737: Warnings are surfaced when a reload causes a cross-package class collision.
+-spec encode_reloaded([map()], non_neg_integer(), [{pid(), term()}],
+    beamtalk_repl_protocol:protocol_msg(), [binary()]) -> binary().
+encode_reloaded(Classes, ActorCount, MigrationFailures, Msg, Warnings) ->
     ClassNames = [list_to_binary(maps:get(name, C, "")) || C <- Classes],
     Base = beamtalk_repl_protocol:base_response(Msg),
     FailureCount = length(MigrationFailures),
-    jsx:encode(Base#{<<"classes">> => ClassNames,
-                     <<"affected_actors">> => ActorCount,
-                     <<"migration_failures">> => FailureCount,
-                     <<"status">> => [<<"done">>]}).
+    Full = Base#{<<"classes">> => ClassNames,
+                 <<"affected_actors">> => ActorCount,
+                 <<"migration_failures">> => FailureCount,
+                 <<"status">> => [<<"done">>]},
+    jsx:encode(maybe_add_warnings_reloaded(Full, Warnings)).
+
+%% @private
+-spec maybe_add_warnings_reloaded(map(), [binary()]) -> map().
+maybe_add_warnings_reloaded(Map, []) -> Map;
+maybe_add_warnings_reloaded(Map, Warnings) -> Map#{<<"warnings">> => Warnings}.
 
 %%% Term-to-JSON Conversion
 

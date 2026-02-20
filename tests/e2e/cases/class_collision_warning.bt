@@ -1,0 +1,45 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for class redefinition collision warnings (BT-737, ADR 0031)
+//
+// When a class is redefined from a different BEAM module (cross-package collision),
+// the REPL should emit a warning in the load response.
+// Same-module hot-reload should NOT produce a warning.
+
+// ===========================================================================
+// CROSS-MODULE COLLISION WARNING
+// ===========================================================================
+//
+// Register CollisionTestClass with a fake "other package" module atom
+// (simulating a different package's class), then load the fixture that
+// compiles to module bt@collision_test_class.
+// The module mismatch triggers a collision warning.
+
+ci := #{#module => #fake_other_pkg_collision_test}
+// => _
+
+Erlang beamtalk_object_class start: #CollisionTestClass with: ci
+// => _
+
+// Loading the fixture now triggers update_class with module bt@collision_test_class
+// (different from fake_other_pkg_collision_test) => warning emitted
+:load tests/e2e/fixtures/collision_test_class.bt
+// => WARNING: 'CollisionTestClass' redefined
+
+// The class is still functional after the reload
+CollisionTestClass new greet
+// => hello
+
+// ===========================================================================
+// SAME-MODULE HOT-RELOAD — NO WARNING
+// ===========================================================================
+//
+// Loading the same file again (same module bt@collision_test_class) should
+// NOT produce a collision warning.  The result is just "Loaded: ...".
+
+:load tests/e2e/fixtures/collision_test_class.bt
+// => Loaded: CollisionTestClass
+
+CollisionTestClass new greet
+// => hello

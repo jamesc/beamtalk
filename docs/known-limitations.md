@@ -6,11 +6,16 @@ Beamtalk is under active development. This page documents features that are **no
 
 ### No Module or Import System
 
-All classes live in a flat global namespace. There is no `import`, `export`, or namespace syntax. Name collisions between user code and stdlib are possible.
+Beamtalk v0.1 uses a **flat global namespace**: all classes are globally visible with no `import`, `export`, or namespace syntax. This is an explicit design decision documented in [ADR 0031](ADR/0031-flat-namespace-for-v01.md).
 
-**Workaround:** Use distinctive class names to avoid collisions with stdlib classes.
+- Class names must be unique across all loaded packages
+- When two packages define the same class name, the second `:load` hot-reloads the class and emits a warning: `Class 'X' redefined (was old_module, now new_module)`
+- ADR 0016 prevents Erlang-level module collisions under the hood via `bt@package@class` naming
+- A module/import system is planned for v0.2 (see [BT-714](https://linear.app/beamtalk/issue/BT-714))
 
-**Tracking:** [BT-714](https://linear.app/beamtalk/issue/BT-714)
+**Workaround:** Use distinctive, package-specific class names to avoid collisions (e.g. `MyAppCounter` instead of `Counter`).
+
+**References:** [ADR 0031](ADR/0031-flat-namespace-for-v01.md), [BT-714](https://linear.app/beamtalk/issue/BT-714)
 
 ### No `try`/`catch` Keywords
 
