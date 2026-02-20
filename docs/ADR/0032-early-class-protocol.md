@@ -1,7 +1,7 @@
 # ADR 0032: Early Class Protocol — Behaviour and Class in Beamtalk Stdlib
 
 ## Status
-Proposed (2026-02-20)
+Accepted (2026-02-20)
 
 ## Context
 
@@ -649,6 +649,16 @@ This change is intentional — the atom return was a bug, inconsistent with `Cou
 ### Breaking Change: `methods` Includes Inherited
 
 The `methods` selector on class objects already returned flattened (inherited) selectors, so this is not a behavioral change. The new `localMethods` selector provides the local-only behavior that was previously unavailable.
+
+## Implementation Tracking
+
+**Epic:** [BT-731](https://linear.app/beamtalk/issue/BT-731) — Early Class Protocol
+**Issues:**
+- BT-732: Wire Check — Dispatch Fallthrough Proof (S)
+- BT-733: Remove Flattened Method Table (M)
+- BT-734: Bootstrap Intrinsics and Stdlib Behaviour/Class (L)
+- BT-735: Cleanup — Consolidate Duplicate Dispatch Paths (M)
+**Status:** Planned
 
 ## References
 - Related ADRs: [ADR 0005](0005-beam-object-model-pragmatic-hybrid.md) (Object Model), [ADR 0006](0006-unified-method-dispatch.md) (Unified Dispatch), [ADR 0007](0007-compilable-stdlib-with-primitive-injection.md) (Compilable Stdlib), [ADR 0013](0013-class-variables-class-methods-instantiation.md) (Virtual Metaclasses), [ADR 0015](0015-repl-error-objects-and-exception-hierarchy.md) (Error Hierarchy — new intrinsics must use `beamtalk_error:raise/1`)
