@@ -663,7 +663,7 @@ The `methods` selector on class objects already returned flattened (inherited) s
 ## References
 - Related ADRs: [ADR 0005](0005-beam-object-model-pragmatic-hybrid.md) (Object Model), [ADR 0006](0006-unified-method-dispatch.md) (Unified Dispatch), [ADR 0007](0007-compilable-stdlib-with-primitive-injection.md) (Compilable Stdlib), [ADR 0013](0013-class-variables-class-methods-instantiation.md) (Virtual Metaclasses), [ADR 0015](0015-repl-error-objects-and-exception-hierarchy.md) (Error Hierarchy — new intrinsics must use `beamtalk_error:raise/1`)
 - Design docs: [design-metaprogramming.md](../internal/design-metaprogramming.md), [design-self-as-object.md](../internal/design-self-as-object.md)
-- Fixed bugs: BT-721 (respondsTo: for inherited methods), BT-510 (out-of-order class loading)
+- Fixed bugs: BT-721 (respondsTo: for inherited methods), BT-510 (out-of-order class loading), BT-734 (follow-up: runtime dispatch/intrinsics)
 - Pharo sources: [Behavior.class.st](https://github.com/pharo-project/pharo/blob/Pharo12/src/Kernel-CodeModel/Behavior.class.st), [Class.class.st](https://github.com/pharo-project/pharo/blob/Pharo12/src/Kernel-CodeModel/Class.class.st), [Metaclass.class.st](https://github.com/pharo-project/pharo/blob/Pharo12/src/Kernel-CodeModel/Metaclass.class.st)
 - [Pharo Reflective Core Booklet](https://books.pharo.org/booklet-ReflectiveCore/)
 - [Smalltalk-80 Blue Book, Chapter 5](http://stephane.ducasse.free.fr/FreeBooks/BlueBook/Bluebook.pdf)
