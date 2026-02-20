@@ -44,6 +44,17 @@ pub use pattern_bindings::extract_pattern_bindings;
 pub use scope::BindingKind;
 pub use type_checker::{InferredType, TypeChecker, TypeMap, infer_types};
 
+/// BT-738: Warn when a user-defined class name shadows a stdlib built-in.
+///
+/// Must NOT be called for stdlib compilation (`stdlib_mode = true`). Call
+/// this alongside `validate_primitives`, guarded by `!options.stdlib_mode`.
+pub fn check_stdlib_name_shadowing(
+    module: &Module,
+    diagnostics: &mut Vec<crate::source_analysis::Diagnostic>,
+) {
+    validators::check_stdlib_name_shadowing(module, diagnostics);
+}
+
 /// Result of semantic analysis.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnalysisResult {

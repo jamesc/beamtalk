@@ -747,6 +747,17 @@ pub fn compile_source_with_bindings(
     let analysis_result = beamtalk_core::semantic_analysis::analyse(&module);
     diagnostics.extend(analysis_result.diagnostics);
 
+    // BT-738: Warn when user code shadows a stdlib class name.
+    // Only applies to non-stdlib compilation (stdlib defines these names legitimately).
+    if !options.stdlib_mode {
+        let mut stdlib_shadow_diags = Vec::new();
+        beamtalk_core::semantic_analysis::check_stdlib_name_shadowing(
+            &module,
+            &mut stdlib_shadow_diags,
+        );
+        diagnostics.extend(stdlib_shadow_diags);
+    }
+
     // Check for errors
     let has_errors = diagnostics
         .iter()

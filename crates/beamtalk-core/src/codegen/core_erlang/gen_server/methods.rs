@@ -777,7 +777,8 @@ impl CoreErlangGenerator {
                         line(),
                         format!("<{{'ok', _Pid{i}}}> when 'true' -> 'ok'"),
                         line(),
-                        // BT-572: On redefinition, update class metadata for hot reload
+                        // BT-572: On redefinition, update class metadata for hot reload.
+                        // BT-738: Normalize update_class result so errors propagate from on_load.
                         format!(
                             "<{{'error', {{'already_started', _Existing{i}}}}}> when 'true' ->"
                         ),
@@ -786,9 +787,23 @@ impl CoreErlangGenerator {
                             docvec![
                                 line(),
                                 format!(
-                                    "call 'beamtalk_object_class':'update_class'('{}', ClassInfo{i})",
+                                    "let _UpdRes{i} = call 'beamtalk_object_class':'update_class'('{}', ClassInfo{i})",
                                     class.name.name
                                 ),
+                                format!(" in case _UpdRes{i} of"),
+                                nest(
+                                    INDENT,
+                                    docvec![
+                                        line(),
+                                        format!("<{{'ok', _}}> when 'true' -> 'ok'"),
+                                        line(),
+                                        format!(
+                                            "<{{'error', _UpdErr{i}}}> when 'true' -> {{'error', _UpdErr{i}}}"
+                                        ),
+                                    ]
+                                ),
+                                line(),
+                                "end",
                             ]
                         ),
                         line(),
@@ -801,6 +816,16 @@ impl CoreErlangGenerator {
             class_docs.push(class_doc);
         }
 
+        // BT-738: Use the last _RegN variable as the try-body result so that
+        // {error, ...} from update_class propagates out of on_load. When on_load
+        // returns anything other than 'ok', code:load_binary fails, which lets
+        // the REPL surface a structured stdlib_shadowing error.
+        let last_i = module.classes.len().saturating_sub(1);
+        let final_expr = if module.classes.is_empty() {
+            "'ok'".to_string()
+        } else {
+            format!("_Reg{last_i}")
+        };
         let doc = docvec![
             "'register_class'/0 = fun () ->",
             nest(
@@ -810,7 +835,12 @@ impl CoreErlangGenerator {
                     "try",
                     nest(
                         INDENT,
-                        docvec![Document::Vec(class_docs), "\n", line(), "in 'ok'",]
+                        docvec![
+                            Document::Vec(class_docs),
+                            "\n",
+                            line(),
+                            format!("in {final_expr}"),
+                        ]
                     ),
                 ]
             ),

@@ -449,6 +449,35 @@ fn visit_classvar_access(
     }
 }
 
+/// BT-738: Warn when a user-defined class name matches a stdlib built-in class name.
+///
+/// Stdlib class names are protected at runtime (via `update_class` in the runtime).
+/// This compile-time warning surfaces the conflict earlier, before the BEAM module
+/// even loads. Uses `ClassHierarchy::is_builtin_class` which covers both generated
+/// stdlib classes (from `lib/*.bt`) and runtime-only built-ins like `Future`.
+///
+/// This must NOT be called during stdlib compilation (`stdlib_mode = true`).
+/// Call it alongside `validate_primitives`, guarded by `!options.stdlib_mode`.
+pub fn check_stdlib_name_shadowing(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+    for class in &module.classes {
+        let name = class.name.name.as_str();
+        if ClassHierarchy::is_builtin_class(name) {
+            let mut diag = Diagnostic::warning(
+                format!(
+                    "Class name `{name}` conflicts with a stdlib class. \
+                     Loading will fail because stdlib class names are protected."
+                ),
+                class.name.span,
+            );
+            diag.hint = Some(
+                format!("Choose a different name. `{name}` is a protected stdlib class name.")
+                    .into(),
+            );
+            diagnostics.push(diag);
+        }
+    }
+}
+
 /// BT-631: Warn about empty method bodies.
 ///
 /// Methods declared with `=>` but no body expressions are likely incomplete.

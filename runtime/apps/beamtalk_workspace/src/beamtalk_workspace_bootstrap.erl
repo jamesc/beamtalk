@@ -7,6 +7,11 @@
 %%% starts the singleton actors. Monitors singleton PIDs and re-sets class
 %%% variables when children restart.
 %%%
+%%% Also activates compiled project modules from `_build/dev/ebin/` at startup
+%%% (BT-739). When a project path is provided, scans that directory for
+%%% `bt@*.beam` modules (excluding `bt@stdlib@*`) and calls `register_class/0`
+%%% on each, making them visible in the class registry without requiring `:load`.
+%%%
 %%% Singleton mapping derived from beamtalk_workspace_config:singletons/0.
 %%%
 %%% **DDD Context:** Workspace
@@ -14,8 +19,9 @@
 -module(beamtalk_workspace_bootstrap).
 -behaviour(gen_server).
 
--export([start_link/0]).
--export([init/1, handle_info/2, handle_call/3, handle_cast/2, terminate/2]).
+-export([start_link/0, start_link/1]).
+-export([init/1, handle_continue/2, handle_info/2, handle_call/3, handle_cast/2, terminate/2]).
+-export([find_bt_modules_in_dir/1]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -24,15 +30,30 @@
     monitors = #{} :: #{reference() => {ClassName :: atom(), RegName :: atom()}}
 }).
 
-%% @doc Start the bootstrap worker.
+%% @doc Start the bootstrap worker without project module activation.
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+    start_link(undefined).
+
+%% @doc Start the bootstrap worker.
+%% When ProjectPath is a binary path to a project root, compiled modules from
+%% `{ProjectPath}/_build/dev/ebin/` matching `bt@*` (excluding `bt@stdlib@*`)
+%% are activated after singleton bootstrap. Pass `undefined` to skip activation.
+-spec start_link(binary() | undefined) -> {ok, pid()} | {error, term()}.
+start_link(ProjectPath) ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [ProjectPath], []).
 
 %% @private
-init([]) ->
+init([ProjectPath]) ->
     State = bootstrap_all(#state{}),
-    {ok, State}.
+    %% Defer project module activation to handle_continue so init/1 returns
+    %% promptly and the gen_server is registered before doing I/O.
+    {ok, State, {continue, {activate_project_modules, ProjectPath}}}.
+
+%% @private
+handle_continue({activate_project_modules, ProjectPath}, State) ->
+    activate_project_modules(ProjectPath),
+    {noreply, State}.
 
 %% @private
 handle_info({'DOWN', MonRef, process, _Pid, _Reason}, State) ->
@@ -124,4 +145,76 @@ set_class_variable(ClassName, Obj) ->
     catch
         error:#beamtalk_error{kind = class_not_found} ->
             ?LOG_WARNING("Bootstrap: class not loaded yet", #{class => ClassName})
+    end.
+
+%% @private Activate compiled project modules from _build/dev/ebin/ (BT-739).
+%% Scans `{ProjectPath}/_build/dev/ebin/` for `bt@*.beam` files (excluding
+%% `bt@stdlib@*`), loads each, calls register_class/0, and registers the
+%% module with workspace_meta. Failures are logged but do not abort startup.
+-spec activate_project_modules(binary() | undefined) -> ok.
+activate_project_modules(undefined) ->
+    ok;
+activate_project_modules(ProjectPath) when is_binary(ProjectPath), byte_size(ProjectPath) > 0 ->
+    EbinDir = filename:absname(filename:join([binary_to_list(ProjectPath), "_build", "dev", "ebin"])),
+    _ = code:add_pathz(EbinDir),
+    Modules = find_bt_modules_in_dir(EbinDir),
+    lists:foreach(fun activate_project_module/1, Modules);
+activate_project_modules(_Other) ->
+    ok.
+
+%% @doc Scan a directory for bt@*.beam files that are not stdlib modules.
+%% Returns a list of module atoms. Returns [] for missing or unreadable dirs.
+-spec find_bt_modules_in_dir(string()) -> [module()].
+find_bt_modules_in_dir(Dir) ->
+    case file:list_dir(Dir) of
+        {ok, Files} ->
+            lists:filtermap(fun beam_file_to_project_module/1, Files);
+        {error, _} ->
+            []
+    end.
+
+%% @private Map a filename to a project module atom, or false to skip it.
+-spec beam_file_to_project_module(string()) -> {true, module()} | false.
+beam_file_to_project_module(File) ->
+    case filename:extension(File) of
+        ".beam" ->
+            ModName = filename:rootname(filename:basename(File)),
+            IsProject = lists:prefix("bt@", ModName) andalso
+                        not lists:prefix("bt@stdlib@", ModName),
+            case IsProject of
+                true  -> {true, list_to_atom(ModName)};
+                false -> false
+            end;
+        _ ->
+            false
+    end.
+
+%% @private Ensure a module is loaded, call register_class/0, and track it.
+-spec activate_project_module(module()) -> ok.
+activate_project_module(ModuleName) ->
+    case code:ensure_loaded(ModuleName) of
+        {module, ModuleName} ->
+            try_register_class(ModuleName),
+            beamtalk_workspace_meta:register_module(ModuleName),
+            ?LOG_DEBUG("Bootstrap: activated project module", #{module => ModuleName});
+        {error, Reason} ->
+            ?LOG_WARNING("Bootstrap: failed to load project module",
+                         #{module => ModuleName, reason => Reason})
+    end.
+
+%% @private Call register_class/0 on a module if it exports one.
+-spec try_register_class(module()) -> ok.
+try_register_class(ModuleName) ->
+    case erlang:function_exported(ModuleName, register_class, 0) of
+        true ->
+            try
+                _ = ModuleName:register_class(),
+                ok
+            catch
+                _:Err ->
+                    ?LOG_WARNING("Bootstrap: register_class/0 failed",
+                                 #{module => ModuleName, error => Err})
+            end;
+        false ->
+            ok
     end.

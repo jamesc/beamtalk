@@ -2223,6 +2223,7 @@ fn test_no_class_registration_for_empty_module() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn test_multiple_classes_registration() {
     // BT-218: Test that modules with multiple classes register all of them
     use crate::ast::{ClassDefinition, Identifier, StateDeclaration};
@@ -2331,10 +2332,22 @@ fn test_multiple_classes_registration() {
         "Should call update_class for Logger on already_started. Got:\n{code}"
     );
 
-    // Function should return ok
+    // BT-738: Function should propagate last _RegN result (so errors from update_class surface).
+    // For 2 classes the final expression is `in _Reg1` (last index).
     assert!(
-        code.contains("in 'ok'"),
-        "Should return ok after all registrations. Got:\n{code}"
+        code.contains("in _Reg1"),
+        "Should propagate last _Reg result after all registrations. Got:\n{code}"
+    );
+    // The update_class result is normalized: {ok, _} -> ok, {error, E} -> {error, E}
+    assert!(
+        code.contains(
+            "let _UpdRes0 = call 'beamtalk_object_class':'update_class'('Counter', ClassInfo0)"
+        ),
+        "Should wrap update_class call in let binding. Got:\n{code}"
+    );
+    assert!(
+        code.contains("<{'ok', _}> when 'true' -> 'ok'"),
+        "Should normalize update_class success to ok. Got:\n{code}"
     );
 }
 
