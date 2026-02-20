@@ -871,7 +871,10 @@ mod tests {
         std::fs::create_dir_all(&ws_dir).unwrap();
 
         let port_file = ws_dir.join("port");
-        std::fs::write(&port_file, "12345\nnonce_value\n").unwrap();
+        // Use a distinct port (23456) to avoid racing with read_port_file_nonce_from_plain_text
+        // which also writes port 12345. Both tests scan all workspace dirs, so sharing a port
+        // number causes non-deterministic results depending on directory enumeration order.
+        std::fs::write(&port_file, "23456\nnonce_value\n").unwrap();
 
         // Looking for a different port should return None
         let nonce = read_port_file_nonce(54321);
