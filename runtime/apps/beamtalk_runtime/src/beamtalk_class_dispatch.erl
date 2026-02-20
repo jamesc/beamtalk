@@ -163,8 +163,11 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
             test_spawn;
         false ->
             %% Build class self object for `self` reference in class methods
-            ClassSelf = {beamtalk_object, beamtalk_class_registry:class_object_tag(ClassName),
-                         DefiningModule, self()},
+            ClassSelf = #beamtalk_object{
+                class = beamtalk_class_registry:class_object_tag(ClassName),
+                class_mod = DefiningModule,
+                pid = self()
+            },
             FunName = class_method_fun_name(Selector),
             %% BT-412: Pass class variables; handle {Result, NewClassVars} returns
             try erlang:apply(DefiningModule, FunName, [ClassSelf, ClassVars | Args]) of
