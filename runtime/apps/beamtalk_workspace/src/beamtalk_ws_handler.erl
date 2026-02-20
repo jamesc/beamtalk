@@ -56,10 +56,6 @@ websocket_handle(_Frame, State) ->
     {ok, State}.
 
 %% @doc Handle Erlang messages sent to the handler process.
-websocket_info(shutdown_requested, State) ->
-    ?LOG_INFO("Executing WebSocket-requested shutdown", #{}),
-    init:stop(),
-    {ok, State};
 %% BT-696: Streaming stdout chunk from eval
 websocket_info({eval_out, Chunk}, State = #ws_state{authenticated = true,
                                                      pending_eval = Msg})
@@ -403,7 +399,10 @@ handle_shutdown(Msg, State) ->
             case CookieValid of
                 true ->
                     ?LOG_INFO("Shutdown requested via WebSocket protocol", #{}),
-                    erlang:send_after(100, self(), shutdown_requested),
+                    %% Send to beamtalk_repl_server (a persistent gen_server)
+                    %% instead of self() — the WS handler process dies when
+                    %% the client closes the connection, racing the 100ms timer.
+                    erlang:send_after(100, beamtalk_repl_server, shutdown_requested),
                     Reply = beamtalk_repl_protocol:encode_status(ok, Msg,
                         fun beamtalk_repl_json:term_to_json/1),
                     {[{text, Reply}], State};
