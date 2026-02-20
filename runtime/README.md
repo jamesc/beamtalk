@@ -146,7 +146,7 @@ When running multiple Beamtalk instances in parallel worktrees, each instance us
 - Override with `beamtalk repl --port <port>` or `BEAMTALK_REPL_PORT`
 - Node name defaults to `beamtalk@localhost` unless overridden by `--node` or `BEAMTALK_NODE_NAME`
 
-See [Parallel Development with Worktrees](../AGENTS.md#parallel-development-with-worktrees) for details.
+See [Parallel Development with Worktrees](../docs/agents/expanded.md) for details.
 
 
 ## Integration with Beamtalk Compiler
