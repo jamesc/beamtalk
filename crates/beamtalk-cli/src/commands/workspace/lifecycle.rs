@@ -266,8 +266,8 @@ pub fn stop_workspace(name_or_id: &str, force: bool) -> Result<()> {
                     Ok(()) => {
                         // Wait for the workspace to actually exit.
                         // OTP init:stop() does orderly application teardown which
-                        // can take 10+ seconds under load.
-                        if wait_for_workspace_exit(host, info.port, 15).is_err() {
+                        // can take 10+ seconds under CI load.
+                        if wait_for_workspace_exit(host, info.port, 30).is_err() {
                             // Graceful shutdown acknowledged but process didn't exit
                             // Fall back to force-kill (if PID available)
                             if info.pid == 0 {
