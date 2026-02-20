@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use miette::{IntoDiagnostic, Result, miette};
-use tungstenite::{Message, WebSocket};
+use tungstenite::{Error as WsError, Message, WebSocket};
 
 /// Default connection timeout in milliseconds.
 const CONNECT_TIMEOUT_MS: u64 = 5000;
@@ -26,6 +26,19 @@ static MSG_COUNTER: AtomicU64 = AtomicU64::new(1);
 pub fn next_msg_id() -> String {
     let n = MSG_COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("msg-{n:03}")
+}
+
+/// Check if a tungstenite error is a transport-level failure worth retrying.
+/// Protocol, UTF-8, and capacity errors indicate a message-level problem
+/// that reconnecting won't fix.
+fn is_transport_error(e: &WsError) -> bool {
+    matches!(
+        e,
+        WsError::ConnectionClosed
+            | WsError::AlreadyClosed
+            | WsError::Io(_)
+            | WsError::WriteBufferFull(_)
+    )
 }
 
 /// Low-level JSON-over-WebSocket protocol client (ADR 0020).
@@ -154,19 +167,41 @@ impl ProtocolClient {
 
     /// Attempt to reconnect the underlying WebSocket and resume the session
     /// using the last-known session id if present.
-    pub fn reconnect(&mut self) -> Result<()> {
-        // Use stored connection parameters to re-establish connection.
-        let new_client = Self::connect_with_resume(
+    ///
+    /// Returns `true` if the previous session was successfully resumed,
+    /// `false` if a fresh session was established instead.
+    pub fn reconnect(&mut self) -> Result<bool> {
+        let requested_session = self.session_id.clone();
+        tracing::debug!(
+            host = %self.host,
+            port = self.port,
+            has_session = requested_session.is_some(),
+            "Attempting WebSocket reconnect"
+        );
+        let new_client = match Self::connect_with_resume(
             &self.host,
             self.port,
             &self.cookie,
             self.read_timeout,
-            self.session_id.as_deref(),
-        )?;
+            requested_session.as_deref(),
+        ) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = %e, "Reconnect failed");
+                return Err(e);
+            }
+        };
         // Swap in websocket and session id
         self.ws = new_client.ws;
-        self.session_id = new_client.session_id;
-        Ok(())
+        self.session_id.clone_from(&new_client.session_id);
+        let resumed = requested_session.is_some()
+            && requested_session.as_deref() == new_client.session_id.as_deref();
+        tracing::debug!(
+            session_id = ?self.session_id,
+            resumed,
+            "Reconnect successful"
+        );
+        Ok(resumed)
     }
 
     /// Get the session ID assigned by the server during connection.
@@ -258,13 +293,25 @@ impl ProtocolClient {
     }
 
     /// Send a JSON request and deserialize the response into a typed struct.
+    ///
+    /// On communication failure (send or read), attempts to reconnect and retry
+    /// the request once. **Caution:** if the server processed the request before
+    /// the read failed, retrying will re-execute it. Callers should be aware of
+    /// duplicate-execution risk for mutating operations.
     pub fn send_request<T: serde::de::DeserializeOwned>(
         &mut self,
         request: &serde_json::Value,
     ) -> Result<T> {
-        // Attempt once, and on communication failure try reconnect + retry once.
+        // Attempt once, and on transport failure try reconnect + retry once.
         for attempt in 0..2 {
-            self.send_only(request)?;
+            if let Err(e) = self.send_only(request) {
+                if attempt == 0 {
+                    tracing::debug!("Send failed, attempting reconnect: {e}");
+                    self.reconnect()?;
+                    continue;
+                }
+                return Err(e);
+            }
             loop {
                 match self.ws.read() {
                     Ok(Message::Text(text)) => {
@@ -281,32 +328,26 @@ impl ProtocolClient {
                     }
                     Ok(Message::Close(_)) => {
                         if attempt == 0 {
-                            // Try to reconnect and retry once
                             self.reconnect()?;
                             break; // retry outer loop
                         }
                         return Err(miette!("WebSocket connection closed by server"));
                     }
                     Ok(_) => {}
-                    Err(tungstenite::Error::Io(io_err)) => {
+                    Err(e) if is_transport_error(&e) => {
                         if attempt == 0 {
-                            // Attempt reconnect
                             self.reconnect()?;
                             break; // retry outer loop
                         }
-                        return Err(miette!("WebSocket read error: {io_err}"));
+                        return Err(miette!("WebSocket transport error: {e}"));
                     }
                     Err(e) => {
-                        // Other errors
-                        if attempt == 0 {
-                            self.reconnect()?;
-                            break;
-                        }
-                        return Err(miette!("WebSocket read error: {e}"));
+                        // Non-transport error (protocol, UTF-8, etc.) — no retry
+                        return Err(miette!("WebSocket error: {e}"));
                     }
                 }
             }
         }
-        Err(miette!("WebSocket request failed after reconnect"))
+        unreachable!("send_request loop always returns")
     }
 }
