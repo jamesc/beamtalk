@@ -332,8 +332,18 @@ bootstrap_start_link_with_nonexistent_path_test_() ->
 %% Test helpers for temp directories
 %%====================================================================
 
+get_temp_dir() ->
+    case os:getenv("TMPDIR") of
+        false ->
+            case os:getenv("TEMP") of
+                false -> "/tmp";
+                Temp -> Temp
+            end;
+        TmpDir -> TmpDir
+    end.
+
 make_temp_beam_dir(FileNames) ->
-    Dir = filename:join(os:getenv("TMPDIR", "/tmp"),
+    Dir = filename:join(get_temp_dir(),
                         "beamtalk_bootstrap_test_" ++ integer_to_list(erlang:unique_integer([positive]))),
     ok = file:make_dir(Dir),
     lists:foreach(

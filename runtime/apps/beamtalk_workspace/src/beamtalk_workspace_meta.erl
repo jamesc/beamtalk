@@ -34,7 +34,7 @@
 
 -record(state, {
     workspace_id :: binary(),
-    project_path :: binary(),
+    project_path :: binary() | undefined,
     created_at :: integer(),
     last_activity :: integer(),
     node_name :: atom(),
@@ -158,7 +158,7 @@ loaded_modules() ->
 %% @private
 init(InitialMetadata) ->
     WorkspaceId = maps:get(workspace_id, InitialMetadata),
-    ProjectPath = maps:get(project_path, InitialMetadata),
+    ProjectPath = maps:get(project_path, InitialMetadata, undefined),
     CreatedAt = maps:get(created_at, InitialMetadata),
     ReplPort = maps:get(repl_port, InitialMetadata, undefined),
     Now = erlang:system_time(second),
@@ -388,7 +388,10 @@ persist_metadata_to_disk(State) ->
     %% Build JSON metadata (PIDs as strings, atoms as strings)
     Metadata = #{
         <<"workspace_id">> => State#state.workspace_id,
-        <<"project_path">> => State#state.project_path,
+        <<"project_path">> => case State#state.project_path of
+            undefined -> null;
+            PP -> PP
+        end,
         <<"created_at">> => State#state.created_at,
         <<"last_active">> => State#state.last_activity,
         <<"node_name">> => atom_to_binary(State#state.node_name, utf8),

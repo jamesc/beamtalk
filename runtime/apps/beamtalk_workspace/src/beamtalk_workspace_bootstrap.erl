@@ -155,7 +155,8 @@ set_class_variable(ClassName, Obj) ->
 activate_project_modules(undefined) ->
     ok;
 activate_project_modules(ProjectPath) when is_binary(ProjectPath), byte_size(ProjectPath) > 0 ->
-    EbinDir = filename:join([binary_to_list(ProjectPath), "_build", "dev", "ebin"]),
+    EbinDir = filename:absname(filename:join([binary_to_list(ProjectPath), "_build", "dev", "ebin"])),
+    _ = code:add_pathz(EbinDir),
     Modules = find_bt_modules_in_dir(EbinDir),
     lists:foreach(fun activate_project_module/1, Modules);
 activate_project_modules(_Other) ->
