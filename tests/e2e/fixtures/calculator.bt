@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Calculator - tests local variable bindings in Object subclass method bodies (BT-744)
+
+Object subclass: Calculator
+
+  // Single local variable: assign then read
+  double: n =>
+    result := n * 2
+    result
+
+  // Multiple local variables in sequence
+  compute: x =>
+    doubled := x * 2
+    sum := doubled + 10
+    sum
+
+  // Local variable used in a message send
+  addAndNegate: a to: b =>
+    total := a + b
+    total negated
+
+  // Local variable from a conditional expression
+  absVal: n =>
+    positive := n > 0
+    positive ifTrue: [n] ifFalse: [n negated]
