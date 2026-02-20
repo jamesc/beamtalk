@@ -22,8 +22,11 @@ path = "src/main.rs"
 beamtalk-core = { workspace = true }
 # why: encode/decode Erlang External Term Format for compiler port protocol
 eetf = "0.11"
+# why: CLI argument parsing for -v/--verbose flag
 clap = { workspace = true }
+# why: structured logging for compiler port diagnostics
 tracing = { workspace = true }
+# why: tracing output formatting and env-filter for verbosity control
 tracing-subscriber = { workspace = true }
 
 [dev-dependencies]

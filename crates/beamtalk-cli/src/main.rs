@@ -240,10 +240,12 @@ fn main() -> Result<()> {
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"))
         } else {
+            // Target must match Rust module paths (`beamtalk_cli`, `beamtalk_core`).
+            // `beamtalk=…` only matches `beamtalk::*`, not `beamtalk_cli`.
             let directive = if cli.verbose == 1 {
-                "beamtalk=debug"
+                "beamtalk_cli=debug,beamtalk_core=debug"
             } else {
-                "beamtalk=trace"
+                "beamtalk_cli=trace,beamtalk_core=trace"
             };
             tracing_subscriber::EnvFilter::new(directive)
         };

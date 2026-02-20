@@ -60,11 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     // Log to stderr (stdout is the MCP stdio transport)
-    let default_directive = match args.verbose {
-        0 => "beamtalk=info",
-        1 => "beamtalk=debug",
-        _ => "beamtalk=trace",
-    };
+    let default_directive = directive_for_verbosity(args.verbose);
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_directive)),
@@ -143,4 +139,26 @@ fn resolve_port_and_cookie(args: &Args) -> Result<(u16, String), Box<dyn std::er
     Err("Could not find a running beamtalk REPL. \
          Start one with 'beamtalk repl' or specify --port."
         .into())
+}
+
+fn directive_for_verbosity(v: u8) -> &'static str {
+    // Target must match the crate's Rust module path (`beamtalk_mcp`).
+    // `beamtalk=…` only matches `beamtalk::*`, not `beamtalk_mcp`.
+    match v {
+        0 => "beamtalk_mcp=info",
+        1 => "beamtalk_mcp=debug",
+        _ => "beamtalk_mcp=trace",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn directive_defaults() {
+        assert_eq!(directive_for_verbosity(0), "beamtalk_mcp=info");
+        assert_eq!(directive_for_verbosity(1), "beamtalk_mcp=debug");
+        assert_eq!(directive_for_verbosity(2), "beamtalk_mcp=trace");
+    }
 }

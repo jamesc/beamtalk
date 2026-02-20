@@ -48,10 +48,14 @@ async fn main() {
 }
 
 fn directive_for_verbosity(v: u8) -> &'static str {
+    // Target must match the crate's Rust module path (`beamtalk_lsp`).
+    // `beamtalk=…` only matches `beamtalk::*`, not `beamtalk_lsp`.
+    // Also include beamtalk_core for compiler/analysis diagnostics, and
+    // tower_lsp at warn for protocol-level errors.
     match v {
-        0 => "beamtalk=info",
-        1 => "beamtalk=debug",
-        _ => "beamtalk=trace",
+        0 => "beamtalk_lsp=info,beamtalk_core=info,tower_lsp=warn",
+        1 => "beamtalk_lsp=debug,beamtalk_core=debug,tower_lsp=info",
+        _ => "beamtalk_lsp=trace,beamtalk_core=trace,tower_lsp=debug",
     }
 }
 
@@ -61,8 +65,17 @@ mod tests {
 
     #[test]
     fn directive_defaults() {
-        assert_eq!(directive_for_verbosity(0), "beamtalk=info");
-        assert_eq!(directive_for_verbosity(1), "beamtalk=debug");
-        assert_eq!(directive_for_verbosity(2), "beamtalk=trace");
+        assert_eq!(
+            directive_for_verbosity(0),
+            "beamtalk_lsp=info,beamtalk_core=info,tower_lsp=warn"
+        );
+        assert_eq!(
+            directive_for_verbosity(1),
+            "beamtalk_lsp=debug,beamtalk_core=debug,tower_lsp=info"
+        );
+        assert_eq!(
+            directive_for_verbosity(2),
+            "beamtalk_lsp=trace,beamtalk_core=trace,tower_lsp=debug"
+        );
     }
 }
