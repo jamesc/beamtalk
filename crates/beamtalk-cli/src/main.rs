@@ -5,7 +5,7 @@
 //!
 //! This is the main entry point for the `beamtalk` command.
 
-use clap::{Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand};
 use miette::Result;
 
 /// BEAM bytecode compiler integration (Core Erlang → `.beam`).
@@ -22,6 +22,10 @@ mod paths;
 #[command(name = "beamtalk")]
 #[command(version, about, long_about = None)]
 struct Cli {
+    /// Increase logging verbosity (-v: debug, -vv+: trace)
+    #[arg(short, long, action = ArgAction::Count, global = true)]
+    verbose: u8,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -226,14 +230,28 @@ enum Command {
     reason = "top-level dispatch — each arm is a one-liner"
 )]
 fn main() -> Result<()> {
-    // Initialize tracing subscriber only if RUST_LOG is explicitly set
-    // This avoids stderr interference with E2E tests
-    if std::env::var("RUST_LOG").is_ok() {
+    let cli = Cli::parse();
+
+    // Initialize tracing when explicitly requested.
+    // Default is still no logs to avoid stderr interference with E2E tests.
+    let has_rust_log = std::env::var("RUST_LOG").is_ok();
+    if has_rust_log || cli.verbose > 0 {
+        let env_filter = if has_rust_log {
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"))
+        } else {
+            // Target must match Rust module paths (`beamtalk_cli`, `beamtalk_core`).
+            // `beamtalk=…` only matches `beamtalk::*`, not `beamtalk_cli`.
+            let directive = if cli.verbose == 1 {
+                "beamtalk_cli=debug,beamtalk_core=debug"
+            } else {
+                "beamtalk_cli=trace,beamtalk_core=trace"
+            };
+            tracing_subscriber::EnvFilter::new(directive)
+        };
+
         let _ = tracing_subscriber::fmt()
-            .with_env_filter(
-                tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
-            )
+            .with_env_filter(env_filter)
             .try_init();
     }
 
@@ -247,8 +265,6 @@ fn main() -> Result<()> {
                 .build(),
         )
     }))?;
-
-    let cli = Cli::parse();
 
     let result = match cli.command {
         Command::Build {

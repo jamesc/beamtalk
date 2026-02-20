@@ -25,6 +25,7 @@ tokio = { workspace = true }
 camino = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+clap = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

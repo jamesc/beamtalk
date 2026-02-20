@@ -44,7 +44,7 @@ fn workspace_dir(workspace_id: &str) -> Option<PathBuf> {
 pub fn read_port_file(workspace_id: &str) -> Option<u16> {
     let port_file = workspace_dir(workspace_id)?.join("port");
     let content = std::fs::read_to_string(port_file).ok()?;
-    content.trim().parse().ok()
+    content.lines().next()?.trim().parse().ok()
 }
 
 /// Read the cookie file for a workspace.
@@ -96,7 +96,11 @@ pub fn discover_any_port_and_cookie() -> Option<(u16, String)> {
         if is_dir {
             let port_file = entry.path().join("port");
             if let Ok(content) = std::fs::read_to_string(port_file) {
-                if let Ok(port) = content.trim().parse::<u16>() {
+                if let Some(port) = content
+                    .lines()
+                    .next()
+                    .and_then(|line| line.trim().parse::<u16>().ok())
+                {
                     let cookie = std::fs::read_to_string(entry.path().join("cookie"))
                         .ok()
                         .map(|s| s.trim().to_string())
@@ -180,7 +184,7 @@ mod tests {
         let workspace_id = format!("test_mcp_{}", std::process::id());
         let dir = workspaces_dir().unwrap().join(&workspace_id);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("port"), "9876\n").unwrap();
+        fs::write(dir.join("port"), "9876\nnonce123").unwrap();
 
         let result = read_port_file(&workspace_id);
         assert_eq!(result, Some(9876));
@@ -222,7 +226,7 @@ mod tests {
         let workspace_id = format!("test_mcp_discover_{}", std::process::id());
         let dir = workspaces_dir().unwrap().join(&workspace_id);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("port"), "5555").unwrap();
+        fs::write(dir.join("port"), "5555\nnonce456").unwrap();
         fs::write(dir.join("cookie"), "testcookie").unwrap();
 
         let result = discover_port(Some(&workspace_id));

@@ -30,7 +30,7 @@ mod workspace;
 
 use std::sync::Arc;
 
-use clap::Parser;
+use clap::{ArgAction, Parser};
 use rmcp::{ServiceExt, transport::stdio};
 use tracing_subscriber::{self, EnvFilter};
 
@@ -41,6 +41,10 @@ use tracing_subscriber::{self, EnvFilter};
     about = "MCP server for beamtalk REPL — agent interaction with live objects"
 )]
 struct Args {
+    /// Increase logging verbosity (-v: debug, -vv+: trace)
+    #[arg(short, long, action = ArgAction::Count)]
+    verbose: u8,
+
     /// REPL server port (overrides workspace discovery).
     #[arg(short, long)]
     port: Option<u16>,
@@ -53,16 +57,17 @@ struct Args {
 /// Entry point: parse CLI args, connect to the REPL, and start the MCP server.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
+
     // Log to stderr (stdout is the MCP stdio transport)
+    let default_directive = directive_for_verbosity(args.verbose);
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::from_default_env().add_directive("beamtalk_mcp=info".parse().unwrap()),
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_directive)),
         )
         .with_writer(std::io::stderr)
         .with_ansi(false)
         .init();
-
-    let args = Args::parse();
 
     // Resolve REPL port and cookie
     let (port, cookie) = resolve_port_and_cookie(&args)?;
@@ -134,4 +139,26 @@ fn resolve_port_and_cookie(args: &Args) -> Result<(u16, String), Box<dyn std::er
     Err("Could not find a running beamtalk REPL. \
          Start one with 'beamtalk repl' or specify --port."
         .into())
+}
+
+fn directive_for_verbosity(v: u8) -> &'static str {
+    // Target must match the crate's Rust module path (`beamtalk_mcp`).
+    // `beamtalk=…` only matches `beamtalk::*`, not `beamtalk_mcp`.
+    match v {
+        0 => "beamtalk_mcp=info",
+        1 => "beamtalk_mcp=debug",
+        _ => "beamtalk_mcp=trace",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn directive_defaults() {
+        assert_eq!(directive_for_verbosity(0), "beamtalk_mcp=info");
+        assert_eq!(directive_for_verbosity(1), "beamtalk_mcp=debug");
+        assert_eq!(directive_for_verbosity(2), "beamtalk_mcp=trace");
+    }
 }

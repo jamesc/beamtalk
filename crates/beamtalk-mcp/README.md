@@ -87,6 +87,7 @@ beamtalk-mcp [OPTIONS]
 Options:
   -p, --port <PORT>                  REPL server port (overrides workspace discovery)
   -w, --workspace-id <WORKSPACE_ID>  Workspace ID for port discovery
+  -v, --verbose...                   Increase logging verbosity (-v debug, -vv+ trace)
   -h, --help                         Print help
 ```
 
@@ -106,6 +107,9 @@ The server discovers the REPL port in this order:
 cargo build -p beamtalk-mcp
 
 # Run with logging
+cargo run -p beamtalk-mcp -- --port 9876 -v
+
+# Or use explicit RUST_LOG
 RUST_LOG=beamtalk_mcp=debug cargo run -p beamtalk-mcp -- --port 9876
 
 # Test with MCP Inspector
