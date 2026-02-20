@@ -1,3 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
 // String doubled-delimiter escape tests (BT-743)
 // Doubling the delimiter ("") inside a string produces a literal double-quote.
 
