@@ -38,7 +38,7 @@
 
 -type workspace_config() :: #{
     workspace_id => binary(),
-    project_path => binary(),
+    project_path => binary() | undefined,
     tcp_port => inet:port_number(),
     bind_addr => inet:ip4_address(),
     auto_cleanup => boolean(),

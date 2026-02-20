@@ -48,7 +48,7 @@
 
 -type metadata() :: #{
     workspace_id => binary(),
-    project_path => binary(),
+    project_path => binary() | undefined,
     created_at => integer(),
     last_activity => integer(),
     node_name => atom(),
