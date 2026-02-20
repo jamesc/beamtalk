@@ -32,7 +32,6 @@
     inherits_from/2,
     direct_subclasses/1,
     all_subclasses/1,
-    invalidate_subclass_flattened_tables/1,
     class_object_tag/1,
     is_class_object/1,
     is_class_name/1,
@@ -154,23 +153,6 @@ all_subclasses_acc([], Acc) ->
 all_subclasses_acc([Current | Rest], Acc) ->
     Children = direct_subclasses(Current),
     all_subclasses_acc(Children ++ Rest, Children ++ Acc).
-
-%% @doc Broadcast rebuild_flattened to all class processes except the caller.
-%%
-%% ADR 0006 Phase 2: When a class's methods change, all subclasses need to
-%% rebuild their flattened tables to include the new/changed method.
-%% Uses pg group for fire-and-forget broadcast.
--spec invalidate_subclass_flattened_tables(class_name()) -> ok.
-invalidate_subclass_flattened_tables(ChangedClass) ->
-    AllClasses = pg:get_members(beamtalk_classes),
-    Self = self(),
-    lists:foreach(fun(Pid) ->
-        case Pid of
-            Self -> ok;
-            _ -> Pid ! {rebuild_flattened, ChangedClass}
-        end
-    end, AllClasses),
-    ok.
 
 %%====================================================================
 %% Class Object Identity

@@ -157,14 +157,17 @@ integer_superclass_test() ->
 integer_methods_test() ->
     ok = beamtalk_stdlib:init(),
     Pid = beamtalk_class_registry:whereis_class('Integer'),
+    %% ADR 0032 Phase 1: methods/1 returns local-only selectors.
+    %% Inherited methods (e.g. 'class' from Object) are not included.
     Methods = beamtalk_object_class:methods(Pid),
-    
-    %% Check some expected methods
+
+    %% Check Integer-local expected methods
     ?assert(lists:member('+', Methods)),
     ?assert(lists:member('-', Methods)),
     ?assert(lists:member('*', Methods)),
-    ?assert(lists:member('class', Methods)),
-    ?assert(lists:member('asString', Methods)).
+    ?assert(lists:member('asString', Methods)),
+    %% 'class' is inherited from Object — not in local methods list
+    ?assertNot(lists:member('class', Methods)).
 
 %%% ============================================================================
 %%% Beamtalk Class Method Tests

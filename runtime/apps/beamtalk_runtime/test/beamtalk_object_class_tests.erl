@@ -866,49 +866,45 @@ hierarchy_inherits_from_test_() ->
                  end)]
      end}.
 
-%% BT-510: Test that methods includes inherited methods even with out-of-order registration
+%% ADR 0032 Phase 1: methods/1 returns local-only selectors.
+%% Out-of-order registration no longer affects the methods list;
+%% hierarchy walk happens at dispatch time via beamtalk_dispatch:responds_to/2.
 hierarchy_methods_inherited_test_() ->
     {setup,
      fun setup/0,
      fun teardown/1,
      fun(_) ->
          [
-          %% Register child BEFORE parent — methods should still include inherited
           ?_test(begin
                      {ok, ChildPid} = beamtalk_object_class:start_link('HierChild', #{
                          name => 'HierChild', module => hier_child,
                          superclass => 'HierParent',
                          instance_methods => #{childMethod => #{arity => 0}}
                      }),
-                     %% Before parent registered — only local methods
+                     %% methods/1 returns local-only selectors — never inherited
                      MethodsBefore = beamtalk_object_class:methods(ChildPid),
                      ?assert(lists:member(childMethod, MethodsBefore)),
                      ?assertNot(lists:member(parentMethod, MethodsBefore)),
 
-                     %% Register parent — triggers rebuild_flattened broadcast
+                     %% Register parent
                      {ok, _ParentPid} = beamtalk_object_class:start_link('HierParent', #{
                          name => 'HierParent', module => hier_parent,
                          superclass => none,
                          instance_methods => #{parentMethod => #{arity => 0}}
                      }),
 
-                     %% Wait until rebuild is processed (bounded retry)
-                     WaitForInherited = fun Wait(0) ->
-                                                ?assert(false);
-                                            Wait(N) ->
-                                                M = beamtalk_object_class:methods(ChildPid),
-                                                case lists:member(parentMethod, M) of
-                                                    true -> M;
-                                                    false -> timer:sleep(10), Wait(N - 1)
-                                                end
-                                        end,
-                     MethodsAfter = WaitForInherited(50),
+                     %% methods/1 still returns only local selectors after parent is registered
+                     MethodsAfter = beamtalk_object_class:methods(ChildPid),
                      ?assert(lists:member(childMethod, MethodsAfter)),
-                     ?assert(lists:member(parentMethod, MethodsAfter))
+                     ?assertNot(lists:member(parentMethod, MethodsAfter)),
+
+                     %% Inherited method is found via responds_to (chain walk at dispatch time)
+                     ?assert(beamtalk_dispatch:responds_to(parentMethod, 'HierChild'))
                  end)]
      end}.
 
-%% BT-510: Normal order — parent first, child inherits immediately
+%% ADR 0032 Phase 1: Normal order — parent first, child local-only in methods/1.
+%% Inherited method is visible via responds_to (chain walk), not methods/1.
 hierarchy_methods_normal_order_test_() ->
     {setup,
      fun setup/0,
@@ -926,9 +922,12 @@ hierarchy_methods_normal_order_test_() ->
                          superclass => 'HierParent',
                          instance_methods => #{childMethod => #{arity => 0}}
                      }),
+                     %% methods/1 returns local-only selectors
                      Methods = beamtalk_object_class:methods(ChildPid),
                      ?assert(lists:member(childMethod, Methods)),
-                     ?assert(lists:member(parentMethod, Methods))
+                     ?assertNot(lists:member(parentMethod, Methods)),
+                     %% Inherited method found via responds_to (chain walk)
+                     ?assert(beamtalk_dispatch:responds_to(parentMethod, 'HierChild'))
                  end)]
      end}.
 

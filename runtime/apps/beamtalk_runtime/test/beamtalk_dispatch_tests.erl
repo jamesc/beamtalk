@@ -68,18 +68,17 @@ dispatch_test_() ->
            {"responds_to inherited method", fun test_responds_to_inherited_method/0},
            {"extension error propagation", fun test_extension_error_propagation/0},
           {"responds_to extension method", fun test_responds_to_extension_method/0},
-          {"BT-283: flattened table performance", fun test_flattened_table_performance/0},
-          {"BT-283: flattened table memory overhead", fun test_flattened_table_memory_overhead/0},
-          {"BT-283: flattened table invalidation on method add", fun test_flattened_table_invalidation_on_method_add/0},
-          {"BT-283: subclass flattened table invalidation on parent change", fun test_subclass_invalidation_on_parent_change/0},
-          {"BT-387: out-of-order class registration rebuilds flattened tables", fun test_out_of_order_registration/0},
+          {"BT-283: dispatch lookup performance", fun test_dispatch_lookup_performance/0},
+          {"BT-283: dynamic method found after put_method", fun test_dynamic_method_responds_to/0},
+          {"BT-283: inherited dynamic method found via chain walk", fun test_inherited_responds_to_dynamic_method/0},
+          {"BT-387: out-of-order registration dispatches correctly", fun test_out_of_order_registration/0},
           {"BT-429: super finds extension on superclass", fun test_super_finds_extension_on_superclass/0},
           %% BT-623: Additional coverage tests
           {"lookup on non-existent class returns class_not_found", fun test_lookup_nonexistent_class/0},
           {"super on non-existent class returns error", fun test_super_nonexistent_class/0},
-          {"lookup falls back when defining class gone", fun test_flattened_stale_defining_class/0},
+          {"lookup returns class_not_found when parent class is gone", fun test_stale_parent_class/0},
           {"continue_to_superclass at root returns DNU", fun test_continue_to_superclass_root/0},
-          {"try_flattened_lookup handles dead process", fun test_flattened_lookup_dead_process/0},
+          {"lookup returns error for dead class process", fun test_dead_class_process/0},
           {"super at Object for unknown method", fun test_super_object_unknown/0},
           {"lookup with class_not_found in superclass chain", fun test_lookup_missing_superclass_in_chain/0}
          ]
@@ -364,126 +363,76 @@ test_responds_to_extension_method() ->
     end.
 
 %%% ============================================================================
-%%% BT-283: Performance Benchmark Tests (ADR 0006 Phase 2)
+%%% BT-283: Performance and Correctness Tests (ADR 0032 Phase 1)
 %%% ============================================================================
 
-%% Benchmark: O(1) lookup with flattened table vs O(depth) hierarchy walk
-test_flattened_table_performance() ->
+%% Benchmark: chain walk dispatch for inherited methods
+%% ADR 0032 Phase 1: flattened table removed; direct hierarchy walk used instead.
+test_dispatch_lookup_performance() ->
     ok = ensure_counter_loaded(),
-    
+
     State = #{
         '$beamtalk_class' => 'Counter',
         'value' => 0
     },
     Self = make_ref(),
-    
-    %% Warm up - ensure Counter's flattened table is built
+
+    %% Warm up
     _ = beamtalk_dispatch:lookup(increment, [], Self, State, 'Counter'),
-    
-    %% Benchmark flattened table lookup (should be O(1))
-    %% Call an inherited method that would require hierarchy walk without flattening
-    %% 'class' is defined in Object, so Counter -> Actor -> Object (depth 3)
+
+    %% Benchmark chain walk for an inherited method.
+    %% 'class' is defined in Object, so Counter -> Actor -> Object (depth 3).
     N = 10000,
-    
-    StartFlattened = erlang:monotonic_time(microsecond),
+
+    Start = erlang:monotonic_time(microsecond),
     lists:foreach(fun(_) ->
         _ = beamtalk_dispatch:lookup(class, [], Self, State, 'Counter')
     end, lists:seq(1, N)),
-    EndFlattened = erlang:monotonic_time(microsecond),
-    
-    FlattenedTime = EndFlattened - StartFlattened,
-    AvgFlattenedTime = FlattenedTime / N,
-    
-    logger:notice("Flattened table: ~p lookups in ~p μs (avg ~.2f μs/call)", [N, FlattenedTime, AvgFlattenedTime]),
-    
-    %% Flattened lookup should complete (no hard timing assertion — CI machines vary)
-    ?assert(AvgFlattenedTime < 500.0).
+    End = erlang:monotonic_time(microsecond),
 
-%% Memory benchmark: document overhead per class
-test_flattened_table_memory_overhead() ->
-    ok = ensure_counter_loaded(),
-    
-    %% Get Counter class process
-    CounterPid = beamtalk_class_registry:whereis_class('Counter'),
-    ?assertNotEqual(undefined, CounterPid),
-    
-    %% Get process memory info
-    {memory, MemoryBytes} = erlang:process_info(CounterPid, memory),
-    
-    %% Get flattened methods map and measure its serialized size
-    {ok, FlattenedMethods} = gen_server:call(CounterPid, get_flattened_methods),
-    FlattenedSize = erlang:external_size(FlattenedMethods),
-    NumFlattened = maps:size(FlattenedMethods),
-    
-    logger:notice("Flattened table: ~p methods, ~p bytes serialized, ~p bytes process total",
-                  [NumFlattened, FlattenedSize, MemoryBytes]),
-    
-    %% Flattened table should be less than 10KB per class (typical case)
-    ?assert(FlattenedSize < 10000).
+    AvgTime = (End - Start) / N,
+    logger:notice("Chain walk: ~p lookups in ~p μs (avg ~.2f μs/call)", [N, End - Start, AvgTime]),
 
-%% Test flattened table invalidation on method addition
-test_flattened_table_invalidation_on_method_add() ->
+    %% Chain walk at depth 3 should complete well within 500 μs/call on any CI machine
+    ?assert(AvgTime < 500.0).
+
+%% Test that a dynamically added method is immediately discoverable via responds_to.
+%% ADR 0032 Phase 1: no flattened table invalidation needed — chain walk is always current.
+test_dynamic_method_responds_to() ->
     ok = ensure_counter_loaded(),
-    
+
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
-    
-    %% Get initial flattened methods
-    {ok, InitialFlattened} = gen_server:call(CounterPid, get_flattened_methods),
-    InitialSize = maps:size(InitialFlattened),
-    
-    %% Add a new method
+
+    %% Add a new dynamic method
     TestMethod = fun(_Self, [], State) -> {reply, test_result, State} end,
-    ok = beamtalk_object_class:put_method(CounterPid, testNewMethod, TestMethod),
-    
-    %% Get updated flattened methods
-    {ok, UpdatedFlattened} = gen_server:call(CounterPid, get_flattened_methods),
-    UpdatedSize = maps:size(UpdatedFlattened),
-    
-    %% Verify new method is in flattened table
-    ?assert(maps:is_key(testNewMethod, UpdatedFlattened)),
-    ?assertEqual(InitialSize + 1, UpdatedSize),
-    
-    %% Verify the method is discoverable via flattened lookup
-    %% (Don't dispatch through compiled module — it doesn't know about dynamic methods)
-    Result = gen_server:call(CounterPid, {lookup_flattened, testNewMethod}),
-    ?assertMatch({ok, 'Counter', _}, Result).
+    ok = beamtalk_object_class:put_method(CounterPid, testNewDynMethod, TestMethod),
 
-%% Test that adding a method to a parent class propagates to subclass flattened tables.
-%% This verifies the subclass invalidation mechanism: when Actor gets a new method,
-%% Counter (which inherits from Actor) should see it in its flattened table.
-test_subclass_invalidation_on_parent_change() ->
+    %% Method is immediately discoverable — chain walk reads current instance_methods
+    ?assert(beamtalk_dispatch:responds_to(testNewDynMethod, 'Counter')).
+
+%% Test that a method added to a parent class is immediately visible in subclass responds_to.
+%% ADR 0032 Phase 1: chain walk traverses live gen_server state; no broadcast needed.
+test_inherited_responds_to_dynamic_method() ->
     ok = ensure_counter_loaded(),
-    
-    %% Counter inherits from Actor. Get both pids.
-    CounterPid = beamtalk_class_registry:whereis_class('Counter'),
-    ActorPid = beamtalk_class_registry:whereis_class('Actor'),
-    ?assertNotEqual(undefined, CounterPid),
-    ?assertNotEqual(undefined, ActorPid),
-    
-    %% Verify Counter doesn't have parentTestMethod yet
-    {ok, InitialFlattened} = gen_server:call(CounterPid, get_flattened_methods),
-    ?assertNot(maps:is_key(parentTestMethod, InitialFlattened)),
-    
-    %% Add a method to Actor (parent of Counter)
-    ParentMethod = fun(_Self, [], State) -> {reply, parent_result, State} end,
-    ok = beamtalk_object_class:put_method(ActorPid, parentTestMethod, ParentMethod),
-    
-    %% The invalidation uses handle_info (async message). Use a synchronous
-    %% gen_server:call as a barrier — it will be queued after rebuild_flattened.
-    _ = beamtalk_object_class:superclass(CounterPid),
-    
-    %% Counter's flattened table should now include the new Actor method
-    {ok, UpdatedFlattened} = gen_server:call(CounterPid, get_flattened_methods),
-    ?assert(maps:is_key(parentTestMethod, UpdatedFlattened)),
-    
-    %% The defining class should be Actor, not Counter
-    {ok, DefiningClass, _MethodInfo} = gen_server:call(CounterPid, {lookup_flattened, parentTestMethod}),
-    ?assertEqual('Actor', DefiningClass).
 
-%% Test that registering a parent class AFTER a child class still produces
-%% complete flattened tables in the child (out-of-order bootstrap).
+    ActorPid = beamtalk_class_registry:whereis_class('Actor'),
+    ?assertNotEqual(undefined, ActorPid),
+
+    %% Counter shouldn't have this method initially
+    ?assertNot(beamtalk_dispatch:responds_to(inheritedDynTestMethod, 'Counter')),
+
+    %% Add to Actor (parent of Counter)
+    ParentMethod = fun(_Self, [], State) -> {reply, parent_result, State} end,
+    ok = beamtalk_object_class:put_method(ActorPid, inheritedDynTestMethod, ParentMethod),
+
+    %% Chain walk finds it immediately in Actor — no async rebuild required
+    ?assert(beamtalk_dispatch:responds_to(inheritedDynTestMethod, 'Counter')).
+
+%% Test that registering a parent class AFTER a child class works correctly.
+%% ADR 0032 Phase 1: chain walk reads the registry at dispatch time, so
+%% out-of-order registration is resolved automatically without rebuild broadcasts.
 test_out_of_order_registration() ->
-    %% Step 1: Register child class with non-existent parent
+    %% Register child class with non-existent parent
     ChildMethod = fun(_Self, [], State) -> {reply, child_result, State} end,
     {ok, ChildPid} = beamtalk_object_class:start_link('TestChild', #{
         superclass => 'TestParent',
@@ -491,12 +440,11 @@ test_out_of_order_registration() ->
         instance_variables => []
     }),
 
-    %% Child's flattened table should only have local methods (parent missing)
-    {ok, ChildFlattened1} = gen_server:call(ChildPid, get_flattened_methods),
-    ?assert(maps:is_key(childMethod, ChildFlattened1)),
-    ?assertNot(maps:is_key(parentMethod, ChildFlattened1)),
+    %% Before parent is registered — only local method visible
+    ?assert(beamtalk_dispatch:responds_to(childMethod, 'TestChild')),
+    ?assertNot(beamtalk_dispatch:responds_to(parentMethod, 'TestChild')),
 
-    %% Step 2: Register parent class — this should trigger child rebuild
+    %% Register parent class — chain walk will find it immediately
     ParentMethod = fun(_Self, [], State) -> {reply, parent_result, State} end,
     {ok, ParentPid} = beamtalk_object_class:start_link('TestParent', #{
         superclass => none,
@@ -504,19 +452,11 @@ test_out_of_order_registration() ->
         instance_variables => []
     }),
 
-    %% Use synchronous barrier to ensure child processed rebuild_flattened
-    _ = beamtalk_object_class:superclass(ChildPid),
+    %% No barrier or sleep needed — chain walk reads registry at call time
+    ?assert(beamtalk_dispatch:responds_to(childMethod, 'TestChild')),
+    ?assert(beamtalk_dispatch:responds_to(parentMethod, 'TestChild')),
 
-    %% Child's flattened table should now include parent's method
-    {ok, ChildFlattened2} = gen_server:call(ChildPid, get_flattened_methods),
-    ?assert(maps:is_key(childMethod, ChildFlattened2)),
-    ?assert(maps:is_key(parentMethod, ChildFlattened2)),
-
-    %% Verify defining class is correct
-    {ok, DefClass, _} = gen_server:call(ChildPid, {lookup_flattened, parentMethod}),
-    ?assertEqual('TestParent', DefClass),
-
-    %% Clean up test-only class processes to avoid leaking between tests
+    %% Clean up
     gen_server:stop(ChildPid),
     gen_server:stop(ParentPid).
 
@@ -569,10 +509,9 @@ test_super_nonexistent_class() ->
     Result = beamtalk_dispatch:super(anyMethod, [], Self, State, 'NoSuchClass'),
     ?assertMatch({error, #beamtalk_error{kind = class_not_found}}, Result).
 
-%% Test that when flattened table points to a defining class that no longer exists,
-%% dispatch falls back to hierarchy walk
-test_flattened_stale_defining_class() ->
-    %% Create a parent with a method, then a child
+%% Test that when the parent class process is killed, lookup returns class_not_found.
+%% Chain walk tries to reach the parent via registry; when it's gone, class_not_found.
+test_stale_parent_class() ->
     ParentMethod = fun(_Self, [], State) -> {reply, parent_ok, State} end,
     {ok, ParentPid} = beamtalk_object_class:start_link('StaleTestParent', #{
         superclass => none,
@@ -587,21 +526,16 @@ test_flattened_stale_defining_class() ->
         instance_variables => []
     }),
 
-    %% Wait for flattened table to build
-    _ = beamtalk_object_class:superclass(ChildPid),
-
-    %% Verify the child's flattened table has the parent method
-    {ok, Flattened} = gen_server:call(ChildPid, get_flattened_methods),
-    ?assert(maps:is_key(staleMethod, Flattened)),
+    %% Verify parent method is reachable before killing parent
+    ?assert(beamtalk_dispatch:responds_to(staleMethod, 'StaleTestChild')),
 
     %% Kill the parent class process (simulates hot reload edge case)
     gen_server:stop(ParentPid),
 
-    %% Lookup should handle the stale defining class gracefully
+    %% Chain walk tries to reach StaleTestParent, gets class_not_found
     State = #{'$beamtalk_class' => 'StaleTestChild'},
     Self = make_ref(),
     Result = beamtalk_dispatch:lookup(staleMethod, [], Self, State, 'StaleTestChild'),
-    %% Parent class is stopped — hierarchy walk can't find it either, so class_not_found expected
     ?assertMatch({error, #beamtalk_error{kind = class_not_found}}, Result),
 
     gen_server:stop(ChildPid).
@@ -622,8 +556,8 @@ test_continue_to_superclass_root() ->
 
     gen_server:stop(RootPid).
 
-%% Test flattened lookup with a dead process
-test_flattened_lookup_dead_process() ->
+%% Test that lookup on a dead class process returns class_not_found (not a crash).
+test_dead_class_process() ->
     ok = ensure_counter_loaded(),
 
     %% Create a temporary class, get its pid, then kill it
@@ -635,7 +569,7 @@ test_flattened_lookup_dead_process() ->
     }),
     gen_server:stop(TmpPid),
 
-    %% Lookup on dead class should not crash — returns not_found/error
+    %% Lookup on dead class should not crash — returns class_not_found error
     State = #{'$beamtalk_class' => 'TmpDeadClass'},
     Self = make_ref(),
     Result = beamtalk_dispatch:lookup(tmpMethod, [], Self, State, 'TmpDeadClass'),
