@@ -454,7 +454,9 @@ impl CoreErlangGenerator {
                         let val_doc = self.expression_doc(value)?;
                         self.bind_var(var_name, &core_var);
                         body_parts.push(docvec![
-                            format!("    let {core_var} = "),
+                            "    let ",
+                            core_var,
+                            " = ",
                             val_doc,
                             " in\n",
                         ]);
