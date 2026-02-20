@@ -1131,8 +1131,55 @@ pub(crate) fn repl_loop(
                     }
                     Err(e) => {
                         eprintln!("Communication error: {e}");
-                        eprintln!("The REPL backend may have crashed. Exiting.");
-                        break;
+                        eprintln!("Attempting to reconnect to REPL backend...");
+                        match client.reconnect() {
+                            Ok(()) => {
+                                eprintln!("Reconnected. Retrying evaluation...");
+                                match client.eval_interruptible(&accumulated, &interrupted) {
+                                    Ok(response) => {
+                                        // Print captured stdout before value/error (BT-355)
+                                        if let Some(ref output) = response.output {
+                                            if !output.is_empty() {
+                                                print!("{output}");
+                                                if !output.ends_with('\n') {
+                                                    println!();
+                                                }
+                                                let _ =
+                                                    std::io::Write::flush(&mut std::io::stdout());
+                                            }
+                                        }
+                                        // Display compilation warnings (BT-407)
+                                        if let Some(ref warnings) = response.warnings {
+                                            for warning in warnings {
+                                                eprintln!("⚠ {warning}");
+                                            }
+                                        }
+                                        if response.is_error() {
+                                            if let Some(msg) = response.error_message() {
+                                                if msg == "Interrupted" {
+                                                    // BT-666: Clean interrupt message
+                                                    eprintln!("{msg}");
+                                                } else {
+                                                    eprintln!("{}", format_error(msg));
+                                                }
+                                            }
+                                        } else if let Some(value) = response.value {
+                                            println!("{}", format_value(&value));
+                                        }
+                                    }
+                                    Err(e2) => {
+                                        eprintln!("Communication error after reconnect: {e2}");
+                                        eprintln!("The REPL backend may have crashed. Exiting.");
+                                        break;
+                                    }
+                                }
+                            }
+                            Err(re) => {
+                                eprintln!("Reconnect failed: {re}");
+                                eprintln!("The REPL backend may have crashed. Exiting.");
+                                break;
+                            }
+                        }
                     }
                 }
                 line_buffer.clear();
