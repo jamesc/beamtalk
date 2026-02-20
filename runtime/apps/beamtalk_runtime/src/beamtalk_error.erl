@@ -192,6 +192,10 @@ generate_message(user_error, _Class, undefined) ->
     <<"Error">>;
 generate_message(user_error, _Class, Selector) ->
     iolist_to_binary(io_lib:format("~p", [Selector]));
+generate_message(stdlib_shadowing, Class, undefined) ->
+    iolist_to_binary(io_lib:format("Cannot redefine stdlib class '~s'", [Class]));
+generate_message(stdlib_shadowing, Class, Selector) ->
+    iolist_to_binary(io_lib:format("Cannot redefine stdlib class '~s' (via '~s')", [Class, Selector]));
 generate_message(class_not_found, Class, undefined) ->
     iolist_to_binary(io_lib:format("Class '~s' not found", [Class]));
 generate_message(class_not_found, Class, Selector) ->

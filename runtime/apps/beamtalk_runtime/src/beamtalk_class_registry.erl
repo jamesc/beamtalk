@@ -32,6 +32,8 @@
     ensure_class_warnings_table/0,
     record_class_collision_warning/3,
     drain_class_warnings_by_names/1,
+    record_pending_load_error/2,
+    drain_pending_load_errors_by_names/1,
     inherits_from/2,
     direct_subclasses/1,
     all_subclasses/1,
@@ -146,6 +148,48 @@ drain_class_warnings_by_names(ClassNames) ->
                      || {CN, OldMod, NewMod} <- ets:take(beamtalk_class_warnings, ClassName)]
                 end,
                 ClassNames)
+    end.
+
+%% @doc Record a structured error to be surfaced after a failed module load.
+%% BT-738: Called by beamtalk_object_class when update_class detects stdlib shadowing.
+%% The error is keyed by class name (atom) and drained by the REPL load handler
+%% after code:load_binary returns {error, _} due to on_load failure.
+-spec record_pending_load_error(atom(), #beamtalk_error{}) -> ok.
+record_pending_load_error(ClassName, Error) ->
+    ensure_pending_errors_table(),
+    ets:insert(beamtalk_pending_load_errors, {ClassName, Error}),
+    ok.
+
+%% @doc Drain pending load errors for the given class names.
+%% BT-738: Called by the REPL load handler after a failed code:load_binary,
+%% to retrieve any structured stdlib_shadowing errors for the attempted classes.
+%% Removes entries from the table (atomically via ets:take/2).
+-spec drain_pending_load_errors_by_names([atom()]) -> [{atom(), #beamtalk_error{}}].
+drain_pending_load_errors_by_names(ClassNames) ->
+    case ets:info(beamtalk_pending_load_errors) of
+        undefined -> [];
+        _ ->
+            lists:flatmap(
+                fun(ClassName) ->
+                    [{CN, Err} || {CN, Err} <- ets:take(beamtalk_pending_load_errors, ClassName)]
+                end,
+                ClassNames)
+    end.
+
+%% @private Ensure the pending load errors ETS table exists.
+-spec ensure_pending_errors_table() -> ok.
+ensure_pending_errors_table() ->
+    case ets:info(beamtalk_pending_load_errors) of
+        undefined ->
+            try
+                ets:new(beamtalk_pending_load_errors,
+                        [set, public, named_table, {write_concurrency, true}]),
+                ok
+            catch
+                error:badarg -> ok
+            end;
+        _ ->
+            ok
     end.
 
 %%====================================================================

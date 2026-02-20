@@ -686,6 +686,45 @@ Object subclass: Logger ...
 Object subclass: MyAppLogger ...
 ```
 
+### Protected stdlib class names
+
+Beamtalk's standard library classes (e.g., `Integer`, `String`, `Array`, `Actor`,
+`Object`, `Boolean`) are **protected** against redefinition in user code. There
+are two layers of protection:
+
+**Compile-time warning** — fires for all stdlib class names (both `lib/*.bt`
+classes and runtime-only built-ins like `Future`):
+
+```beamtalk
+// ❌ Compile-time warning: Class name `Integer` conflicts with a stdlib class.
+//    Loading will fail because stdlib class names are protected.
+Object subclass: Integer
+  | x |
+  => x: v [ x := v ]
+```
+
+**Runtime load-time error** — fires for fully-featured stdlib classes that are
+backed by `lib/*.bt` source files and loaded under the `bt@stdlib@*` module
+prefix. Attempting to load user code that redefines one of these returns a
+structured error:
+
+```text
+:load my_integers.bt
+// => Error: Cannot redefine stdlib class 'Integer'
+//    Hint: Choose a different name. `Integer` is a protected stdlib class name.
+```
+
+If you need to customise stdlib behaviour, subclass instead of redefining:
+
+```beamtalk
+// ✓ Subclass is fine
+Integer subclass: SafeInteger
+  => divSafe: divisor [
+    divisor = 0 ifTrue: [ ^ 0 ].
+    self / divisor
+  ]
+```
+
 ### v0.2 plan
 
 A `import`/module system is planned for v0.2. Until then, class names must be
