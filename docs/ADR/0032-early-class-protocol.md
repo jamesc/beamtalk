@@ -52,7 +52,7 @@ Introduce `Behaviour` and `Class` as real Beamtalk stdlib classes that define th
 
 ### Class Hierarchy (Extended)
 
-```
+```text
 ProtoObject
   └─ Object
        ├─ Behaviour (abstract — class protocol: hierarchy, method dict, instance creation)
@@ -303,7 +303,7 @@ sealed isMemberOf: aClass: Class -> Boolean =>
 
 ### REPL Session
 
-```
+```beamtalk
 >> Counter superclass
 => Actor
 
@@ -346,7 +346,7 @@ sealed isMemberOf: aClass: Class -> Boolean =>
 
 ### Error Examples
 
-```
+```beamtalk
 >> Counter whichClassIncludesSelector: #nonExistent
 => nil
 
@@ -380,7 +380,7 @@ The pre-computed flattened method tables (`flattened_methods`, `flattened_class_
 
 #### New Intrinsics
 
-Thin data-access intrinsics for raw gen_server state reads (7 intrinsics). Hierarchy-walking logic lives in Beamtalk, not Erlang.
+Thin data-access intrinsics for raw gen_server state reads (8 intrinsics). Hierarchy-walking logic lives in Beamtalk, not Erlang.
 
 | Intrinsic | Backing Erlang | Purpose |
 |---|---|---|
@@ -594,7 +594,7 @@ Prove the core assumption before building the full feature: a class-side message
    - `className/1`, `classClass/1` — identity queries
 
 2. Update `beamtalk_bootstrap.erl` to register `Behaviour` and `Class`:
-   ```
+   ```text
    ProtoObject → Object → Behaviour → Class → Actor → user modules
    ```
 
