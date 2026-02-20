@@ -24,10 +24,9 @@
 %%%
 %%% ## Phase 0 Outcome
 %%%
-%%% The testClassProtocol probe method is defined in beamtalk_class_bt.erl.
-%%% After this test suite passes, `testClassProtocol` is removed from
-%%% beamtalk_class_bt.erl and has_method/1 returns false for it.
-%%% The dispatch mechanism (try_class_chain_fallthrough) remains.
+%%% The testClassProtocol probe was provided by beamtalk_class_chain_test_helper
+%%% (test-only module) to keep production code clean. The dispatch mechanism
+%%% (try_class_chain_fallthrough) remains in beamtalk_class_dispatch.
 
 -module(beamtalk_class_chain_tests).
 
@@ -162,11 +161,16 @@ test_fallthrough_absent_class() ->
         ClassPid -> exit(ClassPid, kill), timer:sleep(50)
     end,
 
-    %% Should raise does_not_understand, not crash
-    ?assertError(
-        #{error := #beamtalk_error{kind = does_not_understand, class = 'Counter'}},
-        beamtalk_object_class:class_send(CounterPid, testClassProtocol, [])
-    ).
+    try
+        %% Should raise does_not_understand, not crash
+        ?assertError(
+            #{error := #beamtalk_error{kind = does_not_understand, class = 'Counter'}},
+            beamtalk_object_class:class_send(CounterPid, testClassProtocol, [])
+        )
+    after
+        %% Restore Class so subsequent tests (if order changes) are not affected
+        register_class_with_test_helper()
+    end.
 
 %%====================================================================
 %% Helpers

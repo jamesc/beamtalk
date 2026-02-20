@@ -13,9 +13,10 @@
 %%% by the class registry (beamtalk_object_class) before any classes load.
 %%%
 %%% ADR 0032 Phase 0 (BT-732): Bootstrap registers the 'Class' stub
-%%% (beamtalk_class_bt) to prove class chain dispatch fallthrough. This
-%%% registration happens after stdlib loads so that Object is available
-%%% as the superclass. See beamtalk_class_bt for the stub details.
+%%% (beamtalk_class_bt) immediately after pg starts, before stdlib loads.
+%%% This is safe because dispatch works via beamtalk_class_bt:has_method/1
+%%% and dispatch/4 even before the superclass (Object) is registered.
+%%% See beamtalk_class_bt for the stub details.
 -module(beamtalk_bootstrap).
 
 -export([start_link/0, init/1]).

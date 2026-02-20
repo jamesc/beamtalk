@@ -11,8 +11,10 @@
 %%%
 %%% ## Phase 0 (BT-732): Wire Check
 %%%
-%%% Registers 'Class' with a temporary `testClassProtocol` probe method.
-%%% This method is removed after the wire check verifies the dispatch mechanism.
+%%% Registered 'Class' during bootstrap to prove that class-side messages not
+%%% found in user-defined class methods can dispatch through the Class chain.
+%%% The testClassProtocol probe was used during the spike and removed once the
+%%% mechanism was verified (BT-732 acceptance criteria met).
 %%%
 %%% ## Future (ADR 0032 Phase 2)
 %%%

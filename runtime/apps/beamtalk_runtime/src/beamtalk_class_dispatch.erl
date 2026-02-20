@@ -237,11 +237,14 @@ handle_async_dispatch(_Msg, _ClassName, _Flattened, _Superclass, _Module) ->
 %% ClassSelf has the metaclass tag (e.g., 'Counter class') so methods in
 %% 'Class' receive the correct self when invoked.
 %%
-%% Returns {ok, Result} if the method is found in the Class chain,
-%% or not_found if 'Class' is not registered or does not respond.
+%% Returns {ok, Result} if the method is found in the Class chain.
+%% Returns not_found if 'Class' does not understand the selector (does_not_understand).
+%% Re-raises any other error (type_error, arity_mismatch, etc.) from Class methods
+%% so callers see real errors rather than a misleading DNU on the original class.
 %%
-%% If 'Class' is not yet registered (pre-Phase 2), returns not_found
-%% and the caller raises does_not_understand as before.
+%% NOTE: NewState from Class methods is intentionally dropped. Class has no
+%% persistent instance state in Phase 0-1; if stateful Class methods are added
+%% in Phase 2+, this must be revisited.
 -spec try_class_chain_fallthrough(#beamtalk_object{}, atom(), list()) ->
     {ok, term()} | not_found.
 try_class_chain_fallthrough(ClassSelf, Selector, Args) ->
@@ -251,6 +254,14 @@ try_class_chain_fallthrough(ClassSelf, Selector, Args) ->
         {reply, Result, _NewState} ->
             ?LOG_DEBUG("Class chain fallthrough succeeded for ~p", [Selector]),
             {ok, Result};
-        {error, _Error} ->
-            not_found
+        {error, #beamtalk_error{kind = does_not_understand}} ->
+            %% Method not found anywhere in the Class chain — tell caller to raise DNU.
+            not_found;
+        {error, #beamtalk_error{kind = class_not_found}} ->
+            %% 'Class' process not registered (pre-Phase 2 or process died) — graceful fallback.
+            not_found;
+        {error, Error} ->
+            %% A real error from a Class method (type_error, arity_mismatch, etc.).
+            %% Propagate so the caller sees the actual cause, not a misleading DNU.
+            beamtalk_error:raise(Error)
     end.
