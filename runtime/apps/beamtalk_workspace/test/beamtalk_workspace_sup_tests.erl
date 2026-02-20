@@ -171,7 +171,8 @@ bootstrap_spec_test() ->
     [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_workspace_bootstrap],
     ?assertEqual(worker, maps:get(type, Spec)),
     ?assertEqual(permanent, maps:get(restart, Spec)),
-    ?assertEqual({beamtalk_workspace_bootstrap, start_link, []}, maps:get(start, Spec)).
+    %% ProjectPath from test_config is <<"/tmp/test">> — passed for BT-739 module activation
+    ?assertEqual({beamtalk_workspace_bootstrap, start_link, [<<"/tmp/test">>]}, maps:get(start, Spec)).
 
 bootstrap_after_singletons_before_repl_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),

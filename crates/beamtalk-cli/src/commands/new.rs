@@ -73,10 +73,18 @@ version = "0.1.0"
         r#"// Copyright 2026 {name} authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Main entry point for {name}
-main := [
-    Transcript show: "Hello from {name}!"; cr.
-]
+// Main entry point for {name}.
+// Load in the REPL with: :load src/main.bt
+// Then run with: Main new run
+
+Object subclass: Main
+
+  class run =>
+    self new run
+
+  run =>
+    TranscriptStream current show: "Hello from {name}!"; cr.
+    self
 "#
     );
     fs::write(path.join("src").join("main.bt"), main_content)
@@ -335,8 +343,8 @@ mod tests {
         assert!(main_path.exists());
 
         let content = fs::read_to_string(main_path).unwrap();
-        assert!(content.contains("main :="));
-        assert!(content.contains("Transcript show:"));
+        assert!(content.contains("Object subclass: Main"));
+        assert!(content.contains("TranscriptStream current show:"));
     }
 
     /// Uses `#[serial(cwd)]` because it changes the current working directory
