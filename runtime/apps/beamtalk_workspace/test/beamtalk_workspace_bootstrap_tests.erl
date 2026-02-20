@@ -338,7 +338,7 @@ make_temp_beam_dir(FileNames) ->
     ok = file:make_dir(Dir),
     lists:foreach(
         fun(Name) ->
-            file:write_file(filename:join(Dir, Name), <<>>)
+            ok = file:write_file(filename:join(Dir, Name), <<>>)
         end,
         FileNames
     ),
