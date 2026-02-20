@@ -663,7 +663,7 @@ If two files from **different packages** define the same class name, the BEAM mo
 atoms differ (e.g. `bt@counter` vs `bt@other_pkg@counter`), and Beamtalk emits a
 warning to alert you to the collision:
 
-```
+```text
 :load my_app/counter.bt
 // => Loaded: Counter
 

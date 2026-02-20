@@ -164,8 +164,17 @@ handle(<<"unload">>, Params, Msg, SessionPid) ->
 %% formats them as human-readable binary strings for the protocol response.
 -spec collect_load_warnings([map()]) -> [binary()].
 collect_load_warnings(Classes) ->
-    %% Filter empty names to avoid creating/looking up the empty atom ''.
-    ClassNames = [list_to_atom(N) || #{name := N} <- Classes, N =/= ""],
+    %% Use safe_to_existing_atom (not list_to_atom) to avoid leaking atoms for
+    %% user-defined class names. Class atoms must already exist after loading.
+    ClassNames = lists:filtermap(
+        fun(#{name := N}) when N =/= "" ->
+            case beamtalk_repl_server:safe_to_existing_atom(list_to_binary(N)) of
+                {ok, Atom} -> {true, Atom};
+                {error, badarg} -> false
+            end;
+        (_) -> false
+        end,
+        Classes),
     Collisions = beamtalk_class_registry:drain_class_warnings_by_names(ClassNames),
     [format_collision_warning(ClassName, OldModule, NewModule)
      || {ClassName, OldModule, NewModule} <- Collisions].
