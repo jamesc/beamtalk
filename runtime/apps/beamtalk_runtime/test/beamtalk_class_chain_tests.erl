@@ -3,6 +3,8 @@
 
 %%% @doc Wire check tests for ADR 0032 Phase 0 (BT-732).
 %%%
+%% **DDD Context:** Object System
+%%%
 %%% Proves the core assumption of the Early Class Protocol:
 %%% a class-side message not found in user-defined class methods
 %%% dispatches through the 'Class' instance method chain.

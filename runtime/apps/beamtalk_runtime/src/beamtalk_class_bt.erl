@@ -3,7 +3,7 @@
 
 %%% @doc Minimal Class bootstrap stub for ADR 0032 (Early Class Protocol).
 %%%
-%%% **DDD Context:** Object System
+%% **DDD Context:** Object System
 %%%
 %%% This module acts as the implementation module for the 'Class' class,
 %%% enabling ADR 0032 Phase 0 wire check: proving that class-side messages not

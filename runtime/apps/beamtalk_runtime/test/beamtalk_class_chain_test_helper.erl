@@ -3,6 +3,8 @@
 
 %%% @doc Test helper module for BT-732 class chain wire check.
 %%%
+%% **DDD Context:** Object System
+%%%
 %%% This module acts as a minimal Class implementation for EUnit tests.
 %%% It provides `testClassProtocol` so tests can verify the dispatch
 %%% fallthrough without putting probe methods in production code.
