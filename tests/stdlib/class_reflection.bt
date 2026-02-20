@@ -1,15 +1,17 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Stdlib tests for class methods reflection (BT-510)
+// Stdlib tests for class methods reflection (BT-510 / ADR 0032 Phase 1)
 //
-// Verifies that `methods` returns both local and inherited methods
-// for user-defined classes, not just local methods.
+// ADR 0032 Phase 1: `methods` returns local-only selectors.
+// Phase 2 will add `Behaviour methods` for the full hierarchy walk.
+//
+// Inherited methods are found via `respondsTo:` (chain walk), not `methods`.
 
 // @load tests/e2e/fixtures/counter.bt
 
 // ---------------------------------------------------------------------------
-// Counter local methods
+// Counter local methods (local-only per ADR 0032 Phase 1)
 // ---------------------------------------------------------------------------
 
 counterMethods := Counter methods
@@ -18,7 +20,7 @@ counterMethods := Counter methods
 counterMethods isEmpty
 // => false
 
-// Counter defines increment, decrement, getValue
+// Counter defines increment, decrement, getValue locally
 counterMethods includes: #increment
 // => true
 
@@ -29,20 +31,21 @@ counterMethods includes: #getValue
 // => true
 
 // ---------------------------------------------------------------------------
-// Counter should inherit Object methods via Actor
+// Inherited methods are NOT in `methods` (local-only in Phase 1)
+// They are accessible via respondsTo: (chain walk at dispatch time)
 // ---------------------------------------------------------------------------
 
 counterMethods includes: #isNil
-// => true
+// => false
 
 counterMethods includes: #printString
-// => true
+// => false
 
 counterMethods includes: #respondsTo:
-// => true
+// => false
 
 counterMethods includes: #yourself
-// => true
+// => false
 
 // ---------------------------------------------------------------------------
 // Primitive class methods still work
@@ -54,6 +57,6 @@ intMethods := Integer methods
 intMethods isEmpty
 // => false
 
-// Integer inherits Object methods
+// Integer local methods do not include inherited Object methods in Phase 1
 intMethods includes: #isNil
-// => true
+// => false

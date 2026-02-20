@@ -725,6 +725,7 @@ Integer subclass: SafeInteger
   ]
 ```
 
+
 ### v0.2 plan
 
 A `import`/module system is planned for v0.2. Until then, class names must be

@@ -41,10 +41,12 @@ format_class_docs(ClassName) ->
                 Superclass = gen_server:call(ClassPid, superclass, 5000),
                 IsSealed = gen_server:call(ClassPid, is_sealed, 5000),
                 IsAbstract = gen_server:call(ClassPid, is_abstract, 5000),
-                {ok, Flattened} = gen_server:call(ClassPid, get_flattened_methods, 5000),
 
                 %% Get module doc from EEP-48 chunks
                 ModuleDoc = get_module_doc(ModuleName),
+
+                %% Walk class hierarchy to collect #{Sel => {DefiningClass, MethodInfo}}
+                Flattened = collect_flattened_methods(ClassName, ClassPid),
 
                 %% Build method listing grouped by defining class
                 {Own, Inherited} = maps:fold(
@@ -98,8 +100,8 @@ format_method_doc(ClassName, SelectorBin) ->
                 {error, badarg} ->
                     {error, {method_not_found, ClassName, SelectorBin}};
                 {ok, SelectorAtom} ->
-                    case gen_server:call(ClassPid, {lookup_flattened, SelectorAtom}, 5000) of
-                        {ok, DefiningClass, _MethodInfo} ->
+                    case find_method_in_chain(ClassPid, SelectorAtom) of
+                        {ok, DefiningClass} ->
                             %% Found the method — get its doc from the defining class
                             DocInfo = case beamtalk_class_registry:whereis_class(DefiningClass) of
                                 undefined ->
@@ -380,6 +382,56 @@ format_modifiers(#{is_abstract := true}) ->
     <<"\n[abstract]">>;
 format_modifiers(_) ->
     <<>>.
+
+%% @private
+%% @doc Walk the class hierarchy and build a flattened method map.
+%%
+%% ADR 0032 Phase 1: Replaces get_flattened_methods gen_server call.
+%% Returns #{Selector => {DefiningClass, MethodInfo}} where local methods
+%% shadow inherited ones, walking from ClassName upward.
+-spec collect_flattened_methods(atom(), pid()) -> map().
+collect_flattened_methods(ClassName, ClassPid) ->
+    {ok, LocalMethods} = gen_server:call(ClassPid, get_instance_methods, 5000),
+    LocalFlat = maps:map(fun(_Sel, Info) -> {ClassName, Info} end, LocalMethods),
+    Superclass = gen_server:call(ClassPid, superclass, 5000),
+    SuperFlat = collect_chain_methods(Superclass),
+    maps:merge(SuperFlat, LocalFlat).
+
+-spec collect_chain_methods(atom() | none) -> map().
+collect_chain_methods(none) -> #{};
+collect_chain_methods(SuperName) ->
+    case beamtalk_class_registry:whereis_class(SuperName) of
+        undefined -> #{};
+        SuperPid -> collect_flattened_methods(SuperName, SuperPid)
+    end.
+
+%% @private
+%% @doc Walk the class hierarchy to find which class defines a selector.
+%%
+%% ADR 0032 Phase 1: Replaces {lookup_flattened, Selector} gen_server call.
+%% Returns {ok, DefiningClass} or not_found.
+%%
+%% Uses {method, Selector} to check only the local instance_methods map,
+%% NOT the compiled module's has_method/1. This correctly identifies the
+%% defining class rather than the class that dispatches the method.
+-spec find_method_in_chain(pid(), atom()) -> {ok, atom()} | not_found.
+find_method_in_chain(ClassPid, Selector) ->
+    ClassName = gen_server:call(ClassPid, class_name, 5000),
+    case gen_server:call(ClassPid, {method, Selector}, 5000) of
+        nil ->
+            %% Not in local instance_methods — check superclass
+            case gen_server:call(ClassPid, superclass, 5000) of
+                none ->
+                    not_found;
+                Super ->
+                    case beamtalk_class_registry:whereis_class(Super) of
+                        undefined -> not_found;
+                        SuperPid -> find_method_in_chain(SuperPid, Selector)
+                    end
+            end;
+        _MethodInfo ->
+            {ok, ClassName}
+    end.
 
 %% @doc Format method-specific documentation output.
 -spec format_method_output(atom(), binary(), atom(),

@@ -9,8 +9,8 @@
 %% process. Follows Smalltalk philosophy where classes are messageable objects.
 %%
 %% Class method dispatch is handled by beamtalk_class_dispatch.
-%% Flattened method table management by beamtalk_class_hierarchy.
 %% Instance creation (new/spawn) by beamtalk_class_instantiation.
+%% Method lookup walks the class chain directly via has_method/2 + superclass/1.
 %%
 %% ## Registration
 %%
@@ -81,9 +81,7 @@
     method_source = #{} :: #{selector() => binary()},
     before_methods = #{} :: #{selector() => [fun()]},
     after_methods = #{} :: #{selector() => [fun()]},
-    dynamic_methods = #{} :: #{selector() => fun()},
-    flattened_methods = #{} :: #{selector() => {class_name(), method_info()}},
-    flattened_class_methods = #{} :: #{selector() => {class_name(), method_info()}}
+    dynamic_methods = #{} :: #{selector() => fun()}
 }).
 
 %%====================================================================
@@ -254,10 +252,9 @@ init({ClassName, ClassInfo}) ->
     ClassMethods = maps:get(class_methods, ClassInfo, #{}),
     
     ets:insert(beamtalk_class_hierarchy, {ClassName, Superclass}),
-    FlattenedMethods = beamtalk_class_hierarchy:build_flattened_methods(ClassName, Superclass, InstanceMethods),
-    FlattenedClassMethods = beamtalk_class_hierarchy:build_flattened_methods(ClassName, Superclass, ClassMethods, get_flattened_class_methods),
-    
+
     %% BT-474: is_constructible starts undefined — computed lazily on first new call
+    %% ADR 0032 Phase 1: No flattened method tables — dispatch walks the chain directly.
     State = #class_state{
         name = ClassName,
         module = Module,
@@ -271,12 +268,8 @@ init({ClassName, ClassInfo}) ->
         method_source = maps:get(method_source, ClassInfo, #{}),
         before_methods = maps:get(before_methods, ClassInfo, #{}),
         after_methods = maps:get(after_methods, ClassInfo, #{}),
-        dynamic_methods = maps:get(dynamic_methods, ClassInfo, #{}),
-        flattened_methods = FlattenedMethods,
-        flattened_class_methods = FlattenedClassMethods
+        dynamic_methods = maps:get(dynamic_methods, ClassInfo, #{})
     },
-    %% Notify subclasses to rebuild flattened tables (out-of-order registration)
-    beamtalk_class_registry:invalidate_subclass_flattened_tables(ClassName),
     {ok, State}.
 
 handle_call({spawn, Args}, _From, #class_state{
@@ -307,8 +300,10 @@ handle_call({new, Args}, _From, #class_state{
             {reply, {error, Error}, State#class_state{is_constructible = IsConstructible}}
     end;
 
-handle_call(methods, _From, #class_state{flattened_methods = Flattened} = State) ->
-    {reply, maps:keys(Flattened), State};
+%% ADR 0032 Phase 1: Returns local (non-inherited) method selectors only.
+%% Full hierarchy walk is done by Behaviour.methods in Phase 2.
+handle_call(methods, _From, #class_state{instance_methods = Methods} = State) ->
+    {reply, maps:keys(Methods), State};
 
 handle_call(superclass, _From, #class_state{superclass = Super} = State) ->
     {reply, Super, State};
@@ -342,19 +337,17 @@ handle_call({put_method, Selector, Fun, Source}, _From, State) ->
     MethodInfo = #{block => Fun, arity => Arity},
     NewMethods = maps:put(Selector, MethodInfo, State#class_state.instance_methods),
     NewSource = maps:put(Selector, Source, State#class_state.method_source),
-    NewFlattened = beamtalk_class_hierarchy:build_flattened_methods(
-        State#class_state.name, State#class_state.superclass, NewMethods),
-    NewState = State#class_state{
-        instance_methods = NewMethods, method_source = NewSource,
-        flattened_methods = NewFlattened},
+    %% ADR 0032 Phase 1: No flattened table to rebuild or invalidate.
+    %% Dispatch finds the new method via chain walk on the next call.
+    NewState = State#class_state{instance_methods = NewMethods, method_source = NewSource},
     notify_instances(State#class_state.name, NewMethods),
-    beamtalk_class_registry:invalidate_subclass_flattened_tables(State#class_state.name),
     {reply, ok, NewState};
 
 %% BT-572: Update class metadata after redefinition (hot reload).
 %% BT-737: Emits a collision warning when a class is redefined from a different module.
 %% BT-738: Rejects redefinition that would shadow a stdlib class.
 %% Returns {ok, InstanceVars} with the new instance variable list for state migration.
+%% ADR 0032 Phase 1: No flattened tables to rebuild or invalidate.
 handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = State) ->
     OldModule = State#class_state.module,
     NewModule = maps:get(module, ClassInfo, OldModule),
@@ -391,21 +384,16 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
                 true ->
                     ok
             end,
+            %% ADR 0032 Phase 1: No flattened tables to rebuild or invalidate.
             NewInstanceMethods = maps:get(instance_methods, ClassInfo, State#class_state.instance_methods),
             NewClassMethods = maps:get(class_methods, ClassInfo, State#class_state.class_methods),
-            NewFlattened = beamtalk_class_hierarchy:build_flattened_methods(
-                ClassName, State#class_state.superclass, NewInstanceMethods),
-            NewFlattenedClass = beamtalk_class_hierarchy:build_flattened_methods(
-                ClassName, State#class_state.superclass, NewClassMethods, get_flattened_class_methods),
             NewIVars = maps:get(instance_variables, ClassInfo, State#class_state.instance_variables),
             NewState = State#class_state{
                 module = maps:get(module, ClassInfo, State#class_state.module),
                 instance_methods = NewInstanceMethods, class_methods = NewClassMethods,
                 instance_variables = NewIVars,
                 method_source = maps:get(method_source, ClassInfo, State#class_state.method_source),
-                flattened_methods = NewFlattened, flattened_class_methods = NewFlattenedClass,
                 is_constructible = undefined},
-            beamtalk_class_registry:invalidate_subclass_flattened_tables(ClassName),
             {reply, {ok, NewIVars}, NewState}
     end;
 
@@ -437,30 +425,30 @@ handle_call({add_after, Selector, Fun}, _From, State) ->
     NewAfters = maps:put(Selector, Afters ++ [Fun], State#class_state.after_methods),
     {reply, ok, State#class_state{after_methods = NewAfters}};
 
-handle_call(get_flattened_methods, _From, #class_state{flattened_methods = Flattened} = State) ->
-    {reply, {ok, Flattened}, State};
+%% ADR 0032 Phase 1: Returns local class_methods for chain walk queries.
+handle_call(get_local_class_methods, _From, #class_state{class_methods = ClassMethods} = State) ->
+    {reply, ClassMethods, State};
 
-handle_call({lookup_flattened, Selector}, _From, #class_state{flattened_methods = Flattened} = State) ->
-    Result = case maps:find(Selector, Flattened) of
-        {ok, {DefiningClass, MethodInfo}} -> {ok, DefiningClass, MethodInfo};
-        error -> not_found
-    end,
-    {reply, Result, State};
+%% ADR 0032 Phase 1: Returns local instance_methods for chain walk queries.
+handle_call(get_instance_methods, _From, #class_state{instance_methods = InstanceMethods} = State) ->
+    {reply, {ok, InstanceMethods}, State};
 
 %% BT-411/BT-412/BT-440: Class method dispatch.
 %% Delegates to beamtalk_class_dispatch (BT-704).
+%% ADR 0032 Phase 1: Passes local class_methods (no flattened table).
+%% beamtalk_class_dispatch walks the superclass chain if not found locally.
 handle_call({class_method_call, Selector, Args}, From,
-            #class_state{flattened_class_methods = FlatClassMethods,
-                         flattened_methods = FlatMethods,
+            #class_state{class_methods = ClassMethods,
+                         instance_methods = InstanceMethods,
                          name = ClassName, module = Module,
                          class_variables = ClassVars} = State) ->
     case beamtalk_class_dispatch:handle_class_method_call(
-            Selector, Args, ClassName, Module, FlatClassMethods, ClassVars) of
+            Selector, Args, ClassName, Module, ClassMethods, ClassVars) of
         {reply, Result, NewClassVars} ->
             {reply, Result, State#class_state{class_variables = NewClassVars}};
         test_spawn ->
             beamtalk_test_case:spawn_test_execution(
-                Selector, Args, ClassName, Module, FlatMethods, From),
+                Selector, Args, ClassName, Module, InstanceMethods, From),
             {noreply, State};
         {error, not_found} ->
             {reply, {error, not_found}, State}
@@ -468,9 +456,6 @@ handle_call({class_method_call, Selector, Args}, From,
 
 handle_call({initialize, _Args}, _From, #class_state{} = State) ->
     {reply, {ok, nil}, State};
-
-handle_call(get_flattened_class_methods, _From, #class_state{flattened_class_methods = Flattened} = State) ->
-    {reply, {ok, Flattened}, State};
 
 handle_call(get_module, _From, #class_state{module = Module} = State) ->
     {reply, Module, State};
@@ -481,53 +466,29 @@ handle_call({get_class_var, Name}, _From, #class_state{class_variables = ClassVa
 handle_call({set_class_var, Name, Value}, _From, #class_state{class_variables = ClassVars} = State) ->
     {reply, Value, State#class_state{class_variables = maps:put(Name, Value, ClassVars)}}.
 
-handle_cast(Msg, #class_state{flattened_methods = Flattened,
+%% ADR 0032 Phase 1: Passes instance_methods (local only) instead of flattened table.
+handle_cast(Msg, #class_state{instance_methods = InstanceMethods,
                               name = ClassName, superclass = Superclass,
                               module = Module} = State) ->
-    beamtalk_class_dispatch:handle_async_dispatch(Msg, ClassName, Flattened, Superclass, Module),
+    beamtalk_class_dispatch:handle_async_dispatch(Msg, ClassName, InstanceMethods, Superclass, Module),
     {noreply, State}.
 
-handle_info({rebuild_flattened, ChangedClass}, #class_state{superclass = Superclass} = State) ->
-    try beamtalk_class_registry:inherits_from(Superclass, ChangedClass) of
-        true ->
-            {noreply, rebuild_all_flattened_tables(State)};
-        false ->
-            {noreply, State}
-    catch
-        _:_ ->
-            {noreply, State}
-    end;
+%% ADR 0032 Phase 1: {rebuild_flattened, _} messages are no longer sent
+%% (invalidate_subclass_flattened_tables removed from beamtalk_class_registry).
 handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, _State) ->
     ok.
 
+%% ADR 0032 Phase 1: No flattened tables to rebuild after hot reload.
 code_change(OldVsn, State, Extra) ->
     {ok, NewState} = beamtalk_hot_reload:code_change(OldVsn, State, Extra),
-    FinalState = rebuild_all_flattened_tables(NewState),
-    FinalState2 = FinalState#class_state{is_constructible = undefined},
-    beamtalk_class_registry:invalidate_subclass_flattened_tables(FinalState2#class_state.name),
-    {ok, FinalState2}.
+    {ok, NewState#class_state{is_constructible = undefined}}.
 
 %%====================================================================
 %% Internal functions
 %%====================================================================
-
-%% @private Rebuild both flattened tables. Delegates to beamtalk_class_hierarchy.
--spec rebuild_all_flattened_tables(#class_state{}) -> #class_state{}.
-rebuild_all_flattened_tables(#class_state{
-    name = Name,
-    superclass = Superclass,
-    instance_methods = InstanceMethods,
-    class_methods = ClassMethods
-} = State) ->
-    {NewFlattened, NewFlattenedClass} = beamtalk_class_hierarchy:rebuild_all_flattened_tables(
-        Name, Superclass, InstanceMethods, ClassMethods),
-    State#class_state{
-        flattened_methods = NewFlattened,
-        flattened_class_methods = NewFlattenedClass
-    }.
 
 notify_instances(_ClassName, _NewMethods) ->
     ok.
