@@ -21,7 +21,7 @@
 
 -export([start_link/0, start_link/1]).
 -export([init/1, handle_continue/2, handle_info/2, handle_call/3, handle_cast/2, terminate/2]).
--export([find_bt_modules_in_dir/1]).
+-export([find_bt_modules_in_dir/1, activate_project_modules/1]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
