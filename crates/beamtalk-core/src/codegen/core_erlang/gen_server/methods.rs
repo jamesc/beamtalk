@@ -866,11 +866,7 @@ impl CoreErlangGenerator {
             "'register_class'/0 = fun () ->",
             nest(
                 INDENT,
-                docvec![
-                    line(),
-                    "try",
-                    nest(INDENT, docvec![try_body, "\n",]),
-                ]
+                docvec![line(), "try", nest(INDENT, docvec![try_body, "\n",]),]
             ),
             nest(
                 INDENT,

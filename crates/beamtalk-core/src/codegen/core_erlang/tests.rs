@@ -2398,10 +2398,7 @@ fn test_multi_class_early_error_short_circuits() {
     // The fix must ensure that if _Reg0 is {error, ...}, we never reach _Reg1.
     let module = Module {
         expressions: vec![],
-        classes: vec![
-            make_class("ShadowA", 7, 20),
-            make_class("ValidB", 6, 30),
-        ],
+        classes: vec![make_class("ShadowA", 7, 20), make_class("ValidB", 6, 30)],
         method_definitions: Vec::new(),
         span: Span::new(0, 50),
         leading_comments: vec![],
