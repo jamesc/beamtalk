@@ -17,6 +17,7 @@
 -module(beamtalk_dispatch_tests).
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("kernel/include/logger.hrl").
 -include("beamtalk.hrl").
 
 %%% ============================================================================
@@ -391,7 +392,7 @@ test_dispatch_lookup_performance() ->
     End = erlang:monotonic_time(microsecond),
 
     AvgTime = (End - Start) / N,
-    logger:notice("Chain walk: ~p lookups in ~p μs (avg ~.2f μs/call)", [N, End - Start, AvgTime]),
+    ?LOG_NOTICE("Chain walk: ~p lookups in ~p μs (avg ~.2f μs/call)", [N, End - Start, AvgTime]),
 
     %% Chain walk at depth 3 should complete well within 500 μs/call on any CI machine
     ?assert(AvgTime < 500.0).

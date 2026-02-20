@@ -295,7 +295,7 @@ handle_async_dispatch({Selector, Args, FuturePid}, ClassName, InstanceMethods, S
             FuturePid ! {reject, Error}
     end,
     ok;
-handle_async_dispatch(_Msg, _ClassName, _Flattened, _Superclass, _Module) ->
+handle_async_dispatch(_Msg, _ClassName, _InstanceMethods, _Superclass, _Module) ->
     ok.
 
 %%% ============================================================================
