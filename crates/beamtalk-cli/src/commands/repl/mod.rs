@@ -227,6 +227,9 @@ fn auto_run_entry(client: &mut client::ReplClient, project_root: &Path) {
             let is_error = response.is_error();
             display_eval_response(&response);
             if is_error {
+                if response.error_message().is_none() {
+                    eprintln!("Warning: [run] entry failed (no error details).");
+                }
                 eprintln!("The REPL is still available.");
             }
         }

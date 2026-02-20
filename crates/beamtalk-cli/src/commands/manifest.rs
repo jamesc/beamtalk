@@ -118,6 +118,9 @@ pub fn find_run_config(project_root: &Utf8Path) -> Result<Option<RunConfig>> {
         return Ok(None);
     }
     let manifest = parse_manifest_raw(&manifest_path)?;
+    if let Err(e) = validate_package_name(&manifest.package.name) {
+        miette::bail!("{}", format_name_error(&manifest.package.name, &e));
+    }
     Ok(manifest.run)
 }
 
@@ -544,6 +547,28 @@ version = "0.1.0"
 
         let run_config = find_run_config(&path).unwrap();
         assert!(run_config.is_none());
+    }
+
+    #[test]
+    fn test_find_run_config_rejects_invalid_package_name() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "BadName"
+version = "0.1.0"
+
+[run]
+entry = "Main run"
+"#,
+        );
+
+        let result = find_run_config(&path);
+        assert!(
+            result.is_err(),
+            "should reject manifest with invalid package name"
+        );
     }
 
     #[test]
