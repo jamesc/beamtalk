@@ -47,7 +47,6 @@
 
 use std::path::{Path, PathBuf};
 
-use camino;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -209,6 +208,7 @@ pub(crate) struct SessionInfo {
 /// but does not abort — the REPL remains interactive.
 fn auto_run_entry(client: &mut client::ReplClient, project_root: &Path) {
     let Some(project_root_utf8) = camino::Utf8Path::from_path(project_root) else {
+        eprintln!("Warning: project path is not valid UTF-8, skipping [run] entry");
         return;
     };
 
@@ -224,13 +224,10 @@ fn auto_run_entry(client: &mut client::ReplClient, project_root: &Path) {
     println!("> {}", run_config.entry);
     match client.eval(&run_config.entry) {
         Ok(response) => {
-            if response.is_error() {
-                if let Some(msg) = response.error_message() {
-                    eprintln!("Warning: [run] entry failed: {msg}");
-                    eprintln!("The REPL is still available.");
-                }
-            } else if let Some(ref value) = response.value {
-                println!("{}", display::format_value(value));
+            let is_error = response.is_error();
+            display_eval_response(&response);
+            if is_error {
+                eprintln!("The REPL is still available.");
             }
         }
         Err(e) => {

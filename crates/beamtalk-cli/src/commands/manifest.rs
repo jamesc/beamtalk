@@ -60,18 +60,25 @@ pub struct PackageManifest {
     pub start: Option<String>,
 }
 
+/// Read and deserialize a `beamtalk.toml` file into a raw [`Manifest`].
+///
+/// Does **not** validate the package name — use [`parse_manifest`] for that.
+fn parse_manifest_raw(path: &Utf8Path) -> Result<Manifest> {
+    let content = fs::read_to_string(path)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read manifest '{path}'"))?;
+
+    toml::from_str(&content)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to parse manifest '{path}'"))
+}
+
 /// Parse a `beamtalk.toml` manifest file.
 ///
 /// Returns the parsed manifest, or an error if the file cannot be read or
 /// contains invalid TOML / missing required fields.
 pub fn parse_manifest(path: &Utf8Path) -> Result<PackageManifest> {
-    let content = fs::read_to_string(path)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to read manifest '{path}'"))?;
-
-    let manifest: Manifest = toml::from_str(&content)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to parse manifest '{path}'"))?;
+    let manifest = parse_manifest_raw(path)?;
 
     if let Err(e) = validate_package_name(&manifest.package.name) {
         miette::bail!("{}", format_name_error(&manifest.package.name, &e));
@@ -110,12 +117,7 @@ pub fn find_run_config(project_root: &Utf8Path) -> Result<Option<RunConfig>> {
     {
         return Ok(None);
     }
-    let content = fs::read_to_string(&manifest_path)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to read manifest '{manifest_path}'"))?;
-    let manifest: Manifest = toml::from_str(&content)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to parse manifest '{manifest_path}'"))?;
+    let manifest = parse_manifest_raw(&manifest_path)?;
     Ok(manifest.run)
 }
 

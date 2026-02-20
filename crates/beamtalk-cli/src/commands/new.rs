@@ -77,8 +77,8 @@ entry = "Main run"
 // SPDX-License-Identifier: Apache-2.0
 
 // Main entry point for {name}.
-// Load in the REPL with: :load src/main.bt
-// Then run with: Main new run
+// Auto-runs via [run].entry in beamtalk.toml when you start `beamtalk repl`.
+// Or load manually: :load src/main.bt
 
 Object subclass: Main
 
