@@ -93,15 +93,16 @@ counterMethods includes: #decrement
 counterMethods includes: #getValue
 // => true
 
-// Counter should inherit Object methods via Actor
+// ADR 0032 Phase 1: methods returns local-only selectors.
+// Inherited Object methods are NOT included in the local list.
 counterMethods includes: #isNil
-// => true
+// => false
 
 counterMethods includes: #printString
-// => true
+// => false
 
 counterMethods includes: #respondsTo:
-// => true
+// => false
 
 // ---------------------------------------------------------------------------
 // Get methods list from Integer class

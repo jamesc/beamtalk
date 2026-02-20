@@ -174,8 +174,12 @@ super(Selector, Args, Self, State, CurrentClass) ->
 %% @doc Check if a class or any of its ancestors responds to a selector.
 %%
 %% Walks the class hierarchy from ClassName upward, checking each class's
-%% method table (metadata + module has_method/1). Returns true if any class
-%% in the chain has the method.
+%% local method table via has_method/2. Returns true if any class in the
+%% chain has the method.
+%%
+%% ADR 0032 Phase 1: Direct chain walk replaces the flattened table fast path.
+%% Fixes BT-721 where responds_to_slow called try_flattened_lookup instead
+%% of has_method, causing inherited method detection to fail.
 %%
 %% Used by Object's `respondsTo:` implementation to check the full hierarchy.
 -spec responds_to(selector(), class_name()) -> boolean().
@@ -189,38 +193,24 @@ responds_to(Selector, ClassName) ->
                 undefined ->
                     false;
                 ClassPid ->
-                    %% ADR 0006 Phase 2: Try flattened table first (O(1))
-                    case try_flattened_lookup(ClassPid, Selector) of
-                        {ok, _, _} ->
-                            true;
-                        not_found ->
-                            %% Fall back to hierarchy walk in case flattened
-                            %% table is incomplete (bootstrap, rebuild failure)
-                            responds_to_slow(Selector, ClassPid)
-                    end
+                    responds_to_chain(Selector, ClassPid)
             end
     end.
 
 %% @private
-%% @doc Slow path for responds_to: walk hierarchy checking each class's flattened table.
-%%
-%% This is the fallback when try_flattened_lookup fails. It manually walks the
-%% hierarchy at each level, checking the class's flattened methods table.
-%% Returns true if the method is found in any class's flattened table.
--spec responds_to_slow(selector(), pid()) -> boolean().
-responds_to_slow(Selector, ClassPid) ->
-    %% Try this class's flattened table
-    case try_flattened_lookup(ClassPid, Selector) of
-        {ok, _, _} ->
+%% @doc Walk hierarchy checking each class's local method table via has_method/2.
+-spec responds_to_chain(selector(), pid()) -> boolean().
+responds_to_chain(Selector, ClassPid) ->
+    case beamtalk_object_class:has_method(ClassPid, Selector) of
+        true ->
             true;
-        not_found ->
-            %% Not in this class, check superclass
+        false ->
             case beamtalk_object_class:superclass(ClassPid) of
                 none -> false;
                 SuperclassName ->
                     case beamtalk_class_registry:whereis_class(SuperclassName) of
                         undefined -> false;
-                        SuperclassPid -> responds_to_slow(Selector, SuperclassPid)
+                        SuperclassPid -> responds_to_chain(Selector, SuperclassPid)
                     end
             end
     end.
@@ -230,48 +220,20 @@ responds_to_slow(Selector, ClassPid) ->
 %%% ============================================================================
 
 %% @private
-%% @doc Look up method in class chain (with flattened table optimization).
+%% @doc Look up method in class chain via direct hierarchy walk.
 %%
-%% ADR 0006 Phase 2: This function first checks the flattened method table
-%% for O(1) lookup. If the flattened table is missing or stale, it falls back
-%% to the recursive hierarchy walk.
-%%
-%% Algorithm:
-%% 1. Check if class exists
-%% 2. Try flattened table lookup (O(1) - fast path)
-%% 3. If not in flattened table or table missing, fall back to hierarchy walk
-%% 4. If found, invoke the method from the defining class
-%% 5. Returns error if not found anywhere
+%% ADR 0032 Phase 1: Replaces the flattened table fast path with a direct
+%% chain walk via has_method/2 + superclass/1. At max hierarchy depth of 6
+%% (typical 4), this means at most ~12 gen_server calls — microseconds on a
+%% local node. The flattened table cache was removed to eliminate BT-510's
+%% race window and O(N) rebuild broadcast cascade.
 -spec lookup_in_class_chain(selector(), args(), bt_self(), state(), class_name()) -> dispatch_result().
 lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
-            %% Class not found
             {error, beamtalk_error:new(class_not_found, ClassName, Selector)};
         ClassPid ->
-            %% ADR 0006 Phase 2: Try flattened table first (O(1) lookup)
-            case try_flattened_lookup(ClassPid, Selector) of
-                {ok, DefiningClass, _MethodInfo} ->
-                    %% Found in flattened table - invoke from defining class
-                    ?LOG_DEBUG("Found method ~p in flattened table (defined in ~p)", [Selector, DefiningClass]),
-                    case beamtalk_class_registry:whereis_class(DefiningClass) of
-                        undefined ->
-                            %% Defining class no longer exists (hot reload edge case)
-                            %% Fall back to hierarchy walk
-                            ?LOG_DEBUG("Defining class ~p not found, falling back to hierarchy walk", [DefiningClass]),
-                            lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid);
-                        DefiningClassPid ->
-                            invoke_method(DefiningClass, DefiningClassPid, Selector, Args, Self, State)
-                    end;
-                not_found ->
-                    %% Not in flattened table - fall back to hierarchy walk
-                    %% This handles:
-                    %% - Methods added at runtime (not yet in flattened table)
-                    %% - Bootstrap ordering (flattened table incomplete)
-                    %% - Extension methods (checked by caller before this)
-                    ?LOG_DEBUG("Method ~p not in flattened table, falling back to hierarchy walk", [Selector]),
-                    lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid)
-            end
+            lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid)
     end.
 
 %% @private
@@ -416,34 +378,3 @@ check_extension(ClassName, Selector) ->
             not_found
     end.
 
-%% @private
-%% @doc Try to look up a method in the flattened method table.
-%%
-%% ADR 0006 Phase 2: Fast O(1) lookup using pre-computed method table.
-%% Returns {ok, DefiningClass, MethodInfo} if found, not_found otherwise.
-%%
-%% The flattened table maps Selector => {DefiningClass, MethodInfo} where
-%% DefiningClass is the class that actually implements the method.
--spec try_flattened_lookup(pid(), selector()) ->
-    {ok, class_name(), term()} | not_found.
-try_flattened_lookup(ClassPid, Selector) ->
-    try
-        gen_server:call(ClassPid, {lookup_flattened, Selector}, 5000)
-    catch
-        exit:{noproc, _} ->
-            %% Class process not running
-            not_found;
-        exit:{normal, _} ->
-            %% Class process terminated normally
-            not_found;
-        exit:{timeout, _} ->
-            %% Class process lookup timed out — log for visibility
-            ?LOG_WARNING("Flattened lookup timed out", #{
-                class_pid => ClassPid,
-                selector => Selector
-            }),
-            not_found;
-        exit:{_Reason, _} ->
-            %% Other exit reasons (shutdown, killed, etc.)
-            not_found
-    end.
