@@ -83,9 +83,11 @@ impl ReplClient {
         match self.inner.send_request::<ReplResponse>(request) {
             Ok(resp) => Ok(resp),
             Err(e) => {
-                // Only retry on transport errors, not parse/protocol errors
+                // Only retry on transport errors, not parse/protocol errors.
+                // ProtocolClient::send_request produces "Failed to parse response"
+                // for JSON errors — no "Failed to deserialize" at this layer.
                 let msg = e.to_string();
-                if msg.contains("Failed to parse") || msg.contains("Failed to deserialize") {
+                if msg.contains("Failed to parse") {
                     return Err(e);
                 }
                 self.reconnect()?;
