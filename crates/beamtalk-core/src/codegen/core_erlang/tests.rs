@@ -2393,8 +2393,8 @@ fn test_multi_class_early_error_short_circuits() {
         }
     }
 
-    // Three classes: A (index 0), B (index 1, last).
-    // B is the valid class; A would be the one shadowing stdlib.
+    // Two classes: ShadowA (index 0), ValidB (index 1, last).
+    // ValidB is fine; ShadowA would be the one shadowing stdlib.
     // The fix must ensure that if _Reg0 is {error, ...}, we never reach _Reg1.
     let module = Module {
         expressions: vec![],
@@ -2427,6 +2427,75 @@ fn test_multi_class_early_error_short_circuits() {
     // (it is the last, so its result flows out directly).
     assert!(
         !code.contains("in case _Reg1 of"),
+        "Last _Reg should not be wrapped in a short-circuit case. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_three_class_short_circuit_nesting() {
+    // BT-749: Verify nesting correctness for N=3 classes.
+    // Short-circuit cases are added for indices 0 and 1 (all except the last).
+    // The last class (index 2) is returned directly with no extra wrapping.
+    use crate::ast::{ClassDefinition, Identifier, StateDeclaration};
+    use crate::source_analysis::Span;
+
+    fn make_class(name: &str, name_len: u32) -> ClassDefinition {
+        ClassDefinition {
+            name: Identifier::new(name, Span::new(0, name_len)),
+            superclass: Some(Identifier::new("Actor", Span::new(0, 5))),
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![StateDeclaration {
+                name: Identifier::new("x", Span::new(0, 1)),
+                default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 1))),
+                type_annotation: None,
+                span: Span::new(0, 5),
+            }],
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: Span::new(0, 20),
+        }
+    }
+
+    let module = Module {
+        expressions: vec![],
+        classes: vec![make_class("A", 1), make_class("B", 1), make_class("C", 1)],
+        method_definitions: Vec::new(),
+        span: Span::new(0, 60),
+        leading_comments: vec![],
+    };
+
+    let code = generate_module(&module, CodegenOptions::new("three_classes"))
+        .expect("codegen should succeed");
+
+    // BT-749: Classes 0 and 1 (non-last) must have short-circuit case wrappers.
+    assert!(
+        code.contains("in case _Reg0 of"),
+        "Should short-circuit on _Reg0 error. Got:\n{code}"
+    );
+    assert!(
+        code.contains("<{'error', _RegErr0}> when 'true' -> {'error', _RegErr0}"),
+        "Should propagate _Reg0 error. Got:\n{code}"
+    );
+    assert!(
+        code.contains("in case _Reg1 of"),
+        "Should short-circuit on _Reg1 error. Got:\n{code}"
+    );
+    assert!(
+        code.contains("<{'error', _RegErr1}> when 'true' -> {'error', _RegErr1}"),
+        "Should propagate _Reg1 error. Got:\n{code}"
+    );
+
+    // Class 2 (last) must be returned directly — no extra case wrapping.
+    assert!(
+        code.contains("in _Reg2"),
+        "Should use _Reg2 as final result. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("in case _Reg2 of"),
         "Last _Reg should not be wrapped in a short-circuit case. Got:\n{code}"
     );
 }

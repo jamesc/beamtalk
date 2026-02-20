@@ -815,8 +815,11 @@ impl CoreErlangGenerator {
             class_docs.push(class_doc);
         }
 
-        // BT-738 / BT-749: Build a short-circuit chain so the first {error, ...}
-        // result propagates out of on_load, regardless of which class caused it.
+        // BT-738 / BT-749: Build a short-circuit chain so that the first
+        // {error, ...} from update_class propagates out of on_load, regardless
+        // of which class position caused it.  Note: non-already_started errors
+        // from start/2 are already normalized to 'ok' in the inner case arms
+        // above, so only update_class errors can produce {error, _} here.
         //
         // For N classes, generates:
         //   let ClassInfo0 = ... in let _Reg0 = case ... end
