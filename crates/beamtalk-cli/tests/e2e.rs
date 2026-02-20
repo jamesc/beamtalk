@@ -736,6 +736,16 @@ impl ReplClient {
         let response: serde_json::Value = serde_json::from_str(&response_line)
             .map_err(|e| format!("Failed to parse load response: {e}"))?;
 
+        // Extract warnings from load response (BT-737: class collision warnings)
+        self.last_warnings.clear();
+        if let Some(warnings) = response.get("warnings").and_then(|w| w.as_array()) {
+            for warning in warnings {
+                if let Some(warn_str) = warning.as_str() {
+                    self.last_warnings.push(warn_str.to_string());
+                }
+            }
+        }
+
         // New protocol: check status for errors
         if let Some(status) = response.get("status").and_then(|s| s.as_array()) {
             let is_error = status.iter().any(|s| s.as_str() == Some("error"));

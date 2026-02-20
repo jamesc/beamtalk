@@ -344,9 +344,26 @@ handle_call({put_method, Selector, Fun, Source}, _From, State) ->
     {reply, ok, NewState};
 
 %% BT-572: Update class metadata after redefinition (hot reload).
+%% BT-737: Emits a collision warning when a class is redefined from a different module.
 %% Returns {ok, InstanceVars} with the new instance variable list for state migration.
 %% ADR 0032 Phase 1: No flattened tables to rebuild or invalidate.
-handle_call({update_class, ClassInfo}, _From, #class_state{} = State) ->
+handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = State) ->
+    %% BT-737: Detect cross-package class redefinition (different BEAM module).
+    %% Same-module reload (hot reload of the same file) does NOT produce a warning.
+    OldModule = State#class_state.module,
+    NewModule = maps:get(module, ClassInfo, OldModule),
+    case OldModule =:= NewModule of
+        false ->
+            ?LOG_WARNING("Class redefined from different module", #{
+                class => ClassName,
+                old_module => OldModule,
+                new_module => NewModule
+            }),
+            beamtalk_class_registry:record_class_collision_warning(
+                ClassName, OldModule, NewModule);
+        true ->
+            ok
+    end,
     NewInstanceMethods = maps:get(instance_methods, ClassInfo, State#class_state.instance_methods),
     NewClassMethods = maps:get(class_methods, ClassInfo, State#class_state.class_methods),
     NewIVars = maps:get(instance_variables, ClassInfo, State#class_state.instance_variables),

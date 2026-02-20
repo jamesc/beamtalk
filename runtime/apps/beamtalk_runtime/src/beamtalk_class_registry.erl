@@ -29,6 +29,9 @@
     registry_name/1,
     ensure_pg_started/0,
     ensure_hierarchy_table/0,
+    ensure_class_warnings_table/0,
+    record_class_collision_warning/3,
+    drain_class_warnings_by_names/1,
     inherits_from/2,
     direct_subclasses/1,
     all_subclasses/1,
@@ -95,6 +98,53 @@ ensure_hierarchy_table() ->
             end;
         _ ->
             ok
+    end.
+
+%% @doc Ensure the class collision warnings ETS table exists.
+%% BT-737: Stores collision warnings keyed by class name (atom).
+%% Uses bag type so multiple warnings per class are all captured.
+%% Uses try/catch to handle concurrent creation race (TOCTOU safe).
+-spec ensure_class_warnings_table() -> ok.
+ensure_class_warnings_table() ->
+    case ets:info(beamtalk_class_warnings) of
+        undefined ->
+            try
+                ets:new(beamtalk_class_warnings,
+                        [bag, public, named_table, {write_concurrency, true}]),
+                ok
+            catch
+                error:badarg -> ok
+            end;
+        _ ->
+            ok
+    end.
+
+%% @doc Record a class collision warning keyed by class name.
+%% BT-737: Called by beamtalk_object_class when update_class detects module mismatch.
+%% Keyed by ClassName (not caller PID) so it can be drained by the load handler
+%% regardless of which process the on_load function ran in.
+-spec record_class_collision_warning(atom(), atom(), atom()) -> ok.
+record_class_collision_warning(ClassName, OldModule, NewModule) ->
+    ensure_class_warnings_table(),
+    ets:insert(beamtalk_class_warnings, {ClassName, OldModule, NewModule}),
+    ok.
+
+%% @doc Drain collision warnings for the given class names after a file load.
+%% BT-737: Called by the REPL load handler after loading a file, to collect
+%% warnings and surface them to the client. Removes entries from the table.
+-spec drain_class_warnings_by_names([atom()]) -> [{atom(), atom(), atom()}].
+drain_class_warnings_by_names(ClassNames) ->
+    case ets:info(beamtalk_class_warnings) of
+        undefined -> [];
+        _ ->
+            lists:flatmap(
+                fun(ClassName) ->
+                    %% ets:take/2 atomically removes and returns entries (OTP 21+).
+                    %% Avoids TOCTOU race between lookup and delete in concurrent loads.
+                    [{CN, OldMod, NewMod}
+                     || {CN, OldMod, NewMod} <- ets:take(beamtalk_class_warnings, ClassName)]
+                end,
+                ClassNames)
     end.
 
 %%====================================================================
