@@ -160,7 +160,7 @@ abstract Object subclass: Behaviour
     result := Set new.
     current := self.
     [current notNil] whileTrue: [
-      result addAll: current localMethods.
+      current localMethods do: [:sel | result add: sel].
       current := current superclass
     ].
     result asList
@@ -217,7 +217,7 @@ abstract Object subclass: Behaviour
     result := List new.
     current := self.
     [current notNil] whileTrue: [
-      result addAll: current instanceVariableNames.
+      current instanceVariableNames do: [:each | result add: each].
       current := current superclass
     ].
     result
@@ -288,7 +288,7 @@ This single line replaces five Erlang code paths. `canUnderstand:` is a pure Bea
 /// 42 isKindOf: String      // => false
 /// ```
 sealed isKindOf: aClass: Class -> Boolean =>
-  aClass includesBehaviour: self class
+  self class includesBehaviour: aClass
 
 /// Test whether the receiver is an exact instance of aClass (not a subclass).
 ///
@@ -540,7 +540,7 @@ Fix BT-721 (make `responds_to_slow` use the flattened table) and BT-510 (synchro
 - **Single source of truth**: Hierarchy walking logic exists once in Beamtalk, not five times in Erlang
 - **BT-510 eliminated by design**: Removing the flattened table removes the async rebuild cascade and its race window entirely. No table to get out of sync.
 - **Massive complexity reduction**: `beamtalk_class_hierarchy.erl` (flattened table builder), the O(N) `invalidate_subclass_flattened_tables` broadcast, and `{rebuild_flattened, ...}` handling are all deleted. The class gen_server state shrinks by two fields.
-- **More logic in Beamtalk**: `methods`, `canUnderstand:`, `allInstanceVariableNames`, `allSuperclasses`, `inheritsFrom:`, `whichClassIncludesSelector:` are all pure Beamtalk chain walks — 7 intrinsics down from 11, and the intrinsics are thin data reads, not logic.
+- **More logic in Beamtalk**: `methods`, `canUnderstand:`, `allInstanceVariableNames`, `allSuperclasses`, `inheritsFrom:`, `whichClassIncludesSelector:` are all pure Beamtalk chain walks — 8 intrinsics down from 11, and the intrinsics are thin data reads, not logic.
 - **Extensibility foundation**: `Behaviour`/`Class` establish the class protocol in Beamtalk rather than Erlang. All methods are sealed at v0.1 to limit blast radius; unsealing specific methods is a future option as the metaclass tower matures.
 - **Discoverability**: `Counter methods`, `Counter allSuperclasses`, `Counter canUnderstand: #x` are explorable in the REPL
 - **Bug reduction**: `respondsTo:` becomes `self class canUnderstand: selector` — one line, no duplication
