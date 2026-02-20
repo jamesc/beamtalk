@@ -39,6 +39,13 @@ greeting := "Hello, 世界! 🌍"
 message := "Welcome, {name}!"
 emoji := "Status: {status} ✓"
 
+// Escape sequences inside strings:
+//   ""   doubled delimiter → literal double-quote character
+//   \{   escaped brace → literal {  (prevents interpolation)
+//   \}   escaped brace → literal }
+quote := """"                    // 1-char string containing "
+dialog := "She said ""hello"""  // → She said "hello"
+
 // All strings are <<"UTF-8 binary">> in Erlang
 ```
 

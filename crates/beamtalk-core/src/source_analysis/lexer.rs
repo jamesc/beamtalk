@@ -1095,6 +1095,20 @@ mod tests {
     }
 
     #[test]
+    fn lex_string_doubled_delimiter_with_interpolation() {
+        // Doubled delimiter combined with interpolation:
+        // `"pre "" {x} "" post"` → StringStart(`pre " `), Identifier(x), StringEnd(` " post`)
+        assert_eq!(
+            lex_kinds("\"pre \"\" {x} \"\" post\""),
+            vec![
+                TokenKind::StringStart("pre \" ".into()),
+                TokenKind::Identifier("x".into()),
+                TokenKind::StringEnd(" \" post".into()),
+            ]
+        );
+    }
+
+    #[test]
     fn lex_string_with_backslash_escapes() {
         // Escaped braces produce plain string (no interpolation)
         assert_eq!(
