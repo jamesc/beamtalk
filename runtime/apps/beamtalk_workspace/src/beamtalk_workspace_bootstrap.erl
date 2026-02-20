@@ -20,7 +20,7 @@
 -behaviour(gen_server).
 
 -export([start_link/0, start_link/1]).
--export([init/1, handle_info/2, handle_call/3, handle_cast/2, terminate/2]).
+-export([init/1, handle_continue/2, handle_info/2, handle_call/3, handle_cast/2, terminate/2]).
 -export([find_bt_modules_in_dir/1]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -46,8 +46,14 @@ start_link(ProjectPath) ->
 %% @private
 init([ProjectPath]) ->
     State = bootstrap_all(#state{}),
+    %% Defer project module activation to handle_continue so init/1 returns
+    %% promptly and the gen_server is registered before doing I/O.
+    {ok, State, {continue, {activate_project_modules, ProjectPath}}}.
+
+%% @private
+handle_continue({activate_project_modules, ProjectPath}, State) ->
     activate_project_modules(ProjectPath),
-    {ok, State}.
+    {noreply, State}.
 
 %% @private
 handle_info({'DOWN', MonRef, process, _Pid, _Reason}, State) ->
@@ -148,10 +154,12 @@ set_class_variable(ClassName, Obj) ->
 -spec activate_project_modules(binary() | undefined) -> ok.
 activate_project_modules(undefined) ->
     ok;
-activate_project_modules(ProjectPath) ->
+activate_project_modules(ProjectPath) when is_binary(ProjectPath), byte_size(ProjectPath) > 0 ->
     EbinDir = filename:join([binary_to_list(ProjectPath), "_build", "dev", "ebin"]),
     Modules = find_bt_modules_in_dir(EbinDir),
-    lists:foreach(fun activate_project_module/1, Modules).
+    lists:foreach(fun activate_project_module/1, Modules);
+activate_project_modules(_Other) ->
+    ok.
 
 %% @doc Scan a directory for bt@*.beam files that are not stdlib modules.
 %% Returns a list of module atoms. Returns [] for missing or unreadable dirs.
@@ -199,7 +207,8 @@ try_register_class(ModuleName) ->
     case erlang:function_exported(ModuleName, register_class, 0) of
         true ->
             try
-                ModuleName:register_class()
+                _ = ModuleName:register_class(),
+                ok
             catch
                 _:Err ->
                     ?LOG_WARNING("Bootstrap: register_class/0 failed",

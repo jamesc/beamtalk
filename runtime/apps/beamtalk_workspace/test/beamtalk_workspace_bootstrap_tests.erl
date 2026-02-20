@@ -314,6 +314,20 @@ bootstrap_starts_with_no_project_modules_test_() ->
           end)]
      end}.
 
+%% Test that start_link/1 with a nonexistent project path starts without error.
+bootstrap_start_link_with_nonexistent_path_test_() ->
+    {setup,
+     fun() -> ensure_runtime() end,
+     fun(_) -> cleanup_all() end,
+     fun(_) ->
+         [?_test(begin
+              %% A nonexistent path should not crash the bootstrap worker —
+              %% find_bt_modules_in_dir returns [] for missing directories.
+              {ok, BPid} = beamtalk_workspace_bootstrap:start_link(<<"/nonexistent/project/path">>),
+              ?assert(is_process_alive(BPid))
+          end)]
+     end}.
+
 %%====================================================================
 %% Test helpers for temp directories
 %%====================================================================
