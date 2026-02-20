@@ -35,7 +35,13 @@
 %%
 %% All Beamtalk errors use this consistent structure for better tooling
 %% and developer experience:
-%% - kind: Error category (does_not_understand, immutable_value, type_error, etc.)
+%% - kind: Error category — one of:
+%%     does_not_understand | immutable_value | type_error | arity_mismatch |
+%%     future_not_awaited | timeout | instantiation_error | file_not_found |
+%%     permission_denied | invalid_path | io_error | class_not_found |
+%%     no_superclass | class_already_exists | internal_error | dispatch_error |
+%%     callback_failed | assertion_failed | runtime_error | erlang_exit |
+%%     erlang_throw | missing_parameter | stdlib_shadowing
 %% - class: The class name where the error occurred (e.g., 'Integer')
 %% - selector: The method that failed (if applicable)
 %% - message: Human-readable explanation using user-facing names
@@ -44,7 +50,7 @@
 %%
 %% See docs/internal/design-self-as-object.md Section 3.8 for full taxonomy.
 -record(beamtalk_error, {
-    kind    :: atom(),              % does_not_understand | immutable_value | type_error | arity_mismatch | future_not_awaited | timeout | instantiation_error | file_not_found | permission_denied | invalid_path | io_error | class_not_found | no_superclass | class_already_exists | internal_error | dispatch_error | callback_failed | assertion_failed | runtime_error | erlang_exit | erlang_throw | missing_parameter | stdlib_shadowing
+    kind    :: atom(),              % Error category (see doc above)
     class   :: atom(),              % 'Integer', 'Counter', 'String'
     selector:: atom() | undefined,  % method that failed
     message :: binary(),            % human-readable explanation
