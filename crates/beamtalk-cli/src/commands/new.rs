@@ -61,6 +61,9 @@ fn create_project_structure(path: &Utf8Path, name: &str) -> Result<()> {
 name = "{name}"
 version = "0.1.0"
 
+[run]
+entry = "Main run"
+
 [dependencies]
 "#
     );
@@ -321,6 +324,8 @@ mod tests {
         assert!(content.contains("[package]"));
         assert!(content.contains(&format!("name = \"{project_name}\"")));
         assert!(content.contains("version = \"0.1.0\""));
+        assert!(content.contains("[run]"));
+        assert!(content.contains("entry = \"Main run\""));
     }
 
     /// Uses `#[serial(cwd)]` because it changes the current working directory

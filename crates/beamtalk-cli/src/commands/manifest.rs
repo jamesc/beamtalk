@@ -19,6 +19,19 @@ use std::fs;
 pub struct Manifest {
     /// The `[package]` section of the manifest.
     pub package: PackageManifest,
+    /// The optional `[run]` section of the manifest.
+    #[serde(default)]
+    pub run: Option<RunConfig>,
+}
+
+/// REPL entry point configuration from the `[run]` section of `beamtalk.toml`.
+///
+/// When present, `beamtalk repl` evaluates `entry` after auto-loading compiled
+/// classes so the application is live immediately on startup.
+#[derive(Debug, Deserialize, Clone)]
+pub struct RunConfig {
+    /// Beamtalk expression to evaluate at REPL startup (e.g. `"Main run"`).
+    pub entry: String,
 }
 
 /// Package metadata from `beamtalk.toml`.
@@ -82,6 +95,28 @@ pub fn find_manifest(project_root: &Utf8Path) -> Result<Option<PackageManifest>>
     } else {
         Ok(None)
     }
+}
+
+/// Look for `beamtalk.toml` in the given directory and return the `[run]` config if present.
+///
+/// Returns `None` if no manifest file exists or no `[run]` section is present.
+/// Returns an error if the file exists but is malformed.
+pub fn find_run_config(project_root: &Utf8Path) -> Result<Option<RunConfig>> {
+    let manifest_path = project_root.join("beamtalk.toml");
+    if !manifest_path
+        .try_exists()
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to stat manifest '{manifest_path}'"))?
+    {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(&manifest_path)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read manifest '{manifest_path}'"))?;
+    let manifest: Manifest = toml::from_str(&content)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to parse manifest '{manifest_path}'"))?;
+    Ok(manifest.run)
 }
 
 /// Format a package name validation error with an optional suggestion.
@@ -462,6 +497,71 @@ start = "app"
         let manifest = parse_manifest(&path.join("beamtalk.toml")).unwrap();
         assert_eq!(manifest.name, "my_app");
         assert_eq!(manifest.start.as_deref(), Some("app"));
+    }
+
+    #[test]
+    fn test_find_run_config_present() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[run]
+entry = "Main run"
+"#,
+        );
+
+        let run_config = find_run_config(&path).unwrap();
+        assert!(run_config.is_some());
+        assert_eq!(run_config.unwrap().entry, "Main run");
+    }
+
+    #[test]
+    fn test_find_run_config_absent() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+"#,
+        );
+
+        let run_config = find_run_config(&path).unwrap();
+        assert!(run_config.is_none());
+    }
+
+    #[test]
+    fn test_find_run_config_no_manifest() {
+        let temp = TempDir::new().unwrap();
+        let path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let run_config = find_run_config(&path).unwrap();
+        assert!(run_config.is_none());
+    }
+
+    #[test]
+    fn test_find_run_config_custom_entry() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[run]
+entry = "App start: 'production'"
+"#,
+        );
+
+        let run_config = find_run_config(&path).unwrap();
+        assert!(run_config.is_some());
+        assert_eq!(run_config.unwrap().entry, "App start: 'production'");
     }
 
     #[test]
