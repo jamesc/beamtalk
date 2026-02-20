@@ -438,7 +438,8 @@ impl<'src> Lexer<'src> {
         let string_start = self.current_position();
         self.advance(); // opening quote
 
-        let mut content_start = self.current_position();
+        let mut seg_start = self.current_position();
+        let mut content_buf = String::new();
         let mut segments: Vec<(EcoString, u32, u32)> = Vec::new();
         let mut interp_ranges: Vec<(u32, u32)> = Vec::new();
         let mut has_interpolation = false;
@@ -449,13 +450,16 @@ impl<'src> Lexer<'src> {
                     let text = self.text_for(self.span_from(string_start));
                     return TokenKind::Error(EcoString::from(text));
                 }
+                Some('"') if self.peek_char_n(1) == Some('"') => {
+                    // Doubled delimiter: "" → literal "
+                    self.advance(); // first "
+                    self.advance(); // second "
+                    content_buf.push('"');
+                }
                 Some('"') => {
-                    let seg_text = self.text_for(Span::new(content_start, self.current_position()));
-                    segments.push((
-                        EcoString::from(seg_text),
-                        content_start,
-                        self.current_position(),
-                    ));
+                    // Closing delimiter
+                    let seg_end = self.current_position();
+                    segments.push((EcoString::from(content_buf.as_str()), seg_start, seg_end));
                     self.advance(); // closing quote
                     break;
                 }
@@ -465,28 +469,29 @@ impl<'src> Lexer<'src> {
                         let text = self.text_for(self.span_from(string_start));
                         return TokenKind::Error(EcoString::from(text));
                     }
-                    self.advance();
+                    content_buf.push('\\');
+                    if let Some(c) = self.advance() {
+                        content_buf.push(c);
+                    }
                 }
                 Some('{') => {
                     has_interpolation = true;
-                    let seg_text = self.text_for(Span::new(content_start, self.current_position()));
-                    segments.push((
-                        EcoString::from(seg_text),
-                        content_start,
-                        self.current_position(),
-                    ));
+                    let seg_end = self.current_position();
+                    segments.push((EcoString::from(content_buf.as_str()), seg_start, seg_end));
+                    content_buf.clear();
                     self.advance(); // consume `{`
 
                     match self.lex_interpolation_body(string_start) {
                         Ok((interp_start, interp_end)) => {
                             interp_ranges.push((interp_start, interp_end));
-                            content_start = self.current_position();
+                            seg_start = self.current_position();
                         }
                         Err(error_kind) => return error_kind,
                     }
                 }
-                _ => {
+                Some(c) => {
                     self.advance();
+                    content_buf.push(c);
                 }
             }
         }
@@ -673,6 +678,11 @@ impl<'src> Lexer<'src> {
         loop {
             match self.peek_char() {
                 None => break,
+                Some('"') if self.peek_char_n(1) == Some('"') => {
+                    // Doubled delimiter — skip both quotes
+                    self.advance(); // first "
+                    self.advance(); // second "
+                }
                 Some('"') => {
                     self.advance(); // closing quote
                     break;
@@ -1057,6 +1067,30 @@ mod tests {
         assert_eq!(
             lex_kinds(r#""it\"s""#),
             vec![TokenKind::String("it\\\"s".into())]
+        );
+    }
+
+    #[test]
+    fn lex_string_doubled_delimiter_single_quote() {
+        // Beamtalk `""""` = opening-", doubled "" escape, closing-" → String containing `"`
+        assert_eq!(lex_kinds("\"\"\"\""), vec![TokenKind::String("\"".into())]);
+    }
+
+    #[test]
+    fn lex_string_doubled_delimiter_multiple() {
+        // Beamtalk `"say ""hello"" please"` → String `say "hello" please`
+        assert_eq!(
+            lex_kinds("\"say \"\"hello\"\" please\""),
+            vec![TokenKind::String("say \"hello\" please".into())]
+        );
+    }
+
+    #[test]
+    fn lex_string_doubled_delimiter_at_boundaries() {
+        // Beamtalk `""" hi """` → String `" hi "`
+        assert_eq!(
+            lex_kinds("\"\"\" hi \"\"\""),
+            vec![TokenKind::String("\" hi \"".into())]
         );
     }
 
