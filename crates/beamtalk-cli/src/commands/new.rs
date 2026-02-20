@@ -61,6 +61,9 @@ fn create_project_structure(path: &Utf8Path, name: &str) -> Result<()> {
 name = "{name}"
 version = "0.1.0"
 
+[run]
+entry = "Main run"
+
 [dependencies]
 "#
     );
@@ -74,8 +77,8 @@ version = "0.1.0"
 // SPDX-License-Identifier: Apache-2.0
 
 // Main entry point for {name}.
-// Load in the REPL with: :load src/main.bt
-// Then run with: Main new run
+// Auto-runs via [run].entry in beamtalk.toml when you start `beamtalk repl`.
+// Or load manually: :load src/main.bt
 
 Object subclass: Main
 
@@ -321,6 +324,8 @@ mod tests {
         assert!(content.contains("[package]"));
         assert!(content.contains(&format!("name = \"{project_name}\"")));
         assert!(content.contains("version = \"0.1.0\""));
+        assert!(content.contains("[run]"));
+        assert!(content.contains("entry = \"Main run\""));
     }
 
     /// Uses `#[serial(cwd)]` because it changes the current working directory
