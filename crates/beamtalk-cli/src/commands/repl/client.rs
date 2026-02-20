@@ -44,9 +44,43 @@ impl ReplClient {
         })
     }
 
+    /// Reconnect to the REPL backend, attempting to resume the previous session if possible.
+    pub(crate) fn reconnect(&mut self) -> Result<()> {
+        for attempt in 1..=super::MAX_CONNECT_RETRIES {
+            match ProtocolClient::connect_with_resume(
+                &self.host,
+                self.port,
+                &self.cookie,
+                None,
+                self.session_id.as_deref(),
+            ) {
+                Ok(inner) => {
+                    self.inner = inner;
+                    self.session_id = self.inner.session_id().map(String::from);
+                    return Ok(());
+                }
+                Err(e) => {
+                    if attempt == super::MAX_CONNECT_RETRIES {
+                        return Err(e);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(super::RETRY_DELAY_MS));
+                }
+            }
+        }
+        Err(miette!("Failed to reconnect to REPL backend"))
+    }
+
     /// Send a protocol request and receive the response.
+    /// On communication error, attempt to reconnect and retry once (session resume).
     pub(crate) fn send_request(&mut self, request: &serde_json::Value) -> Result<ReplResponse> {
-        self.inner.send_request(request)
+        match self.inner.send_request::<ReplResponse>(request) {
+            Ok(resp) => Ok(resp),
+            Err(_e) => {
+                // Try to reconnect and retry once
+                self.reconnect()?;
+                self.inner.send_request::<ReplResponse>(request)
+            }
+        }
     }
 
     /// Send an eval request and receive the response.
@@ -203,11 +237,12 @@ impl ReplClient {
             interrupt_req["session"] = serde_json::Value::String(session.clone());
         }
         // Open a new connection and send interrupt — best effort
-        if let Ok(mut interrupt_client) = ProtocolClient::connect(
+        if let Ok(mut interrupt_client) = ProtocolClient::connect_with_resume(
             &self.host,
             self.port,
             &self.cookie,
             Some(Duration::from_secs(2)),
+            self.session_id.as_deref(),
         ) {
             let _ = interrupt_client.send_request::<serde_json::Value>(&interrupt_req);
         }

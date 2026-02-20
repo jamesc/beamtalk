@@ -497,10 +497,8 @@ cargo deny check
 
 ## Cross-References
 
-- **Domain Driven Design:** [AGENTS.md - Domain Driven Design section](../../AGENTS.md#domain-driven-design-ddd)
-- **DDD Model:** [docs/beamtalk-ddd-model.md](../beamtalk-ddd-model.md)
-- **Testing Strategy:** [docs/development/testing-strategy.md](testing-strategy.md)
-- **Rust Best Practices:** [AGENTS.md - Rust Development Best Practices](../../AGENTS.md#rust-development-best-practices)
+- **Domain-Driven Design:** [AGENTS.md - Domain-Driven Design section](../../docs/agents/expanded.md#domain-driven-design-ddd)
+- **Rust Best Practices:** [AGENTS.md - Rust Development Best Practices](../../docs/agents/expanded.md#development-architecture-principles)
 
 ---
 

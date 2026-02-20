@@ -45,8 +45,8 @@ End-to-end tests that validate the complete compilation and execution pipeline b
 | Block with variables | ✅ | [control_flow.bt](cases/control_flow.bt) | Uses REPL bindings |
 | `whileTrue:` | 🔧 | [blocks.bt](cases/blocks.bt) | Non-mutating loop (`[false] whileTrue: [42]`) works; assignments inside blocks don't persist (BT-90) |
 | `whileFalse:` | 🔧 | — | Implemented but assignments inside blocks don't persist (BT-90) |
-| `timesRepeat:` | 📋 | — | Not yet implemented |
-| `to:do:` | 📋 | — | Not yet implemented |
+| `timesRepeat:` | ✅ | [actor_local_mutations.bt](../stdlib/actor_local_mutations.bt) | Tested in stdlib |
+| `to:do:` | ✅ | [nested_to_do.bt](../stdlib/nested_to_do.bt) | Tested in stdlib |
 | **Boolean Operations** | | | |
 | `ifTrue:ifFalse:` | ✅ | [booleans.bt](cases/booleans.bt) | `true ifTrue: [1] ifFalse: [2]` → `1` |
 | `ifTrue:` | ✅ | [booleans.bt](cases/booleans.bt) | `true ifTrue: [42]` → `42` |
@@ -108,19 +108,18 @@ tests/e2e/
 
 ```bash
 # Run E2E tests only
-cargo test --test e2e
+just test-e2e
+
+# Or directly via cargo (E2E tests are #[ignore]d, require --ignored flag)
+cargo test --test e2e -- --ignored
 
 # Run with verbose output
-cargo test --test e2e -- --nocapture
-
-# Run all tests including E2E
-cargo test --all-targets
+cargo test --test e2e -- --ignored --nocapture
 ```
 
 **Prerequisites:**
-- The daemon must be running, or the test harness will start it automatically
 - Erlang/OTP must be installed (for the REPL runtime)
-- The project must be built (`cargo build`)
+- The project must be built (`just build`)
 
 ## Test File Format
 
@@ -232,7 +231,7 @@ all expressions within that file. Loaded modules also persist for the file's dur
 
 1. Create a new `.bt` file in `tests/e2e/cases/`
 2. Add expressions with `// =>` expected results
-3. Run `cargo test --test e2e` to verify
+3. Run `just test-e2e` to verify
 
 ### Guidelines
 
@@ -246,8 +245,8 @@ all expressions within that file. Loaded modules also persist for the file's dur
 
 The test harness (`crates/beamtalk-cli/tests/e2e.rs`) handles:
 
-1. **Daemon management**: Starts the daemon if not running
-2. **REPL connection**: Uses TCP socket to communicate with REPL (port 9000)
+1. **REPL startup**: Starts a REPL workspace automatically (ephemeral port)
+2. **REPL connection**: Uses TCP socket to communicate with REPL
 3. **Test execution**: Parses `.bt` files and evaluates each expression
 4. **Result comparison**: Compares actual results with expected values
 
@@ -257,33 +256,20 @@ The harness uses the same JSON protocol as the REPL CLI:
 
 ```json
 // Request
-{"type": "eval", "expression": "3 + 4"}
+{"op": "eval", "id": "1", "code": "3 + 4"}
 
 // Success response
-{"type": "result", "value": 7}
-
-// Error response
-{"type": "error", "message": "Undefined variable: x"}
+{"id": "1", "value": "7"}
 ```
 
 ## Troubleshooting
 
-### "Failed to connect to REPL"
-
-1. Check if the daemon is running: `beamtalk daemon status`
-2. Try starting manually: `beamtalk daemon start --foreground`
-3. Check port 9000 is available: `ss -tlnp | grep 9000`
-
-### "Daemon may not be fully started"
-
-The REPL server may take a moment to initialize. The test harness waits up to 6 seconds for the server to become available.
-
 ### Debugging Output
 
-To see daemon and BEAM output during tests:
+To see BEAM output during tests:
 
 ```bash
-E2E_DEBUG=1 cargo test --test e2e -- --nocapture
+cargo test --test e2e -- --ignored --nocapture
 ```
 
 ### Tests timeout
@@ -292,18 +278,3 @@ The default timeout is 30 seconds per expression. If tests are timing out:
 1. Check if the expression is causing an infinite loop
 2. Verify the Erlang runtime is functioning correctly
 3. Check for resource exhaustion
-
-## Adding to CI
-
-E2E tests should run as part of the CI pipeline. They require:
-- Rust toolchain
-- Erlang/OTP
-- Network access to localhost:9000
-
-```yaml
-# Example CI step
-- name: Run E2E tests
-  run: |
-    cargo build
-    cargo test --test e2e -- --nocapture
-```

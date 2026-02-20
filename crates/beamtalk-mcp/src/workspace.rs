@@ -102,7 +102,7 @@ pub fn discover_any_port_and_cookie() -> Option<(u16, String)> {
                 if let Some(port) = content
                     .lines()
                     .next()
-                    .and_then(|l| l.trim().parse::<u16>().ok())
+                    .and_then(|line| line.trim().parse::<u16>().ok())
                 {
                     let cookie = std::fs::read_to_string(entry.path().join("cookie"))
                         .ok()
@@ -187,7 +187,7 @@ mod tests {
         let workspace_id = format!("test_mcp_{}", std::process::id());
         let dir = workspaces_dir().unwrap().join(&workspace_id);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("port"), "9876\n").unwrap();
+        fs::write(dir.join("port"), "9876\nnonce123").unwrap();
 
         let result = read_port_file(&workspace_id);
         assert_eq!(result, Some(9876));
@@ -244,7 +244,7 @@ mod tests {
         let workspace_id = format!("test_mcp_discover_{}", std::process::id());
         let dir = workspaces_dir().unwrap().join(&workspace_id);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("port"), "5555").unwrap();
+        fs::write(dir.join("port"), "5555\nnonce456").unwrap();
         fs::write(dir.join("cookie"), "testcookie").unwrap();
 
         let result = discover_port(Some(&workspace_id));

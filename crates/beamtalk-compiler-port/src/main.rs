@@ -13,6 +13,9 @@
 
 use std::io::{self, Read, Write};
 
+use clap::{ArgAction, Parser};
+use tracing_subscriber::{self, EnvFilter};
+
 use eetf::{Atom, Binary, List, Map, Term};
 
 /// Read a {packet, 4} framed message from stdin.
@@ -608,7 +611,35 @@ fn handle_request(request_term: &Term) -> Term {
     }
 }
 
+#[derive(Debug, Parser)]
+#[command(name = "beamtalk-compiler-port", about = "Beamtalk compiler port")]
+struct Cli {
+    /// Increase logging verbosity (-v: debug, -vv+: trace)
+    #[arg(short, long, action = ArgAction::Count)]
+    verbose: u8,
+}
+
 fn main() {
+    let cli = Cli::parse();
+
+    // Only initialize tracing when explicitly requested.
+    // The compiler port is spawned by the Erlang runtime without args, so
+    // default (verbose=0) must produce no stderr output to avoid interfering
+    // with the OTP port protocol.
+    let has_rust_log = std::env::var("RUST_LOG").is_ok();
+    if has_rust_log || cli.verbose > 0 {
+        let env_filter = if has_rust_log {
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"))
+        } else {
+            EnvFilter::new(directive_for_verbosity(cli.verbose))
+        };
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .with_writer(std::io::stderr)
+            .with_ansi(false)
+            .try_init();
+    }
+
     let mut stdin = io::stdin().lock();
     let mut stdout = io::stdout().lock();
 
@@ -654,6 +685,37 @@ fn main() {
                 break;
             }
         }
+    }
+}
+
+fn directive_for_verbosity(v: u8) -> &'static str {
+    // Target must match Rust module paths (`beamtalk_compiler_port`, `beamtalk_core`).
+    // `beamtalk=…` only matches `beamtalk::*`, not `beamtalk_compiler_port`.
+    match v {
+        0 => "beamtalk_compiler_port=info,beamtalk_core=info",
+        1 => "beamtalk_compiler_port=debug,beamtalk_core=debug",
+        _ => "beamtalk_compiler_port=trace,beamtalk_core=trace",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn directive_defaults() {
+        assert_eq!(
+            directive_for_verbosity(0),
+            "beamtalk_compiler_port=info,beamtalk_core=info"
+        );
+        assert_eq!(
+            directive_for_verbosity(1),
+            "beamtalk_compiler_port=debug,beamtalk_core=debug"
+        );
+        assert_eq!(
+            directive_for_verbosity(2),
+            "beamtalk_compiler_port=trace,beamtalk_core=trace"
+        );
     }
 }
 
