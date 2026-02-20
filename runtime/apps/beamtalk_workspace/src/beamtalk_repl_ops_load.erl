@@ -20,7 +20,9 @@ handle(<<"load-file">>, Params, Msg, SessionPid) ->
     Path = binary_to_list(maps:get(<<"path">>, Params, <<>>)),
     case beamtalk_repl_shell:load_file(SessionPid, Path) of
         {ok, Classes} ->
-            beamtalk_repl_protocol:encode_loaded(Classes, Msg, fun beamtalk_repl_json:term_to_json/1);
+            Warnings = collect_load_warnings(Classes),
+            beamtalk_repl_protocol:encode_loaded(
+                Classes, Msg, fun beamtalk_repl_json:term_to_json/1, Warnings);
         {error, Reason} ->
             WrappedReason = beamtalk_repl_server:ensure_structured_error(Reason),
             beamtalk_repl_protocol:encode_error(
@@ -39,7 +41,9 @@ handle(<<"load-source">>, Params, Msg, SessionPid) ->
         _ ->
             case beamtalk_repl_shell:load_source(SessionPid, Source) of
                 {ok, Classes} ->
-                    beamtalk_repl_protocol:encode_loaded(Classes, Msg, fun beamtalk_repl_json:term_to_json/1);
+                    Warnings = collect_load_warnings(Classes),
+                    beamtalk_repl_protocol:encode_loaded(
+                        Classes, Msg, fun beamtalk_repl_json:term_to_json/1, Warnings);
                 {error, Reason} ->
                     WrappedReason = beamtalk_repl_server:ensure_structured_error(Reason),
                     beamtalk_repl_protocol:encode_error(
@@ -155,13 +159,45 @@ handle(<<"unload">>, Params, Msg, SessionPid) ->
 %%% Internal helpers
 
 %% @private
+%% @doc Collect collision warnings for the loaded classes after a file load.
+%% BT-737: Drains warnings from the ETS table keyed by class name and
+%% formats them as human-readable binary strings for the protocol response.
+-spec collect_load_warnings([map()]) -> [binary()].
+collect_load_warnings(Classes) ->
+    %% Use safe_to_existing_atom (not list_to_atom) to avoid leaking atoms for
+    %% user-defined class names. Class atoms must already exist after loading.
+    ClassNames = lists:filtermap(
+        fun(#{name := N}) when N =/= "" ->
+            case beamtalk_repl_server:safe_to_existing_atom(list_to_binary(N)) of
+                {ok, Atom} -> {true, Atom};
+                {error, badarg} -> false
+            end;
+        (_) -> false
+        end,
+        Classes),
+    Collisions = beamtalk_class_registry:drain_class_warnings_by_names(ClassNames),
+    [format_collision_warning(ClassName, OldModule, NewModule)
+     || {ClassName, OldModule, NewModule} <- Collisions].
+
+%% @private
+-spec format_collision_warning(atom(), atom(), atom()) -> binary().
+format_collision_warning(ClassName, OldModule, NewModule) ->
+    iolist_to_binary([
+        "Class '", atom_to_binary(ClassName, utf8),
+        "' redefined (was ", atom_to_binary(OldModule, utf8),
+        ", now ", atom_to_binary(NewModule, utf8), ")"
+    ]).
+
+%% @private
 -spec do_reload(string(), atom() | undefined, beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 do_reload(Path, ModuleAtom, Msg, SessionPid) ->
     case beamtalk_repl_shell:load_file(SessionPid, Path) of
         {ok, Classes} ->
+            %% BT-737: Collect any cross-package collision warnings from this load.
+            Warnings = collect_load_warnings(Classes),
             {ActorCount, MigrationFailures} =
                 trigger_actor_code_change(ModuleAtom, Classes),
-            beamtalk_repl_json:encode_reloaded(Classes, ActorCount, MigrationFailures, Msg);
+            beamtalk_repl_json:encode_reloaded(Classes, ActorCount, MigrationFailures, Msg, Warnings);
         {error, Reason} ->
             WrappedReason = beamtalk_repl_server:ensure_structured_error(Reason),
             beamtalk_repl_protocol:encode_error(

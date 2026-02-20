@@ -24,7 +24,7 @@
          encode_status/3,
          encode_out/3,
          encode_need_input/2,
-         encode_bindings/3, encode_loaded/3, encode_actors/3,
+         encode_bindings/3, encode_loaded/3, encode_loaded/4, encode_actors/3,
          encode_modules/3, encode_sessions/3, encode_inspect/2, encode_inspect/3,
          encode_docs/2, encode_describe/3,
          encode_test_results/2,
@@ -190,14 +190,23 @@ encode_bindings(Bindings, Msg, TermToJson) ->
 
 %% @doc Encode a loaded file response.
 -spec encode_loaded([map()], protocol_msg(), fun((term()) -> term())) -> binary().
-encode_loaded(Classes, Msg, _TermToJson) ->
+encode_loaded(Classes, Msg, TermToJson) ->
+    encode_loaded(Classes, Msg, TermToJson, []).
+
+%% @doc Encode a loaded file response with warnings.
+%% BT-737: Warnings are class collision warnings from loading classes that
+%% shadow classes already registered from a different module.
+-spec encode_loaded([map()], protocol_msg(), fun((term()) -> term()), [binary()]) -> binary().
+encode_loaded(Classes, Msg, _TermToJson, Warnings) ->
     ClassNames = [list_to_binary(maps:get(name, C, "")) || C <- Classes],
     case Msg#protocol_msg.legacy of
         true ->
-            jsx:encode(#{<<"type">> => <<"loaded">>, <<"classes">> => ClassNames});
+            Base = #{<<"type">> => <<"loaded">>, <<"classes">> => ClassNames},
+            jsx:encode(maybe_add_warnings(Base, Warnings));
         false ->
             Base = base_response(Msg),
-            jsx:encode(Base#{<<"classes">> => ClassNames, <<"status">> => [<<"done">>]})
+            Full = Base#{<<"classes">> => ClassNames, <<"status">> => [<<"done">>]},
+            jsx:encode(maybe_add_warnings(Full, Warnings))
     end.
 
 %% @doc Encode an actors list response.
