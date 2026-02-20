@@ -1228,7 +1228,7 @@ update_class_stdlib_to_stdlib_no_error_test_() ->
               },
               {ok, _Pid} = beamtalk_object_class:start_link('StdlibShadowTest', ClassInfo),
 
-              %% Update with ANOTHER stdlib module (stdlib hot-reload — allowed)
+              %% Update with the SAME stdlib module (hot-reload — allowed)
               NewStdlibInfo = ClassInfo#{module => 'bt@stdlib@integer'},
               Result = beamtalk_object_class:update_class('StdlibShadowTest', NewStdlibInfo),
 
