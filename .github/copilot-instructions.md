@@ -10,7 +10,3 @@ Quick reference
 - **Common CI commands:** `just ci`, `just build`, `just test`, `just test-stdlib`, `just test-e2e`.
 - **PR / comments:** When scripting GitHub interactions prefer `gh api` with `--paginate`; see examples in `AGENTS.md`.
 - **Docs in PRs:** When adding documentation notes to a PR, include which sections helped, what could improve, and one short actionable suggestion (see `AGENTS.md` example).
-
-If you'd like, I can further shorten this file to a single pointer to `AGENTS.md` or move any remaining quick examples into a separate `docs/` note. Proceed with that change?
-
-This is completely optional but helps us understand which parts of AGENTS.md are useful vs noise.
