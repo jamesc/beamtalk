@@ -26,7 +26,7 @@ Beamtalk is a Smalltalk/Newspeak-inspired programming language that compiles to 
 
 **Key principle:** Beamtalk is an **interactive-first** language. The live environment and hot code reloading are core to the design, not afterthoughts.
 
-**Important:** While heavily inspired by Smalltalk, Beamtalk makes pragmatic departures from Smalltalk syntax and semantics to work well with BEAM and modern development practices. We're "Smalltalk-like," not Smalltalk-compatible. See [docs/beamtalk-syntax-rationale.md](../docs/beamtalk-syntax-rationale.md) for specific differences, [docs/beamtalk-principles.md](../docs/beamtalk-principles.md) for design philosophy, and [docs/beamtalk-language-features.md](../docs/beamtalk-language-features.md) for full language specification.
+**Important:** While heavily inspired by Smalltalk, Beamtalk makes pragmatic departures from Smalltalk syntax and semantics to work well with BEAM and modern development practices. We're "Smalltalk-like," not Smalltalk-compatible. See [beamtalk-syntax-rationale.md](../beamtalk-syntax-rationale.md) for specific differences, [beamtalk-principles.md](../beamtalk-principles.md) for design philosophy, and [beamtalk-language-features.md](../beamtalk-language-features.md) for full language specification.
 
 ---
 
@@ -395,55 +395,9 @@ Significant design decisions are documented as ADRs in `docs/ADR/`. Create an AD
 
 ## Agent Skills
 
-This repository includes custom skills in `.github/skills/` that teach Copilot specialized workflows for this project. Skills are automatically loaded when relevant to your prompt.
+Agent skills are defined as personal skills in `~/.claude/skills/` (Claude Code) or `~/.copilot/skills/` (Copilot). They are not stored in the repository.
 
-### Available Skills
-
-| Skill | Trigger | Description |
-|-------|---------|-------------|
-| **Coding Workflow** | | |
-| `pick-issue` | `/pick-issue` | Pick up the next Linear issue from backlog |
-| `done` | `/done` | Complete work, commit, push, and create PR |
-| `resolve-pr` | `/resolve-pr` | Systematically address PR review comments |
-| `resolve-merge` | `/resolve-merge` | Update main, merge into current branch, resolve conflicts |
-| **Issue Management** | | |
-| `create-issue` | "create issue" | Create Linear issues with blocking relationships |
-| `refresh-issue` | `/refresh-issue BT-XX` | Refresh a Linear issue to align with current code state |
-| `update-issues` | `/update-issues` | Find and update Linear issues with missing labels or metadata |
-| `whats-next` | `/whats-next` | Get recommendations for what to work on next |
-| **Architecture** | | |
-| `draft-adr` | `/draft-adr` | Research a problem and draft an Architecture Decision Record |
-| `plan-adr` | `/plan-adr` | Break an accepted ADR into implementation issues with an Epic |
-| **Refactoring** | | |
-| `plan-refactor` | `/plan-refactor` | Analyze repo and plan refactoring for code quality/maintainability |
-| `do-refactor` | `/do-refactor` | Execute a refactoring epic: all issues on one branch, CI after each |
-| **Review** | | |
-| `review-code` | `/review-code` | 3-pass code review: diff, system, adversarial (different model) |
-| `review-adr` | `/review-adr` | 3-pass ADR review: structural, reasoning, adversarial |
-
-### Skill Locations
-
-- **Project skills** (this repo): `.github/skills/<skill-name>/SKILL.md`
-- **Personal skills** (all projects): `~/.copilot/skills/<skill-name>/SKILL.md`
-
-### Creating New Skills
-
-1. Create a directory: `.github/skills/<skill-name>/`
-2. Add a `SKILL.md` file with YAML frontmatter:
-   ```markdown
-   ---
-   name: skill-name
-   description: When to use this skill. Be specific so Copilot knows when to activate it.
-   ---
-
-   # Skill Instructions
-
-   Step-by-step instructions for Copilot to follow...
-   ```
-
-3. Optionally add scripts or resources to the skill directory
-
-For more details, see [About Agent Skills](https://docs.github.com/en/copilot/concepts/agents/about-agent-skills).
+Available skills include: `pick-issue`, `done`, `resolve-pr`, `resolve-merge`, `create-issue`, `refresh-issue`, `update-issues`, `whats-next`, `draft-adr`, `plan-adr`, `plan-refactor`, `do-refactor`, `review-code`, `review-adr`.
 
 ---
 

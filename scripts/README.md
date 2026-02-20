@@ -170,10 +170,4 @@ Edit `devcontainer.json` to add environment variables via `containerEnv` or `rem
 
 ### Changing the Default Model
 
-Edit `model` in `.devcontainer/copilot-config.json`:
-
-```json
-{
-  "model": "gpt-4o"
-}
-```
+Edit `model` in `.devcontainer/copilot-config.json` (for Copilot CLI sessions).

@@ -497,8 +497,8 @@ cargo deny check
 
 ## Cross-References
 
- **Domain-Driven Design:** [AGENTS.md - Domain-Driven Design section](../../docs/agents/expanded.md#domain-driven-design-ddd)
- **Rust Best Practices:** [AGENTS.md - Rust Development Best Practices](../../docs/agents/expanded.md#development-architecture-principles)
+- **Domain-Driven Design:** [AGENTS.md - Domain-Driven Design section](../../docs/agents/expanded.md#domain-driven-design-ddd)
+- **Rust Best Practices:** [AGENTS.md - Rust Development Best Practices](../../docs/agents/expanded.md#development-architecture-principles)
 
 ---
 

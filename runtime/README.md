@@ -140,23 +140,7 @@ For Erlang distribution, node names can be configured:
 
 ### Parallel Worktrees
 
-When running multiple Beamtalk instances in parallel worktrees, each instance uses an OS-assigned REPL port by default:
-
-- Port defaults to `0` (ephemeral) to avoid collisions
-- Override with `beamtalk repl --port <port>` or `BEAMTALK_REPL_PORT`
-- Node name defaults to `beamtalk@localhost` unless overridden by `--node` or `BEAMTALK_NODE_NAME`
-
-See [Parallel Development with Worktrees](../docs/agents/expanded.md#parallel-worktrees) for details.
-
-
-## Integration with Beamtalk Compiler
-
-Once BT-13 (erlc integration) is complete, the Rust compiler will:
-
-1. Generate `.core` files from `.bt` source
-2. Use the `compile.escript` to compile `.core` → `.beam`
-3. Hot-load the `.beam` files into the running BEAM node
-4. The runtime modules (`beamtalk_future`) will be available to generated code
+Port defaults to `0` (ephemeral) — multiple Beamtalk instances in parallel worktrees each get an OS-assigned port automatically, with no configuration needed.
 
 ## Design Rationale
 
@@ -176,7 +160,5 @@ Process-per-future provides:
 
 ## Future Work
 
-- Performance benchmarks (futures/second, memory overhead)
 - Optimization for common patterns (chaining, all/race combinators)
-- Integration with OTP supervisor trees
 - Distributed futures (cross-node await)
