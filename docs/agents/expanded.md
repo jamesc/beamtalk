@@ -80,7 +80,7 @@ Before using ANY Beamtalk syntax, verify it exists in at least one of:
 1. **Language spec:** [docs/beamtalk-language-features.md](../docs/beamtalk-language-features.md)
 2. **Examples:** `examples/*.bt`
 3. **Tests:** `tests/stdlib/*.bt`, `tests/e2e/cases/*.bt`
-4. **Parser tests:** `crates/beamtalk-core/src/source_analysis/parser/mod.rs`
+4. **Parser tests:** `crates/beamtalk-core/src/source_analysis/parser/`
 
 **If it doesn't appear in any of these → it's likely hallucinated. Search the codebase or ask.**
 
