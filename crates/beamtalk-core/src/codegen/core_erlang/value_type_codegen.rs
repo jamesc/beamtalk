@@ -453,13 +453,7 @@ impl CoreErlangGenerator {
                             .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
                         let val_doc = self.expression_doc(value)?;
                         self.bind_var(var_name, &core_var);
-                        body_parts.push(docvec![
-                            "    let ",
-                            core_var,
-                            " = ",
-                            val_doc,
-                            " in\n",
-                        ]);
+                        body_parts.push(docvec!["    let ", core_var, " = ", val_doc, " in\n",]);
                     }
                 }
             } else {
