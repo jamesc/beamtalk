@@ -11,6 +11,12 @@
 %%%
 %%% Bootstrap only ensures pg (process group) is started, which is needed
 %%% by the class registry (beamtalk_object_class) before any classes load.
+%%%
+%%% ADR 0032 Phase 0 (BT-732): Bootstrap registers the 'Class' stub
+%%% (beamtalk_class_bt) immediately after pg starts, before stdlib loads.
+%%% This is safe because dispatch works via beamtalk_class_bt:has_method/1
+%%% and dispatch/4 even before the superclass (Object) is registered.
+%%% See beamtalk_class_bt for the stub details.
 -module(beamtalk_bootstrap).
 
 -export([start_link/0, init/1]).
@@ -27,6 +33,9 @@ start_link() ->
 %%
 %% Starts pg (process group) which is required by the class registry.
 %% Class processes are created by compiled stdlib modules' on_load.
+%%
+%% ADR 0032 Phase 0 (BT-732): Also registers the 'Class' stub so the
+%% class chain dispatch fallthrough is available from startup.
 -spec init(pid()) -> no_return().
 init(Parent) ->
     %% Ensure pg is started (required by beamtalk_object_class for class registry)
@@ -36,7 +45,13 @@ init(Parent) ->
         _ ->
             ok
     end,
-    
+
+    %% ADR 0032 Phase 0 (BT-732): Register the 'Class' stub.
+    %% This is safe to call before stdlib loads — the module is part of
+    %% beamtalk_runtime, and dispatch works via beamtalk_class_bt:has_method/1
+    %% and dispatch/4 even before the superclass (Object) is registered.
+    beamtalk_class_bt:register_class(),
+
     proc_lib:init_ack(Parent, {ok, self()}),
     bootstrap_loop().
 

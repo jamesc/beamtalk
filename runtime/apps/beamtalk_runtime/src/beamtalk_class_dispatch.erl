@@ -5,13 +5,18 @@
 %%%
 %%% **DDD Context:** Object System
 %%%
-%% Handles class-level message sending protocol, translating Beamtalk messages
-%% to gen_server calls. Also provides helpers for class method execution
-%% including test execution detection and result unwrapping.
+%%% Handles class-level message sending protocol, translating Beamtalk messages
+%%% to gen_server calls. Also provides helpers for class method execution
+%%% including test execution detection and result unwrapping.
+%%%
+%%% ADR 0032 Phase 0 (BT-732): Added class chain fallthrough.
+%%% When a class-side message is not found in user-defined class methods,
+%%% dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/5.
 %%%
 %%% Extracted from beamtalk_object_class.erl (BT-704).
 -module(beamtalk_class_dispatch).
 
+-include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 -export([
@@ -80,12 +85,25 @@ class_send(ClassPid, Selector, Args) ->
         {ok, Result} -> Result;
         {error, not_found} ->
             ClassName = gen_server:call(ClassPid, class_name),
-            Error = beamtalk_error:new(
-                does_not_understand,
-                ClassName,
-                Selector,
-                <<"Class does not understand this message">>),
-            beamtalk_error:raise(Error);
+            %% ADR 0032 Phase 0 (BT-732): Try Class chain before raising does_not_understand.
+            %% Class objects are instances of 'Class'; fall through to Class instance methods.
+            ModuleName = gen_server:call(ClassPid, module_name),
+            ClassSelf = #beamtalk_object{
+                class = beamtalk_class_registry:class_object_tag(ClassName),
+                class_mod = ModuleName,
+                pid = ClassPid
+            },
+            case try_class_chain_fallthrough(ClassSelf, Selector, Args) of
+                {ok, Result} ->
+                    Result;
+                not_found ->
+                    Error = beamtalk_error:new(
+                        does_not_understand,
+                        ClassName,
+                        Selector,
+                        <<"Class does not understand this message">>),
+                    beamtalk_error:raise(Error)
+            end;
         Other -> unwrap_class_call(Other)
     end.
 
@@ -205,3 +223,45 @@ handle_async_dispatch({Selector, Args, FuturePid}, ClassName, Flattened, Supercl
     ok;
 handle_async_dispatch(_Msg, _ClassName, _Flattened, _Superclass, _Module) ->
     ok.
+
+%%% ============================================================================
+%%% Internal Functions — ADR 0032 Phase 0
+%%% ============================================================================
+
+%% @doc Try dispatching through the Class chain (ADR 0032 Phase 0, BT-732).
+%%
+%% When a class-side message is not found in user-defined class methods,
+%% fall through to instance methods of 'Class'. This implements the
+%% Smalltalk metaclass protocol: every class object is an instance of 'Class'.
+%%
+%% ClassSelf has the metaclass tag (e.g., 'Counter class') so methods in
+%% 'Class' receive the correct self when invoked.
+%%
+%% Returns {ok, Result} if the method is found in the Class chain.
+%% Returns not_found if 'Class' does not understand the selector (does_not_understand).
+%% Re-raises any other error (type_error, arity_mismatch, etc.) from Class methods
+%% so callers see real errors rather than a misleading DNU on the original class.
+%%
+%% NOTE: NewState from Class methods is intentionally dropped. Class has no
+%% persistent instance state in Phase 0-1; if stateful Class methods are added
+%% in Phase 2+, this must be revisited.
+-spec try_class_chain_fallthrough(#beamtalk_object{}, atom(), list()) ->
+    {ok, term()} | not_found.
+try_class_chain_fallthrough(ClassSelf, Selector, Args) ->
+    %% Class objects have no mutable instance state; use an empty map.
+    %% The Class methods receive ClassSelf (with its metaclass tag) as self.
+    case beamtalk_dispatch:lookup(Selector, Args, ClassSelf, #{}, 'Class') of
+        {reply, Result, _NewState} ->
+            ?LOG_DEBUG("Class chain fallthrough succeeded for ~p", [Selector]),
+            {ok, Result};
+        {error, #beamtalk_error{kind = does_not_understand}} ->
+            %% Method not found anywhere in the Class chain — tell caller to raise DNU.
+            not_found;
+        {error, #beamtalk_error{kind = class_not_found}} ->
+            %% 'Class' process not registered (pre-Phase 2 or process died) — graceful fallback.
+            not_found;
+        {error, Error} ->
+            %% A real error from a Class method (type_error, arity_mismatch, etc.).
+            %% Propagate so the caller sees the actual cause, not a misleading DNU.
+            beamtalk_error:raise(Error)
+    end.
