@@ -45,19 +45,25 @@ impl ReplClient {
     }
 
     /// Reconnect to the REPL backend, attempting to resume the previous session if possible.
-    pub(crate) fn reconnect(&mut self) -> Result<()> {
+    ///
+    /// Returns `true` if the previous session was resumed, `false` if a fresh
+    /// session was established.
+    pub(crate) fn reconnect(&mut self) -> Result<bool> {
+        let requested_session = self.session_id.clone();
         for attempt in 1..=super::MAX_CONNECT_RETRIES {
             match ProtocolClient::connect_with_resume(
                 &self.host,
                 self.port,
                 &self.cookie,
                 None,
-                self.session_id.as_deref(),
+                requested_session.as_deref(),
             ) {
                 Ok(inner) => {
                     self.inner = inner;
                     self.session_id = self.inner.session_id().map(String::from);
-                    return Ok(());
+                    let resumed = requested_session.is_some()
+                        && requested_session.as_deref() == self.session_id.as_deref();
+                    return Ok(resumed);
                 }
                 Err(e) => {
                     if attempt == super::MAX_CONNECT_RETRIES {
@@ -67,16 +73,23 @@ impl ReplClient {
                 }
             }
         }
-        Err(miette!("Failed to reconnect to REPL backend"))
+        unreachable!("reconnect loop always returns on final attempt")
     }
 
     /// Send a protocol request and receive the response.
-    /// On communication error, attempt to reconnect and retry once (session resume).
+    /// On transport error, attempt to reconnect and retry once (session resume).
+    /// Parse/protocol errors are returned immediately without retry.
     pub(crate) fn send_request(&mut self, request: &serde_json::Value) -> Result<ReplResponse> {
         match self.inner.send_request::<ReplResponse>(request) {
             Ok(resp) => Ok(resp),
-            Err(_e) => {
-                // Try to reconnect and retry once
+            Err(e) => {
+                // Only retry on transport errors, not parse/protocol errors.
+                // ProtocolClient::send_request produces "Failed to parse response"
+                // for JSON errors — no "Failed to deserialize" at this layer.
+                let msg = e.to_string();
+                if msg.contains("Failed to parse") {
+                    return Err(e);
+                }
                 self.reconnect()?;
                 self.inner.send_request::<ReplResponse>(request)
             }

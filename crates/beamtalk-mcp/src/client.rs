@@ -21,12 +21,21 @@ use tracing::instrument;
 const REPL_IO_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Async WebSocket client for the beamtalk REPL protocol.
-#[derive(Debug)]
 pub struct ReplClient {
     inner: Mutex<ReplClientInner>,
     port: u16,
     cookie: String,
     session: tokio::sync::Mutex<Option<String>>,
+}
+
+impl std::fmt::Debug for ReplClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReplClient")
+            .field("port", &self.port)
+            .field("cookie", &"<redacted>")
+            .field("session", &"<redacted>")
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug)]
@@ -50,61 +59,7 @@ impl ReplClient {
             .await
             .map_err(|e| format!("Failed to connect to REPL at {url}: {e}"))?;
 
-        // Read auth-required message (pre-auth, no session yet)
-        let auth_required = read_text_message_with_timeout(&mut ws, REPL_IO_TIMEOUT).await?;
-        let auth_required_json: serde_json::Value = serde_json::from_str(&auth_required)
-            .map_err(|e| format!("Failed to parse auth-required: {e}"))?;
-        match auth_required_json.get("op").and_then(|v| v.as_str()) {
-            Some("auth-required") => {}
-            _ => return Err(format!("Unexpected pre-auth message: {auth_required_json}")),
-        }
-
-        // ADR 0020: Cookie handshake with optional resume
-        let mut auth_msg = serde_json::json!({"type": "auth", "cookie": cookie});
-        if let Some(r) = resume {
-            auth_msg["resume"] = serde_json::Value::String(r.to_string());
-        }
-        let auth_str = serde_json::to_string(&auth_msg)
-            .map_err(|e| format!("Failed to serialize auth: {e}"))?;
-        ws.send(Message::Text(auth_str.into()))
-            .await
-            .map_err(|e| format!("Failed to send auth: {e}"))?;
-
-        // Read auth response
-        let auth_response = read_text_message_with_timeout(&mut ws, REPL_IO_TIMEOUT).await?;
-        let auth_json: serde_json::Value = serde_json::from_str(&auth_response)
-            .map_err(|e| format!("Failed to parse auth response: {e}"))?;
-        match auth_json.get("type").and_then(|t| t.as_str()) {
-            Some("auth_ok") => {}
-            Some("auth_error") => {
-                let msg = auth_json
-                    .get("message")
-                    .and_then(|m| m.as_str())
-                    .unwrap_or("Authentication failed");
-                return Err(format!("Workspace authentication failed: {msg}"));
-            }
-            _ => {
-                return Err(format!("Unexpected auth response: {auth_json}"));
-            }
-        }
-
-        // Read session-started message (sent after successful auth)
-        let session_started = read_text_message_with_timeout(&mut ws, REPL_IO_TIMEOUT).await?;
-        let session_started_json: serde_json::Value = serde_json::from_str(&session_started)
-            .map_err(|e| format!("Failed to parse session-started: {e}"))?;
-        let mut session_id: Option<String> = None;
-        match session_started_json.get("op").and_then(|v| v.as_str()) {
-            Some("session-started") => {
-                if let Some(s) = session_started_json.get("session").and_then(|v| v.as_str()) {
-                    session_id = Some(s.to_string());
-                }
-            }
-            _ => {
-                return Err(format!(
-                    "Unexpected post-auth message: {session_started_json}"
-                ));
-            }
-        }
+        let session_id = perform_auth_handshake(&mut ws, cookie, resume).await?;
 
         Ok(Self {
             inner: Mutex::new(ReplClientInner { ws }),
@@ -121,87 +76,45 @@ impl ReplClient {
 
     /// Reconnect the underlying WebSocket, attempting to resume the session
     /// using the last-known session id if available.
-    pub async fn reconnect(&self) -> Result<(), String> {
-        let resume = { self.session.lock().await.clone() };
+    ///
+    /// Returns `true` if the previous session was successfully resumed,
+    /// `false` if a fresh session was established instead.
+    pub async fn reconnect(&self) -> Result<bool, String> {
+        let requested_session = { self.session.lock().await.clone() };
         let url = format!("ws://127.0.0.1:{}/ws", self.port);
         let (mut ws, _response) = tokio_tungstenite::connect_async(&url)
             .await
             .map_err(|e| format!("Failed to reconnect to REPL at {url}: {e}"))?;
 
-        // Read auth-required
-        let auth_required = read_text_message_with_timeout(&mut ws, REPL_IO_TIMEOUT).await?;
-        let auth_required_json: serde_json::Value = serde_json::from_str(&auth_required)
-            .map_err(|e| format!("Failed to parse auth-required: {e}"))?;
-        match auth_required_json.get("op").and_then(|v| v.as_str()) {
-            Some("auth-required") => {}
-            _ => return Err(format!("Unexpected pre-auth message: {auth_required_json}")),
-        }
+        let session_id =
+            perform_auth_handshake(&mut ws, &self.cookie, requested_session.as_deref()).await?;
 
-        // Send auth with resume if present
-        let mut auth_msg = serde_json::json!({"type": "auth", "cookie": self.cookie});
-        if let Some(r) = resume.as_deref() {
-            auth_msg["resume"] = serde_json::Value::String(r.to_string());
-        }
-        let auth_str = serde_json::to_string(&auth_msg)
-            .map_err(|e| format!("Failed to serialize auth: {e}"))?;
-        ws.send(Message::Text(auth_str.into()))
-            .await
-            .map_err(|e| format!("Failed to send auth: {e}"))?;
+        let resumed =
+            requested_session.is_some() && requested_session.as_deref() == session_id.as_deref();
+        tracing::debug!(session_id = ?session_id, resumed, "MCP WebSocket reconnect successful");
 
-        // Read auth response
-        let auth_response = read_text_message_with_timeout(&mut ws, REPL_IO_TIMEOUT).await?;
-        let auth_json: serde_json::Value = serde_json::from_str(&auth_response)
-            .map_err(|e| format!("Failed to parse auth response: {e}"))?;
-        match auth_json.get("type").and_then(|t| t.as_str()) {
-            Some("auth_ok") => {}
-            Some("auth_error") => {
-                let msg = auth_json
-                    .get("message")
-                    .and_then(|m| m.as_str())
-                    .unwrap_or("Authentication failed");
-                return Err(format!("Workspace authentication failed: {msg}"));
-            }
-            _ => {
-                return Err(format!("Unexpected auth response: {auth_json}"));
-            }
-        }
-
-        // Read session-started and capture session id
-        let session_started = read_text_message_with_timeout(&mut ws, REPL_IO_TIMEOUT).await?;
-        let session_started_json: serde_json::Value = serde_json::from_str(&session_started)
-            .map_err(|e| format!("Failed to parse session-started: {e}"))?;
-        let mut session_id: Option<String> = None;
-        match session_started_json.get("op").and_then(|v| v.as_str()) {
-            Some("session-started") => {
-                if let Some(s) = session_started_json.get("session").and_then(|v| v.as_str()) {
-                    session_id = Some(s.to_string());
-                }
-            }
-            _ => {
-                return Err(format!(
-                    "Unexpected post-auth message: {session_started_json}"
-                ));
-            }
-        }
-
-        // Swap in the new websocket
+        // Swap in the new websocket and session
         {
             let mut inner = self.inner.lock().await;
             inner.ws = ws;
         }
-        // Update session id
         {
             let mut s = self.session.lock().await;
             *s = session_id;
         }
 
-        Ok(())
+        Ok(resumed)
     }
 
     /// Send a JSON request and receive a JSON response.
     ///
     /// Times out after [`REPL_IO_TIMEOUT`] to prevent hanging MCP calls
     /// if the REPL becomes unresponsive.
+    ///
+    /// On communication failure, attempts to reconnect and retry the request
+    /// once. **Caution:** if the server processed the request before the read
+    /// failed, retrying will re-execute it. Callers should be aware of
+    /// duplicate-execution risk for mutating operations.
     ///
     /// The REPL protocol may send intermediate streaming messages (e.g.
     /// `out` chunks) before the final response. This method loops until
@@ -247,17 +160,19 @@ impl ReplClient {
             match tokio::time::timeout(REPL_IO_TIMEOUT, io_future).await {
                 Ok(Ok(resp)) => return Ok(resp),
                 Ok(Err(e)) => {
-                    // Communication error — try reconnect once
+                    // Don't retry on parse/deserialization errors — reconnecting won't help
+                    if e.starts_with("Failed to parse") || e.starts_with("Failed to deserialize") {
+                        return Err(e);
+                    }
                     if attempt == 0 {
                         drop(inner); // release lock before reconnecting
                         tracing::warn!("Send failed, attempting reconnect: {e}");
                         if let Err(re) = self.reconnect().await {
                             return Err(format!("Send failed: {e}; reconnect failed: {re}"));
                         }
+                        continue; // retry
                     }
-                    if attempt != 0 {
-                        return Err(e);
-                    }
+                    return Err(e);
                 }
                 Err(_) => {
                     let timeout_err = format!(
@@ -270,15 +185,14 @@ impl ReplClient {
                         if let Err(re) = self.reconnect().await {
                             return Err(format!("{timeout_err}; reconnect failed: {re}"));
                         }
+                        continue; // retry
                     }
-                    if attempt != 0 {
-                        return Err(timeout_err);
-                    }
+                    return Err(timeout_err);
                 }
             }
         }
 
-        Err("unreachable".to_string())
+        unreachable!("send loop always returns on all paths")
     }
 
     /// Send an eval operation.
@@ -558,6 +472,68 @@ pub struct ModuleInfo {
     pub load_time: i64,
     /// Human-readable relative time since load (e.g., `"2m ago"`).
     pub time_ago: String,
+}
+
+/// Perform the ADR 0020 authentication handshake on a WebSocket connection.
+///
+/// Reads `auth-required`, sends `auth` (with optional `resume`), reads `auth_ok`,
+/// and reads `session-started`. Returns the session ID from the server.
+async fn perform_auth_handshake<S>(
+    ws: &mut tokio_tungstenite::WebSocketStream<S>,
+    cookie: &str,
+    resume: Option<&str>,
+) -> Result<Option<String>, String>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    // Read auth-required
+    let auth_required = read_text_message_with_timeout(ws, REPL_IO_TIMEOUT).await?;
+    let auth_required_json: serde_json::Value = serde_json::from_str(&auth_required)
+        .map_err(|e| format!("Failed to parse auth-required: {e}"))?;
+    match auth_required_json.get("op").and_then(|v| v.as_str()) {
+        Some("auth-required") => {}
+        _ => return Err(format!("Unexpected pre-auth message: {auth_required_json}")),
+    }
+
+    // Send auth with optional resume
+    let mut auth_msg = serde_json::json!({"type": "auth", "cookie": cookie});
+    if let Some(r) = resume {
+        auth_msg["resume"] = serde_json::Value::String(r.to_string());
+    }
+    let auth_str =
+        serde_json::to_string(&auth_msg).map_err(|e| format!("Failed to serialize auth: {e}"))?;
+    ws.send(Message::Text(auth_str.into()))
+        .await
+        .map_err(|e| format!("Failed to send auth: {e}"))?;
+
+    // Read auth response
+    let auth_response = read_text_message_with_timeout(ws, REPL_IO_TIMEOUT).await?;
+    let auth_json: serde_json::Value = serde_json::from_str(&auth_response)
+        .map_err(|e| format!("Failed to parse auth response: {e}"))?;
+    match auth_json.get("type").and_then(|t| t.as_str()) {
+        Some("auth_ok") => {}
+        Some("auth_error") => {
+            let msg = auth_json
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("Authentication failed");
+            return Err(format!("Workspace authentication failed: {msg}"));
+        }
+        _ => return Err(format!("Unexpected auth response: {auth_json}")),
+    }
+
+    // Read session-started
+    let session_started = read_text_message_with_timeout(ws, REPL_IO_TIMEOUT).await?;
+    let session_json: serde_json::Value = serde_json::from_str(&session_started)
+        .map_err(|e| format!("Failed to parse session-started: {e}"))?;
+    match session_json.get("op").and_then(|v| v.as_str()) {
+        Some("session-started") => {}
+        _ => return Err(format!("Unexpected post-auth message: {session_json}")),
+    }
+    Ok(session_json
+        .get("session")
+        .and_then(|v| v.as_str())
+        .map(String::from))
 }
 
 /// Read the next text message from a WebSocket stream.

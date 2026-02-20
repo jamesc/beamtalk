@@ -632,6 +632,38 @@ mod ephemeral_tests {
     }
 }
 
+/// Display the output, warnings, errors, and value from an eval response.
+fn display_eval_response(response: &ReplResponse) {
+    // Print captured stdout before value/error (BT-355)
+    if let Some(ref output) = response.output {
+        if !output.is_empty() {
+            print!("{output}");
+            if !output.ends_with('\n') {
+                println!();
+            }
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+        }
+    }
+    // Display compilation warnings (BT-407)
+    if let Some(ref warnings) = response.warnings {
+        for warning in warnings {
+            eprintln!("⚠ {warning}");
+        }
+    }
+    if response.is_error() {
+        if let Some(msg) = response.error_message() {
+            if msg == "Interrupted" {
+                // BT-666: Clean interrupt message
+                eprintln!("{msg}");
+            } else {
+                eprintln!("{}", format_error(msg));
+            }
+        }
+    } else if let Some(ref value) = response.value {
+        println!("{}", format_value(value));
+    }
+}
+
 /// Shared REPL loop used by both `beamtalk repl` and `beamtalk attach`.
 ///
 /// Sets up rustyline with tab completion and history, registers the SIGINT
@@ -1099,74 +1131,23 @@ pub(crate) fn repl_loop(
                 // Clear any stale interrupt flag before starting eval
                 interrupted.store(false, Ordering::SeqCst);
                 match client.eval_interruptible(&accumulated, &interrupted) {
-                    Ok(response) => {
-                        // Print captured stdout before value/error (BT-355)
-                        if let Some(ref output) = response.output {
-                            if !output.is_empty() {
-                                print!("{output}");
-                                if !output.ends_with('\n') {
-                                    println!();
-                                }
-                                let _ = std::io::Write::flush(&mut std::io::stdout());
-                            }
-                        }
-                        // Display compilation warnings (BT-407)
-                        if let Some(ref warnings) = response.warnings {
-                            for warning in warnings {
-                                eprintln!("⚠ {warning}");
-                            }
-                        }
-                        if response.is_error() {
-                            if let Some(msg) = response.error_message() {
-                                if msg == "Interrupted" {
-                                    // BT-666: Clean interrupt message
-                                    eprintln!("{msg}");
-                                } else {
-                                    eprintln!("{}", format_error(msg));
-                                }
-                            }
-                        } else if let Some(value) = response.value {
-                            println!("{}", format_value(&value));
-                        }
-                    }
+                    Ok(response) => display_eval_response(&response),
                     Err(e) => {
                         eprintln!("Communication error: {e}");
                         eprintln!("Attempting to reconnect to REPL backend...");
                         match client.reconnect() {
-                            Ok(()) => {
-                                eprintln!("Reconnected. Retrying evaluation...");
+                            Ok(resumed) => {
+                                if resumed {
+                                    eprintln!(
+                                        "Reconnected (session resumed). Retrying evaluation..."
+                                    );
+                                } else {
+                                    eprintln!("Reconnected (new session). Retrying evaluation...");
+                                }
+                                // Reset interrupt flag for the retry attempt
+                                interrupted.store(false, Ordering::SeqCst);
                                 match client.eval_interruptible(&accumulated, &interrupted) {
-                                    Ok(response) => {
-                                        // Print captured stdout before value/error (BT-355)
-                                        if let Some(ref output) = response.output {
-                                            if !output.is_empty() {
-                                                print!("{output}");
-                                                if !output.ends_with('\n') {
-                                                    println!();
-                                                }
-                                                let _ =
-                                                    std::io::Write::flush(&mut std::io::stdout());
-                                            }
-                                        }
-                                        // Display compilation warnings (BT-407)
-                                        if let Some(ref warnings) = response.warnings {
-                                            for warning in warnings {
-                                                eprintln!("⚠ {warning}");
-                                            }
-                                        }
-                                        if response.is_error() {
-                                            if let Some(msg) = response.error_message() {
-                                                if msg == "Interrupted" {
-                                                    // BT-666: Clean interrupt message
-                                                    eprintln!("{msg}");
-                                                } else {
-                                                    eprintln!("{}", format_error(msg));
-                                                }
-                                            }
-                                        } else if let Some(value) = response.value {
-                                            println!("{}", format_value(&value));
-                                        }
-                                    }
+                                    Ok(response) => display_eval_response(&response),
                                     Err(e2) => {
                                         eprintln!("Communication error after reconnect: {e2}");
                                         eprintln!("The REPL backend may have crashed. Exiting.");
