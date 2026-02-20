@@ -261,6 +261,14 @@ For v0.2 (import system), the leading candidate is Option B (package-scoped impo
 - Whether collision policy should be configurable (error vs. warn vs. replace)
 - How class identity surfaces in tooling, error messages, and serialization
 
+## Implementation Tracking
+
+**Epic:** [BT-736](https://linear.app/beamtalk/issue/BT-736) — Epic: Flat Namespace for v0.1 (ADR 0031)
+**Issues:**
+- [BT-737](https://linear.app/beamtalk/issue/BT-737) — Add class redefinition collision warning and document flat namespace
+- [BT-738](https://linear.app/beamtalk/issue/BT-738) — Prevent stdlib class shadowing with structured error (blocked by BT-737)
+**Status:** Planned
+
 ## Migration Path
 
 No migration needed — this ADR formalizes the current behavior. When a module/import system is added in a future version, a migration path will be specified in that ADR.
