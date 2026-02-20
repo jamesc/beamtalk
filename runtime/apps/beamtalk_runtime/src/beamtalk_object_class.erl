@@ -353,40 +353,61 @@ handle_call({put_method, Selector, Fun, Source}, _From, State) ->
 
 %% BT-572: Update class metadata after redefinition (hot reload).
 %% BT-737: Emits a collision warning when a class is redefined from a different module.
+%% BT-738: Rejects redefinition that would shadow a stdlib class.
 %% Returns {ok, InstanceVars} with the new instance variable list for state migration.
 handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = State) ->
-    %% BT-737: Detect cross-package class redefinition (different BEAM module).
-    %% Same-module reload (hot reload of the same file) does NOT produce a warning.
     OldModule = State#class_state.module,
     NewModule = maps:get(module, ClassInfo, OldModule),
-    case OldModule =:= NewModule of
-        false ->
-            ?LOG_WARNING("Class redefined from different module", #{
-                class => ClassName,
-                old_module => OldModule,
-                new_module => NewModule
-            }),
-            beamtalk_class_registry:record_class_collision_warning(
-                ClassName, OldModule, NewModule);
+    %% BT-738: Stdlib classes cannot be shadowed by user code.
+    %% If the existing class belongs to the stdlib (bt@stdlib@*) and the incoming
+    %% module does NOT, reject the redefinition with a structured error.
+    case is_stdlib_module(OldModule) andalso not is_stdlib_module(NewModule) of
         true ->
-            ok
-    end,
-    NewInstanceMethods = maps:get(instance_methods, ClassInfo, State#class_state.instance_methods),
-    NewClassMethods = maps:get(class_methods, ClassInfo, State#class_state.class_methods),
-    NewFlattened = beamtalk_class_hierarchy:build_flattened_methods(
-        ClassName, State#class_state.superclass, NewInstanceMethods),
-    NewFlattenedClass = beamtalk_class_hierarchy:build_flattened_methods(
-        ClassName, State#class_state.superclass, NewClassMethods, get_flattened_class_methods),
-    NewIVars = maps:get(instance_variables, ClassInfo, State#class_state.instance_variables),
-    NewState = State#class_state{
-        module = maps:get(module, ClassInfo, State#class_state.module),
-        instance_methods = NewInstanceMethods, class_methods = NewClassMethods,
-        instance_variables = NewIVars,
-        method_source = maps:get(method_source, ClassInfo, State#class_state.method_source),
-        flattened_methods = NewFlattened, flattened_class_methods = NewFlattenedClass,
-        is_constructible = undefined},
-    beamtalk_class_registry:invalidate_subclass_flattened_tables(ClassName),
-    {reply, {ok, NewIVars}, NewState};
+            Error0 = beamtalk_error:new(stdlib_shadowing, ClassName),
+            Error1 = beamtalk_error:with_hint(
+                Error0,
+                <<"Choose a different class name. Stdlib class names are protected.">>),
+            ?LOG_WARNING("Rejected stdlib class shadowing attempt", #{
+                class => ClassName,
+                stdlib_module => OldModule,
+                user_module => NewModule
+            }),
+            %% Store in ETS so the REPL load handler can retrieve the structured error
+            %% after code:load_binary returns {error, on_load_failure}.
+            beamtalk_class_registry:record_pending_load_error(ClassName, Error1),
+            {reply, {error, Error1}, State};
+        false ->
+            %% BT-737: Detect cross-package class redefinition (different BEAM module).
+            %% Same-module reload (hot reload of the same file) does NOT produce a warning.
+            case OldModule =:= NewModule of
+                false ->
+                    ?LOG_WARNING("Class redefined from different module", #{
+                        class => ClassName,
+                        old_module => OldModule,
+                        new_module => NewModule
+                    }),
+                    beamtalk_class_registry:record_class_collision_warning(
+                        ClassName, OldModule, NewModule);
+                true ->
+                    ok
+            end,
+            NewInstanceMethods = maps:get(instance_methods, ClassInfo, State#class_state.instance_methods),
+            NewClassMethods = maps:get(class_methods, ClassInfo, State#class_state.class_methods),
+            NewFlattened = beamtalk_class_hierarchy:build_flattened_methods(
+                ClassName, State#class_state.superclass, NewInstanceMethods),
+            NewFlattenedClass = beamtalk_class_hierarchy:build_flattened_methods(
+                ClassName, State#class_state.superclass, NewClassMethods, get_flattened_class_methods),
+            NewIVars = maps:get(instance_variables, ClassInfo, State#class_state.instance_variables),
+            NewState = State#class_state{
+                module = maps:get(module, ClassInfo, State#class_state.module),
+                instance_methods = NewInstanceMethods, class_methods = NewClassMethods,
+                instance_variables = NewIVars,
+                method_source = maps:get(method_source, ClassInfo, State#class_state.method_source),
+                flattened_methods = NewFlattened, flattened_class_methods = NewFlattenedClass,
+                is_constructible = undefined},
+            beamtalk_class_registry:invalidate_subclass_flattened_tables(ClassName),
+            {reply, {ok, NewIVars}, NewState}
+    end;
 
 handle_call(instance_variables, _From, #class_state{instance_variables = IVars} = State) ->
     {reply, IVars, State};
@@ -510,3 +531,16 @@ rebuild_all_flattened_tables(#class_state{
 
 notify_instances(_ClassName, _NewMethods) ->
     ok.
+
+%% @private
+%% @doc Returns true if the given module atom belongs to the Beamtalk stdlib.
+%% BT-738: Stdlib modules have the prefix 'bt@stdlib@'. This is the canonical
+%% way to identify stdlib-owned classes at runtime.
+-spec is_stdlib_module(atom()) -> boolean().
+is_stdlib_module(Module) when is_atom(Module) ->
+    case atom_to_binary(Module, utf8) of
+        <<"bt@stdlib@", _/binary>> -> true;
+        _ -> false
+    end;
+is_stdlib_module(_) ->
+    false.

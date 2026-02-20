@@ -268,7 +268,15 @@ load_compiled_module(Binary, ClassNames, ModuleName, Source, SourcePath, State) 
                 NewState2, ClassNames),
             {ok, ClassNames, NewState3};
         {error, Reason} ->
-            {error, {load_error, Reason}, State}
+            %% BT-738: Check for a structured stdlib_shadowing error stored in the
+            %% pending errors table by update_class before on_load failed.
+            ClassAtoms = class_name_atoms(ClassNames),
+            case beamtalk_class_registry:drain_pending_load_errors_by_names(ClassAtoms) of
+                [{_ClassName, StructuredError} | _] ->
+                    {error, StructuredError, State};
+                [] ->
+                    {error, {load_error, Reason}, State}
+            end
     end.
 
 %% BT-571: Handle inline class definition result.
@@ -301,7 +309,15 @@ handle_class_definition(ClassInfo, Warnings, Expression, State) ->
             end,
             {ok, ClassName, <<>>, Warnings, NewState2};
         {error, Reason} ->
-            {error, {load_error, Reason}, <<>>, Warnings, State}
+            %% BT-738: Check for a structured stdlib_shadowing error stored in the
+            %% pending errors table by update_class before on_load failed.
+            ClassAtoms = class_name_atoms(Classes),
+            case beamtalk_class_registry:drain_pending_load_errors_by_names(ClassAtoms) of
+                [{_ClassName, StructuredError} | _] ->
+                    {error, StructuredError, <<>>, Warnings, State};
+                [] ->
+                    {error, {load_error, Reason}, <<>>, Warnings, State}
+            end
     end.
 
 %% BT-571: Handle standalone method definition result.
@@ -339,8 +355,16 @@ handle_method_definition(MethodInfo, Warnings, Expression, State) ->
                                     Result = <<ClassNameBin/binary, ">>",
                                                SelectorBin/binary>>,
                                     {ok, Result, <<>>, AllWarnings, NewState};
-                                {error, Reason} ->
-                                    {error, {load_error, Reason}, <<>>, AllWarnings, State}
+                                {error, LoadReason} ->
+                                    %% BT-738: Check for a structured stdlib_shadowing error stored
+                                    %% in the pending errors table by update_class before on_load failed.
+                                    ClassAtoms = class_name_atoms(Classes),
+                                    case beamtalk_class_registry:drain_pending_load_errors_by_names(ClassAtoms) of
+                                        [{_ClassName, StructuredError} | _] ->
+                                            {error, StructuredError, <<>>, AllWarnings, State};
+                                        [] ->
+                                            {error, {load_error, LoadReason}, <<>>, AllWarnings, State}
+                                    end
                             end;
                         {error, Reason} ->
                             ErrorMsg = iolist_to_binary(
@@ -654,3 +678,25 @@ inject_output({ok, Result, State}, Output, Warnings) ->
     {ok, Result, Output, Warnings, State};
 inject_output({error, Reason, State}, Output, Warnings) ->
     {error, Reason, Output, Warnings, State}.
+
+%% @private
+%% @doc Convert a list of class info maps to a list of existing atoms.
+%% BT-738: Used to look up pending load errors after a failed on_load.
+%% Uses safe_to_existing_atom to avoid atom table pollution.
+-spec class_name_atoms([map()]) -> [atom()].
+class_name_atoms(Classes) ->
+    lists:filtermap(
+        fun(#{name := Name}) when is_list(Name) ->
+            case beamtalk_repl_server:safe_to_existing_atom(list_to_binary(Name)) of
+                {ok, Atom} -> {true, Atom};
+                {error, badarg} -> false
+            end;
+        (#{name := Name}) when is_binary(Name) ->
+            case beamtalk_repl_server:safe_to_existing_atom(Name) of
+                {ok, Atom} -> {true, Atom};
+                {error, badarg} -> false
+            end;
+        (_) ->
+            false
+        end,
+        Classes).
