@@ -276,27 +276,10 @@ all_classes_test() ->
     ?assert(is_list(Result)).
 
 %%% ============================================================================
-%%% invalidate_subclass_flattened_tables tests
+%%% ADR 0032 Phase 1: invalidate_subclass_flattened_tables removed
 %%% ============================================================================
-
-invalidate_subclass_flattened_tables_test() ->
-    beamtalk_class_registry:ensure_pg_started(),
-    Ref = make_ref(),
-    Self = self(),
-    %% Spawn a mock class process and join the pg group
-    MockPid = spawn(fun() ->
-        pg:join(beamtalk_classes, self()),
-        receive
-            {rebuild_flattened, _Class} = Msg -> Self ! {Ref, Msg}
-        after 1000 -> Self ! {Ref, timeout}
-        end,
-        pg:leave(beamtalk_classes, self())
-    end),
-    %% Give time for pg:join to take effect
-    timer:sleep(50),
-    beamtalk_class_registry:invalidate_subclass_flattened_tables('TestClass'),
-    Result = receive {Ref, R} -> R after 1000 -> timeout end,
-    ?assertEqual({rebuild_flattened, 'TestClass'}, Result),
-    %% Ensure mock process exits
-    _ = (catch exit(MockPid, kill)),
-    ok.
+%% The rebuild broadcast (invalidate_subclass_flattened_tables) was removed in
+%% ADR 0032 Phase 1. Chain walk at dispatch time replaces the flattened table
+%% cache, so no broadcast is needed when class methods change.
+%%
+%% Test removed: invalidate_subclass_flattened_tables_test
