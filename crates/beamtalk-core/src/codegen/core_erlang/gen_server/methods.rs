@@ -829,42 +829,36 @@ impl CoreErlangGenerator {
         //       let ClassInfo1 = ... in let _Reg1 = case ... end
         //       in _Reg1   % (or nested case if more classes follow)
         //   end
-        let try_body = if module.classes.is_empty() {
-            Document::Str("'ok'")
-        } else {
-            let last_i = class_docs.len() - 1;
-            // Start from innermost: just last class + final result
-            let mut inner: Document<'static> = docvec![
-                class_docs[last_i].clone(),
+        // The early return above already handles the empty case, so class_docs is non-empty here.
+        let last_i = class_docs.len() - 1;
+        // Start from innermost: just last class + final result
+        let mut try_body: Document<'static> = docvec![
+            class_docs[last_i].clone(),
+            "\n",
+            line(),
+            format!("in _Reg{last_i}"),
+        ];
+        // Wrap from second-to-last down to first, adding short-circuit cases
+        for i in (0..last_i).rev() {
+            try_body = docvec![
+                class_docs[i].clone(),
                 "\n",
                 line(),
-                format!("in _Reg{last_i}"),
+                format!("in case _Reg{i} of"),
+                nest(
+                    INDENT,
+                    docvec![
+                        line(),
+                        format!("<{{'error', _RegErr{i}}}> when 'true' -> {{'error', _RegErr{i}}}"),
+                        line(),
+                        format!("<_> when 'true' ->"),
+                        nest(INDENT, docvec![line(), try_body]),
+                    ]
+                ),
+                line(),
+                "end",
             ];
-            // Wrap from second-to-last down to first, adding short-circuit cases
-            for i in (0..last_i).rev() {
-                inner = docvec![
-                    class_docs[i].clone(),
-                    "\n",
-                    line(),
-                    format!("in case _Reg{i} of"),
-                    nest(
-                        INDENT,
-                        docvec![
-                            line(),
-                            format!(
-                                "<{{'error', _RegErr{i}}}> when 'true' -> {{'error', _RegErr{i}}}"
-                            ),
-                            line(),
-                            format!("<_> when 'true' ->"),
-                            nest(INDENT, docvec![line(), inner]),
-                        ]
-                    ),
-                    line(),
-                    "end",
-                ];
-            }
-            inner
-        };
+        }
         let doc = docvec![
             "'register_class'/0 = fun () ->",
             nest(
