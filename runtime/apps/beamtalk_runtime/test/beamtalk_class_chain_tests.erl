@@ -10,7 +10,9 @@
 %%% ## What This Tests
 %%%
 %%% 1. **Dispatch fallthrough**: `Counter testClassProtocol` reaches
-%%%    `beamtalk_class_bt:dispatch/4` via `try_class_chain_fallthrough/3`.
+%%%    the currently registered Class implementation module's
+%%%    `dispatch/4` (in this suite, `beamtalk_class_chain_test_helper:dispatch/4`)
+%%%    via `try_class_chain_fallthrough/3`.
 %%%
 %%% 2. **Metaclass tag preservation**: The `self` argument received by
 %%%    the Class method has the 'Counter class' tag, not 'Counter'.
@@ -47,6 +49,20 @@ setup() ->
     ok.
 
 teardown(_) ->
+    %% Restore 'Class' to the production stub so other test modules in the
+    %% same VM don't see the test helper module as Class's implementation.
+    ClassInfo = #{
+        name => 'Class',
+        superclass => 'Object',
+        module => beamtalk_class_bt,
+        instance_variables => [],
+        class_methods => #{},
+        instance_methods => #{}
+    },
+    case beamtalk_class_registry:whereis_class('Class') of
+        undefined -> ok;
+        _Pid -> beamtalk_object_class:update_class('Class', ClassInfo)
+    end,
     ok.
 
 %% Register or update 'Class' to use the test helper module.
@@ -63,12 +79,14 @@ register_class_with_test_helper() ->
             testClassProtocol => #{arity => 0}
         }
     },
-    case beamtalk_class_registry:whereis_class('Class') of
-        undefined ->
-            beamtalk_object_class:start('Class', ClassInfo);
-        _Pid ->
-            beamtalk_object_class:update_class('Class', ClassInfo)
-    end,
+    Result =
+        case beamtalk_class_registry:whereis_class('Class') of
+            undefined ->
+                beamtalk_object_class:start('Class', ClassInfo);
+            _Pid ->
+                beamtalk_object_class:update_class('Class', ClassInfo)
+        end,
+    {ok, _} = Result,
     ok.
 
 %%====================================================================
@@ -155,10 +173,18 @@ test_fallthrough_absent_class() ->
     ok = ensure_counter_loaded(),
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
 
-    %% Kill 'Class' process if it's running to test the absent case
+    %% Kill 'Class' process if it's running to test the absent case.
+    %% Use monitor + DOWN to avoid flaky timer:sleep on loaded CI nodes.
     case beamtalk_class_registry:whereis_class('Class') of
         undefined -> ok;
-        ClassPid -> exit(ClassPid, kill), timer:sleep(50)
+        ClassPid ->
+            Ref = erlang:monitor(process, ClassPid),
+            exit(ClassPid, kill),
+            receive
+                {'DOWN', Ref, process, ClassPid, _Reason} -> ok
+            after 1000 ->
+                ?assert(false)
+            end
     end,
 
     try

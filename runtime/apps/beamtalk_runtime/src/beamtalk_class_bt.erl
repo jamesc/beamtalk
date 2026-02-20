@@ -97,6 +97,9 @@ register_class() ->
             ?LOG_INFO("Registered Class (ADR 0032 Phase 0 stub)", #{module => ?MODULE}),
             ok;
         {error, {already_started, _}} ->
+            %% Class was already registered (e.g., bootstrap ran twice or a prior
+            %% test registered it). Refresh the metadata to keep it consistent.
+            beamtalk_object_class:update_class('Class', ClassInfo),
             ok;
         {error, Reason} ->
             ?LOG_WARNING("Failed to register Class", #{reason => Reason}),
