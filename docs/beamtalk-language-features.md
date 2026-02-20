@@ -39,6 +39,14 @@ greeting := "Hello, 世界! 🌍"
 message := "Welcome, {name}!"
 emoji := "Status: {status} ✓"
 
+// Escape sequences inside strings:
+//   ""   doubled delimiter → literal double-quote character
+//   \{   backslash preserved → literal \{  (prevents interpolation)
+//   \}   backslash preserved → literal \}
+quote := """"                    // 1-char string containing "
+dialog := "She said ""hello"""  // → She said "hello"
+// Note: \{ and \} keep the backslash in the string value (current lexer behavior)
+
 // All strings are <<"UTF-8 binary">> in Erlang
 ```
 
