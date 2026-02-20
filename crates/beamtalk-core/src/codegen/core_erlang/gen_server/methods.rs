@@ -1058,6 +1058,26 @@ impl CoreErlangGenerator {
                 // ends with `in ` (open scope) so ClassVarsN stays visible for the
                 // remaining body expressions.
                 docs.push(self.generate_expression(expr)?);
+            } else if Self::is_local_var_assignment(expr) {
+                // BT-741: Local variable assignment — create a proper `let` binding so
+                // subsequent expressions can reference the variable by name.
+                // Without this, the variable is unbound in scope and falls through to
+                // `generate_identifier`, which generates `call 'maps':'get'('d', State)`.
+                // Class methods have no State parameter, causing {unbound_var, 'State', ...}.
+                if let Expression::Assignment { target, value, .. } = expr {
+                    if let Expression::Block(block) = value.as_ref() {
+                        Self::validate_stored_closure(block, format!("{:?}", expr.span()))?;
+                    }
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        let var_name = &id.name;
+                        let core_var = self
+                            .lookup_var(var_name)
+                            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+                        let val_doc = self.expression_doc(value)?;
+                        self.bind_var(var_name, &core_var);
+                        docs.push(docvec![format!("let {core_var} = "), val_doc, " in "]);
+                    }
+                }
             } else {
                 let tmp_var = self.fresh_temp_var("seq");
                 let expr_str = self.expression_doc(expr)?;
