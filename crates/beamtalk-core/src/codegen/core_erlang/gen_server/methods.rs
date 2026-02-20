@@ -726,11 +726,10 @@ impl CoreErlangGenerator {
 
             let is_sealed = if class.is_sealed { "true" } else { "false" };
             let is_abstract = if class.is_abstract { "true" } else { "false" };
-            let let_prefix = if i > 0 { "in " } else { "" };
 
             let class_doc = docvec![
                 line(),
-                format!("{let_prefix}let ClassInfo{i} = ~{{",),
+                format!("let ClassInfo{i} = ~{{",),
                 nest(
                     INDENT,
                     docvec![
@@ -816,15 +815,52 @@ impl CoreErlangGenerator {
             class_docs.push(class_doc);
         }
 
-        // BT-738: Use the last _RegN variable as the try-body result so that
-        // {error, ...} from update_class propagates out of on_load. When on_load
-        // returns anything other than 'ok', code:load_binary fails, which lets
-        // the REPL surface a structured stdlib_shadowing error.
-        let last_i = module.classes.len().saturating_sub(1);
-        let final_expr = if module.classes.is_empty() {
-            "'ok'".to_string()
+        // BT-738 / BT-749: Build a short-circuit chain so the first {error, ...}
+        // result propagates out of on_load, regardless of which class caused it.
+        //
+        // For N classes, generates:
+        //   let ClassInfo0 = ... in let _Reg0 = case ... end
+        //   in case _Reg0 of
+        //     <{'error', _RegErr0}> when 'true' -> {'error', _RegErr0}
+        //     <_> when 'true' ->
+        //       let ClassInfo1 = ... in let _Reg1 = case ... end
+        //       in _Reg1   % (or nested case if more classes follow)
+        //   end
+        let try_body = if module.classes.is_empty() {
+            Document::Str("'ok'")
         } else {
-            format!("_Reg{last_i}")
+            let last_i = class_docs.len() - 1;
+            // Start from innermost: just last class + final result
+            let mut inner: Document<'static> = docvec![
+                class_docs[last_i].clone(),
+                "\n",
+                line(),
+                format!("in _Reg{last_i}"),
+            ];
+            // Wrap from second-to-last down to first, adding short-circuit cases
+            for i in (0..last_i).rev() {
+                inner = docvec![
+                    class_docs[i].clone(),
+                    "\n",
+                    line(),
+                    format!("in case _Reg{i} of"),
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            format!(
+                                "<{{'error', _RegErr{i}}}> when 'true' -> {{'error', _RegErr{i}}}"
+                            ),
+                            line(),
+                            format!("<_> when 'true' ->"),
+                            nest(INDENT, docvec![line(), inner]),
+                        ]
+                    ),
+                    line(),
+                    "end",
+                ];
+            }
+            inner
         };
         let doc = docvec![
             "'register_class'/0 = fun () ->",
@@ -833,15 +869,7 @@ impl CoreErlangGenerator {
                 docvec![
                     line(),
                     "try",
-                    nest(
-                        INDENT,
-                        docvec![
-                            Document::Vec(class_docs),
-                            "\n",
-                            line(),
-                            format!("in {final_expr}"),
-                        ]
-                    ),
+                    nest(INDENT, docvec![try_body, "\n",]),
                 ]
             ),
             nest(
