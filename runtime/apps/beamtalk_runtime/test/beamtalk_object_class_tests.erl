@@ -73,7 +73,9 @@ teardown(_) ->
          beamtalk_class_HierOrphan, beamtalk_class_HierParent, beamtalk_class_HierChild,
          beamtalk_class_NewErrorTestClass, beamtalk_class_DoubleWrapTestClass,
          beamtalk_class_PrimTestInteger,
-         beamtalk_class_StdlibShadowTest]
+         beamtalk_class_StdlibShadowTest,
+         beamtalk_class_MultiShadowInteger,
+         beamtalk_class_MultiShadowHelper]
     ),
     %% Clean up ETS hierarchy table entries
     try ets:delete_all_objects(beamtalk_class_hierarchy) catch _:_ -> ok end,
@@ -1273,5 +1275,108 @@ update_class_non_stdlib_no_shadowing_test_() ->
               %% No pending stdlib error
               Errors = beamtalk_class_registry:drain_pending_load_errors_by_names(['StdlibShadowTest']),
               ?assertEqual([], Errors)
+          end)]
+     end}.
+
+%%====================================================================
+%% Multi-class stdlib shadowing integration tests (BT-751)
+%%====================================================================
+
+%% BT-751: Integration test for the multi-class short-circuit behaviour
+%% validated at the codegen level by BT-749.
+%%
+%% Simulates the generated register_class/0 for a two-class module where
+%% the first class (Integer) shadows a stdlib class.  The short-circuit
+%% must propagate the error and prevent the second class (MyHelper) from
+%% being registered.
+multi_class_stdlib_shadowing_short_circuits_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              %% Ensure ETS tables exist and are clean
+              beamtalk_class_registry:record_pending_load_error('__warmup__', #beamtalk_error{}),
+              ets:delete_all_objects(beamtalk_pending_load_errors),
+
+              %% --- Pre-condition: register a fake stdlib class for Integer ---
+              StdlibInfo = #{
+                  name => 'MultiShadowInteger',
+                  module => 'bt@stdlib@integer',
+                  superclass => none,
+                  instance_methods => #{}
+              },
+              {ok, _StdPid} = beamtalk_object_class:start_link('MultiShadowInteger', StdlibInfo),
+
+              %% ============================================================
+              %% Simulate register_class/0 for a two-class module:
+              %%   Class 0: "Integer" (shadows stdlib)
+              %%   Class 1: "MyHelper" (innocent bystander)
+              %%
+              %% Generated Core Erlang (BT-749) looks like:
+              %%   _Reg0 = case start(...Integer...) of ... end
+              %%   case _Reg0 of
+              %%     <{'error', Err}> -> {'error', Err}   % short-circuit
+              %%     <_> -> _Reg1 = case start(...MyHelper...) of ... end
+              %%            in _Reg1
+              %%   end
+              %% ============================================================
+
+              %% --- Class 0: start + update_class for Integer ---
+              UserIntegerInfo = #{
+                  name => 'MultiShadowInteger',
+                  module => 'bt@user_app@integer',
+                  superclass => 'Object',
+                  instance_methods => #{}
+              },
+              Reg0 = case beamtalk_object_class:start('MultiShadowInteger', UserIntegerInfo) of
+                  {ok, _Pid0} ->
+                      beamtalk_object_class:update_class('MultiShadowInteger', UserIntegerInfo);
+                  {error, {already_started, _Pid0}} ->
+                      beamtalk_object_class:update_class('MultiShadowInteger', UserIntegerInfo);
+                  {error, Reason0} ->
+                      {error, Reason0}
+              end,
+
+              %% --- Short-circuit check (mirrors generated case expression) ---
+              FinalResult = case Reg0 of
+                  {error, _RegErr0} ->
+                      {error, _RegErr0};
+                  _ ->
+                      %% Class 1: start + update_class for MyHelper
+                      HelperInfo = #{
+                          name => 'MultiShadowHelper',
+                          module => 'bt@user_app@integer',
+                          superclass => 'Object',
+                          instance_methods => #{}
+                      },
+                      case beamtalk_object_class:start('MultiShadowHelper', HelperInfo) of
+                          {ok, _Pid1} ->
+                              beamtalk_object_class:update_class('MultiShadowHelper', HelperInfo);
+                          {error, {already_started, _Pid1}} ->
+                              beamtalk_object_class:update_class('MultiShadowHelper', HelperInfo);
+                          {error, Reason1} ->
+                              {error, Reason1}
+                      end
+              end,
+
+              %% === Acceptance Criteria ===
+
+              %% 1. Loading must produce a stdlib_shadowing error
+              ?assertMatch({error, #beamtalk_error{kind = stdlib_shadowing}}, FinalResult),
+
+              %% 2. MyHelper must NOT be registered (short-circuit skipped it)
+              ?assertEqual(undefined,
+                  beamtalk_class_registry:whereis_class('MultiShadowHelper')),
+
+              %% 3. The error must be in the pending load errors ETS table
+              PendingErrors = beamtalk_class_registry:drain_pending_load_errors_by_names(
+                  ['MultiShadowInteger', 'MultiShadowHelper']),
+              ?assertMatch([{'MultiShadowInteger', #beamtalk_error{kind = stdlib_shadowing}}],
+                  PendingErrors),
+
+              %% 4. No stale ETS entry for MyHelper
+              ?assertEqual([],
+                  beamtalk_class_registry:drain_pending_load_errors_by_names(['MultiShadowHelper']))
           end)]
      end}.
