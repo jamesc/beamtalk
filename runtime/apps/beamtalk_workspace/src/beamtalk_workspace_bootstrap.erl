@@ -252,7 +252,9 @@ topo_sort(Entries) ->
     topo_sort_waves(Entries, ClassSet, sets:new(), []).
 
 -spec topo_sort_waves(
-    [{module(), atom(), atom()}], sets:set(atom()), sets:set(atom()),
+    [{module(), atom(), atom()}],
+    sets:set(atom()),
+    sets:set(atom()),
     [{module(), atom(), atom()}]
 ) -> [{module(), atom(), atom()}].
 topo_sort_waves([], _ClassSet, _Emitted, Acc) ->

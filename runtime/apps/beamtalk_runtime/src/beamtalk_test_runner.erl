@@ -199,7 +199,8 @@ discover_methods_via_registry(ClassName) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
             Msg = iolist_to_binary(
-                io_lib:format("Class '~s' not found in class registry", [ClassName])),
+                io_lib:format("Class '~s' not found in class registry", [ClassName])
+            ),
             Error0 = beamtalk_error:new(class_not_found, 'TestRunner'),
             Error1 = beamtalk_error:with_selector(Error0, 'run:'),
             Error2 = beamtalk_error:with_message(Error1, Msg),
@@ -275,11 +276,15 @@ aggregate_results(ClassResults) ->
                 },
                 {TAcc, PAcc, FAcc, DAcc, TestsAcc}
             ) ->
-                {TAcc + T, PAcc + P, FAcc + F, DAcc + D,
-                 lists:reverse(Tests) ++ TestsAcc}
+                {TAcc + T, PAcc + P, FAcc + F, DAcc + D, lists:reverse(Tests) ++ TestsAcc}
             end,
             {0, 0, 0, 0.0, []},
             ClassResults
         ),
-    make_test_result(TotalSum, PassedSum, FailedSum, DurationSum,
-                     lists:reverse(RevTests)).
+    make_test_result(
+        TotalSum,
+        PassedSum,
+        FailedSum,
+        DurationSum,
+        lists:reverse(RevTests)
+    ).

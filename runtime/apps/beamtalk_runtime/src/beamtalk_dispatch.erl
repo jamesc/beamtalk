@@ -306,7 +306,12 @@ lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid, Dep
                             {error, beamtalk_error:new(class_not_found, SuperclassName, Selector)};
                         SuperclassPid ->
                             lookup_in_class_chain_slow(
-                                Selector, Args, Self, State, SuperclassName, SuperclassPid,
+                                Selector,
+                                Args,
+                                Self,
+                                State,
+                                SuperclassName,
+                                SuperclassPid,
                                 Depth + 1
                             )
                     end

@@ -139,9 +139,8 @@ lint: lint-rust lint-erlang lint-js
 # Lint Rust: clippy + formatting check
 lint-rust: clippy fmt-check-rust
 
-# Lint Erlang: Dialyzer type checking
-# TODO: add fmt-check-erlang here once bulk-format commit lands
-lint-erlang: dialyzer
+# Lint Erlang: Dialyzer type checking + format check
+lint-erlang: dialyzer fmt-check-erlang
 
 # Lint JS/TS: Biome lint + format check
 [working-directory: 'editors/vscode']
@@ -162,8 +161,7 @@ fmt-check-rust:
     cargo fmt --all -- --check
 
 # Check all code formatting
-# TODO: add fmt-check-erlang here once bulk-format commit lands
-fmt-check: fmt-check-rust fmt-check-js
+fmt-check: fmt-check-rust fmt-check-erlang fmt-check-js
 
 # Format all Rust code
 fmt-rust:
