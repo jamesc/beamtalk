@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-761: Actor with local variable + conditional ^ return
+Actor subclass: ActorNlrLocalVar
+  state: data = #{}
+
+  store: key val: v =>
+    self.data := self.data at: key put: v
+
+  fetch: key =>
+    val := self.data at: key ifAbsent: [nil]
+    val notNil ifTrue: [^val]
+    "not found"

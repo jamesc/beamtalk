@@ -250,9 +250,46 @@ impl CoreErlangGenerator {
                         .map(|p| self.fresh_var(&p.name))
                         .collect();
 
+                    // BT-761: Detect NLR in block-based actor method body
+                    let needs_nlr = block
+                        .body
+                        .iter()
+                        .any(|expr| Self::expr_has_block_nlr(expr, false));
+
+                    if needs_nlr {
+                        let token_var = self.fresh_temp_var("NlrToken");
+                        self.current_nlr_token = Some(token_var);
+                    }
+
                     // Generate body as Document, render to string for embedding
                     let body_doc = self.generate_method_body_with_reply(block)?;
                     let body_str = body_doc.to_pretty_string();
+
+                    // BT-761: Wrap in try/catch for non-local returns from block closures
+                    let body_str = if let Some(token_var) = self.current_nlr_token.take() {
+                        let result_var = self.fresh_temp_var("NlrResult");
+                        let cls_var = self.fresh_temp_var("NlrCls");
+                        let err_var = self.fresh_temp_var("NlrErr");
+                        let stk_var = self.fresh_temp_var("NlrStk");
+                        let ctk_var = self.fresh_temp_var("CatchTok");
+                        let val_var = self.fresh_temp_var("NlrVal");
+                        let ot_pair_var = self.fresh_temp_var("OtherPair");
+                        format!(
+                            "let {token_var} = call 'erlang':'make_ref'() in\n\
+                             try\n  {body_str}\n\
+                             of {result_var} -> {result_var}\n\
+                             catch <{cls_var}, {err_var}, {stk_var}> ->\n\
+                             \x20 case {{{cls_var}, {err_var}}} of\n\
+                             \x20   <{{'throw', {{'$bt_nlr', {ctk_var}, {val_var}}}}}> \
+                                  when call 'erlang':'=:='({ctk_var}, {token_var}) -> \
+                                  {{'reply', {val_var}, State}}\n\
+                             \x20   <{ot_pair_var}> when 'true' -> \
+                                  primop 'raw_raise'({cls_var}, {err_var}, {stk_var})\n\
+                             \x20 end"
+                        )
+                    } else {
+                        body_str
+                    };
 
                     // Build method clause as Document tree
                     let clause_doc = if param_vars.is_empty() {

@@ -1,0 +1,66 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-761: Non-local return (^) inside block arguments in Actor subclass methods.
+//
+// A ^ inside a block (e.g. ifTrue: [^"early"]) must cause an early return from
+// the enclosing actor method, not just from the block. The actor method's reply
+// tuple must contain the returned value.
+//
+// @load tests/e2e/fixtures/actor_nlr_basic.bt
+// @load tests/e2e/fixtures/actor_nlr_branches.bt
+// @load tests/e2e/fixtures/actor_nlr_local_var.bt
+// @load tests/e2e/fixtures/actor_nlr_computed.bt
+
+// === Basic ifTrue: with non-local return ===
+
+a1 := ActorNlrBasic spawn
+// => #Actor<ActorNlrBasic,_>
+
+(a1 test: 5) await
+// => positive
+
+(a1 test: -1) await
+// => non-positive
+
+(a1 test: 0) await
+// => non-positive
+
+// === ifTrue:ifFalse: with non-local returns in both branches ===
+
+a2 := ActorNlrBranches spawn
+// => #Actor<ActorNlrBranches,_>
+
+(a2 classify: 5) await
+// => positive
+
+(a2 classify: -1) await
+// => non-positive
+
+(a2 classify: 0) await
+// => non-positive
+
+// === Local variable + conditional ^ return ===
+
+a3 := ActorNlrLocalVar spawn
+// => #Actor<ActorNlrLocalVar,_>
+
+(a3 store: "x" val: 42) await
+// => _
+
+(a3 fetch: "x") await
+// => 42
+
+(a3 fetch: "missing") await
+// => not found
+
+// === Non-local return with computed value ===
+
+a4 := ActorNlrComputed spawn
+// => #Actor<ActorNlrComputed,_>
+
+(a4 test: 5) await
+// => 10
+
+(a4 test: -1) await
+// => 0

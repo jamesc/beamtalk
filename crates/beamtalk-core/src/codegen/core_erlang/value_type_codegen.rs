@@ -533,8 +533,8 @@ impl CoreErlangGenerator {
     /// Returns `true` if `expr` contains a `^` (Return) that is nested inside
     /// a block literal at any depth.
     ///
-    /// Used by `generate_value_type_method` to decide whether to emit a
-    /// non-local return try/catch wrapper (BT-754).
+    /// Used by `generate_value_type_method` and actor method codegen to decide
+    /// whether to emit a non-local return try/catch wrapper (BT-754, BT-761).
     ///
     /// * `inside_block` — whether we are already inside at least one block literal.
     ///   At the method-body level the caller passes `false`; `generate_block` sets
@@ -542,7 +542,10 @@ impl CoreErlangGenerator {
     ///
     /// Each `Expression` variant is matched explicitly (no wildcard) so the Rust
     /// compiler enforces exhaustiveness: adding a new AST node forces an update here.
-    fn expr_has_block_nlr(expr: &Expression, inside_block: bool) -> bool {
+    pub(in crate::codegen::core_erlang) fn expr_has_block_nlr(
+        expr: &Expression,
+        inside_block: bool,
+    ) -> bool {
         match expr {
             Expression::Return { value, .. } => {
                 // ^ at method-body level is NOT an NLR — it is handled by the

@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-761: Actor with ^ inside ifTrue: block
+Actor subclass: ActorNlrBasic
+  state: x = 0
+
+  test: n =>
+    n > 0 ifTrue: [^"positive"]
+    "non-positive"

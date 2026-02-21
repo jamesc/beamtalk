@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-761: Actor with ^ inside ifTrue:ifFalse: both branches
+Actor subclass: ActorNlrBranches
+  state: x = 0
+
+  classify: n =>
+    n > 0 ifTrue: [^"positive"] ifFalse: [^"non-positive"]
+    "unreachable"

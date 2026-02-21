@@ -57,9 +57,49 @@ impl CoreErlangGenerator {
             })
             .collect();
 
+        // BT-761: Detect whether any block argument in this method body contains ^.
+        // If so, set up a non-local return token so ^ inside blocks can throw to escape
+        // the closure and return from the enclosing method (same pattern as BT-754).
+        let needs_nlr = method
+            .body
+            .iter()
+            .any(|expr| Self::expr_has_block_nlr(expr, false));
+
+        if needs_nlr {
+            let token_var = self.fresh_temp_var("NlrToken");
+            self.current_nlr_token = Some(token_var);
+        }
+
         // Generate body as Document, render to string for embedding
         let method_body_doc = self.generate_method_definition_body_with_reply(method)?;
         let body_str = method_body_doc.to_pretty_string();
+
+        // BT-761: Wrap in try/catch for non-local returns from block closures.
+        // The catch produces {'reply', CaughtValue, State} to satisfy gen_server.
+        let body_str = if let Some(token_var) = self.current_nlr_token.take() {
+            let result_var = self.fresh_temp_var("NlrResult");
+            let cls_var = self.fresh_temp_var("NlrCls");
+            let err_var = self.fresh_temp_var("NlrErr");
+            let stk_var = self.fresh_temp_var("NlrStk");
+            let ctk_var = self.fresh_temp_var("CatchTok");
+            let val_var = self.fresh_temp_var("NlrVal");
+            let ot_pair_var = self.fresh_temp_var("OtherPair");
+            format!(
+                "let {token_var} = call 'erlang':'make_ref'() in\n\
+                 try\n  {body_str}\n\
+                 of {result_var} -> {result_var}\n\
+                 catch <{cls_var}, {err_var}, {stk_var}> ->\n\
+                 \x20 case {{{cls_var}, {err_var}}} of\n\
+                 \x20   <{{'throw', {{'$bt_nlr', {ctk_var}, {val_var}}}}}> \
+                      when call 'erlang':'=:='({ctk_var}, {token_var}) -> \
+                      {{'reply', {val_var}, State}}\n\
+                 \x20   <{ot_pair_var}> when 'true' -> \
+                      primop 'raw_raise'({cls_var}, {err_var}, {stk_var})\n\
+                 \x20 end"
+            )
+        } else {
+            body_str
+        };
 
         // Build method clause as Document tree
         let has_params = !param_vars.is_empty();
