@@ -20,11 +20,11 @@ if [[ -z "${BRANCH}" ]]; then
   exit 0
 fi
 
-# Check whether the branch exists on origin
-if git ls-remote --heads origin "${BRANCH}" 2>/dev/null | grep -q "${BRANCH}"; then
+# Check whether the branch exists on origin (anchor match to avoid substring hits)
+if git ls-remote --heads origin "${BRANCH}" 2>/dev/null | grep -qF "refs/heads/${BRANCH}"; then
   git fetch origin "${BRANCH}" 2>&1
-  git pull --ff-only origin "${BRANCH}" 2>&1
   BEHIND=$(git rev-list HEAD..origin/"${BRANCH}" --count 2>/dev/null || echo 0)
+  git pull --ff-only origin "${BRANCH}" 2>&1
   echo "Worktree branch '${BRANCH}' pulled from origin (was ${BEHIND} commit(s) behind)."
 else
   echo "Worktree branch '${BRANCH}' has no remote counterpart on origin — nothing to pull."
