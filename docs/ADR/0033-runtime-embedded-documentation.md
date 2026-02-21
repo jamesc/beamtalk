@@ -17,6 +17,8 @@ Documentation in Beamtalk is currently accessible only through EEP-48 chunks bak
 
 4. **Docs are not first-class.** In Smalltalk, `MyClass comment` and `(MyClass >> #foo) comment` are ordinary message sends. In Beamtalk, docs require a special REPL command and a detour through the Erlang `code` module. This contradicts Principle 6 (Messages All The Way Down) and Principle 8 (Reflection as Primitive).
 
+5. **EEP-48 adds pipeline complexity for little v0.1 value.** The current doc pipeline generates EEP-48 chunks in `doc_chunks.rs`, writes a `.docs` file alongside Core Erlang output, and injects the chunk into `.beam` files post-`erlc`. This is the most fragile part of the compilation pipeline. The primary consumer is `:h` in the Beamtalk REPL — not Erlang or Elixir tooling. For v0.1, no one is calling `h(counter)` from the Erlang shell.
+
 ### Current State
 
 - `///` doc comments are parsed and stored in the AST (`ClassDefinition.doc_comment`, `MethodDefinition.doc_comment`)
@@ -30,7 +32,6 @@ Documentation in Beamtalk is currently accessible only through EEP-48 chunks bak
 
 ### Constraints
 
-- EEP-48 chunks must continue to be generated for BEAM ecosystem interop (`code:get_doc/1`, Elixir's `h/1`, Erlang shell `h/2`)
 - Must work for both compiled classes (with `.beam` files) and dynamic classes (without)
 - Must integrate with ADR 0032's `Behaviour`/`Class` protocol — doc access should be methods on `Behaviour`
 - The `///` source syntax (ADR 0008) is unchanged — this ADR changes where docs are stored at runtime, not how they're authored
@@ -39,6 +40,8 @@ Documentation in Beamtalk is currently accessible only through EEP-48 chunks bak
 ## Decision
 
 Add documentation strings as first-class state on `Behaviour` and `CompiledMethod`, with post-hoc setter messages for programmatic doc assignment. The `///` syntax compiles to the same data path as the setters — one unified mechanism for compiled and dynamic classes.
+
+**Remove EEP-48 doc chunk generation.** Runtime-embedded docs replace EEP-48 as the single source of truth for documentation. This eliminates the `doc_chunks.rs` codegen, the `.docs` file intermediate, and the post-`erlc` beam chunk injection step. EEP-48 generation can be re-added later if BEAM ecosystem interop becomes a priority — the data is all available in `class_state`.
 
 ### Runtime Storage
 
@@ -77,7 +80,7 @@ Counter doc                      // => 'A counter actor that maintains state.'
 
 `Counter doc` returns the class doc string or `nil`.
 
-**Method doc access**: The `>>` operator returns a CompiledMethod from the local method dict only (it does not walk the hierarchy). To access docs for inherited methods, use `Behaviour >> docForMethod:` which walks the chain:
+**Method doc access**: The `>>` operator returns a CompiledMethod from the local method dict only (it does not walk the hierarchy). To access docs for inherited methods, use `docForMethod:` which walks the chain:
 
 ```beamtalk
 Counter docForMethod: #increment   // => 'Increment the counter by 1.' (local)
@@ -182,18 +185,6 @@ In `generate_register_class` codegen (`methods.rs`), the `ClassInfo` map gains:
 }
 ```
 
-EEP-48 chunks continue to be generated in parallel (by `doc_chunks.rs`) for BEAM ecosystem interop. Both paths consume the same `///` source — no duplication in authoring.
-
-### Source of Truth
-
-Two storage paths exist for compiled classes: EEP-48 chunks (in `.beam` files) and runtime state (in the class gen_server). Their relationship:
-
-- **Compiled classes, no post-hoc mutation**: EEP-48 and runtime docs are identical — both populated from `///` at compile/load time.
-- **Compiled classes, after `doc:` mutation**: Runtime docs are authoritative for the running system. EEP-48 becomes stale until the next hot reload (which re-syncs both from source). This is analogous to Pharo's changes file — runtime mutations are session-local.
-- **Dynamic classes**: Only runtime docs exist (no `.beam` file). EEP-48 does not apply.
-
-The `:h` REPL command should check runtime docs first, falling back to EEP-48 only if the runtime doc is `nil` (backward compatibility for classes loaded before this feature).
-
 ### REPL Session
 
 ```beamtalk
@@ -219,7 +210,7 @@ The `:h` REPL command should check runtime docs first, falling back to EEP-48 on
 >> Counter docForMethod: #class
 => "Return the class of the receiver."
 
->> // Dynamic class — no .beam file, docs still work
+>> // Dynamic class — docs work without .beam files
 >> Greeter doc: 'A simple greeter actor.'
 => "A simple greeter actor."
 
@@ -262,9 +253,9 @@ The `:h` REPL command should check runtime docs first, falling back to EEP-48 on
 
 - **Pharo extracts method comments from source code** (the first string literal in a method body). We use structured `///` syntax instead (ADR 0008) and store the extracted doc as a separate field rather than re-parsing source at runtime.
 
-**What we preserve:**
+**What we reject:**
 
-- **Elixir/Erlang EEP-48 interop** — We continue generating EEP-48 chunks for `.beam` files. `code:get_doc(counter)` still works. Erlang `h(counter)` and Elixir `h Counter` still work. The runtime `doc` message is an additional access path, not a replacement for EEP-48.
+- **EEP-48 as the doc access path** — Elixir and Erlang store docs in `.beam` file chunks, read via `code:get_doc/1`. This doesn't work for dynamic classes and requires complex post-compilation beam rewriting. We store docs on the runtime objects instead. EEP-48 generation can be re-added for BEAM interop if needed — the data is available in `class_state`.
 
 ## User Impact
 
@@ -279,21 +270,21 @@ The `:h` REPL command should check runtime docs first, falling back to EEP-48 on
 - **Caveat**: Unlike Pharo, mutations don't persist (no changes file). Smalltalkers may find this surprising.
 
 ### Erlang/BEAM Developer
-- **EEP-48 preserved**: `code:get_doc/1` continues to work. No behavior change for existing BEAM tooling.
 - **Gen_server state**: Docs are just another field in `class_state` — visible in Observer, debuggable with `sys:get_state/1`.
-- **Caveat**: Post-hoc `doc:` mutations make EEP-48 stale for the running session. Erlang tools reading `.beam` files offline see the original compiled docs, not runtime mutations.
+- **Caveat**: EEP-48 chunks are no longer generated. `code:get_doc(counter)` will not return Beamtalk docs. If BEAM ecosystem interop for docs becomes important, EEP-48 generation can be re-added as a future phase.
 
 ### Production Operator
 - **Small memory cost**: Doc strings are binaries — typically 50-200 bytes per method. For a system with 500 methods, that's ~50-100KB total. Negligible.
 - **No performance impact on dispatch**: Docs are stored alongside method_info but not consulted during dispatch. The `doc` field is read only when explicitly asked for.
+- **Simpler build pipeline**: Removing EEP-48 chunk injection eliminates the post-`erlc` beam rewriting step.
 
 ## Steelman Analysis
 
-### Alternative A: Lazy EEP-48 Accessor Only
+### Alternative A: Keep EEP-48 as Primary (Lazy Accessor)
 
 | Cohort | Strongest argument |
 |---|---|
-| **BEAM veteran** | "EEP-48 is the standard. Adding a second doc storage path means two sources of truth that can diverge. `doc:` lets someone set runtime docs that don't match the `///` in source. Keep it simple — one source, one path, `code:get_doc/1`." |
+| **BEAM veteran** | "EEP-48 is the BEAM standard. Every BEAM language uses it. Removing it means Beamtalk docs are invisible to `h/1` in Erlang and Elixir shells, to ExDoc, to any tool that reads beam chunks. You're building a walled garden for no reason — EEP-48 already works." |
 | **Operator** | "Zero memory overhead for docs in production. Docs live on disk in `.beam` files, loaded only when someone asks. Why pay the RAM cost for something that's only used during development?" |
 
 ### Alternative C: Compiler-Only (Enrich ClassInfo, No Setters)
@@ -306,14 +297,19 @@ The `:h` REPL command should check runtime docs first, falling back to EEP-48 on
 ### Tension Points
 
 - The deepest tension is between live object mutability (Smalltalk/Pharo) and immutable compiled artifacts (BEAM/Erlang). We side with Smalltalk for the REPL experience but treat runtime doc mutations as session-local. Production systems should not rely on post-hoc doc mutations for correctness.
-- BEAM veterans prefer the single-source-of-truth of EEP-48-only. Smalltalk purists want mutable docs as part of the live object model. The post-hoc setter approach sides with Smalltalk but preserves EEP-48 for interop and offline tooling.
-- The "two sources of truth" concern is real: for compiled classes without post-hoc mutation, EEP-48 and runtime are consistent. After `doc:` mutation, runtime is authoritative and EEP-48 is stale until the next hot reload from source. This is the same trade-off Pharo makes with the changes file — acceptable for an interactive-first language.
+- Dropping EEP-48 trades BEAM ecosystem interop for simplicity. For v0.1, this is the right trade — no one is using Beamtalk docs from Erlang or Elixir. If interop becomes important, EEP-48 generation can be re-added as a thin layer that reads from `class_state` (the data is all there).
 
 ## Alternatives Considered
 
-### Alternative A: Lazy EEP-48 Accessor
+### Alternative A: Keep EEP-48 Alongside Runtime Docs
 
-Add a `doc` message on `Behaviour` and `CompiledMethod` that calls `code:get_doc/1` on demand. No new state, no setters.
+Continue generating EEP-48 chunks and add runtime docs as a parallel storage path.
+
+**Rejected because:** Two sources of truth that can diverge. Post-hoc `doc:` mutations make EEP-48 stale. The `:h` command needs to decide which source to trust. The EEP-48 pipeline (`doc_chunks.rs`, `.docs` file, post-`erlc` injection) is the most fragile part of compilation. All this complexity for a feature no v0.1 user needs (Erlang shell doc interop).
+
+### Alternative B: Lazy EEP-48 Accessor Only
+
+Add a `doc` message on `Behaviour` and `CompiledMethod` that calls `code:get_doc/1` on demand. No new state, no setters, keep EEP-48 as the only storage.
 
 ```beamtalk
 Counter doc   // => calls code:get_doc(counter), parses docs_v1 tuple
@@ -336,21 +332,22 @@ Counter doc: 'new docs'         // => Error: does not understand #doc:
 
 ### Positive
 - **Self-describing objects**: Classes and CompiledMethods carry their documentation — no external lookup required
-- **Works for dynamic classes**: Post-hoc setters provide the only doc path for classes without `.beam` files
-- **Simpler `:h` implementation**: `beamtalk_repl_docs.erl` can use `doc` / `docForMethod:` messages instead of parsing EEP-48 tuples directly
+- **Works for dynamic classes**: Post-hoc setters provide docs for classes without `.beam` files
+- **Simpler build pipeline**: Removing EEP-48 generation eliminates `doc_chunks.rs`, the `.docs` intermediate file, and post-`erlc` beam chunk injection
+- **Simpler `:h` implementation**: `beamtalk_repl_docs.erl` can use `doc` / `docForMethod:` messages instead of parsing EEP-48 tuples and walking the hierarchy manually
+- **Single source of truth**: Runtime `class_state` is the only place docs live — no divergence between beam chunks and process state
 - **Principle alignment**: Satisfies Principle 6 (Messages All The Way Down) and 8 (Reflection as Primitive) — docs are just messages
 - **Unified mechanism**: `///` and post-hoc setters both populate the same state — one runtime representation
 
 ### Negative
-- **Two doc storage paths**: EEP-48 chunks and runtime state can diverge after post-hoc `doc:` mutations. Runtime docs are authoritative for the running system; EEP-48 becomes stale until the next hot reload from source. Erlang/Elixir tools reading `.beam` files offline will see original compiled docs, not runtime mutations. Mitigated by: doc mutations are session-local development tools, not production semantics.
+- **No BEAM doc interop**: `code:get_doc(counter)` will no longer return Beamtalk docs. Erlang `h/1` and Elixir `h/1` won't show Beamtalk class docs. Mitigated by: no v0.1 user needs this; EEP-48 can be re-added later by reading from `class_state`.
 - **Memory cost**: Doc strings consume RAM proportional to total documentation volume (~50-100KB for a typical system)
 - **Three new intrinsics**: `classDoc`, `classSetDoc`, `classSetMethodDoc` added to the intrinsic set
 - **Session-local mutations**: Unlike Pharo's changes file, `doc:` mutations don't persist to disk. This may surprise Smalltalk developers who expect image-like persistence.
 
 ### Neutral
-- **`:h` REPL command unchanged**: Continues to work as before; implementation can be simplified to use `doc` messages internally, but the user-facing command is the same
+- **`:h` REPL command unchanged**: Continues to work as before; implementation simplified to use `doc` messages internally, but the user-facing command is the same
 - **`///` syntax unchanged**: No authoring changes — this ADR affects storage and access, not how docs are written
-- **EEP-48 generation unchanged**: `doc_chunks.rs` continues to generate chunks for `.beam` files
 - **Doc write/read asymmetry**: `docForMethod:` reads inherited docs (walks chain), `setDocForMethod:to:` writes local docs only. This mirrors method dispatch — you can call inherited methods but only define methods locally.
 
 ## Implementation
@@ -380,21 +377,26 @@ Counter doc: 'new docs'         // => Error: does not understand #doc:
 2. Ensure `update_class` (hot reload path) also carries updated docs, re-syncing runtime docs with source
 3. Add tests verifying doc roundtrip: `///` → compile → `Counter doc` returns the text
 
-### Phase 3: Simplify REPL Docs (S)
+### Phase 3: Remove EEP-48 and Simplify REPL Docs (M)
 
-**Affected components:** Workspace (`beamtalk_workspace`)
+**Affected components:** Codegen (`beamtalk-core`), workspace (`beamtalk_workspace`), compile escript
 
-1. Update `beamtalk_repl_docs.erl` to check runtime docs first (via `doc` / `docForMethod:` messages), falling back to EEP-48 via `code:get_doc/1` only if runtime doc is `nil`
-2. Simplify `format_method_doc/2` to use `docForMethod:` instead of manually walking EEP-48 entries
-3. Simplify `format_class_docs/1` to use `doc` message for class-level documentation
+1. Remove `doc_chunks.rs` from codegen
+2. Remove `.docs` file generation from the compile pipeline
+3. Remove EEP-48 chunk injection from the compile escript
+4. Rewrite `beamtalk_repl_docs.erl` to use `doc` / `docForMethod:` messages exclusively — remove all `code:get_doc/1` calls and EEP-48 parsing
+5. Simplify `format_class_docs/1` and `format_method_doc/2` to delegate to the object protocol
+6. Update any tests that assert on EEP-48 chunk contents
 
 ## Future Considerations
 
+- **EEP-48 re-addition**: If BEAM ecosystem doc interop becomes important, EEP-48 chunks can be re-generated by reading from `class_state` at compile time or as a post-load step. The data is all there — this is an additive change.
 - **Metaclass compatibility**: If ADR 0032 Phase 2 introduces the full metaclass tower, verify that `Behaviour.doc` and any metaclass-level doc protocol are compatible. The `doc` / `doc:` methods are sealed on Behaviour, so metaclass additions would need to compose with (not conflict with) the existing protocol.
 - **Doc persistence**: A future `writeBack:` or workspace persistence feature could write `doc:` mutations back to `///` comments in `.bt` source files, bridging the gap between session-local mutations and file-based persistence.
 
 ## References
-- Related ADRs: [ADR 0008](0008-doc-comments-and-api-documentation.md) (Doc Comments and API Documentation — establishes `///` syntax and EEP-48 generation), [ADR 0032](0032-early-class-protocol.md) (Early Class Protocol — `Behaviour`/`Class` as stdlib classes, intrinsic pattern)
+- **Supersedes (partially):** [ADR 0008](0008-doc-comments-and-api-documentation.md) Phase 3 (EEP-48 generation) — runtime docs replace EEP-48 as the doc access path. ADR 0008 Phases 1-2 (`///` syntax, AST storage) remain in effect.
+- Related ADRs: [ADR 0032](0032-early-class-protocol.md) (Early Class Protocol — `Behaviour`/`Class` as stdlib classes, intrinsic pattern)
 - Related issues: BT-496 (Doc Comments epic — implemented), BT-731 (Early Class Protocol epic)
 - Pharo class comments: [ClassDescription>>comment](https://github.com/pharo-project/pharo/blob/Pharo12/src/Kernel-CodeModel/ClassDescription.class.st)
 - Python docstrings: [PEP 257](https://peps.python.org/pep-0257/)
