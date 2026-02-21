@@ -19,6 +19,8 @@
     get_method_signatures/2
 ]).
 
+-include_lib("kernel/include/logger.hrl").
+
 %% Maximum class hierarchy depth before aborting chain walks.
 %% Prevents infinite loops if the ETS hierarchy table ever contains a cycle.
 -define(MAX_HIERARCHY_DEPTH, 20).
@@ -451,7 +453,11 @@ collect_flattened_methods(ClassName, ClassPid) ->
     collect_flattened_methods(ClassName, ClassPid, 0).
 
 -spec collect_flattened_methods(atom(), pid(), non_neg_integer()) -> map().
-collect_flattened_methods(_ClassName, _ClassPid, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+collect_flattened_methods(ClassName, _ClassPid, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+    ?LOG_WARNING(
+        "collect_flattened_methods: max hierarchy depth ~p exceeded at ~p — possible cycle",
+        [?MAX_HIERARCHY_DEPTH, ClassName]
+    ),
     #{};
 collect_flattened_methods(ClassName, ClassPid, Depth) ->
     {ok, LocalMethods} = gen_server:call(ClassPid, get_instance_methods, 5000),
@@ -483,7 +489,11 @@ find_method_in_chain(ClassPid, Selector) ->
     find_method_in_chain(ClassPid, Selector, 0).
 
 -spec find_method_in_chain(pid(), atom(), non_neg_integer()) -> {ok, atom()} | not_found.
-find_method_in_chain(_ClassPid, _Selector, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+find_method_in_chain(_ClassPid, Selector, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+    ?LOG_WARNING(
+        "find_method_in_chain: max hierarchy depth ~p exceeded for selector ~p — possible cycle",
+        [?MAX_HIERARCHY_DEPTH, Selector]
+    ),
     not_found;
 find_method_in_chain(ClassPid, Selector, Depth) ->
     ClassName = gen_server:call(ClassPid, class_name, 5000),
