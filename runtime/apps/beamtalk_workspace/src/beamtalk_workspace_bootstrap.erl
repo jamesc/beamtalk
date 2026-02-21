@@ -23,7 +23,9 @@
 -export([init/1, handle_continue/2, handle_info/2, handle_call/3, handle_cast/2, terminate/2]).
 -export([find_bt_modules_in_dir/1, activate_project_modules/1]).
 -export([sort_modules_by_dependency/2]).
+-ifdef(TEST).
 -export([is_valid_module_name/1]).
+-endif.
 
 %% Maximum number of project modules activated per startup (BT-747).
 %% Prevents atom table exhaustion if _build/dev/ebin/ contains excessive files.
@@ -180,12 +182,13 @@ activate_project_modules(_Other) ->
 %% @doc Scan a directory for bt@*.beam files that are not stdlib modules.
 %% Returns a list of module atoms. Returns [] for missing or unreadable dirs.
 %% Capped at ?MAX_PROJECT_MODULES to guard against atom table exhaustion (BT-747).
-%% Filters eligible filenames first (no atom creation), then caps before converting.
+%% Filters eligible filenames first (no atom creation), sorts for deterministic
+%% selection across platforms, then caps before converting to atoms.
 -spec find_bt_modules_in_dir(string()) -> [module()].
 find_bt_modules_in_dir(Dir) ->
     case file:list_dir(Dir) of
         {ok, Files} ->
-            Eligible = lists:filter(fun is_project_beam_file/1, Files),
+            Eligible = lists:sort(lists:filter(fun is_project_beam_file/1, Files)),
             Count = length(Eligible),
             Capped =
                 case Count > ?MAX_PROJECT_MODULES of
