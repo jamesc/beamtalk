@@ -1,0 +1,45 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// System class tests — environment variables, platform, process info.
+
+TestCase subclass: SystemTest
+
+  testSection1 =>
+    self assert: ((System getEnv: "PATH") class =:= String).
+    // Reading a non-existent env var returns nil
+    self assert: (System getEnv: "BEAMTALK_TEST_NONEXISTENT_VAR_XYZ") equals: nil.
+    // Non-existent var returns the default
+    self assert: (System getEnv: "BEAMTALK_TEST_NONEXISTENT_VAR_XYZ" default: "fallback") equals: "fallback".
+    // Existing var returns the actual value (not the default)
+    self deny: ((System getEnv: "PATH" default: "nope") =:= "nope").
+    // osPlatform returns a string
+    self assert: (System osPlatform class =:= String).
+    // Platform is one of the known values
+    self assert: (#("linux", "darwin", "win32") includes: System osPlatform).
+    // osFamily returns a string
+    self assert: (System osFamily class =:= String).
+    // Family is one of the known values
+    self assert: (#("unix", "win32") includes: System osFamily).
+    // architecture returns a non-empty string
+    self assert: (System architecture class =:= String).
+    // --- architecture ---
+    self assert: (System architecture length > 0).
+    // hostname returns a non-empty string
+    self assert: (System hostname class =:= String).
+    // --- hostname ---
+    self assert: (System hostname length > 0).
+    // erlangVersion returns a non-empty string
+    self assert: (System erlangVersion class =:= String).
+    // --- erlangVersion ---
+    self assert: (System erlangVersion length > 0).
+    // pid returns a positive integer
+    self assert: (System pid class =:= Integer).
+    // --- pid ---
+    self assert: (System pid > 0).
+    // getEnv: requires String argument
+    self should: [System getEnv: 42] raise: #type_error.
+    // getEnv:default: validates both arguments
+    self should: [System getEnv: 42 default: "fallback"] raise: #type_error.
+    // --- error cases ---
+    self should: [System getEnv: "PATH" default: 42] raise: #type_error

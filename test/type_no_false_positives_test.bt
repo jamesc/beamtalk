@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Regression coverage for permissive typing paths (BT-673)
+
+// @load tests/e2e/fixtures/typed_ledger.bt
+// @load tests/e2e/fixtures/untyped_container.bt
+// @load tests/e2e/fixtures/typed_math.bt
+// @load examples/bank/typed_account.bt
+
+TestCase subclass: TypeNoFalsePositivesTest
+
+  testSection1 =>
+    ledger := TypedLedger spawn.
+    self assert: (ledger addOne await) equals: 1.
+    self assert: (ledger addOne await) equals: 2.
+    untyped := UntypedContainer spawn.
+    self assert: ((untyped setItem: "hello") await) equals: "hello".
+    self assert: ((untyped setItem: 99) await) equals: 99.
+    typed := TypedAccount spawn.
+    self assert: ((typed deposit: 20) await) equals: 20.
+    self assert: ((typed deposit: (5 asType: Integer)) await) equals: 25.
+    self assert: (typed balance await) equals: 25.
+    math2 := TypedMath new.
+    self assert: (math2 maybeName: false) equals: "none".
+    self assert: (math2 maybeName: true) equals: 1

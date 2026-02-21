@@ -1,0 +1,90 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for transcendental math methods (BT-712)
+
+TestCase subclass: MathTest
+
+  testFloatClassSideConstants =>
+    self assert: (Float pi) equals: 3.141592653589793.
+    // Euler's number
+    self assert: (Float e) equals: 2.718281828459045
+
+  testTrigonometricMethodsFloatInstance =>
+    // sin of pi/2
+    self assert: ((Float pi / 2) sin) equals: 1 asFloat.
+    // cos of pi
+    self assert: ((Float pi) cos) equals: -1 asFloat.
+    // tan of pi/4 (should be close to 1.0)
+    self assert: ((Float pi / 4) tan) equals: 0.9999999999999999.
+    // asin of 0.5
+    self assert: (0.5 asin) equals: 0.5235987755982989.
+    // acos of 0.5
+    self assert: (0.5 acos) equals: 1.0471975511965979.
+    // atan of 0.5
+    self assert: (0.5 atan) equals: 0.4636476090008061.
+    // atan2
+    self assert: (0.5 atan2: 0.5) equals: 0.7853981633974483.
+    // atan2 with Integer argument
+    self assert: ((1 asFloat) atan2: 2) equals: 0.4636476090008061.
+    // sin of small value
+    self assert: (0.5 sin) equals: 0.479425538604203.
+    // cos of small value
+    self assert: (0.5 cos) equals: 0.8775825618903728
+
+  testExponentialLogarithmicMethodsFloatInstance =>
+    // sqrt of 4.0
+    self assert: (4.0 sqrt) equals: 2 asFloat.
+    // sqrt of 2.0
+    self assert: (2.0 sqrt) equals: 1.4142135623730951.
+    // log of e (natural)
+    self assert: ((Float e) log) equals: 1 asFloat.
+    // ln of e (alias for log)
+    self assert: ((Float e) ln) equals: 1 asFloat.
+    // log2
+    self assert: (8.0 log2) equals: 3 asFloat.
+    // log10
+    self assert: (100.0 log10) equals: 2 asFloat.
+    // exp of 0.5
+    self assert: (0.5 exp) equals: 1.6487212707001282.
+    // raisedTo:
+    self assert: (2.0 raisedTo: 10) equals: 1024 asFloat.
+    // raisedTo: with float exponent
+    self assert: (4.0 raisedTo: 0.5) equals: 2 asFloat
+
+  testExponentialLogarithmicMethodsIntegerInstance =>
+    // Integer sqrt
+    self assert: (16 sqrt) equals: 4 asFloat.
+    // Integer sqrt non-perfect
+    self assert: (2 sqrt) equals: 1.4142135623730951.
+    // Integer log2
+    self assert: (8 log2) equals: 3 asFloat.
+    // Integer log10
+    self assert: (100 log10) equals: 2 asFloat.
+    // Integer exp of 2
+    self assert: (2 exp) equals: 7.38905609893065.
+    // Integer raisedTo:
+    self assert: (2 raisedTo: 10) equals: 1024 asFloat
+
+  testTrigonometricIdentities =>
+    // sin^2 + cos^2 = 1 (within float precision)
+    x := 0.5.
+    self assert: ((x sin) * (x sin)) + ((x cos) * (x cos)) equals: 1 asFloat
+
+  testDomainErrorHandling =>
+    // sqrt of negative number
+    self should: [(-1 asFloat) sqrt] raise: #badarith.
+    // log of zero
+    self should: [(0 asFloat) log] raise: #badarith.
+    // log of negative
+    self should: [(-1 asFloat) log] raise: #badarith.
+    // ln of zero (alias for log)
+    self should: [(0 asFloat) ln] raise: #badarith.
+    // log2 of zero
+    self should: [(0 asFloat) log2] raise: #badarith.
+    // log10 of zero
+    self should: [(0 asFloat) log10] raise: #badarith.
+    // asin outside [-1, 1] range
+    self should: [(2 asFloat) asin] raise: #badarith.
+    // acos outside [-1, 1] range
+    self should: [(2 asFloat) acos] raise: #badarith

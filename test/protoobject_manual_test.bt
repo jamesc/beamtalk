@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ProtoObject behavior tests - the root of the class hierarchy
+
+TestCase subclass: ProtoobjectManualTestTest
+
+  testClassReflection =>
+    self assert: (42 class) equals: Integer.
+    self assert: ("hello" class) equals: String.
+    self assert: (true class) equals: True.
+    self assert: (false class) equals: False.
+    self assert: (nil class) equals: UndefinedObject
+
+  testIdentityComparison =>
+    self assert: (42 == 42).
+    self assert: (42 /= 43).
+    self assert: (nil == nil).
+    self deny: (nil == false).
+    self assert: (nil /= false).
+    self deny: (nil /= nil)
+
+  testPerformWithargumentsDynamicDispatch =>
+    self assert: (42 perform: #+ withArguments: #(3)) equals: 45.
+    self assert: (42 perform: #asString withArguments: #()) equals: "42".
+    self assert: ("hello" perform: #++ withArguments: #(" world")) equals: "hello world"

@@ -1,0 +1,54 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Object reflection API
+
+TestCase subclass: ObjectReflectionTest
+
+  testNilTestingProtocol =>
+    self deny: (42 isNil).
+    self assert: (42 notNil).
+    self deny: ("hello" isNil).
+    self assert: ("hello" notNil).
+    self deny: (true isNil).
+    self assert: (true notNil).
+    // ---------------------------------------------------------------------------
+    self assert: (nil isNil).
+    // isNil and notNil on nil
+    self deny: (nil notNil).
+    // ---------------------------------------------------------------------------
+    self assert: (42 ifNil: [99]) equals: 42.
+    // ifNil: on non-nil objects
+    self assert: ("hello" ifNil: ["default"]) equals: "hello".
+    // ---------------------------------------------------------------------------
+    self assert: (nil ifNil: [99]) equals: 99.
+    // ifNil: on nil
+    self assert: (nil ifNil: ["default"]) equals: "default".
+    // ---------------------------------------------------------------------------
+    self assert: (42 ifNotNil: [:v | v + 1]) equals: 43.
+    // ifNotNil: on non-nil objects
+    self assert: ("hello" ifNotNil: [:s | s ++ " world"]) equals: "hello world".
+    // Zero-arg block (no receiver passed)
+    self assert: (42 ifNotNil: [ 99 ]) equals: 99.
+    // ---------------------------------------------------------------------------
+    self assert: ("hello" ifNotNil: [ "yes" ]) equals: "yes".
+    // ---------------------------------------------------------------------------
+    self assert: (nil ifNotNil: [:v | v + 1]) equals: nil.
+    // ifNotNil: on nil
+    self assert: (nil ifNotNil: [ 99 ]) equals: nil.
+    // ---------------------------------------------------------------------------
+    self assert: (42 ifNil: [0] ifNotNil: [:v | v * 2]) equals: 84.
+    // ifNil:ifNotNil: two-way conditional on non-nil
+    self assert: ("hello" ifNil: [""] ifNotNil: [:s | s ++ "!"]) equals: "hello!".
+    // Zero-arg notNil block
+    self assert: (42 ifNil: [0] ifNotNil: [ 99 ]) equals: 99.
+    // ---------------------------------------------------------------------------
+    self assert: (nil ifNil: [0] ifNotNil: [:v | v * 2]) equals: 0.
+    // ifNil:ifNotNil: two-way conditional on nil
+    self assert: (nil ifNil: ["empty"] ifNotNil: [:s | s ++ "!"]) equals: "empty".
+    // ---------------------------------------------------------------------------
+    self assert: (42 ifNotNil: [:v | v * 2] ifNil: [0]) equals: 84.
+    // Zero-arg notNil block
+    self assert: (42 ifNotNil: [ 99 ] ifNil: [0]) equals: 99.
+    // ---------------------------------------------------------------------------
+    self assert: (nil ifNotNil: [:v | v * 2] ifNil: [0]) equals: 0

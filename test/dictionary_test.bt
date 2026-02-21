@@ -1,0 +1,77 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Dictionary (Erlang map) methods (BT-418)
+
+TestCase subclass: DictionaryTest
+
+  testCreation =>
+    self assert: (Dictionary new) equals: #{}.
+    self assert: ((Dictionary new) size) equals: 0.
+    self assert: ((Dictionary new) class) equals: Dictionary.
+    // Dictionary new: initializes with given entries
+    self assert: (Dictionary new: #{#x => 10, #y => 20}) equals: #{#x => 10, #y => 20}.
+    self assert: ((Dictionary new: #{#x => 10, #y => 20}) size) equals: 2.
+    self assert: ((Dictionary new: #{#x => 10}) at: #x) equals: 10.
+    self assert: ((Dictionary new: #{#x => 10}) class) equals: Dictionary
+
+  testClass =>
+    self assert: (#{#a => 1} class) equals: Dictionary.
+    self assert: (#{} class) equals: Dictionary
+
+  testSize =>
+    self assert: (#{#a => 1, #b => 2, #c => 3} size) equals: 3.
+    self assert: (#{} size) equals: 0
+
+  testKeysValues =>
+    self assert: (#{#x => 10} keys) equals: #(#x).
+    self assert: (#{#x => 10} values) equals: #(10)
+
+  testAtLookup =>
+    self assert: (#{#name => "Alice", #age => 30} at: #name) equals: "Alice".
+    self assert: (#{#x => 42} at: #x) equals: 42
+
+  testAtPutInsertUpdateReturnsNewDictionary =>
+    d := #{#x => 1}.
+    self assert: d equals: #{#x => 1}.
+    self assert: (d at: #y put: 2) equals: #{#x => 1, #y => 2}.
+    self assert: ((#{#a => 1} at: #b put: 2) size) equals: 2.
+    self assert: ((#{#a => 1} at: #a put: 99) at: #a) equals: 99
+
+  testAtIfabsentLookupWithDefault =>
+    self assert: (#{#a => 1} at: #a ifAbsent: [42]) equals: 1.
+    self assert: (#{#a => 1} at: #b ifAbsent: [42]) equals: 42
+
+  testIncludeskey =>
+    self assert: (#{#a => 1, #b => 2} includesKey: #a).
+    self deny: (#{#a => 1, #b => 2} includesKey: #c).
+    self deny: (#{} includesKey: #x)
+
+  testRemovekey =>
+    self assert: ((#{#a => 1, #b => 2} removeKey: #a) size) equals: 1.
+    self deny: ((#{#a => 1, #b => 2} removeKey: #a) includesKey: #a)
+
+  testMerge =>
+    d1 := #{#a => 1, #b => 2}.
+    self assert: d1 equals: #{#a => 1, #b => 2}.
+    d2 := #{#b => 20, #c => 3}.
+    self assert: d2 equals: #{#b => 20, #c => 3}.
+    self assert: (d1 merge: d2) equals: #{#a => 1, #b => 20, #c => 3}.
+    self assert: ((#{#a => 1} merge: #{#a => 99}) at: #a) equals: 99
+
+  testKeysandvaluesdo =>
+    self assert: (#{#a => 1} keysAndValuesDo: [:k :v | nil]) equals: nil
+
+  testNestedDictionaries =>
+    // Nested dictionaries display correctly
+    self assert: #{#a => #{#x => 1}} equals: #{#a => #{#x => 1}}.
+    // Empty nested dictionary
+    self assert: #{#a => #{}} equals: #{#a => #{}}
+
+  testBinaryExpressionsInMapValues =>
+    // Simple arithmetic in map value
+    self assert: #{#x => 1 + 2} equals: #{#x => 3}.
+    // Multiple binary expressions in values
+    self assert: #{#x => 1 + 2, #y => 3 * 4} equals: #{#x => 3, #y => 12}.
+    // Subtraction in map value
+    self assert: #{#result => 10 - 3} equals: #{#result => 7}

@@ -11,8 +11,8 @@ Beamtalk uses a multi-layered testing strategy covering the Rust compiler, Erlan
 | Unit Tests | Rust `#[test]` | `crates/*/src/*.rs` | Test individual functions and modules |
 | Snapshot Tests | insta | `test-package-compiler/` | Validate lexer, parser, and codegen output |
 | Compilation Tests | erlc | `test-package-compiler/` | Verify generated Core Erlang compiles |
-| **Stdlib Tests** | **EUnit (compiled)** | **`tests/stdlib/*.bt`** | **Language feature validation (no REPL needed)** |
-| **BUnit Tests** | **EUnit (TestCase)** | **`test/*.bt`** | **User-written TestCase subclasses (`beamtalk test`)** |
+| **Stdlib Tests** | **EUnit (compiled)** | **`tests/stdlib/*.bt`** | **Bootstrap primitive validation (no REPL needed)** |
+| **BUnit Tests** | **EUnit (TestCase)** | **`test/*.bt`** | **Language feature tests via TestCase (`beamtalk test`)** |
 | Runtime Unit Tests | EUnit | `runtime/apps/beamtalk_runtime/test/*_tests.erl` | Test Erlang runtime modules |
 | Integration Tests | EUnit + daemon | `runtime/apps/beamtalk_runtime/test/*_integration_tests.erl` | Test REPL ↔ daemon communication |
 | Codegen Simulation Tests | EUnit | `runtime/apps/beamtalk_runtime/test/beamtalk_codegen_simulation_tests.erl` | Simulate compiler output, test runtime behavior |
@@ -32,7 +32,8 @@ cargo build --all-targets
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
 cargo test --all-targets
-just test-stdlib         # Compiled language feature tests (fast, ~14s)
+just test-stdlib         # Bootstrap expression tests (fast, ~14s)
+just test-bunit          # BUnit TestCase tests (~77s)
 just test-e2e            # REPL integration tests (slower, ~50s)
 ```
 
@@ -228,13 +229,13 @@ These tests verify that generated Core Erlang actually compiles with `erlc`.
 
 ---
 
-### 4. Stdlib Tests (Compiled Expression Tests)
+### 4. Stdlib Tests (Bootstrap Expression Tests)
 
-Language feature tests compiled directly to EUnit — no REPL daemon needed. These validate arithmetic, strings, blocks, closures, collections, and other pure language features at ~50-100x the speed of E2E tests.
+Expression tests for bootstrap-critical primitives that TestCase transitively depends on. These must remain as expression tests because TestCase itself relies on these features working correctly.
 
 **Location:** `tests/stdlib/*.bt`
 
-**Count:** ~57 test files, ~1154 assertions
+**Count:** ~16 test files, ~394 assertions
 
 **Command:** `just test-stdlib`
 
@@ -264,16 +265,19 @@ Counter spawn
 // Wildcard _ means "runs but don't check result"
 ```
 
-**When to use stdlib tests:**
+**Bootstrap files (DO NOT migrate to BUnit):**
+`arithmetic.bt`, `booleans.bt`, `equality.bt`, `errors.bt`, `exceptions.bt`, `custom_exceptions.bt`, `erlang_exceptions.bt`, `integer_test.bt`, `float.bt`, `string_methods.bt`, `string_ops.bt`, `symbol.bt`, `literals.bt`, `value_types.bt`
+
+Also kept as expression tests due to compile-time type check constraints:
+`stack_frames.bt`, `class_hierarchy.bt`
+
+**When to use stdlib expression tests:**
 | Test needs... | Use stdlib test? |
 |---|---|
-| Pure language features (arithmetic, strings, blocks) | ✅ Yes |
-| Collections (List, Dictionary, Set, Tuple) | ✅ Yes |
-| Actor spawning + messaging (with `@load`) | ✅ Yes |
-| Workspace bindings (Transcript, Beamtalk) | ❌ No — use E2E |
-| REPL commands (`:load`, `:quit`, `:help`) | ❌ No — use E2E |
-| Auto-await behavior | ❌ No — use E2E |
-| `ERROR:` assertion pattern | ❌ No — use E2E |
+| Bootstrap-critical primitives (arithmetic, strings, booleans) | ✅ Yes |
+| Tests that TestCase depends on transitively | ✅ Yes |
+| Tests that fail static type checks in BUnit (e.g. `Number subclasses`) | ✅ Yes |
+| All other language feature tests | ❌ No — use BUnit tests |
 
 **Adding a new stdlib test:**
 1. Create `tests/stdlib/my_feature.bt`
@@ -286,11 +290,13 @@ Counter spawn
 
 ### 4b. BUnit Tests (TestCase Classes)
 
-SUnit-style test classes that subclass `TestCase`. Part of ADR 0014 Phase 2.
+SUnit-style test classes that subclass `TestCase`. The primary home for language feature tests — collections, closures, regex, actors, reflection, and more.
 
 **Location:** `test/*.bt` (project test directory)
 
-**Command:** `beamtalk test`
+**Count:** ~77 test files, ~1293 assertions
+
+**Command:** `just test-bunit` or `beamtalk test`
 
 **How it works:** The `beamtalk test` command discovers `.bt` files containing `TestCase subclass:` definitions, compiles them through the normal pipeline, generates EUnit wrapper modules, and runs all test methods. Each test method starting with `test` is auto-discovered and run with a fresh instance. **Limitation:** currently only the first `TestCase` subclass in each `.bt` file is compiled (a warning is emitted if more are found), so put each test class in its own file.
 
@@ -308,8 +314,8 @@ TestCase subclass: CounterTest
 
   testMultipleIncrements =>
     | counter |
-    counter := Counter spawn
-    3 timesRepeat: [counter increment await]
+    counter := Counter spawn.
+    3 timesRepeat: [counter increment await].
     self assert: (counter getValue await) equals: 3
 ```
 
@@ -335,16 +341,17 @@ TestCase subclass: CounterTest
 **When to use BUnit tests:**
 | Test needs... | Use BUnit? |
 |---|---|
+| Language features (collections, closures, regex, etc.) | ✅ Yes |
 | Stateful test setup/teardown | ✅ Yes |
 | Multiple assertions per test | ✅ Yes |
 | Testing complex actor interactions | ✅ Yes |
-| Simple expression → result checks | ❌ No — use stdlib tests |
+| Bootstrap-critical primitives | ❌ No — use stdlib tests |
 | REPL command testing | ❌ No — use E2E |
 
 **Adding a BUnit test:**
 1. Create `test/my_feature_test.bt` with `TestCase subclass: MyFeatureTest`
 2. Add test methods prefixed with `test`
-3. Run `beamtalk test`
+3. Run `just test-bunit`
 
 **Design:** See [ADR 0014](../ADR/0014-beamtalk-test-framework.md) Phase 2 for the full TestCase framework rationale.
 
@@ -476,7 +483,7 @@ REPL and workspace integration tests that require a running REPL daemon.
 - Integration between compiler daemon and runtime
 
 **When to use E2E tests:**
-Only for tests that genuinely need the REPL daemon. Most language feature tests belong in `tests/stdlib/` instead (see section 4).
+Only for tests that genuinely need the REPL daemon. Most language feature tests belong in `test/*.bt` as BUnit tests (see section 4b).
 
 **Test file format:**
 ```smalltalk
@@ -509,7 +516,7 @@ cargo test --test e2e -- --ignored --nocapture
 2. Add expressions with `// =>` expected results
 3. Run `just test-e2e`
 
-**Note:** Before adding to E2E, consider whether the test needs the REPL. If it tests pure language features, add it to `tests/stdlib/` instead (see section 4).
+**Note:** Before adding to E2E, consider whether the test needs the REPL. If it tests pure language features, add it to `test/*.bt` as a BUnit test instead (see section 4b).
 
 **Error testing:**
 ```smalltalk
@@ -531,7 +538,8 @@ just ci
 #   just build           # Build Rust + Erlang
 #   just lint            # Clippy + fmt-check + dialyzer
 #   just test            # Rust unit tests + runtime EUnit
-#   just test-stdlib     # Compiled language feature tests (~14s)
+#   just test-stdlib     # Bootstrap expression tests (~14s)
+#   just test-bunit      # BUnit TestCase tests (~77s)
 #   just test-e2e        # REPL integration tests (~50s)
 ```
 
@@ -544,11 +552,11 @@ The test suite follows a proper testing pyramid after [ADR 0014](../ADR/0014-bea
            ╱  ╲        E2E Tests (~18 files)
           ╱    ╲       REPL/workspace integration — slow (~50s)
          ╱──────╲
-        ╱        ╲     BUnit Tests (TestCase classes)
-       ╱          ╲    User-written test suites — fast (`beamtalk test`)
+        ╱        ╲     BUnit Tests (~77 files, ~1293 assertions)
+       ╱          ╲    Language feature tests — fast (`just test-bunit`)
       ╱────────────╲
-     ╱              ╲  Stdlib Tests (~57 files)
-    ╱                ╲ Compiled expression tests — fast (~14s)
+     ╱              ╲  Stdlib Tests (~16 files, ~394 assertions)
+    ╱                ╲ Bootstrap expression tests — fast (~14s)
    ╱──────────────────╲
   ╱                    ╲ Rust + Erlang Unit Tests (~600+ tests)
  ╱                      ╲ Parser, codegen, runtime modules — fast (~10s)
@@ -560,8 +568,8 @@ The test suite follows a proper testing pyramid after [ADR 0014](../ADR/0014-bea
 | Rust unit tests | ~600 tests | ~5s | Parser, AST, codegen |
 | Erlang unit tests | ~100 tests | ~3s | Runtime, primitives, object system |
 | Compiler snapshots | ~51 cases | ~2s | Codegen output stability |
-| **Stdlib tests** | **~57 files** | **~14s** | **Language features (compiled)** |
-| **BUnit tests** | **TestCase classes** | **fast** | **User test suites (`beamtalk test`)** |
+| **Stdlib tests** | **~16 files** | **~14s** | **Bootstrap primitives (expression tests)** |
+| **BUnit tests** | **~77 files** | **~77s** | **Language features (TestCase classes)** |
 | E2E tests | ~18 files | ~50s | REPL/workspace integration |
 
 ---
@@ -685,7 +693,7 @@ mod tests {
 2. Manually construct state as compiler would generate
 3. Run `cd runtime && rebar3 eunit --module=beamtalk_codegen_simulation_tests`
 
-### Adding a Stdlib Test (Language Features)
+### Adding a Stdlib Test (Bootstrap Primitives)
 
 1. Create `tests/stdlib/my_feature.bt`
 2. Add expressions with `// => expected_result` annotations
@@ -703,14 +711,14 @@ sideEffectExpression
 // => _
 ```
 
-**Use this for:** Pure language features, arithmetic, strings, blocks, closures, collections, actor spawn/messaging (with `@load`).
+**Use this for:** Bootstrap-critical primitives only (arithmetic, booleans, equality, strings, errors, exceptions). Most new tests should use BUnit instead.
 
 ### Adding a BUnit Test (TestCase Classes)
 
 1. Create `test/my_feature_test.bt` with `TestCase subclass: MyFeatureTest`
 2. Add test methods prefixed with `test` (auto-discovered)
 3. Optionally add `setUp`/`tearDown` for fixtures
-4. Run `beamtalk test`
+4. Run `just test-bunit`
 
 Example test file:
 ```beamtalk

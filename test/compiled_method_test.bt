@@ -1,0 +1,39 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for CompiledMethod introspection (BT-101, BT-323, BT-454)
+
+// @load test/fixtures/counter.bt
+
+TestCase subclass: CompiledMethodTest
+
+  testMethodLookup =>
+    Counter >> #getValue.
+    self assert: (Counter >> #nonExistent) equals: nil
+
+  testMethodLookupOnVariableReceivers =>
+    cls := Counter.
+    self assert: cls equals: Counter.
+    cls >> #getValue.
+    self assert: ((cls >> #getValue) selector) equals: #getValue.
+    self assert: (cls >> #nonExistent) equals: nil
+
+  testClass =>
+    self assert: ((Counter >> #getValue) class) equals: CompiledMethod
+
+  testSelector =>
+    self assert: ((Counter >> #getValue) selector) equals: #getValue.
+    self assert: ((Counter >> #increment) selector) equals: #increment
+
+  testArgumentCount =>
+    self assert: ((Counter >> #getValue) argumentCount) equals: 0.
+    self assert: ((Counter >> #increment) argumentCount) equals: 0
+
+  testSource =>
+    (Counter >> #getValue) source
+
+  testPrintString =>
+    (Counter >> #getValue) printString
+
+  testAsString =>
+    (Counter >> #getValue) asString

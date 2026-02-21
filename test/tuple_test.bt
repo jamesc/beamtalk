@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tuple primitive tests (BT-417)
+
+TestCase subclass: TupleTest
+
+  testSection1 =>
+    self assert: (1 + 1) equals: 2
+
+  testCreation =>
+    // Tuple new returns an empty tuple
+    Tuple new.
+    self assert: ((Tuple new) class) equals: Tuple.
+    // Tuple new: is not supported (no meaningful init-from-map)
+    self should: [Tuple new: #{#a => 1}] raise: #instantiation_error
+
+  testDisplay =>
+    // Tuple printString shows tuple format
+    (Tuple new) printString
+
+  testSize =>
+    // Empty tuple has size 0
+    self assert: ((Tuple new) size) equals: 0

@@ -1,0 +1,52 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for new String methods (BT-43)
+
+TestCase subclass: StringNewMethodsTest
+
+  testReplace =>
+    self assert: ("hello world" replaceAll: "o" with: "0") equals: "hell0 w0rld".
+    self assert: ("aaa" replaceAll: "a" with: "bb") equals: "bbbbbb".
+    // replaceFirst:with:
+    self assert: ("hello world" replaceFirst: "o" with: "0") equals: "hell0 world"
+
+  testLinesAndWords =>
+    // words
+    self assert: ("hello world foo" words) equals: #("hello", "world", "foo").
+    // words with extra spaces
+    self assert: ("  hello   world  " words) equals: #("hello", "world")
+
+  testTakeAndDrop =>
+    // take:
+    self assert: ("hello" take: 3) equals: "hel".
+    self assert: ("hello" take: 10) equals: "hello".
+    self assert: ("hello" take: 0) equals: "".
+    // drop:
+    self assert: ("hello" drop: 2) equals: "llo".
+    self assert: ("hello" drop: 0) equals: "hello".
+    self assert: ("hello" drop: 10) equals: ""
+
+  testPadding =>
+    // padLeft: (leading spaces significant, cannot assert exact value)
+    "hi" padLeft: 5.
+    // padRight: (trailing spaces significant, cannot assert exact value)
+    "hi" padRight: 5.
+    // padLeft:with: - pad with specific character
+    self assert: ("42" padLeft: 5 with: "0") equals: "00042".
+    // padRight:with: - pad with specific character
+    self assert: ("42" padRight: 5 with: "0") equals: "42000"
+
+  testTesting =>
+    // isBlank
+    self assert: ("" isBlank).
+    self assert: ("   " isBlank).
+    self deny: ("hello" isBlank).
+    // isDigit
+    self assert: ("123" isDigit).
+    self deny: ("12a" isDigit).
+    self deny: ("" isDigit).
+    // isAlpha
+    self assert: ("hello" isAlpha).
+    self deny: ("hello1" isAlpha).
+    self deny: ("" isAlpha)

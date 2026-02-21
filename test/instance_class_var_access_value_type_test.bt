@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-413: Value type instance-side class variable access
+
+// @load tests/e2e/fixtures/class_var_point.bt
+
+TestCase subclass: InstanceClassVarAccessValueTypeTest
+
+  testSection1 =>
+    self assert: (ClassVarPoint instanceCount) equals: 0.
+    // Create a point via class method (increments instanceCount)
+    p1 := ClassVarPoint create: #{#x => 3, #y => 4}.
+    // Verify it's a value type (has x field)
+    self assert: (p1 x) equals: 3.
+    // Class variable was incremented
+    self assert: (ClassVarPoint instanceCount) equals: 1.
+    // Instance reads class variable via self class (the key BT-413 feature)
+    self assert: (p1 totalPoints) equals: 1.
+    // Create another point
+    p2 := ClassVarPoint create: #{#x => 1, #y => 2}.
+    // Both instances see updated class variable
+    self assert: (p1 totalPoints) equals: 2.
+    self assert: (p2 totalPoints) equals: 2

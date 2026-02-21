@@ -1,0 +1,57 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Keyword message tests (block value: dispatch)
+
+// @load tests/e2e/fixtures/multi_keyword.bt
+
+TestCase subclass: KeywordMessagesTest
+
+  testSingleKeywordMessages =>
+    self assert: ([:x | x] value: 42) equals: 42.
+    self assert: ([:x | x + 10] value: 5) equals: 15.
+    self assert: ([:n | n * n] value: 4) equals: 16
+
+  testMultiKeywordMessages =>
+    self assert: ([:x :y | x + y] value: 3 value: 4) equals: 7.
+    self assert: ([:a :b | a - b] value: 10 value: 3) equals: 7.
+    self assert: ([:x :y | x * y] value: 6 value: 7) equals: 42
+
+  testThreeKeywordMessages =>
+    self assert: ([:a :b :c | a + b + c] value: 1 value: 2 value: 3) equals: 6.
+    self assert: ([:x :y :z | x * y + z] value: 2 value: 3 value: 4) equals: 10
+
+  testNestedKeywordMessages =>
+    self assert: ([:x | [:y | x + y] value: 10] value: 5) equals: 15.
+    self assert: ([:a | [:b | [:c | a + b + c] value: 3] value: 2] value: 1) equals: 6
+
+  testKeywordMessagesWithLiterals =>
+    self assert: ([:s | s] value: "test") equals: "test".
+    self assert: ([:n | n * 10] value: 0) equals: 0.
+    self assert: ([:x | 0 - x] value: 5) equals: -5
+
+  testComplexExpressionsAsArguments =>
+    self assert: ([:x | x * 2] value: 3 + 2) equals: 10.
+    self assert: ([:a :b | a + b] value: 2 * 3 value: 4 + 1) equals: 11
+
+  testHigherOrderBlocksVariablePersistenceAcrossExpressions =>
+    // Block that returns a block
+    makeMultiplier := [:factor | [:n | n * factor]].
+    times3 := makeMultiplier value: 3.
+    self assert: (times3 value: 7) equals: 21.
+    // Passing block as argument
+    applyBlock := [:block :arg | block value: arg].
+    self assert: (applyBlock value: [:x | x + 100] value: 42) equals: 142
+
+  test4KeywordMessagesOnObjects =>
+    mk := MultiKeyword spawn.
+    // 4-keyword method: sum four arguments
+    self assert: ((mk add: 1 and: 2 and: 3 and: 4) await) equals: 10.
+    // 4-keyword method: verify argument order (weighted sum)
+    self assert: ((mk first: 1 second: 2 third: 3 fourth: 4) await) equals: 1234.
+    // Different argument values to confirm ordering
+    self assert: ((mk first: 9 second: 0 third: 5 fourth: 7) await) equals: 9057.
+    // 5-keyword method: sum five arguments
+    self assert: ((mk add: 10 and: 20 and: 30 and: 40 and: 50) await) equals: 150.
+    // Verify state was updated by add:and:and:and:and:
+    self assert: (mk getResult await) equals: 150

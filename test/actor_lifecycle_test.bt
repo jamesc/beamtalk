@@ -1,0 +1,45 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for actor lifecycle (BT-172, BT-397)
+
+// @load test/fixtures/counter.bt
+
+TestCase subclass: ActorLifecycleTest
+
+  testSection1 =>
+    counter := Counter spawn.
+    // isAlive returns true for a running actor
+    self assert: (counter isAlive await).
+    // Actor still works after isAlive check
+    self assert: (counter increment await) equals: 1.
+    // isAlive still true after message processing
+    self assert: (counter isAlive await).
+    // Stop the actor gracefully
+    self assert: (counter stop await) equals: #ok.
+    // Stopping an already-stopped actor is idempotent
+    self assert: (counter stop await) equals: #ok.
+    // isAlive returns false after stop
+    self deny: (counter isAlive await).
+    // Sending a message to a stopped actor returns actor_dead error
+    self should: [counter increment await] raise: #error
+
+  testNonMapArgumentToSpawnwith =>
+    // not silently fall back to spawn/0.
+    self should: [Counter spawnWith: 42] raise: #type_error.
+    // Passing a non-Dictionary argument to spawnWith: should raise type_error,
+    self should: [Counter spawnWith: "hello"] raise: #type_error.
+    self should: [Counter spawnWith: true] raise: #type_error
+
+  testSpawnwithWithBareIdentifierKeys =>
+    // Bare identifier keys in map literals work as implicit symbols
+    c3 := Counter spawnWith: #{value => 10}.
+    self assert: (c3 getValue await) equals: 10.
+    self assert: (c3 increment await) equals: 11
+
+  testPrintstringActorInstanceAndClassObject =>
+    // Actor instance printString returns "a ClassName"
+    c2 := Counter spawn.
+    c2 printString await.
+    // Class object printString returns class name
+    self assert: (Counter printString) equals: "Counter"

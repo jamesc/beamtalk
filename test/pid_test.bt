@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Pid - BEAM process identifier (BT-681)
+
+TestCase subclass: PidTest
+
+  testSection1 =>
+    self assert: Pid equals: Pid

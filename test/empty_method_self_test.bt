@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests that empty method bodies return self instead of nil (BT-631)
+
+// @load tests/e2e/fixtures/empty_method_actor.bt
+
+TestCase subclass: EmptyMethodSelfTest
+
+  testSection1 =>
+    a := EmptyMethodActor spawn.
+    // Call empty method — should return self (the actor), not nil
+    ref := a doNothing await.
+    // Returned reference should be the same actor — verify by reading state
+    self assert: (ref getValue await) equals: 42

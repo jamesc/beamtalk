@@ -1,0 +1,99 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for Collection abstract superclass (BT-505)
+
+TestCase subclass: CollectionProtocolTest
+
+  testListSharedCollectionProtocol =>
+    self assert: (#() isEmpty).
+    self deny: (#(1, 2) isEmpty).
+    // List isNotEmpty
+    self assert: (#(1) isNotEmpty).
+    self deny: (#() isNotEmpty).
+    // List includes:
+    self assert: (#(1, 2, 3) includes: 2).
+    self deny: (#(1, 2, 3) includes: 9).
+    // List collect:
+    self assert: (#(1, 2, 3) collect: [:x | x * 2]) equals: #(2, 4, 6).
+    // List select:
+    self assert: (#(1, 2, 3, 4) select: [:x | x > 2]) equals: #(3, 4).
+    // List reject:
+    self assert: (#(1, 2, 3, 4) reject: [:x | x > 2]) equals: #(1, 2).
+    // List inject:into:
+    self assert: (#(1, 2, 3) inject: 0 into: [:sum :x | sum + x]) equals: 6.
+    // List detect:
+    self assert: (#(1, 2, 3) detect: [:x | x > 1]) equals: 2.
+    // List detect:ifNone:
+    self assert: (#(1, 2) detect: [:x | x > 5] ifNone: [0]) equals: 0.
+    // List anySatisfy:
+    self assert: (#(1, 2, 3) anySatisfy: [:x | x > 2]).
+    self deny: (#(1, 2, 3) anySatisfy: [:x | x > 5]).
+    // List allSatisfy:
+    self assert: (#(1, 2, 3) allSatisfy: [:x | x > 0]).
+    self deny: (#(1, 2, 3) allSatisfy: [:x | x > 1])
+
+  testSetSharedCollectionProtocolInheritedFromCollection =>
+    // Set isEmpty
+    self assert: (Set new isEmpty).
+    self deny: ((Set new add: 1) isEmpty).
+    // Set isNotEmpty
+    self assert: ((Set new add: 1) isNotEmpty).
+    self deny: (Set new isNotEmpty).
+    // Set includes:
+    self assert: ((Set new add: 1) includes: 1).
+    self deny: ((Set new add: 1) includes: 2).
+    // Set collect: (inherited from Collection)
+    ((Set new add: 1) add: 2) collect: [:x | x * 10].
+    // Set select: (inherited from Collection)
+    (((Set new add: 1) add: 2) add: 3) select: [:x | x > 1].
+    // Set reject: (inherited from Collection)
+    (((Set new add: 1) add: 2) add: 3) reject: [:x | x > 2].
+    // Set inject:into: (inherited from Collection)
+    self assert: ((((Set new add: 1) add: 2) add: 3) inject: 0 into: [:sum :x | sum + x]) equals: 6.
+    // Set detect: (inherited from Collection)
+    (((Set new add: 1) add: 2) add: 3) detect: [:x | x > 1].
+    // Set detect:ifNone: (inherited from Collection)
+    self assert: ((Set new add: 1) detect: [:x | x > 5] ifNone: [0]) equals: 0.
+    // Set anySatisfy: (inherited from Collection)
+    self assert: ((((Set new add: 1) add: 2) add: 3) anySatisfy: [:x | x > 2]).
+    self deny: (((Set new add: 1) add: 2) anySatisfy: [:x | x > 5]).
+    // Set allSatisfy: (inherited from Collection)
+    self assert: ((((Set new add: 1) add: 2) add: 3) allSatisfy: [:x | x > 0]).
+    self deny: ((((Set new add: 1) add: 2) add: 3) allSatisfy: [:x | x > 2])
+
+  testDictionarySharedCollectionProtocolInheritedFromCollection =>
+    // Dictionary isEmpty (inherited from Collection via size)
+    self assert: (#{} isEmpty).
+    self deny: (#{#a => 1} isEmpty).
+    // Dictionary do: iterates over values
+    self assert: (#{#a => 10, #b => 20} do: [:v | v + 1]) equals: nil.
+    // Dictionary includes: checks values
+    self assert: (#{#a => 1, #b => 2} includes: 1).
+    self deny: (#{#a => 1, #b => 2} includes: 99).
+    // Dictionary collect: (inherited from Collection via do:)
+    #{#a => 1, #b => 2} collect: [:v | v * 10].
+    // Dictionary select: (inherited from Collection via do:)
+    #{#a => 1, #b => 2, #c => 3} select: [:v | v > 1].
+    // Dictionary inject:into: (inherited from Collection via do:)
+    self assert: (#{#a => 1, #b => 2, #c => 3} inject: 0 into: [:sum :v | sum + v]) equals: 6.
+    // Dictionary detect: (inherited from Collection via do:)
+    self assert: (#{#a => 1, #b => 5, #c => 3} detect: [:v | v > 4]) equals: 5.
+    // Dictionary detect:ifNone:
+    self assert: (#{#a => 1} detect: [:v | v > 10] ifNone: [0]) equals: 0.
+    // Dictionary anySatisfy: (inherited from Collection)
+    self assert: (#{#a => 1, #b => 5} anySatisfy: [:v | v > 3]).
+    self deny: (#{#a => 1, #b => 2} anySatisfy: [:v | v > 5]).
+    // Dictionary allSatisfy: (inherited from Collection)
+    self assert: (#{#a => 2, #b => 4} allSatisfy: [:v | v isEven]).
+    self deny: (#{#a => 1, #b => 2} allSatisfy: [:v | v isEven])
+
+  testTupleTupleHasNoLiteralSyntaxYetCollectionProtocolIsInherited =>
+    // Tuple empty creation
+    self assert: (Tuple new class) equals: Tuple
+
+  testClassHierarchyVerification =>
+    // Verify superclass chain
+    self assert: (#(1, 2, 3) class) equals: List.
+    self assert: (Set new class) equals: Set.
+    self assert: (#{} class) equals: Dictionary

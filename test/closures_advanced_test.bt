@@ -1,0 +1,75 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for closure behavior (blocks capturing outer scope)
+
+TestCase subclass: ClosuresAdvancedTest
+
+  testBasicClosureCapture =>
+    outer := 10.
+    self assert: outer equals: 10.
+    closure := [:x | x + outer].
+    self assert: (closure value: 5) equals: 15.
+    // Verify outer variable unchanged
+    self assert: outer equals: 10
+
+  testMultipleCaptures =>
+    // Closure capturing multiple variables
+    base := 100.
+    self assert: base equals: 100.
+    multiplier := 2.
+    self assert: multiplier equals: 2.
+    compute := [:x | (x + base) * multiplier].
+    self assert: (compute value: 50) equals: 300
+
+  testNestedClosures =>
+    // Closure returning closure (currying pattern)
+    makeAdder := [:amount | [:value | value + amount]].
+    add10 := makeAdder value: 10.
+    self assert: (add10 value: 5) equals: 15.
+    self assert: (add10 value: 20) equals: 30.
+    // Different closure from same factory
+    add100 := makeAdder value: 100.
+    self assert: (add100 value: 5) equals: 105
+
+  testClosureChains =>
+    // Multiple levels of nesting
+    makeMultiplier := [:factor | [:makeAdder | [:value | (value + makeAdder) * factor]]].
+    times2 := makeMultiplier value: 2.
+    times2Plus10 := times2 value: 10.
+    self assert: (times2Plus10 value: 5) equals: 30
+
+  testClosureWithOperators =>
+    // Closure using binary operators
+    threshold := 100.
+    self assert: threshold equals: 100.
+    isAboveThreshold := [:n | n > threshold].
+    self assert: (isAboveThreshold value: 150).
+    self deny: (isAboveThreshold value: 50)
+
+  testSharedCaptures =>
+    // Multiple closures sharing same captured variable
+    shared := 1000.
+    self assert: shared equals: 1000.
+    addShared := [:x | x + shared].
+    subtractShared := [:x | x - shared].
+    multiplyShared := [:x | x * shared].
+    self assert: (addShared value: 500) equals: 1500.
+    self assert: (subtractShared value: 1200) equals: 200.
+    self assert: (multiplyShared value: 2) equals: 2000
+
+  testClosureComposition =>
+    // Using one closure's result as input to another
+    double := [:x | x * 2].
+    addOne := [:x | x + 1].
+    // Apply double first, then addOne
+    doubleResult := double value: 5.
+    self assert: doubleResult equals: 10.
+    self assert: (addOne value: doubleResult) equals: 11
+
+  testDeepNesting =>
+    // Three levels deep
+    level1 := [:a | [:b | [:c | a + b + c]]].
+    level2 := level1 value: 1.
+    level3 := level2 value: 2.
+    self assert: (level3 value: 3) equals: 6

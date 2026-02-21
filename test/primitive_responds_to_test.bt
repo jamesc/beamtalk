@@ -1,0 +1,30 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test respondsTo: for all primitive types (BT-277)
+
+TestCase subclass: PrimitiveRespondsToTest
+
+  testSection1 =>
+    self assert: (42 respondsTo: #'+').
+    self deny: (42 respondsTo: #foo).
+    // Test String respondsTo:
+    self assert: ("hello" respondsTo: #size).
+    self deny: ("hello" respondsTo: #bar).
+    // Test Boolean respondsTo:
+    self assert: (true respondsTo: #not).
+    self assert: (false respondsTo: #'and:').
+    self deny: (true respondsTo: #unknownMethod).
+    // Test nil respondsTo:
+    self assert: (nil respondsTo: #isNil).
+    self deny: (nil respondsTo: #notAMethod).
+    // Test Block respondsTo:
+    self assert: ([1] respondsTo: #value).
+    self deny: ([1] respondsTo: #invalidMethod).
+    // Test Float respondsTo: (BT-277 - newly implemented)
+    self assert: (3.14 respondsTo: #'+').
+    self assert: (3.14 respondsTo: #'-').
+    self assert: (3.14 respondsTo: #class).
+    self assert: (3.14 respondsTo: #asString).
+    self assert: (3.14 respondsTo: #abs).
+    self deny: (3.14 respondsTo: #nonExistent)

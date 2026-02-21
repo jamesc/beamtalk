@@ -213,8 +213,8 @@ dialyzer:
 # Testing
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Run fast tests (Rust unit/integration + stdlib + Erlang runtime, skip slow E2E)
-test: test-rust test-stdlib test-runtime
+# Run fast tests (Rust unit/integration + stdlib + BUnit + Erlang runtime, skip slow E2E)
+test: test-rust test-stdlib test-bunit test-runtime
 
 # Run Rust tests (unit + integration, skip slow E2E)
 # Output: summary lines + failures only (reduces ~74 lines to ~10)
@@ -276,7 +276,7 @@ test-mcp: build
     @echo "✅ MCP integration tests complete"
 
 # Run ALL tests (unit + integration + E2E + Erlang runtime)
-test-all: test-rust test-stdlib test-integration test-mcp test-e2e test-runtime
+test-all: test-rust test-stdlib test-bunit test-integration test-mcp test-e2e test-runtime
 
 # Unix-only: uses mktemp, trap, kill, nc, process management
 # Smoke test installed layout (install to temp dir, verify REPL starts)
@@ -327,6 +327,13 @@ test-stdlib *ARGS: build-stdlib
     @echo "🧪 Running stdlib tests..."
     @cargo run --bin beamtalk --quiet -- test-stdlib --no-warnings --quiet {{ ARGS }}
     @echo "✅ Stdlib tests complete"
+
+# Run BUnit TestCase tests (ADR 0014 Phase 2)
+# Accepts optional path: just test-bunit test/dictionary_test.bt
+test-bunit *ARGS: build-stdlib
+    @echo "🧪 Running BUnit tests..."
+    @cargo run --bin beamtalk --quiet -- test {{ ARGS }}
+    @echo "✅ BUnit tests complete"
 
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
 # Run Erlang runtime unit tests

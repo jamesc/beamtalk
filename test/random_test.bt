@@ -1,0 +1,103 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for Random class (BT-723)
+
+TestCase subclass: RandomTest
+
+  testClassSideRandomFloat =>
+    self assert: ((Random next) class) equals: Float.
+    // Random next returns value >= 0.0
+    self assert: ((Random next) >= 0.0).
+    // Random next returns value < 1.0
+    self assert: ((Random next) < 1.0)
+
+  testClassSideRandomInteger =>
+    // Random nextInteger: 1 always returns 1
+    self assert: (Random nextInteger: 1) equals: 1.
+    // Random nextInteger: returns an Integer
+    self assert: ((Random nextInteger: 100) class) equals: Integer.
+    // Random nextInteger: returns value >= 1
+    self assert: ((Random nextInteger: 100) >= 1).
+    // Random nextInteger: returns value <= max
+    self assert: ((Random nextInteger: 100) <= 100).
+    // Random nextInteger: 6 returns between 1 and 6
+    result := Random nextInteger: 6.
+    self assert: ((result >= 1) and: [result <= 6])
+
+  testInstanceSideNew =>
+    // Random new returns a Random instance
+    self assert: ((Random new) class) equals: Random.
+    // Random new printString
+    (Random new) printString.
+    // Random new describe
+    (Random new) describe.
+    // Instance next returns a Float
+    rng := Random new.
+    self assert: ((rng next) class) equals: Float.
+    // Instance next returns value in range
+    rng2 := Random new.
+    v := rng2 next.
+    self assert: ((v >= 0.0) and: [v < 1.0]).
+    // Instance nextInteger: returns an Integer
+    rng3 := Random new.
+    self assert: ((rng3 nextInteger: 100) class) equals: Integer.
+    // Instance nextInteger: returns value in range
+    rng4 := Random new.
+    n := rng4 nextInteger: 50.
+    self assert: ((n >= 1) and: [n <= 50])
+
+  testInstanceSideSeededDeterministic =>
+    // Two identically seeded instances produce the same first value
+    a := Random seed: 42.
+    b := Random seed: 42.
+    self assert: (a next) =:= (b next).
+    // Two identically seeded instances produce the same integer
+    c := Random seed: 99.
+    d := Random seed: 99.
+    self assert: (c nextInteger: 1000) =:= (d nextInteger: 1000).
+    // (statistically extremely unlikely to be equal for float)
+    e := Random seed: 1.
+    // Differently seeded instances generally produce different values
+    f := Random seed: 999999.
+    self assert: (e next) /= (f next).
+    // Same instance returns same value (immutable value type)
+    g := Random seed: 42.
+    self assert: (g next) =:= (g next)
+
+  testCollectionIntegrationAtrandom =>
+    // List atRandom returns an element from the list
+    self assert: (#(10, 20, 30) atRandom class) equals: Integer.
+    // List atRandom returns value that is in the list
+    elem := #(10, 20, 30) atRandom.
+    self assert: (#(10, 20, 30) includes: elem).
+    // Single-element list always returns that element
+    self assert: (#(42) atRandom) equals: 42.
+    // Empty list atRandom raises type_error
+    self should: [#() atRandom] raise: #type_error.
+    // Tuple atRandom via Erlang interop — deterministic non-empty case
+    tuple := Erlang erlang list_to_tuple: #(7, 7, 7).
+    self assert: (tuple atRandom) equals: 7.
+    // Tuple atRandom via Erlang interop — empty tuple raises type_error
+    emptyTuple := Erlang erlang list_to_tuple: #().
+    self should: [emptyTuple atRandom] raise: #type_error
+
+  testErrorHandling =>
+    // nextInteger: with zero raises type_error
+    self should: [Random nextInteger: 0] raise: #type_error.
+    // nextInteger: with negative raises type_error
+    self should: [Random nextInteger: -5] raise: #type_error.
+    // nextInteger: with non-integer raises type_error
+    self should: [Random nextInteger: "hello"] raise: #type_error.
+    // seed: with non-integer raises type_error
+    self should: [Random seed: "bad"] raise: #type_error.
+    // Instance nextInteger: with zero raises type_error
+    rng5 := Random new.
+    self should: [rng5 nextInteger: 0] raise: #type_error.
+    // Instance nextInteger: with negative raises type_error
+    rng6 := Random new.
+    self should: [rng6 nextInteger: -1] raise: #type_error
+
+  testClassIdentity =>
+    // Random is a class — class on class returns Metaclass
+    self assert: (Random class) equals: #Metaclass

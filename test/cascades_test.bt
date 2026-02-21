@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for cascade message sends
+
+TestCase subclass: CascadesTest
+
+  testBasicCascadeInfrastructureTest =>
+    // Simple value to test cascade infrastructure works
+    x := 5.
+    self assert: x equals: 5.
+    // Verify variable persists for future cascade tests
+    self assert: x equals: 5

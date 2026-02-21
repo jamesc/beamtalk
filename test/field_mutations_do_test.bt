@@ -1,0 +1,30 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for field mutations (BT-98)
+
+// @load tests/e2e/fixtures/field_mutation_counter.bt
+// @load tests/e2e/fixtures/field_mutation_accumulator.bt
+
+TestCase subclass: FieldMutationsDoTest
+
+  testSection1 =>
+    counter := FieldMutationCounter spawn.
+    self assert: (counter getValue await) equals: 0.
+    self assert: ((counter setValue: 5) await) equals: 5.
+    self assert: (counter getValue await) equals: 5.
+    self assert: ((counter setValue: 10) await) equals: 10.
+    self assert: (counter getValue await) equals: 10.
+    self assert: ((counter setValue: 0) await) equals: 0.
+    self assert: ((counter sumArray: #(1, 2, 3)) await) equals: 6.
+    self assert: (counter getValue await) equals: 6.
+    self assert: ((counter setValue: 0) await) equals: 0.
+    self assert: ((counter sumArray: #(10, 20, 30)) await) equals: 60.
+    self assert: (counter getValue await) equals: 60.
+    self assert: ((counter sumWithInject: #(1, 2, 3)) await) equals: 6.
+    self assert: ((counter sumWithInject: #(100, 200, 300)) await) equals: 600.
+    acc := FieldMutationAccumulator spawn.
+    self assert: ((acc processArray: #(2, 3, 4)) await) equals: #{#count => 3, #product => 24, #sum => 9}.
+    self assert: (acc getSum await) equals: 9.
+    self assert: (acc getProduct await) equals: 24.
+    self assert: (acc getCount await) equals: 3

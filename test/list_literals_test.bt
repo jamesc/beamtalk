@@ -1,0 +1,33 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for list literal syntax #(1, 2, 3) (ADR 0012, BT-402)
+
+TestCase subclass: ListLiteralsTest
+
+  testEmptyList =>
+    self assert: #() equals: #().
+    self assert: (#() size) equals: 0.
+    self assert: (#() isEmpty)
+
+  testSingleElementList =>
+    self assert: #(256) equals: #(256).
+    self assert: (#(256) size) equals: 1.
+    self deny: (#(256) isEmpty)
+
+  testMultipleElementList =>
+    self assert: #(1, 2, 3) equals: #(1, 2, 3).
+    self assert: (#(1, 2, 3) size) equals: 3
+
+  testNestedLists =>
+    self assert: #(#(1, 2), #(3, 4)) equals: #(#(1, 2), #(3, 4))
+
+  testListMethods =>
+    self assert: (#(1, 2, 3) first) equals: 1.
+    self assert: (#(1, 2, 3) rest) equals: #(2, 3)
+
+  testTrailingComma =>
+    self assert: #(10, 20, 30,) equals: #(10, 20, 30)
+
+  testListWithExpressionsParenthesizedForBinaryOps =>
+    self assert: #((1 + 2), (3 * 4)) equals: #(3, 12)

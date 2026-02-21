@@ -1,0 +1,64 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// File I/O tests
+
+TestCase subclass: FileIoTest
+
+  testFileExistenceChecks =>
+    self deny: (File exists: "_bt_stdlib_nonexistent_xyzzy.txt")
+
+  testFileWritingAndReading =>
+    self assert: (File writeAll: "_bt_stdlib_test.txt" contents: "Hello, Beamtalk!") equals: nil.
+    self assert: (File readAll: "_bt_stdlib_test.txt") equals: "Hello, Beamtalk!".
+    self assert: (File exists: "_bt_stdlib_test.txt")
+
+  testOverwriteExistingFile =>
+    self assert: (File writeAll: "_bt_stdlib_test.txt" contents: "New content") equals: nil.
+    self assert: (File readAll: "_bt_stdlib_test.txt") equals: "New content"
+
+  testSpecialCharacters =>
+    self assert: (File writeAll: "_bt_stdlib_special.txt" contents: "Hello, World! @#$%") equals: nil.
+    self assert: (File readAll: "_bt_stdlib_special.txt") equals: "Hello, World! @#$%"
+
+  testEmptyFile =>
+    self assert: (File writeAll: "_bt_stdlib_empty.txt" contents: "") equals: nil.
+    self assert: (File readAll: "_bt_stdlib_empty.txt") equals: "".
+    self assert: (File exists: "_bt_stdlib_empty.txt")
+
+  testSecurityPathValidation =>
+    self deny: (File exists: "/etc/passwd").
+    self deny: (File exists: "../passwords.txt").
+    // Windows-style absolute paths
+    self deny: (File exists: "C:\\Windows\\system32").
+    // Backslash absolute paths
+    self deny: (File exists: "\\\\server\\share")
+
+  testErrorPathsReadall =>
+    // readAll: nonexistent file
+    self should: [File readAll: "_bt_stdlib_no_such_file_xyz.txt"] raise: #file_not_found.
+    // readAll: non-string path
+    self should: [File readAll: 42] raise: #type_error.
+    // readAll: absolute path
+    self should: [File readAll: "/etc/passwd"] raise: #invalid_path.
+    // readAll: directory traversal
+    self should: [File readAll: "../secret.txt"] raise: #invalid_path
+
+  testErrorPathsWriteallContents =>
+    // writeAll: non-string path
+    self should: [File writeAll: 42 contents: "data"] raise: #type_error.
+    // writeAll: non-string contents
+    self should: [File writeAll: "_bt_stdlib_test.txt" contents: 42] raise: #type_error.
+    // writeAll: absolute path
+    self should: [File writeAll: "/tmp/evil.txt" contents: "data"] raise: #invalid_path.
+    // writeAll: directory traversal
+    self should: [File writeAll: "../evil.txt" contents: "data"] raise: #invalid_path
+
+  testSubdirectoryCreation =>
+    // writeAll: creates parent directories automatically
+    self assert: (File writeAll: "_bt_stdlib_subdir/nested.txt" contents: "nested") equals: nil.
+    self assert: (File readAll: "_bt_stdlib_subdir/nested.txt") equals: "nested"
+
+  testUnicodeContent =>
+    self assert: (File writeAll: "_bt_stdlib_unicode.txt" contents: "Hello 世界 🌍") equals: nil.
+    self assert: (File readAll: "_bt_stdlib_unicode.txt") equals: "Hello 世界 🌍"
