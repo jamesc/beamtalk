@@ -1,30 +1,39 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Thin data-access intrinsics for the Behaviour/Class protocol (ADR 0032 Phase 2).
+%%% @doc Thin Behaviour/Class intrinsics (ADR 0032 Phase 2).
 %%%
 %%% **DDD Context:** Object System
 %%%
 %%% These functions back the `@primitive "classXxx"` declarations in `lib/Behaviour.bt`
 %%% and `lib/Class.bt`. Each function receives a class object `Self`
-%%% (a `#beamtalk_object{}` tuple with a ClassPid at position 4) and returns
-%%% the raw data from the class gen_server state or registry.
+%%% (a `#beamtalk_object{}` tuple with a ClassPid at position 4) and exposes
+%%% either raw data from the class gen_server state / registry or small,
+%%% hierarchy-aware queries over that data.
 %%%
-%%% Hierarchy-walking logic (allSuperclasses, canUnderstand:, etc.) lives in
-%%% Beamtalk, not here. These 8 functions are the smallest possible Erlang surface.
+%%% Richer hierarchy-walking and protocol logic still lives in Beamtalk-level
+%%% code; this module provides a minimal, side-effect-free intrinsic surface
+%%% that the Behaviour/Class libraries can rely on.
 %%%
 %%% ## Intrinsic Table
 %%%
-%%% | Erlang function         | Backing data source                      |
-%%% |-------------------------|------------------------------------------|
-%%% | classSuperclass/1       | gen_server:call(ClassPid, superclass)    |
-%%% | classSubclasses/1       | beamtalk_class_registry:direct_subclasses |
-%%% | classAllSubclasses/1    | beamtalk_class_registry:all_subclasses   |
-%%% | classLocalMethods/1     | gen_server:call(ClassPid, methods)       |
-%%% | classIncludesSelector/2 | local method dict check                  |
-%%% | classInstVarNames/1     | gen_server:call(ClassPid, instance_variables) |
-%%% | className/1             | gen_server:call(ClassPid, class_name)    |
-%%% | classClass/1            | Virtual metaclass sentinel               |
+%%% | Erlang function             | Backing data source / derivation                          |
+%%% |-----------------------------|------------------------------------------------------------|
+%%% | classSuperclass/1           | Direct superclass from class gen_server state             |
+%%% | classAllSuperclasses/1      | Recursively walks the superclass chain from classSuperclass/1 |
+%%% | classSubclasses/1           | Direct subclasses from class registry                     |
+%%% | classAllSubclasses/1        | All subclasses from class registry                        |
+%%% | classLocalMethods/1         | Local method dictionary from class gen_server state       |
+%%% | classMethods/1              | Combined local + inherited methods via superclass chain   |
+%%% | classIncludesSelector/2     | Membership check in local method dictionary               |
+%%% | classCanUnderstand/2        | Selector lookup against full method dictionary (classMethods/1) |
+%%% | classInheritsFrom/2         | Predicate over the superclass chain (classAllSuperclasses/1) |
+%%% | classIncludesBehaviour/2    | Behaviour / interface membership via superclass chain     |
+%%% | classWhichIncludesSelector/2| First class in hierarchy whose local methods include selector |
+%%% | classInstVarNames/1         | Instance variable names from class gen_server state       |
+%%% | classAllInstVarNames/1      | Combined instance variable names via superclass chain     |
+%%% | className/1                 | Class name from class gen_server state                    |
+%%% | classClass/1                | Virtual metaclass sentinel                                |
 
 -module(beamtalk_behaviour_intrinsics).
 
@@ -74,7 +83,12 @@ classSubclasses(Self) ->
     ClassPid = erlang:element(4, Self),
     ClassName = gen_server:call(ClassPid, class_name),
     Subclasses = beamtalk_class_registry:direct_subclasses(ClassName),
-    [atom_to_class_object(SC) || SC <- Subclasses, atom_to_class_object(SC) =/= nil].
+    lists:filtermap(fun(SC) ->
+        case atom_to_class_object(SC) of
+            nil -> false;
+            Obj -> {true, Obj}
+        end
+    end, Subclasses).
 
 %% @doc Return all subclasses transitively (breadth-first) as class objects.
 %%
@@ -84,7 +98,12 @@ classAllSubclasses(Self) ->
     ClassPid = erlang:element(4, Self),
     ClassName = gen_server:call(ClassPid, class_name),
     AllSubclasses = beamtalk_class_registry:all_subclasses(ClassName),
-    [atom_to_class_object(SC) || SC <- AllSubclasses, atom_to_class_object(SC) =/= nil].
+    lists:filtermap(fun(SC) ->
+        case atom_to_class_object(SC) of
+            nil -> false;
+            Obj -> {true, Obj}
+        end
+    end, AllSubclasses).
 
 %% @doc Return the local method selectors of the receiver (non-inherited).
 %%
