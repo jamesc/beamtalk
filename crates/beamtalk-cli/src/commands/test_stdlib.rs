@@ -281,7 +281,7 @@ fn generate_eunit_wrapper(
         let escaped_file = test_file_path.replace('\\', "\\\\").replace('"', "\\\"");
         let escaped_expr = case.expression.replace('\\', "\\\\").replace('"', "\\\"");
         let location = format!("{escaped_file}:{} `{escaped_expr}`", case.line);
-        let location_bin = format!("<<\"{location}\">>");
+        let location_bin = format!("<<\"{location}\"/utf8>>");
 
         // Variable binding name (atom or 'none')
         let var_atom = match extract_assignment_var(&case.expression) {
@@ -890,9 +890,24 @@ fn parse_eunit_output(
     let mut module_results = std::collections::HashMap::new();
     let mut failed_modules = std::collections::HashMap::new();
 
-    // Parse structured RESULTS: lines
-    for line in combined.lines() {
-        if let Some(rest) = line.strip_prefix("RESULTS:") {
+    // Parse output line by line, accumulating FAIL blocks and associating
+    // them with the next RESULTS: line (the Erlang module prints FAIL blocks
+    // before its RESULTS: summary).
+    let lines: Vec<&str> = combined.lines().collect();
+    let mut pending_failures: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        if let Some(location) = lines[i].strip_prefix("FAIL ") {
+            // Collect multi-line FAIL block
+            let mut block = format!("FAIL {location}");
+            i += 1;
+            while i < lines.len() && lines[i].starts_with("  ") {
+                block.push('\n');
+                block.push_str(lines[i]);
+                i += 1;
+            }
+            pending_failures.push(block);
+        } else if let Some(rest) = lines[i].strip_prefix("RESULTS:") {
             let parts: Vec<&str> = rest.splitn(3, ':').collect();
             if parts.len() == 3 {
                 let module_name = parts[0].to_string();
@@ -903,31 +918,11 @@ fn parse_eunit_output(
                     ModuleResult {
                         passed,
                         failed,
-                        failures: Vec::new(),
+                        failures: std::mem::take(&mut pending_failures),
                     },
                 );
             }
-        }
-    }
-
-    // Collect FAIL blocks (multi-line: "FAIL location\n  expected: ...\n  got: ...")
-    let lines: Vec<&str> = combined.lines().collect();
-    let mut i = 0;
-    while i < lines.len() {
-        if let Some(location) = lines[i].strip_prefix("FAIL ") {
-            let mut block = format!("FAIL {location}");
             i += 1;
-            while i < lines.len() && lines[i].starts_with("  ") {
-                block.push('\n');
-                block.push_str(lines[i]);
-                i += 1;
-            }
-            // Associate with any module that has failures
-            for result in module_results.values_mut() {
-                if result.failed > 0 {
-                    result.failures.push(block.clone());
-                }
-            }
         } else {
             i += 1;
         }

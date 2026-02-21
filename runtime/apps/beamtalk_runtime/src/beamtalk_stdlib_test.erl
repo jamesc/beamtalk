@@ -23,7 +23,6 @@
 %%%   Location    :: binary() - source location "file:line `expr`"
 
 -module(beamtalk_stdlib_test).
--include_lib("kernel/include/logger.hrl").
 
 -export([
     run_and_assert/2,
