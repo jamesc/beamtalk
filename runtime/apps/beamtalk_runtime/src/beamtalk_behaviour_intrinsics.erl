@@ -34,6 +34,9 @@
 %%% | classAllInstVarNames/1      | Combined instance variable names via superclass chain     |
 %%% | className/1                 | Class name from class gen_server state                    |
 %%% | classClass/1                | Virtual metaclass sentinel                                |
+%%% | classDoc/1                  | Class doc string from class gen_server state (ADR 0033)   |
+%%% | classSetDoc/2               | Set class doc string (ADR 0033)                           |
+%%% | classSetMethodDoc/3         | Set method doc string for a selector (ADR 0033)           |
 
 -module(beamtalk_behaviour_intrinsics).
 
@@ -55,7 +58,11 @@
     classInstVarNames/1,
     classAllInstVarNames/1,
     className/1,
-    classClass/1
+    classClass/1,
+    %% ADR 0033: Runtime-embedded documentation
+    classDoc/1,
+    classSetDoc/2,
+    classSetMethodDoc/3
 ]).
 
 %%% ============================================================================
@@ -277,6 +284,36 @@ className(Self) ->
 -spec classClass(#beamtalk_object{}) -> atom().
 classClass(_Self) ->
     'Metaclass'.
+
+%% @doc Return the class documentation string, or nil if none set.
+%%
+%% ADR 0033: Runtime-embedded documentation.
+%% The class gen_server stores `none` internally; we return `nil` for Beamtalk.
+-spec classDoc(#beamtalk_object{}) -> binary() | nil.
+classDoc(Self) ->
+    ClassPid = erlang:element(4, Self),
+    case gen_server:call(ClassPid, get_doc) of
+        none -> nil;
+        Doc -> Doc
+    end.
+
+%% @doc Set the class documentation string.
+%%
+%% ADR 0033: Post-hoc setter for class-level doc.
+-spec classSetDoc(#beamtalk_object{}, binary()) -> #beamtalk_object{}.
+classSetDoc(Self, DocBinary) ->
+    ClassPid = erlang:element(4, Self),
+    ok = gen_server:call(ClassPid, {set_doc, DocBinary}),
+    Self.
+
+%% @doc Set the documentation string for a specific method selector.
+%%
+%% ADR 0033: Post-hoc setter for method-level doc.
+-spec classSetMethodDoc(#beamtalk_object{}, atom(), binary()) -> #beamtalk_object{}.
+classSetMethodDoc(Self, Selector, DocBinary) ->
+    ClassPid = erlang:element(4, Self),
+    ok = gen_server:call(ClassPid, {set_method_doc, Selector, DocBinary}),
+    Self.
 
 %%% ============================================================================
 %%% Internal Helpers

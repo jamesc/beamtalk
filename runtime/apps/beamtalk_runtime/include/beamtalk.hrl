@@ -99,5 +99,6 @@
     '$beamtalk_class' := 'CompiledMethod',
     '__selector__' := atom(),
     '__source__' := binary(),
-    '__method_info__' := map()
+    '__method_info__' := map(),
+    '__doc__' := binary() | nil
 }.

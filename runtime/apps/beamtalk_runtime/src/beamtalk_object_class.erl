@@ -81,7 +81,10 @@
     method_source = #{} :: #{selector() => binary()},
     before_methods = #{} :: #{selector() => [fun()]},
     after_methods = #{} :: #{selector() => [fun()]},
-    dynamic_methods = #{} :: #{selector() => fun()}
+    dynamic_methods = #{} :: #{selector() => fun()},
+    %% ADR 0033: Runtime-embedded documentation
+    doc = none :: binary() | none,
+    method_docs = #{} :: #{selector() => binary()}
 }).
 
 %%====================================================================
@@ -274,7 +277,9 @@ init({ClassName, ClassInfo}) ->
         method_source = maps:get(method_source, ClassInfo, #{}),
         before_methods = maps:get(before_methods, ClassInfo, #{}),
         after_methods = maps:get(after_methods, ClassInfo, #{}),
-        dynamic_methods = maps:get(dynamic_methods, ClassInfo, #{})
+        dynamic_methods = maps:get(dynamic_methods, ClassInfo, #{}),
+        doc = maps:get(doc, ClassInfo, none),
+        method_docs = maps:get(method_docs, ClassInfo, #{})
     },
     {ok, State}.
 
@@ -338,17 +343,20 @@ handle_call(
     _From,
     #class_state{
         instance_methods = Methods,
-        method_source = Source
+        method_source = Source,
+        method_docs = MethodDocs
     } = State
 ) ->
     case maps:find(Selector, Methods) of
         {ok, MethodInfo} ->
             Src = maps:get(Selector, Source, <<"">>),
+            Doc = maps:get(Selector, MethodDocs, nil),
             MethodObj = #{
                 '$beamtalk_class' => 'CompiledMethod',
                 '__selector__' => Selector,
                 '__source__' => Src,
-                '__method_info__' => MethodInfo
+                '__method_info__' => MethodInfo,
+                '__doc__' => Doc
             },
             {reply, MethodObj, State};
         error ->
@@ -421,7 +429,9 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
                 class_methods = NewClassMethods,
                 instance_variables = NewIVars,
                 method_source = maps:get(method_source, ClassInfo, State#class_state.method_source),
-                is_constructible = undefined
+                is_constructible = undefined,
+                doc = maps:get(doc, ClassInfo, State#class_state.doc),
+                method_docs = maps:get(method_docs, ClassInfo, State#class_state.method_docs)
             },
             {reply, {ok, NewIVars}, NewState}
     end;
@@ -458,6 +468,14 @@ handle_call(get_local_class_methods, _From, #class_state{class_methods = ClassMe
 %% ADR 0032 Phase 1: Returns local instance_methods for chain walk queries.
 handle_call(get_instance_methods, _From, #class_state{instance_methods = InstanceMethods} = State) ->
     {reply, {ok, InstanceMethods}, State};
+%% ADR 0033: Runtime-embedded documentation — class doc accessors.
+handle_call(get_doc, _From, #class_state{doc = Doc} = State) ->
+    {reply, Doc, State};
+handle_call({set_doc, DocBinary}, _From, State) ->
+    {reply, ok, State#class_state{doc = DocBinary}};
+handle_call({set_method_doc, Selector, DocBinary}, _From, State) ->
+    NewMethodDocs = maps:put(Selector, DocBinary, State#class_state.method_docs),
+    {reply, ok, State#class_state{method_docs = NewMethodDocs}};
 %% BT-411/BT-412/BT-440: Class method dispatch.
 %% Delegates to beamtalk_class_dispatch (BT-704).
 %% ADR 0032 Phase 1: Passes local class_methods (no flattened table).
