@@ -527,7 +527,9 @@ mod tests {
     #[test]
     fn future_class_no_shadowing_warning() {
         let tokens = lex_with_eof("Object subclass: Future\n  value => 1");
-        let (module, _) = parse(tokens);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        assert_eq!(module.classes.len(), 1);
         let mut diagnostics = Vec::new();
         check_stdlib_name_shadowing(&module, &mut diagnostics);
         assert!(
@@ -540,7 +542,9 @@ mod tests {
     #[test]
     fn stdlib_class_triggers_shadowing_warning() {
         let tokens = lex_with_eof("Object subclass: Integer\n  value => 1");
-        let (module, _) = parse(tokens);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        assert_eq!(module.classes.len(), 1);
         let mut diagnostics = Vec::new();
         check_stdlib_name_shadowing(&module, &mut diagnostics);
         assert_eq!(diagnostics.len(), 1);
