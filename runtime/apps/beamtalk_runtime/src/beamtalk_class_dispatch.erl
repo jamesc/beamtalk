@@ -211,13 +211,19 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
     {ok, class_name(), atom()} | not_found.
 find_class_method_in_chain(Selector, ClassName) ->
     SuperclassName = superclass_from_ets(ClassName),
-    find_class_method_in_ancestors(Selector, SuperclassName).
+    find_class_method_in_ancestors(Selector, SuperclassName, 0).
 
--spec find_class_method_in_ancestors(selector(), class_name() | none) ->
+-spec find_class_method_in_ancestors(selector(), class_name() | none, non_neg_integer()) ->
     {ok, class_name(), atom()} | not_found.
-find_class_method_in_ancestors(_Selector, none) ->
+find_class_method_in_ancestors(_Selector, none, _Depth) ->
     not_found;
-find_class_method_in_ancestors(Selector, AncestorName) ->
+find_class_method_in_ancestors(_Selector, AncestorName, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+    ?LOG_WARNING(
+        "find_class_method_in_ancestors: max hierarchy depth ~p exceeded at ~p — possible cycle",
+        [?MAX_HIERARCHY_DEPTH, AncestorName]
+    ),
+    not_found;
+find_class_method_in_ancestors(Selector, AncestorName, Depth) ->
     case beamtalk_class_registry:whereis_class(AncestorName) of
         undefined ->
             not_found;
@@ -251,13 +257,13 @@ find_class_method_in_ancestors(Selector, AncestorName) ->
                         undefined ->
                             %% Class has method in metadata but no module — skip and continue up.
                             Next = superclass_from_ets(AncestorName),
-                            find_class_method_in_ancestors(Selector, Next);
+                            find_class_method_in_ancestors(Selector, Next, Depth + 1);
                         _ ->
                             {ok, AncestorName, AncestorModule}
                     end;
                 false ->
                     Next = superclass_from_ets(AncestorName),
-                    find_class_method_in_ancestors(Selector, Next)
+                    find_class_method_in_ancestors(Selector, Next, Depth + 1)
             end
     end.
 

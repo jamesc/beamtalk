@@ -208,6 +208,15 @@ responds_to(Selector, ClassName) ->
 %% @doc Walk hierarchy checking each class's local method table via has_method/2.
 -spec responds_to_chain(selector(), pid()) -> boolean().
 responds_to_chain(Selector, ClassPid) ->
+    responds_to_chain(Selector, ClassPid, 0).
+
+-spec responds_to_chain(selector(), pid(), non_neg_integer()) -> boolean().
+responds_to_chain(_Selector, _ClassPid, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+    ?LOG_WARNING("responds_to_chain: max hierarchy depth ~p exceeded — possible cycle", [
+        ?MAX_HIERARCHY_DEPTH
+    ]),
+    false;
+responds_to_chain(Selector, ClassPid, Depth) ->
     case beamtalk_object_class:has_method(ClassPid, Selector) of
         true ->
             true;
@@ -218,7 +227,7 @@ responds_to_chain(Selector, ClassPid) ->
                 SuperclassName ->
                     case beamtalk_class_registry:whereis_class(SuperclassName) of
                         undefined -> false;
-                        SuperclassPid -> responds_to_chain(Selector, SuperclassPid)
+                        SuperclassPid -> responds_to_chain(Selector, SuperclassPid, Depth + 1)
                     end
             end
     end.
@@ -242,7 +251,7 @@ lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
         undefined ->
             {error, beamtalk_error:new(class_not_found, ClassName, Selector)};
         ClassPid ->
-            lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid)
+            lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid, 0)
     end.
 
 %% @private
@@ -250,15 +259,30 @@ lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
 %%
 %% Used when flattened table is missing, stale, or incomplete.
 %% This is the original ADR 0006 Phase 1 implementation.
--spec lookup_in_class_chain_slow(selector(), args(), bt_self(), state(), class_name(), pid()) ->
-    dispatch_result().
-lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid) ->
+-spec lookup_in_class_chain_slow(
+    selector(), args(), bt_self(), state(), class_name(), pid(), non_neg_integer()
+) -> dispatch_result().
+lookup_in_class_chain_slow(Selector, _Args, _Self, _State, ClassName, _ClassPid, Depth) when
+    Depth > ?MAX_HIERARCHY_DEPTH
+->
+    ?LOG_WARNING(
+        "lookup_in_class_chain_slow: max hierarchy depth ~p exceeded at ~p — possible cycle",
+        [?MAX_HIERARCHY_DEPTH, ClassName]
+    ),
+    {error,
+        beamtalk_error:new(
+            does_not_understand,
+            ClassName,
+            Selector,
+            <<"Hierarchy depth limit exceeded — possible cycle in class hierarchy">>
+        )};
+lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid, Depth) ->
     %% Check if this class has the method
     case beamtalk_object_class:has_method(ClassPid, Selector) of
         true ->
             %% Found the method - invoke it
             ?LOG_DEBUG("Found method ~p in class ~p (hierarchy walk)", [Selector, ClassName]),
-            invoke_method(ClassName, ClassPid, Selector, Args, Self, State);
+            invoke_method(ClassName, ClassPid, Selector, Args, Self, State, Depth);
         false ->
             %% Not found in this class - try superclass
             case beamtalk_object_class:superclass(ClassPid) of
@@ -282,7 +306,8 @@ lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid) ->
                             {error, beamtalk_error:new(class_not_found, SuperclassName, Selector)};
                         SuperclassPid ->
                             lookup_in_class_chain_slow(
-                                Selector, Args, Self, State, SuperclassName, SuperclassPid
+                                Selector, Args, Self, State, SuperclassName, SuperclassPid,
+                                Depth + 1
                             )
                     end
             end
@@ -297,14 +322,15 @@ lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid) ->
 %%
 %% The class process knows the module name, so we can determine which strategy to use.
 %% ClassPid is passed from the caller to avoid a redundant whereis_class lookup.
--spec invoke_method(class_name(), pid(), selector(), args(), bt_self(), state()) ->
+%% Depth is threaded through for cycle detection in continue_to_superclass.
+-spec invoke_method(class_name(), pid(), selector(), args(), bt_self(), state(), non_neg_integer()) ->
     dispatch_result().
-invoke_method(_ClassName, ClassPid, Selector, Args, Self, State) ->
+invoke_method(_ClassName, ClassPid, Selector, Args, Self, State, Depth) ->
     %% Get the module name for this class
     case beamtalk_object_class:module_name(ClassPid) of
         undefined ->
             %% Dynamic class or no module — continue to superclass (BT-427)
-            continue_to_superclass(Selector, Args, Self, State, ClassPid);
+            continue_to_superclass(Selector, Args, Self, State, ClassPid, Depth);
         ModuleName ->
             %% Ensure the module is loaded before checking exports.
             %% BEAM lazy-loads modules, and function_exported/3 only checks
@@ -316,7 +342,7 @@ invoke_method(_ClassName, ClassPid, Selector, Args, Self, State) ->
             case erlang:function_exported(ModuleName, dispatch, 4) of
                 false ->
                     %% Module exists but lacks dispatch/4 — continue to superclass (BT-427)
-                    continue_to_superclass(Selector, Args, Self, State, ClassPid);
+                    continue_to_superclass(Selector, Args, Self, State, ClassPid, Depth);
                 true ->
                     ?LOG_DEBUG("Invoking ~p:dispatch(~p, ...)", [ModuleName, Selector]),
                     %% Normalize the return value: dispatch/4 returns either
@@ -334,8 +360,9 @@ invoke_method(_ClassName, ClassPid, Selector, Args, Self, State) ->
 %% @private
 %% @doc Continue hierarchy walk to superclass when current class can't dispatch.
 %% Used when a class has no module or its module lacks dispatch/4 (abstract classes).
--spec continue_to_superclass(selector(), args(), bt_self(), state(), pid()) -> dispatch_result().
-continue_to_superclass(Selector, Args, Self, State, ClassPid) ->
+-spec continue_to_superclass(selector(), args(), bt_self(), state(), pid(), non_neg_integer()) ->
+    dispatch_result().
+continue_to_superclass(Selector, Args, Self, State, ClassPid, Depth) ->
     case beamtalk_object_class:superclass(ClassPid) of
         none ->
             %% Reached root without finding dispatchable method
@@ -353,7 +380,7 @@ continue_to_superclass(Selector, Args, Self, State, ClassPid) ->
                     {error, beamtalk_error:new(class_not_found, SuperclassName, Selector)};
                 SuperclassPid ->
                     lookup_in_class_chain_slow(
-                        Selector, Args, Self, State, SuperclassName, SuperclassPid
+                        Selector, Args, Self, State, SuperclassName, SuperclassPid, Depth + 1
                     )
             end
     end.
