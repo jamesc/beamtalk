@@ -4,6 +4,7 @@ expression: core_erlang
 ---
 module 'typed_value_type' ['new'/0, 'new'/1, 'getX'/1, 'getY'/1, 'distanceTo:'/2, 'printString'/1, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0]
   attributes ['on_load' = [{'register_class', 0}],
+     'beamtalk_class' = [{'TypedPoint', 'Object'}],
      'spec' =
         [{{'getX', 1}, [{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'map', 'any'}]}, {'type', 0, 'integer', []}]}]}],
      'spec' =

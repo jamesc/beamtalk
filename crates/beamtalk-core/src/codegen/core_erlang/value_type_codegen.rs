@@ -144,11 +144,15 @@ impl CoreErlangGenerator {
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
 
+        // BT-745: Build beamtalk_class attribute for dependency-ordered bootstrap
+        let beamtalk_class_attr = super::util::beamtalk_class_attribute(&module.classes);
+
         // Module header
         let module_name = self.module_name.clone();
         docs.push(docvec![
             format!("module '{}' [{}]\n", module_name, exports.join(", ")),
             "  attributes ['on_load' = [{'register_class', 0}]",
+            beamtalk_class_attr,
             spec_suffix,
             "]\n",
             "\n",

@@ -11,7 +11,20 @@
 //! - Class identity (DDD Value Object bundling module + class names)
 
 use super::{CoreErlangGenerator, Result};
-use crate::ast::Expression;
+use crate::ast::{ClassDefinition, Expression};
+
+/// BT-745: Generate a `'beamtalk_class' = [{...}]` attribute fragment for the
+/// module attributes section. Returns an empty string when classes is empty.
+pub(super) fn beamtalk_class_attribute(classes: &[ClassDefinition]) -> String {
+    if classes.is_empty() {
+        return String::new();
+    }
+    let entries: Vec<String> = classes
+        .iter()
+        .map(|c| format!("{{'{}', '{}'}}", c.name.name, c.superclass_name()))
+        .collect();
+    format!(",\n     'beamtalk_class' = [{}]", entries.join(", "))
+}
 
 /// Value Object: A class's compile-time identity.
 ///

@@ -34,18 +34,14 @@ impl CoreErlangGenerator {
     pub(super) fn generate_actor_module(&mut self, module: &Module) -> Result<Document<'static>> {
         // BT-213: Set context to Actor for this module
         self.context = CodeGenContext::Actor;
-
         self.setup_class_identity(module);
 
         // Check if module has class definitions for registration
         let has_classes = !module.classes.is_empty();
-
         // BT-403: Build sealed method exports
         let sealed_export_str = self.build_sealed_export_str(module);
-
         // BT-411: Build class method exports
         let class_method_export_str = Self::build_class_method_export_str(module);
-
         // BT-105: Check if class is abstract
         let is_abstract = module.classes.first().is_some_and(|c| c.is_abstract);
 
@@ -68,6 +64,9 @@ impl CoreErlangGenerator {
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
 
+        // BT-745: Build beamtalk_class attribute for dependency-ordered bootstrap
+        let beamtalk_class_attr = super::util::beamtalk_class_attribute(&module.classes);
+
         // Module header with exports and attributes
         let module_header = if has_classes {
             docvec![
@@ -78,6 +77,7 @@ impl CoreErlangGenerator {
                 "\n",
                 "  attributes ['behaviour' = ['gen_server'], \
                  'on_load' = [{'register_class', 0}]",
+                beamtalk_class_attr,
                 spec_suffix,
                 "]\n",
             ]
@@ -96,78 +96,42 @@ impl CoreErlangGenerator {
         docs.push(module_header);
         docs.push(Document::Str("\n"));
 
-        // Generate start_link/1 (standard gen_server entry point)
-        docs.push(self.generate_start_link_doc());
-        docs.push(Document::Str("\n"));
+        // Helper: push a generated function + newline separator
+        let mut push_fn = |doc: Document<'static>| -> Result<()> {
+            docs.push(doc);
+            docs.push(Document::Str("\n"));
+            Ok(())
+        };
+
+        push_fn(self.generate_start_link_doc())?;
 
         if is_abstract {
-            // BT-105: Abstract classes cannot be spawned — generate error methods
-            docs.push(self.generate_abstract_spawn_error_method()?);
-            docs.push(Document::Str("\n"));
-            docs.push(self.generate_abstract_spawn_with_args_error_method()?);
-            docs.push(Document::Str("\n"));
+            push_fn(self.generate_abstract_spawn_error_method()?)?;
+            push_fn(self.generate_abstract_spawn_with_args_error_method()?)?;
         } else {
-            // Generate spawn/0 function (class method to instantiate actors)
-            docs.push(self.generate_spawn_function(module)?);
-            docs.push(Document::Str("\n"));
-
-            // Generate spawn/1 function (class method with init args)
-            docs.push(self.generate_spawn_with_args_function(module)?);
-            docs.push(Document::Str("\n"));
+            push_fn(self.generate_spawn_function(module)?)?;
+            push_fn(self.generate_spawn_with_args_function(module)?)?;
         }
 
-        // BT-217: Generate new/0 and new/1 error methods for actors
-        docs.push(self.generate_actor_new_error_method()?);
-        docs.push(Document::Str("\n"));
-        docs.push(self.generate_actor_new_with_args_error_method()?);
-        docs.push(Document::Str("\n"));
-
-        // Generate superclass/0 class method for reflection
-        docs.push(self.generate_superclass_function(module)?);
-        docs.push(Document::Str("\n"));
-
-        // Generate init/1 function
-        docs.push(self.generate_init_function(module)?);
-        docs.push(Document::Str("\n"));
+        push_fn(self.generate_actor_new_error_method()?)?;
+        push_fn(self.generate_actor_new_with_args_error_method()?)?;
+        push_fn(self.generate_superclass_function(module)?)?;
+        push_fn(self.generate_init_function(module)?)?;
 
         // BT-403: Abstract classes skip gen_server callback scaffolding.
-        // These callbacks are only needed for instantiable actors that receive messages.
         if is_abstract {
-            // BT-403: Abstract classes need minimal gen_server callbacks
-            // (required by gen_server behaviour but will never be called)
-            docs.push(self.generate_abstract_callbacks_doc());
-            docs.push(Document::Str("\n"));
+            push_fn(self.generate_abstract_callbacks_doc())?;
         } else {
-            // Generate handle_cast/2 function with error handling
-            docs.push(self.generate_handle_cast()?);
-            docs.push(Document::Str("\n"));
-
-            // Generate handle_call/3 function with error handling
-            docs.push(self.generate_handle_call()?);
-            docs.push(Document::Str("\n"));
-
-            // Generate code_change/3 function
-            docs.push(self.generate_code_change()?);
-            docs.push(Document::Str("\n"));
-
-            // Generate terminate/2 function (per BT-29)
-            docs.push(self.generate_terminate(module)?);
-            docs.push(Document::Str("\n"));
-
-            // Generate safe_dispatch/3 with error isolation (per BT-29)
-            docs.push(self.generate_safe_dispatch()?);
-            docs.push(Document::Str("\n"));
+            push_fn(self.generate_handle_cast()?)?;
+            push_fn(self.generate_handle_call()?)?;
+            push_fn(self.generate_code_change()?)?;
+            push_fn(self.generate_terminate(module)?)?;
+            push_fn(self.generate_safe_dispatch()?)?;
         }
 
-        // Generate dispatch function with DNU fallback
-        docs.push(self.generate_dispatch(module)?);
-        docs.push(Document::Str("\n"));
-
-        // Generate method table
-        docs.push(self.generate_method_table(module)?);
-        docs.push(Document::Str("\n"));
-
-        // Generate has_method/1 for reflection (BT-242)
+        push_fn(self.generate_dispatch(module)?)?;
+        push_fn(self.generate_method_table(module)?)?;
+        // has_method/1 — no trailing newline needed
         docs.push(self.generate_has_method(module)?);
 
         // BT-403: Generate sealed method standalone functions
