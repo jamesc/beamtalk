@@ -17,6 +17,7 @@
 %%% ```
 
 -module(beamtalk_test_runner).
+-include("beamtalk.hrl").
 
 -export([
     %% TestRunner class-side primitives
@@ -192,11 +193,17 @@ run_method_by_name(ClassName, TestName) ->
 %% Returns {TestMethods, FlatMethods} where TestMethods is the sorted list
 %% of test* selectors and FlatMethods is a map of all methods (used by
 %% run_test_method to check for setUp/tearDown without module_info).
+%% Raises a structured error if the class is not registered.
 -spec discover_methods_via_registry(atom()) -> {[atom()], map()}.
 discover_methods_via_registry(ClassName) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
-            {[], #{}};
+            Msg = iolist_to_binary(
+                io_lib:format("Class '~s' not found in class registry", [ClassName])),
+            Error0 = beamtalk_error:new(class_not_found, 'TestRunner'),
+            Error1 = beamtalk_error:with_selector(Error0, 'run:'),
+            Error2 = beamtalk_error:with_message(Error1, Msg),
+            beamtalk_error:raise(Error2);
         ClassPid ->
             Methods = gen_server:call(ClassPid, methods),
             FlatMethods = maps:from_list([{M, true} || M <- Methods]),
@@ -256,7 +263,7 @@ make_test_result(Total, Passed, Failed, Duration, Tests) ->
 %% @doc Aggregate results from multiple classes into a single TestResult.
 -spec aggregate_results([map()]) -> map().
 aggregate_results(ClassResults) ->
-    {TotalSum, PassedSum, FailedSum, DurationSum, AllTests} =
+    {TotalSum, PassedSum, FailedSum, DurationSum, RevTests} =
         lists:foldl(
             fun(
                 #{
@@ -268,9 +275,11 @@ aggregate_results(ClassResults) ->
                 },
                 {TAcc, PAcc, FAcc, DAcc, TestsAcc}
             ) ->
-                {TAcc + T, PAcc + P, FAcc + F, DAcc + D, TestsAcc ++ Tests}
+                {TAcc + T, PAcc + P, FAcc + F, DAcc + D,
+                 lists:reverse(Tests) ++ TestsAcc}
             end,
             {0, 0, 0, 0.0, []},
             ClassResults
         ),
-    make_test_result(TotalSum, PassedSum, FailedSum, DurationSum, AllTests).
+    make_test_result(TotalSum, PassedSum, FailedSum, DurationSum,
+                     lists:reverse(RevTests)).

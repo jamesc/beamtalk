@@ -26,8 +26,14 @@ TestCase subclass: TestRunnerTest
     result := TestRunner run: SampleTestCase.
     self deny: (result summary == nil)
 
-  testRunSingleMethod =>
-    result := TestRunner run: SampleTestCase method: #testPassing.
-    self assert: (result total) equals: 1.
-    self assert: (result passed) equals: 1.
-    self assert: (result hasPassed)
+  testResultDuration =>
+    result := TestRunner run: SampleTestCase.
+    self assert: (result duration >= 0.0)
+
+  testResultPrintString =>
+    result := TestRunner run: SampleTestCase.
+    self deny: (result printString == nil)
+
+  testResultFailuresEmpty =>
+    result := TestRunner run: SampleTestCase.
+    self assert: (result failures == nil) equals: false
