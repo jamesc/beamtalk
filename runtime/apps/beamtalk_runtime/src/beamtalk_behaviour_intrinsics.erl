@@ -175,16 +175,21 @@ classInheritsFrom(Self, TargetClassObj) ->
     TargetName = gen_server:call(TargetPid, class_name),
     ClassPid = erlang:element(4, Self),
     SuperName = gen_server:call(ClassPid, superclass),
-    walk_hierarchy(
-        SuperName,
-        fun(CN, _CPid, _Acc) ->
-            case CN of
-                TargetName -> {halt, true};
-                _ -> {cont, false}
-            end
-        end,
-        false
-    ).
+    case SuperName of
+        TargetName ->
+            true;
+        _ ->
+            walk_hierarchy(
+                SuperName,
+                fun(CN, _CPid, _Acc) ->
+                    case CN of
+                        TargetName -> {halt, true};
+                        _ -> {cont, false}
+                    end
+                end,
+                false
+            )
+    end.
 
 %% @doc Test whether aBehaviour is the receiver or one of its ancestors.
 -spec classIncludesBehaviour(#beamtalk_object{}, #beamtalk_object{}) -> boolean().
@@ -193,16 +198,21 @@ classIncludesBehaviour(Self, TargetClassObj) ->
     SelfName = gen_server:call(SelfPid, class_name),
     TargetPid = erlang:element(4, TargetClassObj),
     TargetName = gen_server:call(TargetPid, class_name),
-    walk_hierarchy(
-        SelfName,
-        fun(CN, _CPid, _Acc) ->
-            case CN of
-                TargetName -> {halt, true};
-                _ -> {cont, false}
-            end
-        end,
-        false
-    ).
+    case SelfName of
+        TargetName ->
+            true;
+        _ ->
+            walk_hierarchy(
+                SelfName,
+                fun(CN, _CPid, _Acc) ->
+                    case CN of
+                        TargetName -> {halt, true};
+                        _ -> {cont, false}
+                    end
+                end,
+                false
+            )
+    end.
 
 %% @doc Walk the hierarchy and return the class object that defines the selector, or nil.
 -spec classWhichIncludesSelector(#beamtalk_object{}, atom()) -> #beamtalk_object{} | nil.
@@ -280,8 +290,8 @@ classClass(_Self) ->
 %%   {halt, Result}   — stop and return Result immediately
 %%
 %% Returns Acc when the chain is exhausted (none or unregistered class).
--spec walk_hierarchy(atom() | none, fun((atom(), pid(), Acc) -> {cont, Acc} | {halt, Acc}), Acc) ->
-    Acc.
+-spec walk_hierarchy(atom() | none, fun((atom(), pid(), Acc) -> {cont, Acc} | {halt, Result}), Acc) ->
+    Acc | Result.
 walk_hierarchy(none, _Fun, Acc) ->
     Acc;
 walk_hierarchy(ClassName, Fun, Acc) ->
