@@ -631,11 +631,11 @@ mod tests {
 
     #[test]
     fn cross_file_stdlib_class_with_source_loaded() {
-        let file_collection = Utf8PathBuf::from("lib/Collection.bt");
+        let file_collection = Utf8PathBuf::from("stdlib/src/Collection.bt");
         let module_collection = parse_source("abstract Object subclass: Collection");
         let hierarchy_collection = ClassHierarchy::build(&module_collection).0;
 
-        let file_set = Utf8PathBuf::from("lib/Set.bt");
+        let file_set = Utf8PathBuf::from("stdlib/src/Set.bt");
         let module_set = parse_source("sealed Collection subclass: Set");
         let hierarchy_set = ClassHierarchy::build(&module_set).0;
 

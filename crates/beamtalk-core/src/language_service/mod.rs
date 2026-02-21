@@ -836,7 +836,7 @@ mod tests {
     #[test]
     fn goto_definition_stdlib_class() {
         let stdlib = vec![(
-            Utf8PathBuf::from("lib/Counter.bt"),
+            Utf8PathBuf::from("stdlib/src/Counter.bt"),
             "Object subclass: Counter\n  increment => 1".to_string(),
         )];
         let index = ProjectIndex::with_stdlib(&stdlib);
@@ -844,7 +844,7 @@ mod tests {
 
         // Add the stdlib file as an open file too so cross-file lookup can find it
         service.update_file(
-            Utf8PathBuf::from("lib/Counter.bt"),
+            Utf8PathBuf::from("stdlib/src/Counter.bt"),
             "Object subclass: Counter\n  increment => 1".to_string(),
         );
 
@@ -855,15 +855,15 @@ mod tests {
         let def = service.goto_definition(&user_file, Position::new(0, 5));
         assert!(def.is_some());
         let loc = def.unwrap();
-        assert_eq!(loc.file, Utf8PathBuf::from("lib/Counter.bt"));
+        assert_eq!(loc.file, Utf8PathBuf::from("stdlib/src/Counter.bt"));
     }
 
     #[test]
     fn goto_definition_superclass_in_class_header() {
         let mut service = SimpleLanguageService::new();
 
-        let collection_file = Utf8PathBuf::from("lib/Collection.bt");
-        let set_file = Utf8PathBuf::from("lib/Set.bt");
+        let collection_file = Utf8PathBuf::from("stdlib/src/Collection.bt");
+        let set_file = Utf8PathBuf::from("stdlib/src/Set.bt");
 
         service.update_file(
             collection_file.clone(),
@@ -884,8 +884,8 @@ mod tests {
     #[test]
     fn goto_definition_type_annotation_identifier() {
         let mut service = SimpleLanguageService::new();
-        let integer_file = Utf8PathBuf::from("lib/Integer.bt");
-        let tuple_file = Utf8PathBuf::from("lib/Tuple.bt");
+        let integer_file = Utf8PathBuf::from("stdlib/src/Integer.bt");
+        let tuple_file = Utf8PathBuf::from("stdlib/src/Tuple.bt");
 
         service.update_file(
             integer_file.clone(),
