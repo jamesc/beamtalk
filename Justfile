@@ -134,7 +134,17 @@ build-examples: build-stdlib
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Run all linting and formatting checks
-lint: clippy fmt-check dialyzer
+lint: lint-rust lint-erlang lint-js
+
+# Lint Rust: clippy + formatting check
+lint-rust: clippy fmt-check
+
+# Lint Erlang: Dialyzer type checking
+lint-erlang: dialyzer
+
+# Lint JS/TS: placeholder for future JS tooling
+lint-js:
+    @echo "⏭️  No JS linting configured"
 
 # Run clippy (Rust linter) - warnings are errors
 clippy:

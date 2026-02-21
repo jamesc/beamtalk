@@ -105,6 +105,10 @@ _rel/
 # Claude Code local settings (personal, not shared)
 .claude/settings.local.json
 
+# Lint stamp files (track fingerprints for pre-push hook)
+.lint-erlang-stamp
+.lint-js-stamp
+
 # Session and temporary files
 *.tmp
 *.log

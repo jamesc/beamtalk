@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+#
+# Pre-push hook: run linting before pushing.
+#
+# - lint-rust (clippy + fmt-check) always runs (~1s)
+# - lint-erlang (dialyzer) runs only if Erlang sources changed (~9s)
+# - lint-js runs only if JS/TS sources changed
+#
+# Stamp files (.lint-erlang-stamp, .lint-js-stamp) track the last-linted
+# fingerprint of each language's sources.
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+ERLANG_STAMP="$REPO_ROOT/.lint-erlang-stamp"
+JS_STAMP="$REPO_ROOT/.lint-js-stamp"
+
+# Compute a fingerprint of tracked files matching the given patterns.
+fingerprint() {
+  git ls-files -- "$@" | git hash-object --stdin-paths | { sha1sum 2>/dev/null || shasum -a 1; } | cut -d' ' -f1
+}
+
+stamp_matches() {
+  local stamp_file="$1"
+  local current_fp="$2"
+  [[ -f "$stamp_file" ]] && [[ "$(cat "$stamp_file")" == "$current_fp" ]]
+}
+
+echo "🔍 Running lint-rust..."
+just lint-rust
+
+ERLANG_FP="$(fingerprint '*.erl' '*.hrl')"
+if stamp_matches "$ERLANG_STAMP" "$ERLANG_FP"; then
+  echo "⏭️  lint-erlang: no Erlang changes since last lint, skipping"
+else
+  echo "🔬 Running lint-erlang..."
+  just lint-erlang
+  echo "$ERLANG_FP" > "$ERLANG_STAMP"
+fi
+
+JS_FP="$(fingerprint '*.js' '*.ts' '*.jsx' '*.tsx')"
+if stamp_matches "$JS_STAMP" "$JS_FP"; then
+  echo "⏭️  lint-js: no JS/TS changes since last lint, skipping"
+else
+  echo "🔎 Running lint-js..."
+  just lint-js
+  echo "$JS_FP" > "$JS_STAMP"
+fi
+
+echo "✅ All lint checks passed"
