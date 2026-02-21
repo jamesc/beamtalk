@@ -51,7 +51,9 @@ kind_to_class_type_error_test() ->
     ?assertEqual('TypeError', beamtalk_exception_handler:kind_to_class(type_error)).
 
 kind_to_class_instantiation_error_test() ->
-    ?assertEqual('InstantiationError', beamtalk_exception_handler:kind_to_class(instantiation_error)).
+    ?assertEqual(
+        'InstantiationError', beamtalk_exception_handler:kind_to_class(instantiation_error)
+    ).
 
 kind_to_class_runtime_error_test() ->
     ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(runtime_error)).
@@ -127,193 +129,190 @@ wrap_runtime_error_kind_becomes_runtime_error_test() ->
 %%% is_exception_class/1, matches_class/2 now delegate to class hierarchy
 
 hierarchy_test_() ->
-    {setup,
-     fun setup_class_system/0,
-     fun teardown_class_system/1,
-     [
-      %% is_exception_class/1 tests (BT-475 — derived from class system)
-      {"Exception is an exception class",
-       fun() -> ?assertEqual(true, beamtalk_exception_handler:is_exception_class('Exception')) end},
-      {"Error is an exception class",
-       fun() -> ?assertEqual(true, beamtalk_exception_handler:is_exception_class('Error')) end},
-      {"RuntimeError is an exception class",
-       fun() -> ?assertEqual(true, beamtalk_exception_handler:is_exception_class('RuntimeError')) end},
-      {"TypeError is an exception class",
-       fun() -> ?assertEqual(true, beamtalk_exception_handler:is_exception_class('TypeError')) end},
-      {"InstantiationError is an exception class",
-       fun() -> ?assertEqual(true, beamtalk_exception_handler:is_exception_class('InstantiationError')) end},
-      {"Dictionary is not an exception class",
-       fun() -> ?assertEqual(false, beamtalk_exception_handler:is_exception_class('Dictionary')) end},
-      {"Integer is not an exception class",
-       fun() -> ?assertEqual(false, beamtalk_exception_handler:is_exception_class('Integer')) end},
-      {"Unregistered class is not an exception class",
-       fun() -> ?assertEqual(false, beamtalk_exception_handler:is_exception_class('NonExistent')) end},
+    {setup, fun setup_class_system/0, fun teardown_class_system/1, [
+        %% is_exception_class/1 tests (BT-475 — derived from class system)
+        {"Exception is an exception class", fun() ->
+            ?assertEqual(true, beamtalk_exception_handler:is_exception_class('Exception'))
+        end},
+        {"Error is an exception class", fun() ->
+            ?assertEqual(true, beamtalk_exception_handler:is_exception_class('Error'))
+        end},
+        {"RuntimeError is an exception class", fun() ->
+            ?assertEqual(true, beamtalk_exception_handler:is_exception_class('RuntimeError'))
+        end},
+        {"TypeError is an exception class", fun() ->
+            ?assertEqual(true, beamtalk_exception_handler:is_exception_class('TypeError'))
+        end},
+        {"InstantiationError is an exception class", fun() ->
+            ?assertEqual(true, beamtalk_exception_handler:is_exception_class('InstantiationError'))
+        end},
+        {"Dictionary is not an exception class", fun() ->
+            ?assertEqual(false, beamtalk_exception_handler:is_exception_class('Dictionary'))
+        end},
+        {"Integer is not an exception class", fun() ->
+            ?assertEqual(false, beamtalk_exception_handler:is_exception_class('Integer'))
+        end},
+        {"Unregistered class is not an exception class", fun() ->
+            ?assertEqual(false, beamtalk_exception_handler:is_exception_class('NonExistent'))
+        end},
 
-      %% matches_class/2 with nil (catch all)
-      {"nil matches any wrapped error",
-       fun() ->
-           Error = beamtalk_error:new(does_not_understand, 'Integer'),
-           Wrapped = beamtalk_exception_handler:wrap(Error),
-           ?assertEqual(true, beamtalk_exception_handler:matches_class(nil, Wrapped))
-       end},
+        %% matches_class/2 with nil (catch all)
+        {"nil matches any wrapped error", fun() ->
+            Error = beamtalk_error:new(does_not_understand, 'Integer'),
+            Wrapped = beamtalk_exception_handler:wrap(Error),
+            ?assertEqual(true, beamtalk_exception_handler:matches_class(nil, Wrapped))
+        end},
 
-      %% matches_class/2 with atom class names
-      {"Exception atom matches wrapped error",
-       fun() ->
-           Error = beamtalk_error:new(does_not_understand, 'Integer'),
-           Wrapped = beamtalk_exception_handler:wrap(Error),
-           ?assertEqual(true, beamtalk_exception_handler:matches_class('Exception', Wrapped))
-       end},
+        %% matches_class/2 with atom class names
+        {"Exception atom matches wrapped error", fun() ->
+            Error = beamtalk_error:new(does_not_understand, 'Integer'),
+            Wrapped = beamtalk_exception_handler:wrap(Error),
+            ?assertEqual(true, beamtalk_exception_handler:matches_class('Exception', Wrapped))
+        end},
 
-      %% matches_class/2 with kind atoms (backward compat removed — kinds are not class names)
-      {"kind atom does not match directly (not a class name)",
-       fun() ->
-           Error = beamtalk_error:new(does_not_understand, 'Integer'),
-           Wrapped = beamtalk_exception_handler:wrap(Error),
-           ?assertEqual(false, beamtalk_exception_handler:matches_class(does_not_understand, Wrapped))
-       end},
+        %% matches_class/2 with kind atoms (backward compat removed — kinds are not class names)
+        {"kind atom does not match directly (not a class name)", fun() ->
+            Error = beamtalk_error:new(does_not_understand, 'Integer'),
+            Wrapped = beamtalk_exception_handler:wrap(Error),
+            ?assertEqual(
+                false, beamtalk_exception_handler:matches_class(does_not_understand, Wrapped)
+            )
+        end},
 
-      %% Hierarchy-aware matches_class/2 (BT-452/BT-475)
-      {"RuntimeError catches does_not_understand",
-       fun() ->
-           Error = beamtalk_error:new(does_not_understand, 'Integer'),
-           Wrapped = beamtalk_exception_handler:wrap(Error),
-           ?assertEqual(true, beamtalk_exception_handler:matches_class('RuntimeError', Wrapped))
-       end},
-      {"RuntimeError rejects type_error",
-       fun() ->
-           Error = beamtalk_error:new(type_error, 'String'),
-           Wrapped = beamtalk_exception_handler:wrap(Error),
-           ?assertEqual(false, beamtalk_exception_handler:matches_class('RuntimeError', Wrapped))
-       end},
-      {"TypeError catches type_error",
-       fun() ->
-           Error = beamtalk_error:new(type_error, 'String'),
-           Wrapped = beamtalk_exception_handler:wrap(Error),
-           ?assertEqual(true, beamtalk_exception_handler:matches_class('TypeError', Wrapped))
-       end},
-      {"TypeError rejects does_not_understand",
-       fun() ->
-           Error = beamtalk_error:new(does_not_understand, 'Integer'),
-           Wrapped = beamtalk_exception_handler:wrap(Error),
-           ?assertEqual(false, beamtalk_exception_handler:matches_class('TypeError', Wrapped))
-       end},
-      {"Error catches all subclasses",
-       fun() ->
-           DNU = beamtalk_exception_handler:wrap(beamtalk_error:new(does_not_understand, 'Integer')),
-           TE = beamtalk_exception_handler:wrap(beamtalk_error:new(type_error, 'String')),
-           IE = beamtalk_exception_handler:wrap(beamtalk_error:new(instantiation_error, 'Actor')),
-           ?assertEqual(true, beamtalk_exception_handler:matches_class('Error', DNU)),
-           ?assertEqual(true, beamtalk_exception_handler:matches_class('Error', TE)),
-           ?assertEqual(true, beamtalk_exception_handler:matches_class('Error', IE))
-       end},
-      {"Exception catches everything",
-       fun() ->
-           DNU = beamtalk_exception_handler:wrap(beamtalk_error:new(does_not_understand, 'Integer')),
-           TE = beamtalk_exception_handler:wrap(beamtalk_error:new(type_error, 'String')),
-           ?assertEqual(true, beamtalk_exception_handler:matches_class('Exception', DNU)),
-           ?assertEqual(true, beamtalk_exception_handler:matches_class('Exception', TE))
-       end},
+        %% Hierarchy-aware matches_class/2 (BT-452/BT-475)
+        {"RuntimeError catches does_not_understand", fun() ->
+            Error = beamtalk_error:new(does_not_understand, 'Integer'),
+            Wrapped = beamtalk_exception_handler:wrap(Error),
+            ?assertEqual(true, beamtalk_exception_handler:matches_class('RuntimeError', Wrapped))
+        end},
+        {"RuntimeError rejects type_error", fun() ->
+            Error = beamtalk_error:new(type_error, 'String'),
+            Wrapped = beamtalk_exception_handler:wrap(Error),
+            ?assertEqual(false, beamtalk_exception_handler:matches_class('RuntimeError', Wrapped))
+        end},
+        {"TypeError catches type_error", fun() ->
+            Error = beamtalk_error:new(type_error, 'String'),
+            Wrapped = beamtalk_exception_handler:wrap(Error),
+            ?assertEqual(true, beamtalk_exception_handler:matches_class('TypeError', Wrapped))
+        end},
+        {"TypeError rejects does_not_understand", fun() ->
+            Error = beamtalk_error:new(does_not_understand, 'Integer'),
+            Wrapped = beamtalk_exception_handler:wrap(Error),
+            ?assertEqual(false, beamtalk_exception_handler:matches_class('TypeError', Wrapped))
+        end},
+        {"Error catches all subclasses", fun() ->
+            DNU = beamtalk_exception_handler:wrap(
+                beamtalk_error:new(does_not_understand, 'Integer')
+            ),
+            TE = beamtalk_exception_handler:wrap(beamtalk_error:new(type_error, 'String')),
+            IE = beamtalk_exception_handler:wrap(beamtalk_error:new(instantiation_error, 'Actor')),
+            ?assertEqual(true, beamtalk_exception_handler:matches_class('Error', DNU)),
+            ?assertEqual(true, beamtalk_exception_handler:matches_class('Error', TE)),
+            ?assertEqual(true, beamtalk_exception_handler:matches_class('Error', IE))
+        end},
+        {"Exception catches everything", fun() ->
+            DNU = beamtalk_exception_handler:wrap(
+                beamtalk_error:new(does_not_understand, 'Integer')
+            ),
+            TE = beamtalk_exception_handler:wrap(beamtalk_error:new(type_error, 'String')),
+            ?assertEqual(true, beamtalk_exception_handler:matches_class('Exception', DNU)),
+            ?assertEqual(true, beamtalk_exception_handler:matches_class('Exception', TE))
+        end},
 
-      %% Metaclass ("ClassName class") variant tests
-      {"'RuntimeError class' catches does_not_understand",
-       fun() ->
-           Error = beamtalk_error:new(does_not_understand, 'Integer'),
-           Wrapped = beamtalk_exception_handler:wrap(Error),
-           ?assertEqual(true, beamtalk_exception_handler:matches_class('RuntimeError class', Wrapped))
-       end},
-      {"'TypeError class' catches type_error",
-       fun() ->
-           Error = beamtalk_error:new(type_error, 'String'),
-           Wrapped = beamtalk_exception_handler:wrap(Error),
-           ?assertEqual(true, beamtalk_exception_handler:matches_class('TypeError class', Wrapped))
-       end},
-      {"'Exception class' catches everything",
-       fun() ->
-           Error = beamtalk_error:new(does_not_understand, 'Integer'),
-           Wrapped = beamtalk_exception_handler:wrap(Error),
-           ?assertEqual(true, beamtalk_exception_handler:matches_class('Exception class', Wrapped))
-       end},
+        %% Metaclass ("ClassName class") variant tests
+        {"'RuntimeError class' catches does_not_understand", fun() ->
+            Error = beamtalk_error:new(does_not_understand, 'Integer'),
+            Wrapped = beamtalk_exception_handler:wrap(Error),
+            ?assertEqual(
+                true, beamtalk_exception_handler:matches_class('RuntimeError class', Wrapped)
+            )
+        end},
+        {"'TypeError class' catches type_error", fun() ->
+            Error = beamtalk_error:new(type_error, 'String'),
+            Wrapped = beamtalk_exception_handler:wrap(Error),
+            ?assertEqual(true, beamtalk_exception_handler:matches_class('TypeError class', Wrapped))
+        end},
+        {"'Exception class' catches everything", fun() ->
+            Error = beamtalk_error:new(does_not_understand, 'Integer'),
+            Wrapped = beamtalk_exception_handler:wrap(Error),
+            ?assertEqual(true, beamtalk_exception_handler:matches_class('Exception class', Wrapped))
+        end},
 
-      %% BT-480: User-defined error subclasses
-      {"wrap uses exception class from error record",
-       fun() ->
-           %% When error.class is an exception class, wrap should use it
-           Error = #beamtalk_error{
-               kind = signal,
-               class = 'RuntimeError',
-               selector = undefined,
-               message = <<"test">>,
-               hint = undefined,
-               details = #{}
-           },
-           #{'$beamtalk_class' := Class} = beamtalk_exception_handler:wrap(Error),
-           ?assertEqual('RuntimeError', Class)
-       end},
-      {"wrap falls back to kind_to_class for non-exception class",
-       fun() ->
-           %% When error.class is NOT an exception class, fall back to kind_to_class
-           Error = beamtalk_error:new(does_not_understand, 'Integer'),
-           #{'$beamtalk_class' := Class} = beamtalk_exception_handler:wrap(Error),
-           ?assertEqual('RuntimeError', Class)
-       end},
-      {"matches_class_name uses exception class from error record",
-       fun() ->
-           %% Error with exception class in error.class should match by that class
-           Error = #beamtalk_error{
-               kind = signal,
-               class = 'RuntimeError',
-               selector = undefined,
-               message = <<"test">>,
-               hint = undefined,
-               details = #{}
-           },
-           Wrapped = beamtalk_exception_handler:wrap(Error),
-           ?assertEqual(true, beamtalk_exception_handler:matches_class('RuntimeError', Wrapped)),
-           ?assertEqual(true, beamtalk_exception_handler:matches_class('Error', Wrapped)),
-           ?assertEqual(true, beamtalk_exception_handler:matches_class('Exception', Wrapped))
-       end},
-      {"matches_class_name rejects non-matching exception class",
-       fun() ->
-           Error = #beamtalk_error{
-               kind = signal,
-               class = 'RuntimeError',
-               selector = undefined,
-               message = <<"test">>,
-               hint = undefined,
-               details = #{}
-           },
-           Wrapped = beamtalk_exception_handler:wrap(Error),
-           ?assertEqual(false, beamtalk_exception_handler:matches_class('TypeError', Wrapped))
-       end},
-      {"signal_message/2 preserves exception class",
-       fun() ->
-           try
-               beamtalk_exception_handler:signal_message(<<"test msg">>, 'RuntimeError'),
-               ?assert(false)  % Should never reach here — signal_message is no_return
-           catch
-               error:#{error := Inner} ->
-                   ?assertEqual('RuntimeError', Inner#beamtalk_error.class),
-                   ?assertEqual(signal, Inner#beamtalk_error.kind),
-                   ?assertEqual(<<"test msg">>, Inner#beamtalk_error.message)
-           end
-       end}
-     ]}.
+        %% BT-480: User-defined error subclasses
+        {"wrap uses exception class from error record", fun() ->
+            %% When error.class is an exception class, wrap should use it
+            Error = #beamtalk_error{
+                kind = signal,
+                class = 'RuntimeError',
+                selector = undefined,
+                message = <<"test">>,
+                hint = undefined,
+                details = #{}
+            },
+            #{'$beamtalk_class' := Class} = beamtalk_exception_handler:wrap(Error),
+            ?assertEqual('RuntimeError', Class)
+        end},
+        {"wrap falls back to kind_to_class for non-exception class", fun() ->
+            %% When error.class is NOT an exception class, fall back to kind_to_class
+            Error = beamtalk_error:new(does_not_understand, 'Integer'),
+            #{'$beamtalk_class' := Class} = beamtalk_exception_handler:wrap(Error),
+            ?assertEqual('RuntimeError', Class)
+        end},
+        {"matches_class_name uses exception class from error record", fun() ->
+            %% Error with exception class in error.class should match by that class
+            Error = #beamtalk_error{
+                kind = signal,
+                class = 'RuntimeError',
+                selector = undefined,
+                message = <<"test">>,
+                hint = undefined,
+                details = #{}
+            },
+            Wrapped = beamtalk_exception_handler:wrap(Error),
+            ?assertEqual(true, beamtalk_exception_handler:matches_class('RuntimeError', Wrapped)),
+            ?assertEqual(true, beamtalk_exception_handler:matches_class('Error', Wrapped)),
+            ?assertEqual(true, beamtalk_exception_handler:matches_class('Exception', Wrapped))
+        end},
+        {"matches_class_name rejects non-matching exception class", fun() ->
+            Error = #beamtalk_error{
+                kind = signal,
+                class = 'RuntimeError',
+                selector = undefined,
+                message = <<"test">>,
+                hint = undefined,
+                details = #{}
+            },
+            Wrapped = beamtalk_exception_handler:wrap(Error),
+            ?assertEqual(false, beamtalk_exception_handler:matches_class('TypeError', Wrapped))
+        end},
+        {"signal_message/2 preserves exception class", fun() ->
+            try
+                beamtalk_exception_handler:signal_message(<<"test msg">>, 'RuntimeError'),
+                % Should never reach here — signal_message is no_return
+                ?assert(false)
+            catch
+                error:#{error := Inner} ->
+                    ?assertEqual('RuntimeError', Inner#beamtalk_error.class),
+                    ?assertEqual(signal, Inner#beamtalk_error.kind),
+                    ?assertEqual(<<"test msg">>, Inner#beamtalk_error.message)
+            end
+        end}
+    ]}.
 
 %% BT-480: signal_from_class/1 unit test
 signal_from_class_test_() ->
-    {"signal_from_class preserves class and uses class name as message",
-     fun() ->
-         try
-             beamtalk_exception_handler:signal_from_class('MyCustomError'),
-             ?assert(false)  % Should never reach here — signal_from_class is no_return
-         catch
-             error:#{error := Inner} ->
-                 ?assertEqual('MyCustomError', Inner#beamtalk_error.class),
-                 ?assertEqual(signal, Inner#beamtalk_error.kind),
-                 ?assertEqual(<<"MyCustomError">>, Inner#beamtalk_error.message)
-         end
-     end}.
+    {"signal_from_class preserves class and uses class name as message", fun() ->
+        try
+            beamtalk_exception_handler:signal_from_class('MyCustomError'),
+            % Should never reach here — signal_from_class is no_return
+            ?assert(false)
+        catch
+            error:#{error := Inner} ->
+                ?assertEqual('MyCustomError', Inner#beamtalk_error.class),
+                ?assertEqual(signal, Inner#beamtalk_error.kind),
+                ?assertEqual(<<"MyCustomError">>, Inner#beamtalk_error.message)
+        end
+    end}.
 
 %%% ===================================================================
 %%% dispatch/3 tests — pure, no class system needed
@@ -332,13 +331,17 @@ make_test_exception() ->
 
 dispatch_message_test() ->
     Ex = make_test_exception(),
-    ?assertEqual(<<"Integer does not understand 'foo'">>,
-                 beamtalk_exception_handler:dispatch('message', [], Ex)).
+    ?assertEqual(
+        <<"Integer does not understand 'foo'">>,
+        beamtalk_exception_handler:dispatch('message', [], Ex)
+    ).
 
 dispatch_hint_test() ->
     Ex = make_test_exception(),
-    ?assertEqual(<<"Check spelling">>,
-                 beamtalk_exception_handler:dispatch('hint', [], Ex)).
+    ?assertEqual(
+        <<"Check spelling">>,
+        beamtalk_exception_handler:dispatch('hint', [], Ex)
+    ).
 
 dispatch_hint_nil_when_undefined_test() ->
     Error = beamtalk_error:new(runtime_error, 'SomeClass'),
@@ -347,13 +350,17 @@ dispatch_hint_nil_when_undefined_test() ->
 
 dispatch_kind_test() ->
     Ex = make_test_exception(),
-    ?assertEqual(does_not_understand,
-                 beamtalk_exception_handler:dispatch('kind', [], Ex)).
+    ?assertEqual(
+        does_not_understand,
+        beamtalk_exception_handler:dispatch('kind', [], Ex)
+    ).
 
 dispatch_selector_test() ->
     Ex = make_test_exception(),
-    ?assertEqual('foo',
-                 beamtalk_exception_handler:dispatch('selector', [], Ex)).
+    ?assertEqual(
+        'foo',
+        beamtalk_exception_handler:dispatch('selector', [], Ex)
+    ).
 
 dispatch_selector_nil_when_undefined_test() ->
     Error = beamtalk_error:new(runtime_error, 'SomeClass'),
@@ -362,8 +369,10 @@ dispatch_selector_nil_when_undefined_test() ->
 
 dispatch_error_class_test() ->
     Ex = make_test_exception(),
-    ?assertEqual('Integer',
-                 beamtalk_exception_handler:dispatch('errorClass', [], Ex)).
+    ?assertEqual(
+        'Integer',
+        beamtalk_exception_handler:dispatch('errorClass', [], Ex)
+    ).
 
 dispatch_print_string_test() ->
     Ex = make_test_exception(),
@@ -378,18 +387,24 @@ dispatch_describe_same_as_print_string_test() ->
 
 dispatch_stack_trace_with_frames_test() ->
     Ex = (make_test_exception())#{stacktrace => [frame1, frame2]},
-    ?assertEqual([frame1, frame2],
-                 beamtalk_exception_handler:dispatch('stackTrace', [], Ex)).
+    ?assertEqual(
+        [frame1, frame2],
+        beamtalk_exception_handler:dispatch('stackTrace', [], Ex)
+    ).
 
 dispatch_stack_trace_empty_when_missing_test() ->
     Ex = make_test_exception(),
-    ?assertEqual([],
-                 beamtalk_exception_handler:dispatch('stackTrace', [], Ex)).
+    ?assertEqual(
+        [],
+        beamtalk_exception_handler:dispatch('stackTrace', [], Ex)
+    ).
 
 dispatch_class_test() ->
     Ex = make_test_exception(),
-    ?assertEqual('RuntimeError',
-                 beamtalk_exception_handler:dispatch('class', [], Ex)).
+    ?assertEqual(
+        'RuntimeError',
+        beamtalk_exception_handler:dispatch('class', [], Ex)
+    ).
 
 dispatch_signal_raises_test() ->
     Ex = make_test_exception(),

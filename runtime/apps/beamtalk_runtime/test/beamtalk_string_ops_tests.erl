@@ -25,16 +25,31 @@ at_emoji_test() ->
     ?assertEqual(<<"👋"/utf8>>, beamtalk_string_ops:at(<<"hi👋"/utf8>>, 3)).
 
 at_out_of_bounds_test() ->
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds, class = 'String', selector = 'at:'}},
-                 beamtalk_string_ops:at(<<"hi">>, 10)).
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = index_out_of_bounds, class = 'String', selector = 'at:'}
+        },
+        beamtalk_string_ops:at(<<"hi">>, 10)
+    ).
 
 at_zero_index_test() ->
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds, class = 'String', selector = 'at:'}},
-                 beamtalk_string_ops:at(<<"hi">>, 0)).
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = index_out_of_bounds, class = 'String', selector = 'at:'}
+        },
+        beamtalk_string_ops:at(<<"hi">>, 0)
+    ).
 
 at_negative_index_test() ->
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds, class = 'String', selector = 'at:'}},
-                 beamtalk_string_ops:at(<<"hi">>, -1)).
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = index_out_of_bounds, class = 'String', selector = 'at:'}
+        },
+        beamtalk_string_ops:at(<<"hi">>, -1)
+    ).
 
 %%% ============================================================================
 %%% capitalize/1
@@ -150,20 +165,28 @@ index_of_utf8_test() ->
 %%% ============================================================================
 
 split_on_comma_test() ->
-    ?assertEqual([<<"a">>, <<"b">>, <<"c">>],
-                 beamtalk_string_ops:split_on(<<"a,b,c">>, <<",">>)).
+    ?assertEqual(
+        [<<"a">>, <<"b">>, <<"c">>],
+        beamtalk_string_ops:split_on(<<"a,b,c">>, <<",">>)
+    ).
 
 split_on_no_match_test() ->
-    ?assertEqual([<<"hello">>],
-                 beamtalk_string_ops:split_on(<<"hello">>, <<",">>)).
+    ?assertEqual(
+        [<<"hello">>],
+        beamtalk_string_ops:split_on(<<"hello">>, <<",">>)
+    ).
 
 split_on_multi_char_test() ->
-    ?assertEqual([<<"a">>, <<"b">>],
-                 beamtalk_string_ops:split_on(<<"a::b">>, <<"::">>)).
+    ?assertEqual(
+        [<<"a">>, <<"b">>],
+        beamtalk_string_ops:split_on(<<"a::b">>, <<"::">>)
+    ).
 
 split_on_empty_pattern_test() ->
-    ?assertEqual([<<"hello">>],
-                 beamtalk_string_ops:split_on(<<"hello">>, <<>>)).
+    ?assertEqual(
+        [<<"hello">>],
+        beamtalk_string_ops:split_on(<<"hello">>, <<>>)
+    ).
 
 %%% ============================================================================
 %%% repeat/2
@@ -183,15 +206,19 @@ repeat_one_test() ->
 %%% ============================================================================
 
 as_list_simple_test() ->
-    ?assertEqual([<<"h">>, <<"e">>, <<"l">>, <<"l">>, <<"o">>],
-                 beamtalk_string_ops:as_list(<<"hello">>)).
+    ?assertEqual(
+        [<<"h">>, <<"e">>, <<"l">>, <<"l">>, <<"o">>],
+        beamtalk_string_ops:as_list(<<"hello">>)
+    ).
 
 as_list_empty_test() ->
     ?assertEqual([], beamtalk_string_ops:as_list(<<>>)).
 
 as_list_utf8_test() ->
-    ?assertEqual([<<"c">>, <<"a">>, <<"f">>, <<"é"/utf8>>],
-                 beamtalk_string_ops:as_list(<<"café"/utf8>>)).
+    ?assertEqual(
+        [<<"c">>, <<"a">>, <<"f">>, <<"é"/utf8>>],
+        beamtalk_string_ops:as_list(<<"café"/utf8>>)
+    ).
 
 %%% ============================================================================
 %%% each/2
@@ -204,17 +231,33 @@ each_calls_block_test() ->
     Ref = make_ref(),
     Self = self(),
     beamtalk_string_ops:each(<<"ab">>, fun(G) -> Self ! {Ref, G} end),
-    ?assertEqual(<<"a">>, receive {Ref, M1} -> M1 after 100 -> timeout end),
-    ?assertEqual(<<"b">>, receive {Ref, M2} -> M2 after 100 -> timeout end).
+    ?assertEqual(
+        <<"a">>,
+        receive
+            {Ref, M1} -> M1
+        after 100 -> timeout
+        end
+    ),
+    ?assertEqual(
+        <<"b">>,
+        receive
+            {Ref, M2} -> M2
+        after 100 -> timeout
+        end
+    ).
 
 %%% ============================================================================
 %%% collect/2
 %%% ============================================================================
 
 collect_uppercase_test() ->
-    ?assertEqual([<<"H">>, <<"I">>],
-                 beamtalk_string_ops:collect(<<"hi">>,
-                     fun(G) -> unicode:characters_to_binary(string:uppercase(G)) end)).
+    ?assertEqual(
+        [<<"H">>, <<"I">>],
+        beamtalk_string_ops:collect(
+            <<"hi">>,
+            fun(G) -> unicode:characters_to_binary(string:uppercase(G)) end
+        )
+    ).
 
 collect_empty_test() ->
     ?assertEqual([], beamtalk_string_ops:collect(<<>>, fun(X) -> X end)).
@@ -225,65 +268,93 @@ collect_empty_test() ->
 
 select_vowels_test() ->
     Vowels = [<<"a">>, <<"e">>, <<"i">>, <<"o">>, <<"u">>],
-    ?assertEqual(<<"eoo">>,
-                 beamtalk_string_ops:select(<<"hello world">>,
-                    fun(G) -> lists:member(G, Vowels) end)).
+    ?assertEqual(
+        <<"eoo">>,
+        beamtalk_string_ops:select(
+            <<"hello world">>,
+            fun(G) -> lists:member(G, Vowels) end
+        )
+    ).
 
 select_all_test() ->
-    ?assertEqual(<<"hi">>,
-                 beamtalk_string_ops:select(<<"hi">>, fun(_) -> true end)).
+    ?assertEqual(
+        <<"hi">>,
+        beamtalk_string_ops:select(<<"hi">>, fun(_) -> true end)
+    ).
 
 select_none_test() ->
-    ?assertEqual(<<>>,
-                 beamtalk_string_ops:select(<<"hi">>, fun(_) -> false end)).
+    ?assertEqual(
+        <<>>,
+        beamtalk_string_ops:select(<<"hi">>, fun(_) -> false end)
+    ).
 
 %%% ============================================================================
 %%% lines/1
 %%% ============================================================================
 
 lines_newline_test() ->
-    ?assertEqual([<<"a">>, <<"b">>, <<"c">>],
-                 beamtalk_string_ops:lines(<<"a\nb\nc">>)).
+    ?assertEqual(
+        [<<"a">>, <<"b">>, <<"c">>],
+        beamtalk_string_ops:lines(<<"a\nb\nc">>)
+    ).
 
 lines_crlf_test() ->
-    ?assertEqual([<<"a">>, <<"b">>],
-                 beamtalk_string_ops:lines(<<"a\r\nb">>)).
+    ?assertEqual(
+        [<<"a">>, <<"b">>],
+        beamtalk_string_ops:lines(<<"a\r\nb">>)
+    ).
 
 lines_mixed_test() ->
-    ?assertEqual([<<"a">>, <<"b">>, <<"c">>],
-                 beamtalk_string_ops:lines(<<"a\r\nb\nc">>)).
+    ?assertEqual(
+        [<<"a">>, <<"b">>, <<"c">>],
+        beamtalk_string_ops:lines(<<"a\r\nb\nc">>)
+    ).
 
 lines_single_test() ->
-    ?assertEqual([<<"hello">>],
-                 beamtalk_string_ops:lines(<<"hello">>)).
+    ?assertEqual(
+        [<<"hello">>],
+        beamtalk_string_ops:lines(<<"hello">>)
+    ).
 
 lines_empty_test() ->
-    ?assertEqual([<<>>],
-                 beamtalk_string_ops:lines(<<>>)).
+    ?assertEqual(
+        [<<>>],
+        beamtalk_string_ops:lines(<<>>)
+    ).
 
 %%% ============================================================================
 %%% words/1
 %%% ============================================================================
 
 words_basic_test() ->
-    ?assertEqual([<<"hello">>, <<"world">>],
-                 beamtalk_string_ops:words(<<"hello world">>)).
+    ?assertEqual(
+        [<<"hello">>, <<"world">>],
+        beamtalk_string_ops:words(<<"hello world">>)
+    ).
 
 words_extra_spaces_test() ->
-    ?assertEqual([<<"hello">>, <<"world">>],
-                 beamtalk_string_ops:words(<<"  hello   world  ">>)).
+    ?assertEqual(
+        [<<"hello">>, <<"world">>],
+        beamtalk_string_ops:words(<<"  hello   world  ">>)
+    ).
 
 words_tabs_test() ->
-    ?assertEqual([<<"a">>, <<"b">>],
-                 beamtalk_string_ops:words(<<"a\tb">>)).
+    ?assertEqual(
+        [<<"a">>, <<"b">>],
+        beamtalk_string_ops:words(<<"a\tb">>)
+    ).
 
 words_single_test() ->
-    ?assertEqual([<<"hello">>],
-                 beamtalk_string_ops:words(<<"hello">>)).
+    ?assertEqual(
+        [<<"hello">>],
+        beamtalk_string_ops:words(<<"hello">>)
+    ).
 
 words_empty_test() ->
-    ?assertEqual([],
-                 beamtalk_string_ops:words(<<>>)).
+    ?assertEqual(
+        [],
+        beamtalk_string_ops:words(<<>>)
+    ).
 
 %%% ============================================================================
 %%% take/2
@@ -303,8 +374,10 @@ take_negative_test() ->
 
 take_utf8_test() ->
     Str = unicode:characters_to_binary("héllo"),
-    ?assertEqual(unicode:characters_to_binary("hé"),
-                 beamtalk_string_ops:take(Str, 2)).
+    ?assertEqual(
+        unicode:characters_to_binary("hé"),
+        beamtalk_string_ops:take(Str, 2)
+    ).
 
 %%% ============================================================================
 %%% drop/2

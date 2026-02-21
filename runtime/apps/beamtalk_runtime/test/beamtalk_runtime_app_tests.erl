@@ -47,14 +47,14 @@ start_returns_supervisor_pid_test() ->
     %% Start (or get already running) supervisor
     Result = start_runtime(),
     Pid = element(2, Result),
-    
+
     ?assert(is_pid(Pid)),
     ?assert(is_process_alive(Pid)),
-    
+
     %% Verify we can query it as a supervisor
     Children = supervisor:which_children(Pid),
     ?assert(is_list(Children)),
-    
+
     %% Clean up only if we started it
     stop_runtime(Result).
 
@@ -85,13 +85,15 @@ exports_required_callbacks_test() ->
 system_dictionary_loaded_after_start_test() ->
     %% Start (or get already running) supervisor
     Result = start_runtime(),
-    
+
     %% The SystemDictionary module provides system reflection (allClasses, classNamed:, etc.)
     %% via beamtalk_system_dictionary, replacing the legacy compiled beamtalk module.
     %% Use ensure_loaded to verify the module is available (not just loaded as side-effect).
-    ?assertEqual({module, beamtalk_system_dictionary},
-                 code:ensure_loaded(beamtalk_system_dictionary)),
+    ?assertEqual(
+        {module, beamtalk_system_dictionary},
+        code:ensure_loaded(beamtalk_system_dictionary)
+    ),
     ?assertEqual(true, beamtalk_system_dictionary:has_method(allClasses)),
-    
+
     %% Clean up only if we started it
     stop_runtime(Result).

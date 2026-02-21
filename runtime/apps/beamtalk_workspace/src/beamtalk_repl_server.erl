@@ -23,23 +23,44 @@
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--export([start_link/1, get_port/0, get_web_port/0, get_nonce/0, handle_protocol_request/2,
-         generate_session_id/0, parse_request/1, safe_to_existing_atom/1,
-         ensure_structured_error/1]).
+-export([
+    start_link/1,
+    get_port/0,
+    get_web_port/0,
+    get_nonce/0,
+    handle_protocol_request/2,
+    generate_session_id/0,
+    parse_request/1,
+    safe_to_existing_atom/1,
+    ensure_structured_error/1
+]).
 -ifdef(TEST).
--export([generate_nonce/0, validate_actor_pid/1, is_known_actor/1,
-         get_completions/1, get_symbol_info/1, resolve_class_to_module/1,
-         ensure_structured_error/2,
-         make_class_not_found_error/1, format_name/1,
-         base_protocol_response/1,
-         resolve_module_atoms/2,
-         handle_op/4,
-         write_port_file/3]).
+-export([
+    generate_nonce/0,
+    validate_actor_pid/1,
+    is_known_actor/1,
+    get_completions/1,
+    get_symbol_info/1,
+    resolve_class_to_module/1,
+    ensure_structured_error/2,
+    make_class_not_found_error/1,
+    format_name/1,
+    base_protocol_response/1,
+    resolve_module_atoms/2,
+    handle_op/4,
+    write_port_file/3
+]).
 -endif.
 
 %% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3]).
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
 
 -define(LISTENER_REF, beamtalk_repl_ws).
 -define(WEB_LISTENER_REF, beamtalk_web_http).
@@ -116,10 +137,12 @@ init(Config) ->
             write_port_file(WorkspaceId, ActualPort, Nonce),
             %% BT-689: Optionally start a separate browser HTTP listener on web_port
             ActualWebPort = maybe_start_web_listener(WebPort, BindAddr),
-            {ok, #state{port = ActualPort,
-                        workspace_id = WorkspaceId,
-                        nonce = Nonce,
-                        web_port = ActualWebPort}};
+            {ok, #state{
+                port = ActualPort,
+                workspace_id = WorkspaceId,
+                nonce = Nonce,
+                web_port = ActualWebPort
+            }};
         {error, Reason} ->
             {stop, {listen_failed, Reason}}
     end.
@@ -144,7 +167,6 @@ handle_info(shutdown_requested, State) ->
     ?LOG_INFO("Executing requested shutdown", #{}),
     init:stop(),
     {noreply, State};
-
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -210,28 +232,41 @@ write_port_file(undefined, _Port, _Nonce) ->
 write_port_file(WorkspaceId, Port, Nonce) ->
     case beamtalk_platform:home_dir() of
         false ->
-            ?LOG_WARNING("HOME/USERPROFILE not set; skipping port file write for workspace ~p",
-                           [WorkspaceId]),
+            ?LOG_WARNING(
+                "HOME/USERPROFILE not set; skipping port file write for workspace ~p",
+                [WorkspaceId]
+            ),
             ok;
         Home ->
-            PortFilePath = filename:join([Home, ".beamtalk", "workspaces",
-                                          binary_to_list(WorkspaceId), "port"]),
+            PortFilePath = filename:join([
+                Home,
+                ".beamtalk",
+                "workspaces",
+                binary_to_list(WorkspaceId),
+                "port"
+            ]),
             case filelib:ensure_dir(PortFilePath) of
                 ok ->
                     %% Format: PORT\nNONCE (two lines for stale detection, BT-611)
                     Content = [integer_to_list(Port), "\n", binary_to_list(Nonce)],
                     case file:write_file(PortFilePath, Content) of
                         ok ->
-                            ?LOG_DEBUG("Wrote port file: ~s (port ~p, nonce ~s)", [PortFilePath, Port, Nonce]),
+                            ?LOG_DEBUG("Wrote port file: ~s (port ~p, nonce ~s)", [
+                                PortFilePath, Port, Nonce
+                            ]),
                             ok;
                         {error, Reason} ->
-                            ?LOG_WARNING("Failed to write port file ~s: ~p",
-                                           [PortFilePath, Reason]),
+                            ?LOG_WARNING(
+                                "Failed to write port file ~s: ~p",
+                                [PortFilePath, Reason]
+                            ),
                             ok
                     end;
                 {error, Reason} ->
-                    ?LOG_WARNING("Failed to create directory for port file ~s: ~p",
-                                   [PortFilePath, Reason]),
+                    ?LOG_WARNING(
+                        "Failed to create directory for port file ~s: ~p",
+                        [PortFilePath, Reason]
+                    ),
                     ok
             end
     end.
@@ -244,8 +279,11 @@ write_port_file(WorkspaceId, Port, Nonce) ->
 -spec generate_nonce() -> binary().
 generate_nonce() ->
     Bytes = crypto:strong_rand_bytes(8),
-    list_to_binary(lists:flatten(
-        [io_lib:format("~2.16.0b", [B]) || <<B>> <= Bytes])).
+    list_to_binary(
+        lists:flatten(
+            [io_lib:format("~2.16.0b", [B]) || <<B>> <= Bytes]
+        )
+    ).
 
 %%% Session ID Generation
 
@@ -278,59 +316,80 @@ handle_protocol_request(Msg, SessionPid) ->
             }),
             WrappedReason = ensure_structured_error(Reason, Class),
             beamtalk_repl_protocol:encode_error(
-                WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1)
+                WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1
+            )
     end.
 
 %% @private
 %% @doc Dispatch protocol ops to domain-specific handler modules (BT-705).
 handle_op(Op, Params, Msg, SessionPid) when
-        Op =:= <<"eval">>; Op =:= <<"clear">>; Op =:= <<"bindings">> ->
+    Op =:= <<"eval">>; Op =:= <<"clear">>; Op =:= <<"bindings">>
+->
     beamtalk_repl_ops_eval:handle(Op, Params, Msg, SessionPid);
 handle_op(Op, Params, Msg, SessionPid) when
-        Op =:= <<"load-file">>; Op =:= <<"load-source">>; Op =:= <<"reload">>;
-        Op =:= <<"unload">>; Op =:= <<"modules">> ->
+    Op =:= <<"load-file">>;
+    Op =:= <<"load-source">>;
+    Op =:= <<"reload">>;
+    Op =:= <<"unload">>;
+    Op =:= <<"modules">>
+->
     beamtalk_repl_ops_load:handle(Op, Params, Msg, SessionPid);
 handle_op(Op, Params, Msg, SessionPid) when
-        Op =:= <<"actors">>; Op =:= <<"inspect">>; Op =:= <<"kill">>;
-        Op =:= <<"interrupt">> ->
+    Op =:= <<"actors">>;
+    Op =:= <<"inspect">>;
+    Op =:= <<"kill">>;
+    Op =:= <<"interrupt">>
+->
     beamtalk_repl_ops_actors:handle(Op, Params, Msg, SessionPid);
 handle_op(Op, Params, Msg, SessionPid) when
-        Op =:= <<"sessions">>; Op =:= <<"clone">>; Op =:= <<"close">>;
-        Op =:= <<"health">>; Op =:= <<"shutdown">> ->
+    Op =:= <<"sessions">>;
+    Op =:= <<"clone">>;
+    Op =:= <<"close">>;
+    Op =:= <<"health">>;
+    Op =:= <<"shutdown">>
+->
     beamtalk_repl_ops_session:handle(Op, Params, Msg, SessionPid);
 handle_op(Op, Params, Msg, SessionPid) when
-        Op =:= <<"complete">>; Op =:= <<"info">>; Op =:= <<"docs">>;
-        Op =:= <<"describe">>; Op =:= <<"show-codegen">> ->
+    Op =:= <<"complete">>;
+    Op =:= <<"info">>;
+    Op =:= <<"docs">>;
+    Op =:= <<"describe">>;
+    Op =:= <<"show-codegen">>
+->
     beamtalk_repl_ops_dev:handle(Op, Params, Msg, SessionPid);
 handle_op(Op, Params, Msg, SessionPid) when
-        Op =:= <<"test">>; Op =:= <<"test-all">> ->
+    Op =:= <<"test">>; Op =:= <<"test-all">>
+->
     beamtalk_repl_ops_dev:handle(Op, Params, Msg, SessionPid);
 handle_op(Op, _Params, Msg, _SessionPid) ->
     Err0 = beamtalk_error:new(unknown_op, 'REPL'),
-    Err1 = beamtalk_error:with_message(Err0,
-        iolist_to_binary([<<"Unknown operation: ">>, Op])),
+    Err1 = beamtalk_error:with_message(
+        Err0,
+        iolist_to_binary([<<"Unknown operation: ">>, Op])
+    ),
     beamtalk_repl_protocol:encode_error(
-        Err1, Msg, fun beamtalk_repl_json:format_error_message/1).
+        Err1, Msg, fun beamtalk_repl_json:format_error_message/1
+    ).
 
 %%% Protocol Parsing and Formatting
 
 %% @doc Parse a request from the CLI (legacy interface).
 %% Expected format: JSON with "type" field.
 %% New code should use beamtalk_repl_protocol:decode/1 instead.
--spec parse_request(binary()) -> 
-    {eval, string()} | 
-    {clear_bindings} | 
-    {get_bindings} | 
-    {load_file, string()} | 
-    {load_source, binary()} |
-    {list_actors} |
-    {kill_actor, string()} |
-    {list_modules} |
-    {unload_module, string()} |
-    {get_docs, binary(), binary() | undefined} |
-    {health} |
-    {shutdown, string()} |
-    {error, term()}.
+-spec parse_request(binary()) ->
+    {eval, string()}
+    | {clear_bindings}
+    | {get_bindings}
+    | {load_file, string()}
+    | {load_source, binary()}
+    | {list_actors}
+    | {kill_actor, string()}
+    | {list_modules}
+    | {unload_module, string()}
+    | {get_docs, binary(), binary() | undefined}
+    | {health}
+    | {shutdown, string()}
+    | {error, term()}.
 parse_request(Data) when is_binary(Data) ->
     try
         %% Remove trailing newline if present
@@ -374,12 +433,19 @@ parse_request(Data) when is_binary(Data) ->
 %% @private
 %% @doc Translate a protocol operation name to an internal request tuple.
 -spec op_to_request(binary(), map()) ->
-    {eval, string()} | {clear_bindings} | {get_bindings} |
-    {load_file, string()} | {load_source, binary()} |
-    {list_actors} | {list_modules} |
-    {kill_actor, string()} | {unload_module, string()} |
-    {get_docs, binary(), binary() | undefined} |
-    {health} | {shutdown, string()} | {error, term()}.
+    {eval, string()}
+    | {clear_bindings}
+    | {get_bindings}
+    | {load_file, string()}
+    | {load_source, binary()}
+    | {list_actors}
+    | {list_modules}
+    | {kill_actor, string()}
+    | {unload_module, string()}
+    | {get_docs, binary(), binary() | undefined}
+    | {health}
+    | {shutdown, string()}
+    | {error, term()}.
 op_to_request(<<"eval">>, Map) ->
     Code = maps:get(<<"code">>, Map, <<>>),
     {eval, binary_to_list(Code)};
@@ -415,7 +481,6 @@ op_to_request(<<"shutdown">>, Map) ->
 op_to_request(Op, _Map) ->
     {error, {unknown_op, Op}}.
 
-
 %%% Delegated helpers (BT-705)
 %%%
 %%% These functions have been extracted to domain-specific ops modules.
@@ -432,25 +497,29 @@ is_known_actor(Pid) -> beamtalk_repl_ops_actors:is_known_actor(Pid).
 
 %% @private Delegate to beamtalk_repl_ops_load.
 resolve_class_to_module(ClassName) -> beamtalk_repl_ops_load:resolve_class_to_module(ClassName).
-resolve_module_atoms(ModuleAtom, Classes) -> beamtalk_repl_ops_load:resolve_module_atoms(ModuleAtom, Classes).
+resolve_module_atoms(ModuleAtom, Classes) ->
+    beamtalk_repl_ops_load:resolve_module_atoms(ModuleAtom, Classes).
 
 %% @private Delegate to beamtalk_repl_ops_dev.
 get_completions(Prefix) -> beamtalk_repl_ops_dev:get_completions(Prefix).
 get_symbol_info(Symbol) -> beamtalk_repl_ops_dev:get_symbol_info(Symbol).
-make_class_not_found_error(ClassName) -> beamtalk_repl_ops_dev:make_class_not_found_error(ClassName).
+make_class_not_found_error(ClassName) ->
+    beamtalk_repl_ops_dev:make_class_not_found_error(ClassName).
 -endif.
 
 %% @private
 %% @doc Safely convert a binary to an existing atom, returning error instead of creating new atoms.
 -spec safe_to_existing_atom(binary()) -> {ok, atom()} | {error, badarg}.
-safe_to_existing_atom(<<>>) -> {error, badarg};
+safe_to_existing_atom(<<>>) ->
+    {error, badarg};
 safe_to_existing_atom(Bin) when is_binary(Bin) ->
     try binary_to_existing_atom(Bin, utf8) of
         Atom -> {ok, Atom}
     catch
         error:badarg -> {error, badarg}
     end;
-safe_to_existing_atom(_) -> {error, badarg}.
+safe_to_existing_atom(_) ->
+    {error, badarg}.
 
 %% @private
 %% @doc Ensure an error reason is a structured #beamtalk_error{} record.
@@ -458,10 +527,16 @@ safe_to_existing_atom(_) -> {error, badarg}.
 %% Handles known bare tuple error patterns from the compile pipeline.
 %% Otherwise wraps the raw term in an internal_error.
 -spec ensure_structured_error(term()) -> #beamtalk_error{}.
-ensure_structured_error(#beamtalk_error{} = Err) -> Err;
-ensure_structured_error(#{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}) -> Err;
-ensure_structured_error({eval_error, _Class, #{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}}) -> Err;
-ensure_structured_error({eval_error, _Class, #beamtalk_error{} = Err}) -> Err;
+ensure_structured_error(#beamtalk_error{} = Err) ->
+    Err;
+ensure_structured_error(#{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}) ->
+    Err;
+ensure_structured_error(
+    {eval_error, _Class, #{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}}
+) ->
+    Err;
+ensure_structured_error({eval_error, _Class, #beamtalk_error{} = Err}) ->
+    Err;
 ensure_structured_error({eval_error, _Class, Reason}) ->
     %% Delegate to /1 for known tuple patterns; fall back to generic wrapper.
     ensure_structured_error(Reason);
@@ -473,32 +548,46 @@ ensure_structured_error({compile_error, Msg}) when is_list(Msg) ->
     beamtalk_error:with_message(Err0, list_to_binary(Msg));
 ensure_structured_error({compile_error, Reason}) ->
     Err0 = beamtalk_error:new(compile_error, 'Compiler'),
-    beamtalk_error:with_message(Err0,
-        iolist_to_binary([<<"Compile error: ">>, format_name(Reason)]));
+    beamtalk_error:with_message(
+        Err0,
+        iolist_to_binary([<<"Compile error: ">>, format_name(Reason)])
+    );
 ensure_structured_error({undefined_variable, Name}) ->
     Err0 = beamtalk_error:new(undefined_variable, 'REPL'),
-    beamtalk_error:with_message(Err0,
-        iolist_to_binary([<<"Undefined variable: ">>, format_name(Name)]));
+    beamtalk_error:with_message(
+        Err0,
+        iolist_to_binary([<<"Undefined variable: ">>, format_name(Name)])
+    );
 ensure_structured_error({file_not_found, Path}) ->
     Err0 = beamtalk_error:new(file_not_found, 'File'),
-    beamtalk_error:with_message(Err0,
-        iolist_to_binary([<<"File not found: ">>, format_name(Path)]));
+    beamtalk_error:with_message(
+        Err0,
+        iolist_to_binary([<<"File not found: ">>, format_name(Path)])
+    );
 ensure_structured_error({read_error, Reason}) ->
     Err0 = beamtalk_error:new(io_error, 'File'),
-    beamtalk_error:with_message(Err0,
-        iolist_to_binary([<<"Failed to read file: ">>, format_name(Reason)]));
+    beamtalk_error:with_message(
+        Err0,
+        iolist_to_binary([<<"Failed to read file: ">>, format_name(Reason)])
+    );
 ensure_structured_error({load_error, Reason}) ->
     Err0 = beamtalk_error:new(io_error, 'File'),
-    beamtalk_error:with_message(Err0,
-        iolist_to_binary([<<"Failed to load bytecode: ">>, format_name(Reason)]));
+    beamtalk_error:with_message(
+        Err0,
+        iolist_to_binary([<<"Failed to load bytecode: ">>, format_name(Reason)])
+    );
 ensure_structured_error({parse_error, Details}) ->
     Err0 = beamtalk_error:new(compile_error, 'Compiler'),
-    beamtalk_error:with_message(Err0,
-        iolist_to_binary([<<"Parse error: ">>, format_name(Details)]));
+    beamtalk_error:with_message(
+        Err0,
+        iolist_to_binary([<<"Parse error: ">>, format_name(Details)])
+    );
 ensure_structured_error({invalid_request, Reason}) ->
     Err0 = beamtalk_error:new(internal_error, 'REPL'),
-    beamtalk_error:with_message(Err0,
-        iolist_to_binary([<<"Invalid request: ">>, format_name(Reason)]));
+    beamtalk_error:with_message(
+        Err0,
+        iolist_to_binary([<<"Invalid request: ">>, format_name(Reason)])
+    );
 ensure_structured_error(empty_expression) ->
     Err0 = beamtalk_error:new(empty_expression, 'REPL'),
     beamtalk_error:with_message(Err0, <<"Empty expression">>);
@@ -507,29 +596,46 @@ ensure_structured_error(timeout) ->
     beamtalk_error:with_message(Err0, <<"Request timed out">>);
 ensure_structured_error(Reason) ->
     Err0 = beamtalk_error:new(internal_error, 'REPL'),
-    beamtalk_error:with_message(Err0,
-        iolist_to_binary(io_lib:format("~p", [Reason]))).
+    beamtalk_error:with_message(
+        Err0,
+        iolist_to_binary(io_lib:format("~p", [Reason]))
+    ).
 
 %% @private
 %% @doc Ensure an error reason is structured, with exception class context.
 %% Delegates known tuple patterns to ensure_structured_error/1 to preserve
 %% specific error kinds, only falling back to generic wrapper for unknown terms.
 -spec ensure_structured_error(term(), atom()) -> #beamtalk_error{}.
-ensure_structured_error(#beamtalk_error{} = Err, _Class) -> Err;
-ensure_structured_error(#{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}, _Class) -> Err;
-ensure_structured_error({compile_error, _} = Reason, _Class) -> ensure_structured_error(Reason);
-ensure_structured_error({eval_error, _, _} = Reason, _Class) -> ensure_structured_error(Reason);
-ensure_structured_error({undefined_variable, _} = Reason, _Class) -> ensure_structured_error(Reason);
-ensure_structured_error({file_not_found, _} = Reason, _Class) -> ensure_structured_error(Reason);
-ensure_structured_error({read_error, _} = Reason, _Class) -> ensure_structured_error(Reason);
-ensure_structured_error({load_error, _} = Reason, _Class) -> ensure_structured_error(Reason);
-ensure_structured_error({parse_error, _} = Reason, _Class) -> ensure_structured_error(Reason);
-ensure_structured_error({invalid_request, _} = Reason, _Class) -> ensure_structured_error(Reason);
+ensure_structured_error(#beamtalk_error{} = Err, _Class) ->
+    Err;
+ensure_structured_error(#{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}, _Class) ->
+    Err;
+ensure_structured_error({compile_error, _} = Reason, _Class) ->
+    ensure_structured_error(Reason);
+ensure_structured_error({eval_error, _, _} = Reason, _Class) ->
+    ensure_structured_error(Reason);
+ensure_structured_error({undefined_variable, _} = Reason, _Class) ->
+    ensure_structured_error(Reason);
+ensure_structured_error({file_not_found, _} = Reason, _Class) ->
+    ensure_structured_error(Reason);
+ensure_structured_error({read_error, _} = Reason, _Class) ->
+    ensure_structured_error(Reason);
+ensure_structured_error({load_error, _} = Reason, _Class) ->
+    ensure_structured_error(Reason);
+ensure_structured_error({parse_error, _} = Reason, _Class) ->
+    ensure_structured_error(Reason);
+ensure_structured_error({invalid_request, _} = Reason, _Class) ->
+    ensure_structured_error(Reason);
 ensure_structured_error(Reason, Class) ->
     Err0 = beamtalk_error:new(internal_error, 'REPL'),
-    beamtalk_error:with_message(Err0,
-        iolist_to_binary([atom_to_binary(Class, utf8), <<": ">>,
-            io_lib:format("~p", [Reason])])).
+    beamtalk_error:with_message(
+        Err0,
+        iolist_to_binary([
+            atom_to_binary(Class, utf8),
+            <<": ">>,
+            io_lib:format("~p", [Reason])
+        ])
+    ).
 
 %% @private
 %% @doc Format a name for error messages.

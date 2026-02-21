@@ -38,10 +38,17 @@
 -export([start_link/1, mark_activity/0]).
 
 %% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3]).
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
 
--define(CHECK_INTERVAL, 600000).  % Check every 10 minutes
+% Check every 10 minutes
+-define(CHECK_INTERVAL, 600000).
 
 -record(state, {
     enabled :: boolean(),
@@ -69,22 +76,23 @@ mark_activity() ->
 init(Config) ->
     Enabled = maps:get(enabled, Config, true),
     MaxIdleSeconds = maps:get(max_idle_seconds, Config, 3600 * 4),
-    
+
     State = #state{
         enabled = Enabled,
         max_idle_seconds = MaxIdleSeconds,
         timer_ref = undefined
     },
-    
+
     %% Start periodic checks if enabled
-    NewState = case Enabled of
-        true ->
-            TRef = erlang:send_after(?CHECK_INTERVAL, self(), check_idle),
-            State#state{timer_ref = TRef};
-        false ->
-            State
-    end,
-    
+    NewState =
+        case Enabled of
+            true ->
+                TRef = erlang:send_after(?CHECK_INTERVAL, self(), check_idle),
+                State#state{timer_ref = TRef};
+            false ->
+                State
+        end,
+
     {ok, NewState}.
 
 %% @private
@@ -99,7 +107,6 @@ handle_cast(_Msg, State) ->
 handle_info(check_idle, State = #state{enabled = false}) ->
     %% Auto-cleanup disabled, don't schedule next check
     {noreply, State};
-
 handle_info(check_idle, State = #state{enabled = true, max_idle_seconds = MaxIdle}) ->
     %% Check if we should terminate
     case should_terminate(MaxIdle) of
@@ -113,7 +120,6 @@ handle_info(check_idle, State = #state{enabled = true, max_idle_seconds = MaxIdl
             TRef = erlang:send_after(?CHECK_INTERVAL, self(), check_idle),
             {noreply, State#state{timer_ref = TRef}}
     end;
-
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -137,13 +143,13 @@ code_change(_OldVsn, State, _Extra) ->
 should_terminate(MaxIdleSeconds) ->
     %% Check if there are any active sessions
     HasSessions = has_active_sessions(),
-    
+
     %% Check idle time
     case beamtalk_workspace_meta:get_last_activity() of
         {ok, LastActivity} ->
             Now = erlang:system_time(second),
             IdleTime = Now - LastActivity,
-            
+
             %% Terminate if no sessions and idle too long
             (not HasSessions) andalso (IdleTime > MaxIdleSeconds);
         {error, _} ->

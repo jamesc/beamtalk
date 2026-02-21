@@ -145,7 +145,9 @@
 'atRandom'([]) ->
     Error0 = beamtalk_error:new(type_error, 'List'),
     Error1 = beamtalk_error:with_selector(Error0, 'atRandom'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Cannot select random element from empty collection">>),
+    Error2 = beamtalk_error:with_hint(
+        Error1, <<"Cannot select random element from empty collection">>
+    ),
     beamtalk_error:raise(Error2);
 'atRandom'(List) when is_list(List) ->
     Len = length(List),
@@ -157,7 +159,9 @@
 'atRandom'(Tuple) when is_tuple(Tuple) ->
     Error0 = beamtalk_error:new(type_error, 'Tuple'),
     Error1 = beamtalk_error:with_selector(Error0, 'atRandom'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Cannot select random element from empty collection">>),
+    Error2 = beamtalk_error:with_hint(
+        Error1, <<"Cannot select random element from empty collection">>
+    ),
     beamtalk_error:raise(Error2).
 
 %%% ============================================================================

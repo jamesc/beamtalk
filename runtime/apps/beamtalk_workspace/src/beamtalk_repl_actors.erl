@@ -33,17 +33,30 @@
 -include_lib("kernel/include/logger.hrl").
 
 %% Public API
--export([start_link/1, register_actor/4, unregister_actor/2, 
-         list_actors/1, kill_actor/2, get_actor/2, count_actors_for_module/2,
-         get_pids_for_module/2,
-         on_actor_spawned/4]).
+-export([
+    start_link/1,
+    register_actor/4,
+    unregister_actor/2,
+    list_actors/1,
+    kill_actor/2,
+    get_actor/2,
+    count_actors_for_module/2,
+    get_pids_for_module/2,
+    on_actor_spawned/4
+]).
 
 %% Subscriber API (ADR 0017 — actor lifecycle push messages)
 -export([subscribe/0, unsubscribe/0]).
 
 %% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3]).
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
 
 -record(state, {
     actors :: #{pid() => actor_metadata()},
@@ -187,46 +200,43 @@ init([]) ->
 %% @private
 handle_call({register, ActorPid, ClassName, ModuleName}, _From, State) ->
     #state{actors = Actors, monitors = Monitors} = State,
-    
+
     %% Monitor the actor so we know when it terminates
     MonitorRef = erlang:monitor(process, ActorPid),
-    
+
     Metadata = #{
         pid => ActorPid,
         class => ClassName,
         module => ModuleName,
         spawned_at => erlang:system_time(second)
     },
-    
+
     NewActors = maps:put(ActorPid, Metadata, Actors),
     NewMonitors = maps:put(MonitorRef, ActorPid, Monitors),
-    
+
     NewState = State#state{actors = NewActors, monitors = NewMonitors},
     notify_subscribers({actor_spawned, Metadata}, NewState),
-    
-    {reply, ok, NewState};
 
+    {reply, ok, NewState};
 handle_call({unregister, ActorPid}, _From, State) ->
     #state{actors = Actors, monitors = Monitors} = State,
-    
+
     %% Find and demonitor all references for this actor
     MonitorRefs = [Ref || {Ref, Pid} <- maps:to_list(Monitors), Pid =:= ActorPid],
     lists:foreach(fun erlang:demonitor/1, MonitorRefs),
-    
+
     %% Remove monitor references
     NewMonitors = maps:filter(
         fun(_Ref, Pid) -> Pid =/= ActorPid end,
         Monitors
     ),
-    
+
     NewActors = maps:remove(ActorPid, Actors),
     {reply, ok, State#state{actors = NewActors, monitors = NewMonitors}};
-
 handle_call(list_actors, _From, State) ->
     #state{actors = Actors} = State,
     ActorList = maps:values(Actors),
     {reply, ActorList, State};
-
 handle_call({kill, ActorPid}, _From, State) ->
     #state{actors = Actors} = State,
     case maps:is_key(ActorPid, Actors) of
@@ -237,7 +247,6 @@ handle_call({kill, ActorPid}, _From, State) ->
         false ->
             {reply, {error, not_found}, State}
     end;
-
 handle_call({get_actor, ActorPid}, _From, State) ->
     #state{actors = Actors} = State,
     case maps:find(ActorPid, Actors) of
@@ -246,7 +255,6 @@ handle_call({get_actor, ActorPid}, _From, State) ->
         error ->
             {reply, {error, not_found}, State}
     end;
-
 handle_call({count_for_module, ModuleName}, _From, State) ->
     #state{actors = Actors} = State,
     Count = maps:fold(
@@ -260,7 +268,6 @@ handle_call({count_for_module, ModuleName}, _From, State) ->
         Actors
     ),
     {reply, {ok, Count}, State};
-
 handle_call({pids_for_module, ModuleName}, _From, State) ->
     #state{actors = Actors} = State,
     Pids = maps:fold(
@@ -274,7 +281,6 @@ handle_call({pids_for_module, ModuleName}, _From, State) ->
         Actors
     ),
     {reply, {ok, Pids}, State};
-
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
@@ -306,12 +312,13 @@ handle_info({'DOWN', MonitorRef, process, Pid, Reason}, State) ->
     case maps:find(MonitorRef, Monitors) of
         {ok, ActorPid} ->
             %% Actor terminated — unregister and notify subscribers
-            StopInfo = case maps:find(ActorPid, Actors) of
-                {ok, #{class := ClassName}} ->
-                    #{pid => ActorPid, class => ClassName, reason => Reason};
-                error ->
-                    #{pid => ActorPid, class => undefined, reason => Reason}
-            end,
+            StopInfo =
+                case maps:find(ActorPid, Actors) of
+                    {ok, #{class := ClassName}} ->
+                        #{pid => ActorPid, class => ClassName, reason => Reason};
+                    error ->
+                        #{pid => ActorPid, class => undefined, reason => Reason}
+                end,
             NewActors = maps:remove(ActorPid, Actors),
             NewMonitors = maps:remove(MonitorRef, Monitors),
             NewState = State#state{actors = NewActors, monitors = NewMonitors},
@@ -326,7 +333,6 @@ handle_info({'DOWN', MonitorRef, process, Pid, Reason}, State) ->
                     {noreply, State}
             end
     end;
-
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -348,9 +354,12 @@ terminate(_Reason, State) ->
 %% @doc Send lifecycle event to all subscribers.
 -spec notify_subscribers(term(), #state{}) -> ok.
 notify_subscribers(Event, #state{subscribers = Subs}) ->
-    maps:foreach(fun(Pid, _Ref) ->
-        Pid ! Event
-    end, Subs),
+    maps:foreach(
+        fun(Pid, _Ref) ->
+            Pid ! Event
+        end,
+        Subs
+    ),
     ok.
 
 %% @private

@@ -20,7 +20,8 @@
 %% a clean slate for each test.
 stop_if_running() ->
     case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
+        undefined ->
+            ok;
         Pid ->
             gen_server:stop(Pid),
             ok
@@ -39,18 +40,18 @@ session_connect_updates_activity_test() ->
         project_path => <<"/tmp/test">>,
         created_at => erlang:system_time(second)
     }),
-    
+
     try
         %% Get initial activity time
         {ok, InitialTime} = beamtalk_workspace_meta:get_last_activity(),
-        
+
         %% Wait a moment to ensure time changes
         timer:sleep(1100),
-        
+
         %% Simulate session connection by calling update_activity
         %% (This is what beamtalk_repl_server does when a session is created)
         ok = beamtalk_workspace_meta:update_activity(),
-        
+
         %% Verify activity time was updated
         {ok, NewTime} = beamtalk_workspace_meta:get_last_activity(),
         ?assert(NewTime > InitialTime, "Activity time should increase after update")
@@ -67,18 +68,18 @@ actor_spawn_updates_activity_test() ->
         project_path => <<"/tmp/test">>,
         created_at => erlang:system_time(second)
     }),
-    
+
     try
         %% Get initial activity time
         {ok, InitialTime} = beamtalk_workspace_meta:get_last_activity(),
-        
+
         %% Wait a moment
         timer:sleep(1100),
-        
+
         %% Simulate actor spawn by calling update_activity
         %% (This is what beamtalk_actor:register_spawned does after registration)
         ok = beamtalk_workspace_meta:update_activity(),
-        
+
         %% Verify activity time was updated
         {ok, NewTime} = beamtalk_workspace_meta:get_last_activity(),
         ?assert(NewTime > InitialTime, "Activity time should increase after actor spawn")
@@ -95,18 +96,18 @@ code_reload_updates_activity_test() ->
         project_path => <<"/tmp/test">>,
         created_at => erlang:system_time(second)
     }),
-    
+
     try
         %% Get initial activity time
         {ok, InitialTime} = beamtalk_workspace_meta:get_last_activity(),
-        
+
         %% Wait a moment
         timer:sleep(1100),
-        
+
         %% Simulate code reload by calling update_activity
         %% (This is what beamtalk_repl_eval:do_load does after module load)
         ok = beamtalk_workspace_meta:update_activity(),
-        
+
         %% Verify activity time was updated
         {ok, NewTime} = beamtalk_workspace_meta:get_last_activity(),
         ?assert(NewTime > InitialTime, "Activity time should increase after code reload")
@@ -123,23 +124,23 @@ multiple_activity_updates_test() ->
         project_path => <<"/tmp/test">>,
         created_at => erlang:system_time(second)
     }),
-    
+
     try
         %% Get initial activity time
         {ok, Time1} = beamtalk_workspace_meta:get_last_activity(),
-        
+
         %% Update 1
         timer:sleep(1100),
         ok = beamtalk_workspace_meta:update_activity(),
         {ok, Time2} = beamtalk_workspace_meta:get_last_activity(),
         ?assert(Time2 > Time1, "First update should increase time"),
-        
+
         %% Update 2
         timer:sleep(1100),
         ok = beamtalk_workspace_meta:update_activity(),
         {ok, Time3} = beamtalk_workspace_meta:get_last_activity(),
         ?assert(Time3 > Time2, "Second update should increase time"),
-        
+
         %% Update 3
         timer:sleep(1100),
         ok = beamtalk_workspace_meta:update_activity(),
@@ -158,17 +159,17 @@ mark_activity_delegates_to_workspace_meta_test() ->
         project_path => <<"/tmp/test">>,
         created_at => erlang:system_time(second)
     }),
-    
+
     try
         %% Get initial activity time
         {ok, InitialTime} = beamtalk_workspace_meta:get_last_activity(),
-        
+
         %% Wait a moment
         timer:sleep(1100),
-        
+
         %% Use the convenience function
         ok = beamtalk_idle_monitor:mark_activity(),
-        
+
         %% Verify activity was updated
         {ok, NewTime} = beamtalk_workspace_meta:get_last_activity(),
         ?assert(NewTime > InitialTime, "mark_activity should delegate to workspace_meta")

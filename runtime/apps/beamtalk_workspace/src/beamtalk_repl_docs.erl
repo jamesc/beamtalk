@@ -12,18 +12,30 @@
 
 -module(beamtalk_repl_docs).
 
--export([format_class_docs/1, format_method_doc/2,
-         get_module_doc/1, get_method_signatures/2]).
+-export([
+    format_class_docs/1,
+    format_method_doc/2,
+    get_module_doc/1,
+    get_method_signatures/2
+]).
 
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
--export([safe_to_existing_atom/1, get_doc_entries/1,
-         find_doc_entry/2,
-         get_method_signatures_with_sealed/3, get_method_doc/2,
-         group_by_class/1, format_class_output/6, format_superclass/1,
-         format_modifiers/1,
-         format_method_output/4, format_metaclass_docs/0,
-         format_metaclass_method_doc/1, metaclass_method_doc/1]).
+-export([
+    safe_to_existing_atom/1,
+    get_doc_entries/1,
+    find_doc_entry/2,
+    get_method_signatures_with_sealed/3,
+    get_method_doc/2,
+    group_by_class/1,
+    format_class_output/6,
+    format_superclass/1,
+    format_modifiers/1,
+    format_method_output/4,
+    format_metaclass_docs/0,
+    format_metaclass_method_doc/1,
+    metaclass_method_doc/1
+]).
 -endif.
 
 %% @doc Format documentation for a class, including method listing.
@@ -67,15 +79,22 @@ format_class_docs(ClassName) ->
                 OwnSelectors = lists:sort([S || {S, _} <- Own]),
                 SealedMap = maps:from_list(Own),
                 OwnDocs = get_method_signatures_with_sealed(
-                              ModuleName, OwnSelectors, SealedMap),
+                    ModuleName, OwnSelectors, SealedMap
+                ),
 
                 %% Group inherited by defining class
                 InheritedGrouped = group_by_class(lists:sort(Inherited)),
 
                 %% Format the output
                 Modifiers = #{is_sealed => IsSealed, is_abstract => IsAbstract},
-                Output = format_class_output(ClassName, Superclass, Modifiers,
-                                              ModuleDoc, OwnDocs, InheritedGrouped),
+                Output = format_class_output(
+                    ClassName,
+                    Superclass,
+                    Modifiers,
+                    ModuleDoc,
+                    OwnDocs,
+                    InheritedGrouped
+                ),
                 {ok, Output}
             catch
                 exit:{timeout, _} ->
@@ -103,15 +122,20 @@ format_method_doc(ClassName, SelectorBin) ->
                     case find_method_in_chain(ClassPid, SelectorAtom) of
                         {ok, DefiningClass} ->
                             %% Found the method — get its doc from the defining class
-                            DocInfo = case beamtalk_class_registry:whereis_class(DefiningClass) of
-                                undefined ->
-                                    {atom_to_binary(SelectorAtom, utf8), none};
-                                DefClassPid ->
-                                    DefModule = gen_server:call(DefClassPid, module_name, 5000),
-                                    get_method_doc(DefModule, SelectorAtom)
-                            end,
-                            Output = format_method_output(ClassName, SelectorBin,
-                                                           DefiningClass, DocInfo),
+                            DocInfo =
+                                case beamtalk_class_registry:whereis_class(DefiningClass) of
+                                    undefined ->
+                                        {atom_to_binary(SelectorAtom, utf8), none};
+                                    DefClassPid ->
+                                        DefModule = gen_server:call(DefClassPid, module_name, 5000),
+                                        get_method_doc(DefModule, SelectorAtom)
+                                end,
+                            Output = format_method_output(
+                                ClassName,
+                                SelectorBin,
+                                DefiningClass,
+                                DocInfo
+                            ),
                             {ok, Output};
                         not_found ->
                             {error, {method_not_found, ClassName, SelectorBin}}
@@ -143,11 +167,15 @@ format_metaclass_docs() ->
 format_metaclass_method_doc(SelectorBin) ->
     case metaclass_method_doc(SelectorBin) of
         {ok, Doc} ->
-            {ok, iolist_to_binary([
-                <<"Metaclass >> ">>, SelectorBin,
-                <<"\n  ">>, SelectorBin,
-                <<"\n\n">>, Doc
-            ])};
+            {ok,
+                iolist_to_binary([
+                    <<"Metaclass >> ">>,
+                    SelectorBin,
+                    <<"\n  ">>,
+                    SelectorBin,
+                    <<"\n\n">>,
+                    Doc
+                ])};
         not_found ->
             {error, {method_not_found, 'Metaclass', SelectorBin}}
     end.
@@ -167,7 +195,8 @@ metaclass_method_doc(_) ->
 
 %% @doc Safe atom conversion — returns error instead of creating new atoms.
 -spec safe_to_existing_atom(binary()) -> {ok, atom()} | {error, badarg}.
-safe_to_existing_atom(<<>>) -> {error, badarg};
+safe_to_existing_atom(<<>>) ->
+    {error, badarg};
 safe_to_existing_atom(Bin) when is_binary(Bin) ->
     try binary_to_existing_atom(Bin, utf8) of
         Atom -> {ok, Atom}
@@ -253,14 +282,16 @@ find_doc_entry(Selector, DocEntries) ->
     ),
     case Result of
         [{{function, _Name, _Arity}, _Anno, Sigs, Doc, _Meta} | _] ->
-            Signature = case Sigs of
-                [S | _] -> S;
-                _ -> atom_to_binary(Selector, utf8)
-            end,
-            DocText = case Doc of
-                #{<<"en">> := Text} -> Text;
-                _ -> none
-            end,
+            Signature =
+                case Sigs of
+                    [S | _] -> S;
+                    _ -> atom_to_binary(Selector, utf8)
+                end,
+            DocText =
+                case Doc of
+                    #{<<"en">> := Text} -> Text;
+                    _ -> none
+                end,
             {ok, Signature, DocText};
         _ ->
             not_found
@@ -289,15 +320,23 @@ group_by_class(Methods) ->
     ).
 
 %% @doc Format the complete class documentation output.
--spec format_class_output(atom(), atom() | none, map(),
-                          binary() | none,
-                          [{atom(), binary(), binary() | none, boolean()}],
-                          [{atom(), [atom()]}]) -> binary().
+-spec format_class_output(
+    atom(),
+    atom() | none,
+    map(),
+    binary() | none,
+    [{atom(), binary(), binary() | none, boolean()}],
+    [{atom(), [atom()]}]
+) -> binary().
 format_class_output(ClassName, Superclass, Modifiers, ModuleDoc, OwnDocs, InheritedGrouped) ->
     Parts = [
         %% Header
-        iolist_to_binary([<<"== ">>, atom_to_binary(ClassName, utf8),
-                          format_superclass(Superclass), <<" ==">>]),
+        iolist_to_binary([
+            <<"== ">>,
+            atom_to_binary(ClassName, utf8),
+            format_superclass(Superclass),
+            <<" ==">>
+        ]),
 
         %% Class modifiers
         format_modifiers(Modifiers),
@@ -305,57 +344,65 @@ format_class_output(ClassName, Superclass, Modifiers, ModuleDoc, OwnDocs, Inheri
         %% Module doc
         case ModuleDoc of
             none -> <<>>;
-            Text ->
-                iolist_to_binary([<<"\n">>, Text])
+            Text -> iolist_to_binary([<<"\n">>, Text])
         end,
 
         %% Own methods
         case OwnDocs of
-            [] -> <<>>;
+            [] ->
+                <<>>;
             _ ->
                 MethodLines = lists:map(
-                    fun({_Sel, Sig, _Doc, true}) ->
-                        iolist_to_binary([<<"  ">>, Sig, <<" [sealed]">>]);
-                       ({_Sel, Sig, _Doc, false}) ->
-                        iolist_to_binary([<<"  ">>, Sig])
+                    fun
+                        ({_Sel, Sig, _Doc, true}) ->
+                            iolist_to_binary([<<"  ">>, Sig, <<" [sealed]">>]);
+                        ({_Sel, Sig, _Doc, false}) ->
+                            iolist_to_binary([<<"  ">>, Sig])
                     end,
                     OwnDocs
                 ),
-                iolist_to_binary([<<"\nInstance methods:\n">>,
-                                  lists:join(<<"\n">>, MethodLines)])
+                iolist_to_binary([
+                    <<"\nInstance methods:\n">>,
+                    lists:join(<<"\n">>, MethodLines)
+                ])
         end,
 
         %% Inherited methods (compact summary per class)
         lists:map(
             fun({FromClass, Selectors}) ->
                 Count = length(Selectors),
-                Summary = case Count =< 5 of
-                    true ->
-                        %% Show all if 5 or fewer
-                        SelectorStrs = lists:map(
-                            fun(S) -> atom_to_binary(S, utf8) end,
-                            Selectors
-                        ),
-                        lists:join(<<", ">>, SelectorStrs);
-                    false ->
-                        %% Show first 3 + count of remaining
-                        {First3, _Rest} = lists:split(3, Selectors),
-                        Shown = lists:map(
-                            fun(S) -> atom_to_binary(S, utf8) end,
-                            First3
-                        ),
-                        Remaining = Count - 3,
-                        iolist_to_binary([
-                            lists:join(<<", ">>, Shown),
-                            <<", ... (">>,
-                            integer_to_binary(Remaining),
-                            <<" more)">>
-                        ])
-                end,
-                iolist_to_binary([<<"\nInherited from ">>,
-                                  atom_to_binary(FromClass, utf8),
-                                  <<" (">>, integer_to_binary(Count), <<" methods): ">>,
-                                  Summary])
+                Summary =
+                    case Count =< 5 of
+                        true ->
+                            %% Show all if 5 or fewer
+                            SelectorStrs = lists:map(
+                                fun(S) -> atom_to_binary(S, utf8) end,
+                                Selectors
+                            ),
+                            lists:join(<<", ">>, SelectorStrs);
+                        false ->
+                            %% Show first 3 + count of remaining
+                            {First3, _Rest} = lists:split(3, Selectors),
+                            Shown = lists:map(
+                                fun(S) -> atom_to_binary(S, utf8) end,
+                                First3
+                            ),
+                            Remaining = Count - 3,
+                            iolist_to_binary([
+                                lists:join(<<", ">>, Shown),
+                                <<", ... (">>,
+                                integer_to_binary(Remaining),
+                                <<" more)">>
+                            ])
+                    end,
+                iolist_to_binary([
+                    <<"\nInherited from ">>,
+                    atom_to_binary(FromClass, utf8),
+                    <<" (">>,
+                    integer_to_binary(Count),
+                    <<" methods): ">>,
+                    Summary
+                ])
             end,
             InheritedGrouped
         ),
@@ -363,14 +410,20 @@ format_class_output(ClassName, Superclass, Modifiers, ModuleDoc, OwnDocs, Inheri
         %% Hint
         <<"\nUse :help ClassName selector for method details.">>
     ],
-    iolist_to_binary(lists:filter(fun(<<>>) -> false; (_) -> true end,
-                                   lists:flatten(Parts))).
+    iolist_to_binary(
+        lists:filter(
+            fun
+                (<<>>) -> false;
+                (_) -> true
+            end,
+            lists:flatten(Parts)
+        )
+    ).
 
 %% @doc Format superclass portion of header.
 -spec format_superclass(atom() | none) -> iolist().
 format_superclass(none) -> [];
-format_superclass(Superclass) ->
-    [<<" < ">>, atom_to_binary(Superclass, utf8)].
+format_superclass(Superclass) -> [<<" < ">>, atom_to_binary(Superclass, utf8)].
 
 %% @doc Format class modifiers (sealed/abstract) for display.
 -spec format_modifiers(map()) -> binary().
@@ -398,7 +451,8 @@ collect_flattened_methods(ClassName, ClassPid) ->
     maps:merge(SuperFlat, LocalFlat).
 
 -spec collect_chain_methods(atom() | none) -> map().
-collect_chain_methods(none) -> #{};
+collect_chain_methods(none) ->
+    #{};
 collect_chain_methods(SuperName) ->
     case beamtalk_class_registry:whereis_class(SuperName) of
         undefined -> #{};
@@ -434,20 +488,33 @@ find_method_in_chain(ClassPid, Selector) ->
     end.
 
 %% @doc Format method-specific documentation output.
--spec format_method_output(atom(), binary(), atom(),
-                           {binary(), binary() | none}) -> binary().
+-spec format_method_output(
+    atom(),
+    binary(),
+    atom(),
+    {binary(), binary() | none}
+) -> binary().
 format_method_output(ClassName, SelectorBin, DefiningClass, {Signature, DocText}) ->
-    Header = iolist_to_binary([atom_to_binary(ClassName, utf8),
-                                <<" >> ">>, SelectorBin]),
-    Inherited = case DefiningClass of
-        ClassName -> <<>>;
-        _ -> iolist_to_binary([<<"\n(inherited from ">>,
-                                atom_to_binary(DefiningClass, utf8), <<")">>])
-    end,
+    Header = iolist_to_binary([
+        atom_to_binary(ClassName, utf8),
+        <<" >> ">>,
+        SelectorBin
+    ]),
+    Inherited =
+        case DefiningClass of
+            ClassName ->
+                <<>>;
+            _ ->
+                iolist_to_binary([
+                    <<"\n(inherited from ">>,
+                    atom_to_binary(DefiningClass, utf8),
+                    <<")">>
+                ])
+        end,
     SignatureLine = iolist_to_binary([<<"\n  ">>, Signature]),
-    Doc = case DocText of
-        none -> <<>>;
-        Text -> iolist_to_binary([<<"\n\n">>, Text])
-    end,
+    Doc =
+        case DocText of
+            none -> <<>>;
+            Text -> iolist_to_binary([<<"\n\n">>, Text])
+        end,
     iolist_to_binary([Header, Inherited, SignatureLine, Doc]).
-

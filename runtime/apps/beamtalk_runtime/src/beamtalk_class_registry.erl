@@ -92,8 +92,10 @@ ensure_hierarchy_table() ->
     case ets:info(beamtalk_class_hierarchy) of
         undefined ->
             try
-                ets:new(beamtalk_class_hierarchy,
-                        [set, public, named_table, {read_concurrency, true}]),
+                ets:new(
+                    beamtalk_class_hierarchy,
+                    [set, public, named_table, {read_concurrency, true}]
+                ),
                 ok
             catch
                 error:badarg -> ok
@@ -111,8 +113,10 @@ ensure_class_warnings_table() ->
     case ets:info(beamtalk_class_warnings) of
         undefined ->
             try
-                ets:new(beamtalk_class_warnings,
-                        [bag, public, named_table, {write_concurrency, true}]),
+                ets:new(
+                    beamtalk_class_warnings,
+                    [bag, public, named_table, {write_concurrency, true}]
+                ),
                 ok
             catch
                 error:badarg -> ok
@@ -137,16 +141,20 @@ record_class_collision_warning(ClassName, OldModule, NewModule) ->
 -spec drain_class_warnings_by_names([atom()]) -> [{atom(), atom(), atom()}].
 drain_class_warnings_by_names(ClassNames) ->
     case ets:info(beamtalk_class_warnings) of
-        undefined -> [];
+        undefined ->
+            [];
         _ ->
             lists:flatmap(
                 fun(ClassName) ->
                     %% ets:take/2 atomically removes and returns entries (OTP 21+).
                     %% Avoids TOCTOU race between lookup and delete in concurrent loads.
-                    [{CN, OldMod, NewMod}
-                     || {CN, OldMod, NewMod} <- ets:take(beamtalk_class_warnings, ClassName)]
+                    [
+                        {CN, OldMod, NewMod}
+                     || {CN, OldMod, NewMod} <- ets:take(beamtalk_class_warnings, ClassName)
+                    ]
                 end,
-                ClassNames)
+                ClassNames
+            )
     end.
 
 %% @doc Record a structured error to be surfaced after a failed module load.
@@ -166,13 +174,15 @@ record_pending_load_error(ClassName, Error) ->
 -spec drain_pending_load_errors_by_names([atom()]) -> [{atom(), #beamtalk_error{}}].
 drain_pending_load_errors_by_names(ClassNames) ->
     case ets:info(beamtalk_pending_load_errors) of
-        undefined -> [];
+        undefined ->
+            [];
         _ ->
             lists:flatmap(
                 fun(ClassName) ->
                     [{CN, Err} || {CN, Err} <- ets:take(beamtalk_pending_load_errors, ClassName)]
                 end,
-                ClassNames)
+                ClassNames
+            )
     end.
 
 %% @private Ensure the pending load errors ETS table exists.
@@ -181,8 +191,10 @@ ensure_pending_errors_table() ->
     case ets:info(beamtalk_pending_load_errors) of
         undefined ->
             try
-                ets:new(beamtalk_pending_load_errors,
-                        [set, public, named_table, {write_concurrency, true}]),
+                ets:new(
+                    beamtalk_pending_load_errors,
+                    [set, public, named_table, {write_concurrency, true}]
+                ),
                 ok
             catch
                 error:badarg -> ok
@@ -210,7 +222,8 @@ inherits_from(ClassName, Ancestor) when ClassName =:= Ancestor ->
     true;
 inherits_from(ClassName, Ancestor) ->
     case ets:info(beamtalk_class_hierarchy) of
-        undefined -> false;
+        undefined ->
+            false;
         _ ->
             case ets:lookup(beamtalk_class_hierarchy, ClassName) of
                 [{_, none}] -> false;
@@ -226,7 +239,8 @@ inherits_from(ClassName, Ancestor) ->
 -spec direct_subclasses(class_name()) -> [class_name()].
 direct_subclasses(ClassName) ->
     case ets:info(beamtalk_class_hierarchy) of
-        undefined -> [];
+        undefined ->
+            [];
         _ ->
             Matches = ets:match(beamtalk_class_hierarchy, {'$1', ClassName}),
             lists:sort([Name || [Name] <- Matches])

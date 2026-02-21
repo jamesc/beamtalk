@@ -46,7 +46,9 @@ dispatch_calls_method_closure_test() ->
     },
     Fields = test_init_state('TestClass', Methods, #{value => 42}),
     Self = #beamtalk_object{class = 'TestClass', class_mod = beamtalk_dynamic_object, pid = self()},
-    ?assertEqual({reply, 42, Fields}, beamtalk_dynamic_object:dispatch('getValue', [], Self, Fields)).
+    ?assertEqual(
+        {reply, 42, Fields}, beamtalk_dynamic_object:dispatch('getValue', [], Self, Fields)
+    ).
 
 dispatch_updates_state_test() ->
     Methods = #{
@@ -98,13 +100,17 @@ dispatch_unknown_method_returns_error_test() ->
 dispatch_unknown_method_error_has_selector_test() ->
     Fields = test_init_state('TestClass', #{}),
     Self = #beamtalk_object{class = 'TestClass', class_mod = beamtalk_dynamic_object, pid = self()},
-    {error, #beamtalk_error{selector = Sel}} = beamtalk_dynamic_object:dispatch('missing', [], Self, Fields),
+    {error, #beamtalk_error{selector = Sel}} = beamtalk_dynamic_object:dispatch(
+        'missing', [], Self, Fields
+    ),
     ?assertEqual('missing', Sel).
 
 dispatch_unknown_method_error_has_hint_test() ->
     Fields = test_init_state('TestClass', #{}),
     Self = #beamtalk_object{class = 'TestClass', class_mod = beamtalk_dynamic_object, pid = self()},
-    {error, #beamtalk_error{hint = Hint}} = beamtalk_dynamic_object:dispatch('missing', [], Self, Fields),
+    {error, #beamtalk_error{hint = Hint}} = beamtalk_dynamic_object:dispatch(
+        'missing', [], Self, Fields
+    ),
     ?assert(is_binary(Hint)).
 
 dispatch_does_not_understand_handler_test() ->
@@ -115,8 +121,10 @@ dispatch_does_not_understand_handler_test() ->
     },
     Fields = test_init_state('TestClass', Methods),
     Self = #beamtalk_object{class = 'TestClass', class_mod = beamtalk_dynamic_object, pid = self()},
-    ?assertEqual({reply, {caught, 'foo'}, Fields},
-                 beamtalk_dynamic_object:dispatch('foo', [], Self, Fields)).
+    ?assertEqual(
+        {reply, {caught, 'foo'}, Fields},
+        beamtalk_dynamic_object:dispatch('foo', [], Self, Fields)
+    ).
 
 %%====================================================================
 %% Method exception handling tests
@@ -240,8 +248,10 @@ handle_cast_error_rejects_future_test() ->
     FuturePid = beamtalk_future:new(),
     gen_server:cast(Pid, {'crasher', [], FuturePid}),
     %% The future should be rejected — await throws {future_rejected, Reason}
-    ?assertThrow({future_rejected, #beamtalk_error{kind = type_error}},
-        beamtalk_future:await(FuturePid, 1000)),
+    ?assertThrow(
+        {future_rejected, #beamtalk_error{kind = type_error}},
+        beamtalk_future:await(FuturePid, 1000)
+    ),
     gen_server:stop(Pid).
 
 %% Test handle_cast noreply resolves future with nil
@@ -263,7 +273,8 @@ handle_cast_noreply_resolves_nil_test() ->
 start_link_registered_name_test() ->
     InitState = test_init_state('TestClass', #{}),
     {ok, Pid} = beamtalk_dynamic_object:start_link(
-        {local, test_registered_dynamic}, 'TestClass', InitState),
+        {local, test_registered_dynamic}, 'TestClass', InitState
+    ),
     ?assert(is_process_alive(Pid)),
     ?assertEqual(Pid, whereis(test_registered_dynamic)),
     gen_server:stop(Pid).
@@ -296,8 +307,10 @@ dnu_handler_with_args_test() ->
     },
     Fields = test_init_state('TestClass', Methods),
     Self = #beamtalk_object{class = 'TestClass', class_mod = beamtalk_dynamic_object, pid = self()},
-    ?assertEqual({reply, {caught, 'add:to:', 2}, Fields},
-                 beamtalk_dynamic_object:dispatch('add:to:', [1, 2], Self, Fields)).
+    ?assertEqual(
+        {reply, {caught, 'add:to:', 2}, Fields},
+        beamtalk_dynamic_object:dispatch('add:to:', [1, 2], Self, Fields)
+    ).
 
 %% Test handle_call noreply returns nil
 handle_call_noreply_returns_nil_test() ->

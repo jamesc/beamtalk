@@ -21,13 +21,30 @@
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %% Public API
--export([start_link/1, stop/1, eval/2, eval_async/3, interrupt/1, get_bindings/1, clear_bindings/1,
-         load_file/2, load_source/2, unload_module/2, get_module_tracker/1,
-         show_codegen/2]).
+-export([
+    start_link/1,
+    stop/1,
+    eval/2,
+    eval_async/3,
+    interrupt/1,
+    get_bindings/1,
+    clear_bindings/1,
+    load_file/2,
+    load_source/2,
+    unload_module/2,
+    get_module_tracker/1,
+    show_codegen/2
+]).
 
 %% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3]).
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
 
 %%% Public API
 
@@ -42,7 +59,8 @@ stop(SessionPid) ->
     gen_server:stop(SessionPid, normal, 5000).
 
 %% @doc Evaluate an expression in this session.
--spec eval(pid(), string()) -> {ok, term(), binary(), [binary()]} | {error, term(), binary(), [binary()]}.
+-spec eval(pid(), string()) ->
+    {ok, term(), binary(), [binary()]} | {error, term(), binary(), [binary()]}.
 eval(SessionPid, Expression) ->
     gen_server:call(SessionPid, {eval, Expression}, 30000).
 
@@ -101,7 +119,7 @@ init(SessionId) ->
     %% Create session-specific REPL state
     %% We use undefined for listen_socket and port since session doesn't own TCP connection
     State0 = beamtalk_repl_state:new(undefined, 0),
-    
+
     %% ADR 0019 Phase 3: Inject workspace convenience bindings into session
     %% so that Transcript, Beamtalk, Workspace resolve from bindings map.
     Bindings0 = inject_workspace_bindings(#{}),
@@ -109,15 +127,16 @@ init(SessionId) ->
 
     %% Get workspace-wide actor registry
     %% The registry is registered globally in the workspace
-    RegistryPid = case whereis(beamtalk_actor_registry) of
-        undefined ->
-            ?LOG_WARNING("Actor registry not found for session ~p", [SessionId]),
-            undefined;
-        Pid ->
-            Pid
-    end,
+    RegistryPid =
+        case whereis(beamtalk_actor_registry) of
+            undefined ->
+                ?LOG_WARNING("Actor registry not found for session ~p", [SessionId]),
+                undefined;
+            Pid ->
+                Pid
+        end,
     State1 = beamtalk_repl_state:set_actor_registry(RegistryPid, State0b),
-    
+
     {ok, {SessionId, State1, undefined}}.
 
 %% @private
@@ -129,14 +148,12 @@ handle_call({eval, Expression}, From, {SessionId, State, undefined}) ->
         Self ! {eval_result, self(), Result}
     end),
     {noreply, {SessionId, State, {WorkerPid, MonRef, From}}};
-
 handle_call({eval, _Expression}, _From, {_SessionId, _State, {_Pid, _Ref, _}} = FullState) ->
     %% Already evaluating — reject concurrent eval
     Err0 = beamtalk_error:new(eval_busy, 'REPL'),
     Err1 = beamtalk_error:with_message(Err0, <<"An evaluation is already in progress">>),
     Err2 = beamtalk_error:with_hint(Err1, <<"Use Ctrl-C to interrupt the current evaluation.">>),
     {reply, {error, Err2, <<>>, []}, FullState};
-
 handle_call(interrupt, _From, {SessionId, State, {WorkerPid, MonRef, EvalFrom}}) ->
     %% Kill the worker process and reply to the waiting eval caller
     erlang:demonitor(MonRef, [flush]),
@@ -150,22 +167,18 @@ handle_call(interrupt, _From, {SessionId, State, {WorkerPid, MonRef, EvalFrom}})
     Err1 = beamtalk_error:with_message(Err0, <<"Interrupted">>),
     reply_eval(EvalFrom, {eval_error, Err1, <<>>, []}),
     {reply, ok, {SessionId, State, undefined}};
-
 handle_call(interrupt, _From, {_SessionId, _State, undefined} = FullState) ->
     %% No eval in progress — nothing to interrupt
     {reply, ok, FullState};
-
 handle_call(get_bindings, _From, {SessionId, State, Worker}) ->
     Bindings = beamtalk_repl_state:get_bindings(State),
     {reply, {ok, Bindings}, {SessionId, State, Worker}};
-
 handle_call(clear_bindings, _From, {SessionId, State, Worker}) ->
     %% ADR 0019 Phase 3: Re-inject workspace bindings after clearing
     %% so that Transcript, Beamtalk, Workspace remain available.
     Bindings = inject_workspace_bindings(#{}),
     NewState = beamtalk_repl_state:set_bindings(Bindings, State),
     {reply, ok, {SessionId, NewState, Worker}};
-
 handle_call({load_file, Path}, _From, {SessionId, State, Worker}) ->
     case beamtalk_repl_eval:handle_load(Path, State) of
         {ok, LoadedModules, NewState} ->
@@ -173,7 +186,6 @@ handle_call({load_file, Path}, _From, {SessionId, State, Worker}) ->
         {error, Reason, NewState} ->
             {reply, {error, Reason}, {SessionId, NewState, Worker}}
     end;
-
 handle_call({load_source, Source}, _From, {SessionId, State, Worker}) ->
     case beamtalk_repl_eval:handle_load_source(Source, "<editor>", State) of
         {ok, LoadedModules, NewState} ->
@@ -181,11 +193,9 @@ handle_call({load_source, Source}, _From, {SessionId, State, Worker}) ->
         {error, Reason, NewState} ->
             {reply, {error, Reason}, {SessionId, NewState, Worker}}
     end;
-
 handle_call(get_module_tracker, _From, {SessionId, State, Worker}) ->
     Tracker = beamtalk_repl_state:get_module_tracker(State),
     {reply, {ok, Tracker}, {SessionId, State, Worker}};
-
 handle_call({unload_module, Module}, _From, {SessionId, State, Worker}) ->
     case code:is_loaded(Module) of
         {file, _} ->
@@ -199,25 +209,27 @@ handle_call({unload_module, Module}, _From, {SessionId, State, Worker}) ->
                 false ->
                     Err0 = beamtalk_error:new(module_in_use, 'Module'),
                     Err1 = beamtalk_error:with_selector(Err0, Module),
-                    Err = beamtalk_error:with_hint(Err1,
-                        <<"Stop actors using this module first.">>),
+                    Err = beamtalk_error:with_hint(
+                        Err1,
+                        <<"Stop actors using this module first.">>
+                    ),
                     {reply, {error, Err}, {SessionId, State, Worker}}
             end;
         false ->
             Err0 = beamtalk_error:new(module_not_loaded, 'Module'),
             Err1 = beamtalk_error:with_selector(Err0, Module),
-            Err = beamtalk_error:with_hint(Err1,
-                <<"Use :load <path> to load it first.">>),
+            Err = beamtalk_error:with_hint(
+                Err1,
+                <<"Use :load <path> to load it first.">>
+            ),
             {reply, {error, Err}, {SessionId, State, Worker}}
     end;
-
 handle_call({show_codegen, _Expression}, _From, {_SessionId, _State, {_Pid, _Ref, _}} = FullState) ->
     %% Reject if eval is in progress
     Err0 = beamtalk_error:new(eval_busy, 'REPL'),
     Err1 = beamtalk_error:with_message(Err0, <<"An evaluation is already in progress">>),
     Err2 = beamtalk_error:with_hint(Err1, <<"Wait for the current evaluation to complete.">>),
     {reply, {error, Err2, []}, FullState};
-
 handle_call({show_codegen, Expression}, _From, {SessionId, State, undefined}) ->
     case beamtalk_repl_eval:do_show_codegen(Expression, State) of
         {ok, CoreErlang, Warnings, NewState} ->
@@ -225,7 +237,6 @@ handle_call({show_codegen, Expression}, _From, {SessionId, State, undefined}) ->
         {error, Reason, Warnings, NewState} ->
             {reply, {error, Reason, Warnings}, {SessionId, NewState, undefined}}
     end;
-
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
@@ -238,7 +249,9 @@ handle_cast({eval_async, Expression, Subscriber}, {SessionId, State, undefined})
         Self ! {eval_result, self(), Result}
     end),
     {noreply, {SessionId, State, {WorkerPid, MonRef, {async, Subscriber}}}};
-handle_cast({eval_async, _Expression, Subscriber}, {_SessionId, _State, {_Pid, _Ref, _}} = FullState) ->
+handle_cast(
+    {eval_async, _Expression, Subscriber}, {_SessionId, _State, {_Pid, _Ref, _}} = FullState
+) ->
     %% Already evaluating — reject concurrent eval
     Err0 = beamtalk_error:new(eval_busy, 'REPL'),
     Err1 = beamtalk_error:with_message(Err0, <<"An evaluation is already in progress">>),
@@ -260,16 +273,18 @@ handle_info({eval_result, WorkerPid, Result}, {SessionId, _State, {WorkerPid, Mo
             reply_eval(From, {eval_error, Reason, Output, Warnings}),
             {noreply, {SessionId, NewState, undefined}}
     end;
-
 %% Worker process crashed (BT-666)
-handle_info({'DOWN', MonRef, process, WorkerPid, Reason},
-            {SessionId, State, {WorkerPid, MonRef, From}}) ->
+handle_info(
+    {'DOWN', MonRef, process, WorkerPid, Reason},
+    {SessionId, State, {WorkerPid, MonRef, From}}
+) ->
     Err0 = beamtalk_error:new(eval_crashed, 'REPL'),
-    Err1 = beamtalk_error:with_message(Err0,
-        iolist_to_binary(io_lib:format("Evaluation crashed: ~p", [Reason]))),
+    Err1 = beamtalk_error:with_message(
+        Err0,
+        iolist_to_binary(io_lib:format("Evaluation crashed: ~p", [Reason]))
+    ),
     reply_eval(From, {eval_error, Err1, <<>>, []}),
     {noreply, {SessionId, State, undefined}};
-
 handle_info(_Info, State) ->
     {noreply, State}.
 

@@ -130,7 +130,8 @@ send_to_float_test() ->
     %% Float dispatch implemented (BT-277)
     Result = beamtalk_primitive:send(3.14, '+', [2.0]),
     ?assert(is_float(Result)),
-    ?assert(abs(Result - 5.14) < 0.0001),  % Floating point tolerance
+    % Floating point tolerance
+    ?assert(abs(Result - 5.14) < 0.0001),
     ?assertEqual('Float', beamtalk_primitive:send(3.14, 'class', [])).
 
 %%% ============================================================================
@@ -147,83 +148,62 @@ responds_to_beamtalk_object_test() ->
     ?assertEqual(false, beamtalk_primitive:responds_to(Obj, 'increment')).
 
 responds_to_integer_test_() ->
-    {setup, 
-     fun() -> beamtalk_extensions:init() end,
-     fun(_) -> ok end,
-     fun() ->
-         %% Integer class now implemented (BT-166)
-         ?assertEqual(true, beamtalk_primitive:responds_to(42, '+')),
-         ?assertEqual(true, beamtalk_primitive:responds_to(42, 'class')),
-         ?assertEqual(false, beamtalk_primitive:responds_to(42, 'unknownMethod'))
-     end}.
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        %% Integer class now implemented (BT-166)
+        ?assertEqual(true, beamtalk_primitive:responds_to(42, '+')),
+        ?assertEqual(true, beamtalk_primitive:responds_to(42, 'class')),
+        ?assertEqual(false, beamtalk_primitive:responds_to(42, 'unknownMethod'))
+    end}.
 
 responds_to_string_test_() ->
-    {setup,
-     fun() -> beamtalk_extensions:init() end,
-     fun(_) -> ok end,
-     fun() ->
-         %% String class now implemented (BT-167)
-         ?assertEqual(true, beamtalk_primitive:responds_to(<<"hello">>, '++')),
-         ?assertEqual(true, beamtalk_primitive:responds_to(<<"hello">>, 'length')),
-         ?assertEqual(true, beamtalk_primitive:responds_to(<<"hello">>, 'class')),
-         ?assertEqual(false, beamtalk_primitive:responds_to(<<"hello">>, 'unknownMethod'))
-     end}.
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        %% String class now implemented (BT-167)
+        ?assertEqual(true, beamtalk_primitive:responds_to(<<"hello">>, '++')),
+        ?assertEqual(true, beamtalk_primitive:responds_to(<<"hello">>, 'length')),
+        ?assertEqual(true, beamtalk_primitive:responds_to(<<"hello">>, 'class')),
+        ?assertEqual(false, beamtalk_primitive:responds_to(<<"hello">>, 'unknownMethod'))
+    end}.
 
 responds_to_boolean_test_() ->
-    {setup,
-     fun() -> beamtalk_extensions:init() end,
-     fun(_) -> ok end,
-     fun() ->
-         %% Boolean class now implemented (BT-168)
-         ?assertEqual(true, beamtalk_primitive:responds_to(true, 'not')),
-         ?assertEqual(true, beamtalk_primitive:responds_to(false, 'not')),
-         ?assertEqual(true, beamtalk_primitive:responds_to(true, 'ifTrue:')),
-         ?assertEqual(false, beamtalk_primitive:responds_to(true, 'unknownMethod'))
-     end}.
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        %% Boolean class now implemented (BT-168)
+        ?assertEqual(true, beamtalk_primitive:responds_to(true, 'not')),
+        ?assertEqual(true, beamtalk_primitive:responds_to(false, 'not')),
+        ?assertEqual(true, beamtalk_primitive:responds_to(true, 'ifTrue:')),
+        ?assertEqual(false, beamtalk_primitive:responds_to(true, 'unknownMethod'))
+    end}.
 
 responds_to_nil_test_() ->
-    {setup,
-     fun() -> beamtalk_extensions:init() end,
-     fun(_) -> ok end,
-     fun() ->
-         %% Nil class now implemented (BT-168)
-         ?assertEqual(true, beamtalk_primitive:responds_to(nil, 'isNil')),
-         ?assertEqual(true, beamtalk_primitive:responds_to(nil, 'ifNil:')),
-         ?assertEqual(false, beamtalk_primitive:responds_to(nil, 'unknownMethod'))
-     end}.
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        %% Nil class now implemented (BT-168)
+        ?assertEqual(true, beamtalk_primitive:responds_to(nil, 'isNil')),
+        ?assertEqual(true, beamtalk_primitive:responds_to(nil, 'ifNil:')),
+        ?assertEqual(false, beamtalk_primitive:responds_to(nil, 'unknownMethod'))
+    end}.
 
 responds_to_block_test_() ->
-    {setup,
-     fun() -> beamtalk_extensions:init() end,
-     fun(_) -> ok end,
-     fun() ->
-         %% Block class now implemented (BT-168)
-         Block = fun() -> ok end,
-         ?assertEqual(true, beamtalk_primitive:responds_to(Block, 'value')),
-         ?assertEqual(true, beamtalk_primitive:responds_to(Block, 'arity')),
-         ?assertEqual(false, beamtalk_primitive:responds_to(Block, 'unknownMethod'))
-     end}.
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        %% Block class now implemented (BT-168)
+        Block = fun() -> ok end,
+        ?assertEqual(true, beamtalk_primitive:responds_to(Block, 'value')),
+        ?assertEqual(true, beamtalk_primitive:responds_to(Block, 'arity')),
+        ?assertEqual(false, beamtalk_primitive:responds_to(Block, 'unknownMethod'))
+    end}.
 
 responds_to_tuple_test_() ->
-    {setup,
-     fun() -> beamtalk_extensions:init() end,
-     fun(_) -> ok end,
-     fun() ->
-         %% Tuple class now implemented (BT-168)
-         ?assertEqual(true, beamtalk_primitive:responds_to({a, b}, 'size')),
-         ?assertEqual(true, beamtalk_primitive:responds_to({ok, 42}, 'isOk')),
-         ?assertEqual(false, beamtalk_primitive:responds_to({a, b}, 'unknownMethod'))
-     end}.
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        %% Tuple class now implemented (BT-168)
+        ?assertEqual(true, beamtalk_primitive:responds_to({a, b}, 'size')),
+        ?assertEqual(true, beamtalk_primitive:responds_to({ok, 42}, 'isOk')),
+        ?assertEqual(false, beamtalk_primitive:responds_to({a, b}, 'unknownMethod'))
+    end}.
 
 responds_to_float_test_() ->
-    {setup,
-     fun() -> beamtalk_extensions:init() end,
-     fun(_) -> ok end,
-     fun() ->
-         ?assertEqual(true, beamtalk_primitive:responds_to(3.14, '+')),
-         ?assertEqual(true, beamtalk_primitive:responds_to(3.14, 'class')),
-         ?assertEqual(false, beamtalk_primitive:responds_to(3.14, 'unknownMethod'))
-     end}.
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        ?assertEqual(true, beamtalk_primitive:responds_to(3.14, '+')),
+        ?assertEqual(true, beamtalk_primitive:responds_to(3.14, 'class')),
+        ?assertEqual(false, beamtalk_primitive:responds_to(3.14, 'unknownMethod'))
+    end}.
 
 responds_to_other_primitives_test() ->
     %% Lists support size via bt@stdlib@list dispatch
@@ -250,7 +230,7 @@ class_of_special_atoms_test() ->
     ?assertEqual('True', beamtalk_primitive:class_of(true)),
     ?assertEqual('False', beamtalk_primitive:class_of(false)),
     ?assertEqual('UndefinedObject', beamtalk_primitive:class_of(nil)),
-    
+
     %% But other atoms are symbols
     ?assertEqual('Symbol', beamtalk_primitive:class_of(ok)),
     ?assertEqual('Symbol', beamtalk_primitive:class_of(error)).
@@ -295,118 +275,103 @@ reflection_class_tuple_test() ->
 
 %% Test respondsTo reflection directly via dispatch
 reflection_responds_to_integer_test_() ->
-    {setup,
-     fun() -> beamtalk_extensions:init() end,
-     fun(_) -> ok end,
-     fun() ->
-         %% True cases - methods that exist
-         ?assertEqual(true, 'bt@stdlib@integer':dispatch('respondsTo:', ['+'], 42)),
-         ?assertEqual(true, 'bt@stdlib@integer':dispatch('respondsTo:', ['class'], 42)),
-         ?assertEqual(true, 'bt@stdlib@integer':dispatch('respondsTo:', ['abs'], 42)),
-         ?assertEqual(true, 'bt@stdlib@integer':dispatch('respondsTo:', ['respondsTo:'], 42)),
-         
-         %% False cases - methods that don't exist
-         ?assertEqual(false, 'bt@stdlib@integer':dispatch('respondsTo:', ['unknownMethod'], 42)),
-         ?assertEqual(false, 'bt@stdlib@integer':dispatch('respondsTo:', ['fooBar'], 42))
-     end}.
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        %% True cases - methods that exist
+        ?assertEqual(true, 'bt@stdlib@integer':dispatch('respondsTo:', ['+'], 42)),
+        ?assertEqual(true, 'bt@stdlib@integer':dispatch('respondsTo:', ['class'], 42)),
+        ?assertEqual(true, 'bt@stdlib@integer':dispatch('respondsTo:', ['abs'], 42)),
+        ?assertEqual(true, 'bt@stdlib@integer':dispatch('respondsTo:', ['respondsTo:'], 42)),
+
+        %% False cases - methods that don't exist
+        ?assertEqual(false, 'bt@stdlib@integer':dispatch('respondsTo:', ['unknownMethod'], 42)),
+        ?assertEqual(false, 'bt@stdlib@integer':dispatch('respondsTo:', ['fooBar'], 42))
+    end}.
 
 reflection_responds_to_string_test_() ->
-    {setup,
-     fun() -> beamtalk_extensions:init() end,
-     fun(_) -> ok end,
-     fun() ->
-         %% True cases
-         ?assertEqual(true, 'bt@stdlib@string':dispatch('respondsTo:', ['++'], <<"hi">>)),
-         ?assertEqual(true, 'bt@stdlib@string':dispatch('respondsTo:', ['class'], <<"hi">>)),
-         ?assertEqual(true, 'bt@stdlib@string':dispatch('respondsTo:', ['size'], <<"hi">>)),
-         ?assertEqual(true, 'bt@stdlib@string':dispatch('respondsTo:', ['respondsTo:'], <<"hi">>)),
-         
-         %% False cases
-         ?assertEqual(false, 'bt@stdlib@string':dispatch('respondsTo:', ['unknownMethod'], <<"hi">>)),
-         ?assertEqual(false, 'bt@stdlib@string':dispatch('respondsTo:', ['+'], <<"hi">>))
-     end}.
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        %% True cases
+        ?assertEqual(true, 'bt@stdlib@string':dispatch('respondsTo:', ['++'], <<"hi">>)),
+        ?assertEqual(true, 'bt@stdlib@string':dispatch('respondsTo:', ['class'], <<"hi">>)),
+        ?assertEqual(true, 'bt@stdlib@string':dispatch('respondsTo:', ['size'], <<"hi">>)),
+        ?assertEqual(true, 'bt@stdlib@string':dispatch('respondsTo:', ['respondsTo:'], <<"hi">>)),
+
+        %% False cases
+        ?assertEqual(
+            false, 'bt@stdlib@string':dispatch('respondsTo:', ['unknownMethod'], <<"hi">>)
+        ),
+        ?assertEqual(false, 'bt@stdlib@string':dispatch('respondsTo:', ['+'], <<"hi">>))
+    end}.
 
 reflection_responds_to_boolean_test_() ->
-    {setup,
-     fun() -> beamtalk_extensions:init() end,
-     fun(_) -> ok end,
-     fun() ->
-         %% True cases
-         ?assertEqual(true, 'bt@stdlib@true':dispatch('respondsTo:', ['not'], true)),
-         ?assertEqual(true, 'bt@stdlib@true':dispatch('respondsTo:', ['class'], true)),
-         ?assertEqual(true, 'bt@stdlib@true':dispatch('respondsTo:', ['ifTrue:'], true)),
-         ?assertEqual(true, 'bt@stdlib@true':dispatch('respondsTo:', ['respondsTo:'], true)),
-         
-         %% False cases
-         ?assertEqual(false, 'bt@stdlib@true':dispatch('respondsTo:', ['unknownMethod'], true)),
-         ?assertEqual(false, 'bt@stdlib@true':dispatch('respondsTo:', ['+'], true))
-     end}.
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        %% True cases
+        ?assertEqual(true, 'bt@stdlib@true':dispatch('respondsTo:', ['not'], true)),
+        ?assertEqual(true, 'bt@stdlib@true':dispatch('respondsTo:', ['class'], true)),
+        ?assertEqual(true, 'bt@stdlib@true':dispatch('respondsTo:', ['ifTrue:'], true)),
+        ?assertEqual(true, 'bt@stdlib@true':dispatch('respondsTo:', ['respondsTo:'], true)),
+
+        %% False cases
+        ?assertEqual(false, 'bt@stdlib@true':dispatch('respondsTo:', ['unknownMethod'], true)),
+        ?assertEqual(false, 'bt@stdlib@true':dispatch('respondsTo:', ['+'], true))
+    end}.
 
 reflection_responds_to_nil_test_() ->
-    {setup,
-     fun() -> beamtalk_extensions:init() end,
-     fun(_) -> ok end,
-     fun() ->
-         %% True cases
-         ?assertEqual(true, 'bt@stdlib@undefined_object':dispatch('respondsTo:', ['isNil'], nil)),
-         ?assertEqual(true, 'bt@stdlib@undefined_object':dispatch('respondsTo:', ['class'], nil)),
-         ?assertEqual(true, 'bt@stdlib@undefined_object':dispatch('respondsTo:', ['ifNil:'], nil)),
-         ?assertEqual(true, 'bt@stdlib@undefined_object':dispatch('respondsTo:', ['respondsTo:'], nil)),
-         
-         %% False cases
-         ?assertEqual(false, 'bt@stdlib@undefined_object':dispatch('respondsTo:', ['unknownMethod'], nil)),
-         ?assertEqual(false, 'bt@stdlib@undefined_object':dispatch('respondsTo:', ['+'], nil))
-     end}.
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        %% True cases
+        ?assertEqual(true, 'bt@stdlib@undefined_object':dispatch('respondsTo:', ['isNil'], nil)),
+        ?assertEqual(true, 'bt@stdlib@undefined_object':dispatch('respondsTo:', ['class'], nil)),
+        ?assertEqual(true, 'bt@stdlib@undefined_object':dispatch('respondsTo:', ['ifNil:'], nil)),
+        ?assertEqual(
+            true, 'bt@stdlib@undefined_object':dispatch('respondsTo:', ['respondsTo:'], nil)
+        ),
+
+        %% False cases
+        ?assertEqual(
+            false, 'bt@stdlib@undefined_object':dispatch('respondsTo:', ['unknownMethod'], nil)
+        ),
+        ?assertEqual(false, 'bt@stdlib@undefined_object':dispatch('respondsTo:', ['+'], nil))
+    end}.
 
 reflection_responds_to_block_test_() ->
-    {setup,
-     fun() -> beamtalk_extensions:init() end,
-     fun(_) -> ok end,
-     fun() ->
-         Block = fun() -> ok end,
-         %% True cases
-         ?assertEqual(true, 'bt@stdlib@block':dispatch('respondsTo:', ['value'], Block)),
-         ?assertEqual(true, 'bt@stdlib@block':dispatch('respondsTo:', ['class'], Block)),
-         ?assertEqual(true, 'bt@stdlib@block':dispatch('respondsTo:', ['arity'], Block)),
-         ?assertEqual(true, 'bt@stdlib@block':dispatch('respondsTo:', ['respondsTo:'], Block)),
-         
-         %% False cases
-         ?assertEqual(false, 'bt@stdlib@block':dispatch('respondsTo:', ['unknownMethod'], Block)),
-         ?assertEqual(false, 'bt@stdlib@block':dispatch('respondsTo:', ['+'], Block))
-     end}.
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        Block = fun() -> ok end,
+        %% True cases
+        ?assertEqual(true, 'bt@stdlib@block':dispatch('respondsTo:', ['value'], Block)),
+        ?assertEqual(true, 'bt@stdlib@block':dispatch('respondsTo:', ['class'], Block)),
+        ?assertEqual(true, 'bt@stdlib@block':dispatch('respondsTo:', ['arity'], Block)),
+        ?assertEqual(true, 'bt@stdlib@block':dispatch('respondsTo:', ['respondsTo:'], Block)),
+
+        %% False cases
+        ?assertEqual(false, 'bt@stdlib@block':dispatch('respondsTo:', ['unknownMethod'], Block)),
+        ?assertEqual(false, 'bt@stdlib@block':dispatch('respondsTo:', ['+'], Block))
+    end}.
 
 reflection_responds_to_tuple_test_() ->
-    {setup,
-     fun() -> beamtalk_extensions:init() end,
-     fun(_) -> ok end,
-     fun() ->
-         Tuple = {a, b, c},
-         %% True cases
-         ?assertEqual(true, 'bt@stdlib@tuple':dispatch('respondsTo:', ['size'], Tuple)),
-         ?assertEqual(true, 'bt@stdlib@tuple':dispatch('respondsTo:', ['class'], Tuple)),
-         ?assertEqual(true, 'bt@stdlib@tuple':dispatch('respondsTo:', ['at:'], Tuple)),
-         ?assertEqual(true, 'bt@stdlib@tuple':dispatch('respondsTo:', ['respondsTo:'], Tuple)),
-         
-         %% False cases
-         ?assertEqual(false, 'bt@stdlib@tuple':dispatch('respondsTo:', ['unknownMethod'], Tuple)),
-         ?assertEqual(false, 'bt@stdlib@tuple':dispatch('respondsTo:', ['+'], Tuple))
-     end}.
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        Tuple = {a, b, c},
+        %% True cases
+        ?assertEqual(true, 'bt@stdlib@tuple':dispatch('respondsTo:', ['size'], Tuple)),
+        ?assertEqual(true, 'bt@stdlib@tuple':dispatch('respondsTo:', ['class'], Tuple)),
+        ?assertEqual(true, 'bt@stdlib@tuple':dispatch('respondsTo:', ['at:'], Tuple)),
+        ?assertEqual(true, 'bt@stdlib@tuple':dispatch('respondsTo:', ['respondsTo:'], Tuple)),
+
+        %% False cases
+        ?assertEqual(false, 'bt@stdlib@tuple':dispatch('respondsTo:', ['unknownMethod'], Tuple)),
+        ?assertEqual(false, 'bt@stdlib@tuple':dispatch('respondsTo:', ['+'], Tuple))
+    end}.
 
 reflection_responds_to_float_test_() ->
-    {setup,
-     fun() -> beamtalk_extensions:init() end,
-     fun(_) -> ok end,
-     fun() ->
-         %% True cases
-         ?assertEqual(true, 'bt@stdlib@float':dispatch('respondsTo:', ['+'], 3.14)),
-         ?assertEqual(true, 'bt@stdlib@float':dispatch('respondsTo:', ['class'], 3.14)),
-         ?assertEqual(true, 'bt@stdlib@float':dispatch('respondsTo:', ['abs'], 3.14)),
-         ?assertEqual(true, 'bt@stdlib@float':dispatch('respondsTo:', ['respondsTo:'], 3.14)),
-         
-         %% False cases
-         ?assertEqual(false, 'bt@stdlib@float':dispatch('respondsTo:', ['unknownMethod'], 3.14)),
-         ?assertEqual(false, 'bt@stdlib@float':dispatch('respondsTo:', ['fooBar'], 3.14))
-     end}.
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        %% True cases
+        ?assertEqual(true, 'bt@stdlib@float':dispatch('respondsTo:', ['+'], 3.14)),
+        ?assertEqual(true, 'bt@stdlib@float':dispatch('respondsTo:', ['class'], 3.14)),
+        ?assertEqual(true, 'bt@stdlib@float':dispatch('respondsTo:', ['abs'], 3.14)),
+        ?assertEqual(true, 'bt@stdlib@float':dispatch('respondsTo:', ['respondsTo:'], 3.14)),
+
+        %% False cases
+        ?assertEqual(false, 'bt@stdlib@float':dispatch('respondsTo:', ['unknownMethod'], 3.14)),
+        ?assertEqual(false, 'bt@stdlib@float':dispatch('respondsTo:', ['fooBar'], 3.14))
+    end}.
 
 %%% ============================================================================
 %%% perform: dynamic message send tests (BT-165)
@@ -421,7 +386,9 @@ perform_on_integer_test() ->
 perform_on_string_test() ->
     %% Test perform: on string primitive
     %% "hello" perform: #'++' withArgs: [" world"]  => "hello" ++ " world"
-    Result = 'bt@stdlib@string':dispatch('perform:withArguments:', ['++', [<<" world">>]], <<"hello">>),
+    Result = 'bt@stdlib@string':dispatch(
+        'perform:withArguments:', ['++', [<<" world">>]], <<"hello">>
+    ),
     ?assertEqual(<<"hello world">>, Result).
 
 perform_on_boolean_test() ->
@@ -429,7 +396,9 @@ perform_on_boolean_test() ->
     %% true perform: #'ifTrue:ifFalse:' withArgs: [yes, no]  => yes
     YesBlock = fun() -> yes end,
     NoBlock = fun() -> no end,
-    Result = 'bt@stdlib@true':dispatch('perform:withArguments:', ['ifTrue:ifFalse:', [YesBlock, NoBlock]], true),
+    Result = 'bt@stdlib@true':dispatch(
+        'perform:withArguments:', ['ifTrue:ifFalse:', [YesBlock, NoBlock]], true
+    ),
     ?assertEqual(yes, Result).
 
 perform_with_unary_message_on_integer_test() ->
@@ -441,8 +410,10 @@ perform_with_unary_message_on_integer_test() ->
 perform_withArgs_invalid_args_type_on_primitive_test() ->
     %% Test perform:withArguments: with non-list ArgList on primitive
     %% Generated dispatch calls hd/tl which raises badarg for non-list args
-    ?assertError(badarg,
-                 'bt@stdlib@integer':dispatch('perform:withArguments:', ['+', 42], 10)).
+    ?assertError(
+        badarg,
+        'bt@stdlib@integer':dispatch('perform:withArguments:', ['+', 42], 10)
+    ).
 
 %%% ============================================================================
 %%% Value Type Dispatch Tests (BT-354)
@@ -499,9 +470,17 @@ value_type_send_does_not_understand_test() ->
     Self = #{'$beamtalk_class' => 'MockVTErr'},
     create_mock_value_type_module('bt@mock_vterr', 'MockVTErr', []),
     try
-        ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand, class = 'MockVTErr',
-                                      selector = 'nonexistent'}},
-                     beamtalk_primitive:send(Self, 'nonexistent', []))
+        ?assertError(
+            #{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{
+                    kind = does_not_understand,
+                    class = 'MockVTErr',
+                    selector = 'nonexistent'
+                }
+            },
+            beamtalk_primitive:send(Self, 'nonexistent', [])
+        )
     after
         code:purge('bt@mock_vterr'),
         code:delete('bt@mock_vterr')
@@ -565,9 +544,17 @@ value_type_inst_var_at_put_raises_immutable_value_test() ->
     Self = #{'$beamtalk_class' => 'MockVtIvar', x => 42},
     create_mock_value_type_module('bt@mock_vt_ivar', 'MockVtIvar', []),
     try
-        ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = immutable_value, class = 'MockVtIvar',
-                                       selector = 'instVarAt:put:'}},
-                     beamtalk_primitive:send(Self, 'instVarAt:put:', [x, 99]))
+        ?assertError(
+            #{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{
+                    kind = immutable_value,
+                    class = 'MockVtIvar',
+                    selector = 'instVarAt:put:'
+                }
+            },
+            beamtalk_primitive:send(Self, 'instVarAt:put:', [x, 99])
+        )
     after
         code:purge('bt@mock_vt_ivar'),
         code:delete('bt@mock_vt_ivar')
@@ -578,9 +565,17 @@ value_type_inst_var_at_raises_immutable_value_test() ->
     Self = #{'$beamtalk_class' => 'MockVtIvar2', x => 42},
     create_mock_value_type_module('bt@mock_vt_ivar2', 'MockVtIvar2', []),
     try
-        ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = immutable_value, class = 'MockVtIvar2',
-                                       selector = 'instVarAt:'}},
-                     beamtalk_primitive:send(Self, 'instVarAt:', [x]))
+        ?assertError(
+            #{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{
+                    kind = immutable_value,
+                    class = 'MockVtIvar2',
+                    selector = 'instVarAt:'
+                }
+            },
+            beamtalk_primitive:send(Self, 'instVarAt:', [x])
+        )
     after
         code:purge('bt@mock_vt_ivar2'),
         code:delete('bt@mock_vt_ivar2')
@@ -603,13 +598,13 @@ create_mock_value_type_module(ModuleName, _ClassName, FieldMethods) ->
     ModuleName.
 
 maps_get_form(Name, Field) ->
-    {function, 1, Name, 1,
-     [{clause, 1,
-       [{var, 1, 'Self'}],
-       [],
-       [{call, 1,
-         {remote, 1, {atom, 1, maps}, {atom, 1, get}},
-         [{atom, 1, Field}, {var, 1, 'Self'}]}]}]}.
+    {function, 1, Name, 1, [
+        {clause, 1, [{var, 1, 'Self'}], [], [
+            {call, 1, {remote, 1, {atom, 1, maps}, {atom, 1, get}}, [
+                {atom, 1, Field}, {var, 1, 'Self'}
+            ]}
+        ]}
+    ]}.
 
 %%% ============================================================================
 %%% print_string/1 Tests — Complex Types
@@ -654,8 +649,12 @@ print_string_empty_tuple_test() ->
     ?assertEqual(<<"{}">>, beamtalk_primitive:print_string({})).
 
 print_string_beamtalk_error_test() ->
-    Error = #beamtalk_error{kind = does_not_understand, class = 'Integer',
-                            selector = 'foo', message = <<"Integer does not understand 'foo'">>},
+    Error = #beamtalk_error{
+        kind = does_not_understand,
+        class = 'Integer',
+        selector = 'foo',
+        message = <<"Integer does not understand 'foo'">>
+    },
     Result = beamtalk_primitive:print_string(Error),
     ?assert(is_binary(Result)),
     ?assert(byte_size(Result) > 0).
@@ -667,22 +666,21 @@ print_string_set_test() ->
 
 print_string_plain_map_test_() ->
     {setup,
-     fun() ->
-         case whereis(pg) of
-             undefined -> pg:start_link();
-             _ -> ok
-         end,
-         beamtalk_extensions:init(),
-         {ok, _} = beamtalk_bootstrap:start_link(),
-         beamtalk_stdlib:init(),
-         ok
-     end,
-     fun(_) -> ok end,
-     fun() ->
-         %% Plain map (Dictionary) — should use beamtalk_map_ops format
-         Result = beamtalk_primitive:print_string(#{a => 1}),
-         ?assert(is_binary(Result))
-     end}.
+        fun() ->
+            case whereis(pg) of
+                undefined -> pg:start_link();
+                _ -> ok
+            end,
+            beamtalk_extensions:init(),
+            {ok, _} = beamtalk_bootstrap:start_link(),
+            beamtalk_stdlib:init(),
+            ok
+        end,
+        fun(_) -> ok end, fun() ->
+            %% Plain map (Dictionary) — should use beamtalk_map_ops format
+            Result = beamtalk_primitive:print_string(#{a => 1}),
+            ?assert(is_binary(Result))
+        end}.
 
 print_string_catchall_test() ->
     %% Pid/reference should use the catch-all io_lib:format path
@@ -698,37 +696,35 @@ class_of_object_metaclass_sentinel_test() ->
 
 class_of_object_primitive_test_() ->
     {setup,
-     fun() ->
-         case whereis(pg) of
-             undefined -> pg:start_link();
-             _ -> ok
-         end,
-         beamtalk_extensions:init(),
-         {ok, _} = beamtalk_bootstrap:start_link(),
-         beamtalk_stdlib:init(),
-         ok
-     end,
-     fun(_) -> ok end,
-     [
-        {"class_of_object for integer returns class object",
-         fun() ->
-             Result = beamtalk_primitive:class_of_object(42),
-             ?assertMatch({beamtalk_object, _, _, _}, Result)
-         end},
-        {"class_of_object for string returns class object",
-         fun() ->
-             Result = beamtalk_primitive:class_of_object(<<"hello">>),
-             ?assertMatch({beamtalk_object, _, _, _}, Result)
-         end},
-        {"class_of_object for class object returns Metaclass",
-         fun() ->
-             IntegerPid = beamtalk_class_registry:whereis_class('Integer'),
-             %% Class objects have class field ending in " class"
-             ClassObj = #beamtalk_object{class = 'Integer class', class_mod = beamtalk_object_class, pid = IntegerPid},
-             Result = beamtalk_primitive:class_of_object(ClassObj),
-             ?assertEqual('Metaclass', Result)
-         end}
-     ]}.
+        fun() ->
+            case whereis(pg) of
+                undefined -> pg:start_link();
+                _ -> ok
+            end,
+            beamtalk_extensions:init(),
+            {ok, _} = beamtalk_bootstrap:start_link(),
+            beamtalk_stdlib:init(),
+            ok
+        end,
+        fun(_) -> ok end, [
+            {"class_of_object for integer returns class object", fun() ->
+                Result = beamtalk_primitive:class_of_object(42),
+                ?assertMatch({beamtalk_object, _, _, _}, Result)
+            end},
+            {"class_of_object for string returns class object", fun() ->
+                Result = beamtalk_primitive:class_of_object(<<"hello">>),
+                ?assertMatch({beamtalk_object, _, _, _}, Result)
+            end},
+            {"class_of_object for class object returns Metaclass", fun() ->
+                IntegerPid = beamtalk_class_registry:whereis_class('Integer'),
+                %% Class objects have class field ending in " class"
+                ClassObj = #beamtalk_object{
+                    class = 'Integer class', class_mod = beamtalk_object_class, pid = IntegerPid
+                },
+                Result = beamtalk_primitive:class_of_object(ClassObj),
+                ?assertEqual('Metaclass', Result)
+            end}
+        ]}.
 
 %%% ============================================================================
 %%% class_of_object_by_name/1 Tests
@@ -736,29 +732,26 @@ class_of_object_primitive_test_() ->
 
 class_of_object_by_name_test_() ->
     {setup,
-     fun() ->
-         case whereis(pg) of
-             undefined -> pg:start_link();
-             _ -> ok
-         end,
-         beamtalk_extensions:init(),
-         {ok, _} = beamtalk_bootstrap:start_link(),
-         beamtalk_stdlib:init(),
-         ok
-     end,
-     fun(_) -> ok end,
-     [
-        {"known class returns class object",
-         fun() ->
-             Result = beamtalk_primitive:class_of_object_by_name('Integer'),
-             ?assertMatch({beamtalk_object, _, _, _}, Result)
-         end},
-        {"unknown class returns atom",
-         fun() ->
-             Result = beamtalk_primitive:class_of_object_by_name('NonExistentClass'),
-             ?assertEqual('NonExistentClass', Result)
-         end}
-     ]}.
+        fun() ->
+            case whereis(pg) of
+                undefined -> pg:start_link();
+                _ -> ok
+            end,
+            beamtalk_extensions:init(),
+            {ok, _} = beamtalk_bootstrap:start_link(),
+            beamtalk_stdlib:init(),
+            ok
+        end,
+        fun(_) -> ok end, [
+            {"known class returns class object", fun() ->
+                Result = beamtalk_primitive:class_of_object_by_name('Integer'),
+                ?assertMatch({beamtalk_object, _, _, _}, Result)
+            end},
+            {"unknown class returns atom", fun() ->
+                Result = beamtalk_primitive:class_of_object_by_name('NonExistentClass'),
+                ?assertEqual('NonExistentClass', Result)
+            end}
+        ]}.
 
 %%% ============================================================================
 %%% camel_to_snake/1 Tests (via class_name_to_module)

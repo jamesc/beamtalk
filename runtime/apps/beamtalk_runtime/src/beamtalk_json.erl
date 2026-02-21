@@ -51,7 +51,8 @@
         Result = jsx:decode(JsonStr, [return_maps]),
         normalize_decoded(Result)
     catch
-        error:#{error := #beamtalk_error{}} = E:_ -> error(E);
+        error:#{error := #beamtalk_error{}} = E:_ ->
+            error(E);
         error:badarg ->
             Error0 = beamtalk_error:new(parse_error, 'JSON'),
             Error1 = beamtalk_error:with_selector(Error0, 'parse:'),
@@ -81,7 +82,8 @@
         Prepared = prepare_for_encode(Value),
         jsx:encode(Prepared)
     catch
-        error:#{error := #beamtalk_error{}} = E:_ -> error(E);
+        error:#{error := #beamtalk_error{}} = E:_ ->
+            error(E);
         error:badarg ->
             Error0 = beamtalk_error:new(type_error, 'JSON'),
             Error1 = beamtalk_error:with_selector(Error0, 'generate:'),
@@ -103,7 +105,8 @@
         Compact = jsx:encode(Prepared),
         jsx:prettify(Compact)
     catch
-        error:#{error := #beamtalk_error{}} = E:_ -> error(E);
+        error:#{error := #beamtalk_error{}} = E:_ ->
+            error(E);
         error:badarg ->
             Error0 = beamtalk_error:new(type_error, 'JSON'),
             Error1 = beamtalk_error:with_selector(Error0, 'prettyPrint:'),
@@ -156,8 +159,10 @@ prepare_for_encode(Map) when is_map(Map) ->
     maps:map(fun(_K, V) -> prepare_for_encode(V) end, Cleaned);
 prepare_for_encode(List) when is_list(List) ->
     lists:map(fun prepare_for_encode/1, List);
-prepare_for_encode(true) -> true;
-prepare_for_encode(false) -> false;
+prepare_for_encode(true) ->
+    true;
+prepare_for_encode(false) ->
+    false;
 prepare_for_encode(V) when is_integer(V) -> V;
 prepare_for_encode(V) when is_float(V) -> V;
 prepare_for_encode(V) when is_binary(V) -> V;
@@ -168,5 +173,8 @@ prepare_for_encode(Other) ->
     %% No selector — callers add the correct one via their catch blocks
     Error0 = beamtalk_error:new(type_error, 'JSON'),
     Error1 = beamtalk_error:with_details(Error0, #{value => Other}),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Only Dictionary, List, String, Integer, Float, Boolean, and nil can be converted to JSON">>),
+    Error2 = beamtalk_error:with_hint(
+        Error1,
+        <<"Only Dictionary, List, String, Integer, Float, Boolean, and nil can be converted to JSON">>
+    ),
     beamtalk_error:raise(Error2).

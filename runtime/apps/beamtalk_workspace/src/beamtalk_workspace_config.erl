@@ -42,18 +42,24 @@
 -spec singletons() -> [singleton_config()].
 singletons() ->
     [
-        #{binding_name => 'Transcript',
-          class_name   => 'TranscriptStream',
-          module       => beamtalk_transcript_stream,
-          start_args   => [1000]},
-        #{binding_name => 'Beamtalk',
-          class_name   => 'SystemDictionary',
-          module       => beamtalk_system_dictionary,
-          start_args   => [[]]},
-        #{binding_name => 'Workspace',
-          class_name   => 'WorkspaceEnvironment',
-          module       => beamtalk_workspace_environment,
-          start_args   => []}
+        #{
+            binding_name => 'Transcript',
+            class_name => 'TranscriptStream',
+            module => beamtalk_transcript_stream,
+            start_args => [1000]
+        },
+        #{
+            binding_name => 'Beamtalk',
+            class_name => 'SystemDictionary',
+            module => beamtalk_system_dictionary,
+            start_args => [[]]
+        },
+        #{
+            binding_name => 'Workspace',
+            class_name => 'WorkspaceEnvironment',
+            module => beamtalk_workspace_environment,
+            start_args => []
+        }
     ].
 
 %% @doc Return the list of workspace binding names.

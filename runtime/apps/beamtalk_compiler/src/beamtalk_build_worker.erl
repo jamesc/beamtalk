@@ -52,8 +52,10 @@ compile_loop() ->
                                 {ok, ModuleNames} ->
                                     lists:foreach(
                                         fun(ModuleName) ->
-                                            io:put_chars("beamtalk-compile-module:" ++
-                                                        atom_to_list(ModuleName) ++ "\n")
+                                            io:put_chars(
+                                                "beamtalk-compile-module:" ++
+                                                    atom_to_list(ModuleName) ++ "\n"
+                                            )
                                         end,
                                         ModuleNames
                                     ),
@@ -79,8 +81,10 @@ compile_modules(OutDir, CoreFiles) ->
             ok = producer_loop(CoreFiles, Workers),
             collect_results(length(CoreFiles), {true, []});
         {error, Reason} ->
-            io:put_chars(standard_error,
-                io_lib:format("Error creating output directory: ~p~n", [Reason])),
+            io:put_chars(
+                standard_error,
+                io_lib:format("Error creating output directory: ~p~n", [Reason])
+            ),
             error
     end.
 
@@ -142,27 +146,41 @@ compile_core_file(CoreFile, OutDir) ->
         {ok, CoreErlangBin} ->
             case compile_core_erlang(CoreErlangBin) of
                 {ok, ModuleName, BeamBinary} ->
-                    BeamFile = filename:join(OutDir,
-                        atom_to_list(ModuleName) ++ ".beam"),
+                    BeamFile = filename:join(
+                        OutDir,
+                        atom_to_list(ModuleName) ++ ".beam"
+                    ),
                     case file:write_file(BeamFile, BeamBinary) of
                         ok ->
                             {ok, ModuleName};
                         {error, WriteReason} ->
-                            io:put_chars(standard_error,
-                                io_lib:format("Error writing ~s: ~p~n",
-                                    [BeamFile, WriteReason])),
+                            io:put_chars(
+                                standard_error,
+                                io_lib:format(
+                                    "Error writing ~s: ~p~n",
+                                    [BeamFile, WriteReason]
+                                )
+                            ),
                             error
                     end;
                 {error, Reason} ->
-                    io:put_chars(standard_error,
-                        io_lib:format("Error compiling ~s: ~p~n",
-                            [CoreFile, Reason])),
+                    io:put_chars(
+                        standard_error,
+                        io_lib:format(
+                            "Error compiling ~s: ~p~n",
+                            [CoreFile, Reason]
+                        )
+                    ),
                     error
             end;
         {error, ReadReason} ->
-            io:put_chars(standard_error,
-                io_lib:format("Error reading ~s: ~p~n",
-                    [CoreFile, ReadReason])),
+            io:put_chars(
+                standard_error,
+                io_lib:format(
+                    "Error reading ~s: ~p~n",
+                    [CoreFile, ReadReason]
+                )
+            ),
             error
     end.
 
@@ -175,9 +193,18 @@ compile_core_erlang(CoreErlangBin) ->
         {ok, Tokens, _} ->
             case core_parse:parse(Tokens) of
                 {ok, CoreModule} ->
-                    case compile:forms(CoreModule,
-                            [from_core, binary, return_errors,
-                             report_warnings, debug_info]) of
+                    case
+                        compile:forms(
+                            CoreModule,
+                            [
+                                from_core,
+                                binary,
+                                return_errors,
+                                report_warnings,
+                                debug_info
+                            ]
+                        )
+                    of
                         {ok, ModuleName, Binary} ->
                             {ok, ModuleName, Binary};
                         {ok, ModuleName, Binary, _Warnings} ->

@@ -60,10 +60,10 @@ start_link(Args) ->
 %% `{ok, method_definition, MethodInfo}' for standalone method definitions (BT-571),
 %% or `{error, Diagnostics}' on failure.
 -spec compile_expression(binary(), binary(), [binary()]) ->
-    {ok, binary(), [binary()]} |
-    {ok, class_definition, map()} |
-    {ok, method_definition, map()} |
-    {error, [binary()]}.
+    {ok, binary(), [binary()]}
+    | {ok, class_definition, map()}
+    | {ok, method_definition, map()}
+    | {error, [binary()]}.
 compile_expression(Source, ModuleName, KnownVars) ->
     gen_server:call(?MODULE, {compile_expression, Source, ModuleName, KnownVars}, 30000).
 
@@ -122,19 +122,15 @@ handle_call({compile_expression, Source, ModuleName, KnownVars}, _From, State) -
         State#state.port, Source, ModuleName, KnownVars
     ),
     {reply, Result, State};
-
 handle_call({compile, Source, Options}, _From, State) ->
     Result = do_compile(State#state.port, Source, Options),
     {reply, Result, State};
-
 handle_call({diagnostics, Source}, _From, State) ->
     Result = do_diagnostics(State#state.port, Source),
     {reply, Result, State};
-
 handle_call(version, _From, State) ->
     Result = do_version(State#state.port),
     {reply, Result, State};
-
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
@@ -144,11 +140,9 @@ handle_cast(_Msg, State) ->
 handle_info({Port, {exit_status, Status}}, #state{port = Port} = State) ->
     ?LOG_ERROR("Compiler port exited unexpectedly", #{status => Status}),
     {stop, {port_exit_status, Status}, State};
-
 handle_info({'EXIT', Port, Reason}, #state{port = Port} = State) ->
     ?LOG_ERROR("Compiler port EXIT", #{reason => Reason}),
     {stop, {port_exit, Reason}, State};
-
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -255,9 +249,13 @@ flush_port_messages(Port) ->
     end.
 
 %% Handle response from compile command.
-handle_compile_response(#{status := ok, core_erlang := CoreErlang,
-                          module_name := ModuleName, classes := Classes,
-                          warnings := Warnings}) ->
+handle_compile_response(#{
+    status := ok,
+    core_erlang := CoreErlang,
+    module_name := ModuleName,
+    classes := Classes,
+    warnings := Warnings
+}) ->
     {ok, #{
         core_erlang => CoreErlang,
         module_name => ModuleName,

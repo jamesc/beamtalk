@@ -53,12 +53,18 @@ dictionary_at_test() ->
     ?assertEqual(1, 'bt@stdlib@dictionary':dispatch('at:', [a], #{a => 1, b => 2})).
 
 dictionary_at_put_test() ->
-    ?assertEqual(#{a => 1, b => 2},
-        'bt@stdlib@dictionary':dispatch('at:put:', [b, 2], #{a => 1})).
+    ?assertEqual(
+        #{a => 1, b => 2},
+        'bt@stdlib@dictionary':dispatch('at:put:', [b, 2], #{a => 1})
+    ).
 
 dictionary_at_if_absent_test() ->
-    ?assertEqual(1, 'bt@stdlib@dictionary':dispatch('at:ifAbsent:', [a, fun() -> 99 end], #{a => 1})),
-    ?assertEqual(99, 'bt@stdlib@dictionary':dispatch('at:ifAbsent:', [b, fun() -> 99 end], #{a => 1})).
+    ?assertEqual(
+        1, 'bt@stdlib@dictionary':dispatch('at:ifAbsent:', [a, fun() -> 99 end], #{a => 1})
+    ),
+    ?assertEqual(
+        99, 'bt@stdlib@dictionary':dispatch('at:ifAbsent:', [b, fun() -> 99 end], #{a => 1})
+    ).
 
 dictionary_includes_key_test() ->
     ?assertEqual(true, 'bt@stdlib@dictionary':dispatch('includesKey:', [a], #{a => 1})),
@@ -68,12 +74,16 @@ dictionary_remove_key_test() ->
     ?assertEqual(#{}, 'bt@stdlib@dictionary':dispatch('removeKey:', [a], #{a => 1})).
 
 dictionary_merge_test() ->
-    ?assertEqual(#{a => 1, b => 2},
-        'bt@stdlib@dictionary':dispatch('merge:', [#{b => 2}], #{a => 1})).
+    ?assertEqual(
+        #{a => 1, b => 2},
+        'bt@stdlib@dictionary':dispatch('merge:', [#{b => 2}], #{a => 1})
+    ).
 
 dictionary_keys_and_values_do_test() ->
-    ?assertEqual(nil,
-        'bt@stdlib@dictionary':dispatch('keysAndValuesDo:', [fun(_, _) -> ok end], #{a => 1})).
+    ?assertEqual(
+        nil,
+        'bt@stdlib@dictionary':dispatch('keysAndValuesDo:', [fun(_, _) -> ok end], #{a => 1})
+    ).
 
 %%% ============================================================================
 %%% Compiled bt@stdlib@dictionary has_method/1
@@ -100,8 +110,13 @@ dictionary_responds_to_test() ->
 
 dictionary_does_not_understand_test() ->
     beamtalk_extensions:init(),
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand, class = 'Dictionary'}},
-        'bt@stdlib@dictionary':dispatch('nonExistent', [], #{a => 1})).
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = does_not_understand, class = 'Dictionary'}
+        },
+        'bt@stdlib@dictionary':dispatch('nonExistent', [], #{a => 1})
+    ).
 
 %%% ============================================================================
 %%% Error paths
@@ -109,8 +124,10 @@ dictionary_does_not_understand_test() ->
 
 dictionary_at_missing_key_test() ->
     %% maps:get raises {badkey, Key} for missing keys — same as pre-migration
-    ?assertError({badkey, missing},
-        'bt@stdlib@dictionary':dispatch('at:', [missing], #{a => 1})).
+    ?assertError(
+        {badkey, missing},
+        'bt@stdlib@dictionary':dispatch('at:', [missing], #{a => 1})
+    ).
 
 %%% ============================================================================
 %%% beamtalk_primitive:send integration tests
@@ -127,8 +144,10 @@ primitive_send_at_test() ->
     ?assertEqual(1, beamtalk_primitive:send(#{a => 1}, 'at:', [a])).
 
 primitive_send_at_put_test() ->
-    ?assertEqual(#{a => 1, b => 2},
-        beamtalk_primitive:send(#{a => 1}, 'at:put:', [b, 2])).
+    ?assertEqual(
+        #{a => 1, b => 2},
+        beamtalk_primitive:send(#{a => 1}, 'at:put:', [b, 2])
+    ).
 
 primitive_send_includes_key_test() ->
     ?assertEqual(true, beamtalk_primitive:send(#{a => 1}, 'includesKey:', [a])),

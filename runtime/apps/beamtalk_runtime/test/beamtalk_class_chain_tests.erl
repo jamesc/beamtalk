@@ -96,22 +96,17 @@ register_class_with_test_helper() ->
 %%====================================================================
 
 class_chain_test_() ->
-    {setup,
-     fun setup/0,
-     fun teardown/1,
-     fun(_) ->
-         [
-          {"BT-732: Counter testClassProtocol dispatches through Class chain",
-           fun test_dispatch_fallthrough/0},
-          {"BT-732: metaclass tag is preserved in self",
-           fun test_metaclass_tag_preserved/0},
-          {"BT-732: unknown message still raises does_not_understand",
-           fun test_unknown_message_dnu/0},
-          {"BT-732: fallthrough returns not_found when Class absent",
-           fun test_fallthrough_absent_class/0}
-         ]
-     end
-    }.
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            {"BT-732: Counter testClassProtocol dispatches through Class chain",
+                fun test_dispatch_fallthrough/0},
+            {"BT-732: metaclass tag is preserved in self", fun test_metaclass_tag_preserved/0},
+            {"BT-732: unknown message still raises does_not_understand",
+                fun test_unknown_message_dnu/0},
+            {"BT-732: fallthrough returns not_found when Class absent",
+                fun test_fallthrough_absent_class/0}
+        ]
+    end}.
 
 %%====================================================================
 %% Test Implementations
@@ -178,7 +173,8 @@ test_fallthrough_absent_class() ->
     %% Kill 'Class' process if it's running to test the absent case.
     %% Use monitor + DOWN to avoid flaky timer:sleep on loaded CI nodes.
     case beamtalk_class_registry:whereis_class('Class') of
-        undefined -> ok;
+        undefined ->
+            ok;
         ClassPid ->
             Ref = erlang:monitor(process, ClassPid),
             exit(ClassPid, kill),
@@ -213,8 +209,11 @@ ensure_counter_loaded() ->
             case code:load_file('bt@counter') of
                 {module, 'bt@counter'} ->
                     case erlang:function_exported('bt@counter', register_class, 0) of
-                        true -> 'bt@counter':register_class(), ok;
-                        false -> {error, no_register_class}
+                        true ->
+                            'bt@counter':register_class(),
+                            ok;
+                        false ->
+                            {error, no_register_class}
                     end;
                 {error, nofile} ->
                     {error, counter_not_built}

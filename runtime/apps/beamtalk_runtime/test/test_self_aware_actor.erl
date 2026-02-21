@@ -12,8 +12,14 @@
 -export([start_link/1]).
 
 %% gen_server callbacks
--export([init/1, handle_cast/2, handle_call/3,
-         handle_info/2, code_change/3, terminate/2]).
+-export([
+    init/1,
+    handle_cast/2,
+    handle_call/3,
+    handle_info/2,
+    code_change/3,
+    terminate/2
+]).
 
 %% Method implementations (new-style with Self parameter)
 -export([handle_getSelf/4, handle_getClassName/4]).

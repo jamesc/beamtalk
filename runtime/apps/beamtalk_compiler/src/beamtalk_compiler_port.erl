@@ -54,10 +54,10 @@ open(BinaryPath) ->
 %% `{ok, method_definition, MethodInfo}' for standalone method definitions (BT-571),
 %% or `{error, Diagnostics}' on failure.
 -spec compile_expression(port(), binary(), binary(), [binary()]) ->
-    {ok, binary(), [binary()]} |
-    {ok, class_definition, map()} |
-    {ok, method_definition, map()} |
-    {error, [binary()]}.
+    {ok, binary(), [binary()]}
+    | {ok, class_definition, map()}
+    | {ok, method_definition, map()}
+    | {error, [binary()]}.
 compile_expression(Port, Source, ModuleName, KnownVars) ->
     Request = #{
         command => compile_expression,
@@ -95,20 +95,40 @@ close(Port) ->
 %% @private Handle ETF response from the compiler port.
 %% BT-571: Extended to handle class_definition and method_definition responses
 -spec handle_response(map()) ->
-    {ok, binary(), [binary()]} |
-    {ok, class_definition, map()} |
-    {ok, method_definition, map()} |
-    {error, [binary()]}.
-handle_response(#{status := ok, kind := class_definition, core_erlang := CoreErlang,
-                  module_name := ModuleName, classes := Classes, warnings := Warnings}) ->
-    {ok, class_definition, #{core_erlang => CoreErlang, module_name => ModuleName,
-                             classes => Classes, warnings => Warnings}};
-handle_response(#{status := ok, kind := method_definition, class_name := ClassName,
-                  selector := Selector, is_class_method := IsClassMethod,
-                  method_source := MethodSource, warnings := Warnings}) ->
-    {ok, method_definition, #{class_name => ClassName, selector => Selector,
-                              is_class_method => IsClassMethod,
-                              method_source => MethodSource, warnings => Warnings}};
+    {ok, binary(), [binary()]}
+    | {ok, class_definition, map()}
+    | {ok, method_definition, map()}
+    | {error, [binary()]}.
+handle_response(#{
+    status := ok,
+    kind := class_definition,
+    core_erlang := CoreErlang,
+    module_name := ModuleName,
+    classes := Classes,
+    warnings := Warnings
+}) ->
+    {ok, class_definition, #{
+        core_erlang => CoreErlang,
+        module_name => ModuleName,
+        classes => Classes,
+        warnings => Warnings
+    }};
+handle_response(#{
+    status := ok,
+    kind := method_definition,
+    class_name := ClassName,
+    selector := Selector,
+    is_class_method := IsClassMethod,
+    method_source := MethodSource,
+    warnings := Warnings
+}) ->
+    {ok, method_definition, #{
+        class_name => ClassName,
+        selector => Selector,
+        is_class_method => IsClassMethod,
+        method_source => MethodSource,
+        warnings => Warnings
+    }};
 handle_response(#{status := ok, core_erlang := CoreErlang, warnings := Warnings}) ->
     {ok, CoreErlang, Warnings};
 handle_response(#{status := error, diagnostics := Diagnostics}) ->
@@ -123,8 +143,10 @@ handle_response(Other) ->
 find_compiler_binary() ->
     %% 1. Check explicit env var (set by CLI for installed mode)
     case os:getenv("BEAMTALK_COMPILER_PORT_BIN") of
-        false -> find_compiler_binary_dev();
-        "" -> find_compiler_binary_dev();
+        false ->
+            find_compiler_binary_dev();
+        "" ->
+            find_compiler_binary_dev();
         EnvPath ->
             case filelib:is_regular(EnvPath) of
                 true -> EnvPath;
@@ -135,27 +157,31 @@ find_compiler_binary() ->
 find_compiler_binary_dev() ->
     %% Try cargo target directory (development mode)
     ProjectRoot = find_project_root(),
-    
+
     %% On Windows, executables have .exe extension
-    ExeName = case os:type() of
-        {win32, _} -> "beamtalk-compiler-port.exe";
-        _ -> "beamtalk-compiler-port"
-    end,
-    
+    ExeName =
+        case os:type() of
+            {win32, _} -> "beamtalk-compiler-port.exe";
+            _ -> "beamtalk-compiler-port"
+        end,
+
     DevPath = filename:join([ProjectRoot, "target", "debug", ExeName]),
     case filelib:is_regular(DevPath) of
-        true -> DevPath;
+        true ->
+            DevPath;
         false ->
             %% Try release build
             ReleasePath = filename:join([ProjectRoot, "target", "release", ExeName]),
             case filelib:is_regular(ReleasePath) of
-                true -> ReleasePath;
+                true ->
+                    ReleasePath;
                 false ->
                     %% Fall back to PATH
                     case os:find_executable("beamtalk-compiler-port") of
                         false ->
                             error({compiler_not_found, "beamtalk-compiler-port binary not found"});
-                        Path -> Path
+                        Path ->
+                            Path
                     end
             end
     end.

@@ -115,18 +115,23 @@ load_compiled_stdlib_modules() ->
             %% ClassList = [{Module, ClassName, SuperclassName}, ...]
             %% BT-446: Load ALL classes — bootstrap no longer registers any
             Sorted = topo_sort(ClassList),
-            lists:foreach(fun({Mod, Class, _Super}) ->
-                case code:ensure_loaded(Mod) of
-                    {module, Mod} ->
-                        %% Module loaded. If on_load already ran but the class
-                        %% process was killed (e.g., test teardown), re-register.
-                        ensure_class_registered(Mod, Class),
-                        ?LOG_DEBUG("Loaded stdlib module", #{module => Mod});
-                    {error, Reason} ->
-                        ?LOG_WARNING("Failed to load stdlib module",
-                                       #{module => Mod, reason => Reason})
-                end
-            end, Sorted);
+            lists:foreach(
+                fun({Mod, Class, _Super}) ->
+                    case code:ensure_loaded(Mod) of
+                        {module, Mod} ->
+                            %% Module loaded. If on_load already ran but the class
+                            %% process was killed (e.g., test teardown), re-register.
+                            ensure_class_registered(Mod, Class),
+                            ?LOG_DEBUG("Loaded stdlib module", #{module => Mod});
+                        {error, Reason} ->
+                            ?LOG_WARNING(
+                                "Failed to load stdlib module",
+                                #{module => Mod, reason => Reason}
+                            )
+                    end
+                end,
+                Sorted
+            );
         undefined ->
             ?LOG_WARNING("No stdlib class metadata found, falling back to discovery"),
             EbinDir = find_stdlib_ebin(),
@@ -153,7 +158,8 @@ ensure_class_registered(Mod, ClassName) ->
         undefined ->
             %% Class process doesn't exist — re-register
             try Mod:register_class() of
-                ok -> ok;
+                ok ->
+                    ok;
                 Other ->
                     ?LOG_WARNING("Unexpected return from register_class", #{
                         module => Mod,
@@ -193,25 +199,38 @@ topo_sort(Entries) ->
 
 %% @private
 %% @doc Iteratively emit classes whose superclass dependencies are satisfied.
--spec topo_sort_waves([{module(), atom(), atom()}], sets:set(atom()), sets:set(atom()),
-                      [{module(), atom(), atom()}]) -> [{module(), atom(), atom()}].
+-spec topo_sort_waves(
+    [{module(), atom(), atom()}],
+    sets:set(atom()),
+    sets:set(atom()),
+    [{module(), atom(), atom()}]
+) -> [{module(), atom(), atom()}].
 topo_sort_waves([], _ClassSet, _Emitted, Acc) ->
     lists:reverse(Acc);
 topo_sort_waves(Remaining, ClassSet, Emitted, Acc) ->
-    {Ready, Deferred} = lists:partition(fun({_Mod, _Class, Super}) ->
-        %% Ready if superclass is external (bootstrap) or already emitted
-        (not sets:is_element(Super, ClassSet)) orelse sets:is_element(Super, Emitted)
-    end, Remaining),
+    {Ready, Deferred} = lists:partition(
+        fun({_Mod, _Class, Super}) ->
+            %% Ready if superclass is external (bootstrap) or already emitted
+            (not sets:is_element(Super, ClassSet)) orelse sets:is_element(Super, Emitted)
+        end,
+        Remaining
+    ),
     case Ready of
         [] ->
             %% Circular dependency or missing superclass — emit remaining as-is
-            ?LOG_WARNING("Stdlib topo_sort: unresolvable dependencies",
-                           #{remaining => [C || {_, C, _} <- Deferred]}),
+            ?LOG_WARNING(
+                "Stdlib topo_sort: unresolvable dependencies",
+                #{remaining => [C || {_, C, _} <- Deferred]}
+            ),
             lists:reverse(Acc) ++ Deferred;
         _ ->
-            NewEmitted = lists:foldl(fun({_, Class, _}, S) ->
-                sets:add_element(Class, S)
-            end, Emitted, Ready),
+            NewEmitted = lists:foldl(
+                fun({_, Class, _}, S) ->
+                    sets:add_element(Class, S)
+                end,
+                Emitted,
+                Ready
+            ),
             topo_sort_waves(Deferred, ClassSet, NewEmitted, lists:reverse(Ready) ++ Acc)
     end.
 
@@ -223,20 +242,29 @@ topo_sort_waves(Remaining, ClassSet, Emitted, Acc) ->
 discover_and_load_fallback(Dir) ->
     case file:list_dir(Dir) of
         {ok, Files} ->
-            Modules = [list_to_atom(filename:rootname(F))
-                       || F <- Files, filename:extension(F) =:= ".beam"],
-            lists:foreach(fun(Mod) ->
-                case code:ensure_loaded(Mod) of
-                    {module, Mod} ->
-                        ?LOG_DEBUG("Loaded stdlib module (fallback)", #{module => Mod});
-                    {error, Reason} ->
-                        ?LOG_WARNING("Failed to load stdlib module",
-                                       #{module => Mod, reason => Reason})
-                end
-            end, Modules);
+            Modules = [
+                list_to_atom(filename:rootname(F))
+             || F <- Files, filename:extension(F) =:= ".beam"
+            ],
+            lists:foreach(
+                fun(Mod) ->
+                    case code:ensure_loaded(Mod) of
+                        {module, Mod} ->
+                            ?LOG_DEBUG("Loaded stdlib module (fallback)", #{module => Mod});
+                        {error, Reason} ->
+                            ?LOG_WARNING(
+                                "Failed to load stdlib module",
+                                #{module => Mod, reason => Reason}
+                            )
+                    end
+                end,
+                Modules
+            );
         {error, Reason} ->
-            ?LOG_WARNING("Cannot list stdlib ebin directory",
-                           #{dir => Dir, reason => Reason})
+            ?LOG_WARNING(
+                "Cannot list stdlib ebin directory",
+                #{dir => Dir, reason => Reason}
+            )
     end.
 
 %%% ============================================================================
@@ -255,27 +283,25 @@ dispatch(allClasses, [], _Receiver) ->
     %% Return list of all registered class names
     Pids = beamtalk_class_registry:all_classes(),
     [beamtalk_object_class:class_name(Pid) || Pid <- Pids];
-
 dispatch('classNamed:', [ClassName], _Receiver) when is_atom(ClassName) ->
     %% Look up a class by name, return wrapped class object or nil
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined -> nil;
         Pid -> {beamtalk_object, ClassName, beamtalk_object_class, Pid}
     end;
-
 dispatch(globals, [], _Receiver) ->
     %% Placeholder - global namespace not yet implemented
     #{};
-
 dispatch(version, [], _Receiver) ->
     %% Return Beamtalk version
     <<"0.1.0">>;
-
 dispatch(Selector, _Args, _Receiver) ->
     %% Unknown method
     Error0 = beamtalk_error:new(does_not_understand, 'Beamtalk'),
     Error1 = beamtalk_error:with_selector(Error0, Selector),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Check spelling or use 'Beamtalk respondsTo:' to verify method exists">>),
+    Error2 = beamtalk_error:with_hint(
+        Error1, <<"Check spelling or use 'Beamtalk respondsTo:' to verify method exists">>
+    ),
     beamtalk_error:raise(Error2).
 
 %% @doc Check if the Beamtalk class responds to the given selector.

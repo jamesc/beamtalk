@@ -13,8 +13,13 @@
 
 -include_lib("kernel/include/logger.hrl").
 
--export([init/2, websocket_init/1, websocket_handle/2,
-         websocket_info/2, terminate/3]).
+-export([
+    init/2,
+    websocket_init/1,
+    websocket_handle/2,
+    websocket_info/2,
+    terminate/3
+]).
 
 -record(ws_state, {
     session_id :: binary() | undefined,
@@ -32,11 +37,15 @@
 %% @doc HTTP upgrade to WebSocket.
 init(Req, _Opts) ->
     Peer = cowboy_req:peer(Req),
-    {cowboy_websocket, Req, #ws_state{authenticated = false, peer = Peer,
-                                      pending_eval = undefined,
-                                      io_capture_pid = undefined,
-                                      stdin_ref = undefined},
-     #{idle_timeout => 300000, max_frame_size => 1048576}}.
+    {cowboy_websocket, Req,
+        #ws_state{
+            authenticated = false,
+            peer = Peer,
+            pending_eval = undefined,
+            io_capture_pid = undefined,
+            stdin_ref = undefined
+        },
+        #{idle_timeout => 300000, max_frame_size => 1048576}}.
 
 %% @doc WebSocket connection initialized — send auth challenge.
 %% Session is NOT created yet; deferred until after successful auth (security).
@@ -57,43 +66,67 @@ websocket_handle(_Frame, State) ->
 
 %% @doc Handle Erlang messages sent to the handler process.
 %% BT-696: Streaming stdout chunk from eval
-websocket_info({eval_out, Chunk}, State = #ws_state{authenticated = true,
-                                                     pending_eval = Msg})
-        when Msg =/= undefined ->
+websocket_info(
+    {eval_out, Chunk},
+    State = #ws_state{
+        authenticated = true,
+        pending_eval = Msg
+    }
+) when
+    Msg =/= undefined
+->
     Encoded = beamtalk_repl_protocol:encode_out(Chunk, Msg, <<"out">>),
     case Encoded of
-        <<>> -> {ok, State};  %% Legacy client — skip streaming
+        %% Legacy client — skip streaming
+        <<>> -> {ok, State};
         _ -> {[{text, Encoded}], State}
     end;
 %% BT-698: Eval code requests stdin input
-websocket_info({need_input, CapturePid, Ref, Prompt},
-               State = #ws_state{authenticated = true, pending_eval = Msg})
-        when Msg =/= undefined ->
+websocket_info(
+    {need_input, CapturePid, Ref, Prompt},
+    State = #ws_state{authenticated = true, pending_eval = Msg}
+) when
+    Msg =/= undefined
+->
     Encoded = beamtalk_repl_protocol:encode_need_input(Prompt, Msg),
-    {[{text, Encoded}], State#ws_state{io_capture_pid = CapturePid,
-                                       stdin_ref = Ref}};
+    {[{text, Encoded}], State#ws_state{
+        io_capture_pid = CapturePid,
+        stdin_ref = Ref
+    }};
 %% BT-698: Late need_input after eval completed — drop silently
 websocket_info({need_input, _, _, _}, State = #ws_state{pending_eval = undefined}) ->
     {ok, State};
 %% BT-696: Eval completed successfully
-websocket_info({eval_done, Value, Output, Warnings},
-               State = #ws_state{authenticated = true, pending_eval = Msg})
-        when Msg =/= undefined ->
+websocket_info(
+    {eval_done, Value, Output, Warnings},
+    State = #ws_state{authenticated = true, pending_eval = Msg}
+) when
+    Msg =/= undefined
+->
     Response = beamtalk_repl_protocol:encode_result(
-        Value, Msg, fun beamtalk_repl_json:term_to_json/1, Output, Warnings),
-    {[{text, Response}], State#ws_state{pending_eval = undefined,
-                                        io_capture_pid = undefined,
-                                        stdin_ref = undefined}};
+        Value, Msg, fun beamtalk_repl_json:term_to_json/1, Output, Warnings
+    ),
+    {[{text, Response}], State#ws_state{
+        pending_eval = undefined,
+        io_capture_pid = undefined,
+        stdin_ref = undefined
+    }};
 %% BT-696: Eval completed with error
-websocket_info({eval_error, Reason, Output, Warnings},
-               State = #ws_state{authenticated = true, pending_eval = Msg})
-        when Msg =/= undefined ->
+websocket_info(
+    {eval_error, Reason, Output, Warnings},
+    State = #ws_state{authenticated = true, pending_eval = Msg}
+) when
+    Msg =/= undefined
+->
     WrappedReason = beamtalk_repl_server:ensure_structured_error(Reason),
     Response = beamtalk_repl_protocol:encode_error(
-        WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1, Output, Warnings),
-    {[{text, Response}], State#ws_state{pending_eval = undefined,
-                                        io_capture_pid = undefined,
-                                        stdin_ref = undefined}};
+        WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1, Output, Warnings
+    ),
+    {[{text, Response}], State#ws_state{
+        pending_eval = undefined,
+        io_capture_pid = undefined,
+        stdin_ref = undefined
+    }};
 %% BT-696: Late streaming messages after eval completed — drop silently
 websocket_info({eval_out, _Chunk}, State = #ws_state{pending_eval = undefined}) ->
     {ok, State};
@@ -103,32 +136,41 @@ websocket_info({eval_error, _, _, _}, State = #ws_state{pending_eval = undefined
     {ok, State};
 %% Transcript push — forwarded from beamtalk_transcript_stream subscriber (ADR 0017)
 websocket_info({transcript_output, Text}, State = #ws_state{authenticated = true}) ->
-    Push = jsx:encode(#{<<"push">> => <<"transcript">>,
-                        <<"text">> => Text}),
+    Push = jsx:encode(#{
+        <<"push">> => <<"transcript">>,
+        <<"text">> => Text
+    }),
     {[{text, Push}], State};
 %% BT-690: Actor lifecycle push messages (ADR 0017 Phase 2)
 websocket_info({actor_spawned, Metadata}, State = #ws_state{authenticated = true}) ->
-    Push = jsx:encode(#{<<"type">> => <<"push">>,
-                        <<"channel">> => <<"actors">>,
-                        <<"event">> => <<"spawned">>,
-                        <<"data">> => encode_actor_metadata(Metadata)}),
+    Push = jsx:encode(#{
+        <<"type">> => <<"push">>,
+        <<"channel">> => <<"actors">>,
+        <<"event">> => <<"spawned">>,
+        <<"data">> => encode_actor_metadata(Metadata)
+    }),
     {[{text, Push}], State};
 websocket_info({actor_stopped, StopInfo}, State = #ws_state{authenticated = true}) ->
-    Push = jsx:encode(#{<<"type">> => <<"push">>,
-                        <<"channel">> => <<"actors">>,
-                        <<"event">> => <<"stopped">>,
-                        <<"data">> => encode_stop_info(StopInfo)}),
+    Push = jsx:encode(#{
+        <<"type">> => <<"push">>,
+        <<"channel">> => <<"actors">>,
+        <<"event">> => <<"stopped">>,
+        <<"data">> => encode_stop_info(StopInfo)
+    }),
     {[{text, Push}], State};
 %% Session process died — clean up ETS entry and close WebSocket
-websocket_info({'DOWN', MonRef, process, _Pid, _Reason},
-               State = #ws_state{session_mon = MonRef, session_id = SessionId}) ->
+websocket_info(
+    {'DOWN', MonRef, process, _Pid, _Reason},
+    State = #ws_state{session_mon = MonRef, session_id = SessionId}
+) ->
     ?LOG_INFO("Session process terminated, closing WebSocket", #{session => SessionId}),
     ets:delete(beamtalk_sessions, SessionId),
-    {[{close, 1011, <<"Session terminated">>}],
-     State#ws_state{authenticated = false,
-                    session_id = undefined,
-                    session_pid = undefined,
-                    session_mon = undefined}};
+    {[{close, 1011, <<"Session terminated">>}], State#ws_state{
+        authenticated = false,
+        session_id = undefined,
+        session_pid = undefined,
+        session_mon = undefined
+    }};
 websocket_info(_Info, State) ->
     {ok, State}.
 
@@ -156,35 +198,47 @@ terminate(_Reason, _Req, #ws_state{session_id = SessionId, session_pid = Session
 %% Expected: {"type":"auth","cookie":"<workspace cookie>"}
 handle_auth(Data, State) ->
     try jsx:decode(Data, [return_maps]) of
-        #{<<"type">> := <<"auth">>, <<"cookie">> := ProvidedCookie} = AuthMsg
-                when is_binary(ProvidedCookie) ->
+        #{<<"type">> := <<"auth">>, <<"cookie">> := ProvidedCookie} = AuthMsg when
+            is_binary(ProvidedCookie)
+        ->
             NodeCookie = atom_to_binary(erlang:get_cookie(), utf8),
             %% Timing-safe comparison to prevent side-channel attacks.
             %% crypto:hash_equals/2 raises badarg on length mismatch,
             %% so we guard with byte_size check first.
-            CookieValid = byte_size(ProvidedCookie) =:= byte_size(NodeCookie)
-                andalso crypto:hash_equals(ProvidedCookie, NodeCookie),
+            CookieValid =
+                byte_size(ProvidedCookie) =:= byte_size(NodeCookie) andalso
+                    crypto:hash_equals(ProvidedCookie, NodeCookie),
             case CookieValid of
                 true ->
                     %% Check for session resume request
                     ResumeId = maps:get(<<"resume">>, AuthMsg, undefined),
                     start_or_resume_session(ResumeId, State);
                 false ->
-                    ?LOG_WARNING("WebSocket auth failed: invalid cookie", #{peer => State#ws_state.peer}),
-                    Reply = jsx:encode(#{<<"type">> => <<"auth_error">>,
-                                         <<"message">> => <<"Invalid cookie">>}),
+                    ?LOG_WARNING("WebSocket auth failed: invalid cookie", #{
+                        peer => State#ws_state.peer
+                    }),
+                    Reply = jsx:encode(#{
+                        <<"type">> => <<"auth_error">>,
+                        <<"message">> => <<"Invalid cookie">>
+                    }),
                     {[{text, Reply}, {close, 1008, <<"Authentication failed">>}], State}
             end;
         _ ->
-            ?LOG_WARNING("WebSocket auth failed: invalid auth message", #{peer => State#ws_state.peer}),
-            Reply = jsx:encode(#{<<"type">> => <<"auth_error">>,
-                                 <<"message">> => <<"First message must be auth">>}),
+            ?LOG_WARNING("WebSocket auth failed: invalid auth message", #{
+                peer => State#ws_state.peer
+            }),
+            Reply = jsx:encode(#{
+                <<"type">> => <<"auth_error">>,
+                <<"message">> => <<"First message must be auth">>
+            }),
             {[{text, Reply}, {close, 1008, <<"Authentication required">>}], State}
     catch
         error:badarg ->
             ?LOG_WARNING("WebSocket auth failed: malformed JSON", #{peer => State#ws_state.peer}),
-            Reply = jsx:encode(#{<<"type">> => <<"auth_error">>,
-                                 <<"message">> => <<"Malformed auth message">>}),
+            Reply = jsx:encode(#{
+                <<"type">> => <<"auth_error">>,
+                <<"message">> => <<"Malformed auth message">>
+            }),
             {[{text, Reply}, {close, 1008, <<"Authentication required">>}], State}
     end.
 
@@ -237,13 +291,16 @@ start_or_resume_session(ResumeId, State) when is_binary(ResumeId) ->
                     beamtalk_repl_actors:subscribe(),
                     InitialActors = actor_snapshot_frames(),
                     AuthOk = jsx:encode(#{<<"type">> => <<"auth_ok">>}),
-                    SessionMsg = jsx:encode(#{<<"op">> => <<"session-started">>,
-                                              <<"session">> => ResumeId}),
-                    {[{text, AuthOk}, {text, SessionMsg}] ++ InitialActors,
-                     State#ws_state{authenticated = true,
-                                    session_id = ResumeId,
-                                    session_pid = Pid,
-                                    session_mon = MonRef}};
+                    SessionMsg = jsx:encode(#{
+                        <<"op">> => <<"session-started">>,
+                        <<"session">> => ResumeId
+                    }),
+                    {[{text, AuthOk}, {text, SessionMsg}] ++ InitialActors, State#ws_state{
+                        authenticated = true,
+                        session_id = ResumeId,
+                        session_pid = Pid,
+                        session_mon = MonRef
+                    }};
                 false ->
                     %% Session process died — clean up and create new
                     ets:delete(beamtalk_sessions, ResumeId),
@@ -283,20 +340,25 @@ create_session(SessionId, State) ->
             beamtalk_repl_actors:subscribe(),
             InitialActors = actor_snapshot_frames(),
             AuthOk = jsx:encode(#{<<"type">> => <<"auth_ok">>}),
-            SessionMsg = jsx:encode(#{<<"op">> => <<"session-started">>,
-                                      <<"session">> => SessionId}),
-            {[{text, AuthOk}, {text, SessionMsg}] ++ InitialActors,
-             State#ws_state{authenticated = true,
-                            session_id = SessionId,
-                            session_pid = SessionPid,
-                            session_mon = MonRef}};
+            SessionMsg = jsx:encode(#{
+                <<"op">> => <<"session-started">>,
+                <<"session">> => SessionId
+            }),
+            {[{text, AuthOk}, {text, SessionMsg}] ++ InitialActors, State#ws_state{
+                authenticated = true,
+                session_id = SessionId,
+                session_pid = SessionPid,
+                session_mon = MonRef
+            }};
         {error, Reason} ->
             ?LOG_ERROR("Session creation failed after auth", #{
                 reason => Reason,
                 peer => State#ws_state.peer
             }),
-            ErrorJson = jsx:encode(#{<<"type">> => <<"auth_error">>,
-                                     <<"message">> => <<"Session creation failed">>}),
+            ErrorJson = jsx:encode(#{
+                <<"type">> => <<"auth_error">>,
+                <<"message">> => <<"Session creation failed">>
+            }),
             {[{text, ErrorJson}, {close, 1011, <<"Session creation failed">>}], State}
     end.
 
@@ -313,7 +375,8 @@ handle_eval_async(Msg, SessionPid, State = #ws_state{pending_eval = undefined}) 
                     Err1 = beamtalk_error:with_message(Err, <<"Empty expression">>),
                     Err2 = beamtalk_error:with_hint(Err1, <<"Enter an expression to evaluate.">>),
                     Response = beamtalk_repl_protocol:encode_error(
-                        Err2, Msg, fun beamtalk_repl_json:format_error_message/1),
+                        Err2, Msg, fun beamtalk_repl_json:format_error_message/1
+                    ),
                     {[{text, Response}], State};
                 _ ->
                     case is_process_alive(SessionPid) of
@@ -322,12 +385,17 @@ handle_eval_async(Msg, SessionPid, State = #ws_state{pending_eval = undefined}) 
                             {ok, State#ws_state{pending_eval = Msg}};
                         false ->
                             Err = beamtalk_error:new(session_down, 'REPL'),
-                            Err1 = beamtalk_error:with_message(Err,
-                                <<"REPL session is not running">>),
-                            Err2 = beamtalk_error:with_hint(Err1,
-                                <<"Reconnect and retry the evaluation.">>),
+                            Err1 = beamtalk_error:with_message(
+                                Err,
+                                <<"REPL session is not running">>
+                            ),
+                            Err2 = beamtalk_error:with_hint(
+                                Err1,
+                                <<"Reconnect and retry the evaluation.">>
+                            ),
                             Response = beamtalk_repl_protocol:encode_error(
-                                Err2, Msg, fun beamtalk_repl_json:format_error_message/1),
+                                Err2, Msg, fun beamtalk_repl_json:format_error_message/1
+                            ),
                             {[{text, Response}], State}
                     end
             end;
@@ -336,7 +404,8 @@ handle_eval_async(Msg, SessionPid, State = #ws_state{pending_eval = undefined}) 
             Err1 = beamtalk_error:with_message(Err, <<"Invalid code type">>),
             Err2 = beamtalk_error:with_hint(Err1, <<"Code must be a string.">>),
             Response = beamtalk_repl_protocol:encode_error(
-                Err2, Msg, fun beamtalk_repl_json:format_error_message/1),
+                Err2, Msg, fun beamtalk_repl_json:format_error_message/1
+            ),
             {[{text, Response}], State}
     end;
 handle_eval_async(Msg, _SessionPid, State) ->
@@ -345,14 +414,21 @@ handle_eval_async(Msg, _SessionPid, State) ->
     Err1 = beamtalk_error:with_message(Err, <<"An evaluation is already in progress">>),
     Err2 = beamtalk_error:with_hint(Err1, <<"Use Ctrl-C to interrupt the current evaluation.">>),
     Response = beamtalk_repl_protocol:encode_error(
-        Err2, Msg, fun beamtalk_repl_json:format_error_message/1),
+        Err2, Msg, fun beamtalk_repl_json:format_error_message/1
+    ),
     {[{text, Response}], State}.
 
 %% @private
 %% BT-698: Handle stdin op — route input to IO capture process with ref correlation.
-handle_stdin(Msg, State = #ws_state{io_capture_pid = CapturePid,
-                                    stdin_ref = Ref})
-        when is_pid(CapturePid), is_reference(Ref) ->
+handle_stdin(
+    Msg,
+    State = #ws_state{
+        io_capture_pid = CapturePid,
+        stdin_ref = Ref
+    }
+) when
+    is_pid(CapturePid), is_reference(Ref)
+->
     Params = beamtalk_repl_protocol:get_params(Msg),
     Value = maps:get(<<"value">>, Params, <<>>),
     case Value of
@@ -367,9 +443,12 @@ handle_stdin(Msg, State = #ws_state{io_capture_pid = CapturePid,
             %% so client can retry with a valid value
             Err = beamtalk_error:new(invalid_stdin, 'REPL'),
             Err1 = beamtalk_error:with_message(Err, <<"stdin value must be a string or \"eof\"">>),
-            Err2 = beamtalk_error:with_hint(Err1, <<"Send {\"op\": \"stdin\", \"value\": \"your input\\n\"}">>),
+            Err2 = beamtalk_error:with_hint(
+                Err1, <<"Send {\"op\": \"stdin\", \"value\": \"your input\\n\"}">>
+            ),
             Response = beamtalk_repl_protocol:encode_error(
-                Err2, Msg, fun beamtalk_repl_json:format_error_message/1),
+                Err2, Msg, fun beamtalk_repl_json:format_error_message/1
+            ),
             {[{text, Response}], State}
     end;
 handle_stdin(Msg, State) ->
@@ -378,7 +457,8 @@ handle_stdin(Msg, State) ->
     Err1 = beamtalk_error:with_message(Err, <<"No pending input request">>),
     Err2 = beamtalk_error:with_hint(Err1, <<"stdin op is only valid after a need-input status.">>),
     Response = beamtalk_repl_protocol:encode_error(
-        Err2, Msg, fun beamtalk_repl_json:format_error_message/1),
+        Err2, Msg, fun beamtalk_repl_json:format_error_message/1
+    ),
     {[{text, Response}], State}.
 
 %% @private
@@ -394,8 +474,9 @@ handle_shutdown(Msg, State) ->
             {[{text, ErrorJson}], State};
         ProvidedCookie when is_binary(ProvidedCookie) ->
             NodeCookie = atom_to_binary(erlang:get_cookie(), utf8),
-            CookieValid = byte_size(ProvidedCookie) =:= byte_size(NodeCookie)
-                andalso crypto:hash_equals(ProvidedCookie, NodeCookie),
+            CookieValid =
+                byte_size(ProvidedCookie) =:= byte_size(NodeCookie) andalso
+                    crypto:hash_equals(ProvidedCookie, NodeCookie),
             case CookieValid of
                 true ->
                     ?LOG_INFO("Shutdown requested via WebSocket protocol", #{}),
@@ -403,8 +484,11 @@ handle_shutdown(Msg, State) ->
                     %% instead of self() — the WS handler process dies when
                     %% the client closes the connection, racing the 100ms timer.
                     erlang:send_after(100, beamtalk_repl_server, shutdown_requested),
-                    Reply = beamtalk_repl_protocol:encode_status(ok, Msg,
-                        fun beamtalk_repl_json:term_to_json/1),
+                    Reply = beamtalk_repl_protocol:encode_status(
+                        ok,
+                        Msg,
+                        fun beamtalk_repl_json:term_to_json/1
+                    ),
                     {[{text, Reply}], State};
                 false ->
                     ?LOG_WARNING("Shutdown denied: invalid cookie", #{}),
@@ -428,15 +512,21 @@ actor_snapshot_frames() ->
         RegPid when is_pid(RegPid) ->
             try beamtalk_repl_actors:list_actors(RegPid) of
                 Actors ->
-                    [{text, jsx:encode(#{<<"type">> => <<"push">>,
-                                         <<"channel">> => <<"actors">>,
-                                         <<"event">> => <<"spawned">>,
-                                         <<"data">> => encode_actor_metadata(M)})}
-                     || M <- Actors]
+                    [
+                        {text,
+                            jsx:encode(#{
+                                <<"type">> => <<"push">>,
+                                <<"channel">> => <<"actors">>,
+                                <<"event">> => <<"spawned">>,
+                                <<"data">> => encode_actor_metadata(M)
+                            })}
+                     || M <- Actors
+                    ]
             catch
                 Class:Reason ->
                     ?LOG_WARNING("Failed to snapshot actors", #{
-                        class => Class, reason => Reason}),
+                        class => Class, reason => Reason
+                    }),
                     []
             end;
         _ ->
@@ -446,8 +536,10 @@ actor_snapshot_frames() ->
 %% @private
 %% Encode actor metadata for push message JSON.
 encode_actor_metadata(#{pid := Pid, class := Class} = Meta) ->
-    Base = #{<<"class">> => atom_to_binary(Class, utf8),
-             <<"pid">> => list_to_binary(pid_to_list(Pid))},
+    Base = #{
+        <<"class">> => atom_to_binary(Class, utf8),
+        <<"pid">> => list_to_binary(pid_to_list(Pid))
+    },
     case maps:find(spawned_at, Meta) of
         {ok, T} -> Base#{<<"spawned_at">> => T};
         error -> Base
@@ -459,12 +551,15 @@ encode_stop_info(#{pid := Pid, class := Class, reason := Reason}) ->
     %% Limit reason: cap nesting depth, then enforce max byte length
     ReasonStr = iolist_to_binary(io_lib:format("~P", [Reason, 10])),
     TruncatedReason = truncate_utf8(ReasonStr, 4096),
-    #{<<"class">> => case Class of
-                         undefined -> <<"unknown">>;
-                         _ -> atom_to_binary(Class, utf8)
-                     end,
-      <<"pid">> => list_to_binary(pid_to_list(Pid)),
-      <<"reason">> => TruncatedReason}.
+    #{
+        <<"class">> =>
+            case Class of
+                undefined -> <<"unknown">>;
+                _ -> atom_to_binary(Class, utf8)
+            end,
+        <<"pid">> => list_to_binary(pid_to_list(Pid)),
+        <<"reason">> => TruncatedReason
+    }.
 
 %% @private
 %% Truncate binary to at most MaxBytes, respecting UTF-8 boundaries.

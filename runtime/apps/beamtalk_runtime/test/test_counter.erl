@@ -10,12 +10,23 @@
 -export([start_link/1]).
 
 %% gen_server callbacks
--export([init/1, handle_cast/2, handle_call/3,
-         handle_info/2, code_change/3, terminate/2]).
+-export([
+    init/1,
+    handle_cast/2,
+    handle_call/3,
+    handle_info/2,
+    code_change/3,
+    terminate/2
+]).
 
 %% Method implementations
--export([handle_increment/2, handle_decrement/2, handle_getValue/2,
-         'handle_setValue:'/2, handle_test_make_self/2]).
+-export([
+    handle_increment/2,
+    handle_decrement/2,
+    handle_getValue/2,
+    'handle_setValue:'/2,
+    handle_test_make_self/2
+]).
 
 start_link(InitialValue) ->
     beamtalk_actor:start_link(?MODULE, InitialValue).

@@ -20,10 +20,15 @@
 
 %% Exported for testing
 -ifdef(TEST).
--export([io_capture_loop/2, io_passthrough_loop/1,
-         reset_captured_group_leaders/2,
-         is_stdin_request/1, handle_stdin_request/2,
-         prompt_to_binary/1, handle_io_request/2]).
+-export([
+    io_capture_loop/2,
+    io_passthrough_loop/1,
+    reset_captured_group_leaders/2,
+    is_stdin_request/1,
+    handle_stdin_request/2,
+    prompt_to_binary/1,
+    handle_io_request/2
+]).
 -endif.
 
 -define(IO_CAPTURE_TIMEOUT, 5000).
@@ -97,8 +102,11 @@ io_capture_loop(Buffer, Subscriber) ->
                     %% BT-696: Forward new chunk to subscriber if present
                     case is_pid(Subscriber) andalso byte_size(NewBuffer) > byte_size(Buffer) of
                         true ->
-                            Chunk = binary:part(NewBuffer, byte_size(Buffer),
-                                                byte_size(NewBuffer) - byte_size(Buffer)),
+                            Chunk = binary:part(
+                                NewBuffer,
+                                byte_size(Buffer),
+                                byte_size(NewBuffer) - byte_size(Buffer)
+                            ),
                             Subscriber ! {eval_out, Chunk};
                         false ->
                             ok
@@ -136,9 +144,11 @@ reset_captured_group_leaders(CapturePid, OldGL) ->
                         {group_leader, CapturePid} ->
                             group_leader(OldGL, Pid);
                         {group_leader, _} ->
-                            ok;  % Different GL, leave it alone
+                            % Different GL, leave it alone
+                            ok;
                         undefined ->
-                            ok   % Process died between checks, nothing to do
+                            % Process died between checks, nothing to do
+                            ok
                     end;
                 false ->
                     ok
@@ -173,11 +183,13 @@ prompt_to_binary(Prompt) when is_list(Prompt) ->
     try unicode:characters_to_binary(Prompt, utf8) of
         Bin when is_binary(Bin) -> Bin;
         _ -> <<"? ">>
-    catch _:_ -> <<"? ">>
+    catch
+        _:_ -> <<"? ">>
     end;
 prompt_to_binary(Prompt) when is_atom(Prompt) ->
     atom_to_binary(Prompt, utf8);
-prompt_to_binary(_) -> <<"? ">>.
+prompt_to_binary(_) ->
+    <<"? ">>.
 
 %% @doc Handle a stdin IO request by notifying the subscriber and waiting for input.
 %% When no subscriber is present (sync eval), returns {error, enotsup}.

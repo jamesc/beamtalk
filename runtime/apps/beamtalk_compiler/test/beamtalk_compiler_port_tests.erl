@@ -18,7 +18,8 @@ compiler_binary() ->
         false -> error({compiler_not_found, Path})
     end.
 
-find_project_root("/") -> filename:absname("");
+find_project_root("/") ->
+    filename:absname("");
 find_project_root(Dir) ->
     case filelib:is_regular(filename:join(Dir, "Cargo.toml")) of
         true -> Dir;
@@ -110,19 +111,31 @@ compile_on_closed_port_returns_error_test() ->
 
 handle_response_expression_ok_test() ->
     Response = #{status => ok, core_erlang => <<"core">>, warnings => []},
-    ?assertEqual({ok, <<"core">>, []},
-                 beamtalk_compiler_port:handle_response(Response)).
+    ?assertEqual(
+        {ok, <<"core">>, []},
+        beamtalk_compiler_port:handle_response(Response)
+    ).
 
 handle_response_expression_with_warnings_test() ->
-    Response = #{status => ok, core_erlang => <<"core">>,
-                 warnings => [<<"unused var">>]},
-    ?assertEqual({ok, <<"core">>, [<<"unused var">>]},
-                 beamtalk_compiler_port:handle_response(Response)).
+    Response = #{
+        status => ok,
+        core_erlang => <<"core">>,
+        warnings => [<<"unused var">>]
+    },
+    ?assertEqual(
+        {ok, <<"core">>, [<<"unused var">>]},
+        beamtalk_compiler_port:handle_response(Response)
+    ).
 
 handle_response_class_definition_test() ->
-    Response = #{status => ok, kind => class_definition,
-                 core_erlang => <<"core">>, module_name => <<"mod">>,
-                 classes => [<<"Foo">>], warnings => []},
+    Response = #{
+        status => ok,
+        kind => class_definition,
+        core_erlang => <<"core">>,
+        module_name => <<"mod">>,
+        classes => [<<"Foo">>],
+        warnings => []
+    },
     {ok, class_definition, Info} =
         beamtalk_compiler_port:handle_response(Response),
     ?assertEqual(<<"core">>, maps:get(core_erlang, Info)),
@@ -130,10 +143,15 @@ handle_response_class_definition_test() ->
     ?assertEqual([<<"Foo">>], maps:get(classes, Info)).
 
 handle_response_method_definition_test() ->
-    Response = #{status => ok, kind => method_definition,
-                 class_name => <<"Counter">>, selector => <<"increment">>,
-                 is_class_method => false, method_source => <<"src">>,
-                 warnings => []},
+    Response = #{
+        status => ok,
+        kind => method_definition,
+        class_name => <<"Counter">>,
+        selector => <<"increment">>,
+        is_class_method => false,
+        method_source => <<"src">>,
+        warnings => []
+    },
     {ok, method_definition, Info} =
         beamtalk_compiler_port:handle_response(Response),
     ?assertEqual(<<"Counter">>, maps:get(class_name, Info)),
@@ -142,13 +160,17 @@ handle_response_method_definition_test() ->
 
 handle_response_error_test() ->
     Response = #{status => error, diagnostics => [<<"err">>]},
-    ?assertEqual({error, [<<"err">>]},
-                 beamtalk_compiler_port:handle_response(Response)).
+    ?assertEqual(
+        {error, [<<"err">>]},
+        beamtalk_compiler_port:handle_response(Response)
+    ).
 
 handle_response_unexpected_test() ->
     Response = #{bogus => true},
-    ?assertMatch({error, [<<"Unexpected compiler response">>]},
-                 beamtalk_compiler_port:handle_response(Response)).
+    ?assertMatch(
+        {error, [<<"Unexpected compiler response">>]},
+        beamtalk_compiler_port:handle_response(Response)
+    ).
 
 %%% ---------------------------------------------------------------
 %%% find_compiler_binary/0 — binary discovery paths

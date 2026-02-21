@@ -127,7 +127,9 @@ dispatch_line_nil_test() ->
     ?assertEqual(nil, beamtalk_stack_frame:dispatch('line', [], make_nil_frame())).
 
 dispatch_file_test() ->
-    ?assertEqual(<<"src/beamtalk_integer.erl">>, beamtalk_stack_frame:dispatch('file', [], make_test_frame())).
+    ?assertEqual(
+        <<"src/beamtalk_integer.erl">>, beamtalk_stack_frame:dispatch('file', [], make_test_frame())
+    ).
 
 dispatch_file_nil_test() ->
     ?assertEqual(nil, beamtalk_stack_frame:dispatch('file', [], make_nil_frame())).

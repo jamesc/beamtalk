@@ -92,7 +92,9 @@ test_inst_var_at_put_missing() ->
 
 test_inst_var_at_put_state() ->
     State = counter_state(),
-    {reply, 42, NewState} = beamtalk_object_ops:dispatch('instVarAt:put:', [value, 42], self_ref(), State),
+    {reply, 42, NewState} = beamtalk_object_ops:dispatch(
+        'instVarAt:put:', [value, 42], self_ref(), State
+    ),
     ?assertEqual(42, maps:get(value, NewState)).
 
 %%% ============================================================================
@@ -162,20 +164,40 @@ test_not_nil() ->
 has_method_test_() ->
     {"has_method/1", [
         {"class is a known method", fun() -> ?assert(beamtalk_object_ops:has_method(class)) end},
-        {"respondsTo: is a known method", fun() -> ?assert(beamtalk_object_ops:has_method('respondsTo:')) end},
-        {"instVarNames is a known method", fun() -> ?assert(beamtalk_object_ops:has_method('instVarNames')) end},
-        {"instVarAt: is a known method", fun() -> ?assert(beamtalk_object_ops:has_method('instVarAt:')) end},
-        {"instVarAt:put: is a known method", fun() -> ?assert(beamtalk_object_ops:has_method('instVarAt:put:')) end},
-        {"perform: is a known method", fun() -> ?assert(beamtalk_object_ops:has_method('perform:')) end},
-        {"perform:withArguments: is a known method", fun() -> ?assert(beamtalk_object_ops:has_method('perform:withArguments:')) end},
-        {"printString is a known method", fun() -> ?assert(beamtalk_object_ops:has_method('printString')) end},
+        {"respondsTo: is a known method", fun() ->
+            ?assert(beamtalk_object_ops:has_method('respondsTo:'))
+        end},
+        {"instVarNames is a known method", fun() ->
+            ?assert(beamtalk_object_ops:has_method('instVarNames'))
+        end},
+        {"instVarAt: is a known method", fun() ->
+            ?assert(beamtalk_object_ops:has_method('instVarAt:'))
+        end},
+        {"instVarAt:put: is a known method", fun() ->
+            ?assert(beamtalk_object_ops:has_method('instVarAt:put:'))
+        end},
+        {"perform: is a known method", fun() ->
+            ?assert(beamtalk_object_ops:has_method('perform:'))
+        end},
+        {"perform:withArguments: is a known method", fun() ->
+            ?assert(beamtalk_object_ops:has_method('perform:withArguments:'))
+        end},
+        {"printString is a known method", fun() ->
+            ?assert(beamtalk_object_ops:has_method('printString'))
+        end},
         {"inspect is a known method", fun() -> ?assert(beamtalk_object_ops:has_method(inspect)) end},
-        {"describe is a known method", fun() -> ?assert(beamtalk_object_ops:has_method(describe)) end},
-        {"yourself is a known method", fun() -> ?assert(beamtalk_object_ops:has_method(yourself)) end},
+        {"describe is a known method", fun() ->
+            ?assert(beamtalk_object_ops:has_method(describe))
+        end},
+        {"yourself is a known method", fun() ->
+            ?assert(beamtalk_object_ops:has_method(yourself))
+        end},
         {"hash is a known method", fun() -> ?assert(beamtalk_object_ops:has_method(hash)) end},
         {"isNil is a known method", fun() -> ?assert(beamtalk_object_ops:has_method(isNil)) end},
         {"notNil is a known method", fun() -> ?assert(beamtalk_object_ops:has_method(notNil)) end},
-        {"unknown is not a method", fun() -> ?assertNot(beamtalk_object_ops:has_method(unknown)) end}
+        {"unknown is not a method", fun() ->
+            ?assertNot(beamtalk_object_ops:has_method(unknown))
+        end}
     ]}.
 
 %%% ============================================================================
@@ -186,7 +208,8 @@ fallback_test_() ->
     {"dispatch fallback for unknown methods", [
         {"unknown method returns error", fun test_unknown_method/0},
         {"perform: unknown returns 3-tuple error", fun test_perform_unknown_returns_3tuple/0},
-        {"perform:withArguments: bad type returns 3-tuple error", fun test_perform_withargs_bad_type/0}
+        {"perform:withArguments: bad type returns 3-tuple error",
+            fun test_perform_withargs_bad_type/0}
     ]}.
 
 test_unknown_method() ->
@@ -202,5 +225,7 @@ test_perform_unknown_returns_3tuple() ->
 
 test_perform_withargs_bad_type() ->
     State = counter_state(),
-    Result = beamtalk_object_ops:dispatch('perform:withArguments:', ["notAnAtom", []], self_ref(), State),
+    Result = beamtalk_object_ops:dispatch(
+        'perform:withArguments:', ["notAnAtom", []], self_ref(), State
+    ),
     ?assertMatch({error, #beamtalk_error{kind = type_error}, _}, Result).

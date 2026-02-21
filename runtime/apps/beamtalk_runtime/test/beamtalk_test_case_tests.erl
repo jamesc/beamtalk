@@ -18,23 +18,37 @@ assert_true_test() ->
     ?assertEqual(nil, beamtalk_test_case:assert(true)).
 
 assert_false_raises_test() ->
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = assertion_failed, class = 'TestCase'}},
-                 beamtalk_test_case:assert(false)).
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = assertion_failed, class = 'TestCase'}
+        },
+        beamtalk_test_case:assert(false)
+    ).
 
 assert_non_boolean_raises_type_error_test() ->
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'TestCase'}},
-                 beamtalk_test_case:assert(42)).
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'TestCase'}},
+        beamtalk_test_case:assert(42)
+    ).
 
 deny_false_test() ->
     ?assertEqual(nil, beamtalk_test_case:deny(false)).
 
 deny_true_raises_test() ->
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = assertion_failed, class = 'TestCase'}},
-                 beamtalk_test_case:deny(true)).
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = assertion_failed, class = 'TestCase'}
+        },
+        beamtalk_test_case:deny(true)
+    ).
 
 deny_non_boolean_raises_type_error_test() ->
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'TestCase'}},
-                 beamtalk_test_case:deny(<<"not a bool">>)).
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'TestCase'}},
+        beamtalk_test_case:deny(<<"not a bool">>)
+    ).
 
 assert_equals_matching_test() ->
     ?assertEqual(nil, beamtalk_test_case:assert_equals(42, 42)),
@@ -42,28 +56,44 @@ assert_equals_matching_test() ->
     ?assertEqual(nil, beamtalk_test_case:assert_equals(true, true)).
 
 assert_equals_mismatch_raises_test() ->
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = assertion_failed, class = 'TestCase'}},
-                 beamtalk_test_case:assert_equals(1, 2)).
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = assertion_failed, class = 'TestCase'}
+        },
+        beamtalk_test_case:assert_equals(1, 2)
+    ).
 
 fail_with_binary_test() ->
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = assertion_failed}},
-                 beamtalk_test_case:fail(<<"oops">>)).
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = assertion_failed}},
+        beamtalk_test_case:fail(<<"oops">>)
+    ).
 
 fail_with_atom_test() ->
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = assertion_failed}},
-                 beamtalk_test_case:fail(broken)).
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = assertion_failed}},
+        beamtalk_test_case:fail(broken)
+    ).
 
 fail_with_other_test() ->
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = assertion_failed}},
-                 beamtalk_test_case:fail(123)).
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = assertion_failed}},
+        beamtalk_test_case:fail(123)
+    ).
 
 %%% ============================================================================
 %%% should_raise Tests
 %%% ============================================================================
 
 should_raise_matching_kind_test() ->
-    Block = fun() -> error(#beamtalk_error{kind = does_not_understand,
-                                            class = 'X', message = <<"m">>}) end,
+    Block = fun() ->
+        error(#beamtalk_error{
+            kind = does_not_understand,
+            class = 'X',
+            message = <<"m">>
+        })
+    end,
     ?assertEqual(nil, beamtalk_test_case:should_raise(Block, does_not_understand)).
 
 should_raise_raw_atom_error_test() ->
@@ -72,23 +102,36 @@ should_raise_raw_atom_error_test() ->
 
 should_raise_no_error_test() ->
     Block = fun() -> ok end,
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = assertion_failed}},
-                 beamtalk_test_case:should_raise(Block, some_error)).
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = assertion_failed}},
+        beamtalk_test_case:should_raise(Block, some_error)
+    ).
 
 should_raise_wrong_kind_test() ->
-    Block = fun() -> error(#beamtalk_error{kind = type_error,
-                                            class = 'X', message = <<"m">>}) end,
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = assertion_failed}},
-                 beamtalk_test_case:should_raise(Block, does_not_understand)).
+    Block = fun() ->
+        error(#beamtalk_error{
+            kind = type_error,
+            class = 'X',
+            message = <<"m">>
+        })
+    end,
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = assertion_failed}},
+        beamtalk_test_case:should_raise(Block, does_not_understand)
+    ).
 
 should_raise_non_function_raises_type_error_test() ->
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-                 beamtalk_test_case:should_raise(not_a_fun, some_error)).
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_test_case:should_raise(not_a_fun, some_error)
+    ).
 
 should_raise_non_atom_kind_raises_type_error_test() ->
     Block = fun() -> ok end,
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-                 beamtalk_test_case:should_raise(Block, <<"not_atom">>)).
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_test_case:should_raise(Block, <<"not_atom">>)
+    ).
 
 %%% ============================================================================
 %%% extract_error_kind Tests (via should_raise which calls it)
@@ -142,12 +185,16 @@ discover_test_methods_no_test_methods_test() ->
 %% Use a helper that calls the exported execute_tests to verify discovery.
 discover_test_methods_wrapper(FlatMethods) ->
     %% Extract test methods by the same logic used internally
-    TestMethods = maps:fold(fun(Selector, _Info, Acc) ->
-        case atom_to_list(Selector) of
-            "test" ++ _ -> [Selector | Acc];
-            _ -> Acc
-        end
-    end, [], FlatMethods),
+    TestMethods = maps:fold(
+        fun(Selector, _Info, Acc) ->
+            case atom_to_list(Selector) of
+                "test" ++ _ -> [Selector | Acc];
+                _ -> Acc
+            end
+        end,
+        [],
+        FlatMethods
+    ),
     lists:sort(TestMethods).
 
 %%% ============================================================================
@@ -188,15 +235,11 @@ test_case_teardown(_) ->
     ok.
 
 test_case_test_() ->
-    {setup,
-     fun test_case_setup/0,
-     fun test_case_teardown/1,
-     [
+    {setup, fun test_case_setup/0, fun test_case_teardown/1, [
         {"execute_tests runAll with real TestCase module",
-         fun execute_tests_with_real_module_test/0},
-        {"run_all with real TestCase module",
-         fun run_all_with_real_module_test/0}
-     ]}.
+            fun execute_tests_with_real_module_test/0},
+        {"run_all with real TestCase module", fun run_all_with_real_module_test/0}
+    ]}.
 
 execute_tests_with_real_module_test() ->
     %% Use the actual counter_test BUnit module if available
@@ -216,5 +259,6 @@ run_all_with_real_module_test() ->
     try beamtalk_test_case:run_all('NonExistentTestClass') of
         Result when is_binary(Result) -> ok
     catch
-        _:_ -> ok  % Expected — module doesn't exist
+        % Expected — module doesn't exist
+        _:_ -> ok
     end.

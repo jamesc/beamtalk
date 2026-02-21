@@ -18,7 +18,8 @@ ensure_runtime() ->
 
 cleanup_singleton(Name) ->
     case erlang:whereis(Name) of
-        undefined -> ok;
+        undefined ->
+            ok;
         Pid ->
             unlink(Pid),
             gen_server:stop(Pid, normal, 1000),
@@ -27,7 +28,8 @@ cleanup_singleton(Name) ->
 
 cleanup_bootstrap() ->
     case erlang:whereis(beamtalk_workspace_bootstrap) of
-        undefined -> ok;
+        undefined ->
+            ok;
         Pid ->
             unlink(Pid),
             gen_server:stop(Pid, normal, 1000),
@@ -46,200 +48,196 @@ cleanup_all() ->
 
 %% Test that bootstrap wires transcript singleton
 bootstrap_sets_transcript_class_var_test_() ->
-    {setup,
-     fun() -> ensure_runtime() end,
-     fun(_) -> cleanup_all() end,
-     fun(_) ->
-         [?_test(begin
-              {ok, TPid} = beamtalk_transcript_stream:start_link({local, 'Transcript'}, 1000),
-              {ok, _BPid} = beamtalk_workspace_bootstrap:start_link(),
-              ?assertEqual(TPid, whereis('Transcript'))
-          end)]
-     end}.
+    {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
+        [
+            ?_test(begin
+                {ok, TPid} = beamtalk_transcript_stream:start_link({local, 'Transcript'}, 1000),
+                {ok, _BPid} = beamtalk_workspace_bootstrap:start_link(),
+                ?assertEqual(TPid, whereis('Transcript'))
+            end)
+        ]
+    end}.
 
 %% Test that bootstrap wires system dictionary singleton
 bootstrap_sets_beamtalk_class_var_test_() ->
-    {setup,
-     fun() -> ensure_runtime() end,
-     fun(_) -> cleanup_all() end,
-     fun(_) ->
-         [?_test(begin
-              {ok, BPid} = beamtalk_system_dictionary:start_link({local, 'Beamtalk'}, []),
-              {ok, _} = beamtalk_workspace_bootstrap:start_link(),
-              ?assertEqual(BPid, whereis('Beamtalk'))
-          end)]
-     end}.
+    {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
+        [
+            ?_test(begin
+                {ok, BPid} = beamtalk_system_dictionary:start_link({local, 'Beamtalk'}, []),
+                {ok, _} = beamtalk_workspace_bootstrap:start_link(),
+                ?assertEqual(BPid, whereis('Beamtalk'))
+            end)
+        ]
+    end}.
 
 %% Test that bootstrap wires workspace actor singleton
 bootstrap_sets_workspace_class_var_test_() ->
-    {setup,
-     fun() -> ensure_runtime() end,
-     fun(_) -> cleanup_all() end,
-     fun(_) ->
-         [?_test(begin
-              {ok, WPid} = beamtalk_workspace_environment:start_link({local, 'Workspace'}),
-              {ok, _} = beamtalk_workspace_bootstrap:start_link(),
-              ?assertEqual(WPid, whereis('Workspace'))
-          end)]
-     end}.
+    {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
+        [
+            ?_test(begin
+                {ok, WPid} = beamtalk_workspace_environment:start_link({local, 'Workspace'}),
+                {ok, _} = beamtalk_workspace_bootstrap:start_link(),
+                ?assertEqual(WPid, whereis('Workspace'))
+            end)
+        ]
+    end}.
 
 %% Test that bootstrap sets class variables when classes are loaded
 bootstrap_sets_class_variables_test_() ->
-    {setup,
-     fun() -> ensure_runtime() end,
-     fun(_) -> cleanup_all() end,
-     fun(_) ->
-         [?_test(begin
-              {ok, TPid} = beamtalk_transcript_stream:start_link({local, 'Transcript'}, 1000),
-              {ok, _} = beamtalk_workspace_bootstrap:start_link(),
-              case beamtalk_class_registry:whereis_class('TranscriptStream') of
-                  undefined -> ok;
-                  _ClassPid ->
-                      ExpectedObj = {beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, TPid},
-                      ?assertEqual(ExpectedObj,
-                          gen_server:call(beamtalk_class_registry:whereis_class('TranscriptStream'),
-                              {get_class_var, current}))
-              end
-          end)]
-     end}.
+    {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
+        [
+            ?_test(begin
+                {ok, TPid} = beamtalk_transcript_stream:start_link({local, 'Transcript'}, 1000),
+                {ok, _} = beamtalk_workspace_bootstrap:start_link(),
+                case beamtalk_class_registry:whereis_class('TranscriptStream') of
+                    undefined ->
+                        ok;
+                    _ClassPid ->
+                        ExpectedObj =
+                            {beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, TPid},
+                        ?assertEqual(
+                            ExpectedObj,
+                            gen_server:call(
+                                beamtalk_class_registry:whereis_class('TranscriptStream'),
+                                {get_class_var, current}
+                            )
+                        )
+                end
+            end)
+        ]
+    end}.
 
 %% Test that bootstrap handles missing singletons gracefully
 bootstrap_missing_singleton_test_() ->
-    {setup,
-     fun() -> ensure_runtime() end,
-     fun(_) -> cleanup_all() end,
-     fun(_) ->
-         [?_test(begin
-              {ok, _} = beamtalk_workspace_bootstrap:start_link(),
-              ok
-          end)]
-     end}.
+    {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
+        [
+            ?_test(begin
+                {ok, _} = beamtalk_workspace_bootstrap:start_link(),
+                ok
+            end)
+        ]
+    end}.
 
 %% Test that bootstrap re-wires after singleton restart
 bootstrap_restart_rewires_test_() ->
-    {setup,
-     fun() -> ensure_runtime() end,
-     fun(_) -> cleanup_all() end,
-     {timeout, 10,
-      fun() ->
-          OldTrap = process_flag(trap_exit, true),
-          try
-              {ok, TPid1} = beamtalk_transcript_stream:start_link({local, 'Transcript'}, 1000),
-              {ok, _BPid} = beamtalk_workspace_bootstrap:start_link(),
-              ?assertEqual(TPid1, whereis('Transcript')),
-              unlink(TPid1),
-              exit(TPid1, kill),
-              timer:sleep(50),
-              {ok, TPid2} = beamtalk_transcript_stream:start_link({local, 'Transcript'}, 1000),
-              ?assertNotEqual(TPid1, TPid2),
-              timer:sleep(300),
-              ?assertEqual(TPid2, whereis('Transcript'))
-          after
-              process_flag(trap_exit, OldTrap),
-              receive {'EXIT', _, _} -> ok after 0 -> ok end
-          end
-      end}}.
+    {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end,
+        {timeout, 10, fun() ->
+            OldTrap = process_flag(trap_exit, true),
+            try
+                {ok, TPid1} = beamtalk_transcript_stream:start_link({local, 'Transcript'}, 1000),
+                {ok, _BPid} = beamtalk_workspace_bootstrap:start_link(),
+                ?assertEqual(TPid1, whereis('Transcript')),
+                unlink(TPid1),
+                exit(TPid1, kill),
+                timer:sleep(50),
+                {ok, TPid2} = beamtalk_transcript_stream:start_link({local, 'Transcript'}, 1000),
+                ?assertNotEqual(TPid1, TPid2),
+                timer:sleep(300),
+                ?assertEqual(TPid2, whereis('Transcript'))
+            after
+                process_flag(trap_exit, OldTrap),
+                receive
+                    {'EXIT', _, _} -> ok
+                after 0 -> ok
+                end
+            end
+        end}}.
 
 %% Test that rebootstrap gives up after 5 retries and logs error
 rebootstrap_exhaustion_test_() ->
-    {setup,
-     fun() -> ensure_runtime() end,
-     fun(_) -> cleanup_all() end,
-     {timeout, 10,
-      fun() ->
-          OldTrap = process_flag(trap_exit, true),
-          try
-              {ok, TPid} = beamtalk_transcript_stream:start_link({local, 'Transcript'}, 1000),
-              {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
-              ?assertEqual(TPid, whereis('Transcript')),
-              %% Kill the singleton and don't restart it
-              unlink(TPid),
-              exit(TPid, kill),
-              timer:sleep(50),
-              ?assertEqual(undefined, whereis('Transcript')),
-              %% Wait for all 5 retries (100ms initial + 5 * 200ms = ~1200ms)
-              timer:sleep(1500),
-              %% Bootstrap should still be alive after exhausting retries
-              ?assert(is_process_alive(BPid))
-          after
-              process_flag(trap_exit, OldTrap),
-              receive {'EXIT', _, _} -> ok after 0 -> ok end
-          end
-      end}}.
+    {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end,
+        {timeout, 10, fun() ->
+            OldTrap = process_flag(trap_exit, true),
+            try
+                {ok, TPid} = beamtalk_transcript_stream:start_link({local, 'Transcript'}, 1000),
+                {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
+                ?assertEqual(TPid, whereis('Transcript')),
+                %% Kill the singleton and don't restart it
+                unlink(TPid),
+                exit(TPid, kill),
+                timer:sleep(50),
+                ?assertEqual(undefined, whereis('Transcript')),
+                %% Wait for all 5 retries (100ms initial + 5 * 200ms = ~1200ms)
+                timer:sleep(1500),
+                %% Bootstrap should still be alive after exhausting retries
+                ?assert(is_process_alive(BPid))
+            after
+                process_flag(trap_exit, OldTrap),
+                receive
+                    {'EXIT', _, _} -> ok
+                after 0 -> ok
+                end
+            end
+        end}}.
 
 %% Test that DOWN from unknown monitor ref is ignored
 unknown_monitor_down_test_() ->
-    {setup,
-     fun() -> ensure_runtime() end,
-     fun(_) -> cleanup_all() end,
-     fun(_) ->
-         [?_test(begin
-              {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
-              %% Send a DOWN message with a bogus monitor ref
-              FakeRef = make_ref(),
-              BPid ! {'DOWN', FakeRef, process, self(), normal},
-              timer:sleep(50),
-              %% Bootstrap should still be alive and responsive
-              ?assert(is_process_alive(BPid)),
-              ?assertEqual(ok, gen_server:call(BPid, ping))
-          end)]
-     end}.
+    {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
+        [
+            ?_test(begin
+                {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
+                %% Send a DOWN message with a bogus monitor ref
+                FakeRef = make_ref(),
+                BPid ! {'DOWN', FakeRef, process, self(), normal},
+                timer:sleep(50),
+                %% Bootstrap should still be alive and responsive
+                ?assert(is_process_alive(BPid)),
+                ?assertEqual(ok, gen_server:call(BPid, ping))
+            end)
+        ]
+    end}.
 
 %% Test that handle_call returns ok for unknown messages
 handle_call_returns_ok_test_() ->
-    {setup,
-     fun() -> ensure_runtime() end,
-     fun(_) -> cleanup_all() end,
-     fun(_) ->
-         [?_test(begin
-              {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
-              ?assertEqual(ok, gen_server:call(BPid, some_unknown_message)),
-              ?assert(is_process_alive(BPid))
-          end)]
-     end}.
+    {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
+        [
+            ?_test(begin
+                {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
+                ?assertEqual(ok, gen_server:call(BPid, some_unknown_message)),
+                ?assert(is_process_alive(BPid))
+            end)
+        ]
+    end}.
 
 %% Test that handle_cast is a noop
 handle_cast_noop_test_() ->
-    {setup,
-     fun() -> ensure_runtime() end,
-     fun(_) -> cleanup_all() end,
-     fun(_) ->
-         [?_test(begin
-              {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
-              gen_server:cast(BPid, some_unknown_cast),
-              timer:sleep(50),
-              ?assert(is_process_alive(BPid))
-          end)]
-     end}.
+    {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
+        [
+            ?_test(begin
+                {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
+                gen_server:cast(BPid, some_unknown_cast),
+                timer:sleep(50),
+                ?assert(is_process_alive(BPid))
+            end)
+        ]
+    end}.
 
 %% Test that unknown info messages are ignored
 unknown_info_ignored_test_() ->
-    {setup,
-     fun() -> ensure_runtime() end,
-     fun(_) -> cleanup_all() end,
-     fun(_) ->
-         [?_test(begin
-              {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
-              BPid ! {some, random, message},
-              timer:sleep(50),
-              ?assert(is_process_alive(BPid))
-          end)]
-     end}.
+    {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
+        [
+            ?_test(begin
+                {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
+                BPid ! {some, random, message},
+                timer:sleep(50),
+                ?assert(is_process_alive(BPid))
+            end)
+        ]
+    end}.
 
 %% Test that terminate returns ok
 terminate_ok_test_() ->
-    {setup,
-     fun() -> ensure_runtime() end,
-     fun(_) -> cleanup_all() end,
-     fun(_) ->
-         [?_test(begin
-              {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
-              ?assert(is_process_alive(BPid)),
-              gen_server:stop(BPid, normal, 1000),
-              timer:sleep(50),
-              ?assertNot(is_process_alive(BPid))
-          end)]
-     end}.
+    {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
+        [
+            ?_test(begin
+                {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
+                ?assert(is_process_alive(BPid)),
+                gen_server:stop(BPid, normal, 1000),
+                timer:sleep(50),
+                ?assertNot(is_process_alive(BPid))
+            end)
+        ]
+    end}.
 
 %%====================================================================
 %% Tests for project module discovery (BT-739)
@@ -304,29 +302,29 @@ find_bt_modules_ignores_non_beam_test() ->
 
 %% Test that bootstrap starts without error even with no project modules on path.
 bootstrap_starts_with_no_project_modules_test_() ->
-    {setup,
-     fun() -> ensure_runtime() end,
-     fun(_) -> cleanup_all() end,
-     fun(_) ->
-         [?_test(begin
-              {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
-              ?assert(is_process_alive(BPid))
-          end)]
-     end}.
+    {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
+        [
+            ?_test(begin
+                {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
+                ?assert(is_process_alive(BPid))
+            end)
+        ]
+    end}.
 
 %% Test that start_link/1 with a nonexistent project path starts without error.
 bootstrap_start_link_with_nonexistent_path_test_() ->
-    {setup,
-     fun() -> ensure_runtime() end,
-     fun(_) -> cleanup_all() end,
-     fun(_) ->
-         [?_test(begin
-              %% A nonexistent path should not crash the bootstrap worker —
-              %% find_bt_modules_in_dir returns [] for missing directories.
-              {ok, BPid} = beamtalk_workspace_bootstrap:start_link(<<"/nonexistent/project/path">>),
-              ?assert(is_process_alive(BPid))
-          end)]
-     end}.
+    {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
+        [
+            ?_test(begin
+                %% A nonexistent path should not crash the bootstrap worker —
+                %% find_bt_modules_in_dir returns [] for missing directories.
+                {ok, BPid} = beamtalk_workspace_bootstrap:start_link(
+                    <<"/nonexistent/project/path">>
+                ),
+                ?assert(is_process_alive(BPid))
+            end)
+        ]
+    end}.
 
 %%====================================================================
 %% Integration test for full module activation path (BT-748)
@@ -335,36 +333,41 @@ bootstrap_start_link_with_nonexistent_path_test_() ->
 %% Test that activate_project_modules/1 loads a compiled module, calls
 %% register_class/0, and makes the class visible via the class registry.
 activate_project_modules_registers_class_test_() ->
-    {setup,
-     fun() -> ensure_runtime() end,
-     fun(_) ->
-         cleanup_activation_test_class(),
-         purge_activation_fixture_module()
-     end,
-     fun(_) ->
-         [?_test(begin
-              ModName = 'bt@BT748ActivationFixture',
-              ClassName = 'BT748ActivationFixture',
-              {ProjDir, EbinDir} = make_temp_project_dir(),
-              try
-                  BeamBin = compile_activation_fixture(ModName, ClassName),
-                  BeamFile = filename:join(EbinDir, "bt@BT748ActivationFixture.beam"),
-                  ok = file:write_file(BeamFile, BeamBin),
-                  ok = beamtalk_workspace_bootstrap:activate_project_modules(
-                           list_to_binary(ProjDir)),
-                  ?assertNotEqual(undefined,
-                      beamtalk_class_registry:whereis_class(ClassName)),
-                  ?assertEqual({module, ModName}, code:ensure_loaded(ModName))
-              after
-                  remove_temp_project_dir(ProjDir),
-                  code:del_path(EbinDir)
-              end
-          end)]
-     end}.
+    {setup, fun() -> ensure_runtime() end,
+        fun(_) ->
+            cleanup_activation_test_class(),
+            purge_activation_fixture_module()
+        end,
+        fun(_) ->
+            [
+                ?_test(begin
+                    ModName = 'bt@BT748ActivationFixture',
+                    ClassName = 'BT748ActivationFixture',
+                    {ProjDir, EbinDir} = make_temp_project_dir(),
+                    try
+                        BeamBin = compile_activation_fixture(ModName, ClassName),
+                        BeamFile = filename:join(EbinDir, "bt@BT748ActivationFixture.beam"),
+                        ok = file:write_file(BeamFile, BeamBin),
+                        ok = beamtalk_workspace_bootstrap:activate_project_modules(
+                            list_to_binary(ProjDir)
+                        ),
+                        ?assertNotEqual(
+                            undefined,
+                            beamtalk_class_registry:whereis_class(ClassName)
+                        ),
+                        ?assertEqual({module, ModName}, code:ensure_loaded(ModName))
+                    after
+                        remove_temp_project_dir(ProjDir),
+                        code:del_path(EbinDir)
+                    end
+                end)
+            ]
+        end}.
 
 cleanup_activation_test_class() ->
     case beamtalk_class_registry:whereis_class('BT748ActivationFixture') of
-        undefined -> ok;
+        undefined ->
+            ok;
         Pid ->
             gen_server:stop(Pid, normal, 1000),
             timer:sleep(50)
@@ -376,8 +379,10 @@ purge_activation_fixture_module() ->
     ok.
 
 make_temp_project_dir() ->
-    Base = filename:join(get_temp_dir(),
-                         "beamtalk_proj_" ++ integer_to_list(erlang:unique_integer([positive]))),
+    Base = filename:join(
+        get_temp_dir(),
+        "beamtalk_proj_" ++ integer_to_list(erlang:unique_integer([positive]))
+    ),
     ok = file:make_dir(Base),
     ok = file:make_dir(filename:join(Base, "_build")),
     ok = file:make_dir(filename:join([Base, "_build", "dev"])),
@@ -392,7 +397,8 @@ remove_temp_project_dir(Dir) ->
     case file:list_dir(EbinDir) of
         {ok, Files} ->
             lists:foreach(fun(F) -> file:delete(filename:join(EbinDir, F)) end, Files);
-        _ -> ok
+        _ ->
+            ok
     end,
     file:del_dir(EbinDir),
     file:del_dir(BuildDevDir),
@@ -406,32 +412,30 @@ compile_activation_fixture(ModName, ClassName) ->
     Forms = [
         {attribute, 1, module, ModName},
         {attribute, 2, export, [{register_class, 0}]},
-        {function, 3, register_class, 0,
-         [{clause, 3, [], [],
-           [{'case', 4,
-             {call, 4,
-              {remote, 4, {atom, 4, beamtalk_object_class}, {atom, 4, start}},
-              [{atom, 4, ClassName},
-               {map, 4,
-                [{map_field_assoc, 4, {atom, 4, name},               {atom, 4, ClassName}},
-                 {map_field_assoc, 4, {atom, 4, superclass},         {atom, 4, 'Object'}},
-                 {map_field_assoc, 4, {atom, 4, module},             {atom, 4, ModName}},
-                 {map_field_assoc, 4, {atom, 4, instance_variables}, {nil,  4}},
-                 {map_field_assoc, 4, {atom, 4, class_methods},      {map,  4, []}},
-                 {map_field_assoc, 4, {atom, 4, instance_methods},   {map,  4, []}}
-                ]}
-              ]},
-             [{clause, 5,
-               [{tuple, 5, [{atom, 5, ok}, {var, 5, '_Pid'}]}],
-               [],
-               [{atom, 5, ok}]},
-              {clause, 6,
-               [{tuple, 6, [{atom, 6, error}, {var, 6, '_'}]}],
-               [],
-               [{atom, 6, ok}]}
-             ]}
-           ]}
-          ]}
+        {function, 3, register_class, 0, [
+            {clause, 3, [], [], [
+                {'case', 4,
+                    {call, 4, {remote, 4, {atom, 4, beamtalk_object_class}, {atom, 4, start}}, [
+                        {atom, 4, ClassName},
+                        {map, 4, [
+                            {map_field_assoc, 4, {atom, 4, name}, {atom, 4, ClassName}},
+                            {map_field_assoc, 4, {atom, 4, superclass}, {atom, 4, 'Object'}},
+                            {map_field_assoc, 4, {atom, 4, module}, {atom, 4, ModName}},
+                            {map_field_assoc, 4, {atom, 4, instance_variables}, {nil, 4}},
+                            {map_field_assoc, 4, {atom, 4, class_methods}, {map, 4, []}},
+                            {map_field_assoc, 4, {atom, 4, instance_methods}, {map, 4, []}}
+                        ]}
+                    ]},
+                    [
+                        {clause, 5, [{tuple, 5, [{atom, 5, ok}, {var, 5, '_Pid'}]}], [], [
+                            {atom, 5, ok}
+                        ]},
+                        {clause, 6, [{tuple, 6, [{atom, 6, error}, {var, 6, '_'}]}], [], [
+                            {atom, 6, ok}
+                        ]}
+                    ]}
+            ]}
+        ]}
     ],
     {ok, ModName, BeamBin} = compile:forms(Forms, []),
     BeamBin.
@@ -447,12 +451,15 @@ get_temp_dir() ->
                 false -> "/tmp";
                 Temp -> Temp
             end;
-        TmpDir -> TmpDir
+        TmpDir ->
+            TmpDir
     end.
 
 make_temp_beam_dir(FileNames) ->
-    Dir = filename:join(get_temp_dir(),
-                        "beamtalk_bootstrap_test_" ++ integer_to_list(erlang:unique_integer([positive]))),
+    Dir = filename:join(
+        get_temp_dir(),
+        "beamtalk_bootstrap_test_" ++ integer_to_list(erlang:unique_integer([positive]))
+    ),
     ok = file:make_dir(Dir),
     lists:foreach(
         fun(Name) ->
@@ -463,9 +470,10 @@ make_temp_beam_dir(FileNames) ->
     Dir.
 
 remove_temp_dir(Dir) ->
-    Files = case file:list_dir(Dir) of
-        {ok, Fs} -> Fs;
-        _ -> []
-    end,
+    Files =
+        case file:list_dir(Dir) of
+            {ok, Fs} -> Fs;
+            _ -> []
+        end,
     lists:foreach(fun(F) -> file:delete(filename:join(Dir, F)) end, Files),
     file:del_dir(Dir).

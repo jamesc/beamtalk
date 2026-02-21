@@ -121,7 +121,6 @@ handle_call({register, Class, Pid}, _From, State) ->
             NewMonitors = maps:put(Key, Ref, State#state.monitors),
             {reply, ok, State#state{monitors = NewMonitors}}
     end;
-
 handle_call({unregister, Class, Pid}, _From, State) ->
     Key = {Class, Pid},
     case maps:take(Key, State#state.monitors) of
@@ -133,7 +132,6 @@ handle_call({unregister, Class, Pid}, _From, State) ->
             %% Not registered, but that's ok
             {reply, ok, State}
     end;
-
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
@@ -147,12 +145,15 @@ handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
     %% This is more efficient than scanning all monitors when there are many instances
     Matches = ets:match(?TABLE, {'$1', Pid}),
     Classes = [Class || [Class] <- Matches],
-    
+
     %% Remove from ETS
-    lists:foreach(fun(Class) ->
-        ets:delete_object(?TABLE, {Class, Pid})
-    end, Classes),
-    
+    lists:foreach(
+        fun(Class) ->
+            ets:delete_object(?TABLE, {Class, Pid})
+        end,
+        Classes
+    ),
+
     %% Remove from monitors map
     NewMonitors = lists:foldl(
         fun(Class, Monitors) ->
@@ -162,7 +163,6 @@ handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
         Classes
     ),
     {noreply, State#state{monitors = NewMonitors}};
-
 handle_info(_Info, State) ->
     {noreply, State}.
 

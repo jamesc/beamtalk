@@ -23,14 +23,22 @@
 -export([start_link/1, get_metadata/0, update_activity/0, get_last_activity/0]).
 -export([register_actor/1, unregister_actor/1, supervised_actors/0]).
 -export([register_module/1, loaded_modules/0]).
--export([get/0]).  % Alias for get_metadata/0
+% Alias for get_metadata/0
+-export([get/0]).
 
 %% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3]).
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
 
 -define(ETS_TABLE, beamtalk_workspace_registry).
--define(PERSIST_DELAY_MS, 2000).  % Debounce disk writes to every 2 seconds
+% Debounce disk writes to every 2 seconds
+-define(PERSIST_DELAY_MS, 2000).
 
 -record(state, {
     workspace_id :: binary(),
@@ -89,7 +97,8 @@ update_activity() ->
         gen_server:cast(?MODULE, update_activity)
     catch
         exit:{noproc, _} ->
-            ok  % Gracefully handle if server not running
+            % Gracefully handle if server not running
+            ok
     end.
 
 %% @doc Get the last activity timestamp.
@@ -162,26 +171,37 @@ init(InitialMetadata) ->
     CreatedAt = maps:get(created_at, InitialMetadata),
     ReplPort = maps:get(repl_port, InitialMetadata, undefined),
     Now = erlang:system_time(second),
-    
+
     %% Create ETS table for workspace registry (if not already exists)
     case ets:whereis(?ETS_TABLE) of
         undefined ->
             _Tid = ets:new(?ETS_TABLE, [named_table, public, set, {read_concurrency, true}]);
         _Tid ->
-            ok  % Table already exists
+            % Table already exists
+            ok
     end,
-    
+
     %% Compute metadata path
-    MetadataPath = case beamtalk_platform:home_dir() of
-        false ->
-            CacheDir = filename:basedir(user_cache, "beamtalk"),
-            filename:join([CacheDir, "workspaces",
-                           binary_to_list(WorkspaceId), "metadata.json"]);
-        Home ->
-            filename:join([Home, ".beamtalk", "workspaces", 
-                           binary_to_list(WorkspaceId), "metadata.json"])
-    end,
-    
+    MetadataPath =
+        case beamtalk_platform:home_dir() of
+            false ->
+                CacheDir = filename:basedir(user_cache, "beamtalk"),
+                filename:join([
+                    CacheDir,
+                    "workspaces",
+                    binary_to_list(WorkspaceId),
+                    "metadata.json"
+                ]);
+            Home ->
+                filename:join([
+                    Home,
+                    ".beamtalk",
+                    "workspaces",
+                    binary_to_list(WorkspaceId),
+                    "metadata.json"
+                ])
+        end,
+
     State = #state{
         workspace_id = WorkspaceId,
         project_path = ProjectPath,
@@ -195,13 +215,13 @@ init(InitialMetadata) ->
         persist_timer = undefined,
         monitor_refs = #{}
     },
-    
+
     %% Store initial state in ETS
     store_state_in_ets(State),
-    
+
     %% Load persisted metadata if exists
     State2 = load_metadata_from_disk(State),
-    
+
     {ok, State2}.
 
 %% @private
@@ -217,16 +237,12 @@ handle_call(get_metadata, _From, State) ->
         loaded_modules => State#state.loaded_modules
     },
     {reply, {ok, Metadata}, State};
-
 handle_call(get_last_activity, _From, State) ->
     {reply, {ok, State#state.last_activity}, State};
-
 handle_call(supervised_actors, _From, State) ->
     {reply, {ok, State#state.supervised_actors}, State};
-
 handle_call(loaded_modules, _From, State) ->
     {reply, {ok, State#state.loaded_modules}, State};
-
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
@@ -236,20 +252,22 @@ handle_cast(update_activity, State) ->
     State2 = State#state{last_activity = Now},
     store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
-
 handle_cast({register_actor, Pid}, State) ->
     Actors = State#state.supervised_actors,
-    State2 = case lists:member(Pid, Actors) of
-        true -> State;
-        false ->
-            Ref = monitor(process, Pid),
-            MonRefs = State#state.monitor_refs,
-            State#state{supervised_actors = [Pid | Actors],
-                        monitor_refs = MonRefs#{Pid => Ref}}
-    end,
+    State2 =
+        case lists:member(Pid, Actors) of
+            true ->
+                State;
+            false ->
+                Ref = monitor(process, Pid),
+                MonRefs = State#state.monitor_refs,
+                State#state{
+                    supervised_actors = [Pid | Actors],
+                    monitor_refs = MonRefs#{Pid => Ref}
+                }
+        end,
     store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
-
 handle_cast({unregister_actor, Pid}, State) ->
     Actors = State#state.supervised_actors,
     MonRefs = State#state.monitor_refs,
@@ -258,20 +276,21 @@ handle_cast({unregister_actor, Pid}, State) ->
         {ok, Ref} -> demonitor(Ref, [flush]);
         error -> ok
     end,
-    State2 = State#state{supervised_actors = lists:delete(Pid, Actors),
-                         monitor_refs = maps:remove(Pid, MonRefs)},
+    State2 = State#state{
+        supervised_actors = lists:delete(Pid, Actors),
+        monitor_refs = maps:remove(Pid, MonRefs)
+    },
     store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
-
 handle_cast({register_module, Module}, State) ->
     Modules = State#state.loaded_modules,
-    State2 = case lists:member(Module, Modules) of
-        true -> State;
-        false -> State#state{loaded_modules = [Module | Modules]}
-    end,
+    State2 =
+        case lists:member(Module, Modules) of
+            true -> State;
+            false -> State#state{loaded_modules = [Module | Modules]}
+        end,
     store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
-
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -279,16 +298,16 @@ handle_cast(_Msg, State) ->
 handle_info(persist_to_disk, State) ->
     persist_metadata_to_disk(State),
     {noreply, State#state{persist_timer = undefined}};
-
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
     %% Actor exited, remove from tracked list and monitor refs
     Actors = State#state.supervised_actors,
     MonRefs = State#state.monitor_refs,
-    State2 = State#state{supervised_actors = lists:delete(Pid, Actors),
-                         monitor_refs = maps:remove(Pid, MonRefs)},
+    State2 = State#state{
+        supervised_actors = lists:delete(Pid, Actors),
+        monitor_refs = maps:remove(Pid, MonRefs)
+    },
     store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
-
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -324,7 +343,8 @@ schedule_persist(#state{persist_timer = OldTimer} = State) ->
 %% Store state in ETS for fast read access
 store_state_in_ets(State) ->
     case ets:whereis(?ETS_TABLE) of
-        undefined -> ok;  % Table doesn't exist yet, skip
+        % Table doesn't exist yet, skip
+        undefined -> ok;
         _Tid -> ets:insert(?ETS_TABLE, {metadata, State})
     end.
 
@@ -339,42 +359,52 @@ load_metadata_from_disk(State) ->
                     %% Do NOT restore supervised_actors from disk - PIDs are
                     %% not valid across node restarts. The monitor-based cleanup
                     %% handles tracking for the current session only.
-                    
+
                     %% Restore loaded_modules (atoms persist across restarts)
                     Modules = maps:get(<<"loaded_modules">>, Map, []),
-                    ModuleAtoms = [Atom || Bin <- Modules,
-                                   is_binary(Bin),
-                                   Atom <- [safe_existing_atom(Bin)],
-                                   Atom =/= undefined],
+                    ModuleAtoms = [
+                        Atom
+                     || Bin <- Modules,
+                        is_binary(Bin),
+                        Atom <- [safe_existing_atom(Bin)],
+                        Atom =/= undefined
+                    ],
 
                     %% Restore timestamps and project path if present
-                    CreatedAt = case maps:get(<<"created_at">>, Map, State#state.created_at) of
-                        CreatedAtValue when is_integer(CreatedAtValue) -> CreatedAtValue;
-                        _ -> State#state.created_at
-                    end,
-                    LastActive = case maps:get(<<"last_active">>, Map, State#state.last_activity) of
-                        LastActiveValue when is_integer(LastActiveValue) -> LastActiveValue;
-                        _ -> State#state.last_activity
-                    end,
-                    ProjectPath = case maps:get(<<"project_path">>, Map, State#state.project_path) of
-                        ProjectPathValue when is_binary(ProjectPathValue) -> ProjectPathValue;
-                        _ -> State#state.project_path
-                    end,
-                    
+                    CreatedAt =
+                        case maps:get(<<"created_at">>, Map, State#state.created_at) of
+                            CreatedAtValue when is_integer(CreatedAtValue) -> CreatedAtValue;
+                            _ -> State#state.created_at
+                        end,
+                    LastActive =
+                        case maps:get(<<"last_active">>, Map, State#state.last_activity) of
+                            LastActiveValue when is_integer(LastActiveValue) -> LastActiveValue;
+                            _ -> State#state.last_activity
+                        end,
+                    ProjectPath =
+                        case maps:get(<<"project_path">>, Map, State#state.project_path) of
+                            ProjectPathValue when is_binary(ProjectPathValue) -> ProjectPathValue;
+                            _ -> State#state.project_path
+                        end,
+
                     State#state{
                         project_path = ProjectPath,
                         created_at = CreatedAt,
                         last_activity = LastActive,
-                        supervised_actors = [],  % Always start fresh
+                        % Always start fresh
+                        supervised_actors = [],
                         loaded_modules = ModuleAtoms
                     }
             catch
-                _:_ -> State  % Failed to parse, use default
+                % Failed to parse, use default
+                _:_ -> State
             end;
         {error, enoent} ->
-            State;  % No metadata file yet
+            % No metadata file yet
+            State;
         {error, _} ->
-            State  % Failed to read, use default
+            % Failed to read, use default
+            State
     end.
 
 %% @private
@@ -384,35 +414,43 @@ persist_metadata_to_disk(State) ->
     %% Ensure directory exists
     Dir = filename:dirname(Path),
     _ = filelib:ensure_dir(filename:join(Dir, "dummy")),
-    
+
     %% Build JSON metadata (PIDs as strings, atoms as strings)
     Metadata = #{
         <<"workspace_id">> => State#state.workspace_id,
-        <<"project_path">> => case State#state.project_path of
-            undefined -> null;
-            PP -> PP
-        end,
+        <<"project_path">> =>
+            case State#state.project_path of
+                undefined -> null;
+                PP -> PP
+            end,
         <<"created_at">> => State#state.created_at,
         <<"last_active">> => State#state.last_activity,
         <<"node_name">> => atom_to_binary(State#state.node_name, utf8),
-        <<"repl_port">> => case State#state.repl_port of
-            undefined -> null;
-            Port -> Port
-        end,
-        <<"supervised_actors">> => [list_to_binary(pid_to_list(P)) || 
-                                    P <- State#state.supervised_actors],
-        <<"loaded_modules">> => [atom_to_binary(M, utf8) || 
-                                 M <- State#state.loaded_modules]
+        <<"repl_port">> =>
+            case State#state.repl_port of
+                undefined -> null;
+                Port -> Port
+            end,
+        <<"supervised_actors">> => [
+            list_to_binary(pid_to_list(P))
+         || P <- State#state.supervised_actors
+        ],
+        <<"loaded_modules">> => [
+            atom_to_binary(M, utf8)
+         || M <- State#state.loaded_modules
+        ]
     },
-    
+
     %% Write to disk
     Json = jsx:encode(Metadata, [{space, 2}, {indent, 2}]),
     case file:write_file(Path, Json) of
         ok ->
             ok;
         {error, Reason} ->
-            ?LOG_WARNING("Failed to persist workspace metadata to ~s: ~p",
-                           [Path, Reason]),
+            ?LOG_WARNING(
+                "Failed to persist workspace metadata to ~s: ~p",
+                [Path, Reason]
+            ),
             {error, Reason}
     end.
 

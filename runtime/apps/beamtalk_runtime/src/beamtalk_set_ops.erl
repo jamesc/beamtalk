@@ -90,8 +90,10 @@ remove(#{'$beamtalk_class' := 'Set', elements := Elements}, Element) ->
 
 %% @doc Return the union of two Sets.
 -spec union(map(), map()) -> map().
-union(#{'$beamtalk_class' := 'Set', elements := E1},
-      #{'$beamtalk_class' := 'Set', elements := E2}) ->
+union(
+    #{'$beamtalk_class' := 'Set', elements := E1},
+    #{'$beamtalk_class' := 'Set', elements := E2}
+) ->
     #{'$beamtalk_class' => 'Set', elements => ordsets:union(E1, E2)};
 union(#{'$beamtalk_class' := 'Set'}, _Other) ->
     set_type_error('union:');
@@ -100,8 +102,10 @@ union(_, _) ->
 
 %% @doc Return the intersection of two Sets.
 -spec intersection(map(), map()) -> map().
-intersection(#{'$beamtalk_class' := 'Set', elements := E1},
-             #{'$beamtalk_class' := 'Set', elements := E2}) ->
+intersection(
+    #{'$beamtalk_class' := 'Set', elements := E1},
+    #{'$beamtalk_class' := 'Set', elements := E2}
+) ->
     #{'$beamtalk_class' => 'Set', elements => ordsets:intersection(E1, E2)};
 intersection(#{'$beamtalk_class' := 'Set'}, _Other) ->
     set_type_error('intersection:');
@@ -110,8 +114,10 @@ intersection(_, _) ->
 
 %% @doc Return the difference of two Sets (elements in self but not other).
 -spec difference(map(), map()) -> map().
-difference(#{'$beamtalk_class' := 'Set', elements := E1},
-           #{'$beamtalk_class' := 'Set', elements := E2}) ->
+difference(
+    #{'$beamtalk_class' := 'Set', elements := E1},
+    #{'$beamtalk_class' := 'Set', elements := E2}
+) ->
     #{'$beamtalk_class' => 'Set', elements => ordsets:subtract(E1, E2)};
 difference(#{'$beamtalk_class' := 'Set'}, _Other) ->
     set_type_error('difference:');
@@ -124,8 +130,10 @@ difference(_, _) ->
 
 %% @doc Return true if self is a subset of other.
 -spec is_subset_of(map(), map()) -> boolean().
-is_subset_of(#{'$beamtalk_class' := 'Set', elements := E1},
-             #{'$beamtalk_class' := 'Set', elements := E2}) ->
+is_subset_of(
+    #{'$beamtalk_class' := 'Set', elements := E1},
+    #{'$beamtalk_class' := 'Set', elements := E2}
+) ->
     ordsets:is_subset(E1, E2);
 is_subset_of(#{'$beamtalk_class' := 'Set'}, _Other) ->
     set_type_error('isSubsetOf:');

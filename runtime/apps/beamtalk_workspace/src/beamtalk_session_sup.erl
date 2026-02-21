@@ -40,17 +40,18 @@ init([]) ->
         intensity => 10,
         period => 60
     },
-    
+
     %% Child spec template for sessions
     %% NOTE: This is a placeholder. The actual session implementation
     %% (beamtalk_repl_shell or similar) needs to be created.
     ChildSpec = #{
         id => beamtalk_session,
         start => {beamtalk_repl_shell, start_link, []},
-        restart => temporary,  % Sessions don't restart
+        % Sessions don't restart
+        restart => temporary,
         shutdown => 5000,
         type => worker,
         modules => [beamtalk_repl_shell]
     },
-    
+
     {ok, {SupFlags, [ChildSpec]}}.

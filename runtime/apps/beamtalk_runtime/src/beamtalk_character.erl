@@ -51,18 +51,19 @@ is_lowercase(CP) when is_integer(CP) -> false.
 -spec is_whitespace(integer()) -> boolean().
 is_whitespace(CP) when is_integer(CP), CP >= 0 ->
     unicode_match(CP, <<"\\p{Z}">>) orelse
-    CP =:= $\t orelse CP =:= $\n orelse CP =:= $\r orelse
-    CP =:= 16#0B orelse CP =:= 16#0C;
+        CP =:= $\t orelse CP =:= $\n orelse CP =:= $\r orelse
+        CP =:= 16#0B orelse CP =:= 16#0C;
 is_whitespace(CP) when is_integer(CP) -> false.
 
 %% @private Match a codepoint against a Unicode property regex.
 %% Returns false for values outside the Unicode scalar range.
 -spec unicode_match(integer(), binary()) -> boolean().
-unicode_match(CP, Pattern)
-    when is_integer(CP),
-         CP >= 0,
-         CP =< 16#10FFFF,
-         not (CP >= 16#D800 andalso CP =< 16#DFFF) ->
+unicode_match(CP, Pattern) when
+    is_integer(CP),
+    CP >= 0,
+    CP =< 16#10FFFF,
+    not (CP >= 16#D800 andalso CP =< 16#DFFF)
+->
     Str = unicode:characters_to_binary([CP]),
     match =:= re:run(Str, Pattern, [unicode, {capture, none}]);
 unicode_match(_CP, _Pattern) ->
@@ -112,8 +113,12 @@ value(CP) when is_integer(CP), CP >= 16#E000, CP =< 16#10FFFF -> CP;
 value(CP) ->
     Error0 = beamtalk_error:new(type_error, 'Character'),
     Error1 = beamtalk_error:with_selector(Error0, 'value:'),
-    Error2 = beamtalk_error:with_hint(Error1,
-        <<"Argument must be a valid Unicode scalar value "
-          "(non-negative, <= 0x10FFFF, and not a surrogate codepoint)">>),
+    Error2 = beamtalk_error:with_hint(
+        Error1,
+        <<
+            "Argument must be a valid Unicode scalar value "
+            "(non-negative, <= 0x10FFFF, and not a surrogate codepoint)"
+        >>
+    ),
     Error3 = beamtalk_error:with_details(Error2, #{got => CP}),
     beamtalk_error:raise(Error3).

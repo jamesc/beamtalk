@@ -30,7 +30,7 @@ start(_StartType, _StartArgs) ->
     %% This allows the runtime to notify us when actors spawn, enabling
     %% workspace-wide tracking without creating a compile-time dependency
     application:set_env(beamtalk_runtime, actor_spawn_callback, beamtalk_repl_actors),
-    
+
     %% Start the workspace supervisor tree
     beamtalk_workspace_app_sup:start_link().
 

@@ -267,8 +267,13 @@ set_responds_to_test() ->
 set_does_not_understand_test() ->
     beamtalk_extensions:init(),
     Set = beamtalk_set_ops:from_list([1, 2]),
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand, class = 'Set'}},
-        'bt@stdlib@set':dispatch('nonExistent', [], Set)).
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = does_not_understand, class = 'Set'}
+        },
+        'bt@stdlib@set':dispatch('nonExistent', [], Set)
+    ).
 
 %%% ============================================================================
 %%% Runtime Dispatch Integration (beamtalk_primitive)
@@ -301,30 +306,60 @@ primitive_print_string_empty_test() ->
 %%% ============================================================================
 
 from_list_type_error_test() ->
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Set', selector = 'fromList:'}},
-        beamtalk_set_ops:from_list(42)).
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'Set', selector = 'fromList:'}
+        },
+        beamtalk_set_ops:from_list(42)
+    ).
 
 union_type_error_test() ->
     Set = beamtalk_set_ops:from_list([1, 2]),
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Set', selector = 'union:'}},
-        beamtalk_set_ops:union(Set, not_a_set)).
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'Set', selector = 'union:'}
+        },
+        beamtalk_set_ops:union(Set, not_a_set)
+    ).
 
 intersection_type_error_test() ->
     Set = beamtalk_set_ops:from_list([1, 2]),
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Set', selector = 'intersection:'}},
-        beamtalk_set_ops:intersection(Set, 42)).
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'Set', selector = 'intersection:'}
+        },
+        beamtalk_set_ops:intersection(Set, 42)
+    ).
 
 difference_type_error_test() ->
     Set = beamtalk_set_ops:from_list([1, 2]),
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Set', selector = 'difference:'}},
-        beamtalk_set_ops:difference(Set, 42)).
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'Set', selector = 'difference:'}
+        },
+        beamtalk_set_ops:difference(Set, 42)
+    ).
 
 is_subset_of_type_error_test() ->
     Set = beamtalk_set_ops:from_list([1, 2]),
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Set', selector = 'isSubsetOf:'}},
-        beamtalk_set_ops:is_subset_of(Set, 42)).
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'Set', selector = 'isSubsetOf:'}
+        },
+        beamtalk_set_ops:is_subset_of(Set, 42)
+    ).
 
 do_type_error_test() ->
     Set = beamtalk_set_ops:from_list([1]),
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Set', selector = 'do:'}},
-        beamtalk_set_ops:do(Set, not_a_function)).
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'Set', selector = 'do:'}
+        },
+        beamtalk_set_ops:do(Set, not_a_function)
+    ).

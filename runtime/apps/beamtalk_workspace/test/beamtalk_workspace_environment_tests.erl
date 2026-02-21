@@ -71,11 +71,14 @@ actors_returns_live_actors_test() ->
     ?assertEqual(2, length(Result)),
 
     %% Verify results are beamtalk_object tuples
-    lists:foreach(fun({beamtalk_object, Class, Module, ActorPid}) ->
-        ?assertEqual('Counter', Class),
-        ?assertEqual(test_counter, Module),
-        ?assert(is_process_alive(ActorPid))
-    end, Result),
+    lists:foreach(
+        fun({beamtalk_object, Class, Module, ActorPid}) ->
+            ?assertEqual('Counter', Class),
+            ?assertEqual(test_counter, Module),
+            ?assert(is_process_alive(ActorPid))
+        end,
+        Result
+    ),
 
     gen_server:stop(Actor1),
     gen_server:stop(Actor2),
@@ -245,8 +248,14 @@ actors_of_accepts_class_object_tuple_test() ->
     ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor, 'Counter', test_counter),
 
     %% Start a class process to simulate a real class object reference
-    ClassInfo = #{name => 'Counter', module => test_counter, superclass => 'Actor',
-                  instance_methods => #{}, class_methods => #{}, instance_variables => []},
+    ClassInfo = #{
+        name => 'Counter',
+        module => test_counter,
+        superclass => 'Actor',
+        instance_methods => #{},
+        class_methods => #{},
+        instance_variables => []
+    },
     {ok, ClassPid} = beamtalk_object_class:start_link('Counter', ClassInfo),
 
     ClassObj = {beamtalk_object, 'Counter class', test_counter, ClassPid},

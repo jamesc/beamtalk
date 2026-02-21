@@ -110,39 +110,69 @@ readAll_success_test() ->
 
 readAll_file_not_found_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{
-            kind = file_not_found, class = 'File', selector = 'readAll:'}},
-        beamtalk_file:'readAll:'(<<"_bt_test_no_such_file.txt">>)).
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = file_not_found, class = 'File', selector = 'readAll:'
+            }
+        },
+        beamtalk_file:'readAll:'(<<"_bt_test_no_such_file.txt">>)
+    ).
 
 readAll_type_error_integer_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{
-            kind = type_error, class = 'File', selector = 'readAll:'}},
-        beamtalk_file:'readAll:'(42)).
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'File', selector = 'readAll:'
+            }
+        },
+        beamtalk_file:'readAll:'(42)
+    ).
 
 readAll_type_error_atom_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{
-            kind = type_error, class = 'File', selector = 'readAll:'}},
-        beamtalk_file:'readAll:'(foo)).
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'File', selector = 'readAll:'
+            }
+        },
+        beamtalk_file:'readAll:'(foo)
+    ).
 
 readAll_invalid_path_absolute_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{
-            kind = invalid_path, class = 'File', selector = 'readAll:'}},
-        beamtalk_file:'readAll:'(<<"/etc/passwd">>)).
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = invalid_path, class = 'File', selector = 'readAll:'
+            }
+        },
+        beamtalk_file:'readAll:'(<<"/etc/passwd">>)
+    ).
 
 readAll_invalid_path_traversal_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{
-            kind = invalid_path, class = 'File', selector = 'readAll:'}},
-        beamtalk_file:'readAll:'(<<"../secret.txt">>)).
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = invalid_path, class = 'File', selector = 'readAll:'
+            }
+        },
+        beamtalk_file:'readAll:'(<<"../secret.txt">>)
+    ).
 
 readAll_invalid_path_windows_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{
-            kind = invalid_path, class = 'File', selector = 'readAll:'}},
-        beamtalk_file:'readAll:'(<<"C:\\file.txt">>)).
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = invalid_path, class = 'File', selector = 'readAll:'
+            }
+        },
+        beamtalk_file:'readAll:'(<<"C:\\file.txt">>)
+    ).
 
 readAll_permission_denied_test() ->
     case os:type() of
@@ -157,9 +187,14 @@ readAll_permission_denied_test() ->
             _ = os:cmd(DenyCmd),
             try
                 ?assertError(
-                    #{'$beamtalk_class' := _, error := #beamtalk_error{
-                        kind = permission_denied, class = 'File', selector = 'readAll:'}},
-                    beamtalk_file:'readAll:'(list_to_binary(FileName)))
+                    #{
+                        '$beamtalk_class' := _,
+                        error := #beamtalk_error{
+                            kind = permission_denied, class = 'File', selector = 'readAll:'
+                        }
+                    },
+                    beamtalk_file:'readAll:'(list_to_binary(FileName))
+                )
             after
                 %% Reset ACL to allow access before deleting
                 ResetCmd = "icacls \"" ++ FileName ++ "\" /grant " ++ UserName ++ ":F >nul 2>&1",
@@ -173,9 +208,14 @@ readAll_permission_denied_test() ->
             ok = file:change_mode(FileName, 8#000),
             try
                 ?assertError(
-                    #{'$beamtalk_class' := _, error := #beamtalk_error{
-                        kind = permission_denied, class = 'File', selector = 'readAll:'}},
-                    beamtalk_file:'readAll:'(list_to_binary(FileName)))
+                    #{
+                        '$beamtalk_class' := _,
+                        error := #beamtalk_error{
+                            kind = permission_denied, class = 'File', selector = 'readAll:'
+                        }
+                    },
+                    beamtalk_file:'readAll:'(list_to_binary(FileName))
+                )
             after
                 file:change_mode(FileName, 8#644),
                 file:delete(FileName)
@@ -189,8 +229,12 @@ readAll_permission_denied_test() ->
 writeAll_success_test() ->
     FileName = "_bt_test_write.txt",
     try
-        ?assertEqual(nil, beamtalk_file:'writeAll:contents:'(
-            list_to_binary(FileName), <<"content">>)),
+        ?assertEqual(
+            nil,
+            beamtalk_file:'writeAll:contents:'(
+                list_to_binary(FileName), <<"content">>
+            )
+        ),
         ?assertEqual({ok, <<"content">>}, file:read_file(FileName))
     after
         file:delete(FileName)
@@ -198,34 +242,58 @@ writeAll_success_test() ->
 
 writeAll_type_error_non_string_path_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{
-            kind = type_error, class = 'File', selector = 'writeAll:contents:'}},
-        beamtalk_file:'writeAll:contents:'(42, <<"content">>)).
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'File', selector = 'writeAll:contents:'
+            }
+        },
+        beamtalk_file:'writeAll:contents:'(42, <<"content">>)
+    ).
 
 writeAll_type_error_non_string_contents_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{
-            kind = type_error, class = 'File', selector = 'writeAll:contents:'}},
-        beamtalk_file:'writeAll:contents:'(<<"file.txt">>, 42)).
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'File', selector = 'writeAll:contents:'
+            }
+        },
+        beamtalk_file:'writeAll:contents:'(<<"file.txt">>, 42)
+    ).
 
 writeAll_invalid_path_absolute_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{
-            kind = invalid_path, class = 'File', selector = 'writeAll:contents:'}},
-        beamtalk_file:'writeAll:contents:'(<<"/tmp/test.txt">>, <<"data">>)).
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = invalid_path, class = 'File', selector = 'writeAll:contents:'
+            }
+        },
+        beamtalk_file:'writeAll:contents:'(<<"/tmp/test.txt">>, <<"data">>)
+    ).
 
 writeAll_invalid_path_traversal_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{
-            kind = invalid_path, class = 'File', selector = 'writeAll:contents:'}},
-        beamtalk_file:'writeAll:contents:'(<<"../test.txt">>, <<"data">>)).
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = invalid_path, class = 'File', selector = 'writeAll:contents:'
+            }
+        },
+        beamtalk_file:'writeAll:contents:'(<<"../test.txt">>, <<"data">>)
+    ).
 
 writeAll_creates_subdirectory_test() ->
     %% writeAll should auto-create parent directories
     FileName = "_bt_test_subdir/nested.txt",
     try
-        ?assertEqual(nil, beamtalk_file:'writeAll:contents:'(
-            list_to_binary(FileName), <<"nested content">>)),
+        ?assertEqual(
+            nil,
+            beamtalk_file:'writeAll:contents:'(
+                list_to_binary(FileName), <<"nested content">>
+            )
+        ),
         ?assertEqual({ok, <<"nested content">>}, file:read_file(FileName))
     after
         file:delete(FileName),
@@ -245,9 +313,16 @@ writeAll_permission_denied_test() ->
             _ = os:cmd(DenyCmd),
             try
                 ?assertError(
-                    #{'$beamtalk_class' := _, error := #beamtalk_error{
-                        kind = permission_denied, class = 'File', selector = 'writeAll:contents:'}},
-                    beamtalk_file:'writeAll:contents:'(list_to_binary(FileName), <<"data">>))
+                    #{
+                        '$beamtalk_class' := _,
+                        error := #beamtalk_error{
+                            kind = permission_denied,
+                            class = 'File',
+                            selector = 'writeAll:contents:'
+                        }
+                    },
+                    beamtalk_file:'writeAll:contents:'(list_to_binary(FileName), <<"data">>)
+                )
             after
                 %% Reset ACL to allow access before cleanup
                 ResetCmd = "icacls \"" ++ FileName ++ "\" /grant " ++ UserName ++ ":F >nul 2>&1",
@@ -262,9 +337,16 @@ writeAll_permission_denied_test() ->
             ok = file:change_mode(Dir, 8#555),
             try
                 ?assertError(
-                    #{'$beamtalk_class' := _, error := #beamtalk_error{
-                        kind = permission_denied, class = 'File', selector = 'writeAll:contents:'}},
-                    beamtalk_file:'writeAll:contents:'(list_to_binary(FileName), <<"data">>))
+                    #{
+                        '$beamtalk_class' := _,
+                        error := #beamtalk_error{
+                            kind = permission_denied,
+                            class = 'File',
+                            selector = 'writeAll:contents:'
+                        }
+                    },
+                    beamtalk_file:'writeAll:contents:'(list_to_binary(FileName), <<"data">>)
+                )
             after
                 file:change_mode(Dir, 8#755),
                 file:delete(FileName),
@@ -285,27 +367,47 @@ lines_success_test() ->
 
 lines_file_not_found_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{
-            kind = file_not_found, class = 'File', selector = 'lines:'}},
-        beamtalk_file:'lines:'(<<"_bt_test_no_such_file.txt">>)).
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = file_not_found, class = 'File', selector = 'lines:'
+            }
+        },
+        beamtalk_file:'lines:'(<<"_bt_test_no_such_file.txt">>)
+    ).
 
 lines_type_error_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{
-            kind = type_error, class = 'File', selector = 'lines:'}},
-        beamtalk_file:'lines:'(42)).
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'File', selector = 'lines:'
+            }
+        },
+        beamtalk_file:'lines:'(42)
+    ).
 
 lines_invalid_path_absolute_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{
-            kind = invalid_path, class = 'File', selector = 'lines:'}},
-        beamtalk_file:'lines:'(<<"/etc/passwd">>)).
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = invalid_path, class = 'File', selector = 'lines:'
+            }
+        },
+        beamtalk_file:'lines:'(<<"/etc/passwd">>)
+    ).
 
 lines_invalid_path_traversal_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{
-            kind = invalid_path, class = 'File', selector = 'lines:'}},
-        beamtalk_file:'lines:'(<<"../secret.txt">>)).
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = invalid_path, class = 'File', selector = 'lines:'
+            }
+        },
+        beamtalk_file:'lines:'(<<"../secret.txt">>)
+    ).
 
 lines_empty_file_test() ->
     with_temp_file("_bt_test_empty_lines.txt", <<>>, fun() ->
@@ -343,41 +445,68 @@ open_do_success_test() ->
     with_temp_file("_bt_test_open.txt", <<"line1\nline2\n">>, fun() ->
         Result = beamtalk_file:'open:do:'(
             <<"_bt_test_open.txt">>,
-            fun(Handle) -> beamtalk_stream:as_list(beamtalk_file:handle_lines(Handle)) end),
+            fun(Handle) -> beamtalk_stream:as_list(beamtalk_file:handle_lines(Handle)) end
+        ),
         ?assertEqual([<<"line1">>, <<"line2">>], Result)
     end).
 
 open_do_file_not_found_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{
-            kind = file_not_found, class = 'File', selector = 'open:do:'}},
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = file_not_found, class = 'File', selector = 'open:do:'
+            }
+        },
         beamtalk_file:'open:do:'(
             <<"_bt_test_no_such_file.txt">>,
-            fun(_) -> ok end)).
+            fun(_) -> ok end
+        )
+    ).
 
 open_do_type_error_non_string_path_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{
-            kind = type_error, class = 'File', selector = 'open:do:'}},
-        beamtalk_file:'open:do:'(42, fun(_) -> ok end)).
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'File', selector = 'open:do:'
+            }
+        },
+        beamtalk_file:'open:do:'(42, fun(_) -> ok end)
+    ).
 
 open_do_type_error_non_block_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{
-            kind = type_error, class = 'File', selector = 'open:do:'}},
-        beamtalk_file:'open:do:'(<<"file.txt">>, not_a_function)).
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'File', selector = 'open:do:'
+            }
+        },
+        beamtalk_file:'open:do:'(<<"file.txt">>, not_a_function)
+    ).
 
 open_do_invalid_path_absolute_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{
-            kind = invalid_path, class = 'File', selector = 'open:do:'}},
-        beamtalk_file:'open:do:'(<<"/etc/passwd">>, fun(_) -> ok end)).
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = invalid_path, class = 'File', selector = 'open:do:'
+            }
+        },
+        beamtalk_file:'open:do:'(<<"/etc/passwd">>, fun(_) -> ok end)
+    ).
 
 open_do_invalid_path_traversal_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{
-            kind = invalid_path, class = 'File', selector = 'open:do:'}},
-        beamtalk_file:'open:do:'(<<"../secret.txt">>, fun(_) -> ok end)).
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = invalid_path, class = 'File', selector = 'open:do:'
+            }
+        },
+        beamtalk_file:'open:do:'(<<"../secret.txt">>, fun(_) -> ok end)
+    ).
 
 open_do_closes_on_exception_test() ->
     %% Verify the handle is closed even if the block raises
@@ -386,14 +515,17 @@ open_do_closes_on_exception_test() ->
             test_exception,
             beamtalk_file:'open:do:'(
                 <<"_bt_test_open_exc.txt">>,
-                fun(_Handle) -> error(test_exception) end))
+                fun(_Handle) -> error(test_exception) end
+            )
+        )
     end).
 
 open_do_block_return_value_test() ->
     with_temp_file("_bt_test_open_ret.txt", <<"data\n">>, fun() ->
         Result = beamtalk_file:'open:do:'(
             <<"_bt_test_open_ret.txt">>,
-            fun(_Handle) -> 42 end),
+            fun(_Handle) -> 42 end
+        ),
         ?assertEqual(42, Result)
     end).
 
@@ -403,12 +535,22 @@ open_do_block_return_value_test() ->
 
 handle_lines_type_error_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{
-            kind = type_error, class = 'FileHandle', selector = 'lines'}},
-        beamtalk_file:handle_lines(not_a_handle)).
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'FileHandle', selector = 'lines'
+            }
+        },
+        beamtalk_file:handle_lines(not_a_handle)
+    ).
 
 handle_lines_wrong_map_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{
-            kind = type_error, class = 'FileHandle', selector = 'lines'}},
-        beamtalk_file:handle_lines(#{foo => bar})).
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'FileHandle', selector = 'lines'
+            }
+        },
+        beamtalk_file:handle_lines(#{foo => bar})
+    ).

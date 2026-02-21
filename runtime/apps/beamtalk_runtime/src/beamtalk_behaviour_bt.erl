@@ -77,7 +77,8 @@ register_class() ->
             ok;
         {error, {already_started, _}} ->
             case beamtalk_object_class:update_class('Behaviour', ClassInfo) of
-                {ok, _} -> ok;
+                {ok, _} ->
+                    ok;
                 {error, UpdErr} ->
                     ?LOG_ERROR("Failed to update Behaviour class", #{reason => UpdErr}),
                     {error, UpdErr}

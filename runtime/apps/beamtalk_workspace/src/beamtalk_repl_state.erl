@@ -10,13 +10,25 @@
 
 -module(beamtalk_repl_state).
 
--export([new/2, new/3, get_bindings/1, set_bindings/2, clear_bindings/1,
-         get_eval_counter/1, increment_eval_counter/1,
-         get_loaded_modules/1, add_loaded_module/2, set_loaded_modules/2,
-         get_listen_socket/1, get_port/1,
-         get_actor_registry/1, set_actor_registry/2,
-         get_module_tracker/1, set_module_tracker/2,
-         get_class_source/2, set_class_source/3]).
+-export([
+    new/2, new/3,
+    get_bindings/1,
+    set_bindings/2,
+    clear_bindings/1,
+    get_eval_counter/1,
+    increment_eval_counter/1,
+    get_loaded_modules/1,
+    add_loaded_module/2,
+    set_loaded_modules/2,
+    get_listen_socket/1,
+    get_port/1,
+    get_actor_registry/1,
+    set_actor_registry/2,
+    get_module_tracker/1,
+    set_module_tracker/2,
+    get_class_source/2,
+    set_class_source/3
+]).
 
 -export_type([state/0]).
 

@@ -155,7 +155,8 @@ get_actor_count_with_dead_registry_test() ->
     Tracker = beamtalk_repl_modules:new(),
     Tracker2 = beamtalk_repl_modules:add_module(my_module, "/path.bt", Tracker),
     DeadPid = spawn(fun() -> ok end),
-    timer:sleep(10), %% Ensure process exits
+    %% Ensure process exits
+    timer:sleep(10),
     %% Function should handle error gracefully and return 0
     Count = beamtalk_repl_modules:get_actor_count(my_module, DeadPid, Tracker2),
     ?assertEqual(0, Count).
@@ -240,26 +241,26 @@ full_lifecycle_test() ->
     %% Create tracker
     Tracker = beamtalk_repl_modules:new(),
     ?assertEqual([], beamtalk_repl_modules:list_modules(Tracker)),
-    
+
     %% Add first module
     Tracker2 = beamtalk_repl_modules:add_module(counter, "/lib/Counter.bt", Tracker),
     ?assert(beamtalk_repl_modules:module_exists(counter, Tracker2)),
-    
+
     %% Add second module
     Tracker3 = beamtalk_repl_modules:add_module(worker, "/lib/Worker.bt", Tracker2),
     ?assertEqual(2, length(beamtalk_repl_modules:list_modules(Tracker3))),
-    
+
     %% Get info and format
     {ok, Info} = beamtalk_repl_modules:get_module_info(counter, Tracker3),
     Formatted = beamtalk_repl_modules:format_module_info(Info, 3),
     ?assertEqual(<<"counter">>, maps:get(name, Formatted)),
     ?assertEqual(3, maps:get(actor_count, Formatted)),
-    
+
     %% Remove first module
     Tracker4 = beamtalk_repl_modules:remove_module(counter, Tracker3),
     ?assertNot(beamtalk_repl_modules:module_exists(counter, Tracker4)),
     ?assert(beamtalk_repl_modules:module_exists(worker, Tracker4)),
-    
+
     %% Remove second module
     Tracker5 = beamtalk_repl_modules:remove_module(worker, Tracker4),
     ?assertEqual([], beamtalk_repl_modules:list_modules(Tracker5)).

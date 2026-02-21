@@ -46,14 +46,23 @@ compile_core_erlang_empty_test() ->
 %%% ---------------------------------------------------------------
 
 handle_compile_response_ok_test() ->
-    Response = #{status => ok, core_erlang => <<"core">>,
-                 module_name => <<"mod">>, classes => [<<"Foo">>],
-                 warnings => []},
+    Response = #{
+        status => ok,
+        core_erlang => <<"core">>,
+        module_name => <<"mod">>,
+        classes => [<<"Foo">>],
+        warnings => []
+    },
     Result = beamtalk_compiler_server:handle_compile_response(Response),
-    ?assertMatch({ok, #{core_erlang := <<"core">>,
-                        module_name := <<"mod">>,
-                        classes := [<<"Foo">>],
-                        warnings := []}}, Result).
+    ?assertMatch(
+        {ok, #{
+            core_erlang := <<"core">>,
+            module_name := <<"mod">>,
+            classes := [<<"Foo">>],
+            warnings := []
+        }},
+        Result
+    ).
 
 handle_compile_response_error_test() ->
     Response = #{status => error, diagnostics => [<<"parse error">>]},
@@ -131,14 +140,11 @@ flush_port_messages_stops_at_exit_test() ->
 %%% ---------------------------------------------------------------
 
 gen_server_edge_test_() ->
-    {setup,
-     fun start_compiler/0,
-     fun stop_compiler/1,
-     [
-      {"unknown call returns error", fun unknown_call/0},
-      {"cast is ignored gracefully", fun cast_ignored/0},
-      {"unknown info is ignored gracefully", fun unknown_info/0}
-     ]}.
+    {setup, fun start_compiler/0, fun stop_compiler/1, [
+        {"unknown call returns error", fun unknown_call/0},
+        {"cast is ignored gracefully", fun cast_ignored/0},
+        {"unknown info is ignored gracefully", fun unknown_info/0}
+    ]}.
 
 unknown_call() ->
     Result = gen_server:call(beamtalk_compiler_server, {bogus_request, 42}, 5000),
@@ -172,7 +178,9 @@ stop_compiler(_) ->
     ok.
 
 valid_core_erlang() ->
-    <<"module 'test_server_mod' ['hello'/0]\n"
-      "  attributes []\n"
-      "  'hello'/0 = fun () -> 'world'\n"
-      "end\n">>.
+    <<
+        "module 'test_server_mod' ['hello'/0]\n"
+        "  attributes []\n"
+        "  'hello'/0 = fun () -> 'world'\n"
+        "end\n"
+    >>.

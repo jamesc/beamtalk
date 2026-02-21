@@ -66,11 +66,22 @@ now() ->
     raise_type_error('year:month:day:', <<"Arguments must be Integers">>).
 
 %% @doc Construct a DateTime from year, month, day, hour, minute, second.
--spec 'year:month:day:hour:minute:second:'(integer(), integer(), integer(),
-                                            integer(), integer(), integer()) -> map().
-'year:month:day:hour:minute:second:'(Y, Mo, D, H, Mi, S)
-  when is_integer(Y), is_integer(Mo), is_integer(D),
-       is_integer(H), is_integer(Mi), is_integer(S) ->
+-spec 'year:month:day:hour:minute:second:'(
+    integer(),
+    integer(),
+    integer(),
+    integer(),
+    integer(),
+    integer()
+) -> map().
+'year:month:day:hour:minute:second:'(Y, Mo, D, H, Mi, S) when
+    is_integer(Y),
+    is_integer(Mo),
+    is_integer(D),
+    is_integer(H),
+    is_integer(Mi),
+    is_integer(S)
+->
     validate_date(Y, Mo, D, 'year:month:day:hour:minute:second:'),
     validate_time(H, Mi, S, 'year:month:day:hour:minute:second:'),
     make_datetime(Y, Mo, D, H, Mi, S);
@@ -95,7 +106,9 @@ now() ->
         error ->
             Error0 = beamtalk_error:new(type_error, 'DateTime'),
             Error1 = beamtalk_error:with_selector(Error0, 'fromString:'),
-            Error2 = beamtalk_error:with_hint(Error1, <<"Expected ISO 8601 format: YYYY-MM-DDThh:mm:ssZ">>),
+            Error2 = beamtalk_error:with_hint(
+                Error1, <<"Expected ISO 8601 format: YYYY-MM-DDThh:mm:ssZ">>
+            ),
             beamtalk_error:raise(Error2)
     end;
 'fromString:'(_) ->
@@ -129,17 +142,33 @@ second(#{second := V}) -> V.
 
 %% @doc Convert to Unix epoch timestamp (seconds).
 -spec 'asTimestamp'(map()) -> integer().
-'asTimestamp'(#{year := Y, month := Mo, day := D,
-                hour := H, minute := Mi, second := S}) ->
+'asTimestamp'(#{
+    year := Y,
+    month := Mo,
+    day := D,
+    hour := H,
+    minute := Mi,
+    second := S
+}) ->
     GregSec = calendar:datetime_to_gregorian_seconds({{Y, Mo, D}, {H, Mi, S}}),
     GregSec - ?EPOCH_GREGORIAN.
 
 %% @doc Format as ISO 8601 string.
 -spec 'asString'(map()) -> binary().
-'asString'(#{year := Y, month := Mo, day := D,
-              hour := H, minute := Mi, second := S}) ->
-    iolist_to_binary(io_lib:format("~4..0B-~2..0B-~2..0BT~2..0B:~2..0B:~2..0BZ",
-                                   [Y, Mo, D, H, Mi, S])).
+'asString'(#{
+    year := Y,
+    month := Mo,
+    day := D,
+    hour := H,
+    minute := Mi,
+    second := S
+}) ->
+    iolist_to_binary(
+        io_lib:format(
+            "~4..0B-~2..0B-~2..0BT~2..0B:~2..0B:~2..0BZ",
+            [Y, Mo, D, H, Mi, S]
+        )
+    ).
 
 %% @doc Human-readable representation.
 -spec 'printString'(map()) -> binary().
@@ -246,21 +275,30 @@ has_method(_) -> false.
 %%% Internal Functions
 %%% ============================================================================
 
--spec make_datetime(integer(), integer(), integer(),
-                    integer(), integer(), integer()) -> map().
+-spec make_datetime(
+    integer(),
+    integer(),
+    integer(),
+    integer(),
+    integer(),
+    integer()
+) -> map().
 make_datetime(Y, Mo, D, H, Mi, S) ->
-    #{'$beamtalk_class' => 'DateTime',
-      year   => Y,
-      month  => Mo,
-      day    => D,
-      hour   => H,
-      minute => Mi,
-      second => S}.
+    #{
+        '$beamtalk_class' => 'DateTime',
+        year => Y,
+        month => Mo,
+        day => D,
+        hour => H,
+        minute => Mi,
+        second => S
+    }.
 
 -spec validate_date(integer(), integer(), integer(), atom()) -> ok.
 validate_date(Y, Mo, D, Selector) ->
     case calendar:valid_date(Y, Mo, D) of
-        true -> ok;
+        true ->
+            ok;
         false ->
             Msg = iolist_to_binary(io_lib:format("Invalid date: ~p-~p-~p", [Y, Mo, D])),
             Error0 = beamtalk_error:new(type_error, 'DateTime'),
@@ -270,8 +308,9 @@ validate_date(Y, Mo, D, Selector) ->
     end.
 
 -spec validate_time(integer(), integer(), integer(), atom()) -> ok.
-validate_time(H, Mi, S, Selector)
-  when H >= 0, H =< 23, Mi >= 0, Mi =< 59, S >= 0, S =< 59 ->
+validate_time(H, Mi, S, Selector) when
+    H >= 0, H =< 23, Mi >= 0, Mi =< 59, S >= 0, S =< 59
+->
     ok;
 validate_time(H, Mi, S, Selector) ->
     Msg = iolist_to_binary(io_lib:format("Invalid time: ~p:~p:~p", [H, Mi, S])),
@@ -280,20 +319,25 @@ validate_time(H, Mi, S, Selector) ->
     Error2 = beamtalk_error:with_hint(Error1, Msg),
     beamtalk_error:raise(Error2).
 
--spec parse_iso8601(binary()) -> {ok, integer(), integer(), integer(),
-                                       integer(), integer(), integer()} | error.
+-spec parse_iso8601(binary()) ->
+    {ok, integer(), integer(), integer(), integer(), integer(), integer()}
+    | error.
 parse_iso8601(Str) ->
     %% Accept YYYY-MM-DDThh:mm:ssZ or YYYY-MM-DDThh:mm:ss
-    case re:run(Str,
-                <<"^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2}):(\\d{2})Z?$">>,
-                [{capture, all_but_first, binary}]) of
+    case
+        re:run(
+            Str,
+            <<"^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2}):(\\d{2})Z?$">>,
+            [{capture, all_but_first, binary}]
+        )
+    of
         {match, [YB, MoB, DB, HB, MiB, SB]} ->
-            Y  = binary_to_integer(YB),
+            Y = binary_to_integer(YB),
             Mo = binary_to_integer(MoB),
-            D  = binary_to_integer(DB),
-            H  = binary_to_integer(HB),
+            D = binary_to_integer(DB),
+            H = binary_to_integer(HB),
             Mi = binary_to_integer(MiB),
-            S  = binary_to_integer(SB),
+            S = binary_to_integer(SB),
             case calendar:valid_date(Y, Mo, D) of
                 true when H >= 0, H =< 23, Mi >= 0, Mi =< 59, S >= 0, S =< 59 ->
                     {ok, Y, Mo, D, H, Mi, S};

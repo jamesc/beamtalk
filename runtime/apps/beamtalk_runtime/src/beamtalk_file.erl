@@ -37,8 +37,13 @@
 
 -module(beamtalk_file).
 
--export(['exists:'/1, 'readAll:'/1, 'writeAll:contents:'/2,
-         'lines:'/1, 'open:do:'/2]).
+-export([
+    'exists:'/1,
+    'readAll:'/1,
+    'writeAll:contents:'/2,
+    'lines:'/1,
+    'open:do:'/2
+]).
 -export([handle_lines/1, has_method/1, handle_has_method/1]).
 
 -include("beamtalk.hrl").
@@ -96,10 +101,11 @@
             Error0 = beamtalk_error:new(invalid_path, 'File'),
             Error1 = beamtalk_error:with_selector(Error0, 'readAll:'),
             Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
-            Hint = case Reason of
-                absolute_path -> <<"Use relative paths only">>;
-                directory_traversal -> <<"Use relative paths within the project">>
-            end,
+            Hint =
+                case Reason of
+                    absolute_path -> <<"Use relative paths only">>;
+                    directory_traversal -> <<"Use relative paths within the project">>
+                end,
             Error3 = beamtalk_error:with_hint(Error2, Hint),
             beamtalk_error:raise(Error3)
     end;
@@ -133,7 +139,9 @@
                         {error, Reason} ->
                             Error0 = beamtalk_error:new(io_error, 'File'),
                             Error1 = beamtalk_error:with_selector(Error0, 'writeAll:contents:'),
-                            Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
+                            Error2 = beamtalk_error:with_details(Error1, #{
+                                path => Path, reason => Reason
+                            }),
                             beamtalk_error:raise(Error2)
                     end;
                 {error, Reason} ->
@@ -147,10 +155,11 @@
             Error0 = beamtalk_error:new(invalid_path, 'File'),
             Error1 = beamtalk_error:with_selector(Error0, 'writeAll:contents:'),
             Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
-            Hint = case Reason of
-                absolute_path -> <<"Use relative paths only">>;
-                directory_traversal -> <<"Use relative paths within the project">>
-            end,
+            Hint =
+                case Reason of
+                    absolute_path -> <<"Use relative paths only">>;
+                    directory_traversal -> <<"Use relative paths within the project">>
+                end,
             Error3 = beamtalk_error:with_hint(Error2, Hint),
             beamtalk_error:raise(Error3)
     end;
@@ -221,10 +230,11 @@ handle_has_method(_) -> false.
             Error0 = beamtalk_error:new(invalid_path, 'File'),
             Error1 = beamtalk_error:with_selector(Error0, 'lines:'),
             Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
-            Hint = case Reason of
-                absolute_path -> <<"Use relative paths only">>;
-                directory_traversal -> <<"Use relative paths within the project">>
-            end,
+            Hint =
+                case Reason of
+                    absolute_path -> <<"Use relative paths only">>;
+                    directory_traversal -> <<"Use relative paths within the project">>
+                end,
             Error3 = beamtalk_error:with_hint(Error2, Hint),
             beamtalk_error:raise(Error3)
     end;
@@ -273,10 +283,11 @@ handle_has_method(_) -> false.
             Error0 = beamtalk_error:new(invalid_path, 'File'),
             Error1 = beamtalk_error:with_selector(Error0, 'open:do:'),
             Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
-            Hint = case Reason of
-                absolute_path -> <<"Use relative paths only">>;
-                directory_traversal -> <<"Use relative paths within the project">>
-            end,
+            Hint =
+                case Reason of
+                    absolute_path -> <<"Use relative paths only">>;
+                    directory_traversal -> <<"Use relative paths within the project">>
+                end,
             Error3 = beamtalk_error:with_hint(Error2, Hint),
             beamtalk_error:raise(Error3)
     end;
@@ -381,7 +392,8 @@ make_line_gen_no_close(Fd) ->
 %% @private
 %% @doc Strip trailing newline (and \r\n) from a line read by file:read_line/1.
 -spec strip_newline(binary()) -> binary().
-strip_newline(<<>>) -> <<>>;
+strip_newline(<<>>) ->
+    <<>>;
 strip_newline(Line) when is_binary(Line) ->
     case binary:last(Line) of
         $\n ->

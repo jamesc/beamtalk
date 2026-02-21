@@ -19,7 +19,7 @@
 %%%   └─ [per-workspace children added dynamically]
 %%%       └─ beamtalk_workspace_sup (one_for_one)
 %%%           ├─ beamtalk_workspace_meta
-%%%           ├─ beamtalk_repl_actors  
+%%%           ├─ beamtalk_repl_actors
 %%%           ├─ beamtalk_repl_server
 %%%           ├─ beamtalk_idle_monitor
 %%%           ├─ beamtalk_actor_sup
@@ -44,9 +44,9 @@ init([]) ->
         intensity => 5,
         period => 10
     },
-    
+
     %% No static children - workspaces are added dynamically
     %% (currently done by CLI directly, future ADR 0004 work will use supervisor:start_child)
     ChildSpecs = [],
-    
+
     {ok, {SupFlags, ChildSpecs}}.

@@ -10,9 +10,17 @@
 
 -module(beamtalk_repl_modules).
 
--export([new/0, add_module/3, remove_module/2, get_module_info/2,
-         list_modules/1, module_exists/2, get_actor_count/3,
-         format_module_info/2, get_source_file/1]).
+-export([
+    new/0,
+    add_module/3,
+    remove_module/2,
+    get_module_info/2,
+    list_modules/1,
+    module_exists/2,
+    get_actor_count/3,
+    format_module_info/2,
+    get_source_file/1
+]).
 
 -ifdef(TEST).
 -export([format_time_ago/1]).
@@ -100,17 +108,20 @@ get_actor_count(ModuleName, RegistryPid, Tracker) ->
 %% @doc Format module information for display.
 %% Returns a map with displayable fields.
 -spec format_module_info(module_info(), non_neg_integer()) -> map().
-format_module_info(#module_info{name = Name, source_file = Source, load_time = LoadTime}, ActorCount) ->
+format_module_info(
+    #module_info{name = Name, source_file = Source, load_time = LoadTime}, ActorCount
+) ->
     Now = erlang:system_time(second),
     ElapsedSecs = Now - LoadTime,
     TimeAgo = format_time_ago(ElapsedSecs),
-    
+
     #{
         name => atom_to_binary(Name, utf8),
-        source_file => case Source of
-            undefined -> "unknown";
-            Path -> Path
-        end,
+        source_file =>
+            case Source of
+                undefined -> "unknown";
+                Path -> Path
+            end,
         actor_count => ActorCount,
         load_time => LoadTime,
         time_ago => TimeAgo

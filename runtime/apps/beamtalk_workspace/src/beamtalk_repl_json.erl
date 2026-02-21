@@ -14,12 +14,21 @@
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--export([format_response/1, format_error/1,
-         format_response_with_warnings/2, format_error_with_warnings/2,
-         format_bindings/1, format_loaded/1, format_actors/1,
-         format_modules/1, format_docs/1,
-         term_to_json/1, format_error_message/1,
-         parse_json/1, encode_reloaded/4, encode_reloaded/5]).
+-export([
+    format_response/1,
+    format_error/1,
+    format_response_with_warnings/2,
+    format_error_with_warnings/2,
+    format_bindings/1,
+    format_loaded/1,
+    format_actors/1,
+    format_modules/1,
+    format_docs/1,
+    term_to_json/1,
+    format_error_message/1,
+    parse_json/1,
+    encode_reloaded/4, encode_reloaded/5
+]).
 
 %%% JSON Parsing
 
@@ -51,8 +60,10 @@ format_response(Value) ->
     catch
         Class:Reason:_Stack ->
             ErrorMsg = io_lib:format("Internal error formatting ~p: ~p:~p", [Value, Class, Reason]),
-            jsx:encode(#{<<"type">> => <<"error">>, 
-                        <<"message">> => iolist_to_binary(ErrorMsg)})
+            jsx:encode(#{
+                <<"type">> => <<"error">>,
+                <<"message">> => iolist_to_binary(ErrorMsg)
+            })
     end.
 
 %% @doc Format an error response as JSON.
@@ -69,8 +80,10 @@ format_error(Reason) ->
                 stack => lists:sublist(Stack, 5),
                 original_reason => Reason
             }),
-            jsx:encode(#{<<"type">> => <<"error">>, 
-                        <<"message">> => iolist_to_binary(io_lib:format("Error: ~p", [Reason]))})
+            jsx:encode(#{
+                <<"type">> => <<"error">>,
+                <<"message">> => iolist_to_binary(io_lib:format("Error: ~p", [Reason]))
+            })
     end.
 
 %% @doc Format a successful response with warnings as JSON.
@@ -86,8 +99,10 @@ format_response_with_warnings(Value, Warnings) ->
     catch
         Class:Reason:_Stack ->
             ErrorMsg = io_lib:format("Internal error formatting ~p: ~p:~p", [Value, Class, Reason]),
-            jsx:encode(#{<<"type">> => <<"error">>, 
-                        <<"message">> => iolist_to_binary(ErrorMsg)})
+            jsx:encode(#{
+                <<"type">> => <<"error">>,
+                <<"message">> => iolist_to_binary(ErrorMsg)
+            })
     end.
 
 %% @doc Format an error response with warnings as JSON.
@@ -108,8 +123,10 @@ format_error_with_warnings(Reason, Warnings) ->
                 stack => lists:sublist(Stack, 5),
                 original_reason => Reason
             }),
-            jsx:encode(#{<<"type">> => <<"error">>, 
-                        <<"message">> => iolist_to_binary(io_lib:format("Error: ~p", [Reason]))})
+            jsx:encode(#{
+                <<"type">> => <<"error">>,
+                <<"message">> => iolist_to_binary(io_lib:format("Error: ~p", [Reason]))
+            })
     end.
 
 %% @doc Format bindings response as JSON.
@@ -117,12 +134,13 @@ format_error_with_warnings(Reason, Warnings) ->
 format_bindings(Bindings) ->
     JsonBindings = maps:fold(
         fun(Name, Value, Acc) ->
-            NameBin = if
-                is_atom(Name) -> atom_to_binary(Name, utf8);
-                is_list(Name) -> list_to_binary(Name);
-                is_binary(Name) -> Name;
-                true -> list_to_binary(io_lib:format("~p", [Name]))
-            end,
+            NameBin =
+                if
+                    is_atom(Name) -> atom_to_binary(Name, utf8);
+                    is_list(Name) -> list_to_binary(Name);
+                    is_binary(Name) -> Name;
+                    true -> list_to_binary(io_lib:format("~p", [Name]))
+                end,
             maps:put(NameBin, term_to_json(Value), Acc)
         end,
         #{},
@@ -176,23 +194,34 @@ format_modules(ModulesWithInfo) ->
     jsx:encode(#{<<"type">> => <<"modules">>, <<"modules">> => JsonModules}).
 
 %% @doc Encode reload response with classes, affected actor count, and migration results.
--spec encode_reloaded([map()], non_neg_integer(), [{pid(), term()}],
-    beamtalk_repl_protocol:protocol_msg()) -> binary().
+-spec encode_reloaded(
+    [map()],
+    non_neg_integer(),
+    [{pid(), term()}],
+    beamtalk_repl_protocol:protocol_msg()
+) -> binary().
 encode_reloaded(Classes, ActorCount, MigrationFailures, Msg) ->
     encode_reloaded(Classes, ActorCount, MigrationFailures, Msg, []).
 
 %% @doc Encode a reload response with optional class collision warnings.
 %% BT-737: Warnings are surfaced when a reload causes a cross-package class collision.
--spec encode_reloaded([map()], non_neg_integer(), [{pid(), term()}],
-    beamtalk_repl_protocol:protocol_msg(), [binary()]) -> binary().
+-spec encode_reloaded(
+    [map()],
+    non_neg_integer(),
+    [{pid(), term()}],
+    beamtalk_repl_protocol:protocol_msg(),
+    [binary()]
+) -> binary().
 encode_reloaded(Classes, ActorCount, MigrationFailures, Msg, Warnings) ->
     ClassNames = [list_to_binary(maps:get(name, C, "")) || C <- Classes],
     Base = beamtalk_repl_protocol:base_response(Msg),
     FailureCount = length(MigrationFailures),
-    Full = Base#{<<"classes">> => ClassNames,
-                 <<"affected_actors">> => ActorCount,
-                 <<"migration_failures">> => FailureCount,
-                 <<"status">> => [<<"done">>]},
+    Full = Base#{
+        <<"classes">> => ClassNames,
+        <<"affected_actors">> => ActorCount,
+        <<"migration_failures">> => FailureCount,
+        <<"status">> => [<<"done">>]
+    },
     jsx:encode(maybe_add_warnings_reloaded(Full, Warnings)).
 
 %% @private
@@ -212,7 +241,8 @@ term_to_json(Value) when is_binary(Value) ->
     beamtalk_transcript_stream:ensure_utf8(Value);
 term_to_json(Value) when is_list(Value) ->
     case Value of
-        [] -> [];
+        [] ->
+            [];
         _ ->
             case io_lib:printable_list(Value) of
                 true ->
@@ -310,7 +340,9 @@ format_error_message({eval_error, _Class, #{'$beamtalk_class' := ExClass, error 
 format_error_message({eval_error, _Class, #beamtalk_error{} = Error}) ->
     iolist_to_binary(beamtalk_error:format(Error));
 format_error_message({eval_error, Class, Reason}) ->
-    iolist_to_binary([<<"Evaluation error: ">>, atom_to_binary(Class, utf8), <<":">>, format_name(Reason)]);
+    iolist_to_binary([
+        <<"Evaluation error: ">>, atom_to_binary(Class, utf8), <<":">>, format_name(Reason)
+    ]);
 format_error_message({load_error, Reason}) ->
     iolist_to_binary([<<"Failed to load bytecode: ">>, format_name(Reason)]);
 format_error_message({file_not_found, Path}) ->
@@ -323,20 +355,37 @@ format_error_message({invalid_module_name, ModuleName}) ->
     iolist_to_binary([<<"Invalid module name: ">>, ModuleName]);
 format_error_message({actors_exist, ModuleName, Count}) ->
     CountStr = integer_to_list(Count),
-    ActorWord = if Count == 1 -> <<"actor">>; true -> <<"actors">> end,
+    ActorWord =
+        if
+            Count == 1 -> <<"actor">>;
+            true -> <<"actors">>
+        end,
     iolist_to_binary([
-        <<"Cannot unload ">>, atom_to_binary(ModuleName, utf8), 
-        <<": ">>, CountStr, <<" ">>, ActorWord, <<" still running. Kill them first with :kill">>
+        <<"Cannot unload ">>,
+        atom_to_binary(ModuleName, utf8),
+        <<": ">>,
+        CountStr,
+        <<" ">>,
+        ActorWord,
+        <<" still running. Kill them first with :kill">>
     ]);
 format_error_message({class_not_found, ClassName}) ->
     NameBin = to_binary(ClassName),
-    iolist_to_binary([<<"Unknown class: ">>, NameBin,
-                      <<". Use :modules to see loaded classes.">>]);
+    iolist_to_binary([
+        <<"Unknown class: ">>,
+        NameBin,
+        <<". Use :modules to see loaded classes.">>
+    ]);
 format_error_message({method_not_found, ClassName, Selector}) ->
     NameBin = to_binary(ClassName),
-    iolist_to_binary([NameBin, <<" does not understand ">>,
-                      Selector, <<". Use :help ">>, NameBin,
-                      <<" to see available methods.">>]);
+    iolist_to_binary([
+        NameBin,
+        <<" does not understand ">>,
+        Selector,
+        <<". Use :help ">>,
+        NameBin,
+        <<" to see available methods.">>
+    ]);
 format_error_message({unknown_op, Op}) ->
     iolist_to_binary([<<"Unknown operation: ">>, Op]);
 format_error_message({inspect_failed, PidStr}) ->
@@ -344,11 +393,17 @@ format_error_message({inspect_failed, PidStr}) ->
 format_error_message({actor_not_alive, PidStr}) ->
     iolist_to_binary([<<"Actor is not alive: ">>, list_to_binary(PidStr)]);
 format_error_message({no_source_file, Module}) ->
-    iolist_to_binary([<<"No source file recorded for module: ">>, list_to_binary(Module),
-                      <<". Try :load <path> to load it first.">>]);
+    iolist_to_binary([
+        <<"No source file recorded for module: ">>,
+        list_to_binary(Module),
+        <<". Try :load <path> to load it first.">>
+    ]);
 format_error_message({module_not_loaded, Module}) ->
-    iolist_to_binary([<<"Module not loaded: ">>, format_name(Module),
-                      <<". Use :load <path> to load it first.">>]);
+    iolist_to_binary([
+        <<"Module not loaded: ">>,
+        format_name(Module),
+        <<". Use :load <path> to load it first.">>
+    ]);
 format_error_message({missing_module_name, reload}) ->
     <<"Usage: :reload <ModuleName> or :reload (to reload last file)">>;
 format_error_message({session_creation_failed, Reason}) ->

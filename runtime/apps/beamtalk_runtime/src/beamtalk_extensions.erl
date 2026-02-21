@@ -86,17 +86,19 @@ init() ->
         undefined ->
             ets:new(?EXTENSIONS_TABLE, [set, public, named_table, {read_concurrency, true}]);
         _ ->
-            ok  % Already exists
+            % Already exists
+            ok
     end,
-    
+
     %% Create conflicts tracking table
     case ets:info(?CONFLICTS_TABLE) of
         undefined ->
             ets:new(?CONFLICTS_TABLE, [bag, public, named_table, {read_concurrency, true}]);
         _ ->
-            ok  % Already exists
+            % Already exists
+            ok
     end,
-    
+
     ok.
 
 %% @doc Register an extension method on a class.
@@ -117,10 +119,14 @@ init() ->
 %% register('String', 'json', JsonFun, mylib).
 %% ```
 -spec register(atom(), atom(), function(), atom()) -> ok.
-register(Class, Selector, Fun, Owner) when is_atom(Class), is_atom(Selector), 
-                                            is_function(Fun), is_atom(Owner) ->
+register(Class, Selector, Fun, Owner) when
+    is_atom(Class),
+    is_atom(Selector),
+    is_function(Fun),
+    is_atom(Owner)
+->
     Key = {Class, Selector},
-    
+
     %% Check for existing registration
     case ets:lookup(?EXTENSIONS_TABLE, Key) of
         [] ->
@@ -133,14 +139,16 @@ register(Class, Selector, Fun, Owner) when is_atom(Class), is_atom(Selector),
             ok;
         [{Key, _OldFun, OldOwner}] ->
             %% Conflict: different owner
-            ?LOG_WARNING("Extension conflict: '~p' on '~p' (from '~p') overwritten by '~p'",
-                        [Selector, Class, OldOwner, Owner]),
-            
+            ?LOG_WARNING(
+                "Extension conflict: '~p' on '~p' (from '~p') overwritten by '~p'",
+                [Selector, Class, OldOwner, Owner]
+            ),
+
             %% Record conflict for tooling - record BOTH owners
             Timestamp = erlang:system_time(millisecond),
             ets:insert(?CONFLICTS_TABLE, {Key, OldOwner, Timestamp}),
             ets:insert(?CONFLICTS_TABLE, {Key, Owner, Timestamp + 1}),
-            
+
             %% Overwrite (last-writer-wins)
             ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
             ok
@@ -194,10 +202,10 @@ list(Class) when is_atom(Class) ->
 conflicts() ->
     %% Get all conflict records
     AllConflicts = ets:tab2list(?CONFLICTS_TABLE),
-    
+
     %% Group by {Class, Selector}
     Grouped = group_conflicts(AllConflicts),
-    
+
     %% Convert to result format
     [{Class, Selector, Owners} || {{Class, Selector}, Owners} <- Grouped, length(Owners) > 1].
 

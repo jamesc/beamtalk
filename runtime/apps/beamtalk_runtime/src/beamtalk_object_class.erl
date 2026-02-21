@@ -123,7 +123,8 @@ set_class_var(ClassName, Name, Value) ->
         undefined ->
             Error0 = beamtalk_error:new(class_not_found, ClassName),
             error(Error0);
-        Pid -> gen_server:call(Pid, {set_class_var, Name, Value})
+        Pid ->
+            gen_server:call(Pid, {set_class_var, Name, Value})
     end.
 
 %% @doc Create a new instance of this class.
@@ -176,17 +177,22 @@ has_method(ClassPid, Selector) ->
     case gen_server:call(ClassPid, {method, Selector}) of
         nil ->
             case module_name(ClassPid) of
-                undefined -> false;
+                undefined ->
+                    false;
                 ModuleName ->
                     case erlang:function_exported(ModuleName, has_method, 1) of
                         true ->
-                            try ModuleName:has_method(Selector)
-                            catch _:_ -> false
+                            try
+                                ModuleName:has_method(Selector)
+                            catch
+                                _:_ -> false
                             end;
-                        false -> false
+                        false ->
+                            false
                     end
             end;
-        _MethodInfo -> true
+        _MethodInfo ->
+            true
     end.
 
 %% @doc Replace a method with a new function (hot patching).
@@ -244,13 +250,13 @@ init({ClassName, ClassInfo}) ->
     beamtalk_class_registry:ensure_pg_started(),
     beamtalk_class_registry:ensure_hierarchy_table(),
     ok = pg:join(beamtalk_classes, self()),
-    
+
     Superclass = maps:get(superclass, ClassInfo, none),
     Module = maps:get(module, ClassInfo, ClassName),
     IsAbstract = maps:get(is_abstract, ClassInfo, false),
     InstanceMethods = maps:get(instance_methods, ClassInfo, #{}),
     ClassMethods = maps:get(class_methods, ClassInfo, #{}),
-    
+
     ets:insert(beamtalk_class_hierarchy, {ClassName, Superclass}),
 
     %% BT-474: is_constructible starts undefined — computed lazily on first new call
@@ -272,52 +278,69 @@ init({ClassName, ClassInfo}) ->
     },
     {ok, State}.
 
-handle_call({spawn, Args}, _From, #class_state{
-    name = ClassName,
-    module = Module,
-    is_abstract = IsAbstract
-} = State) ->
+handle_call(
+    {spawn, Args},
+    _From,
+    #class_state{
+        name = ClassName,
+        module = Module,
+        is_abstract = IsAbstract
+    } = State
+) ->
     Result = beamtalk_class_instantiation:handle_spawn(Args, ClassName, Module, IsAbstract),
     {reply, Result, State};
-
 handle_call({new, Args}, _From, #class_state{name = ClassName, is_abstract = true} = State) ->
-    Selector = case Args of [] -> 'new'; _ -> 'new:' end,
+    Selector =
+        case Args of
+            [] -> 'new';
+            _ -> 'new:'
+        end,
     {reply, {error, beamtalk_class_instantiation:abstract_class_error(ClassName, Selector)}, State};
-
-handle_call({new, Args}, _From, #class_state{
-    name = ClassName,
-    module = Module,
-    dynamic_methods = DynamicMethods,
-    instance_variables = InstanceVars,
-    is_constructible = IsConstructible0
-} = State) ->
-    case beamtalk_class_instantiation:handle_new(
-            Args, ClassName, Module, DynamicMethods, InstanceVars, IsConstructible0,
-            self()) of
+handle_call(
+    {new, Args},
+    _From,
+    #class_state{
+        name = ClassName,
+        module = Module,
+        dynamic_methods = DynamicMethods,
+        instance_variables = InstanceVars,
+        is_constructible = IsConstructible0
+    } = State
+) ->
+    case
+        beamtalk_class_instantiation:handle_new(
+            Args,
+            ClassName,
+            Module,
+            DynamicMethods,
+            InstanceVars,
+            IsConstructible0,
+            self()
+        )
+    of
         {ok, Result, IsConstructible} ->
             {reply, {ok, Result}, State#class_state{is_constructible = IsConstructible}};
         {error, Error, IsConstructible} ->
             {reply, {error, Error}, State#class_state{is_constructible = IsConstructible}}
     end;
-
 %% ADR 0032 Phase 1: Returns local (non-inherited) method selectors only.
 %% Full hierarchy walk is done by Behaviour.methods in Phase 2.
 handle_call(methods, _From, #class_state{instance_methods = Methods} = State) ->
     {reply, maps:keys(Methods), State};
-
 handle_call(superclass, _From, #class_state{superclass = Super} = State) ->
     {reply, Super, State};
-
 handle_call(class_name, _From, #class_state{name = Name} = State) ->
     {reply, Name, State};
-
 handle_call(module_name, _From, #class_state{module = Module} = State) ->
     {reply, Module, State};
-
-handle_call({method, Selector}, _From, #class_state{
-    instance_methods = Methods,
-    method_source = Source
-} = State) ->
+handle_call(
+    {method, Selector},
+    _From,
+    #class_state{
+        instance_methods = Methods,
+        method_source = Source
+    } = State
+) ->
     case maps:find(Selector, Methods) of
         {ok, MethodInfo} ->
             Src = maps:get(Selector, Source, <<"">>),
@@ -331,7 +354,6 @@ handle_call({method, Selector}, _From, #class_state{
         error ->
             {reply, nil, State}
     end;
-
 handle_call({put_method, Selector, Fun, Source}, _From, State) ->
     {arity, Arity} = erlang:fun_info(Fun, arity),
     MethodInfo = #{block => Fun, arity => Arity},
@@ -342,7 +364,6 @@ handle_call({put_method, Selector, Fun, Source}, _From, State) ->
     NewState = State#class_state{instance_methods = NewMethods, method_source = NewSource},
     notify_instances(State#class_state.name, NewMethods),
     {reply, ok, NewState};
-
 %% BT-572: Update class metadata after redefinition (hot reload).
 %% BT-737: Emits a collision warning when a class is redefined from a different module.
 %% BT-738: Rejects redefinition that would shadow a stdlib class.
@@ -359,7 +380,8 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
             Error0 = beamtalk_error:new(stdlib_shadowing, ClassName),
             Error1 = beamtalk_error:with_hint(
                 Error0,
-                <<"Choose a different class name. Stdlib class names are protected.">>),
+                <<"Choose a different class name. Stdlib class names are protected.">>
+            ),
             ?LOG_WARNING("Rejected stdlib class shadowing attempt", #{
                 class => ClassName,
                 stdlib_module => OldModule,
@@ -380,97 +402,114 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
                         new_module => NewModule
                     }),
                     beamtalk_class_registry:record_class_collision_warning(
-                        ClassName, OldModule, NewModule);
+                        ClassName, OldModule, NewModule
+                    );
                 true ->
                     ok
             end,
             %% ADR 0032 Phase 1: No flattened tables to rebuild or invalidate.
-            NewInstanceMethods = maps:get(instance_methods, ClassInfo, State#class_state.instance_methods),
+            NewInstanceMethods = maps:get(
+                instance_methods, ClassInfo, State#class_state.instance_methods
+            ),
             NewClassMethods = maps:get(class_methods, ClassInfo, State#class_state.class_methods),
-            NewIVars = maps:get(instance_variables, ClassInfo, State#class_state.instance_variables),
+            NewIVars = maps:get(
+                instance_variables, ClassInfo, State#class_state.instance_variables
+            ),
             NewState = State#class_state{
                 module = maps:get(module, ClassInfo, State#class_state.module),
-                instance_methods = NewInstanceMethods, class_methods = NewClassMethods,
+                instance_methods = NewInstanceMethods,
+                class_methods = NewClassMethods,
                 instance_variables = NewIVars,
                 method_source = maps:get(method_source, ClassInfo, State#class_state.method_source),
-                is_constructible = undefined},
+                is_constructible = undefined
+            },
             {reply, {ok, NewIVars}, NewState}
     end;
-
 handle_call(instance_variables, _From, #class_state{instance_variables = IVars} = State) ->
     {reply, IVars, State};
-
 handle_call(is_sealed, _From, #class_state{is_sealed = Sealed} = State) ->
     {reply, Sealed, State};
-
 handle_call(is_abstract, _From, #class_state{is_abstract = Abstract} = State) ->
     {reply, Abstract, State};
-
-handle_call(is_constructible, _From, #class_state{
-    is_constructible = IsConstructible0,
-    module = Module,
-    is_abstract = IsAbstract
-} = State) ->
+handle_call(
+    is_constructible,
+    _From,
+    #class_state{
+        is_constructible = IsConstructible0,
+        module = Module,
+        is_abstract = IsAbstract
+    } = State
+) ->
     IsConstructible = beamtalk_class_instantiation:ensure_is_constructible(
-        IsConstructible0, Module, IsAbstract),
+        IsConstructible0, Module, IsAbstract
+    ),
     {reply, IsConstructible, State#class_state{is_constructible = IsConstructible}};
-
 handle_call({add_before, Selector, Fun}, _From, State) ->
     Befores = maps:get(Selector, State#class_state.before_methods, []),
     NewBefores = maps:put(Selector, [Fun | Befores], State#class_state.before_methods),
     {reply, ok, State#class_state{before_methods = NewBefores}};
-
 handle_call({add_after, Selector, Fun}, _From, State) ->
     Afters = maps:get(Selector, State#class_state.after_methods, []),
     NewAfters = maps:put(Selector, Afters ++ [Fun], State#class_state.after_methods),
     {reply, ok, State#class_state{after_methods = NewAfters}};
-
 %% ADR 0032 Phase 1: Returns local class_methods for chain walk queries.
 handle_call(get_local_class_methods, _From, #class_state{class_methods = ClassMethods} = State) ->
     {reply, ClassMethods, State};
-
 %% ADR 0032 Phase 1: Returns local instance_methods for chain walk queries.
 handle_call(get_instance_methods, _From, #class_state{instance_methods = InstanceMethods} = State) ->
     {reply, {ok, InstanceMethods}, State};
-
 %% BT-411/BT-412/BT-440: Class method dispatch.
 %% Delegates to beamtalk_class_dispatch (BT-704).
 %% ADR 0032 Phase 1: Passes local class_methods (no flattened table).
 %% beamtalk_class_dispatch walks the superclass chain if not found locally.
-handle_call({class_method_call, Selector, Args}, From,
-            #class_state{class_methods = ClassMethods,
-                         instance_methods = InstanceMethods,
-                         name = ClassName, module = Module,
-                         class_variables = ClassVars} = State) ->
-    case beamtalk_class_dispatch:handle_class_method_call(
-            Selector, Args, ClassName, Module, ClassMethods, ClassVars) of
+handle_call(
+    {class_method_call, Selector, Args},
+    From,
+    #class_state{
+        class_methods = ClassMethods,
+        instance_methods = InstanceMethods,
+        name = ClassName,
+        module = Module,
+        class_variables = ClassVars
+    } = State
+) ->
+    case
+        beamtalk_class_dispatch:handle_class_method_call(
+            Selector, Args, ClassName, Module, ClassMethods, ClassVars
+        )
+    of
         {reply, Result, NewClassVars} ->
             {reply, Result, State#class_state{class_variables = NewClassVars}};
         test_spawn ->
             beamtalk_test_case:spawn_test_execution(
-                Selector, Args, ClassName, Module, InstanceMethods, From),
+                Selector, Args, ClassName, Module, InstanceMethods, From
+            ),
             {noreply, State};
         {error, not_found} ->
             {reply, {error, not_found}, State}
     end;
-
 handle_call({initialize, _Args}, _From, #class_state{} = State) ->
     {reply, {ok, nil}, State};
-
 handle_call(get_module, _From, #class_state{module = Module} = State) ->
     {reply, Module, State};
-
 handle_call({get_class_var, Name}, _From, #class_state{class_variables = ClassVars} = State) ->
     {reply, maps:get(Name, ClassVars, nil), State};
-
 handle_call({set_class_var, Name, Value}, _From, #class_state{class_variables = ClassVars} = State) ->
     {reply, Value, State#class_state{class_variables = maps:put(Name, Value, ClassVars)}}.
 
 %% ADR 0032 Phase 1: Passes instance_methods (local only) instead of flattened table.
-handle_cast(Msg, #class_state{instance_methods = InstanceMethods,
-                              name = ClassName, superclass = Superclass,
-                              module = Module} = State) ->
-    beamtalk_class_dispatch:handle_async_dispatch(Msg, ClassName, InstanceMethods, Superclass, Module),
+handle_cast(
+    Msg,
+    #class_state{
+        instance_methods = InstanceMethods,
+        name = ClassName,
+        superclass = Superclass,
+        module = Module
+    } = State
+) ->
+    beamtalk_class_dispatch:handle_async_dispatch(
+        Msg, ClassName, InstanceMethods, Superclass, Module
+    ),
     {noreply, State}.
 
 %% ADR 0032 Phase 1: {rebuild_flattened, _} messages are no longer sent

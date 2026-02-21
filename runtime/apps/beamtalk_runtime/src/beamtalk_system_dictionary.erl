@@ -73,7 +73,8 @@
 
 -record(system_dict_state, {
     version :: binary(),
-    workspace :: atom() | undefined  % Workspace name for future phases
+    % Workspace name for future phases
+    workspace :: atom() | undefined
 }).
 
 %%====================================================================
@@ -145,7 +146,7 @@ init(Opts) ->
         end,
     Version = proplists:get_value(version, Opts, VersionDefault),
     Workspace = proplists:get_value(workspace, Opts, undefined),
-    
+
     State = #system_dict_state{
         version = Version,
         workspace = Workspace
@@ -162,29 +163,26 @@ init(Opts) ->
 handle_call({allClasses, []}, _From, State) ->
     Classes = handle_all_classes(),
     {reply, Classes, State};
-
 %% classNamed: - Returns class pid or error for given class name
 handle_call({'classNamed:', [ClassName]}, _From, State) ->
     Result = handle_class_named(ClassName),
     {reply, Result, State};
-
 %% globals - Returns workspace bindings map
 handle_call({globals, []}, _From, State) ->
     Globals = handle_globals(),
     {reply, Globals, State};
-
 %% version - Returns Beamtalk version string
 handle_call({version, []}, _From, State) ->
     Version = State#system_dict_state.version,
     {reply, Version, State};
-
 %% Unknown selector - return structured error
 handle_call({UnknownSelector, _Args}, _From, State) ->
     Error0 = beamtalk_error:new(does_not_understand, 'SystemDictionary'),
     Error1 = beamtalk_error:with_selector(Error0, UnknownSelector),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Supported methods: allClasses, classNamed:, globals, version">>),
+    Error2 = beamtalk_error:with_hint(
+        Error1, <<"Supported methods: allClasses, classNamed:, globals, version">>
+    ),
     {reply, {error, Error2}, State};
-
 %% Unknown call format
 handle_call(Request, _From, State) ->
     Error0 = beamtalk_error:new(does_not_understand, 'SystemDictionary'),
@@ -219,10 +217,14 @@ handle_cast({version, [], FuturePid}, State) when is_pid(FuturePid) ->
     Result = State#system_dict_state.version,
     beamtalk_future:resolve(FuturePid, Result),
     {noreply, State};
-handle_cast({UnknownSelector, _Args, FuturePid}, State) when is_pid(FuturePid), is_atom(UnknownSelector) ->
+handle_cast({UnknownSelector, _Args, FuturePid}, State) when
+    is_pid(FuturePid), is_atom(UnknownSelector)
+->
     Error0 = beamtalk_error:new(does_not_understand, 'SystemDictionary'),
     Error1 = beamtalk_error:with_selector(Error0, UnknownSelector),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Supported methods: allClasses, classNamed:, globals, version">>),
+    Error2 = beamtalk_error:with_hint(
+        Error1, <<"Supported methods: allClasses, classNamed:, globals, version">>
+    ),
     beamtalk_future:reject(FuturePid, Error2),
     {noreply, State};
 handle_cast(Msg, State) ->
@@ -304,7 +306,9 @@ handle_class_named(ClassName) when is_atom(ClassName) ->
 handle_class_named(_ClassName) ->
     Error0 = beamtalk_error:new(type_error, 'SystemDictionary'),
     Error1 = beamtalk_error:with_selector(Error0, 'classNamed:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"classNamed: expects an atom or binary class name">>),
+    Error2 = beamtalk_error:with_hint(
+        Error1, <<"classNamed: expects an atom or binary class name">>
+    ),
     {error, Error2}.
 
 %% @doc Get workspace global bindings.
@@ -316,4 +320,3 @@ handle_globals() ->
     %% Phase 1: No workspace bindings yet
     %% Phase 2: Will query workspace state for bindings
     #{}.
-

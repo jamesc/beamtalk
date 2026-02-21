@@ -49,24 +49,28 @@
 -spec handle_spawn(list(), class_name(), atom(), boolean()) ->
     {ok, #beamtalk_object{}} | {error, term()}.
 handle_spawn(Args, ClassName, _Module, true) ->
-    Selector = case Args of
-        [] -> spawn;
-        _ -> 'spawnWith:'
-    end,
+    Selector =
+        case Args of
+            [] -> spawn;
+            _ -> 'spawnWith:'
+        end,
     {error, abstract_class_error(ClassName, Selector)};
 handle_spawn(Args, ClassName, Module, false) ->
     try
-        SpawnResult = case Args of
-            [] ->
-                erlang:apply(Module, spawn, []);
-            [InitArgs] ->
-                erlang:apply(Module, spawn, [InitArgs]);
-            _ ->
-                Error0 = beamtalk_error:new(type_error, ClassName),
-                Error1 = beamtalk_error:with_selector(Error0, 'spawnWith:'),
-                Error2 = beamtalk_error:with_hint(Error1, <<"spawnWith: expects a Dictionary argument">>),
-                beamtalk_error:raise(Error2)
-        end,
+        SpawnResult =
+            case Args of
+                [] ->
+                    erlang:apply(Module, spawn, []);
+                [InitArgs] ->
+                    erlang:apply(Module, spawn, [InitArgs]);
+                _ ->
+                    Error0 = beamtalk_error:new(type_error, ClassName),
+                    Error1 = beamtalk_error:with_selector(Error0, 'spawnWith:'),
+                    Error2 = beamtalk_error:with_hint(
+                        Error1, <<"spawnWith: expects a Dictionary argument">>
+                    ),
+                    beamtalk_error:raise(Error2)
+            end,
         case SpawnResult of
             {beamtalk_object, _, _, _} = Obj ->
                 {ok, Obj};
@@ -96,7 +100,15 @@ handle_spawn(Args, ClassName, Module, false) ->
 %% beamtalk_dynamic_object.
 -spec handle_new(list(), class_name(), atom(), map(), [atom()], boolean() | undefined, pid()) ->
     {ok, term(), boolean() | undefined} | {error, term(), boolean() | undefined}.
-handle_new(Args, ClassName, beamtalk_dynamic_object, DynamicMethods, InstanceVars, IsConstructible, ClassPid) ->
+handle_new(
+    Args,
+    ClassName,
+    beamtalk_dynamic_object,
+    DynamicMethods,
+    InstanceVars,
+    IsConstructible,
+    ClassPid
+) ->
     handle_new_dynamic(Args, ClassName, DynamicMethods, InstanceVars, IsConstructible, ClassPid);
 handle_new(Args, ClassName, Module, _DynamicMethods, _InstanceVars, IsConstructible0, _ClassPid) ->
     handle_new_compiled(Args, ClassName, Module, IsConstructible0).
@@ -109,19 +121,26 @@ handle_new_dynamic(Args, ClassName, DynamicMethods, InstanceVars, IsConstructibl
             '__class_pid__' => ClassPid,
             '__methods__' => DynamicMethods
         },
-        InitStateWithFields = case Args of
-            [FieldMap] when is_map(FieldMap) ->
-                maps:merge(InitState, FieldMap);
-            [] ->
-                lists:foldl(fun(Var, Acc) ->
-                    maps:put(Var, nil, Acc)
-                end, InitState, InstanceVars);
-            _ ->
-                DynErr0 = beamtalk_error:new(type_error, ClassName),
-                DynErr1 = beamtalk_error:with_selector(DynErr0, 'new:'),
-                DynErr2 = beamtalk_error:with_hint(DynErr1, <<"new: expects a Dictionary argument">>),
-                error(DynErr2)
-        end,
+        InitStateWithFields =
+            case Args of
+                [FieldMap] when is_map(FieldMap) ->
+                    maps:merge(InitState, FieldMap);
+                [] ->
+                    lists:foldl(
+                        fun(Var, Acc) ->
+                            maps:put(Var, nil, Acc)
+                        end,
+                        InitState,
+                        InstanceVars
+                    );
+                _ ->
+                    DynErr0 = beamtalk_error:new(type_error, ClassName),
+                    DynErr1 = beamtalk_error:with_selector(DynErr0, 'new:'),
+                    DynErr2 = beamtalk_error:with_hint(
+                        DynErr1, <<"new: expects a Dictionary argument">>
+                    ),
+                    error(DynErr2)
+            end,
         case beamtalk_dynamic_object:start_link(ClassName, InitStateWithFields) of
             {ok, Pid} ->
                 Obj = #beamtalk_object{
@@ -140,32 +159,36 @@ handle_new_dynamic(Args, ClassName, DynamicMethods, InstanceVars, IsConstructibl
 
 %% @private
 handle_new_compiled(Args, ClassName, Module, IsConstructible0) ->
-    IsConstructible = case IsConstructible0 of
-        undefined -> compute_is_constructible(Module, false);
-        C -> C
-    end,
-    try
-        Result = case Args of
-            [] ->
-                erlang:apply(Module, new, []);
-            [InitMap] when is_map(InitMap) ->
-                case erlang:function_exported(Module, new, 1) of
-                    true ->
-                        erlang:apply(Module, new, [InitMap]);
-                    false ->
-                        erlang:apply(Module, new, [])
-                end;
-            _ ->
-                case IsConstructible of
-                    false ->
-                        erlang:apply(Module, new, []);
-                    true ->
-                        Error0 = beamtalk_error:new(type_error, ClassName),
-                        Error1 = beamtalk_error:with_selector(Error0, 'new:'),
-                        Error2 = beamtalk_error:with_hint(Error1, <<"new: expects a Dictionary argument">>),
-                        beamtalk_error:raise(Error2)
-                end
+    IsConstructible =
+        case IsConstructible0 of
+            undefined -> compute_is_constructible(Module, false);
+            C -> C
         end,
+    try
+        Result =
+            case Args of
+                [] ->
+                    erlang:apply(Module, new, []);
+                [InitMap] when is_map(InitMap) ->
+                    case erlang:function_exported(Module, new, 1) of
+                        true ->
+                            erlang:apply(Module, new, [InitMap]);
+                        false ->
+                            erlang:apply(Module, new, [])
+                    end;
+                _ ->
+                    case IsConstructible of
+                        false ->
+                            erlang:apply(Module, new, []);
+                        true ->
+                            Error0 = beamtalk_error:new(type_error, ClassName),
+                            Error1 = beamtalk_error:with_selector(Error0, 'new:'),
+                            Error2 = beamtalk_error:with_hint(
+                                Error1, <<"new: expects a Dictionary argument">>
+                            ),
+                            beamtalk_error:raise(Error2)
+                    end
+            end,
         {ok, Result, IsConstructible}
     catch
         error:Error ->
@@ -200,10 +223,12 @@ compute_is_constructible(beamtalk_dynamic_object, false) ->
     true;
 compute_is_constructible(Module, false) ->
     case erlang:function_exported(Module, spawn, 0) of
-        true -> false;
+        true ->
+            false;
         false ->
             case erlang:function_exported(Module, new, 0) of
-                false -> false;
+                false ->
+                    false;
                 true ->
                     try erlang:apply(Module, new, []) of
                         _ -> true
@@ -222,7 +247,9 @@ compute_is_constructible(Module, false) ->
 abstract_class_error(ClassName, Selector) ->
     Error0 = beamtalk_error:new(instantiation_error, ClassName),
     Error1 = beamtalk_error:with_selector(Error0, Selector),
-    beamtalk_error:with_hint(Error1, <<"Abstract classes cannot be instantiated. Subclass it first.">>).
+    beamtalk_error:with_hint(
+        Error1, <<"Abstract classes cannot be instantiated. Subclass it first.">>
+    ).
 
 %%====================================================================
 %% Dynamic Method Validation
@@ -232,22 +259,30 @@ abstract_class_error(ClassName, Selector) ->
 %% Validates that dynamic methods have correct arity (3: Self, Args, State).
 -spec convert_methods_to_info(#{selector() => fun()}) -> #{selector() => map()}.
 convert_methods_to_info(Methods) ->
-    maps:map(fun(Selector, Fun) ->
-        {arity, Arity} = erlang:fun_info(Fun, arity),
-        case Arity of
-            3 -> ok;
-            _ ->
-                Error0 = beamtalk_error:new(arity_mismatch, 'DynamicClass'),
-                Error1 = beamtalk_error:with_selector(Error0, Selector),
-                Error2 = beamtalk_error:with_hint(Error1, <<"Dynamic methods must be arity 3 (Self, Args, State)">>),
-                Error3 = beamtalk_error:with_details(Error2, #{actual_arity => Arity, expected_arity => 3}),
-                beamtalk_error:raise(Error3)
+    maps:map(
+        fun(Selector, Fun) ->
+            {arity, Arity} = erlang:fun_info(Fun, arity),
+            case Arity of
+                3 ->
+                    ok;
+                _ ->
+                    Error0 = beamtalk_error:new(arity_mismatch, 'DynamicClass'),
+                    Error1 = beamtalk_error:with_selector(Error0, Selector),
+                    Error2 = beamtalk_error:with_hint(
+                        Error1, <<"Dynamic methods must be arity 3 (Self, Args, State)">>
+                    ),
+                    Error3 = beamtalk_error:with_details(Error2, #{
+                        actual_arity => Arity, expected_arity => 3
+                    }),
+                    beamtalk_error:raise(Error3)
+            end,
+            #{
+                arity => Arity,
+                block => Fun
+            }
         end,
-        #{
-            arity => Arity,
-            block => Fun
-        }
-    end, Methods).
+        Methods
+    ).
 
 %%====================================================================
 %% Dynamic Subclass Creation
@@ -264,7 +299,9 @@ create_subclass(SuperclassName, ClassName, ClassSpec) ->
     case beamtalk_class_registry:whereis_class(SuperclassName) of
         undefined ->
             Error0 = beamtalk_error:new(class_not_found, SuperclassName),
-            Error = beamtalk_error:with_hint(Error0, <<"Superclass must be registered before creating subclass">>),
+            Error = beamtalk_error:with_hint(
+                Error0, <<"Superclass must be registered before creating subclass">>
+            ),
             {error, Error};
         _SuperclassPid ->
             InstanceVars = maps:get(instance_variables, ClassSpec, []),
@@ -288,17 +325,21 @@ create_subclass(SuperclassName, ClassName, ClassSpec) ->
                             {error, Error0};
                         {error, Reason} ->
                             case Reason of
-                                #beamtalk_error{} -> {error, Reason};
+                                #beamtalk_error{} ->
+                                    {error, Reason};
                                 _ ->
                                     Err0 = beamtalk_error:new(class_creation_failed, ClassName),
-                                    Err1 = beamtalk_error:with_hint(Err0, <<"Failed to start subclass">>),
+                                    Err1 = beamtalk_error:with_hint(
+                                        Err0, <<"Failed to start subclass">>
+                                    ),
                                     {error, beamtalk_error:with_details(Err1, #{reason => Reason})}
                             end
                     end
             catch
                 error:ErrorReason ->
                     case ErrorReason of
-                        #beamtalk_error{} -> {error, ErrorReason};
+                        #beamtalk_error{} ->
+                            {error, ErrorReason};
                         _ ->
                             Err0 = beamtalk_error:new(class_creation_failed, ClassName),
                             Err1 = beamtalk_error:with_hint(Err0, <<"Failed to start subclass">>),

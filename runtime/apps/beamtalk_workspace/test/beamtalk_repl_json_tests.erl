@@ -190,8 +190,10 @@ format_docs_test() ->
 %%% ============================================================================
 
 format_loaded_test() ->
-    Classes = [#{name => "Counter", superclass => "Actor"},
-               #{name => "Point", superclass => "Object"}],
+    Classes = [
+        #{name => "Counter", superclass => "Actor"},
+        #{name => "Point", superclass => "Object"}
+    ],
     Result = beamtalk_repl_json:format_loaded(Classes),
     {ok, Decoded} = beamtalk_repl_json:parse_json(Result),
     ?assertEqual(<<"loaded">>, maps:get(<<"type">>, Decoded)),
@@ -227,9 +229,15 @@ format_actors_empty_test() ->
 %%% ============================================================================
 
 format_modules_test() ->
-    Modules = [{counter, #{name => <<"Counter">>, source_file => "/tmp/counter.bt",
-                           actor_count => 2, load_time => 1000,
-                           time_ago => "5 seconds ago"}}],
+    Modules = [
+        {counter, #{
+            name => <<"Counter">>,
+            source_file => "/tmp/counter.bt",
+            actor_count => 2,
+            load_time => 1000,
+            time_ago => "5 seconds ago"
+        }}
+    ],
     Result = beamtalk_repl_json:format_modules(Modules),
     {ok, Decoded} = beamtalk_repl_json:parse_json(Result),
     ?assertEqual(<<"modules">>, maps:get(<<"type">>, Decoded)),
@@ -271,7 +279,11 @@ term_to_json_string_test() ->
     ?assertEqual(<<"hello">>, Result).
 
 term_to_json_pid_alive_test() ->
-    Pid = spawn(fun() -> receive stop -> ok end end),
+    Pid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
     Result = beamtalk_repl_json:term_to_json(Pid),
     ?assert(is_binary(Result)),
     Pid ! stop.
@@ -279,7 +291,9 @@ term_to_json_pid_alive_test() ->
 term_to_json_pid_dead_test() ->
     Pid = spawn(fun() -> ok end),
     MRef = monitor(process, Pid),
-    receive {'DOWN', MRef, process, Pid, _} -> ok end,
+    receive
+        {'DOWN', MRef, process, Pid, _} -> ok
+    end,
     Result = beamtalk_repl_json:term_to_json(Pid),
     ?assertMatch(<<"#Dead<", _/binary>>, Result).
 
@@ -372,7 +386,9 @@ format_error_message_class_not_found_test() ->
     ?assertMatch(<<"Unknown class: ", _/binary>>, Result).
 
 format_error_message_method_not_found_test() ->
-    Result = beamtalk_repl_json:format_error_message({method_not_found, 'Counter', <<"increment">>}),
+    Result = beamtalk_repl_json:format_error_message(
+        {method_not_found, 'Counter', <<"increment">>}
+    ),
     ?assert(binary:match(Result, <<"does not understand">>) =/= nomatch).
 
 format_error_message_session_creation_failed_test() ->
@@ -410,7 +426,8 @@ format_error_message_invalid_module_name_test() ->
 encode_reloaded_test() ->
     Classes = [#{name => "Counter"}],
     {ok, Msg} = beamtalk_repl_protocol:decode(
-        <<"{\"op\":\"eval\",\"id\":\"msg1\",\"session\":\"sess1\"}">>),
+        <<"{\"op\":\"eval\",\"id\":\"msg1\",\"session\":\"sess1\"}">>
+    ),
     Result = beamtalk_repl_json:encode_reloaded(Classes, 5, [], Msg),
     {ok, Decoded} = beamtalk_repl_json:parse_json(Result),
     ?assertEqual([<<"Counter">>], maps:get(<<"classes">>, Decoded)),
@@ -422,7 +439,8 @@ encode_reloaded_test() ->
 encode_reloaded_with_failures_test() ->
     Classes = [#{name => "Counter"}, #{name => "Timer"}],
     {ok, Msg} = beamtalk_repl_protocol:decode(
-        <<"{\"op\":\"reload\",\"id\":\"msg2\"}">>),
+        <<"{\"op\":\"reload\",\"id\":\"msg2\"}">>
+    ),
     Failures = [{self(), some_error}],
     Result = beamtalk_repl_json:encode_reloaded(Classes, 3, Failures, Msg),
     {ok, Decoded} = beamtalk_repl_json:parse_json(Result),

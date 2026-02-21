@@ -39,15 +39,16 @@ init([]) ->
         intensity => 10,
         period => 60
     },
-    
+
     %% Child spec template for actors
     ChildSpec = #{
         id => beamtalk_actor,
         start => {beamtalk_actor, start_link_supervised, []},
-        restart => temporary,  % Don't restart crashed actors automatically
+        % Don't restart crashed actors automatically
+        restart => temporary,
         shutdown => 5000,
         type => worker,
         modules => [beamtalk_actor]
     },
-    
+
     {ok, {SupFlags, [ChildSpec]}}.
