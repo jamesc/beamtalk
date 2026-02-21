@@ -1,0 +1,125 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for DateTime class (BT-710)
+
+TestCase subclass: DateTimeTest
+
+  testConstructionYearMonthDay =>
+    dt := DateTime year: 2026 month: 2 day: 18.
+    self assert: (dt class) equals: DateTime
+
+  testConstructionYearMonthDayHourMinuteSecond =>
+    // Construct a full DateTime
+    dt2 := DateTime year: 2026 month: 2 day: 18 hour: 10 minute: 30 second: 0.
+    self assert: (dt2 class) equals: DateTime
+
+  testConstructionFromtimestamp =>
+    // Unix epoch is 1970-01-01
+    epoch := DateTime fromTimestamp: 0.
+    self assert: (epoch year) equals: 1970.
+    self assert: (epoch month) equals: 1.
+    self assert: (epoch day) equals: 1.
+    self assert: (epoch hour) equals: 0
+
+  testConstructionFromstring =>
+    // Parse ISO 8601 string
+    parsed := DateTime fromString: "2026-02-18T10:30:00Z".
+    self assert: (parsed year) equals: 2026.
+    self assert: (parsed month) equals: 2.
+    self assert: (parsed day) equals: 18.
+    self assert: (parsed hour) equals: 10.
+    self assert: (parsed minute) equals: 30.
+    self assert: (parsed second) equals: 0
+
+  testConstructionNow =>
+    // DateTime now returns a DateTime
+    self assert: ((DateTime now) class) equals: DateTime.
+    // now has a year >= 2026
+    self assert: ((DateTime now) year >= 2026)
+
+  testConstructionMonotonicnow =>
+    // monotonicNow returns an Integer
+    self assert: ((DateTime monotonicNow) class =:= Integer)
+
+  testAccessors =>
+    a := DateTime year: 2026 month: 3 day: 15 hour: 14 minute: 45 second: 30.
+    self assert: (a year) equals: 2026.
+    self assert: (a month) equals: 3.
+    self assert: (a day) equals: 15.
+    self assert: (a hour) equals: 14.
+    self assert: (a minute) equals: 45.
+    self assert: (a second) equals: 30
+
+  testConversionAstimestamp =>
+    // Unix epoch round-trip
+    self assert: ((DateTime fromTimestamp: 0) asTimestamp) equals: 0.
+    // Known timestamp round-trip
+    ts := (DateTime year: 2026 month: 1 day: 1) asTimestamp.
+    self assert: ((DateTime fromTimestamp: ts) year) equals: 2026.
+    self assert: ((DateTime fromTimestamp: ts) month) equals: 1.
+    self assert: ((DateTime fromTimestamp: ts) day) equals: 1
+
+  testConversionAsstring =>
+    // Date-only formats with zero time
+    self assert: ((DateTime year: 2026 month: 2 day: 18) asString) equals: "2026-02-18T00:00:00Z".
+    // Full datetime format
+    self assert: ((DateTime year: 2026 month: 2 day: 18 hour: 10 minute: 30 second: 0) asString) equals: "2026-02-18T10:30:00Z"
+
+  testConversionPrintstring =>
+    (DateTime year: 2026 month: 2 day: 18) printString
+
+  testConversionDescribe =>
+    self assert: ((DateTime year: 2026 month: 2 day: 18) describe) equals: "2026-02-18T00:00:00Z"
+
+  testArithmeticAddseconds =>
+    // Add one hour
+    (DateTime year: 2026 month: 1 day: 1) addSeconds: 3600.
+    self assert: (((DateTime year: 2026 month: 1 day: 1) addSeconds: 3600) hour) equals: 1.
+    // Add negative seconds (subtract)
+    self assert: (((DateTime year: 2026 month: 1 day: 1 hour: 1 minute: 0 second: 0) addSeconds: -3600) hour) equals: 0
+
+  testArithmeticAdddays =>
+    // Add 7 days
+    self assert: (((DateTime year: 2026 month: 1 day: 1) addDays: 7) day) equals: 8.
+    // Add days across month boundary
+    self assert: (((DateTime year: 2026 month: 1 day: 30) addDays: 3) month) equals: 2.
+    self assert: (((DateTime year: 2026 month: 1 day: 30) addDays: 3) day) equals: 2
+
+  testArithmeticDiffseconds =>
+    // One day difference
+    b := DateTime year: 2026 month: 1 day: 2.
+    c := DateTime year: 2026 month: 1 day: 1.
+    self assert: (b diffSeconds: c) equals: 86400.
+    // Negative difference (reverse)
+    self assert: (c diffSeconds: b) equals: -86400.
+    // Zero difference
+    self assert: (c diffSeconds: c) equals: 0
+
+  testComparison =>
+    d := DateTime year: 2026 month: 1 day: 1.
+    e := DateTime year: 2026 month: 1 day: 2.
+    self assert: (d < e).
+    self deny: (e < d).
+    self deny: (d > e).
+    self assert: (e > d).
+    self assert: (d <= e).
+    self assert: (d <= d).
+    self deny: (d >= e).
+    self assert: (d >= d).
+    self assert: (d =:= d).
+    self deny: (d =:= e).
+    self assert: (d /= e).
+    self deny: (d /= d)
+
+  testErrorHandling =>
+    // Invalid date raises error
+    self should: [DateTime year: 2026 month: 13 day: 1] raise: #type_error.
+    // Invalid time raises error
+    self should: [DateTime year: 2026 month: 1 day: 1 hour: 25 minute: 0 second: 0] raise: #type_error.
+    // Invalid string format raises error
+    self should: [DateTime fromString: "not-a-date"] raise: #type_error.
+    // Non-integer argument raises error
+    self should: [DateTime fromTimestamp: "hello"] raise: #type_error.
+    // diffSeconds: with non-DateTime raises error
+    self should: [(DateTime year: 2026 month: 1 day: 1) diffSeconds: "hello"] raise: #type_error

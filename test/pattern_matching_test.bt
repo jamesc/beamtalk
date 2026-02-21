@@ -1,0 +1,35 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for pattern matching (BT-406)
+
+TestCase subclass: PatternMatchingTest
+
+  testSection1 =>
+    self assert: (42 match: [_ -> "matched"]) equals: "matched".
+    // Match integer literal — first arm
+    self assert: (1 match: [1 -> "one"; 2 -> "two"; _ -> "other"]) equals: "one".
+    // Match integer literal — second arm
+    self assert: (2 match: [1 -> "one"; 2 -> "two"; _ -> "other"]) equals: "two".
+    // Match integer literal — fallthrough to wildcard
+    self assert: (3 match: [1 -> "one"; 2 -> "two"; _ -> "other"]) equals: "other".
+    // Match symbol literal
+    self assert: (#ok match: [#ok -> "success"; #error -> "failure"; _ -> "unknown"]) equals: "success".
+    // ═══════════════════════════════════════════════════════════════════════════
+    self assert: (#error match: [#ok -> "success"; #error -> "failure"; _ -> "unknown"]) equals: "failure".
+    // Match string literal
+    self assert: ("hello" match: ["hello" -> "greeting"; _ -> "other"]) equals: "greeting".
+    // Variable captures the matched value
+    self assert: (42 match: [x -> x + 1]) equals: 43.
+    // Match with guard — positive
+    self assert: (10 match: [x when: [x > 0] -> "positive"; _ -> "non-positive"]) equals: "positive".
+    // Match with guard — non-positive
+    self assert: (-5 match: [x when: [x > 0] -> "positive"; _ -> "non-positive"]) equals: "non-positive".
+    // Guard with arithmetic comparison
+    self assert: (42 match: [x when: [x > 100] -> "big"; x when: [x > 10] -> "medium"; _ -> "small"]) equals: "medium".
+    // Match on expression result
+    self assert: ((3 + 4) match: [7 -> "correct"; _ -> "wrong"]) equals: "correct".
+    // Match negative integer
+    self assert: (-1 match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]) equals: "minus one".
+    // ═══════════════════════════════════════════════════════════════════════════
+    self assert: (0 match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]) equals: "zero"

@@ -1,0 +1,40 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Association class (BT-335)
+
+TestCase subclass: AssociationTest
+
+  testCreationBinaryMessage =>
+    a := #name -> "James".
+    self assert: (a class) equals: Association.
+    // Integer key with Integer value
+    42 -> "answer".
+    // String key
+    "city" -> "London"
+
+  testAccessorsKeyAndValue =>
+    a := #name -> "James".
+    self assert: (a key) equals: #name.
+    self assert: (a value) equals: "James".
+    b := 1 -> 2.
+    self assert: (b key) equals: 1.
+    self assert: (b value) equals: 2
+
+  testDisplayAsstringPrintstring =>
+    self assert: ((#name -> "James") asString) equals: "#name -> James".
+    (42 -> "answer") asString.
+    ("count" -> 5) asString.
+    // printString delegates to asString (Association.bt)
+    self assert: ((#name -> "James") printString) equals: "#name -> James"
+
+  testReflection =>
+    self assert: ((#name -> "James") class) equals: Association.
+    self assert: ((#name -> "James") respondsTo: #key).
+    self assert: ((#name -> "James") respondsTo: #value)
+
+  testUsageInCollections =>
+    assocs := #(#a -> 1, #b -> 2, #c -> 3).
+    self assert: (assocs size) equals: 3.
+    self assert: (assocs collect: [:assoc | assoc key]) equals: #(#a, #b, #c).
+    self assert: (assocs collect: [:assoc | assoc value]) equals: #(1, 2, 3)

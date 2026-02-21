@@ -1,0 +1,45 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-761: Non-local return (^) inside block arguments in Actor subclass methods.
+
+// @load tests/e2e/fixtures/actor_nlr_basic.bt
+// @load tests/e2e/fixtures/actor_nlr_local_var.bt
+// @load tests/e2e/fixtures/actor_nlr_computed.bt
+// @load tests/e2e/fixtures/actor_nlr_on_do.bt
+// @load tests/e2e/fixtures/actor_nlr_recursive.bt
+// @load tests/e2e/fixtures/actor_nlr_mutate.bt
+
+TestCase subclass: ActorNonLocalReturnTest
+
+  testSection1 =>
+    a := ActorNlrBasic spawn.
+    self assert: ((a test: #()) await) equals: "empty".
+    self assert: ((a test: #(1)) await) equals: "not empty".
+    self assert: ((a classify: 5) await) equals: "positive".
+    self assert: ((a classify: -1) await) equals: "non-positive".
+    self assert: ((a classify: 0) await) equals: "non-positive".
+    self assert: ((a checkFalse: #()) await) equals: "empty".
+    self assert: ((a checkFalse: #(1)) await) equals: "not empty".
+    b := ActorNlrLocalVar spawn.
+    (b store: "x" val: 42) await.
+    self assert: ((b fetch: "x") await) equals: 42.
+    self assert: ((b fetch: "y") await) equals: "not found".
+    c := ActorNlrComputed spawn.
+    self assert: ((c doubleIfPositive: 5) await) equals: 10.
+    self assert: ((c doubleIfPositive: -1) await) equals: 0.
+    d := ActorNlrRecursive spawn.
+    self assert: ((d countDown: 3) await) equals: "done".
+    self assert: ((d countDown: 0) await) equals: "done".
+    e := ActorNlrOnDo spawn.
+    self assert: ((e test: #()) await) equals: "early".
+    self assert: ((e test: #(1)) await) equals: "not early".
+    f := ActorNlrMutate spawn.
+    // count starts at 0; incAndCheck: 1 sets count=1, 1>=1 triggers NLR
+    self assert: ((f incAndCheck: 1) await) equals: 1.
+    // count is now 1 (mutation was preserved); incAndCheck: 5 sets count=2, 2<5 falls through
+    self assert: ((f incAndCheck: 5) await) equals: "not yet".
+    // count is now 2; incAndCheck: 3 sets count=3, 3>=3 triggers NLR
+    self assert: ((f incAndCheck: 3) await) equals: 3.
+    // count is now 3 (verified mutation persisted across NLR and non-NLR paths)
+    self assert: ((f incAndCheck: 10) await) equals: "not yet"

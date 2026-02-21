@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// String doubled-delimiter escape tests (BT-743)
+
+TestCase subclass: StringQuoteEscapeTest
+
+  testSection1 =>
+    self assert: """" equals: """".
+    // Size of a 1-char string containing `"`
+    self assert: ("""" size) equals: 1.
+    // Embedded quotes in the middle of a string
+    self assert: "say ""hello"" please" equals: "say ""hello"" please".
+    // Multiple embedded quotes
+    self assert: "one "" two "" three" equals: "one "" two "" three".
+    // String containing two double-quotes
+    self assert: """""" equals: """"""

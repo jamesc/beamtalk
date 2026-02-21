@@ -1,0 +1,35 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for control flow constructs
+
+TestCase subclass: ControlFlowTest
+
+  testBlockEvaluationBasic =>
+    self assert: ([5 + 3] value) equals: 8.
+    // Block with argument that returns computed value
+    self assert: ([:x | x * 2] value: 7) equals: 14.
+    // Block with two arguments
+    self assert: ([:a :b | a + b] value: 10 value: 20) equals: 30
+
+  testBlockEvaluationNested =>
+    // Nested block evaluation
+    self assert: ([[:x | x * 3] value: 4] value) equals: 12.
+    // Block returning a block, then evaluating it
+    self assert: ([[100]] value value) equals: 100
+
+  testBlockWithConditionals =>
+    // Block with comparison (returns boolean for conditional use)
+    self assert: ([:x | x > 5] value: 10).
+    self deny: ([:x | x > 5] value: 3).
+    // Block with arithmetic comparison
+    self assert: ([:x :y | x + y > 10] value: 5 value: 10)
+
+  testVariablePersistenceInRepl =>
+    // Set up a value
+    baseValue := 100.
+    self assert: baseValue equals: 100.
+    // Use it in a block
+    self assert: ([:x | x + baseValue] value: 50) equals: 150.
+    // Value still accessible
+    self assert: baseValue equals: 100

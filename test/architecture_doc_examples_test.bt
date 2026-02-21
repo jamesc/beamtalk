@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for code examples from docs/beamtalk-architecture.md
+
+TestCase subclass: ArchitectureDocExamplesTest
+
+  testSection1 =>
+    doubled := #(1, 2, 3) collect: [:x | x * 2].
+    self assert: doubled equals: #(2, 4, 6).
+    // --- Math precedence (doc: "Binary Operations with Math Precedence" section) ---
+    result := 2 + 3 * 4.
+    self assert: result equals: 14

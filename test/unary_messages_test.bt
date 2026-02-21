@@ -1,0 +1,68 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for unary message sends
+
+TestCase subclass: UnaryMessagesTest
+
+  testBlockUnaryMessages =>
+    self assert: ([42] value) equals: 42.
+    // Block value with computed body
+    self assert: ([10 + 5] value) equals: 15.
+    // Nested block value
+    self assert: ([[3] value + 2] value) equals: 5
+
+  testIntegerUnaryMethods =>
+    // negated - returns the negative of the receiver
+    self assert: (5 negated) equals: -5.
+    // negated of negative number
+    self assert: (-3 negated) equals: 3.
+    // negated of zero
+    self assert: (0 negated) equals: 0.
+    // abs - absolute value of positive number
+    self assert: (5 abs) equals: 5.
+    // abs - absolute value of negative number
+    self assert: (-5 abs) equals: 5.
+    // abs of zero
+    self assert: (0 abs) equals: 0.
+    // isZero - true for zero
+    self assert: (0 isZero).
+    // isZero - false for non-zero
+    self deny: (5 isZero).
+    // isZero - false for negative
+    self deny: (-3 isZero).
+    // isEven - true for even numbers
+    self assert: (4 isEven).
+    // isEven - false for odd numbers
+    self deny: (5 isEven).
+    // isEven - true for zero (0 is even)
+    self assert: (0 isEven).
+    // isEven - true for negative even
+    self assert: (-6 isEven).
+    // isOdd - true for odd numbers
+    self assert: (7 isOdd).
+    // isOdd - false for even numbers
+    self deny: (8 isOdd).
+    // isOdd - false for zero
+    self deny: (0 isOdd).
+    // isOdd - true for negative odd
+    self assert: (-5 isOdd)
+
+  testStringUnaryMethods =>
+    // length - count graphemes in string
+    self assert: ("hello" length) equals: 5.
+    // length - empty string
+    self assert: ("" length) equals: 0.
+    // length - single character
+    self assert: ("a" length) equals: 1.
+    // isEmpty - true for empty string
+    self assert: ("" isEmpty).
+    // isEmpty - false for non-empty string
+    self deny: ("hello" isEmpty).
+    // isEmpty - false for single character
+    self deny: ("x" isEmpty)
+
+  testBooleanUnaryMethods =>
+    // not - covered in booleans.bt but verify here too
+    self deny: (true not).
+    self assert: (false not)

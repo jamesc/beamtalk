@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-413: Instance-side class variable access tests (Actor)
+
+// @load tests/e2e/fixtures/instance_access_counter.bt
+
+TestCase subclass: InstanceClassVarAccessTest
+
+  testSection1 =>
+    self assert: (InstanceAccessCounter instanceCount) equals: 0.
+    // Create an instance via class method (increments instanceCount)
+    c := InstanceAccessCounter create.
+    // Class variable was incremented (verify via class method)
+    self assert: (InstanceAccessCounter instanceCount) equals: 1.
+    // Instance reads class variable via self class (the key BT-413 feature)
+    self assert: (c totalCounters await) equals: 1.
+    // Create another instance
+    d := InstanceAccessCounter create.
+    // Class variable reflects both creations
+    self assert: (InstanceAccessCounter instanceCount) equals: 2.
+    // Both instances see the same class variable
+    self assert: (c totalCounters await) equals: 2.
+    self assert: (d totalCounters await) equals: 2

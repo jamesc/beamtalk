@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Unicode string operations (BT-388)
+
+TestCase subclass: UnicodeTest
+
+  testSection1 =>
+    self assert: "世界" equals: "世界".
+    // Emoji (4-byte UTF-8)
+    self assert: "🌍" equals: "🌍".
+    // Mixed ASCII and Unicode
+    self assert: "Hello 世界 🌍" equals: "Hello 世界 🌍".
+    // Japanese
+    self assert: "こんにちは" equals: "こんにちは".
+    // Korean
+    self assert: "안녕하세요" equals: "안녕하세요".
+    self assert: ("世界" size) equals: 2.
+    self assert: ("🌍" size) equals: 1.
+    self assert: ("Hello 世界 🌍" size) equals: 10.
+    self assert: "世界" =:= "世界".
+    self deny: "世界" =:= "hello".
+    self assert: ("Hello 世界" at: 7) equals: "世".
+    self assert: ("Hello 世界" at: 8) equals: "界".
+    self assert: ("世界" reverse) equals: "界世".
+    self assert: ("Hello 世界" includes: "世").
+    self deny: ("Hello 世界" includes: "🌍")

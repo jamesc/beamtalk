@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Type annotation syntax variations (BT-673)
+
+// @load tests/e2e/fixtures/typed_math.bt
+
+TestCase subclass: TypeAnnotationsTest
+
+  testSection1 =>
+    math := TypedMath new.
+    self assert: (math identity: 4) equals: 4.
+    self assert: (math identityWithSpace: 5) equals: 5.
+    self assert: (math sum: 2 with: 3) equals: 5.
+    self assert: (math maybeName: true) equals: 1.
+    self assert: (math maybeName: false) equals: "none".
+    self assert: ((41 asType: Integer) + 1) equals: 42

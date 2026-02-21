@@ -1,0 +1,37 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Object>>error: (BT-424)
+
+// @load tests/e2e/fixtures/validator.bt
+
+TestCase subclass: ErrorMethodTest
+
+  testBasicErrorOnPrimitives =>
+    self assert: ([42 error: "too big"] on: Exception do: [:e | e message]) equals: "too big".
+    // Integer error: has user_error kind
+    self assert: ([42 error: "too big"] on: Exception do: [:e | e kind]) equals: #user_error.
+    // Integer error: has correct class
+    self assert: ([42 error: "too big"] on: Exception do: [:e | e errorClass]) equals: #Integer.
+    // String error: works
+    self assert: (["hello" error: "bad string"] on: Exception do: [:e | e message]) equals: "bad string".
+    // String error: has correct class
+    self assert: (["hello" error: "bad string"] on: Exception do: [:e | e errorClass]) equals: #String
+
+  testErrorOnValueTypes =>
+    // Value type error: is catchable
+    v := Validator new.
+    self assert: ([v check: -1] on: Exception do: [:e | e message]) equals: "must be non-negative".
+    // Value type error: has correct class
+    self assert: ([v check: -1] on: Exception do: [:e | e errorClass]) equals: #Validator.
+    // Value type error: has user_error kind
+    self assert: ([v check: -1] on: Exception do: [:e | e kind]) equals: #user_error.
+    // No error when valid
+    self assert: (v check: 5) equals: 5
+
+  testErrorWithNonStringArgument =>
+    // Integer error message is coerced — raises user_error not type_error
+    self should: [42 error: 99] raise: #user_error.
+    // Verify kind and errorClass via on:do:
+    self assert: ([42 error: 99] on: Exception do: [:e | e kind]) equals: #user_error.
+    self assert: ([42 error: 99] on: Exception do: [:e | e errorClass]) equals: #Integer
