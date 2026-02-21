@@ -14,10 +14,10 @@ module 'intrinsic_keyword' ['new'/0, 'new'/1, 'blockValue'/1, 'size'/1, 'dispatc
     call 'maps':'merge'(DefaultState, InitArgs)
 
 
-'blockValue'/1= fun (Self) ->
+'blockValue'/1 = fun (Self) ->
 call 'bt@stdlib@foo':'dispatch'('blockValue', [], Self)
 
-'size'/1= fun (Self) ->
+'size'/1 = fun (Self) ->
 call 'bt@stdlib@foo':'dispatch'('size', [], Self)
 
 'dispatch'/3 = fun (Selector, Args, Self) ->

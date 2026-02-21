@@ -121,6 +121,13 @@ impl CoreErlangGenerator {
             Document::String(format!("apply {handler_var} ()"))
         };
 
+        // BT-754: Fresh variable names for the NLR pattern guard (Core Erlang
+        // does not support anonymous `_` wildcards — each must be unique).
+        let nlr_tok_var = self.fresh_temp_var("NlrCheckTok");
+        let nlr_val_var = self.fresh_temp_var("NlrCheckVal");
+        // Fallback pattern: ONE variable binding the whole 2-tuple (not two separate elements).
+        let other_pair_var = self.fresh_temp_var("OtherPair");
+
         Ok(docvec![
             Document::String(format!("let {block_var} = ")),
             receiver_code,
@@ -131,6 +138,16 @@ impl CoreErlangGenerator {
             Document::String(format!(" in try apply {block_var} () ")),
             Document::String(format!("of {result_var} -> {result_var} ")),
             Document::String(format!("catch <{type_var}, {error_var}, {stack_var}> -> ")),
+            // BT-754: Non-local returns (^ inside blocks) throw {'$bt_nlr', Token, Value}.
+            // on:do: must NOT catch them — re-raise immediately so the enclosing method's
+            // NLR handler can intercept. We check by pattern-matching the raw exception.
+            // Scrutinee is ONE 2-tuple {Type, Error}; patterns must match ONE value.
+            Document::String(format!(
+                "case {{{type_var}, {error_var}}} of \
+                 <{{'throw', {{'$bt_nlr', {nlr_tok_var}, {nlr_val_var}}}}}> when 'true' -> \
+                   primop 'raw_raise'({type_var}, {error_var}, {stack_var}) \
+                 <{other_pair_var}> when 'true' -> "
+            )),
             Document::String(format!(
                 "let {built_stack_var} = primop 'build_stacktrace'({stack_var}) in "
             )),
@@ -147,7 +164,8 @@ impl CoreErlangGenerator {
             handler_apply,
             Document::Str(" "),
             Document::String(format!(
-                "<'false'> when 'true' -> primop 'raw_raise'({type_var}, {error_var}, {stack_var}) end"
+                "<'false'> when 'true' -> primop 'raw_raise'({type_var}, {error_var}, {stack_var}) end \
+                 end"
             )),
         ])
     }
@@ -192,6 +210,11 @@ impl CoreErlangGenerator {
         let ex_obj_var = self.fresh_temp_var("ExObj");
         let match_var = self.fresh_temp_var("Match");
         let state_after_try = self.fresh_temp_var("StateAfterTry");
+        // BT-754: Unique names for NLR pattern variables (no anonymous _ in Core Erlang).
+        let nlr_tok_var = self.fresh_temp_var("NlrCheckTok");
+        let nlr_val_var = self.fresh_temp_var("NlrCheckVal");
+        // Fallback pattern: ONE variable binding the whole 2-tuple (not two separate elements).
+        let other_pair_var = self.fresh_temp_var("OtherPair");
 
         // Bind exception class
         let ex_class_code = self.expression_doc(ex_class)?;
@@ -221,6 +244,13 @@ impl CoreErlangGenerator {
             Document::String(format!(" {{{try_result_var}, {try_final_var}}} ")),
             Document::String(format!("of {state_after_try} -> {state_after_try} ")),
             Document::String(format!("catch <{type_var}, {error_var}, {stack_var}> -> ")),
+            // BT-754: Re-raise NLR throws transparently (see generate_on_do for details).
+            Document::String(format!(
+                "case {{{type_var}, {error_var}}} of \
+                 <{{'throw', {{'$bt_nlr', {nlr_tok_var}, {nlr_val_var}}}}}> when 'true' -> \
+                   primop 'raw_raise'({type_var}, {error_var}, {stack_var}) \
+                 <{other_pair_var}> when 'true' -> "
+            )),
             Document::String(format!(
                 "let {built_stack_var} = primop 'build_stacktrace'({stack_var}) in "
             )),
@@ -262,13 +292,12 @@ impl CoreErlangGenerator {
         )));
         self.pop_scope();
 
-        // Re-raise non-matching exceptions
-        docs.push(docvec![
-            Document::String(format!(
-                "<'false'> when 'true' -> primop 'raw_raise'({type_var}, {error_var}, {stack_var}) "
-            )),
-            Document::Str("end"),
-        ]);
+        // Re-raise non-matching exceptions; close the matches_class case and the outer NLR case.
+        docs.push(Document::String(format!(
+            "<'false'> when 'true' -> primop 'raw_raise'({type_var}, {error_var}, {stack_var}) \
+             end \
+             end"
+        )));
 
         Ok(Document::Vec(docs))
     }

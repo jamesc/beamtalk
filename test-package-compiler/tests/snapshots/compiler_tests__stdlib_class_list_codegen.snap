@@ -16,115 +16,115 @@ module 'stdlib_class_list' ['new'/0, 'new'/1, 'size'/1, 'isEmpty'/1, 'first'/1, 
     call 'beamtalk_error':'raise'(Error2)
 
 
-'size'/1= fun (Self) ->
+'size'/1 = fun (Self) ->
 call 'erlang':'length'(Self)
 
-'isEmpty'/1= fun (Self) ->
+'isEmpty'/1 = fun (Self) ->
 call 'erlang':'=:='(Self, [])
 
-'first'/1= fun (Self) ->
+'first'/1 = fun (Self) ->
 case Self of <[H|_T]> when 'true' -> H <[]> when 'true' -> let Error0 = call 'beamtalk_error':'new'('does_not_understand', 'List') in let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'first') in let Error2 = call 'beamtalk_error':'with_hint'(Error1, #{#<67>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}#) in call 'beamtalk_error':'raise'(Error2) end
 
-'rest'/1= fun (Self) ->
+'rest'/1 = fun (Self) ->
 case Self of <[_H|T]> when 'true' -> T <[]> when 'true' -> [] end
 
-'last'/1= fun (Self) ->
+'last'/1 = fun (Self) ->
 case Self of <[]> when 'true' -> let Error0 = call 'beamtalk_error':'new'('does_not_understand', 'List') in let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'last') in let Error2 = call 'beamtalk_error':'with_hint'(Error1, #{#<67>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}#) in call 'beamtalk_error':'raise'(Error2) <_> when 'true' -> call 'lists':'last'(Self) end
 
-'at:'/2= fun (Self, _index1) ->
+'at:'/2 = fun (Self, _index1) ->
 call 'beamtalk_list_ops':'at'(Self, _index1)
 
-'includes:'/2= fun (Self, _item2) ->
+'includes:'/2 = fun (Self, _item2) ->
 call 'lists':'member'(_item2, Self)
 
-'sort'/1= fun (Self) ->
+'sort'/1 = fun (Self) ->
 call 'lists':'sort'(Self)
 
-'sort:'/2= fun (Self, _comparator3) ->
+'sort:'/2 = fun (Self, _comparator3) ->
 call 'beamtalk_list_ops':'sort_with'(Self, _comparator3)
 
-'reversed'/1= fun (Self) ->
+'reversed'/1 = fun (Self) ->
 call 'lists':'reverse'(Self)
 
-'unique'/1= fun (Self) ->
+'unique'/1 = fun (Self) ->
 call 'lists':'usort'(Self)
 
-'detect:'/2= fun (Self, _block4) ->
+'detect:'/2 = fun (Self, _block4) ->
 call 'beamtalk_list_ops':'detect'(Self, _block4)
 
-'detect:ifNone:'/3= fun (Self, _block5, _default6) ->
+'detect:ifNone:'/3 = fun (Self, _block5, _default6) ->
 call 'beamtalk_list_ops':'detect_if_none'(Self, _block5, _default6)
 
-'do:'/2= fun (Self, _block7) ->
+'do:'/2 = fun (Self, _block7) ->
 call 'beamtalk_list_ops':'do'(Self, _block7)
 
-'collect:'/2= fun (Self, _block8) ->
+'collect:'/2 = fun (Self, _block8) ->
 call 'lists':'map'(_block8, Self)
 
-'select:'/2= fun (Self, _block9) ->
+'select:'/2 = fun (Self, _block9) ->
 call 'lists':'filter'(_block9, Self)
 
-'reject:'/2= fun (Self, _block10) ->
+'reject:'/2 = fun (Self, _block10) ->
 call 'beamtalk_list_ops':'reject'(Self, _block10)
 
-'inject:into:'/3= fun (Self, _initial11, _block12) ->
+'inject:into:'/3 = fun (Self, _initial11, _block12) ->
 call 'lists':'foldl'(_block12, _initial11, Self)
 
-'take:'/2= fun (Self, _n13) ->
+'take:'/2 = fun (Self, _n13) ->
 call 'beamtalk_list_ops':'take'(Self, _n13)
 
-'drop:'/2= fun (Self, _n14) ->
+'drop:'/2 = fun (Self, _n14) ->
 call 'beamtalk_list_ops':'drop'(Self, _n14)
 
-'flatten'/1= fun (Self) ->
+'flatten'/1 = fun (Self) ->
 call 'lists':'flatten'(Self)
 
-'flatMap:'/2= fun (Self, _block15) ->
+'flatMap:'/2 = fun (Self, _block15) ->
 call 'lists':'flatmap'(_block15, Self)
 
-'count:'/2= fun (Self, _block16) ->
+'count:'/2 = fun (Self, _block16) ->
 call 'erlang':'length'(call 'lists':'filter'(_block16, Self))
 
-'anySatisfy:'/2= fun (Self, _block17) ->
+'anySatisfy:'/2 = fun (Self, _block17) ->
 call 'lists':'any'(_block17, Self)
 
-'allSatisfy:'/2= fun (Self, _block18) ->
+'allSatisfy:'/2 = fun (Self, _block18) ->
 call 'lists':'all'(_block18, Self)
 
-'++'/2= fun (Self, _other19) ->
+'++'/2 = fun (Self, _other19) ->
 call 'erlang':'++'(Self, _other19)
 
-'from:to:'/3= fun (Self, _start20, _end21) ->
+'from:to:'/3 = fun (Self, _start20, _end21) ->
 call 'beamtalk_list_ops':'from_to'(Self, _start20, _end21)
 
-'indexOf:'/2= fun (Self, _item22) ->
+'indexOf:'/2 = fun (Self, _item22) ->
 call 'beamtalk_list_ops':'index_of'(Self, _item22)
 
-'eachWithIndex:'/2= fun (Self, _block23) ->
+'eachWithIndex:'/2 = fun (Self, _block23) ->
 call 'beamtalk_list_ops':'each_with_index'(Self, _block23)
 
-'zip:'/2= fun (Self, _other24) ->
+'zip:'/2 = fun (Self, _other24) ->
 call 'beamtalk_list_ops':'zip'(Self, _other24)
 
-'groupBy:'/2= fun (Self, _block25) ->
+'groupBy:'/2 = fun (Self, _block25) ->
 call 'beamtalk_list_ops':'group_by'(Self, _block25)
 
-'partition:'/2= fun (Self, _block26) ->
+'partition:'/2 = fun (Self, _block26) ->
 call 'beamtalk_list_ops':'partition'(Self, _block26)
 
-'takeWhile:'/2= fun (Self, _block27) ->
+'takeWhile:'/2 = fun (Self, _block27) ->
 call 'lists':'takewhile'(_block27, Self)
 
-'dropWhile:'/2= fun (Self, _block28) ->
+'dropWhile:'/2 = fun (Self, _block28) ->
 call 'lists':'dropwhile'(_block28, Self)
 
-'intersperse:'/2= fun (Self, _separator29) ->
+'intersperse:'/2 = fun (Self, _separator29) ->
 call 'beamtalk_list_ops':'intersperse'(Self, _separator29)
 
-'add:'/2= fun (Self, _item30) ->
+'add:'/2 = fun (Self, _item30) ->
 call 'erlang':'++'(Self, [_item30|[]])
 
-'describe'/1= fun (Self) ->
+'describe'/1 = fun (Self) ->
 #{#<97>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<76>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}#
 
 'dispatch'/3 = fun (Selector, Args, Self) ->

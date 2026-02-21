@@ -14,7 +14,8 @@ use super::spec_codegen;
 use super::util::ClassIdentity;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{
-    ClassDefinition, Expression, MessageSelector, MethodDefinition, MethodKind, Module,
+    Block, CascadeMessage, ClassDefinition, Expression, MessageSelector, MethodDefinition,
+    MethodKind, Module, StringSegment,
 };
 use crate::docvec;
 
@@ -412,6 +413,22 @@ impl CoreErlangGenerator {
             params.push(var_name);
         }
 
+        // BT-754: Detect whether any block argument in this method body contains ^.
+        // If so, set up a non-local return token so ^ inside blocks can throw to escape
+        // the closure and return from the enclosing method.
+        let needs_nlr = method
+            .body
+            .iter()
+            .any(|expr| Self::expr_has_block_nlr(expr, false));
+
+        let nlr_token_var = if needs_nlr {
+            let token_var = self.fresh_temp_var("NlrToken");
+            self.current_nlr_token = Some(token_var.clone());
+            Some(token_var)
+        } else {
+            None
+        };
+
         // Build method body parts
         let mut body_parts: Vec<Document<'static>> = Vec::new();
 
@@ -423,7 +440,8 @@ impl CoreErlangGenerator {
         for (i, expr) in method.body.iter().enumerate() {
             let is_last = i == method.body.len() - 1;
 
-            // Early return (^) — emit value and stop generating further expressions
+            // Early return (^) at the method body level — emit value and stop generating.
+            // Note: ^ inside a block is handled via the NLR throw mechanism (BT-754).
             if let Expression::Return { value, .. } = expr {
                 let expr_code = self.capture_expression(value)?;
                 if i > 0 {
@@ -467,12 +485,140 @@ impl CoreErlangGenerator {
         }
 
         self.pop_scope();
+        self.current_nlr_token = None;
 
-        Ok(docvec![
-            format!("'{}'/{}= fun ({}) ->\n", mangled, arity, params.join(", ")),
-            Document::Vec(body_parts),
-            "\n",
-        ])
+        if let Some(token_var) = nlr_token_var {
+            // BT-754: Wrap the method body in try/catch to catch non-local returns
+            // thrown by ^ inside block closures. The token ensures we only catch
+            // our own NLR throws (not those from nested method activations).
+            let result_var = self.fresh_temp_var("NlrResult");
+            let cls_var = self.fresh_temp_var("NlrCls");
+            let err_var = self.fresh_temp_var("NlrErr");
+            let stk_var = self.fresh_temp_var("NlrStk");
+            let ctk_var = self.fresh_temp_var("CatchTok");
+            let val_var = self.fresh_temp_var("NlrVal");
+            // ONE variable binding the whole 2-tuple (not two separate elements) — BT-754.
+            let ot_pair_var = self.fresh_temp_var("OtherPair");
+
+            let body_doc = Document::Vec(body_parts);
+            Ok(docvec![
+                format!("'{}'/{} = fun ({}) ->\n", mangled, arity, params.join(", ")),
+                format!("    let {token_var} = call 'erlang':'make_ref'() in\n"),
+                format!("    try\n"),
+                body_doc,
+                format!(
+                    "\n    of {result_var} -> {result_var}\n\
+                     \x20   catch <{cls_var}, {err_var}, {stk_var}> ->\n\
+                     \x20     case {{{cls_var}, {err_var}}} of\n\
+                     \x20       <{{'throw', {{'$bt_nlr', {ctk_var}, {val_var}}}}}> \
+                          when call 'erlang':'=:='({ctk_var}, {token_var}) -> {val_var}\n\
+                     \x20       <{ot_pair_var}> when 'true' -> \
+                          primop 'raw_raise'({cls_var}, {err_var}, {stk_var})\n\
+                     \x20     end\n"
+                ),
+            ])
+        } else {
+            Ok(docvec![
+                format!("'{}'/{} = fun ({}) ->\n", mangled, arity, params.join(", ")),
+                Document::Vec(body_parts),
+                "\n",
+            ])
+        }
+    }
+
+    /// Returns `true` if `expr` contains a `^` (Return) that is nested inside
+    /// a block literal at any depth.
+    ///
+    /// Used by `generate_value_type_method` to decide whether to emit a
+    /// non-local return try/catch wrapper (BT-754).
+    ///
+    /// * `inside_block` — whether we are already inside at least one block literal.
+    ///   At the method-body level the caller passes `false`; `generate_block` sets
+    ///   it to `true` for the block's body expressions.
+    ///
+    /// Each `Expression` variant is matched explicitly (no wildcard) so the Rust
+    /// compiler enforces exhaustiveness: adding a new AST node forces an update here.
+    fn expr_has_block_nlr(expr: &Expression, inside_block: bool) -> bool {
+        match expr {
+            Expression::Return { value, .. } => {
+                // ^ at method-body level is NOT an NLR — it is handled by the
+                // early-return loop in generate_value_type_method.
+                // ^ inside a block IS an NLR that needs the throw mechanism.
+                inside_block || Self::expr_has_block_nlr(value, inside_block)
+            }
+            Expression::Block(block) => {
+                // Entering a block: any ^ from here downward is a non-local return.
+                Self::block_has_nlr(block)
+            }
+            Expression::MessageSend {
+                receiver,
+                arguments,
+                ..
+            } => {
+                Self::expr_has_block_nlr(receiver, inside_block)
+                    || arguments
+                        .iter()
+                        .any(|a| Self::expr_has_block_nlr(a, inside_block))
+            }
+            Expression::Assignment { target, value, .. } => {
+                Self::expr_has_block_nlr(target, inside_block)
+                    || Self::expr_has_block_nlr(value, inside_block)
+            }
+            Expression::Parenthesized { expression, .. } => {
+                Self::expr_has_block_nlr(expression, inside_block)
+            }
+            Expression::Cascade {
+                receiver, messages, ..
+            } => {
+                Self::expr_has_block_nlr(receiver, inside_block)
+                    || messages.iter().any(|m: &CascadeMessage| {
+                        m.arguments
+                            .iter()
+                            .any(|a| Self::expr_has_block_nlr(a, inside_block))
+                    })
+            }
+            Expression::FieldAccess { receiver, .. } => {
+                Self::expr_has_block_nlr(receiver, inside_block)
+            }
+            Expression::Match { value, arms, .. } => {
+                Self::expr_has_block_nlr(value, inside_block)
+                    || arms.iter().any(|arm| {
+                        arm.guard
+                            .as_ref()
+                            .is_some_and(|g| Self::expr_has_block_nlr(g, inside_block))
+                            || Self::expr_has_block_nlr(&arm.body, inside_block)
+                    })
+            }
+            Expression::MapLiteral { pairs, .. } => pairs.iter().any(|pair| {
+                Self::expr_has_block_nlr(&pair.key, inside_block)
+                    || Self::expr_has_block_nlr(&pair.value, inside_block)
+            }),
+            Expression::ListLiteral { elements, tail, .. } => {
+                elements
+                    .iter()
+                    .any(|e| Self::expr_has_block_nlr(e, inside_block))
+                    || tail
+                        .as_ref()
+                        .is_some_and(|t| Self::expr_has_block_nlr(t, inside_block))
+            }
+            Expression::StringInterpolation { segments, .. } => segments.iter().any(|s| match s {
+                StringSegment::Literal(_) => false,
+                StringSegment::Interpolation(e) => Self::expr_has_block_nlr(e, inside_block),
+            }),
+            // True leaf expressions — cannot contain sub-expressions.
+            Expression::Literal(..)
+            | Expression::Identifier(..)
+            | Expression::ClassReference { .. }
+            | Expression::Super(..)
+            | Expression::Primitive { .. }
+            | Expression::Error { .. } => false,
+        }
+    }
+
+    /// Returns `true` if the block (or any expression inside it, recursively)
+    /// contains a `^` (Return) expression.
+    fn block_has_nlr(block: &Block) -> bool {
+        block.body.iter().any(|e| Self::expr_has_block_nlr(e, true))
     }
 
     /// Returns true if the class is a non-instantiable primitive type.
