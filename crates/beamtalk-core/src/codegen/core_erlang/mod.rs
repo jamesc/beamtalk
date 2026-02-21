@@ -451,39 +451,58 @@ impl NlrValueTypeCatchVars {
     ///   end
     /// ```
     pub fn format_try_prefix(&self) -> String {
-        format!(
-            "    let {} = call 'erlang':'make_ref'() in\n    try\n",
-            self.token_var
-        )
+        docvec![
+            "    let ",
+            self.token_var.clone(),
+            " = call 'erlang':'make_ref'() in\n    try\n",
+        ]
+        .to_pretty_string()
     }
 
     pub fn format_catch_suffix(&self) -> String {
-        format!(
-            "\n    of {} -> {}\n\
-             \x20   catch <{}, {}, {}> ->\n\
-             \x20     case {{{}, {}}} of\n\
-             \x20       <{{'throw', {{'$bt_nlr', {}, {}}}}}> \
-                  when call 'erlang':'=:='({}, {}) -> {}\n\
-             \x20       <{}> when 'true' -> \
-                  primop 'raw_raise'({}, {}, {})\n\
-             \x20     end\n",
-            self.result_var,
-            self.result_var,
-            self.cls_var,
-            self.err_var,
-            self.stk_var,
-            self.cls_var,
-            self.err_var,
-            self.ctk_var,
-            self.val_var,
-            self.ctk_var,
-            self.token_var,
-            self.val_var,
-            self.ot_pair_var,
-            self.cls_var,
-            self.err_var,
-            self.stk_var,
-        )
+        docvec![
+            "\n    of ",
+            self.result_var.clone(),
+            " -> ",
+            self.result_var.clone(),
+            "\n",
+            "    catch <",
+            self.cls_var.clone(),
+            ", ",
+            self.err_var.clone(),
+            ", ",
+            self.stk_var.clone(),
+            "> ->\n",
+            "      case {",
+            self.cls_var.clone(),
+            ", ",
+            self.err_var.clone(),
+            "} of\n",
+            "        <{'throw', {'$bt_nlr', ",
+            self.ctk_var.clone(),
+            ", ",
+            self.val_var.clone(),
+            "}}> ",
+            "when call 'erlang':'=:='(",
+            self.ctk_var.clone(),
+            ", ",
+            self.token_var.clone(),
+            ") -> ",
+            self.val_var.clone(),
+            "\n",
+            "        <",
+            self.ot_pair_var.clone(),
+            "> when 'true' -> ",
+            "primop 'raw_raise'(",
+            self.cls_var.clone(),
+            ", ",
+            self.err_var.clone(),
+            ", ",
+            self.stk_var.clone(),
+            ")\n",
+            "      end\n",
+        ]
+        .to_pretty_string()
     }
 }
 
@@ -768,27 +787,69 @@ impl CoreErlangGenerator {
         let state_var = self.fresh_temp_var("NlrState");
         let ot_pair_var = self.fresh_temp_var("OtherPair");
 
-        let try_catch = format!(
-            "let {token_var} = call 'erlang':'make_ref'() in\n\
-             try\n\
-             {body_str}\n\
-             of {result_var} -> {result_var}\n\
-             catch <{cls_var}, {err_var}, {stk_var}> ->\n\
-               case {{{cls_var}, {err_var}}} of\n\
-                 <{{'throw', {{'$bt_nlr', {ctk_var}, {val_var}, {state_var}}}}}> \
-             when call 'erlang':'=:='({ctk_var}, {token_var}) -> \
-             {{'reply', {val_var}, {state_var}}}\n\
-                 <{ot_pair_var}> when 'true' -> \
-             primop 'raw_raise'({cls_var}, {err_var}, {stk_var})\n\
-               end"
-        );
+        let try_catch = docvec![
+            "let ",
+            token_var.to_string(),
+            " = call 'erlang':'make_ref'() in\n",
+            "try\n",
+            body_str.to_string(),
+            "\n",
+            "of ",
+            result_var.clone(),
+            " -> ",
+            result_var,
+            "\n",
+            "catch <",
+            cls_var.clone(),
+            ", ",
+            err_var.clone(),
+            ", ",
+            stk_var.clone(),
+            "> ->\n",
+            "  case {",
+            cls_var.clone(),
+            ", ",
+            err_var.clone(),
+            "} of\n",
+            "    <{'throw', {'$bt_nlr', ",
+            ctk_var.clone(),
+            ", ",
+            val_var.clone(),
+            ", ",
+            state_var.clone(),
+            "}}> ",
+            "when call 'erlang':'=:='(",
+            ctk_var,
+            ", ",
+            token_var.to_string(),
+            ") -> ",
+            "{'reply', ",
+            val_var,
+            ", ",
+            state_var,
+            "}\n",
+            "    <",
+            ot_pair_var,
+            "> when 'true' -> ",
+            "primop 'raw_raise'(",
+            cls_var,
+            ", ",
+            err_var,
+            ", ",
+            stk_var,
+            ")\n",
+            "  end",
+        ]
+        .to_pretty_string();
 
         if needs_letrec {
-            format!(
-                "letrec '__nlr_body'/0 = fun () ->\n\
-                 {try_catch}\n\
-                 in apply '__nlr_body'/0 ()"
-            )
+            docvec![
+                "letrec '__nlr_body'/0 = fun () ->\n",
+                try_catch,
+                "\n",
+                "in apply '__nlr_body'/0 ()",
+            ]
+            .to_pretty_string()
         } else {
             try_catch
         }
