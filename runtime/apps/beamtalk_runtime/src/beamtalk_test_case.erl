@@ -27,7 +27,11 @@
     run_all_structured/1,
     run_single_structured/2,
     find_test_classes/0,
-    spawn_test_execution/6
+    spawn_test_execution/6,
+    %% BT-762: Exported for beamtalk_test_runner
+    run_test_method/4,
+    structure_results/3,
+    resolve_module/1
 ]).
 
 %% @doc Assert that a condition is true.

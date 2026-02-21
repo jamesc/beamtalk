@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture: a minimal TestCase subclass for TestRunner tests (BT-762)
+
+TestCase subclass: SampleTestCase
+
+  testPassing =>
+    self assert: true
+
+  testAlsoPassing =>
+    self assert: (1 + 1) equals: 2

@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// TestRunner - Programmatic test execution returning structured results (BT-762)
+//
+// TestRunner provides class-side methods for discovering and running tests.
+// Unlike TestCase's runAll (which returns a formatted string), TestRunner
+// returns TestResult objects that agents can introspect programmatically.
+//
+// Example:
+//   TestRunner runAll                          // => TestResult for all test classes
+//   TestRunner run: CounterTest               // => TestResult for one class
+//   TestRunner run: CounterTest method: #testIncrement  // => TestResult for one method
+
+Object subclass: TestRunner
+  // Class-side methods for test execution — return TestResult objects
+  class runAll => @primitive "runAll"
+  class run: testClass => @primitive "run:"
+  class run: testClass method: testName => @primitive "run:method:"

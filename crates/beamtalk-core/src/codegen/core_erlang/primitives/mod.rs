@@ -62,6 +62,8 @@ pub fn generate_primitive_bif(
         "CompiledMethod" => misc::generate_compiled_method_bif(selector, params),
         "Character" => character::generate_character_bif(selector, params),
         "TestCase" => misc::generate_test_case_bif(selector, params),
+        "TestRunner" => misc::generate_test_runner_bif(selector, params),
+        "TestResult" => misc::generate_test_result_bif(selector, params),
         "Stream" => misc::generate_stream_bif(selector, params),
         "JSON" => misc::generate_json_bif(selector, params),
         "Random" => misc::generate_random_bif(selector, params),

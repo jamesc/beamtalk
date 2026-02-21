@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// TestResult - Structured result from running tests (BT-762)
+//
+// TestResult wraps the structured map returned by beamtalk_test_case
+// into a first-class Beamtalk object that agents can introspect.
+//
+// TestResult instances are created by TestRunner — not directly by users.
+//
+// Example:
+//   result := TestRunner runAll
+//   result hasPassed    // => true or false
+//   result summary      // => "5 tests, 5 passed (0.1s)"
+//   result failures     // => [] or [{name: ..., error: ...}, ...]
+
+Object subclass: TestResult
+  // Accessors — @primitive methods implemented in beamtalk_test_runner.erl
+  passed -> Integer => @primitive "passed"
+  failed -> Integer => @primitive "failed"
+  total -> Integer => @primitive "total"
+  duration -> Float => @primitive "duration"
+  failures -> List => @primitive "failures"
+  hasPassed -> Boolean => @primitive "hasPassed"
+  summary -> String => @primitive "summary"
+  printString -> String => @primitive "printString"

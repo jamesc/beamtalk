@@ -7,7 +7,8 @@
 //!
 //! Contains BIF generators for smaller primitive classes:
 //! `File`, `Exception`, `Symbol`, `Tuple`, `Object`, `Association`, `Set`,
-//! `CompiledMethod`, `TestCase`, `Stream`, `StackFrame`, `JSON`.
+//! `CompiledMethod`, `TestCase`, `TestRunner`, `TestResult`, `Stream`,
+//! `StackFrame`, `JSON`.
 
 use super::super::document::Document;
 use super::{binary_bif, ops_dispatch};
@@ -428,6 +429,81 @@ pub(crate) fn generate_test_case_bif(
                 ")",
             ])
         }
+        _ => None,
+    }
+}
+
+/// `TestRunner` primitive implementations for programmatic test execution (BT-762).
+///
+/// `TestRunner` class-side methods discover and run tests, returning `TestResult`
+/// objects. Unlike `TestCase` primitives which need class name extraction from
+/// `ClassSelf`, `TestRunner`'s `runAll` takes no args and `run:`/`run:method:`
+/// take a class reference arg.
+pub(crate) fn generate_test_runner_bif(
+    selector: &str,
+    params: &[String],
+) -> Option<Document<'static>> {
+    match selector {
+        // Class-side: discover all test classes and run everything
+        "runAll" => Some(Document::Str("call 'beamtalk_test_runner':'run_all'()")),
+        // Class-side: run all tests in a single class
+        "run:" => {
+            let p0 = params.first().map_or("_TestClass", String::as_str);
+            Some(docvec![
+                "call 'beamtalk_test_runner':'run_class'(",
+                p0.to_string(),
+                ")",
+            ])
+        }
+        // Class-side: run a single test method in a class
+        "run:method:" => {
+            let p0 = params.first().map_or("_TestClass", String::as_str);
+            let p1 = params.get(1).map_or("_TestName", String::as_str);
+            Some(docvec![
+                "call 'beamtalk_test_runner':'run_method'(",
+                p0.to_string(),
+                ", ",
+                p1.to_string(),
+                ")",
+            ])
+        }
+        _ => None,
+    }
+}
+
+/// `TestResult` primitive implementations for test result introspection (BT-762).
+///
+/// `TestResult` is a tagged map with `$beamtalk_class => 'TestResult'`.
+/// Instance methods extract fields from the map.
+pub(crate) fn generate_test_result_bif(
+    selector: &str,
+    _params: &[String],
+) -> Option<Document<'static>> {
+    match selector {
+        "passed" => Some(Document::Str(
+            "call 'beamtalk_test_runner':'result_passed'(Self)",
+        )),
+        "failed" => Some(Document::Str(
+            "call 'beamtalk_test_runner':'result_failed'(Self)",
+        )),
+        "total" => Some(Document::Str(
+            "call 'beamtalk_test_runner':'result_total'(Self)",
+        )),
+        "duration" => Some(Document::Str(
+            "call 'beamtalk_test_runner':'result_duration'(Self)",
+        )),
+        "failures" => Some(Document::Str(
+            "call 'beamtalk_test_runner':'result_failures'(Self)",
+        )),
+        "hasPassed" => Some(Document::Str(
+            "call 'beamtalk_test_runner':'result_has_passed'(Self)",
+        )),
+        "summary" => Some(Document::Str(
+            "call 'beamtalk_test_runner':'result_summary'(Self)",
+        )),
+        "printString" => Some(Document::Str(
+            "call 'beamtalk_test_runner':'result_print_string'(Self)",
+        )),
         _ => None,
     }
 }
