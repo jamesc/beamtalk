@@ -403,9 +403,16 @@ remove_temp_project_dir(Dir) ->
 %% @private Build a minimal bt@ module with register_class/0 using abstract forms.
 %% The function calls beamtalk_object_class:start/2 to register the class.
 compile_activation_fixture(ModName, ClassName) ->
+    compile_activation_fixture(ModName, ClassName, 'Object').
+
+%% @private Build a minimal bt@ module with register_class/0 and a specified superclass.
+%% BT-745: Also emits a -beamtalk_class([{ClassName, Superclass}]) attribute for
+%% dependency-ordered loading.
+compile_activation_fixture(ModName, ClassName, Superclass) ->
     Forms = [
         {attribute, 1, module, ModName},
         {attribute, 2, export, [{register_class, 0}]},
+        {attribute, 2, beamtalk_class, [{ClassName, Superclass}]},
         {function, 3, register_class, 0,
          [{clause, 3, [], [],
            [{'case', 4,
@@ -414,7 +421,7 @@ compile_activation_fixture(ModName, ClassName) ->
               [{atom, 4, ClassName},
                {map, 4,
                 [{map_field_assoc, 4, {atom, 4, name},               {atom, 4, ClassName}},
-                 {map_field_assoc, 4, {atom, 4, superclass},         {atom, 4, 'Object'}},
+                 {map_field_assoc, 4, {atom, 4, superclass},         {atom, 4, Superclass}},
                  {map_field_assoc, 4, {atom, 4, module},             {atom, 4, ModName}},
                  {map_field_assoc, 4, {atom, 4, instance_variables}, {nil,  4}},
                  {map_field_assoc, 4, {atom, 4, class_methods},      {map,  4, []}},
@@ -435,6 +442,98 @@ compile_activation_fixture(ModName, ClassName) ->
     ],
     {ok, ModName, BeamBin} = compile:forms(Forms, []),
     BeamBin.
+
+%%====================================================================
+%% Integration test for dependency-ordered activation (BT-745)
+%%====================================================================
+
+%% Test that activate_project_modules/1 sorts modules by superclass dependency
+%% so that a parent class is loaded before a child class. We compile two fixture
+%% modules: BT745Parent (extends Object) and BT745Child (extends BT745Parent).
+%% Both must be registered after activation regardless of filesystem order.
+activate_project_modules_dependency_order_test_() ->
+    {setup,
+     fun() -> ensure_runtime() end,
+     fun(_) ->
+         cleanup_bt745_classes(),
+         purge_bt745_modules()
+     end,
+     fun(_) ->
+         [?_test(begin
+              ParentMod = 'bt@BT745Parent',
+              ChildMod = 'bt@BT745Child',
+              ParentClass = 'BT745Parent',
+              ChildClass = 'BT745Child',
+              {ProjDir, EbinDir} = make_temp_project_dir(),
+              try
+                  ParentBin = compile_activation_fixture(ParentMod, ParentClass, 'Object'),
+                  ChildBin = compile_activation_fixture(ChildMod, ChildClass, ParentClass),
+                  %% Write child FIRST to maximize chance of wrong fs order
+                  ok = file:write_file(
+                      filename:join(EbinDir, "bt@BT745Child.beam"), ChildBin),
+                  ok = file:write_file(
+                      filename:join(EbinDir, "bt@BT745Parent.beam"), ParentBin),
+                  ok = beamtalk_workspace_bootstrap:activate_project_modules(
+                           list_to_binary(ProjDir)),
+                  %% Both classes must be registered
+                  ?assertNotEqual(undefined,
+                      beamtalk_class_registry:whereis_class(ParentClass)),
+                  ?assertNotEqual(undefined,
+                      beamtalk_class_registry:whereis_class(ChildClass))
+              after
+                  remove_temp_project_dir(ProjDir),
+                  code:del_path(EbinDir)
+              end
+          end)]
+     end}.
+
+%% Test that sort_modules_by_dependency/2 orders superclass before subclass.
+sort_modules_by_dependency_test_() ->
+    {setup,
+     fun() -> ensure_runtime() end,
+     fun(_) -> ok end,
+     fun(_) ->
+         [?_test(begin
+              ParentMod = 'bt@BT745SortParent',
+              ChildMod = 'bt@BT745SortChild',
+              {ProjDir, EbinDir} = make_temp_project_dir(),
+              try
+                  ParentBin = compile_activation_fixture(
+                      ParentMod, 'BT745SortParent', 'Object'),
+                  ChildBin = compile_activation_fixture(
+                      ChildMod, 'BT745SortChild', 'BT745SortParent'),
+                  ok = file:write_file(
+                      filename:join(EbinDir, atom_to_list(ParentMod) ++ ".beam"), ParentBin),
+                  ok = file:write_file(
+                      filename:join(EbinDir, atom_to_list(ChildMod) ++ ".beam"), ChildBin),
+                  %% Modules in reverse dependency order (child first)
+                  Input = [ChildMod, ParentMod],
+                  Sorted = beamtalk_workspace_bootstrap:sort_modules_by_dependency(
+                               EbinDir, Input),
+                  %% Parent must come before child
+                  ?assertEqual([ParentMod, ChildMod], Sorted)
+              after
+                  remove_temp_project_dir(ProjDir)
+              end
+          end)]
+     end}.
+
+cleanup_bt745_classes() ->
+    lists:foreach(fun(ClassName) ->
+        case beamtalk_class_registry:whereis_class(ClassName) of
+            undefined -> ok;
+            Pid ->
+                gen_server:stop(Pid, normal, 1000),
+                timer:sleep(50)
+        end
+    end, ['BT745Parent', 'BT745Child']).
+
+purge_bt745_modules() ->
+    lists:foreach(fun(Mod) ->
+        code:purge(Mod),
+        code:delete(Mod)
+    end, ['bt@BT745Parent', 'bt@BT745Child']),
+    ok.
 
 %%====================================================================
 %% Test helpers for temp directories
