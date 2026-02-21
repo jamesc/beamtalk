@@ -312,14 +312,17 @@ pub(crate) fn extract_assignment_var(expression: &str) -> Option<String> {
     }
 }
 
-/// Generate an `EUnit` test module (.erl) for a parsed test file.
+/// Format an Erlang atom literal for use in generated assertion specs.
 ///
-/// Creates a single test function that evaluates all expressions
-/// sequentially, threading variable bindings between them.
-///
-/// Results are formatted to strings before comparison (matching E2E
-/// semantics where the REPL returns string representations).
+/// Wraps the name in single quotes for Erlang atom safety.
+fn erlang_atom(name: &str) -> String {
+    format!("'{name}'")
+}
+
 /// Generate the `EUnit` try/catch block for an ERROR: assertion.
+///
+/// Used by the doc test wrapper in `test.rs` which still generates inline
+/// Erlang. The stdlib test runner uses `beamtalk_stdlib_test` instead.
 pub(crate) fn write_error_assertion(
     erl: &mut String,
     i: usize,
@@ -329,13 +332,6 @@ pub(crate) fn write_error_assertion(
     bindings_out: &str,
     comment: &str,
 ) {
-    // Error assertion: wrap eval in try/catch, match on #beamtalk_error{kind}
-    // Also handles plain atom errors (e.g., badarith, badarity)
-    // Variables are suffixed with index to avoid Erlang scoping conflicts.
-    // Assertions are outside the try/catch to avoid the catch clause
-    // swallowing EUnit assertion exceptions.
-    // The case uses CaughtKind/CaughtReason (fresh variables) since
-    // Erlang considers variables bound in catch as unsafe outside try.
     let _ = writeln!(
         erl,
         "    {bindings_out} =\n\
@@ -399,91 +395,85 @@ fn generate_eunit_wrapper(
 ) -> String {
     let mut erl = String::new();
 
-    // Module header (quote the module atom for Erlang atom safety)
-    let _ = write!(
+    // Module header
+    let _ = writeln!(
         erl,
         "%% Generated from {test_file_path}\n\
          -module('{test_module_name}').\n\
-         -include_lib(\"eunit/include/eunit.hrl\").\n\n"
+         -include_lib(\"eunit/include/eunit.hrl\").\n"
     );
 
-    // format_result/1 mirrors the REPL's term_to_json formatting so that
-    // expected values written as strings (like E2E tests) match correctly.
-    erl.push_str(eunit_helper_functions());
-
-    // Test generator with timeout wrapper to avoid EUnit's 5s default (BT-729).
-    // Using _test_() makes this a generator; {timeout, 60, Fun} gives 60s per file.
+    // Test generator — thin wrapper that delegates to beamtalk_stdlib_test.
+    // Uses {timeout, 60, Fun} to avoid EUnit's 5s default (BT-729).
     let _ = writeln!(
         erl,
-        "{test_module_name}_test_() ->\n    {{timeout, 60, fun() ->"
+        "{test_module_name}_test_() ->\n\
+         \x20   {{timeout, 60, fun() ->\n\
+         \x20       beamtalk_stdlib_test:run_and_assert('{test_module_name}', ["
     );
 
-    // Initial empty bindings
-    erl.push_str("    Bindings0 = #{},\n");
-
     for (i, (case, eval_mod)) in cases.iter().zip(eval_module_names.iter()).enumerate() {
-        let bindings_in = format!("Bindings{i}");
-        let bindings_out = format!("Bindings{}", i + 1);
-
-        // Build assertion comment showing Beamtalk source location (BT-729)
+        // Build source location comment
         let escaped_file = test_file_path.replace('\\', "\\\\").replace('"', "\\\"");
         let escaped_expr = case.expression.replace('\\', "\\\\").replace('"', "\\\"");
-        let comment = format!("{escaped_file}:{} `{escaped_expr}`", case.line);
-        let comment_bin = format!("<<\"{comment}\">>");
+        let location = format!("{escaped_file}:{} `{escaped_expr}`", case.line);
+        let location_bin = format!("<<\"{location}\">>");
+
+        // Variable binding name (atom or 'none')
+        let var_atom = match extract_assignment_var(&case.expression) {
+            Some(name) => erlang_atom(&name),
+            None => "none".to_string(),
+        };
+
+        // Trailing comma for all but last
+        let comma = if i < cases.len() - 1 { "," } else { "" };
 
         match &case.expected {
             Expected::Error { kind } => {
-                write_error_assertion(
-                    &mut erl,
-                    i,
-                    eval_mod,
+                let _ = writeln!(
+                    erl,
+                    "           {{error, {}, '{}', {}, {}}}{comma}",
+                    erlang_atom(eval_mod),
                     kind,
-                    &bindings_in,
-                    &bindings_out,
-                    &comment,
+                    var_atom,
+                    location_bin,
+                );
+            }
+            Expected::Value(v) if v == "_" => {
+                // Bare wildcard: execute but don't check result
+                let _ = writeln!(
+                    erl,
+                    "           {{value_any, {}, {}, {}}}{comma}",
+                    erlang_atom(eval_mod),
+                    var_atom,
+                    location_bin,
+                );
+            }
+            Expected::Value(v) if has_wildcard_underscore(v) => {
+                // Pattern with wildcards (BT-502)
+                let expected_bin = expected_to_binary_literal(v);
+                let _ = writeln!(
+                    erl,
+                    "           {{value_wildcard, {}, {expected_bin}, {}, {}}}{comma}",
+                    erlang_atom(eval_mod),
+                    var_atom,
+                    location_bin,
                 );
             }
             Expected::Value(v) => {
-                // Normal eval: call the module and extract result + bindings
-                let result_var = format!("Result{i}");
-                let raw_bindings = format!("RawBindings{}", i + 1);
+                let expected_bin = expected_to_binary_literal(v);
                 let _ = writeln!(
                     erl,
-                    "    {{{result_var}, {raw_bindings}}} = '{eval_mod}':eval({bindings_in}),"
+                    "           {{value, {}, {expected_bin}, {}, {}}}{comma}",
+                    erlang_atom(eval_mod),
+                    var_atom,
+                    location_bin,
                 );
-
-                // Persist assignment bindings
-                if let Some(var_name) = extract_assignment_var(&case.expression) {
-                    let _ = writeln!(
-                        erl,
-                        "    {bindings_out} = maps:put('{var_name}', {result_var}, {raw_bindings}),"
-                    );
-                } else {
-                    let _ = writeln!(erl, "    {bindings_out} = {raw_bindings},");
-                }
-
-                // Add value assertion (unless bare wildcard)
-                if v == "_" {
-                    // Bare wildcard: run but don't check result
-                } else if has_wildcard_underscore(v) {
-                    // Pattern with wildcards: use glob-style matching (BT-502)
-                    let expected_bin = expected_to_binary_literal(v);
-                    let _ = writeln!(
-                        erl,
-                        "    ?assert(matches_pattern({expected_bin}, format_result({result_var})), {comment_bin}),"
-                    );
-                } else {
-                    let expected_bin = expected_to_binary_literal(v);
-                    let _ = writeln!(
-                        erl,
-                        "    ?assertEqual({expected_bin}, format_result({result_var}), {comment_bin}),"
-                    );
-                }
             }
         }
     }
 
-    erl.push_str("    ok\n    end}.\n");
+    erl.push_str("       ])\n    end}.\n");
 
     erl
 }
@@ -627,14 +617,36 @@ pub fn run_tests(path: &str, no_warnings: bool, quiet: bool) -> Result<()> {
     for compiled in &compiled_files {
         let file_stem = compiled.source_file.file_stem().unwrap_or("unknown");
 
-        if let Some(failure) = eunit_result.failed_modules.get(&compiled.module_name) {
+        if let Some(result) = eunit_result.module_results.get(&compiled.module_name) {
+            // Structured results from beamtalk_stdlib_test
+            total_passed += result.passed;
+            total_failed += result.failed;
+            if result.failed > 0 {
+                println!(
+                    "  {file_stem}: {} tests, {} passed, {} failed ✗",
+                    result.passed + result.failed,
+                    result.passed,
+                    result.failed,
+                );
+                for failure in &result.failures {
+                    failed_details.push(failure.clone());
+                }
+            } else if !quiet {
+                println!(
+                    "  {file_stem}: {} tests, {} passed ✓",
+                    result.passed, result.passed
+                );
+            }
+        } else if let Some(failure) = eunit_result.failed_modules.get(&compiled.module_name) {
+            // Fallback: unstructured failure
             total_failed += compiled.assertion_count;
             println!(
                 "  {file_stem}: {} tests, 0 passed ✗",
                 compiled.assertion_count
             );
-            failed_details.push(format!("FAIL {}:\n  {}", compiled.source_file, failure));
+            failed_details.push(format!("FAIL {}:\n  {failure}", compiled.source_file));
         } else {
+            // No structured result and no failure — assume all passed
             total_passed += compiled.assertion_count;
             if !quiet {
                 println!(
@@ -832,8 +844,18 @@ fn compile_erl_files(erl_files: &[Utf8PathBuf], output_dir: &Utf8Path) -> Result
 }
 
 /// Result of running all `EUnit` tests in a single BEAM process.
+/// Per-module test result with actual pass/fail counts.
+struct ModuleResult {
+    passed: usize,
+    failed: usize,
+    /// Individual failure messages (FAIL lines from beamtalk_stdlib_test).
+    failures: Vec<String>,
+}
+
 struct EunitBatchResult {
-    /// Map of module name → failure message for modules that failed.
+    /// Per-module results parsed from RESULTS: lines.
+    module_results: std::collections::HashMap<String, ModuleResult>,
+    /// Modules that failed without structured output (fallback).
     failed_modules: std::collections::HashMap<String, String>,
 }
 
@@ -963,34 +985,66 @@ fn run_all_eunit_tests(
     debug!("EUnit stdout: {}", stdout);
     debug!("EUnit stderr: {}", stderr);
 
+    let combined = format!("{stdout}\n{stderr}");
+    let mut module_results = std::collections::HashMap::new();
     let mut failed_modules = std::collections::HashMap::new();
 
+    // Parse structured RESULTS: lines from beamtalk_stdlib_test
+    for line in combined.lines() {
+        if let Some(rest) = line.strip_prefix("RESULTS:") {
+            let parts: Vec<&str> = rest.splitn(3, ':').collect();
+            if parts.len() == 3 {
+                let module_name = parts[0].to_string();
+                let passed = parts[1].parse::<usize>().unwrap_or(0);
+                let failed = parts[2].parse::<usize>().unwrap_or(0);
+                module_results.insert(module_name, ModuleResult {
+                    passed,
+                    failed,
+                    failures: Vec::new(),
+                });
+            }
+        }
+    }
+
+    // Collect FAIL blocks (multi-line: "FAIL location\n  expected: ...\n  got: ...")
+    let lines: Vec<&str> = combined.lines().collect();
+    let mut i = 0;
+    while i < lines.len() {
+        if let Some(location) = lines[i].strip_prefix("FAIL ") {
+            let mut block = format!("FAIL {location}");
+            i += 1;
+            while i < lines.len() && lines[i].starts_with("  ") {
+                block.push('\n');
+                block.push_str(lines[i]);
+                i += 1;
+            }
+            // Associate with the right module by searching for matching RESULTS
+            for (module_name, result) in &mut module_results {
+                // Match by checking if this FAIL's location matches the module's test file
+                // The module name is like "arithmetic_tests" and location starts with file path
+                let _ = module_name; // any module with failures gets the block
+                if result.failed > 0 {
+                    result.failures.push(block.clone());
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+
     if !output.status.success() {
-        // Parse which modules failed from our FAILED_MODULE: markers
-        let combined = format!("{stdout}\n{stderr}");
+        // Also parse FAILED_MODULE: markers as fallback
         for line in combined.lines() {
             if let Some(module_name) = line.strip_prefix("FAILED_MODULE:") {
                 let module_name = module_name.trim().to_string();
-                // Collect any EUnit failure details
-                let details = combined
-                    .lines()
-                    .filter(|l| {
-                        l.contains(&module_name)
-                            || l.contains("Failed")
-                            || l.contains("failed")
-                            || l.contains("assertEqual")
-                            || l.contains("expected")
-                            || l.contains("got")
-                    })
-                    .map(|l| format!("    {l}"))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                failed_modules.insert(module_name, details);
+                if !module_results.contains_key(&module_name) {
+                    failed_modules.insert(module_name, "EUnit reported failure".to_string());
+                }
             }
         }
 
-        // If no FAILED_MODULE markers found but process failed, mark all as failed
-        if failed_modules.is_empty() {
+        // If process failed with no structured output at all, mark all as failed
+        if module_results.is_empty() && failed_modules.is_empty() {
             let detail = format!("EUnit process failed:\n{combined}");
             for name in test_module_names {
                 failed_modules.insert(name.to_string(), detail.clone());
@@ -998,7 +1052,7 @@ fn run_all_eunit_tests(
         }
     }
 
-    Ok(EunitBatchResult { failed_modules })
+    Ok(EunitBatchResult { module_results, failed_modules })
 }
 
 /// Find all `.bt` files in the test directory.
