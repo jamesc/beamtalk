@@ -10,7 +10,6 @@ TestCase subclass: TupleTest
 
   testCreation =>
     // Tuple new returns an empty tuple
-    Tuple new.
     self assert: ((Tuple new) class) equals: Tuple.
     // Tuple new: is not supported (no meaningful init-from-map)
     self should: [Tuple new: #{#a => 1}] raise: #instantiation_error

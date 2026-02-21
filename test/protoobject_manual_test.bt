@@ -3,7 +3,7 @@
 
 // ProtoObject behavior tests - the root of the class hierarchy
 
-TestCase subclass: ProtoobjectManualTestTest
+TestCase subclass: ProtoobjectManualTest
 
   testClassReflection =>
     self assert: (42 class) equals: Integer.

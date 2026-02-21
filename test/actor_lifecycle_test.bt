@@ -40,6 +40,6 @@ TestCase subclass: ActorLifecycleTest
   testPrintstringActorInstanceAndClassObject =>
     // Actor instance printString returns "a ClassName"
     c2 := Counter spawn.
-    c2 printString await.
+    self assert: (c2 printString await) equals: "a Counter".
     // Class object printString returns class name
     self assert: (Counter printString) equals: "Counter"

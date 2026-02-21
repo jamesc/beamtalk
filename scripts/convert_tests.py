@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
 """Convert stdlib expression tests (// =>) to TestCase/BUnit format.
 
 Usage: python3 convert_tests.py [--dry-run] [file.bt ...]
@@ -386,9 +389,18 @@ def is_balanced_brackets(expr, open_ch, close_ch):
         return False
     depth = 0
     in_string = False
-    for i, c in enumerate(expr):
+    i = 0
+    while i < len(expr):
+        c = expr[i]
         if c == '"':
-            in_string = not in_string
+            if in_string:
+                # Check for doubled delimiter (escaped quote)
+                if i + 1 < len(expr) and expr[i + 1] == '"':
+                    i += 2
+                    continue
+                in_string = False
+            else:
+                in_string = True
         elif not in_string:
             if c == open_ch:
                 depth += 1
@@ -396,6 +408,7 @@ def is_balanced_brackets(expr, open_ch, close_ch):
                 depth -= 1
                 if depth == 0:
                     return i == len(expr) - 1
+        i += 1
     return False
 
 
