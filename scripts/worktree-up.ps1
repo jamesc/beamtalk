@@ -171,6 +171,23 @@ function Get-ProjectName {
     return Split-Path $RepoPath -Leaf
 }
 
+# Run project-specific setup hook inside container
+function Invoke-WorktreeUpHook {
+    param([string]$WorktreePath)
+    
+    $upHookScript = Join-Path $WorktreePath ".devcontainer" "worktree-up-hook.sh"
+    if (Test-Path $upHookScript) {
+        Write-Host "🔧 Running project setup hook..." -ForegroundColor Cyan
+        devcontainer exec --workspace-folder $WorktreePath bash .devcontainer/worktree-up-hook.sh 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✅ Project setup hook completed" -ForegroundColor Green
+        }
+        else {
+            Write-Host "⚠️  Project setup hook failed" -ForegroundColor Yellow
+        }
+    }
+}
+
 # Check if a devcontainer is running for a worktree path
 function Test-ContainerRunning {
     param([string]$WorktreePath)
@@ -404,6 +421,8 @@ if ($skipWorktreeSetup) {
         Write-Host "   Set gitdir to: /workspaces/$worktreeName" -ForegroundColor Gray
     }
     Write-Host "✅ Git paths pre-configured for container" -ForegroundColor Green
+
+    Invoke-WorktreeUpHook -WorktreePath $worktreePath
 }
 else {
     # Sync devcontainer config from main repo (worktrees may be created from old commits)
@@ -507,6 +526,8 @@ if ($LASTEXITCODE -eq 0) {
 else {
     Write-Host "⚠️  Could not configure Copilot CLI" -ForegroundColor Yellow
 }
+
+Invoke-WorktreeUpHook -WorktreePath $worktreePath
 
 # Copy SSH signing key if configured
 if ($env:GIT_SIGNING_KEY) {
