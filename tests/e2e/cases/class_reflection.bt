@@ -93,16 +93,16 @@ counterMethods includes: #decrement
 counterMethods includes: #getValue
 // => true
 
-// ADR 0032 Phase 1: methods returns local-only selectors.
-// Inherited Object methods are NOT included in the local list.
+// ADR 0032 Phase 2: methods returns full hierarchy (local + inherited).
+// Inherited Object methods ARE included via Behaviour.methods chain walk.
 counterMethods includes: #isNil
-// => false
+// => true
 
 counterMethods includes: #printString
-// => false
+// => true
 
 counterMethods includes: #respondsTo:
-// => false
+// => true
 
 // ---------------------------------------------------------------------------
 // Get methods list from Integer class
