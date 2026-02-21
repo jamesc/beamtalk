@@ -502,7 +502,7 @@ impl CoreErlangGenerator {
 
             let body_doc = Document::Vec(body_parts);
             Ok(docvec![
-                format!("'{}'/{}= fun ({}) ->\n", mangled, arity, params.join(", ")),
+                format!("'{}'/{} = fun ({}) ->\n", mangled, arity, params.join(", ")),
                 format!("    let {token_var} = call 'erlang':'make_ref'() in\n"),
                 format!("    try\n"),
                 body_doc,
@@ -519,7 +519,7 @@ impl CoreErlangGenerator {
             ])
         } else {
             Ok(docvec![
-                format!("'{}'/{}= fun ({}) ->\n", mangled, arity, params.join(", ")),
+                format!("'{}'/{} = fun ({}) ->\n", mangled, arity, params.join(", ")),
                 Document::Vec(body_parts),
                 "\n",
             ])

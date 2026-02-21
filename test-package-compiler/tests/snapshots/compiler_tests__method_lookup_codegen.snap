@@ -14,10 +14,10 @@ module 'method_lookup' ['new'/0, 'new'/1, 'lookupLiteral'/1, 'lookupVariable:'/2
     call 'maps':'merge'(DefaultState, InitArgs)
 
 
-'lookupLiteral'/1= fun (Self) ->
+'lookupLiteral'/1 = fun (Self) ->
 call 'beamtalk_method_resolver':'resolve'('Counter', 'increment')
 
-'lookupVariable:'/2= fun (Self, _cls1) ->
+'lookupVariable:'/2 = fun (Self, _cls1) ->
 call 'beamtalk_method_resolver':'resolve'(_cls1, 'getValue')
 
 'dispatch'/3 = fun (Selector, Args, Self) ->

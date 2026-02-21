@@ -20,16 +20,16 @@ module 'typed_value_type' ['new'/0, 'new'/1, 'getX'/1, 'getY'/1, 'distanceTo:'/2
     call 'maps':'merge'(DefaultState, InitArgs)
 
 
-'getX'/1= fun (Self) ->
+'getX'/1 = fun (Self) ->
 call 'maps':'get'('x', Self)
 
-'getY'/1= fun (Self) ->
+'getY'/1 = fun (Self) ->
 call 'maps':'get'('y', Self)
 
-'distanceTo:'/2= fun (Self, _other1) ->
+'distanceTo:'/2 = fun (Self, _other1) ->
 call 'bt@stdlib@typed_point':'dispatch'('distanceTo:', [_other1], Self)
 
-'printString'/1= fun (Self) ->
+'printString'/1 = fun (Self) ->
 call 'bt@stdlib@typed_point':'dispatch'('printString', [], Self)
 
 'dispatch'/3 = fun (Selector, Args, Self) ->
