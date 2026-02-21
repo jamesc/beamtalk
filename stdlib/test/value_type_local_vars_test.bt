@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-744: Local variable bindings in Object subclass method bodies
+
+// @load stdlib/test/fixtures/calculator.bt
+
+TestCase subclass: ValueTypeLocalVarsTest
+
+  testSection1 =>
+    c := Calculator new.
+    // Single local variable: assign and read back
+    self assert: (c double: 7) equals: 14.
+    // Multiple locals in sequence: each must be visible to subsequent expressions
+    self assert: (c compute: 3) equals: 16.
+    // Local variable used as receiver of a message send
+    self assert: (c addAndNegate: 4 to: 6) equals: -10.
+    // Local variable from a conditional
+    self assert: (c absVal: -5) equals: 5.
+    self assert: (c absVal: 3) equals: 3

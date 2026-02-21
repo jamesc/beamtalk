@@ -2,8 +2,8 @@
 
 > **Last updated:** 2026-02-12
 > **Issue:** BT-247
-> **Methodology:** Audit of `lib/*.bt` files, compiler intrinsics (`intrinsics.rs`, `primitive_bindings.rs`),
-> runtime dispatch modules (`beamtalk_*.erl`), stdlib test coverage (`tests/stdlib/*.bt`), and E2E test coverage (`tests/e2e/cases/*.bt`).
+> **Methodology:** Audit of `stdlib/src/*.bt` files, compiler intrinsics (`intrinsics.rs`, `primitive_bindings.rs`),
+> runtime dispatch modules (`beamtalk_*.erl`), stdlib test coverage (`stdlib/bootstrap-test/*.bt`), and E2E test coverage (`tests/e2e/cases/*.bt`).
 
 ## Executive Summary
 
@@ -12,10 +12,10 @@
 | **Total stdlib methods** | 332 |
 | **✅ Implemented** | 332 (100%) |
 | **❌ Not Implemented** | 0 (0%) |
-| **Stdlib test coverage** | 1046 assertions in tests/stdlib/ |
+| **Stdlib test coverage** | 1046 assertions in stdlib/bootstrap-test/ |
 | **E2E test coverage** | 213 assertions in tests/e2e/cases/ |
 | **Stdlib .bt files** | 29 |
-| **Runtime-only classes** | 0 (CompiledMethod now has lib/CompiledMethod.bt) |
+| **Runtime-only classes** | 0 (CompiledMethod now has stdlib/src/CompiledMethod.bt) |
 | **Missing .bt files** | 0 |
 
 ## Status Categories
@@ -38,7 +38,7 @@
 
 ## Tier 1: Core Classes
 
-### ProtoObject (`lib/ProtoObject.bt`)
+### ProtoObject (`stdlib/src/ProtoObject.bt`)
 
 **Class:** `ProtoObject` — superclass: `nil` (root class)
 **Methods:** 5/5 implemented (100%)
@@ -51,7 +51,7 @@
 | `doesNotUnderstand:args:` | intrinsic | ✅ | 🧪 | Fallback for unknown messages |
 | `perform:withArguments:` | intrinsic | ✅ | 🧪 | Dynamic dispatch |
 
-### Object (`lib/Object.bt`)
+### Object (`stdlib/src/Object.bt`)
 
 **Class:** `Object` — superclass: `ProtoObject`
 **Methods:** 23/23 implemented (100%)
@@ -84,7 +84,7 @@
 
 _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getValue => ...`), not an `Object` selector. It is documented here for completeness but is not counted as a stdlib method.
 
-### Number (`lib/Number.bt`)
+### Number (`stdlib/src/Number.bt`)
 
 **Class:** `Number` — superclass: `Object` — `abstract`
 **Methods:** 5/5 implemented (100%)
@@ -97,7 +97,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `sign` | pure BT | ✅ | 🧪 | `Number>>sign` |
 | `between:and:` | pure BT | ✅ | 🧪 | `Magnitude>>between:and:` |
 
-### Integer (`lib/Integer.bt`)
+### Integer (`stdlib/src/Integer.bt`)
 
 **Class:** `Integer` — superclass: `Number` — `@sealed`
 **Methods:** 38/38 implemented (100%)
@@ -143,7 +143,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `isLowercase` | @primitive selector | ✅ | | Character classification (BT-461) |
 | `isWhitespace` | @primitive selector | ✅ | | Character classification (BT-461) |
 
-### String (`lib/String.bt`)
+### String (`stdlib/src/String.bt`)
 
 **Class:** `String` — superclass: `Object` — `@sealed`
 **Methods:** 48/48 implemented (100%)
@@ -199,12 +199,12 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `describe` | pure BT | ✅ | | N/A |
 | `printString` | pure BT | ✅ | | `String>>printString` |
 
-### List (`lib/List.bt`)
+### List (`stdlib/src/List.bt`)
 
 **Class:** `List` — superclass: `Object` — `@sealed`
 **Methods:** 38/38 implemented (100%)
 **Note:** List in Beamtalk maps to Erlang linked lists. Literal syntax: `#(1, 2, 3)`. Renamed from Array in BT-419 — `Array` is reserved for a future tuple-backed O(1)-indexed collection.
-**Migration:** BT-419 — migrated from hand-written `beamtalk_list.erl` (Option B) to compiled `lib/List.bt` with BIF mappings (Option A). Complex operations delegate to `beamtalk_list_ops.erl`.
+**Migration:** BT-419 — migrated from hand-written `beamtalk_list.erl` (Option B) to compiled `stdlib/src/List.bt` with BIF mappings (Option A). Complex operations delegate to `beamtalk_list_ops.erl`.
 
 | Selector | Mechanism | Status | E2E | Pharo Equivalent |
 |----------|-----------|--------|-----|------------------|
@@ -246,7 +246,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `intersperse:` | @primitive → `beamtalk_list_ops:intersperse/2` | ✅ | 🧪 | N/A |
 | `describe` | pure BT | ✅ | | N/A |
 
-### Block (`lib/Block.bt`)
+### Block (`stdlib/src/Block.bt`)
 
 **Class:** `Block` — superclass: `Object` — `@sealed`
 **Methods:** 12/12 implemented (100%)
@@ -266,7 +266,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `valueWithArguments:` | @primitive selector | ✅ | 🧪 | `BlockClosure>>valueWithArguments:` |
 | `describe` | pure BT | ✅ | | N/A |
 
-### True (`lib/True.bt`) & False (`lib/False.bt`)
+### True (`stdlib/src/True.bt`) & False (`stdlib/src/False.bt`)
 
 **Class:** `True` / `False` — superclass: `Boolean` — `@sealed`
 **Methods:** 8/8 implemented each (100%)
@@ -283,7 +283,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `describe` | pure BT | ✅ | | N/A |
 | `printString` | pure BT | ✅ | | `Boolean>>printString` |
 
-### UndefinedObject (`lib/UndefinedObject.bt`)
+### UndefinedObject (`stdlib/src/UndefinedObject.bt`)
 
 **Class:** `UndefinedObject` — superclass: `Object` — `@sealed`
 **Methods:** 11/11 implemented (100%)
@@ -302,7 +302,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `describe` | pure BT | ✅ | | N/A |
 | `printString` | pure BT | ✅ | | `UndefinedObject>>printString` |
 
-### Float (`lib/Float.bt`)
+### Float (`stdlib/src/Float.bt`)
 
 **Class:** `Float` — superclass: `Number` — `@sealed`
 **Methods:** 25/25 implemented (100%)
@@ -339,7 +339,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 
 ## Tier 2: Standard Classes
 
-### Actor (`lib/Actor.bt`)
+### Actor (`stdlib/src/Actor.bt`)
 
 **Class:** `Actor` — superclass: `Object` — `@sealed`
 **Methods:** 5/5 implemented (100%)
@@ -352,7 +352,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `new:` | pure BT | ✅ | | Error: "Use spawnWith: instead" |
 | `describe` | pure BT | ✅ | | Returns string literal |
 
-### File (`lib/File.bt`)
+### File (`stdlib/src/File.bt`)
 
 **Class:** `File` — superclass: `Object`
 **Methods:** 3/3 implemented (100%) — all class-level methods
@@ -363,7 +363,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `readAll:` | @primitive selector | ✅ | 🧪 | `FileReference>>contents` |
 | `writeAll:contents:` | @primitive selector | ✅ | 🧪 | `FileReference>>writeStream` |
 
-### Beamtalk / SystemDictionary (`lib/SystemDictionary.bt`)
+### Beamtalk / SystemDictionary (`stdlib/src/SystemDictionary.bt`)
 
 **Class:** `SystemDictionary` — superclass: `Actor`
 **Methods:** 4/4 implemented (100%)
@@ -375,9 +375,9 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `globals` | @primitive selector | ✅ | | `Smalltalk>>globals` |
 | `version` | @primitive selector | ✅ | 🧪 | N/A |
 
-### Dictionary (`lib/Dictionary.bt` — BT-418)
+### Dictionary (`stdlib/src/Dictionary.bt` — BT-418)
 
-**Stdlib module:** `lib/Dictionary.bt` → `beamtalk_dictionary`
+**Stdlib module:** `stdlib/src/Dictionary.bt` → `beamtalk_dictionary`
 **Helper module:** `beamtalk_map_ops.erl` (complex operations)
 **Methods:** 11 — all implemented
 
@@ -395,9 +395,9 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `keysAndValuesDo:` | @primitive selector | ✅ | 🧪 | `Dictionary>>keysAndValuesDo:` |
 | `describe` | pure BT | ✅ | | `Dictionary>>printString` |
 
-### Set (`lib/Set.bt` — BT-73)
+### Set (`stdlib/src/Set.bt` — BT-73)
 
-**Stdlib module:** `lib/Set.bt` → `beamtalk_set`
+**Stdlib module:** `stdlib/src/Set.bt` → `beamtalk_set`
 **Helper module:** `beamtalk_set_ops.erl` (ordsets operations + tagged map wrapping)
 **Representation:** Tagged map `#{'$beamtalk_class' => 'Set', elements => [sorted_list]}`
 **Methods:** 14 — all implemented
@@ -420,9 +420,9 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `printString` | ✅ | `beamtalk_primitive:print_string/1` | `Set>>printString` (BT-477) |
 | `describe` | ✅ | Returns `'a Set'` | `Set>>printString` |
 
-**Test coverage:** 14 of 15 methods tested in `tests/stdlib/set.bt` (47 assertions). Only `describe` lacks test coverage.
+**Test coverage:** 14 of 15 methods tested in `stdlib/bootstrap-test/set.bt` (47 assertions). Only `describe` lacks test coverage.
 
-### Tuple (`lib/Tuple.bt`)
+### Tuple (`stdlib/src/Tuple.bt`)
 
 **Class:** `Tuple` — superclass: `Object` — `@sealed`
 **Methods:** 8/8 implemented (100%)
@@ -439,7 +439,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `unwrapOrElse:` | @primitive selector | ✅ | | Extract or evaluate block |
 | `asString` | @primitive selector | ✅ | | String representation |
 
-### Symbol (`lib/Symbol.bt`)
+### Symbol (`stdlib/src/Symbol.bt`)
 
 **Class:** `Symbol` — superclass: `Object` — `@sealed`
 **Methods:** 7/7 implemented (100%)
@@ -454,7 +454,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `/=` | @primitive selector | ✅ | 🧪 | `Symbol>>~=` |
 | `hash` | @primitive selector | ✅ | 🧪 | `Symbol>>hash` |
 
-### Association (`lib/Association.bt`)
+### Association (`stdlib/src/Association.bt`)
 
 **Class:** `Association` — superclass: `Object` — `@sealed`
 **Methods:** 5/5 implemented (100%)
@@ -467,7 +467,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `printString` | pure BT | ✅ | | `Association>>printString` |
 | `describe` | pure BT | ✅ | | N/A |
 
-### Exception (`lib/Exception.bt`)
+### Exception (`stdlib/src/Exception.bt`)
 
 **Class:** `Exception` — superclass: `Object`
 **Methods:** 9/9 implemented (100%)
@@ -484,7 +484,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `signal` | @primitive selector | ✅ | | `Exception>>signal` |
 | `signal:` | @primitive selector | ✅ | | `Exception>>signal:` |
 
-### Error (`lib/Error.bt`)
+### Error (`stdlib/src/Error.bt`)
 
 **Class:** `Error` — superclass: `Exception`
 **Methods:** 1/1 implemented (100%)
@@ -493,7 +493,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 |----------|-----------|--------|-----|------------------|
 | `describe` | pure BT | ✅ | | N/A |
 
-### TranscriptStream (`lib/TranscriptStream.bt`)
+### TranscriptStream (`stdlib/src/TranscriptStream.bt`)
 
 **Class:** `TranscriptStream` — superclass: `Actor`
 **Methods:** 6/6 implemented (100%)
@@ -509,7 +509,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 
 ---
 
-### CompiledMethod (`lib/CompiledMethod.bt`)
+### CompiledMethod (`stdlib/src/CompiledMethod.bt`)
 
 **Class:** `CompiledMethod` — superclass: `Object`
 **Methods:** 5/5 implemented (100%)
@@ -522,7 +522,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `printString` | @primitive selector | ✅ | 🧪 | `CompiledMethod>>printString` |
 | `asString` | @primitive selector | ✅ | | `CompiledMethod>>asString` |
 
-### Character (`lib/Character.bt`)
+### Character (`stdlib/src/Character.bt`)
 
 **Class:** `Character` — superclass: `Object` — `@sealed`
 **Methods:** 19/19 implemented (100%)
@@ -549,7 +549,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `lowercase` | @primitive selector | ✅ | 🧪 | Case conversion |
 | `class value:` | @primitive selector | ✅ | 🧪 | Construct from code point |
 
-### Boolean (`lib/Boolean.bt`)
+### Boolean (`stdlib/src/Boolean.bt`)
 
 **Class:** `Boolean` — superclass: `Object` — `abstract`
 **Methods:** 4/4 implemented (100%)
@@ -561,7 +561,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `or:` | pure BT | ✅ | 🧪 | Logical OR |
 | `xor:` | pure BT | ✅ | 🧪 | Logical XOR |
 
-### TestCase (`lib/TestCase.bt`)
+### TestCase (`stdlib/src/TestCase.bt`)
 
 **Class:** `TestCase` — superclass: `Object`
 **Methods:** 7/7 implemented (100%)
@@ -576,7 +576,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `should:raise:` | @primitive selector | ✅ | 🧪 | Assert exception |
 | `fail:` | @primitive selector | ✅ | 🧪 | Fail with message |
 
-### InstantiationError (`lib/InstantiationError.bt`)
+### InstantiationError (`stdlib/src/InstantiationError.bt`)
 
 **Class:** `InstantiationError` — superclass: `Error`
 **Methods:** 1/1 implemented (100%)
@@ -585,7 +585,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 |----------|-----------|--------|-----|-------|
 | `describe` | pure BT | ✅ | 🧪 | Error description |
 
-### RuntimeError (`lib/RuntimeError.bt`)
+### RuntimeError (`stdlib/src/RuntimeError.bt`)
 
 **Class:** `RuntimeError` — superclass: `Error`
 **Methods:** 1/1 implemented (100%)
@@ -594,7 +594,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 |----------|-----------|--------|-----|-------|
 | `describe` | pure BT | ✅ | 🧪 | Error description |
 
-### TypeError (`lib/TypeError.bt`)
+### TypeError (`stdlib/src/TypeError.bt`)
 
 **Class:** `TypeError` — superclass: `Error`
 **Methods:** 1/1 implemented (100%)
@@ -671,7 +671,7 @@ Methods that Pharo users would expect but Beamtalk does **not** define or implem
 
 ## Missing `.bt` Files
 
-All stdlib classes now have corresponding `lib/*.bt` definitions.
+All stdlib classes now have corresponding `stdlib/src/*.bt` definitions.
 
 | Class | Status | Notes |
 |-------|--------|-------|
@@ -682,7 +682,7 @@ All stdlib classes now have corresponding `lib/*.bt` definitions.
 
 ## Test Coverage Gaps
 
-Test coverage is now spread across both `tests/stdlib/` (1046 assertions) and `tests/e2e/cases/` (213 assertions).
+Test coverage is now spread across both `stdlib/bootstrap-test/` (1046 assertions) and `tests/e2e/cases/` (213 assertions).
 Many previously untested methods now have stdlib test coverage. The following gaps remain for methods
 with no coverage in either test suite:
 
@@ -718,12 +718,12 @@ with no coverage in either test suite:
 
 For each method, testing was performed in this priority order:
 
-1. **Stdlib tests** (`tests/stdlib/*.bt`) — compiled expression tests (ADR 0014)
+1. **Stdlib tests** (`stdlib/bootstrap-test/*.bt`) — compiled expression tests (ADR 0014)
 2. **E2E test files** (`tests/e2e/cases/*.bt`) — REPL integration tests
 3. **Compiler intrinsics** (`crates/beamtalk-core/src/codegen/core_erlang/intrinsics.rs`) — verified codegen handler exists
 4. **Primitive bindings** (`crates/beamtalk-core/src/codegen/core_erlang/primitive_bindings.rs`, `primitive_implementations.rs`) — verified selector-based dispatch codegen
 5. **Runtime dispatch** (`runtime/apps/beamtalk_runtime/src/beamtalk_*.erl`) — verified dispatch clause handles the selector
-6. **Pure Beamtalk** (`lib/*.bt`) — verified method body compiles (not just a comment)
+6. **Pure Beamtalk** (`stdlib/src/*.bt`) — verified method body compiles (not just a comment)
 
 A method is marked ✅ if at least one implementation path exists (intrinsic, runtime dispatch, or compiled Beamtalk).
 A method is marked 🧪 if a stdlib or E2E test file exercises it with a `// =>` assertion.

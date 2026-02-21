@@ -5,7 +5,7 @@ Implemented (2026-02-15)
 
 ## Context
 
-Beamtalk's standard library lives in 26 `lib/*.bt` files that were recently converted from documentation-only stubs to compilable source with `@primitive` pragmas (BT-293, ADR 0007 Phase 2). During conversion, verbose API documentation headers were removed, leaving concise class comments and method signatures as the only documentation.
+Beamtalk's standard library lives in 26 `stdlib/src/*.bt` files that were recently converted from documentation-only stubs to compilable source with `@primitive` pragmas (BT-293, ADR 0007 Phase 2). During conversion, verbose API documentation headers were removed, leaving concise class comments and method signatures as the only documentation.
 
 **The problem:** There is no structured way to document methods, classes, or modules in Beamtalk source code. The language has `//` line comments and `/* */` block comments, but no **doc-comment syntax** that tooling can extract for:
 
@@ -233,7 +233,7 @@ Rejected because there's no way to distinguish documentation comments from imple
 
 ### Negative
 - **New syntax to learn:** Developers must know `///` vs `//` distinction
-- **Stdlib rewrite:** All 26 `lib/*.bt` files need doc comments added
+- **Stdlib rewrite:** All 26 `stdlib/src/*.bt` files need doc comments added
 - **Codegen complexity:** Generating EEP-48 `Docs` chunks requires building the `docs_v1` term structure and injecting it into the `.core` → `.beam` pipeline
 
 ### Neutral
@@ -254,7 +254,7 @@ Rejected because there's no way to distinguish documentation comments from imple
 ## Implementation
 
 ### Phase 1: Write Stdlib `///` Docs (S)
-- Add `///` doc comments to all 27 classes and their methods in `lib/*.bt`
+- Add `///` doc comments to all 27 classes and their methods in `stdlib/src/*.bt`
 - Add `README.md` for package-level overview documentation
 - Follow convention: first line = summary, `## Examples` section with `// =>` assertions
 - **Zero infrastructure needed** — `///` is currently a regular comment. Docs are immediately readable in source, on GitHub, and in code review.

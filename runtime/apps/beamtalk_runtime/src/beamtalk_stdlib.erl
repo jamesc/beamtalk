@@ -5,7 +5,7 @@
 %%%
 %%% **DDD Context:** Standard Library
 %%%
-%%% This module loads all compiled stdlib modules (from lib/*.bt) at runtime
+%%% This module loads all compiled stdlib modules (from stdlib/src/*.bt) at runtime
 %%% startup. All class registrations are handled by compiled stdlib modules
 %%% themselves — no hand-written registrations remain.
 %%%
@@ -29,7 +29,7 @@
 %%%
 %%% ## Adding a New Stdlib Class
 %%%
-%%% Just add a .bt file to lib/ and run `beamtalk build-stdlib`.
+%%% Just add a .bt file to stdlib/src/ and run `beamtalk build-stdlib`.
 %%% No Erlang code changes needed.
 -module(beamtalk_stdlib).
 -include_lib("kernel/include/logger.hrl").

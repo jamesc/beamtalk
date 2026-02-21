@@ -1,0 +1,47 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for recursive method dispatch BT-330
+
+// @load stdlib/test/fixtures/math_helper.bt
+// @load stdlib/test/fixtures/recursive_actor.bt
+
+TestCase subclass: RecursionTest
+
+  testRecursiveKeywordMethodFactorial =>
+    m := MathHelper new.
+    // Base cases
+    self assert: (m factorial: 0) equals: 1.
+    self assert: (m factorial: 1) equals: 1.
+    // Recursive cases (5+ depth)
+    self assert: (m factorial: 5) equals: 120.
+    self assert: (m factorial: 10) equals: 3628800
+
+  testDoubleRecursiveKeywordMethodFibonacci =>
+    m := MathHelper new.
+    // Base cases
+    self assert: (m fibonacci: 0) equals: 0.
+    self assert: (m fibonacci: 1) equals: 1.
+    // Recursive cases (5+ depth)
+    self assert: (m fibonacci: 5) equals: 5.
+    self assert: (m fibonacci: 10) equals: 55
+
+  testRecursiveCountdownDepthVerification =>
+    m := MathHelper new.
+    // Verifies 10+ recursion depth
+    self assert: (m countdown: 10) equals: 10.
+    self assert: (m countdown: 20) equals: 20
+
+  testActorRecursiveSelfSends =>
+    // and cross-method self-sends work correctly (no Future/badarith).
+    a := RecursiveActor spawn.
+    // Base case (no self-send needed)
+    self assert: ((a factorial: 1) await) equals: 1.
+    // Recursive self-send on Actor
+    self assert: ((a factorial: 5) await) equals: 120.
+    // Actor self-sends use synchronous direct dispatch, so recursive methods
+    self assert: ((a factorial: 10) await) equals: 3628800.
+    // Double recursion on Actor
+    self assert: ((a fibonacci: 10) await) equals: 55.
+    // Cross-method self-send (self double: n, then * 2)
+    self assert: ((a quadruple: 5) await) equals: 20

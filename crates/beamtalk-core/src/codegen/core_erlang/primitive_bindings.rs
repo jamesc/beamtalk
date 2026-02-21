@@ -585,7 +585,7 @@ mod tests {
             .unwrap()
             .parent()
             .unwrap()
-            .join("lib");
+            .join("stdlib/src");
 
         if !lib_dir.exists() {
             // Skip test if lib/ doesn't exist (e.g., in CI without full repo)

@@ -11,8 +11,8 @@ Beamtalk uses a multi-layered testing strategy covering the Rust compiler, Erlan
 | Unit Tests | Rust `#[test]` | `crates/*/src/*.rs` | Test individual functions and modules |
 | Snapshot Tests | insta | `test-package-compiler/` | Validate lexer, parser, and codegen output |
 | Compilation Tests | erlc | `test-package-compiler/` | Verify generated Core Erlang compiles |
-| **Stdlib Tests** | **EUnit (compiled)** | **`tests/stdlib/*.bt`** | **Bootstrap primitive validation (no REPL needed)** |
-| **BUnit Tests** | **EUnit (TestCase)** | **`test/*.bt`** | **Language feature tests via TestCase (`beamtalk test`)** |
+| **Stdlib Tests** | **EUnit (compiled)** | **`stdlib/bootstrap-test/*.bt`** | **Bootstrap primitive validation (no REPL needed)** |
+| **BUnit Tests** | **EUnit (TestCase)** | **`stdlib/test/*.bt`** | **Language feature tests via TestCase (`beamtalk test`)** |
 | Runtime Unit Tests | EUnit | `runtime/apps/beamtalk_runtime/test/*_tests.erl` | Test Erlang runtime modules |
 | Integration Tests | EUnit + daemon | `runtime/apps/beamtalk_runtime/test/*_integration_tests.erl` | Test REPL ↔ daemon communication |
 | Codegen Simulation Tests | EUnit | `runtime/apps/beamtalk_runtime/test/beamtalk_codegen_simulation_tests.erl` | Simulate compiler output, test runtime behavior |
@@ -233,7 +233,7 @@ These tests verify that generated Core Erlang actually compiles with `erlc`.
 
 Expression tests for bootstrap-critical primitives that TestCase transitively depends on. These must remain as expression tests because TestCase itself relies on these features working correctly.
 
-**Location:** `tests/stdlib/*.bt`
+**Location:** `stdlib/bootstrap-test/*.bt`
 
 **Count:** ~16 test files, ~394 assertions
 
@@ -280,7 +280,7 @@ Also kept as expression tests due to compile-time type check constraints:
 | All other language feature tests | ❌ No — use BUnit tests |
 
 **Adding a new stdlib test:**
-1. Create `tests/stdlib/my_feature.bt`
+1. Create `stdlib/bootstrap-test/my_feature.bt`
 2. Add expressions with `// => expected_result` annotations
 3. Run `just test-stdlib`
 
@@ -292,7 +292,7 @@ Also kept as expression tests due to compile-time type check constraints:
 
 SUnit-style test classes that subclass `TestCase`. The primary home for language feature tests — collections, closures, regex, actors, reflection, and more.
 
-**Location:** `test/*.bt` (project test directory)
+**Location:** `stdlib/test/*.bt` (project test directory)
 
 **Count:** ~77 test files, ~1293 assertions
 
@@ -302,7 +302,7 @@ SUnit-style test classes that subclass `TestCase`. The primary home for language
 
 **Test file format:**
 ```beamtalk
-// test/counter_test.bt
+// stdlib/test/counter_test.bt
 
 TestCase subclass: CounterTest
 
@@ -333,7 +333,7 @@ TestCase subclass: CounterTest
 
 **REPL integration:** TestCase classes can also be run interactively:
 ```text
-> :load test/counter_test.bt
+> :load stdlib/test/counter_test.bt
 > CounterTest runAll        // Run all tests in class
 > CounterTest run: #testIncrement  // Run single test
 ```
@@ -349,7 +349,7 @@ TestCase subclass: CounterTest
 | REPL command testing | ❌ No — use E2E |
 
 **Adding a BUnit test:**
-1. Create `test/my_feature_test.bt` with `TestCase subclass: MyFeatureTest`
+1. Create `stdlib/test/my_feature_test.bt` with `TestCase subclass: MyFeatureTest`
 2. Add test methods prefixed with `test`
 3. Run `just test-bunit`
 
@@ -483,7 +483,7 @@ REPL and workspace integration tests that require a running REPL daemon.
 - Integration between compiler daemon and runtime
 
 **When to use E2E tests:**
-Only for tests that genuinely need the REPL daemon. Most language feature tests belong in `test/*.bt` as BUnit tests (see section 4b).
+Only for tests that genuinely need the REPL daemon. Most language feature tests belong in `stdlib/test/*.bt` as BUnit tests (see section 4b).
 
 **Test file format:**
 ```smalltalk
@@ -516,7 +516,7 @@ cargo test --test e2e -- --ignored --nocapture
 2. Add expressions with `// =>` expected results
 3. Run `just test-e2e`
 
-**Note:** Before adding to E2E, consider whether the test needs the REPL. If it tests pure language features, add it to `test/*.bt` as a BUnit test instead (see section 4b).
+**Note:** Before adding to E2E, consider whether the test needs the REPL. If it tests pure language features, add it to `stdlib/test/*.bt` as a BUnit test instead (see section 4b).
 
 **Error testing:**
 ```smalltalk
@@ -695,7 +695,7 @@ mod tests {
 
 ### Adding a Stdlib Test (Bootstrap Primitives)
 
-1. Create `tests/stdlib/my_feature.bt`
+1. Create `stdlib/bootstrap-test/my_feature.bt`
 2. Add expressions with `// => expected_result` annotations
 3. Optionally use `// @load path/to/fixture.bt` for fixtures
 4. Run `just test-stdlib`
@@ -715,7 +715,7 @@ sideEffectExpression
 
 ### Adding a BUnit Test (TestCase Classes)
 
-1. Create `test/my_feature_test.bt` with `TestCase subclass: MyFeatureTest`
+1. Create `stdlib/test/my_feature_test.bt` with `TestCase subclass: MyFeatureTest`
 2. Add test methods prefixed with `test` (auto-discovered)
 3. Optionally add `setUp`/`tearDown` for fixtures
 4. Run `just test-bunit`

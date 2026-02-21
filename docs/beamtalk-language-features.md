@@ -717,7 +717,7 @@ Beamtalk's standard library classes (e.g., `Integer`, `String`, `Array`, `Actor`
 `Object`, `Boolean`) are **protected** against redefinition in user code. There
 are two layers of protection:
 
-**Compile-time warning** — fires for all stdlib class names (both `lib/*.bt`
+**Compile-time warning** — fires for all stdlib class names (both `stdlib/src/*.bt`
 classes and runtime-only built-ins like `Future`):
 
 ```beamtalk
@@ -729,7 +729,7 @@ Object subclass: Integer
 ```
 
 **Runtime load-time error** — fires for fully-featured stdlib classes that are
-backed by `lib/*.bt` source files and loaded under the `bt@stdlib@*` module
+backed by `stdlib/src/*.bt` source files and loaded under the `bt@stdlib@*` module
 prefix. Attempting to load user code that redefines one of these returns a
 structured error:
 
@@ -952,21 +952,21 @@ Both forms are semantically equivalent at the compiler level (they produce the s
 
 **`@primitive` (quoted)** — runtime-dispatched method implementations:
 ```beamtalk
-// In lib/Integer.bt
+// In stdlib/src/Integer.bt
 + other => @primitive '+'
 asString => @primitive 'asString'
 ```
 
 **`@intrinsic` (unquoted)** — compiler structural intrinsics:
 ```beamtalk
-// In lib/Block.bt
+// In stdlib/src/Block.bt
 value => @intrinsic blockValue
 whileTrue: bodyBlock => @intrinsic whileTrue
 
-// In lib/Actor.bt
+// In stdlib/src/Actor.bt
 sealed spawn => @intrinsic actorSpawn
 
-// In lib/Object.bt
+// In stdlib/src/Object.bt
 new => @intrinsic basicNew
 hash => @intrinsic hash
 ```
@@ -1015,7 +1015,7 @@ The [Beamtalk VS Code extension](https://github.com/jamesc/beamtalk/tree/main/ed
 Beamtalk includes a native test framework inspired by Smalltalk's SUnit.
 
 ```beamtalk
-// test/counter_test.bt
+// stdlib/test/counter_test.bt
 
 TestCase subclass: CounterTest
 
@@ -1054,7 +1054,7 @@ beamtalk test
 Run tests interactively from the REPL:
 
 ```text
-> :load test/counter_test.bt
+> :load stdlib/test/counter_test.bt
 Loaded CounterTest
 
 > CounterTest runAll

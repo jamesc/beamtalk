@@ -156,7 +156,7 @@ Static analysis is the primary source of truth. It works without any running sys
 - `ProjectIndex` provides project-wide symbol index across all files
 - Cross-file `ClassHierarchy` merging (class defined in A, used in B)
 - Cross-file go-to-definition and find-references
-- Stdlib symbols always available (pre-indexed from `lib/*.bt` via `with_stdlib()`)
+- Stdlib symbols always available (pre-indexed from `stdlib/src/*.bt` via `with_stdlib()`)
 - Incremental updates on file save
 
 ### Live Augmentation (Tier 3)
@@ -477,7 +477,7 @@ This ADR introduces new domain concepts that extend the **Language Service** bou
 - Project-wide symbol index (class names, method selectors)
 - Cross-file go-to-definition and find-references
 - Cross-file `ClassHierarchy` merging (class defined in A, used in B)
-- Stdlib pre-indexing (all `lib/*.bt` classes always available)
+- Stdlib pre-indexing (all `stdlib/src/*.bt` classes always available)
 - Incremental index updates on file save
 - Tests: extend existing provider unit tests, multi-file integration tests, E2E tests for class-aware completions
 

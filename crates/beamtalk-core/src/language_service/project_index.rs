@@ -199,7 +199,7 @@ mod tests {
     #[test]
     fn with_stdlib_indexes_classes() {
         let stdlib = vec![(
-            Utf8PathBuf::from("lib/Counter.bt"),
+            Utf8PathBuf::from("stdlib/src/Counter.bt"),
             "Object subclass: Counter\n  increment => 1".to_string(),
         )];
         let index = ProjectIndex::with_stdlib(&stdlib);
@@ -267,14 +267,14 @@ mod tests {
     #[test]
     fn remove_file_preserves_stdlib() {
         let stdlib = vec![(
-            Utf8PathBuf::from("lib/Counter.bt"),
+            Utf8PathBuf::from("stdlib/src/Counter.bt"),
             "Object subclass: Counter\n  increment => 1".to_string(),
         )];
         let mut index = ProjectIndex::with_stdlib(&stdlib);
         assert!(index.hierarchy().has_class("Counter"));
 
         // Remove the stdlib file — Counter should persist because it's stdlib
-        index.remove_file(&Utf8PathBuf::from("lib/Counter.bt"));
+        index.remove_file(&Utf8PathBuf::from("stdlib/src/Counter.bt"));
         // Stdlib classes are tracked separately
         assert!(
             index
@@ -338,7 +338,7 @@ mod tests {
         // User file shadows Counter with decrement.
         // Removing the user file should restore the stdlib Counter.
         let stdlib = vec![(
-            Utf8PathBuf::from("lib/Counter.bt"),
+            Utf8PathBuf::from("stdlib/src/Counter.bt"),
             "Object subclass: Counter\n  increment => 1".to_string(),
         )];
         let mut index = ProjectIndex::with_stdlib(&stdlib);

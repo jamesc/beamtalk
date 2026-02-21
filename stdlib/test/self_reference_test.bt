@@ -1,0 +1,37 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for self-reference behavior (BT-172)
+
+// @load stdlib/test/fixtures/self_ref_actor.bt
+
+TestCase subclass: SelfReferenceTest
+
+  testMethodReturningSelf =>
+    a := SelfRefActor spawn.
+    // returnSelf returns the actor's self reference
+    ref := a returnSelf await.
+    // The returned reference responds to class
+    self assert: (ref class) equals: SelfRefActor.
+    // The returned reference is the same actor (can send messages through it)
+    self assert: ((ref setValue: 99) await) equals: 99.
+    // Verify the state changed on the original actor (same process)
+    self assert: (a getValue await) equals: 99
+
+  testSelfInBlock =>
+    a := SelfRefActor spawn.
+    // self in block refers to enclosing actor, not the block itself
+    self assert: (a classInBlock await) equals: SelfRefActor
+
+  testDynamicDispatchViaPerform =>
+    a := SelfRefActor spawn.
+    (a setValue: 99) await.
+    // perform: dispatches zero-arg methods dynamically on actors
+    self assert: ((a perform: #getValue) await) equals: 99.
+    // perform:withArguments: dispatches methods with arguments on actors
+    self assert: ((a perform: #setValue: withArguments: #(42)) await) equals: 42.
+    self assert: (a getValue await) equals: 42.
+    // perform: also works on primitives (synchronous dispatch)
+    self assert: (42 perform: #asString) equals: "42".
+    // perform:withArguments: works on primitives
+    self assert: (10 perform: #+ withArguments: #(32)) equals: 42

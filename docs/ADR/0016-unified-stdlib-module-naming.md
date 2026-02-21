@@ -17,9 +17,9 @@ The Beamtalk standard library packaging has evolved through multiple phases (ADR
 
 The stdlib packaging pipeline has five interacting pieces:
 
-#### 1. Build-time: `build_stdlib.rs` compiles `lib/*.bt` → `.beam`
+#### 1. Build-time: `build_stdlib.rs` compiles `stdlib/src/*.bt` → `.beam`
 
-Each `.bt` file in `lib/` is compiled to a BEAM module. The module name is determined by `module_name_from_path()` using a **two-prefix scheme**:
+Each `.bt` file in `stdlib/src/` is compiled to a BEAM module. The module name is determined by `module_name_from_path()` using a **two-prefix scheme**:
 
 | Category | Count | Prefix | Example | Reason |
 |----------|-------|--------|---------|--------|
@@ -102,7 +102,7 @@ Each annotated with `// NOTE: Must stay in sync with ...` — a textbook code sm
 
 **3. Already inconsistent in runtime dispatch.**
 
-`beamtalk_primitive.erl` dispatches Association with the `bt_stdlib_` prefix but Set with the `beamtalk_` prefix — both are tagged-map value types compiled from `lib/*.bt`:
+`beamtalk_primitive.erl` dispatches Association with the `bt_stdlib_` prefix but Set with the `beamtalk_` prefix — both are tagged-map value types compiled from `stdlib/src/*.bt`:
 
 ```erlang
 bt_stdlib_association:dispatch(Selector, Args, X);  % bt_stdlib_ prefix
@@ -113,7 +113,7 @@ beamtalk_set:dispatch(Selector, Args, X);           % beamtalk_ prefix
 
 A developer seeing `beamtalk_set.beam` in ebin cannot tell whether it's:
 - Hand-written Erlang (like `beamtalk_actor.erl` in runtime), or
-- Compiled from `.bt` (like `lib/Set.bt` in stdlib)
+- Compiled from `.bt` (like `stdlib/src/Set.bt` in stdlib)
 
 **5. "Primitive" conflates two orthogonal concepts.**
 
@@ -165,10 +165,10 @@ The `@` separator provides clear visual distinction from hand-written Erlang run
 |---------|---------|----------|
 | `beamtalk_*_ops.erl` | Low-level Erlang FFI primitives | `runtime/apps/beamtalk_runtime/src/` |
 | `beamtalk_*.erl` | Other hand-written Erlang runtime code | `runtime/apps/beamtalk_runtime/src/` |
-| `bt@stdlib@*.beam` | Stdlib compiled from `lib/*.bt` | `runtime/apps/beamtalk_stdlib/ebin/` |
+| `bt@stdlib@*.beam` | Stdlib compiled from `stdlib/src/*.bt` | `runtime/apps/beamtalk_stdlib/ebin/` |
 | `bt@*.beam` | User code compiled from `*.bt` | User's project `ebin/` |
 
-This makes the two-layer architecture explicit: `bt@stdlib@list` (Beamtalk stdlib API compiled from `lib/List.bt`) wraps `beamtalk_list_ops` (Erlang FFI in runtime) via `@primitive` pragmas. The runtime provides the bare-metal operations; the stdlib provides the Beamtalk-level class interface.
+This makes the two-layer architecture explicit: `bt@stdlib@list` (Beamtalk stdlib API compiled from `stdlib/src/List.bt`) wraps `beamtalk_list_ops` (Erlang FFI in runtime) via `@primitive` pragmas. The runtime provides the bare-metal operations; the stdlib provides the Beamtalk-level class interface.
 
 ### Why `@` separator?
 
@@ -192,10 +192,10 @@ fn module_name_from_path(path: &Utf8Path) -> Result<String> {
 
 ### 3. Collapse three-way codegen lists into one
 
-The stdlib class list is **auto-derived from `lib/*.bt`** at Rust compile time via `beamtalk-core/build.rs` (BT-472). Adding a new `.bt` file to `lib/` automatically makes it a known stdlib type — no manual list maintenance needed.
+The stdlib class list is **auto-derived from `stdlib/src/*.bt`** at Rust compile time via `beamtalk-core/build.rs` (BT-472). Adding a new `.bt` file to `stdlib/src/` automatically makes it a known stdlib type — no manual list maintenance needed.
 
 ```rust
-// beamtalk-core/build.rs generates STDLIB_CLASS_NAMES from lib/*.bt
+// beamtalk-core/build.rs generates STDLIB_CLASS_NAMES from stdlib/src/*.bt
 include!(concat!(env!("OUT_DIR"), "/stdlib_types.rs"));
 
 // value_type_codegen.rs — AFTER
@@ -341,7 +341,7 @@ Move the 12 primitive BEAM files into the `beamtalk_runtime` application since t
 - Blurs the line between hand-written Erlang and compiled Beamtalk within the same OTP app
 - Complicates the build pipeline — `beamtalk_runtime` is built by rebar3 from `.erl`, not from `.bt`
 - Violates the dependency direction from ADR 0009: `beamtalk_workspace → beamtalk_runtime → beamtalk_stdlib`
-- All classes live in `lib/*.bt` regardless of whether they're "primitive" — they belong together in `beamtalk_stdlib`
+- All classes live in `stdlib/src/*.bt` regardless of whether they're "primitive" — they belong together in `beamtalk_stdlib`
 
 ### Alternative B: Unify Everything to `beamtalk@*`
 
@@ -385,7 +385,7 @@ Use `bt@stdlib@*` for stdlib but keep user code as plain `counter`, `point`, etc
 ## Consequences
 
 ### Positive
-- Three separate `is_*_type()` functions collapse into one `is_known_stdlib_type()`, auto-derived from `lib/*.bt` (BT-472)
+- Three separate `is_*_type()` functions collapse into one `is_known_stdlib_type()`, auto-derived from `stdlib/src/*.bt` (BT-472)
 - `module_name_from_path()` becomes a single-line function
 - `superclass_module_name()` loses its three-way branch — unified `bt@` prefix for all compiled code
 - Clear, memorable naming convention: `beamtalk_*.erl` = hand-written Erlang, `bt@*.beam` = compiled `.bt`

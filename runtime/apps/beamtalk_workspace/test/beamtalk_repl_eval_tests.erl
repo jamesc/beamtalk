@@ -277,10 +277,10 @@ io_capture_reset_does_not_affect_unrelated_processes_test() ->
 %% === is_stdlib_path tests ===
 
 is_stdlib_path_relative_lib_test() ->
-    ?assert(beamtalk_repl_eval:is_stdlib_path("lib/Integer.bt")).
+    ?assert(beamtalk_repl_eval:is_stdlib_path("stdlib/src/Integer.bt")).
 
 is_stdlib_path_absolute_test() ->
-    ?assert(beamtalk_repl_eval:is_stdlib_path("/workspace/project/lib/Integer.bt")).
+    ?assert(beamtalk_repl_eval:is_stdlib_path("/workspace/project/stdlib/src/Integer.bt")).
 
 is_stdlib_path_non_lib_test() ->
     ?assertNot(beamtalk_repl_eval:is_stdlib_path("src/MyClass.bt")).
@@ -289,16 +289,16 @@ is_stdlib_path_non_lib_absolute_test() ->
     ?assertNot(beamtalk_repl_eval:is_stdlib_path("/workspace/project/src/MyClass.bt")).
 
 is_stdlib_path_lib_without_trailing_slash_test() ->
-    %% "lib" alone (no trailing slash) is NOT a lib path
-    ?assertNot(beamtalk_repl_eval:is_stdlib_path("lib")).
+    %% "stdlib/src" alone (no trailing slash) is NOT a stdlib path
+    ?assertNot(beamtalk_repl_eval:is_stdlib_path("stdlib/src")).
 
 is_stdlib_path_libs_prefix_test() ->
-    %% "libs/" is NOT the same as "lib/"
-    ?assertNot(beamtalk_repl_eval:is_stdlib_path("libs/Integer.bt")).
+    %% "stdlib/srcs/" is NOT the same as "stdlib/src/"
+    ?assertNot(beamtalk_repl_eval:is_stdlib_path("stdlib/srcs/Integer.bt")).
 
 is_stdlib_path_embedded_lib_test() ->
-    %% Path with /lib/ deeper in the tree
-    ?assert(beamtalk_repl_eval:is_stdlib_path("/home/user/projects/beamtalk/lib/String.bt")).
+    %% Path with /stdlib/src/ deeper in the tree
+    ?assert(beamtalk_repl_eval:is_stdlib_path("/home/user/projects/beamtalk/stdlib/src/String.bt")).
 
 is_stdlib_path_empty_test() ->
     ?assertNot(beamtalk_repl_eval:is_stdlib_path("")).
@@ -714,7 +714,7 @@ compile_file_noproc_test() ->
 
 compile_file_noproc_stdlib_test() ->
     %% Covers stdlib_mode path too
-    Result = beamtalk_repl_eval:compile_file_via_port("Object subclass: Foo", "/lib/Foo.bt", true),
+    Result = beamtalk_repl_eval:compile_file_via_port("Object subclass: Foo", "/stdlib/src/Foo.bt", true),
     ?assertMatch({error, _}, Result).
 
 %% ===================================================================
@@ -966,13 +966,13 @@ trigger_hot_reload_atom_name_v2_test() ->
 %% ===================================================================
 
 is_stdlib_path_abs_v2_test() ->
-    ?assertEqual(true, beamtalk_repl_eval:is_stdlib_path("/home/user/project/lib/Integer.bt")).
+    ?assertEqual(true, beamtalk_repl_eval:is_stdlib_path("/home/user/project/stdlib/src/Integer.bt")).
 
 is_stdlib_path_not_stdlib_test() ->
     ?assertEqual(false, beamtalk_repl_eval:is_stdlib_path("/home/user/src/main.bt")).
 
 is_stdlib_path_rel_lib_v2_test() ->
-    ?assertEqual(true, beamtalk_repl_eval:is_stdlib_path("lib/String.bt")).
+    ?assertEqual(true, beamtalk_repl_eval:is_stdlib_path("stdlib/src/String.bt")).
 
 %% ===================================================================
 %% should_purge_module edge cases (BT-627)

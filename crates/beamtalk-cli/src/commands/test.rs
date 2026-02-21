@@ -1040,12 +1040,12 @@ mod tests {
         let file = Utf8PathBuf::from_path_buf(temp.path().join("with_load.bt")).unwrap();
         fs::write(
             &file,
-            "// @load test/fixtures/counter.bt\nTestCase subclass: T\n  testX => nil\n",
+            "// @load stdlib/test/fixtures/counter.bt\nTestCase subclass: T\n  testX => nil\n",
         )
         .unwrap();
 
         let (_, loads) = discover_test_classes(&file).unwrap();
-        assert_eq!(loads, vec!["test/fixtures/counter.bt"]);
+        assert_eq!(loads, vec!["stdlib/test/fixtures/counter.bt"]);
     }
 
     #[test]

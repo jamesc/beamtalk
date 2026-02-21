@@ -21,7 +21,7 @@ use std::time::SystemTime;
 use tracing::{debug, info, instrument};
 
 /// Default path to stdlib source files (relative to project root).
-const STDLIB_SOURCE_DIR: &str = "lib";
+const STDLIB_SOURCE_DIR: &str = "stdlib/src";
 
 /// Default output path for compiled stdlib BEAM files (relative to project root).
 const STDLIB_EBIN_DIR: &str = "runtime/apps/beamtalk_stdlib/ebin";

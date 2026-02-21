@@ -461,7 +461,7 @@ impl CoreErlangGenerator {
 
 ### Standard Library Context
 
-**Purpose:** Compile `lib/*.bt` files into class metadata and BEAM modules via pragma-based primitive injection
+**Purpose:** Compile `stdlib/src/*.bt` files into class metadata and BEAM modules via pragma-based primitive injection
 
 **DDD Context:** Standard Library (see [ADR 0007](ADR/0007-compilable-stdlib-with-primitive-injection.md))
 
@@ -475,13 +475,13 @@ impl CoreErlangGenerator {
 | **Runtime Dispatch Module** | Erlang module (e.g., `beamtalk_integer.erl`) providing type checking, structured errors, extension registry |
 
 **Relationships:**
-- **Consumes from:** Source Analysis Context (parsed AST from `lib/*.bt` files)
+- **Consumes from:** Source Analysis Context (parsed AST from `stdlib/src/*.bt` files)
 - **Feeds into:** Code Generation Context (class metadata, three-kind routing, intrinsic bindings)
 - **Collaborates with:** Object System Context (runtime dispatch modules execute the primitives)
 
 **Domain Services:**
 - `IntrinsicRegistry`: Maps intrinsic names to code generation functions (~35 entries)
-- `StdlibCompiler`: Compiles `lib/*.bt` through the normal pipeline, producing class metadata
+- `StdlibCompiler`: Compiles `stdlib/src/*.bt` through the normal pipeline, producing class metadata
 - `ClassKindResolver`: Determines Actor / Value Type / Primitive from class name and superclass
 
 **Key Invariant:** Every intrinsic name must resolve to exactly one code generation function. Unknown names are compile errors.
@@ -532,7 +532,7 @@ impl CoreErlangGenerator {
 **Key Operations:**
 - `update_file`: Add/replace a file's class contributions
 - `remove_file`: Remove a file's classes (preserving stdlib)
-- `with_stdlib`: Pre-index stdlib class definitions from `lib/*.bt`
+- `with_stdlib`: Pre-index stdlib class definitions from `stdlib/src/*.bt`
 
 **Domain Services:**
 - `CompletionProvider`: Suggest completions at cursor

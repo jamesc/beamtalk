@@ -23,18 +23,18 @@ Beamtalk's opportunity: implement this idea with modern (closure-based lazy) mec
 
 ### Current State
 
-**File I/O** (`lib/File.bt`):
+**File I/O** (`stdlib/src/File.bt`):
 - Three class methods: `exists:`, `readAll:`, `writeAll:contents:`
 - Synchronous, whole-file operations via Erlang's `file` module
 - Security: rejects absolute paths and directory traversal
 - Structured error handling via `#beamtalk_error{}`
 
-**TranscriptStream** (`lib/TranscriptStream.bt`):
+**TranscriptStream** (`stdlib/src/TranscriptStream.bt`):
 - Actor (gen_server) with pub/sub semantics
 - Methods: `show:`, `cr`, `subscribe`, `unsubscribe`, `recent`, `clear`
 - Workspace singleton (ADR 0019)
 
-**Collections** (`lib/List.bt`, `lib/Set.bt`, etc.):
+**Collections** (`stdlib/src/List.bt`, `stdlib/src/Set.bt`, etc.):
 - List has full eager iteration: `do:`, `collect:`, `select:`, `reject:`, `inject:into:`, `detect:`, `anySatisfy:`, `allSatisfy:`, plus `take:`, `drop:`
 - String has partial iteration: `each:`, `collect:`, `select:`
 - Set has only `do:`; Dictionary has only `keysAndValuesDo:`
@@ -424,21 +424,21 @@ aSet select: [:x | x > 0]   // Now works, returns a Set
 ## Implementation
 
 ### Phase 1: Stream Core
-- Create `lib/Stream.bt` as sealed Object subclass
+- Create `stdlib/src/Stream.bt` as sealed Object subclass
 - Implement closure-based generator in `beamtalk_stream.erl`
 - Core protocol: `select:`, `collect:`, `reject:`, `take:`, `drop:`, `do:`, `inject:into:`, `detect:`, `asList`, `anySatisfy:`, `allSatisfy:`
 - Constructors: `Stream from:` (successor), `Stream from:by:` (step function), `Stream on:` (from collection)
 - **Required:** `printString` showing pipeline structure, e.g. `Stream(from: 1 | select: [...])` — critical for REPL inspectability
 - Register in `builtins.rs`, `beamtalk_stdlib.app.src`, `beamtalk_primitive.erl`
-- Add tests in `tests/stdlib/stream.bt`
-- **Components:** stdlib (lib/), runtime (primitives), codegen (builtins registration)
+- Add tests in `stdlib/bootstrap-test/stream.bt`
+- **Components:** stdlib (`stdlib/src/`), runtime (primitives), codegen (builtins registration)
 
 ### Phase 2: File Streaming
 - Add `File lines:` class method returning a Stream of lines
 - Add `File open:do:` for block-scoped handle management
 - Stream generator calls `file:read_line/1` lazily
 - Path validation via existing `beamtalk_file.erl` security checks
-- Add tests in `tests/stdlib/file_stream.bt`
+- Add tests in `stdlib/bootstrap-test/file_stream.bt`
 - **Components:** stdlib (File.bt update), runtime (file line generator)
 
 ### Phase 3: Collection Integration
@@ -478,7 +478,7 @@ aSet select: [:x | x > 0]   // Now works, returns a Set
 ## References
 - Related ADRs: ADR 0005 (sealed classes — Stream follows this pattern), ADR 0006 (unified dispatch), ADR 0007 (compilable stdlib), ADR 0009 (OTP structure), ADR 0014 (test framework — Stream tests use terminal ops in `// =>` assertions), ADR 0016 (module naming — Stream becomes `bt@stdlib@stream`), ADR 0019 (singleton access)
 - Related issues: BT-506 (pipeline chaining syntax research), BT-507 (Future class ADR)
-- Existing I/O: `lib/File.bt`, `lib/TranscriptStream.bt`
+- Existing I/O: `stdlib/src/File.bt`, `stdlib/src/TranscriptStream.bt`
 - Elixir Stream module: https://hexdocs.pm/elixir/Stream.html (primary inspiration)
 - Rust Iterator: https://doc.rust-lang.org/std/iter/trait.Iterator.html
 - Kotlin Sequence: https://kotlinlang.org/docs/sequences.html

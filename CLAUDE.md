@@ -32,12 +32,12 @@ You may run `just`, `cargo`, `rustc`, `rustfmt`, and `git` without asking.
 
 | Test needs... | Where |
 |---|---|
-| Bootstrap primitives (arithmetic, booleans, equality, strings) | `tests/stdlib/*.bt` |
-| Language features (collections, closures, regex, actors, etc.) | `test/*.bt` (BUnit) |
-| Stateful tests with setUp/tearDown | `test/*.bt` (BUnit) |
+| Bootstrap primitives (arithmetic, booleans, equality, strings) | `stdlib/bootstrap-test/*.bt` |
+| Language features (collections, closures, regex, actors, etc.) | `stdlib/test/*.bt` (BUnit) |
+| Stateful tests with setUp/tearDown | `stdlib/test/*.bt` (BUnit) |
 | Workspace bindings, REPL commands, variable persistence | `tests/e2e/cases/*.bt` |
 
-Prefer `test/*.bt` (BUnit TestCase) for new tests. Only use `tests/stdlib/` for bootstrap-critical primitives.
+Prefer `stdlib/test/*.bt` (BUnit TestCase) for new tests. Only use `stdlib/bootstrap-test/` for bootstrap-critical primitives.
 
 ## Architecture
 

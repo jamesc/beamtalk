@@ -1,0 +1,36 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for class methods reflection (BT-510 / ADR 0032 Phase 2)
+
+// @load stdlib/test/fixtures/counter.bt
+
+TestCase subclass: ClassReflectionTest
+
+  testSection1 =>
+    counterLocal := Counter localMethods.
+    self deny: (counterLocal isEmpty).
+    // Counter defines increment, decrement, getValue locally
+    self assert: (counterLocal includes: #increment).
+    self assert: (counterLocal includes: #decrement).
+    self assert: (counterLocal includes: #getValue).
+    // Inherited methods are NOT in localMethods
+    self deny: (counterLocal includes: #isNil).
+    self deny: (counterLocal includes: #respondsTo:).
+    // ---------------------------------------------------------------------------
+    counterMethods := Counter methods.
+    // Counter methods — full inheritance chain (Phase 2)
+    self deny: (counterMethods isEmpty).
+    // Local methods are present
+    self assert: (counterMethods includes: #increment).
+    // ---------------------------------------------------------------------------
+    self assert: (counterMethods includes: #getValue).
+    // Inherited methods ARE in methods (full chain)
+    self assert: (counterMethods includes: #isNil).
+    self assert: (counterMethods includes: #respondsTo:).
+    // ---------------------------------------------------------------------------
+    intMethods := Integer methods.
+    // Primitive class methods still work
+    self deny: (intMethods isEmpty).
+    // isNil is inherited from Object/ProtoObject — included in full chain
+    self assert: (intMethods includes: #isNil)

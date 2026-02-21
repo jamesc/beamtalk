@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Typed class behavior smoke tests (BT-673)
+
+// @load stdlib/test/fixtures/typed_counter.bt
+// @load examples/bank/typed_account.bt
+
+TestCase subclass: TypedClassesTest
+
+  testSection1 =>
+    counter := TypedCounter spawn.
+    self assert: (counter increment await) equals: 1.
+    self assert: ((counter add: 5) await) equals: 6.
+    self assert: (counter current await) equals: 6.
+    account := TypedAccount spawn.
+    self assert: ((account setOwner: "Alice") await) equals: "Alice".
+    self assert: ((account deposit: 10) await) equals: 10.
+    self assert: ((account withdraw: 3) await) equals: 7.
+    self assert: (account balance await) equals: 7.
+    self assert: (account getOwner await) equals: "Alice"

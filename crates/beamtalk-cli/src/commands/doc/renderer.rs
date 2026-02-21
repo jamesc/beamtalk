@@ -325,7 +325,7 @@ fn write_method_html_with_source(
     }
 
     if let (Some(file), Some(line)) = (source_file, method.line_number) {
-        let root = source_root.unwrap_or("lib").trim_end_matches('/');
+        let root = source_root.unwrap_or("stdlib/src").trim_end_matches('/');
         let _ = writeln!(
             html,
             "<a class=\"source-link\" \

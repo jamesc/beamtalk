@@ -49,7 +49,7 @@ Beamtalk is a Smalltalk/Newspeak-inspired programming language that compiles to 
 
 ### Test File Rules
 
-In test files (`tests/stdlib/*.bt` and `tests/e2e/cases/*.bt`):
+In test files (`stdlib/bootstrap-test/*.bt` and `tests/e2e/cases/*.bt`):
 - **Every expression MUST have a `// =>` assertion** (even `// => _` for wildcard)
 - **No assertion = no execution** — expressions are silently skipped
 - **Missing assertions fail CI** (BT-249)
@@ -79,7 +79,7 @@ x
 Before using ANY Beamtalk syntax, verify it exists in at least one of:
 1. **Language spec:** [docs/beamtalk-language-features.md](../docs/beamtalk-language-features.md)
 2. **Examples:** `examples/*.bt`
-3. **Tests:** `tests/stdlib/*.bt`, `tests/e2e/cases/*.bt`
+3. **Tests:** `stdlib/bootstrap-test/*.bt`, `tests/e2e/cases/*.bt`
 4. **Parser tests:** `crates/beamtalk-core/src/source_analysis/parser/`
 
 **If it doesn't appear in any of these → it's likely hallucinated. Search the codebase or ask.**
@@ -277,7 +277,7 @@ Identifies which component of the codebase the issue affects:
 | Label | Description | Key Directories |
 |-------|-------------|----------------|
 | `class-system` | Class definition, parsing, codegen, and runtime | `crates/beamtalk-core/src/ast.rs`, `crates/beamtalk-core/src/source_analysis/` |
-| `stdlib` | Standard library: collections, primitives, strings (compiled from `lib/*.bt` via pragmas — see [ADR 0007](../docs/ADR/0007-compilable-stdlib-with-primitive-injection.md)) | `lib/` |
+| `stdlib` | Standard library: collections, primitives, strings (compiled from `stdlib/src/*.bt` via pragmas — see [ADR 0007](../docs/ADR/0007-compilable-stdlib-with-primitive-injection.md)) | `stdlib/src/` |
 | `repl` | REPL backend and CLI interaction | `runtime/src/beamtalk_repl.erl`, `crates/beamtalk-cli/src/repl/` |
 | `cli` | Command-line interface and build tooling | `crates/beamtalk-cli/` |
 | `codegen` | Code generation to Core Erlang/BEAM | `crates/beamtalk-core/src/erlang.rs` |
@@ -476,7 +476,7 @@ beamtalk_stdlib (compiled stdlib)
 - See `docs/development/testing-strategy.md` for compilation workflow details
 
 #### 4. Stdlib Tests (Compiled Expression Tests) — ADR 0014
-**Location:** `tests/stdlib/*.bt` (~57 files)
+**Location:** `stdlib/bootstrap-test/*.bt` (~57 files)
 - **Pure language feature tests** compiled directly to EUnit (no REPL needed)
 - Uses same `// =>` assertion format as E2E tests
 - Runs via `just test-stdlib` (fast, ~14s vs ~50s for E2E)
@@ -485,7 +485,7 @@ beamtalk_stdlib (compiled stdlib)
 - **Use this for any new test that doesn't need REPL/workspace features**
 
 #### 5. BUnit Tests (TestCase Classes) — ADR 0014 Phase 2
-**Location:** `test/*.bt` (project test directory)
+**Location:** `stdlib/test/*.bt` (project test directory)
 - **SUnit-style test classes** that subclass `TestCase`
 - Methods starting with `test` are auto-discovered and run with fresh instances
 - `setUp`/`tearDown` lifecycle methods for test fixtures
@@ -505,11 +505,11 @@ beamtalk_stdlib (compiled stdlib)
 **When choosing between stdlib, BUnit, and E2E tests:**
 | Test needs... | Where |
 |---|---|
-| Pure language features (arithmetic, strings, blocks) | `tests/stdlib/` |
-| Collections (List, Dictionary, Set, Tuple) | `tests/stdlib/` |
-| Actor spawn + messaging (with `@load`) | `tests/stdlib/` |
-| Stateful tests with setUp/tearDown | `test/*.bt` (BUnit) |
-| Complex actor interactions, multiple assertions | `test/*.bt` (BUnit) |
+| Pure language features (arithmetic, strings, blocks) | `stdlib/bootstrap-test/` |
+| Collections (List, Dictionary, Set, Tuple) | `stdlib/bootstrap-test/` |
+| Actor spawn + messaging (with `@load`) | `stdlib/bootstrap-test/` |
+| Stateful tests with setUp/tearDown | `stdlib/test/*.bt` (BUnit) |
+| Complex actor interactions, multiple assertions | `stdlib/test/*.bt` (BUnit) |
 | Workspace bindings (Transcript, Beamtalk) | `tests/e2e/cases/` |
 | REPL commands, variable persistence | `tests/e2e/cases/` |
 | Auto-await, `ERROR:` assertions | `tests/e2e/cases/` |

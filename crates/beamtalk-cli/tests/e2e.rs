@@ -1488,7 +1488,7 @@ undefined_var
     fn test_parse_test_file_with_load_directive() {
         let content = r"
 // @load tests/e2e/fixtures/counter.bt
-// @load lib/stdlib.bt
+// @load stdlib/src/stdlib.bt
 
 // Test with loaded classes
 Counter spawn
@@ -1497,7 +1497,7 @@ Counter spawn
         let parsed = parse_test_file(content);
         assert_eq!(parsed.load_files.len(), 2);
         assert_eq!(parsed.load_files[0], "tests/e2e/fixtures/counter.bt");
-        assert_eq!(parsed.load_files[1], "lib/stdlib.bt");
+        assert_eq!(parsed.load_files[1], "stdlib/src/stdlib.bt");
         assert_eq!(parsed.cases.len(), 1);
         assert_eq!(parsed.cases[0].expression, "Counter spawn");
         assert!(parsed.warnings.is_empty());
