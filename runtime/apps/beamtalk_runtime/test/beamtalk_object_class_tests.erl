@@ -1404,6 +1404,18 @@ class_method_self_call_new_test() ->
         beamtalk_class_dispatch:class_send(self(), 'new', [])
     ).
 
+class_method_self_call_spawn_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = instantiation_error, selector = spawn}},
+        beamtalk_class_dispatch:class_send(self(), spawn, [])
+    ).
+
+class_method_self_call_spawn_with_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = instantiation_error, selector = 'spawnWith:'}},
+        beamtalk_class_dispatch:class_send(self(), 'spawnWith:', [#{}])
+    ).
+
 %% @doc Verify error has the class name extracted from the registered pid name.
 %%
 %% BT-755: class_name_from_pid strips the 'beamtalk_class_' prefix from the
@@ -1421,10 +1433,8 @@ class_method_self_call_class_name_in_error_test_() ->
                  instance_methods => #{}
              },
              {ok, ClassPid} = beamtalk_object_class:start_link('SelfCallTestClass', ClassInfo),
-             %% Ask the class gen_server to execute a fun that calls class_send(self(), 'new:', [#{}])
-             %% from within the class process, so ClassPid =:= self() fires.
-             %% We achieve this via sys:replace_state trickery-free: send a cast that bounces
-             %% the error back. Instead, use the simpler approach of process_info verification.
+             %% Verify the registered name matches the expected 'beamtalk_class_<Name>' pattern
+             %% so class_name_from_pid/1 can recover it for error messages.
              RegName = element(2, erlang:process_info(ClassPid, registered_name)),
              ?assertEqual('SelfCallTestClass',
                  begin
