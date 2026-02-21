@@ -88,8 +88,7 @@ call 'erlang':'*'(Self, 2)
             'instance_variables' => [],
             'class_methods' => ~{
                 'new' => ~{'arity' => 0}~,
-                'new:' => ~{'arity' => 1}~,
-                'superclass' => ~{'arity' => 0}~
+                'new:' => ~{'arity' => 1}~
             }~,
             'method_source' => ~{'doubled' => #{#<100>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']])}#}~,
             'class_variables' => ~{}~

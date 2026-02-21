@@ -25,7 +25,7 @@ default:
 ci: build lint test test-integration test-mcp test-e2e
 
 [windows]
-ci: build clippy fmt-check test test-integration test-mcp test-e2e
+ci: build clippy fmt-check-rust test test-integration test-mcp test-e2e
 
 # Clean all build artifacts (Rust, Erlang, VS Code, caches, examples)
 [unix]
@@ -94,7 +94,7 @@ build-vscode: build-lsp
     mv -f "${TMP_BIN}" editors/vscode/bin/beamtalk-lsp
     echo "   Bundled debug beamtalk-lsp ($(du -h editors/vscode/bin/beamtalk-lsp | cut -f1))"
     cd editors/vscode
-    npm install --quiet
+    npm ci --quiet
     npm run compile
     echo "✅ VS Code extension built for local install from editors/vscode"
 
@@ -137,14 +137,18 @@ build-examples: build-stdlib
 lint: lint-rust lint-erlang lint-js
 
 # Lint Rust: clippy + formatting check
-lint-rust: clippy fmt-check
+lint-rust: clippy fmt-check-rust
 
 # Lint Erlang: Dialyzer type checking
+# TODO: add fmt-check-erlang here once bulk-format commit lands
 lint-erlang: dialyzer
 
-# Lint JS/TS: placeholder for future JS tooling
-lint-js:
-    @echo "⏭️  No JS linting configured"
+# Lint JS/TS: Biome lint + format check
+[working-directory: 'editors/vscode']
+lint-js: fmt-check-js
+    @echo "🔍 Running Biome lint..."
+    npm run lint
+    @echo "✅ Biome lint passed"
 
 # Run clippy (Rust linter) - warnings are errors
 clippy:
@@ -153,14 +157,51 @@ clippy:
     @echo "✅ Clippy passed"
 
 # Check Rust code formatting
-fmt-check:
+fmt-check-rust:
     @echo "📋 Checking Rust formatting..."
     cargo fmt --all -- --check
 
+# Check all code formatting
+# TODO: add fmt-check-erlang here once bulk-format commit lands
+fmt-check: fmt-check-rust fmt-check-js
+
 # Format all Rust code
-fmt:
+fmt-rust:
     @echo "✨ Formatting Rust code..."
     cargo fmt --all
+
+# Format all code (Rust + Erlang + JS)
+fmt: fmt-rust fmt-erlang fmt-js
+
+# Check JS/TS formatting (Biome)
+[working-directory: 'editors/vscode']
+fmt-check-js:
+    @echo "📋 Checking JS/TS formatting..."
+    npm ci --quiet
+    npm run format:check
+    @echo "✅ JS/TS formatting check passed"
+
+# Format all JS/TS code (Biome)
+[working-directory: 'editors/vscode']
+fmt-js:
+    @echo "✨ Formatting JS/TS code..."
+    npm ci --quiet
+    npm run format
+    @echo "✅ JS/TS code formatted"
+
+# Check Erlang code formatting
+[working-directory: 'runtime']
+fmt-check-erlang:
+    @echo "📋 Checking Erlang formatting..."
+    rebar3 fmt --check
+    @echo "✅ Erlang formatting check passed"
+
+# Format all Erlang code
+[working-directory: 'runtime']
+fmt-erlang:
+    @echo "✨ Formatting Erlang code..."
+    rebar3 fmt -w
+    @echo "✅ Erlang code formatted"
 
 # Run Dialyzer on Erlang runtime
 [working-directory: 'runtime']
@@ -744,7 +785,7 @@ dist-vscode-platform target:
     mv -f "${TMP_BIN}" "editors/vscode/bin/${BIN_NAME}"
     echo "   Bundled ${BIN_NAME} ($(du -h editors/vscode/bin/${BIN_NAME} | cut -f1))"
     cd editors/vscode
-    npm install --quiet
+    npm ci --quiet
     npm run compile
     mkdir -p ../../dist
     npx --yes @vscode/vsce package --target "{{target}}" --out "../../dist/beamtalk-{{target}}.vsix"

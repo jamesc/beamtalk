@@ -665,27 +665,38 @@ impl CoreErlangGenerator {
             // Class methods - depends on context
             let mut class_method_entries: Vec<Document<'static>> = Vec::new();
             if self.context == CodeGenContext::Actor {
-                class_method_entries.push(Document::Str("'spawn' => ~{'arity' => 0}~,"));
-                class_method_entries.push(Document::Str("'spawnWith:' => ~{'arity' => 1}~,"));
+                class_method_entries.push(Document::Str("'spawn' => ~{'arity' => 0}~"));
+                class_method_entries.push(Document::Str("'spawnWith:' => ~{'arity' => 1}~"));
             } else {
-                class_method_entries.push(Document::Str("'new' => ~{'arity' => 0}~,"));
-                class_method_entries.push(Document::Str("'new:' => ~{'arity' => 1}~,"));
+                class_method_entries.push(Document::Str("'new' => ~{'arity' => 0}~"));
+                class_method_entries.push(Document::Str("'new:' => ~{'arity' => 1}~"));
             }
-            class_method_entries.push(Document::Str("'superclass' => ~{'arity' => 0}~"));
+            // ADR 0032 Phase 2 (BT-734): superclass is now handled by the
+            // Behaviour dispatch chain, not as a hardcoded class method.
             // BT-411: User-defined class methods
             for method in &class.class_methods {
                 if method.kind == MethodKind::Primary {
-                    class_method_entries.push(Document::String(format!(
-                        ", '{}' => ~{{'arity' => {}}}~",
-                        method.selector.name(),
-                        method.selector.arity()
-                    )));
+                    class_method_entries.push(docvec![
+                        "'",
+                        Document::String(method.selector.name().to_string()),
+                        "' => ~{'arity' => ",
+                        Document::String(method.selector.arity().to_string()),
+                        "}~",
+                    ]);
                 }
             }
 
+            let num_entries = class_method_entries.len();
             let class_methods_lines: Vec<_> = class_method_entries
                 .into_iter()
-                .map(|entry| docvec![line(), entry])
+                .enumerate()
+                .map(|(i, entry)| {
+                    if i < num_entries - 1 {
+                        docvec![line(), entry, ","]
+                    } else {
+                        docvec![line(), entry]
+                    }
+                })
                 .collect();
             let class_methods_doc = docvec![
                 "'class_methods' => ~{",

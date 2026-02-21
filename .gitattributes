@@ -14,6 +14,10 @@
 *.core text eol=lf
 *.app.src text eol=lf
 
+# TypeScript/JavaScript source files
+*.ts text eol=lf
+*.js text eol=lf
+
 # Shell scripts
 *.sh text eol=lf
 
