@@ -11,6 +11,7 @@
 // @load tests/e2e/fixtures/actor_nlr_branches.bt
 // @load tests/e2e/fixtures/actor_nlr_local_var.bt
 // @load tests/e2e/fixtures/actor_nlr_computed.bt
+// @load tests/e2e/fixtures/actor_nlr_check.bt
 
 // === Basic ifTrue: with non-local return ===
 
@@ -64,3 +65,14 @@ a4 := ActorNlrComputed spawn
 
 (a4 test: -1) await
 // => 0
+
+// === ifFalse: with non-local return ===
+
+a5 := ActorNlrCheck spawn
+// => #Actor<ActorNlrCheck,_>
+
+(a5 check: #(1)) await
+// => has items
+
+(a5 check: #()) await
+// => empty

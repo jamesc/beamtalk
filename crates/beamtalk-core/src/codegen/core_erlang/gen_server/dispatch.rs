@@ -267,26 +267,7 @@ impl CoreErlangGenerator {
 
                     // BT-761: Wrap in try/catch for non-local returns from block closures
                     let body_str = if let Some(token_var) = self.current_nlr_token.take() {
-                        let result_var = self.fresh_temp_var("NlrResult");
-                        let cls_var = self.fresh_temp_var("NlrCls");
-                        let err_var = self.fresh_temp_var("NlrErr");
-                        let stk_var = self.fresh_temp_var("NlrStk");
-                        let ctk_var = self.fresh_temp_var("CatchTok");
-                        let val_var = self.fresh_temp_var("NlrVal");
-                        let ot_pair_var = self.fresh_temp_var("OtherPair");
-                        format!(
-                            "let {token_var} = call 'erlang':'make_ref'() in\n\
-                             try\n  {body_str}\n\
-                             of {result_var} -> {result_var}\n\
-                             catch <{cls_var}, {err_var}, {stk_var}> ->\n\
-                             \x20 case {{{cls_var}, {err_var}}} of\n\
-                             \x20   <{{'throw', {{'$bt_nlr', {ctk_var}, {val_var}}}}}> \
-                                  when call 'erlang':'=:='({ctk_var}, {token_var}) -> \
-                                  {{'reply', {val_var}, State}}\n\
-                             \x20   <{ot_pair_var}> when 'true' -> \
-                                  primop 'raw_raise'({cls_var}, {err_var}, {stk_var})\n\
-                             \x20 end"
-                        )
+                        self.wrap_actor_nlr(&body_str, &token_var)
                     } else {
                         body_str
                     };
