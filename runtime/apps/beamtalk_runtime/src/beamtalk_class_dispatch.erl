@@ -40,6 +40,18 @@
 class_send(undefined, Selector, _Args) ->
     Error = beamtalk_error:new(class_not_found, unknown, Selector),
     beamtalk_error:raise(Error);
+%% BT-755: Detect gen_server self-call before it deadlocks.
+%% A class method sending new/new:/spawn/spawnWith: to its own class (ClassPid == self())
+%% would cause gen_server:call(self(), ...) to deadlock — OTP raises {calling_self,...}.
+%% Guard all four instantiation selectors and raise a clean Beamtalk error instead.
+class_send(ClassPid, 'new', _Args) when ClassPid =:= self() ->
+    handle_calling_self_error(ClassPid, 'new');
+class_send(ClassPid, 'new:', _Args) when ClassPid =:= self() ->
+    handle_calling_self_error(ClassPid, 'new:');
+class_send(ClassPid, spawn, _Args) when ClassPid =:= self() ->
+    handle_calling_self_error(ClassPid, spawn);
+class_send(ClassPid, 'spawnWith:', _Args) when ClassPid =:= self() ->
+    handle_calling_self_error(ClassPid, 'spawnWith:');
 class_send(ClassPid, 'new', []) ->
     unwrap_class_call(gen_server:call(ClassPid, {new, []}));
 class_send(ClassPid, 'new:', [Map]) ->
@@ -317,6 +329,52 @@ handle_async_dispatch({Selector, Args, FuturePid}, ClassName, InstanceMethods, S
     ok;
 handle_async_dispatch(_Msg, _ClassName, _InstanceMethods, _Superclass, _Module) ->
     ok.
+
+%%% ============================================================================
+%%% Internal Functions — BT-755
+%%% ============================================================================
+
+%% @private
+%% @doc Raise a clean error when a class method sends an instantiation message to its own class.
+%%
+%% BT-755: A class method running inside gen_server handle_call cannot call
+%% gen_server:call(self(), ...) — OTP detects the self-call and crashes with
+%% {calling_self,...}. Detect this upfront and surface a helpful Beamtalk error.
+-spec handle_calling_self_error(pid(), atom()) -> no_return().
+handle_calling_self_error(ClassPid, Selector) ->
+    ClassName = class_name_from_pid(ClassPid),
+    Error0 = beamtalk_error:new(instantiation_error, ClassName, Selector),
+    Error1 = beamtalk_error:with_hint(
+        Error0,
+        <<"A class method cannot send 'new', 'new:', 'spawn', or 'spawnWith:' "
+          "to its own class (would deadlock the class process). "
+          "Delegate to a helper class method or use a factory on a superclass.">>
+    ),
+    beamtalk_error:raise(Error1).
+
+%% @private
+%% @doc Extract the Beamtalk class name from a class gen_server pid's registered name.
+%%
+%% Class processes are registered as 'beamtalk_class_<ClassName>'. This strips
+%% that prefix to recover the class name for use in error messages.
+-spec class_name_from_pid(pid()) -> atom().
+class_name_from_pid(ClassPid) ->
+    case erlang:process_info(ClassPid, registered_name) of
+        {registered_name, RegName} ->
+            RegStr = atom_to_list(RegName),
+            Prefix = "beamtalk_class_",
+            case lists:prefix(Prefix, RegStr) of
+                true ->
+                    Suffix = lists:nthtail(length(Prefix), RegStr),
+                    try list_to_existing_atom(Suffix)
+                    catch error:badarg -> unknown
+                    end;
+                false ->
+                    unknown
+            end;
+        _ ->
+            unknown
+    end.
 
 %%% ============================================================================
 %%% Internal Functions — ADR 0032 Phase 0
