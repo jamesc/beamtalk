@@ -16,6 +16,8 @@
 use crate::ast::{Expression, Identifier, Module};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::Diagnostic;
+#[cfg(test)]
+use crate::source_analysis::lex_with_eof;
 use ecow::EcoString;
 
 /// BT-105: Check for attempts to instantiate abstract classes.
@@ -453,15 +455,19 @@ fn visit_classvar_access(
 ///
 /// Stdlib class names are protected at runtime (via `update_class` in the runtime).
 /// This compile-time warning surfaces the conflict earlier, before the BEAM module
-/// even loads. Uses `ClassHierarchy::is_builtin_class` which covers both generated
-/// stdlib classes (from `lib/*.bt`) and runtime-only built-ins like `Future`.
+/// even loads. Uses `ClassHierarchy::is_runtime_protected_class` which covers
+/// only generated stdlib classes (from `lib/*.bt`) that have the `bt@stdlib@`
+/// module prefix and are actually protected at runtime.
+///
+/// Runtime-only built-ins like `Future` are intentionally excluded because
+/// they lack the `bt@stdlib@` prefix and loading actually succeeds (BT-750).
 ///
 /// This must NOT be called during stdlib compilation (`stdlib_mode = true`).
 /// Call it alongside `validate_primitives`, guarded by `!options.stdlib_mode`.
 pub fn check_stdlib_name_shadowing(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
     for class in &module.classes {
         let name = class.name.name.as_str();
-        if ClassHierarchy::is_builtin_class(name) {
+        if ClassHierarchy::is_runtime_protected_class(name) {
             let mut diag = Diagnostic::warning(
                 format!(
                     "Class name `{name}` conflicts with a stdlib class. \
@@ -508,5 +514,40 @@ pub(crate) fn check_empty_method_bodies(module: &Module, diagnostics: &mut Vec<D
                 Some("Add an expression after `=>`, or remove the method if unneeded".into());
             diagnostics.push(diag);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::source_analysis::parse;
+
+    /// BT-750: A class named `Future` should NOT trigger the stdlib shadowing
+    /// warning because `Future` lacks runtime protection (no `bt@stdlib@` prefix).
+    #[test]
+    fn future_class_no_shadowing_warning() {
+        let tokens = lex_with_eof("Object subclass: Future\n  value => 1");
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        assert_eq!(module.classes.len(), 1);
+        let mut diagnostics = Vec::new();
+        check_stdlib_name_shadowing(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for Future, got: {diagnostics:?}"
+        );
+    }
+
+    /// BT-738: A class named `Integer` (generated stdlib) SHOULD trigger the warning.
+    #[test]
+    fn stdlib_class_triggers_shadowing_warning() {
+        let tokens = lex_with_eof("Object subclass: Integer\n  value => 1");
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        assert_eq!(module.classes.len(), 1);
+        let mut diagnostics = Vec::new();
+        check_stdlib_name_shadowing(&module, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].message.contains("Integer"));
     }
 }

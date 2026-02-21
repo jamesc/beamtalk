@@ -112,6 +112,15 @@ impl ClassHierarchy {
         builtins::is_builtin_class(name)
     }
 
+    /// Returns true if the given class name has runtime shadowing protection.
+    ///
+    /// Only stdlib classes with the `bt@stdlib@` module prefix are protected
+    /// at runtime. Runtime-only built-ins like `Future` are excluded (BT-750).
+    #[must_use]
+    pub fn is_runtime_protected_class(name: &str) -> bool {
+        builtins::is_runtime_protected_class(name)
+    }
+
     /// Build a class hierarchy from built-in definitions and a parsed module.
     ///
     /// Returns the hierarchy and any diagnostics (e.g., sealed class violations).
