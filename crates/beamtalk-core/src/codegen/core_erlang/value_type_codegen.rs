@@ -542,7 +542,10 @@ impl CoreErlangGenerator {
     ///
     /// Each `Expression` variant is matched explicitly (no wildcard) so the Rust
     /// compiler enforces exhaustiveness: adding a new AST node forces an update here.
-    fn expr_has_block_nlr(expr: &Expression, inside_block: bool) -> bool {
+    pub(in crate::codegen::core_erlang) fn expr_has_block_nlr(
+        expr: &Expression,
+        inside_block: bool,
+    ) -> bool {
         match expr {
             Expression::Return { value, .. } => {
                 // ^ at method-body level is NOT an NLR — it is handled by the

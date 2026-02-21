@@ -319,9 +319,55 @@ impl CoreErlangGenerator {
             ];
             docs.push(header);
 
+            // BT-761: Detect NLR in sealed method body
+            let needs_nlr = method
+                .body
+                .iter()
+                .any(|expr| Self::expr_has_block_nlr(expr, false));
+
+            let nlr_token_var = if needs_nlr {
+                let token_var = self.fresh_temp_var("NlrToken");
+                self.current_nlr_token = Some(token_var.clone());
+                Some(token_var)
+            } else {
+                None
+            };
+
             // Generate method body with reply tuple (reuse existing codegen)
             let method_body_doc = self.generate_method_definition_body_with_reply(method)?;
             let body_str = method_body_doc.to_pretty_string();
+
+            self.current_nlr_token = None;
+
+            // BT-761: Sealed methods are standalone functions (not inside case arms),
+            // so the try/catch can be placed directly at function level.
+            let body_str = if let Some(ref token_var) = nlr_token_var {
+                let result_var = self.fresh_temp_var("NlrResult");
+                let cls_var = self.fresh_temp_var("NlrCls");
+                let err_var = self.fresh_temp_var("NlrErr");
+                let stk_var = self.fresh_temp_var("NlrStk");
+                let ctk_var = self.fresh_temp_var("CatchTok");
+                let val_var = self.fresh_temp_var("NlrVal");
+                let state_var = self.fresh_temp_var("NlrState");
+                let ot_pair_var = self.fresh_temp_var("OtherPair");
+
+                format!(
+                    "let {token_var} = call 'erlang':'make_ref'() in\n\
+                     try\n\
+                     {body_str}\n\
+                     of {result_var} -> {result_var}\n\
+                     catch <{cls_var}, {err_var}, {stk_var}> ->\n\
+                       case {{{cls_var}, {err_var}}} of\n\
+                         <{{'throw', {{'$bt_nlr', {ctk_var}, {val_var}, {state_var}}}}}> \
+                     when call 'erlang':'=:='({ctk_var}, {token_var}) -> \
+                     {{'reply', {val_var}, {state_var}}}\n\
+                         <{ot_pair_var}> when 'true' -> \
+                     primop 'raw_raise'({cls_var}, {err_var}, {stk_var})\n\
+                       end"
+                )
+            } else {
+                body_str
+            };
 
             let body_doc = docvec![nest(INDENT, docvec![line(), body_str,]), "\n",];
             docs.push(body_doc);

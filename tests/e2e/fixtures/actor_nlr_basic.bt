@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-761: ActorNlrBasic — ifTrue: non-local return in Actor method.
+
+Actor subclass: ActorNlrBasic
+  state: x = 0
+
+  test: items =>
+    items isEmpty ifTrue: [^"empty"]
+    "not empty"
+
+  classify: n =>
+    n > 0 ifTrue: [^"positive"] ifFalse: [^"non-positive"]
+    "unreachable"
+
+  checkFalse: items =>
+    items isEmpty ifFalse: [^"not empty"]
+    "empty"

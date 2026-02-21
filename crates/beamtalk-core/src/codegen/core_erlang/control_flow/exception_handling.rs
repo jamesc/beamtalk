@@ -125,6 +125,10 @@ impl CoreErlangGenerator {
         // does not support anonymous `_` wildcards — each must be unique).
         let nlr_tok_var = self.fresh_temp_var("NlrCheckTok");
         let nlr_val_var = self.fresh_temp_var("NlrCheckVal");
+        // BT-761: Actor NLR throws include state as a 4th element.
+        let nlr_state_var = self.fresh_temp_var("NlrCheckState");
+        let nlr_tok_var2 = self.fresh_temp_var("NlrCheckTok");
+        let nlr_val_var2 = self.fresh_temp_var("NlrCheckVal");
         // Fallback pattern: ONE variable binding the whole 2-tuple (not two separate elements).
         let other_pair_var = self.fresh_temp_var("OtherPair");
 
@@ -138,13 +142,14 @@ impl CoreErlangGenerator {
             Document::String(format!(" in try apply {block_var} () ")),
             Document::String(format!("of {result_var} -> {result_var} ")),
             Document::String(format!("catch <{type_var}, {error_var}, {stack_var}> -> ")),
-            // BT-754: Non-local returns (^ inside blocks) throw {'$bt_nlr', Token, Value}.
-            // on:do: must NOT catch them — re-raise immediately so the enclosing method's
-            // NLR handler can intercept. We check by pattern-matching the raw exception.
-            // Scrutinee is ONE 2-tuple {Type, Error}; patterns must match ONE value.
+            // BT-754/BT-761: Non-local returns throw {'$bt_nlr', Token, Value} (value types)
+            // or {'$bt_nlr', Token, Value, State} (actors). on:do: must NOT catch them —
+            // re-raise immediately so the enclosing method's NLR handler can intercept.
             Document::String(format!(
                 "case {{{type_var}, {error_var}}} of \
-                 <{{'throw', {{'$bt_nlr', {nlr_tok_var}, {nlr_val_var}}}}}> when 'true' -> \
+                 <{{'throw', {{'$bt_nlr', {nlr_tok_var}, {nlr_val_var}, {nlr_state_var}}}}}> when 'true' -> \
+                   primop 'raw_raise'({type_var}, {error_var}, {stack_var}) \
+                 <{{'throw', {{'$bt_nlr', {nlr_tok_var2}, {nlr_val_var2}}}}}> when 'true' -> \
                    primop 'raw_raise'({type_var}, {error_var}, {stack_var}) \
                  <{other_pair_var}> when 'true' -> "
             )),
@@ -213,6 +218,10 @@ impl CoreErlangGenerator {
         // BT-754: Unique names for NLR pattern variables (no anonymous _ in Core Erlang).
         let nlr_tok_var = self.fresh_temp_var("NlrCheckTok");
         let nlr_val_var = self.fresh_temp_var("NlrCheckVal");
+        // BT-761: Actor NLR throws include state as a 4th element.
+        let nlr_state_var = self.fresh_temp_var("NlrCheckState");
+        let nlr_tok_var2 = self.fresh_temp_var("NlrCheckTok");
+        let nlr_val_var2 = self.fresh_temp_var("NlrCheckVal");
         // Fallback pattern: ONE variable binding the whole 2-tuple (not two separate elements).
         let other_pair_var = self.fresh_temp_var("OtherPair");
 
@@ -244,10 +253,13 @@ impl CoreErlangGenerator {
             Document::String(format!(" {{{try_result_var}, {try_final_var}}} ")),
             Document::String(format!("of {state_after_try} -> {state_after_try} ")),
             Document::String(format!("catch <{type_var}, {error_var}, {stack_var}> -> ")),
-            // BT-754: Re-raise NLR throws transparently (see generate_on_do for details).
+            // BT-754/BT-761: Re-raise NLR throws transparently (see generate_on_do for details).
+            // Match both 4-tuple (actor) and 3-tuple (value type) NLR throw formats.
             Document::String(format!(
                 "case {{{type_var}, {error_var}}} of \
-                 <{{'throw', {{'$bt_nlr', {nlr_tok_var}, {nlr_val_var}}}}}> when 'true' -> \
+                 <{{'throw', {{'$bt_nlr', {nlr_tok_var}, {nlr_val_var}, {nlr_state_var}}}}}> when 'true' -> \
+                   primop 'raw_raise'({type_var}, {error_var}, {stack_var}) \
+                 <{{'throw', {{'$bt_nlr', {nlr_tok_var2}, {nlr_val_var2}}}}}> when 'true' -> \
                    primop 'raw_raise'({type_var}, {error_var}, {stack_var}) \
                  <{other_pair_var}> when 'true' -> "
             )),

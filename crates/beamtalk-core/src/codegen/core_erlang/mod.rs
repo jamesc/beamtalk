@@ -838,13 +838,28 @@ impl CoreErlangGenerator {
                 // Otherwise (at method body level, or no NLR), just emit the value.
                 if let Some(nlr_token) = self.current_nlr_token.clone() {
                     let val_doc = self.generate_expression(value)?;
-                    Ok(docvec![
-                        "call 'erlang':'throw'({'$bt_nlr', ",
-                        nlr_token,
-                        ", ",
-                        val_doc,
-                        "})"
-                    ])
+                    // BT-761: Actor methods need the current state in the throw so
+                    // the catch arm can build the {reply, Value, State} tuple.
+                    if self.context == CodeGenContext::Actor {
+                        let state = self.current_state_var();
+                        Ok(docvec![
+                            "call 'erlang':'throw'({'$bt_nlr', ",
+                            nlr_token,
+                            ", ",
+                            val_doc,
+                            ", ",
+                            state,
+                            "})"
+                        ])
+                    } else {
+                        Ok(docvec![
+                            "call 'erlang':'throw'({'$bt_nlr', ",
+                            nlr_token,
+                            ", ",
+                            val_doc,
+                            "})"
+                        ])
+                    }
                 } else {
                     // Return in Core Erlang is just the value
                     self.generate_expression(value)

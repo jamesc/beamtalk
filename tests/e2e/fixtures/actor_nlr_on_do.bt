@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-761: ActorNlrOnDo — NLR throw propagates through on:do: in Actor methods.
+
+Actor subclass: ActorNlrOnDo
+  state: x = 0
+
+  test: items =>
+    [items isEmpty ifTrue: [^"early"]] on: Error do: [:e | "caught"]
+    "not early"

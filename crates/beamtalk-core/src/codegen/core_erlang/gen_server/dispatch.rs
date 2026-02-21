@@ -250,9 +250,56 @@ impl CoreErlangGenerator {
                         .map(|p| self.fresh_var(&p.name))
                         .collect();
 
+                    // BT-761: Detect whether any block in this method body contains ^.
+                    let needs_nlr = block
+                        .body
+                        .iter()
+                        .any(|expr| Self::expr_has_block_nlr(expr, false));
+
+                    let nlr_token_var = if needs_nlr {
+                        let token_var = self.fresh_temp_var("NlrToken");
+                        self.current_nlr_token = Some(token_var.clone());
+                        Some(token_var)
+                    } else {
+                        None
+                    };
+
                     // Generate body as Document, render to string for embedding
                     let body_doc = self.generate_method_body_with_reply(block)?;
                     let body_str = body_doc.to_pretty_string();
+
+                    self.current_nlr_token = None;
+
+                    // BT-761: Wrap body in letrec function with try/catch.
+                    let body_str = if let Some(ref token_var) = nlr_token_var {
+                        let result_var = self.fresh_temp_var("NlrResult");
+                        let cls_var = self.fresh_temp_var("NlrCls");
+                        let err_var = self.fresh_temp_var("NlrErr");
+                        let stk_var = self.fresh_temp_var("NlrStk");
+                        let ctk_var = self.fresh_temp_var("CatchTok");
+                        let val_var = self.fresh_temp_var("NlrVal");
+                        let state_var = self.fresh_temp_var("NlrState");
+                        let ot_pair_var = self.fresh_temp_var("OtherPair");
+
+                        format!(
+                            "letrec '__nlr_body'/0 = fun () ->\n\
+                             let {token_var} = call 'erlang':'make_ref'() in\n\
+                             try\n\
+                             {body_str}\n\
+                             of {result_var} -> {result_var}\n\
+                             catch <{cls_var}, {err_var}, {stk_var}> ->\n\
+                               case {{{cls_var}, {err_var}}} of\n\
+                                 <{{'throw', {{'$bt_nlr', {ctk_var}, {val_var}, {state_var}}}}}> \
+                             when call 'erlang':'=:='({ctk_var}, {token_var}) -> \
+                             {{'reply', {val_var}, {state_var}}}\n\
+                                 <{ot_pair_var}> when 'true' -> \
+                             primop 'raw_raise'({cls_var}, {err_var}, {stk_var})\n\
+                               end\n\
+                             in apply '__nlr_body'/0 ()"
+                        )
+                    } else {
+                        body_str
+                    };
 
                     // Build method clause as Document tree
                     let clause_doc = if param_vars.is_empty() {

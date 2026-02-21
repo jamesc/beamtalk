@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-761: ActorNlrMutate — NLR after field mutation preserves updated state.
+
+Actor subclass: ActorNlrMutate
+  state: count = 0
+
+  incAndCheck: n =>
+    self.count := self.count + 1
+    self.count >= n ifTrue: [^self.count]
+    "not yet"
