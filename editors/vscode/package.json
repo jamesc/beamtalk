@@ -77,7 +77,7 @@
     "package": "vsce package",
     "lint": "biome lint src/",
     "format": "biome format --write src/",
-    "format:check": "biome format --diagnostic-level=error src/"
+    "format:check": "biome format src/"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"

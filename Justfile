@@ -94,7 +94,7 @@ build-vscode: build-lsp
     mv -f "${TMP_BIN}" editors/vscode/bin/beamtalk-lsp
     echo "   Bundled debug beamtalk-lsp ($(du -h editors/vscode/bin/beamtalk-lsp | cut -f1))"
     cd editors/vscode
-    npm install --quiet
+    npm ci --quiet
     npm run compile
     echo "✅ VS Code extension built for local install from editors/vscode"
 
@@ -147,7 +147,7 @@ lint-erlang: dialyzer
 [working-directory: 'editors/vscode']
 lint-js: fmt-check-js
     @echo "🔍 Running Biome lint..."
-    npm install --quiet
+    npm ci --quiet
     npm run lint
     @echo "✅ Biome lint passed"
 
@@ -178,7 +178,7 @@ fmt: fmt-rust fmt-erlang fmt-js
 [working-directory: 'editors/vscode']
 fmt-check-js:
     @echo "📋 Checking JS/TS formatting..."
-    npm install --quiet
+    npm ci --quiet
     npm run format:check
     @echo "✅ JS/TS formatting check passed"
 
@@ -186,7 +186,7 @@ fmt-check-js:
 [working-directory: 'editors/vscode']
 fmt-js:
     @echo "✨ Formatting JS/TS code..."
-    npm install --quiet
+    npm ci --quiet
     npm run format
     @echo "✅ JS/TS code formatted"
 
@@ -786,7 +786,7 @@ dist-vscode-platform target:
     mv -f "${TMP_BIN}" "editors/vscode/bin/${BIN_NAME}"
     echo "   Bundled ${BIN_NAME} ($(du -h editors/vscode/bin/${BIN_NAME} | cut -f1))"
     cd editors/vscode
-    npm install --quiet
+    npm ci --quiet
     npm run compile
     mkdir -p ../../dist
     npx --yes @vscode/vsce package --target "{{target}}" --out "../../dist/beamtalk-{{target}}.vsix"
