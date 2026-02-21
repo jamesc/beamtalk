@@ -462,7 +462,7 @@ add_before_method_test_() ->
                 },
                 {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
 
-                BeforeFun = fun() -> io:format("Before!~n") end,
+                BeforeFun = fun() -> ok end,
                 ok = beamtalk_object_class:add_before(Pid, increment, BeforeFun),
 
                 %% Can't easily verify without accessing internal state,
@@ -483,7 +483,7 @@ add_after_method_test_() ->
                 },
                 {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
 
-                AfterFun = fun() -> io:format("After!~n") end,
+                AfterFun = fun() -> ok end,
                 ok = beamtalk_object_class:add_after(Pid, increment, AfterFun),
 
                 ?assert(true)
