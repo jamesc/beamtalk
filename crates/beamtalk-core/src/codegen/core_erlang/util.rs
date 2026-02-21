@@ -10,20 +10,31 @@
 //! - Name conversions (class names, module names)
 //! - Class identity (DDD Value Object bundling module + class names)
 
+use super::document::{Document, join};
 use super::{CoreErlangGenerator, Result};
 use crate::ast::{ClassDefinition, Expression};
+use crate::docvec;
 
 /// BT-745: Generate a `'beamtalk_class' = [{...}]` attribute fragment for the
-/// module attributes section. Returns an empty string when classes is empty.
-pub(super) fn beamtalk_class_attribute(classes: &[ClassDefinition]) -> String {
+/// module attributes section. Returns `Document::Nil` when classes is empty.
+pub(super) fn beamtalk_class_attribute(classes: &[ClassDefinition]) -> Document<'static> {
     if classes.is_empty() {
-        return String::new();
+        return Document::Nil;
     }
-    let entries: Vec<String> = classes
-        .iter()
-        .map(|c| format!("{{'{}', '{}'}}", c.name.name, c.superclass_name()))
-        .collect();
-    format!(",\n     'beamtalk_class' = [{}]", entries.join(", "))
+    let entries = classes.iter().map(|c| {
+        docvec![
+            "{'",
+            Document::String(c.name.name.to_string()),
+            "', '",
+            Document::String(c.superclass_name().to_string()),
+            "'}"
+        ]
+    });
+    docvec![
+        ",\n     'beamtalk_class' = [",
+        join(entries, &Document::Str(", ")),
+        "]"
+    ]
 }
 
 /// Value Object: A class's compile-time identity.
