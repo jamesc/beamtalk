@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 76
 expression: core_erlang
 ---
 module 'typed_value_type' ['new'/0, 'new'/1, 'getX'/1, 'getY'/1, 'distanceTo:'/2, 'printString'/1, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0]
@@ -128,6 +127,7 @@ call 'bt@stdlib@typed_point':'dispatch'('printString', [], Self)
         end
 
         in _Reg0
+
     of RegResult -> RegResult
     catch <CatchType, CatchError, CatchStack> -> 'ok'
 

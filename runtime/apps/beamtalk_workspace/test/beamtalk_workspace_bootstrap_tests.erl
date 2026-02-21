@@ -329,6 +329,114 @@ bootstrap_start_link_with_nonexistent_path_test_() ->
      end}.
 
 %%====================================================================
+%% Integration test for full module activation path (BT-748)
+%%====================================================================
+
+%% Test that activate_project_modules/1 loads a compiled module, calls
+%% register_class/0, and makes the class visible via the class registry.
+activate_project_modules_registers_class_test_() ->
+    {setup,
+     fun() -> ensure_runtime() end,
+     fun(_) ->
+         cleanup_activation_test_class(),
+         purge_activation_fixture_module()
+     end,
+     fun(_) ->
+         [?_test(begin
+              ModName = 'bt@BT748ActivationFixture',
+              ClassName = 'BT748ActivationFixture',
+              {ProjDir, EbinDir} = make_temp_project_dir(),
+              try
+                  BeamBin = compile_activation_fixture(ModName, ClassName),
+                  BeamFile = filename:join(EbinDir, "bt@BT748ActivationFixture.beam"),
+                  ok = file:write_file(BeamFile, BeamBin),
+                  ok = beamtalk_workspace_bootstrap:activate_project_modules(
+                           list_to_binary(ProjDir)),
+                  ?assertNotEqual(undefined,
+                      beamtalk_class_registry:whereis_class(ClassName)),
+                  ?assertEqual({module, ModName}, code:ensure_loaded(ModName))
+              after
+                  remove_temp_project_dir(ProjDir),
+                  code:del_path(EbinDir)
+              end
+          end)]
+     end}.
+
+cleanup_activation_test_class() ->
+    case beamtalk_class_registry:whereis_class('BT748ActivationFixture') of
+        undefined -> ok;
+        Pid ->
+            gen_server:stop(Pid, normal, 1000),
+            timer:sleep(50)
+    end.
+
+purge_activation_fixture_module() ->
+    code:purge('bt@BT748ActivationFixture'),
+    code:delete('bt@BT748ActivationFixture'),
+    ok.
+
+make_temp_project_dir() ->
+    Base = filename:join(get_temp_dir(),
+                         "beamtalk_proj_" ++ integer_to_list(erlang:unique_integer([positive]))),
+    ok = file:make_dir(Base),
+    ok = file:make_dir(filename:join(Base, "_build")),
+    ok = file:make_dir(filename:join([Base, "_build", "dev"])),
+    EbinDir = filename:join([Base, "_build", "dev", "ebin"]),
+    ok = file:make_dir(EbinDir),
+    {Base, EbinDir}.
+
+remove_temp_project_dir(Dir) ->
+    EbinDir = filename:join([Dir, "_build", "dev", "ebin"]),
+    BuildDevDir = filename:join([Dir, "_build", "dev"]),
+    BuildDir = filename:join(Dir, "_build"),
+    case file:list_dir(EbinDir) of
+        {ok, Files} ->
+            lists:foreach(fun(F) -> file:delete(filename:join(EbinDir, F)) end, Files);
+        _ -> ok
+    end,
+    file:del_dir(EbinDir),
+    file:del_dir(BuildDevDir),
+    file:del_dir(BuildDir),
+    file:del_dir(Dir),
+    ok.
+
+%% @private Build a minimal bt@ module with register_class/0 using abstract forms.
+%% The function calls beamtalk_object_class:start/2 to register the class.
+compile_activation_fixture(ModName, ClassName) ->
+    Forms = [
+        {attribute, 1, module, ModName},
+        {attribute, 2, export, [{register_class, 0}]},
+        {function, 3, register_class, 0,
+         [{clause, 3, [], [],
+           [{'case', 4,
+             {call, 4,
+              {remote, 4, {atom, 4, beamtalk_object_class}, {atom, 4, start}},
+              [{atom, 4, ClassName},
+               {map, 4,
+                [{map_field_assoc, 4, {atom, 4, name},               {atom, 4, ClassName}},
+                 {map_field_assoc, 4, {atom, 4, superclass},         {atom, 4, 'Object'}},
+                 {map_field_assoc, 4, {atom, 4, module},             {atom, 4, ModName}},
+                 {map_field_assoc, 4, {atom, 4, instance_variables}, {nil,  4}},
+                 {map_field_assoc, 4, {atom, 4, class_methods},      {map,  4, []}},
+                 {map_field_assoc, 4, {atom, 4, instance_methods},   {map,  4, []}}
+                ]}
+              ]},
+             [{clause, 5,
+               [{tuple, 5, [{atom, 5, ok}, {var, 5, '_Pid'}]}],
+               [],
+               [{atom, 5, ok}]},
+              {clause, 6,
+               [{tuple, 6, [{atom, 6, error}, {var, 6, '_'}]}],
+               [],
+               [{atom, 6, ok}]}
+             ]}
+           ]}
+          ]}
+    ],
+    {ok, ModName, BeamBin} = compile:forms(Forms, []),
+    BeamBin.
+
+%%====================================================================
 %% Test helpers for temp directories
 %%====================================================================
 
