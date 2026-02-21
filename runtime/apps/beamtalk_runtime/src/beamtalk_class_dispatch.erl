@@ -44,13 +44,13 @@ class_send(undefined, Selector, _Args) ->
 %% A class method sending new/new:/spawn/spawnWith: to its own class (ClassPid == self())
 %% would cause gen_server:call(self(), ...) to deadlock — OTP raises {calling_self,...}.
 %% Guard all four instantiation selectors and raise a clean Beamtalk error instead.
-class_send(ClassPid, 'new', []) when ClassPid =:= self() ->
+class_send(ClassPid, 'new', _Args) when ClassPid =:= self() ->
     handle_calling_self_error(ClassPid, 'new');
-class_send(ClassPid, 'new:', [_Map]) when ClassPid =:= self() ->
+class_send(ClassPid, 'new:', _Args) when ClassPid =:= self() ->
     handle_calling_self_error(ClassPid, 'new:');
-class_send(ClassPid, spawn, []) when ClassPid =:= self() ->
+class_send(ClassPid, spawn, _Args) when ClassPid =:= self() ->
     handle_calling_self_error(ClassPid, spawn);
-class_send(ClassPid, 'spawnWith:', [_Map]) when ClassPid =:= self() ->
+class_send(ClassPid, 'spawnWith:', _Args) when ClassPid =:= self() ->
     handle_calling_self_error(ClassPid, 'spawnWith:');
 class_send(ClassPid, 'new', []) ->
     unwrap_class_call(gen_server:call(ClassPid, {new, []}));

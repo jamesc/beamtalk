@@ -1416,32 +1416,39 @@ class_method_self_call_spawn_with_test() ->
         beamtalk_class_dispatch:class_send(self(), 'spawnWith:', [#{}])
     ).
 
-%% @doc Verify error has the class name extracted from the registered pid name.
+%% @doc Verify the error contains the class name extracted from the registered pid name.
 %%
-%% BT-755: class_name_from_pid strips the 'beamtalk_class_' prefix from the
-%% gen_server registered name to give a meaningful class name in the error.
-class_method_self_call_class_name_in_error_test_() ->
-    {setup,
-     fun setup/0,
-     fun teardown/1,
-     fun(_) ->
-         [?_test(begin
-             ClassInfo = #{
-                 name => 'SelfCallTestClass',
-                 module => 'bt@counter',
-                 superclass => 'Object',
-                 instance_methods => #{}
-             },
-             {ok, ClassPid} = beamtalk_object_class:start_link('SelfCallTestClass', ClassInfo),
-             %% Verify the registered name matches the expected 'beamtalk_class_<Name>' pattern
-             %% so class_name_from_pid/1 can recover it for error messages.
-             RegName = element(2, erlang:process_info(ClassPid, registered_name)),
-             ?assertEqual('SelfCallTestClass',
-                 begin
-                     RegStr = atom_to_list(RegName),
-                     Prefix = "beamtalk_class_",
-                     true = lists:prefix(Prefix, RegStr),
-                     list_to_atom(lists:nthtail(length(Prefix), RegStr))
-                 end)
-         end)]
-     end}.
+%% BT-755: class_name_from_pid/1 strips 'beamtalk_class_' from the registered
+%% name to populate the error's class field. Exercise the full error path by
+%% spawning a process registered as a class and calling class_send on self().
+class_method_self_call_class_name_in_error_test() ->
+    TestClassName = 'SelfCallNameTestClass',
+    RegName = list_to_atom("beamtalk_class_" ++ atom_to_list(TestClassName)),
+    Parent = self(),
+    spawn(fun() ->
+        register(RegName, self()),
+        try
+            beamtalk_class_dispatch:class_send(self(), spawn, [])
+        catch
+            error:ErrorMap ->
+                Parent ! {self_call_error, ErrorMap}
+        end
+    end),
+    receive
+        {self_call_error, ErrorMap} ->
+            %% class_name_from_pid/1 should have recovered TestClassName from
+            %% the registered process name and included it in the error record.
+            ?assertMatch(
+                #{
+                    '$beamtalk_class' := _,
+                    error := #beamtalk_error{
+                        kind = instantiation_error,
+                        class = TestClassName,
+                        selector = spawn
+                    }
+                },
+                ErrorMap
+            )
+    after 2000 ->
+        ?assert(false)
+    end.
