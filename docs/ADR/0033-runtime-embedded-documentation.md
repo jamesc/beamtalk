@@ -71,6 +71,8 @@ Add documentation strings as first-class state on `Behaviour` and `CompiledMetho
 
 When constructing a `CompiledMethod` via `handle_call({method, Selector}, ...)`, the `__doc__` field is populated from the `doc` key in the local `method_info()` map. If the method has no doc, `__doc__` is `nil`.
 
+**Note on `none` vs `nil`:** The `class_state` record uses Erlang's `none` atom (idiomatic for internal Erlang records), while the Beamtalk-facing `CompiledMethod` map uses `nil` (Beamtalk's null value). The translation happens at the boundary when constructing CompiledMethod from class state.
+
 ### Beamtalk API
 
 **Reading docs — ordinary message sends:**
@@ -86,8 +88,8 @@ Counter doc                      // => 'A counter actor that maintains state.'
 **Setting docs — post-hoc setters on Behaviour:**
 
 ```beamtalk
-Counter doc: 'A counter actor that maintains state.'.
-Counter setDocForMethod: #increment to: 'Increment the counter by 1.'.
+Counter doc: "A counter actor that maintains state.".
+Counter setDocForMethod: #increment to: "Increment the counter by 1.".
 ```
 
 These are ordinary message sends to the class object, handled by methods on `Behaviour`. They update the class gen_server state. Doc setters only work for locally defined methods — you cannot set a doc on an inherited method without first overriding the method itself.
@@ -120,7 +122,7 @@ Doc reading walks the hierarchy via `>>`; doc writing is local-only via `setDocF
 ///
 /// ## Examples
 /// ```beamtalk
-/// Integer doc       // => 'Integer — Whole number arithmetic and operations...'
+/// Integer doc       // => "Integer — Whole number arithmetic and operations..."
 /// ```
 sealed doc => @intrinsic classDoc
 
@@ -128,8 +130,8 @@ sealed doc => @intrinsic classDoc
 ///
 /// ## Examples
 /// ```beamtalk
-/// Counter doc: 'A counter actor'.
-/// Counter doc   // => 'A counter actor'
+/// Counter doc: "A counter actor".
+/// Counter doc   // => "A counter actor"
 /// ```
 sealed doc: aString => @intrinsic classSetDoc
 
@@ -138,15 +140,15 @@ sealed doc: aString => @intrinsic classSetDoc
 ///
 /// ## Examples
 /// ```beamtalk
-/// Counter setDocForMethod: #increment to: 'Increment by 1'.
-/// (Counter >> #increment) doc   // => 'Increment by 1'
+/// Counter setDocForMethod: #increment to: "Increment by 1".
+/// (Counter >> #increment) doc   // => "Increment by 1"
 /// ```
 sealed setDocForMethod: selector to: aString => @intrinsic classSetMethodDoc
 ```
 
 ### CompiledMethod Addition
 
-In `beamtalk_compiled_method_ops.erl`, add `doc` to the builtin dispatch:
+In `beamtalk_compiled_method_ops.erl`, add `doc` to the built-in dispatch:
 
 ```beamtalk
 (Counter >> #increment) doc            // => 'Increment the counter by 1.'
@@ -185,23 +187,23 @@ In `generate_register_class` codegen (`methods.rs`), the `ClassInfo` map gains:
 >> (Counter >> #class) doc
 => "Return the class of the receiver."
 
->> Counter doc: 'Updated documentation.'
+>> Counter doc: "Updated documentation."
 => "Updated documentation."
 
 >> Counter doc
 => "Updated documentation."
 
->> Counter setDocForMethod: #increment to: 'Add one to the count.'
+>> Counter setDocForMethod: #increment to: "Add one to the count."
 => "Add one to the count."
 
 >> (Counter >> #increment) doc
 => "Add one to the count."
 
 >> // Dynamic class — docs work without .beam files
->> Greeter doc: 'A simple greeter actor.'
+>> Greeter doc: "A simple greeter actor."
 => "A simple greeter actor."
 
->> Greeter setDocForMethod: #greet to: 'Return a greeting.'
+>> Greeter setDocForMethod: #greet to: "Return a greeting."
 => "Return a greeting."
 
 >> (Greeter >> #greet) doc
@@ -211,10 +213,10 @@ In `generate_register_class` codegen (`methods.rs`), the `ClassInfo` map gains:
 ### Error Examples
 
 ```beamtalk
->> Counter setDocForMethod: #nonExistent to: 'docs for missing method'
+>> Counter setDocForMethod: #nonExistent to: "docs for missing method"
 => Error: method #nonExistent is not defined locally on Counter
 
->> Counter setDocForMethod: #class to: 'override inherited doc'
+>> Counter setDocForMethod: #class to: "override inherited doc"
 => Error: method #class is not defined locally on Counter
 
 >> 42 doc
@@ -262,7 +264,7 @@ In `generate_register_class` codegen (`methods.rs`), the `ClassInfo` map gains:
 
 ### Production Operator
 - **Small memory cost**: Doc strings are binaries — typically 50-200 bytes per method. For a system with 500 methods, that's ~50-100KB total. Negligible.
-- **No performance impact on dispatch**: Docs are stored alongside method_info but not consulted during dispatch. The `doc` field is read only when explicitly asked for.
+- **No performance impact on dispatch**: Docs are stored alongside method_info but not consulted during dispatch. The `doc` field is only accessed when explicitly requested via a `doc` message.
 - **Simpler build pipeline**: Removing EEP-48 chunk injection eliminates the post-`erlc` beam rewriting step.
 
 ## Steelman Analysis
@@ -310,7 +312,7 @@ Thread doc strings through the `ClassInfo` map during `register_class/0` (like m
 
 ```beamtalk
 Counter doc                     // => works (populated at compile time)
-Counter doc: 'new docs'         // => Error: does not understand #doc:
+Counter doc: "new docs"          // => Error: does not understand #doc:
 ```
 
 **Rejected because:** Breaks the Smalltalk principle that classes are live, mutable objects. Pharo's `comment:` is essential for interactive development — you fix a doc typo in the browser, not by recompiling. More practically, dynamic classes would have no way to get docs at all. The setters are simple (two intrinsics) and the flexibility is worth it.
