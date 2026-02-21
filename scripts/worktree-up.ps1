@@ -178,12 +178,16 @@ function Invoke-WorktreeUpHook {
     $upHookScript = Join-Path $WorktreePath ".devcontainer" "worktree-up-hook.sh"
     if (Test-Path $upHookScript) {
         Write-Host "🔧 Running project setup hook..." -ForegroundColor Cyan
-        devcontainer exec --workspace-folder $WorktreePath bash .devcontainer/worktree-up-hook.sh 2>$null
+        $hookOutput = & devcontainer exec --workspace-folder $WorktreePath bash .devcontainer/worktree-up-hook.sh 2>&1
         if ($LASTEXITCODE -eq 0) {
             Write-Host "✅ Project setup hook completed" -ForegroundColor Green
         }
         else {
             Write-Host "⚠️  Project setup hook failed" -ForegroundColor Yellow
+            if ($hookOutput) {
+                Write-Host "Hook output:" -ForegroundColor DarkYellow
+                Write-Host $hookOutput
+            }
         }
     }
 }
