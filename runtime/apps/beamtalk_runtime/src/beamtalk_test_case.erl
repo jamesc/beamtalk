@@ -44,7 +44,9 @@ assert(true) ->
 assert(false) ->
     Error0 = beamtalk_error:new(assertion_failed, 'TestCase'),
     Error1 = beamtalk_error:with_selector(Error0, 'assert:'),
-    Error2 = beamtalk_error:with_message(Error1, <<"Assertion failed: expected true but got false">>),
+    Error2 = beamtalk_error:with_message(
+        Error1, <<"Assertion failed: expected true but got false">>
+    ),
     Error3 = beamtalk_error:with_details(Error2, #{expected => true, actual => false}),
     beamtalk_error:raise(Error3);
 assert(Other) ->
@@ -87,7 +89,9 @@ deny(false) ->
 deny(true) ->
     Error0 = beamtalk_error:new(assertion_failed, 'TestCase'),
     Error1 = beamtalk_error:with_selector(Error0, 'deny:'),
-    Error2 = beamtalk_error:with_message(Error1, <<"Assertion failed: expected false but got true">>),
+    Error2 = beamtalk_error:with_message(
+        Error1, <<"Assertion failed: expected false but got true">>
+    ),
     Error3 = beamtalk_error:with_details(Error2, #{expected => false, actual => true}),
     beamtalk_error:raise(Error3);
 deny(Other) ->
@@ -110,16 +114,18 @@ deny(Other) ->
 %% Note: Block is a zero-argument Erlang fun in Core Erlang codegen.
 -spec should_raise(fun(() -> term()), atom()) -> nil.
 should_raise(Block, ExpectedKind) when is_function(Block, 0), is_atom(ExpectedKind) ->
-    try
-        Block()
-    of
+    try Block() of
         _ ->
             % Block completed without error
             NoRaiseErr0 = beamtalk_error:new(assertion_failed, 'TestCase'),
             NoRaiseErr1 = beamtalk_error:with_selector(NoRaiseErr0, 'should:raise:'),
-            NoRaiseMsg = iolist_to_binary(io_lib:format("Expected block to raise ~s but it completed normally", [ExpectedKind])),
+            NoRaiseMsg = iolist_to_binary(
+                io_lib:format("Expected block to raise ~s but it completed normally", [ExpectedKind])
+            ),
             NoRaiseErr2 = beamtalk_error:with_message(NoRaiseErr1, NoRaiseMsg),
-            NoRaiseErr3 = beamtalk_error:with_details(NoRaiseErr2, #{expected_kind => ExpectedKind, actual => completed}),
+            NoRaiseErr3 = beamtalk_error:with_details(NoRaiseErr2, #{
+                expected_kind => ExpectedKind, actual => completed
+            }),
             beamtalk_error:raise(NoRaiseErr3)
     catch
         _:Exception ->
@@ -130,21 +136,30 @@ should_raise(Block, ExpectedKind) when is_function(Block, 0), is_atom(ExpectedKi
                 _ ->
                     MismatchErr0 = beamtalk_error:new(assertion_failed, 'TestCase'),
                     MismatchErr1 = beamtalk_error:with_selector(MismatchErr0, 'should:raise:'),
-                    MismatchMsg = iolist_to_binary(io_lib:format("Expected error kind ~s but got ~s", [ExpectedKind, ActualKind])),
+                    MismatchMsg = iolist_to_binary(
+                        io_lib:format("Expected error kind ~s but got ~s", [
+                            ExpectedKind, ActualKind
+                        ])
+                    ),
                     MismatchErr2 = beamtalk_error:with_message(MismatchErr1, MismatchMsg),
-                    MismatchErr3 = beamtalk_error:with_details(MismatchErr2, #{expected_kind => ExpectedKind, actual_kind => ActualKind}),
+                    MismatchErr3 = beamtalk_error:with_details(MismatchErr2, #{
+                        expected_kind => ExpectedKind, actual_kind => ActualKind
+                    }),
                     beamtalk_error:raise(MismatchErr3)
             end
     end;
 should_raise(Block, ExpectedKind) ->
     Error0 = beamtalk_error:new(type_error, 'TestCase'),
     Error1 = beamtalk_error:with_selector(Error0, 'should:raise:'),
-    Message = case {is_function(Block, 0), is_atom(ExpectedKind)} of
-        {false, _} ->
-            iolist_to_binary(io_lib:format("Expected a zero-argument block, got: ~p", [Block]));
-        {_, false} ->
-            iolist_to_binary(io_lib:format("Expected an error kind atom, got: ~p", [ExpectedKind]))
-    end,
+    Message =
+        case {is_function(Block, 0), is_atom(ExpectedKind)} of
+            {false, _} ->
+                iolist_to_binary(io_lib:format("Expected a zero-argument block, got: ~p", [Block]));
+            {_, false} ->
+                iolist_to_binary(
+                    io_lib:format("Expected an error kind atom, got: ~p", [ExpectedKind])
+                )
+        end,
     Error2 = beamtalk_error:with_message(Error1, Message),
     beamtalk_error:raise(Error2).
 
@@ -177,13 +192,19 @@ execute_tests(runAll, _Args, ClassName, Module, FlatMethods) ->
     TestMethods = discover_test_methods(FlatMethods),
     case TestMethods of
         [] ->
-            iolist_to_binary(io_lib:format(
-                "No test methods found in ~s", [ClassName]));
+            iolist_to_binary(
+                io_lib:format(
+                    "No test methods found in ~s", [ClassName]
+                )
+            );
         _ ->
             StartTime = erlang:monotonic_time(millisecond),
-            Results = lists:map(fun(Method) ->
-                run_test_method(ClassName, Module, Method, FlatMethods)
-            end, TestMethods),
+            Results = lists:map(
+                fun(Method) ->
+                    run_test_method(ClassName, Module, Method, FlatMethods)
+                end,
+                TestMethods
+            ),
             EndTime = erlang:monotonic_time(millisecond),
             Duration = (EndTime - StartTime) / 1000.0,
             format_results(Results, Duration)
@@ -191,8 +212,11 @@ execute_tests(runAll, _Args, ClassName, Module, FlatMethods) ->
 execute_tests('run:', [TestMethodName], ClassName, Module, FlatMethods) ->
     case maps:is_key(TestMethodName, FlatMethods) of
         false ->
-            iolist_to_binary(io_lib:format(
-                "Method '~s' not found in ~s", [TestMethodName, ClassName]));
+            iolist_to_binary(
+                io_lib:format(
+                    "Method '~s' not found in ~s", [TestMethodName, ClassName]
+                )
+            );
         true ->
             StartTime = erlang:monotonic_time(millisecond),
             Result = run_test_method(ClassName, Module, TestMethodName, FlatMethods),
@@ -211,13 +235,19 @@ run_all(ClassName) ->
     TestMethods = discover_test_methods_from_module(Module),
     case TestMethods of
         [] ->
-            iolist_to_binary(io_lib:format(
-                "No test methods found in ~s", [ClassName]));
+            iolist_to_binary(
+                io_lib:format(
+                    "No test methods found in ~s", [ClassName]
+                )
+            );
         _ ->
             StartTime = erlang:monotonic_time(millisecond),
-            Results = lists:map(fun(Method) ->
-                run_test_method(ClassName, Module, Method, none)
-            end, TestMethods),
+            Results = lists:map(
+                fun(Method) ->
+                    run_test_method(ClassName, Module, Method, none)
+                end,
+                TestMethods
+            ),
             EndTime = erlang:monotonic_time(millisecond),
             Duration = (EndTime - StartTime) / 1000.0,
             format_results(Results, Duration)
@@ -239,21 +269,35 @@ run_single(ClassName, TestMethodName) when is_atom(TestMethodName) ->
 %% Returns a map with per-test results suitable for JSON encoding.
 %% Uses the BIF fallback path (safe outside gen_server).
 -spec run_all_structured(atom()) ->
-    #{class := atom(), total := non_neg_integer(), passed := non_neg_integer(),
-      failed := non_neg_integer(), duration := float(),
-      tests := [#{name := atom(), status := pass | fail, error => binary()}]}.
+    #{
+        class := atom(),
+        total := non_neg_integer(),
+        passed := non_neg_integer(),
+        failed := non_neg_integer(),
+        duration := float(),
+        tests := [#{name := atom(), status := pass | fail, error => binary()}]
+    }.
 run_all_structured(ClassName) ->
     Module = resolve_module(ClassName),
     TestMethods = discover_test_methods_from_module(Module),
     case TestMethods of
         [] ->
-            #{class => ClassName, total => 0, passed => 0, failed => 0,
-              duration => 0.0, tests => []};
+            #{
+                class => ClassName,
+                total => 0,
+                passed => 0,
+                failed => 0,
+                duration => 0.0,
+                tests => []
+            };
         _ ->
             StartTime = erlang:monotonic_time(millisecond),
-            Results = lists:map(fun(Method) ->
-                run_test_method(ClassName, Module, Method, none)
-            end, TestMethods),
+            Results = lists:map(
+                fun(Method) ->
+                    run_test_method(ClassName, Module, Method, none)
+                end,
+                TestMethods
+            ),
             EndTime = erlang:monotonic_time(millisecond),
             Duration = (EndTime - StartTime) / 1000.0,
             structure_results(ClassName, Results, Duration)
@@ -261,9 +305,14 @@ run_all_structured(ClassName) ->
 
 %% @doc Run a single test method and return structured results (BT-699).
 -spec run_single_structured(atom(), atom()) ->
-    #{class := atom(), total := non_neg_integer(), passed := non_neg_integer(),
-      failed := non_neg_integer(), duration := float(),
-      tests := [#{name := atom(), status := pass | fail, error => binary()}]}.
+    #{
+        class := atom(),
+        total := non_neg_integer(),
+        passed := non_neg_integer(),
+        failed := non_neg_integer(),
+        duration := float(),
+        tests := [#{name := atom(), status := pass | fail, error => binary()}]
+    }.
 run_single_structured(ClassName, TestMethodName) when is_atom(TestMethodName) ->
     Module = resolve_module(ClassName),
     StartTime = erlang:monotonic_time(millisecond),
@@ -334,24 +383,31 @@ extract_error_kind(_) ->
 %% FlatMethods is #{Selector => {DefiningClass, MethodInfo}}.
 -spec discover_test_methods(map()) -> [atom()].
 discover_test_methods(FlatMethods) ->
-    TestMethods = maps:fold(fun(Selector, _Info, Acc) ->
-        case atom_to_list(Selector) of
-            "test" ++ _ -> [Selector | Acc];
-            _ -> Acc
-        end
-    end, [], FlatMethods),
+    TestMethods = maps:fold(
+        fun(Selector, _Info, Acc) ->
+            case atom_to_list(Selector) of
+                "test" ++ _ -> [Selector | Acc];
+                _ -> Acc
+            end
+        end,
+        [],
+        FlatMethods
+    ),
     lists:sort(TestMethods).
 
 %% @doc Discover test methods from module exports (BIF fallback path).
 -spec discover_test_methods_from_module(atom()) -> [atom()].
 discover_test_methods_from_module(Module) ->
     Exports = Module:module_info(exports),
-    TestMethods = lists:filtermap(fun({FunName, _Arity}) ->
-        case atom_to_list(FunName) of
-            "test" ++ _ -> {true, FunName};
-            _ -> false
-        end
-    end, Exports),
+    TestMethods = lists:filtermap(
+        fun({FunName, _Arity}) ->
+            case atom_to_list(FunName) of
+                "test" ++ _ -> {true, FunName};
+                _ -> false
+            end
+        end,
+        Exports
+    ),
     lists:sort(TestMethods).
 
 %% @doc Resolve the BEAM module atom for a class name (no gen_server call).
@@ -362,19 +418,23 @@ resolve_module(ClassName) ->
     SnakeName = class_name_to_snake(atom_to_list(ClassName)),
     UserModule = list_to_atom("bt@" ++ SnakeName),
     case code:is_loaded(UserModule) of
-        {file, _} -> UserModule;
+        {file, _} ->
+            UserModule;
         false ->
             StdlibModule = list_to_atom("bt@stdlib@" ++ SnakeName),
             case code:is_loaded(StdlibModule) of
-                {file, _} -> StdlibModule;
+                {file, _} ->
+                    StdlibModule;
                 false ->
                     %% Try loading (module may be on code path but not yet loaded)
                     case code:ensure_loaded(UserModule) of
-                        {module, _} -> UserModule;
+                        {module, _} ->
+                            UserModule;
                         _ ->
                             case code:ensure_loaded(StdlibModule) of
                                 {module, _} -> StdlibModule;
-                                _ -> UserModule  % fall back, will error at call site
+                                % fall back, will error at call site
+                                _ -> UserModule
                             end
                     end
             end
@@ -389,7 +449,8 @@ class_name_to_snake(Name) ->
 class_name_to_snake([], _PrevLower, Acc) ->
     lists:reverse(Acc);
 class_name_to_snake([H | T], PrevLower, Acc) when H >= $A, H =< $Z ->
-    Lower = H + 32,  % ASCII uppercase to lowercase
+    % ASCII uppercase to lowercase
+    Lower = H + 32,
     case PrevLower of
         true -> class_name_to_snake(T, false, [Lower, $_ | Acc]);
         false -> class_name_to_snake(T, false, [Lower | Acc])
@@ -413,38 +474,47 @@ run_test_method(ClassName, Module, MethodName, FlatMethods) ->
             true -> Module:dispatch(setUp, [], Instance);
             false -> ok
         end,
-        TestResult = try
-            Module:dispatch(MethodName, [], Instance),
-            {pass, MethodName}
-        catch
-            error:#beamtalk_error{kind = assertion_failed, message = AssertMsg} ->
-                {fail, MethodName, AssertMsg};
-            error:#beamtalk_error{message = ErrMsg} ->
-                {fail, MethodName, ErrMsg};
-            error:TestReason ->
-                FailMsg = iolist_to_binary(io_lib:format("~p", [TestReason])),
-                {fail, MethodName, FailMsg};
-            TestClass:TestReason:TestST ->
-                FailMsg = iolist_to_binary(
-                    io_lib:format("~p:~p", [TestClass, TestReason])),
-                ?LOG_DEBUG("Test ~p:~p failed with stacktrace: ~p",
-                             [ClassName, MethodName, TestST]),
-                {fail, MethodName, FailMsg}
-        after
-            case HasTearDown of
-                true ->
-                    try Module:dispatch(tearDown, [], Instance)
-                    catch _:_ -> ok  % Don't mask the original test failure
-                    end;
-                false -> ok
-            end
-        end,
+        TestResult =
+            try
+                Module:dispatch(MethodName, [], Instance),
+                {pass, MethodName}
+            catch
+                error:#beamtalk_error{kind = assertion_failed, message = AssertMsg} ->
+                    {fail, MethodName, AssertMsg};
+                error:#beamtalk_error{message = ErrMsg} ->
+                    {fail, MethodName, ErrMsg};
+                error:TestReason ->
+                    FailMsg = iolist_to_binary(io_lib:format("~p", [TestReason])),
+                    {fail, MethodName, FailMsg};
+                TestClass:TestReason:TestST ->
+                    FailMsg = iolist_to_binary(
+                        io_lib:format("~p:~p", [TestClass, TestReason])
+                    ),
+                    ?LOG_DEBUG(
+                        "Test ~p:~p failed with stacktrace: ~p",
+                        [ClassName, MethodName, TestST]
+                    ),
+                    {fail, MethodName, FailMsg}
+            after
+                case HasTearDown of
+                    true ->
+                        try
+                            Module:dispatch(tearDown, [], Instance)
+                            % Don't mask the original test failure
+                        catch
+                            _:_ -> ok
+                        end;
+                    false ->
+                        ok
+                end
+            end,
         TestResult
     catch
         %% setUp or new() itself failed
         SetupClass:SetupReason ->
             SetupMsg = iolist_to_binary(
-                io_lib:format("setUp failed: ~p:~p", [SetupClass, SetupReason])),
+                io_lib:format("setUp failed: ~p:~p", [SetupClass, SetupReason])
+            ),
             {fail, MethodName, SetupMsg}
     end.
 
@@ -462,37 +532,56 @@ format_results(Results, Duration) ->
     Total = length(Results),
     Passed = length([ok || {pass, _} <- Results]),
     Failed = Total - Passed,
-    IoList = case Failed of
-        0 ->
-            io_lib:format(
-                "~p tests, ~p passed (~.1fs)", [Total, Passed, Duration]);
-        _ ->
-            Summary = io_lib:format(
-                "~p tests, ~p passed, ~p failed (~.1fs)",
-                [Total, Passed, Failed, Duration]),
-            Failures = [io_lib:format("  FAIL: ~s\n    ~s\n", [M, Msg])
-                        || {fail, M, Msg} <- Results],
-            [Summary, "\n\n" | Failures]
-    end,
+    IoList =
+        case Failed of
+            0 ->
+                io_lib:format(
+                    "~p tests, ~p passed (~.1fs)", [Total, Passed, Duration]
+                );
+            _ ->
+                Summary = io_lib:format(
+                    "~p tests, ~p passed, ~p failed (~.1fs)",
+                    [Total, Passed, Failed, Duration]
+                ),
+                Failures = [
+                    io_lib:format("  FAIL: ~s\n    ~s\n", [M, Msg])
+                 || {fail, M, Msg} <- Results
+                ],
+                [Summary, "\n\n" | Failures]
+        end,
     unicode:characters_to_binary(IoList).
 
 %% @doc Convert raw test results to structured map (BT-699).
 -spec structure_results(atom(), [{pass, atom()} | {fail, atom(), binary()}], float()) ->
-    #{class := atom(), total := non_neg_integer(), passed := non_neg_integer(),
-      failed := non_neg_integer(), duration := float(),
-      tests := [#{name := atom(), status := pass | fail, error => binary()}]}.
+    #{
+        class := atom(),
+        total := non_neg_integer(),
+        passed := non_neg_integer(),
+        failed := non_neg_integer(),
+        duration := float(),
+        tests := [#{name := atom(), status := pass | fail, error => binary()}]
+    }.
 structure_results(ClassName, Results, Duration) ->
     Total = length(Results),
     Passed = length([ok || {pass, _} <- Results]),
     Failed = Total - Passed,
-    Tests = lists:map(fun
-        ({pass, Name}) ->
-            #{name => Name, status => pass};
-        ({fail, Name, Msg}) ->
-            #{name => Name, status => fail, error => Msg}
-    end, Results),
-    #{class => ClassName, total => Total, passed => Passed,
-      failed => Failed, duration => Duration, tests => Tests}.
+    Tests = lists:map(
+        fun
+            ({pass, Name}) ->
+                #{name => Name, status => pass};
+            ({fail, Name, Msg}) ->
+                #{name => Name, status => fail, error => Msg}
+        end,
+        Results
+    ),
+    #{
+        class => ClassName,
+        total => Total,
+        passed => Passed,
+        failed => Failed,
+        duration => Duration,
+        tests => Tests
+    }.
 
 %% @doc Spawn test execution in a separate process to avoid gen_server deadlock.
 %%
@@ -506,19 +595,25 @@ spawn_test_execution(Selector, Args, ClassName, TestModule, FlatMethods, From) -
             gen_server:reply(From, {ok, Result})
         catch
             C:E:ST ->
-                Error = case E of
-                    #beamtalk_error{} -> E;
-                    _ ->
-                        Err0 = beamtalk_error:new(test_execution_failed, ClassName),
-                        beamtalk_error:with_selector(Err0, Selector)
-                end,
-                ?LOG_ERROR("Test execution ~p:~p failed: ~p:~p",
-                             [ClassName, Selector, C, E],
-                             #{class => ClassName,
-                               selector => Selector,
-                               error_class => C,
-                               error => E,
-                               stacktrace => ST}),
+                Error =
+                    case E of
+                        #beamtalk_error{} ->
+                            E;
+                        _ ->
+                            Err0 = beamtalk_error:new(test_execution_failed, ClassName),
+                            beamtalk_error:with_selector(Err0, Selector)
+                    end,
+                ?LOG_ERROR(
+                    "Test execution ~p:~p failed: ~p:~p",
+                    [ClassName, Selector, C, E],
+                    #{
+                        class => ClassName,
+                        selector => Selector,
+                        error_class => C,
+                        error => E,
+                        stacktrace => ST
+                    }
+                ),
                 gen_server:reply(From, {error, Error})
         end
     end).

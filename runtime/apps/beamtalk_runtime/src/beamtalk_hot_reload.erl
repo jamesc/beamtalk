@@ -49,7 +49,9 @@
 %% @returns {ok, NewState} on success, or {error, Reason} on failure
 -spec code_change(OldVsn :: term(), State :: term(), Extra :: term()) ->
     {ok, NewState :: term()} | {error, Reason :: term()}.
-code_change(_OldVsn, State, {NewInstanceVars, Module}) when is_map(State), is_list(NewInstanceVars), is_atom(Module) ->
+code_change(_OldVsn, State, {NewInstanceVars, Module}) when
+    is_map(State), is_list(NewInstanceVars), is_atom(Module)
+->
     %% BT-572: Field migration during hot reload
     MigratedState = maybe_migrate_class_key(State),
     NewState = migrate_fields(MigratedState, NewInstanceVars, Module),
@@ -170,11 +172,14 @@ migrate_fields(OldState, NewInstanceVars, Module) ->
             ),
             %% Log warning for dropped fields
             case Dropped of
-                [] -> ok;
+                [] ->
+                    ok;
                 _ ->
                     ClassName = maps:get('$beamtalk_class', OldState, unknown),
-                    ?LOG_WARNING("Hot reload dropped fields",
-                                 #{class => ClassName, fields => Dropped})
+                    ?LOG_WARNING(
+                        "Hot reload dropped fields",
+                        #{class => ClassName, fields => Dropped}
+                    )
             end,
             Kept;
         _ ->

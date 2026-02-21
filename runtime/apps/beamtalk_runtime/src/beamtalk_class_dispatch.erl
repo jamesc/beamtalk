@@ -54,12 +54,16 @@ class_send(ClassPid, 'spawnWith:', [Map]) ->
 class_send(ClassPid, Selector, Args) ->
     %% BT-411: Try user-defined class methods before raising does_not_understand
     %% BT-440: Test execution may take a long time; use longer timeout.
-    Timeout = case is_test_execution_selector(Selector) of
-        true -> 300000;  % 5 minutes for test suites
-        false -> 5000    % default gen_server timeout
-    end,
+    Timeout =
+        case is_test_execution_selector(Selector) of
+            % 5 minutes for test suites
+            true -> 300000;
+            % default gen_server timeout
+            false -> 5000
+        end,
     case gen_server:call(ClassPid, {class_method_call, Selector, Args}, Timeout) of
-        {ok, Result} -> Result;
+        {ok, Result} ->
+            Result;
         {error, not_found} ->
             ClassName = gen_server:call(ClassPid, class_name),
             %% ADR 0032 Phase 0 (BT-732): Try Class chain before raising does_not_understand.
@@ -78,10 +82,12 @@ class_send(ClassPid, Selector, Args) ->
                         does_not_understand,
                         ClassName,
                         Selector,
-                        <<"Class does not understand this message">>),
+                        <<"Class does not understand this message">>
+                    ),
                     beamtalk_error:raise(Error)
             end;
-        Other -> unwrap_class_call(Other)
+        Other ->
+            unwrap_class_call(Other)
     end.
 
 %% @doc Unwrap a class gen_server call result for use in class_send.
@@ -91,7 +97,8 @@ class_send(ClassPid, Selector, Args) ->
 %% maps (from raise/1 inside handle_call). Uses ensure_wrapped/1 for
 %% idempotent wrapping (BT-525).
 -spec unwrap_class_call(term()) -> term().
-unwrap_class_call({ok, Value}) -> Value;
+unwrap_class_call({ok, Value}) ->
+    Value;
 unwrap_class_call({error, Error}) ->
     Wrapped = beamtalk_exception_handler:ensure_wrapped(Error),
     error(Wrapped).
@@ -108,7 +115,10 @@ unwrap_class_call({error, Error}) ->
 %%
 %% Returns {reply, Result, NewState} or test_spawn or {error, not_found}.
 -spec handle_class_method_call(
-    selector(), list(), class_name(), atom(),
+    selector(),
+    list(),
+    class_name(),
+    atom(),
     #{selector() => term()},
     map()
 ) -> {reply, term(), map()} | test_spawn | {error, not_found}.
@@ -121,7 +131,9 @@ handle_class_method_call(Selector, Args, ClassName, Module, LocalClassMethods, C
             %% Not found locally — walk the superclass chain for inherited class methods.
             case find_class_method_in_chain(Selector, ClassName) of
                 {ok, DefiningClass, DefiningModule} ->
-                    invoke_class_method(Selector, Args, ClassName, Module, DefiningClass, DefiningModule, ClassVars);
+                    invoke_class_method(
+                        Selector, Args, ClassName, Module, DefiningClass, DefiningModule, ClassVars
+                    );
                 not_found ->
                     {error, not_found}
             end
@@ -129,8 +141,15 @@ handle_class_method_call(Selector, Args, ClassName, Module, LocalClassMethods, C
 
 %% @private
 %% @doc Invoke a class method (local or inherited), handling test execution specially.
--spec invoke_class_method(selector(), list(), class_name(), atom(),
-                          class_name(), atom(), map()) ->
+-spec invoke_class_method(
+    selector(),
+    list(),
+    class_name(),
+    atom(),
+    class_name(),
+    atom(),
+    map()
+) ->
     {reply, term(), map()} | test_spawn.
 invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningModule, ClassVars) ->
     %% BT-440: For test execution (runAll, run:) inherited from TestCase,
@@ -154,13 +173,17 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
                     {reply, {ok, Result}, ClassVars}
             catch
                 Class:Error:ST ->
-                    ?LOG_ERROR("Class method ~p:~p failed: ~p:~p",
-                                 [ClassName, Selector, Class, Error],
-                                 #{class => ClassName,
-                                   selector => Selector,
-                                   error_class => Class,
-                                   error => Error,
-                                   stacktrace => ST}),
+                    ?LOG_ERROR(
+                        "Class method ~p:~p failed: ~p:~p",
+                        [ClassName, Selector, Class, Error],
+                        #{
+                            class => ClassName,
+                            selector => Selector,
+                            error_class => Class,
+                            error => Error,
+                            stacktrace => ST
+                        }
+                    ),
                     {reply, {error, Error}, ClassVars}
             end
     end.
@@ -188,20 +211,30 @@ find_class_method_in_ancestors(Selector, AncestorName) ->
             not_found;
         AncestorPid ->
             %% Query ancestor's local class_methods
-            AncestorClassMethods = try gen_server:call(AncestorPid, get_local_class_methods, 5000)
-                                   catch Class:Reason ->
-                                       ?LOG_WARNING("Class chain walk: failed to query ~p class_methods: ~p:~p",
-                                                    [AncestorName, Class, Reason]),
-                                       #{}
-                                   end,
+            AncestorClassMethods =
+                try
+                    gen_server:call(AncestorPid, get_local_class_methods, 5000)
+                catch
+                    Class:Reason ->
+                        ?LOG_WARNING(
+                            "Class chain walk: failed to query ~p class_methods: ~p:~p",
+                            [AncestorName, Class, Reason]
+                        ),
+                        #{}
+                end,
             case maps:is_key(Selector, AncestorClassMethods) of
                 true ->
-                    AncestorModule = try gen_server:call(AncestorPid, module_name, 5000)
-                                     catch Class2:Reason2 ->
-                                         ?LOG_WARNING("Class chain walk: failed to get module for ~p: ~p:~p",
-                                                      [AncestorName, Class2, Reason2]),
-                                         undefined
-                                     end,
+                    AncestorModule =
+                        try
+                            gen_server:call(AncestorPid, module_name, 5000)
+                        catch
+                            Class2:Reason2 ->
+                                ?LOG_WARNING(
+                                    "Class chain walk: failed to get module for ~p: ~p:~p",
+                                    [AncestorName, Class2, Reason2]
+                                ),
+                                undefined
+                        end,
                     case AncestorModule of
                         undefined ->
                             %% Class has method in metadata but no module — skip and continue up.
@@ -221,7 +254,8 @@ find_class_method_in_ancestors(Selector, AncestorName) ->
 -spec superclass_from_ets(class_name()) -> class_name() | none.
 superclass_from_ets(ClassName) ->
     case ets:info(beamtalk_class_hierarchy) of
-        undefined -> none;
+        undefined ->
+            none;
         _ ->
             case ets:lookup(beamtalk_class_hierarchy, ClassName) of
                 [{_, Super}] -> Super;
@@ -252,16 +286,22 @@ is_test_execution_selector(_) -> false.
 %% The methods response returns local-only selectors; full hierarchy walk
 %% will be done by Behaviour.methods in Phase 2.
 -spec handle_async_dispatch(
-    term(), class_name(),
+    term(),
+    class_name(),
     #{selector() => term()},
-    class_name() | none, atom()
+    class_name() | none,
+    atom()
 ) -> ok.
 handle_async_dispatch({Selector, Args, FuturePid}, ClassName, InstanceMethods, Superclass, Module) ->
     case {Selector, Args} of
         {methods, []} ->
             FuturePid ! {resolve, maps:keys(InstanceMethods)};
         {superclass, []} ->
-            Resolved = case Superclass of none -> nil; _ -> Superclass end,
+            Resolved =
+                case Superclass of
+                    none -> nil;
+                    _ -> Superclass
+                end,
             FuturePid ! {resolve, Resolved};
         {class_name, []} ->
             FuturePid ! {resolve, ClassName};

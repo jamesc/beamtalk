@@ -39,8 +39,10 @@ selector_returns_method_name_test() ->
 
 source_returns_source_code_test() ->
     Method = test_method(),
-    ?assertEqual(<<"increment => self.value := self.value + 1">>,
-                 beamtalk_compiled_method_ops:dispatch('source', [], Method)).
+    ?assertEqual(
+        <<"increment => self.value := self.value + 1">>,
+        beamtalk_compiled_method_ops:dispatch('source', [], Method)
+    ).
 
 argument_count_zero_test() ->
     Method = test_method(),
@@ -87,15 +89,23 @@ responds_to_known_selectors_test() ->
     Method = test_method(),
     ?assertEqual(true, beamtalk_compiled_method_ops:dispatch('respondsTo:', ['selector'], Method)),
     ?assertEqual(true, beamtalk_compiled_method_ops:dispatch('respondsTo:', ['source'], Method)),
-    ?assertEqual(true, beamtalk_compiled_method_ops:dispatch('respondsTo:', ['argumentCount'], Method)),
+    ?assertEqual(
+        true, beamtalk_compiled_method_ops:dispatch('respondsTo:', ['argumentCount'], Method)
+    ),
     ?assertEqual(true, beamtalk_compiled_method_ops:dispatch('respondsTo:', ['class'], Method)),
-    ?assertEqual(true, beamtalk_compiled_method_ops:dispatch('respondsTo:', ['printString'], Method)),
+    ?assertEqual(
+        true, beamtalk_compiled_method_ops:dispatch('respondsTo:', ['printString'], Method)
+    ),
     ?assertEqual(true, beamtalk_compiled_method_ops:dispatch('respondsTo:', ['asString'], Method)),
-    ?assertEqual(true, beamtalk_compiled_method_ops:dispatch('respondsTo:', ['respondsTo:'], Method)).
+    ?assertEqual(
+        true, beamtalk_compiled_method_ops:dispatch('respondsTo:', ['respondsTo:'], Method)
+    ).
 
 responds_to_unknown_selector_test() ->
     Method = test_method(),
-    ?assertEqual(false, beamtalk_compiled_method_ops:dispatch('respondsTo:', ['nonexistent'], Method)).
+    ?assertEqual(
+        false, beamtalk_compiled_method_ops:dispatch('respondsTo:', ['nonexistent'], Method)
+    ).
 
 %%====================================================================
 %% has_method tests
@@ -120,8 +130,13 @@ has_method_unknown_test() ->
 
 unknown_selector_raises_error_test() ->
     Method = test_method(),
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand, class = 'CompiledMethod'}},
-                 beamtalk_compiled_method_ops:dispatch('nonexistent', [], Method)).
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = does_not_understand, class = 'CompiledMethod'}
+        },
+        beamtalk_compiled_method_ops:dispatch('nonexistent', [], Method)
+    ).
 
 unknown_selector_error_has_selector_test() ->
     Method = test_method(),

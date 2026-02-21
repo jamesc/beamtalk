@@ -19,25 +19,42 @@
 
 -module(beamtalk_repl_protocol).
 
--export([decode/1, encode_result/3, encode_result/4, encode_result/5,
-         encode_error/3, encode_error/4, encode_error/5,
-         encode_status/3,
-         encode_out/3,
-         encode_need_input/2,
-         encode_bindings/3, encode_loaded/3, encode_loaded/4, encode_actors/3,
-         encode_modules/3, encode_sessions/3, encode_inspect/2, encode_inspect/3,
-         encode_docs/2, encode_describe/3,
-         encode_test_results/2,
-         is_legacy/1, get_op/1, get_id/1, get_session/1, get_params/1,
-         base_response/1]).
+-export([
+    decode/1,
+    encode_result/3, encode_result/4, encode_result/5,
+    encode_error/3, encode_error/4, encode_error/5,
+    encode_status/3,
+    encode_out/3,
+    encode_need_input/2,
+    encode_bindings/3,
+    encode_loaded/3, encode_loaded/4,
+    encode_actors/3,
+    encode_modules/3,
+    encode_sessions/3,
+    encode_inspect/2, encode_inspect/3,
+    encode_docs/2,
+    encode_describe/3,
+    encode_test_results/2,
+    is_legacy/1,
+    get_op/1,
+    get_id/1,
+    get_session/1,
+    get_params/1,
+    base_response/1
+]).
 
 %% Protocol request record
 -record(protocol_msg, {
-    op        :: binary(),              %% Operation name
-    id        :: binary() | undefined,  %% Message correlation ID
-    session   :: binary() | undefined,  %% Session ID
-    params    :: map(),                 %% Operation-specific parameters
-    legacy    :: boolean()              %% Whether request used legacy format
+    %% Operation name
+    op :: binary(),
+    %% Message correlation ID
+    id :: binary() | undefined,
+    %% Session ID
+    session :: binary() | undefined,
+    %% Operation-specific parameters
+    params :: map(),
+    %% Whether request used legacy format
+    legacy :: boolean()
 }).
 
 -type protocol_msg() :: #protocol_msg{}.
@@ -58,7 +75,8 @@ decode(Data) when is_binary(Data) ->
         {error, _} ->
             %% Not JSON - treat as raw eval expression
             case Trimmed of
-                <<>> -> {error, empty_expression};
+                <<>> ->
+                    {error, empty_expression};
                 _ ->
                     {ok, #protocol_msg{
                         op = <<"eval">>,
@@ -103,7 +121,8 @@ encode_result(Value, Msg, TermToJson, Output) ->
     encode_result(Value, Msg, TermToJson, Output, []).
 
 %% @doc Encode a successful result response with captured stdout and warnings.
--spec encode_result(term(), protocol_msg(), fun((term()) -> term()), binary(), [binary()]) -> binary().
+-spec encode_result(term(), protocol_msg(), fun((term()) -> term()), binary(), [binary()]) ->
+    binary().
 encode_result(Value, Msg, TermToJson, Output, Warnings) ->
     JsonValue = TermToJson(Value),
     case Msg#protocol_msg.legacy of
@@ -127,7 +146,8 @@ encode_error(Reason, Msg, FormatError, Output) ->
     encode_error(Reason, Msg, FormatError, Output, []).
 
 %% @doc Encode an error response with captured stdout and warnings.
--spec encode_error(term(), protocol_msg(), fun((term()) -> binary()), binary(), [binary()]) -> binary().
+-spec encode_error(term(), protocol_msg(), fun((term()) -> binary()), binary(), [binary()]) ->
+    binary().
 encode_error(Reason, Msg, FormatError, Output, Warnings) ->
     Message = FormatError(Reason),
     case Msg#protocol_msg.legacy of
@@ -320,14 +340,18 @@ encode_docs(DocText, Msg) ->
 encode_describe(Ops, Versions, Msg) ->
     case Msg#protocol_msg.legacy of
         true ->
-            jsx:encode(#{<<"type">> => <<"describe">>,
-                         <<"ops">> => Ops,
-                         <<"versions">> => Versions});
+            jsx:encode(#{
+                <<"type">> => <<"describe">>,
+                <<"ops">> => Ops,
+                <<"versions">> => Versions
+            });
         false ->
             Base = base_response(Msg),
-            jsx:encode(Base#{<<"ops">> => Ops,
-                             <<"versions">> => Versions,
-                             <<"status">> => [<<"done">>]})
+            jsx:encode(Base#{
+                <<"ops">> => Ops,
+                <<"versions">> => Versions,
+                <<"status">> => [<<"done">>]
+            })
     end.
 
 %% @doc Encode test results response (BT-699).
@@ -336,18 +360,23 @@ encode_describe(Ops, Versions, Msg) ->
 -spec encode_test_results(map(), protocol_msg()) -> binary().
 encode_test_results(Results, Msg) ->
     JsonResults = encode_test_results_map(Results),
-    Status = case maps:get(failed, Results) of
-        0 -> [<<"done">>];
-        _ -> [<<"done">>, <<"test-error">>]
-    end,
+    Status =
+        case maps:get(failed, Results) of
+            0 -> [<<"done">>];
+            _ -> [<<"done">>, <<"test-error">>]
+        end,
     case Msg#protocol_msg.legacy of
         true ->
-            jsx:encode(#{<<"type">> => <<"test-results">>,
-                         <<"results">> => JsonResults});
+            jsx:encode(#{
+                <<"type">> => <<"test-results">>,
+                <<"results">> => JsonResults
+            });
         false ->
             Base = base_response(Msg),
-            jsx:encode(Base#{<<"results">> => JsonResults,
-                             <<"status">> => Status})
+            jsx:encode(Base#{
+                <<"results">> => JsonResults,
+                <<"status">> => Status
+            })
     end.
 
 %%% Internal functions
@@ -407,10 +436,11 @@ legacy_to_op(Type, _Map) ->
 -spec base_response(protocol_msg()) -> map().
 base_response(#protocol_msg{id = Id, session = Session}) ->
     M0 = #{},
-    M1 = case Id of
-        undefined -> M0;
-        _ -> M0#{<<"id">> => Id}
-    end,
+    M1 =
+        case Id of
+            undefined -> M0;
+            _ -> M0#{<<"id">> => Id}
+        end,
     case Session of
         undefined -> M1;
         _ -> M1#{<<"session">> => Session}
@@ -442,7 +472,8 @@ to_binary(Name) ->
 %% @private
 %% @doc Add output field to response map only when non-empty.
 -spec maybe_add_output(map(), binary()) -> map().
-maybe_add_output(Map, <<>>) -> Map;
+maybe_add_output(Map, <<>>) ->
+    Map;
 maybe_add_output(Map, Output) when is_binary(Output) ->
     Map#{<<"output">> => Output}.
 
@@ -450,31 +481,43 @@ maybe_add_output(Map, Output) when is_binary(Output) ->
 %% @doc Add warnings field to response map only when non-empty.
 -spec maybe_add_warnings(map(), [binary()]) -> map().
 maybe_add_warnings(Map, []) -> Map;
-maybe_add_warnings(Map, Warnings) ->
-    Map#{<<"warnings">> => Warnings}.
+maybe_add_warnings(Map, Warnings) -> Map#{<<"warnings">> => Warnings}.
 
 %% @private
 %% @doc Encode structured test results map to JSON-encodable format (BT-699).
 -spec encode_test_results_map(map()) -> map().
-encode_test_results_map(#{class := Class, total := Total, passed := Passed,
-                          failed := Failed, duration := Duration,
-                          tests := Tests}) ->
-    JsonTests = lists:map(fun(Test) ->
-        Base = #{<<"name">> => atom_to_binary(maps:get(name, Test), utf8),
-                 <<"status">> => atom_to_binary(maps:get(status, Test), utf8)},
-        B1 = case maps:find(error, Test) of
-            {ok, Err} -> Base#{<<"error">> => Err};
-            error -> Base
+encode_test_results_map(#{
+    class := Class,
+    total := Total,
+    passed := Passed,
+    failed := Failed,
+    duration := Duration,
+    tests := Tests
+}) ->
+    JsonTests = lists:map(
+        fun(Test) ->
+            Base = #{
+                <<"name">> => atom_to_binary(maps:get(name, Test), utf8),
+                <<"status">> => atom_to_binary(maps:get(status, Test), utf8)
+            },
+            B1 =
+                case maps:find(error, Test) of
+                    {ok, Err} -> Base#{<<"error">> => Err};
+                    error -> Base
+                end,
+            %% Add class name if present (test-all tags each test)
+            case maps:find(class_name, Test) of
+                {ok, CN} -> B1#{<<"class">> => atom_to_binary(CN, utf8)};
+                error -> B1
+            end
         end,
-        %% Add class name if present (test-all tags each test)
-        case maps:find(class_name, Test) of
-            {ok, CN} -> B1#{<<"class">> => atom_to_binary(CN, utf8)};
-            error -> B1
-        end
-    end, Tests),
-    #{<<"class">> => atom_to_binary(Class, utf8),
-      <<"total">> => Total,
-      <<"passed">> => Passed,
-      <<"failed">> => Failed,
-      <<"duration">> => Duration,
-      <<"tests">> => JsonTests}.
+        Tests
+    ),
+    #{
+        <<"class">> => atom_to_binary(Class, utf8),
+        <<"total">> => Total,
+        <<"passed">> => Passed,
+        <<"failed">> => Failed,
+        <<"duration">> => Duration,
+        <<"tests">> => JsonTests
+    }.

@@ -39,7 +39,8 @@
 -spec at(binary(), integer()) -> binary().
 at(Str, Idx) when is_binary(Str), is_integer(Idx), Idx >= 1 ->
     case get_nth_grapheme(Str, Idx) of
-        {ok, Grapheme} -> Grapheme;
+        {ok, Grapheme} ->
+            Grapheme;
         error ->
             Error0 = beamtalk_error:new(index_out_of_bounds, 'String'),
             Error1 = beamtalk_error:with_selector(Error0, 'at:'),
@@ -54,15 +55,18 @@ at(Str, Idx) when is_binary(Str), is_integer(Idx) ->
 
 %% @doc Capitalize the first grapheme, keep rest unchanged.
 -spec capitalize(binary()) -> binary().
-capitalize(<<>>) -> <<>>;
+capitalize(<<>>) ->
+    <<>>;
 capitalize(Str) when is_binary(Str) ->
     case string:next_grapheme(Str) of
         [First | Rest] ->
             Upper = unicode:characters_to_binary(
-                        string:uppercase(unicode:characters_to_binary([First]))),
+                string:uppercase(unicode:characters_to_binary([First]))
+            ),
             RestBin = unicode:characters_to_binary(Rest),
             <<Upper/binary, RestBin/binary>>;
-        [] -> <<>>
+        [] ->
+            <<>>
     end.
 
 %% @doc Grapheme-aware string reverse.
@@ -72,13 +76,15 @@ reverse(Str) when is_binary(Str) ->
 
 %% @doc Check if string contains substring.
 -spec includes(binary(), binary()) -> boolean().
-includes(_Str, <<>>) -> true;
+includes(_Str, <<>>) ->
+    true;
 includes(Str, Sub) when is_binary(Str), is_binary(Sub) ->
     binary:match(Str, Sub) =/= nomatch.
 
 %% @doc Check if string starts with prefix.
 -spec starts_with(binary(), binary()) -> boolean().
-starts_with(_Str, <<>>) -> true;
+starts_with(_Str, <<>>) ->
+    true;
 starts_with(Str, Prefix) when is_binary(Str), is_binary(Prefix) ->
     PrefixSize = byte_size(Prefix),
     case Str of
@@ -88,7 +94,8 @@ starts_with(Str, Prefix) when is_binary(Str), is_binary(Prefix) ->
 
 %% @doc Check if string ends with suffix.
 -spec ends_with(binary(), binary()) -> boolean().
-ends_with(_Str, <<>>) -> true;
+ends_with(_Str, <<>>) ->
+    true;
 ends_with(Str, Suffix) when is_binary(Str), is_binary(Suffix) ->
     SuffixSize = byte_size(Suffix),
     StringSize = byte_size(Str),
@@ -99,12 +106,14 @@ ends_with(Str, Suffix) when is_binary(Str), is_binary(Suffix) ->
                 <<_:PrefixSize/binary, Suffix:SuffixSize/binary>> -> true;
                 _ -> false
             end;
-        false -> false
+        false ->
+            false
     end.
 
 %% @doc Find first occurrence of substring, return 1-based grapheme index or nil.
 -spec index_of(binary(), binary()) -> integer() | nil.
-index_of(_Str, <<>>) -> nil;
+index_of(_Str, <<>>) ->
+    nil;
 index_of(Str, Sub) when is_binary(Str), is_binary(Sub) ->
     StrGs = string:to_graphemes(Str),
     SubGs = string:to_graphemes(Sub),
@@ -178,26 +187,34 @@ is_blank(Str) when is_binary(Str) ->
 
 %% @doc Test if all characters are digits.
 -spec is_digit(binary()) -> boolean().
-is_digit(<<>>) -> false;
+is_digit(<<>>) ->
+    false;
 is_digit(Str) when is_binary(Str) ->
-    lists:all(fun(G) ->
-        case G of
-            <<C>> when C >= $0, C =< $9 -> true;
-            _ -> false
-        end
-    end, as_list(Str)).
+    lists:all(
+        fun(G) ->
+            case G of
+                <<C>> when C >= $0, C =< $9 -> true;
+                _ -> false
+            end
+        end,
+        as_list(Str)
+    ).
 
 %% @doc Test if all characters are alphabetic.
 -spec is_alpha(binary()) -> boolean().
-is_alpha(<<>>) -> false;
+is_alpha(<<>>) ->
+    false;
 is_alpha(Str) when is_binary(Str) ->
-    lists:all(fun(G) ->
-        case G of
-            <<C>> when C >= $a, C =< $z -> true;
-            <<C>> when C >= $A, C =< $Z -> true;
-            _ -> false
-        end
-    end, as_list(Str)).
+    lists:all(
+        fun(G) ->
+            case G of
+                <<C>> when C >= $a, C =< $z -> true;
+                <<C>> when C >= $A, C =< $Z -> true;
+                _ -> false
+            end
+        end,
+        as_list(Str)
+    ).
 
 %%% ============================================================================
 %%% Internal Functions
@@ -206,7 +223,7 @@ is_alpha(Str) when is_binary(Str) ->
 %% @private
 %% @doc Grapheme-aware substring search.
 -spec index_of_graphemes([string:grapheme_cluster()], [string:grapheme_cluster()], integer()) ->
-          integer() | nil.
+    integer() | nil.
 index_of_graphemes([], _SubGs, _Idx) ->
     nil;
 index_of_graphemes(StrGs, SubGs, Idx) ->

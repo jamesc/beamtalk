@@ -53,19 +53,15 @@ compile_core_erlang_empty_test() ->
 %%% ---------------------------------------------------------------
 
 compile_core_file_test_() ->
-    {setup,
-     fun setup_temp_dir/0,
-     fun cleanup_temp_dir/1,
-     fun(TmpDir) ->
-         [
-          {"compiles a valid .core file to .beam",
-           fun() -> compile_core_file_valid(TmpDir) end},
-          {"returns error for missing .core file",
-           fun() -> compile_core_file_missing(TmpDir) end},
-          {"returns error for invalid .core content",
-           fun() -> compile_core_file_invalid(TmpDir) end}
-         ]
-     end}.
+    {setup, fun setup_temp_dir/0, fun cleanup_temp_dir/1, fun(TmpDir) ->
+        [
+            {"compiles a valid .core file to .beam", fun() -> compile_core_file_valid(TmpDir) end},
+            {"returns error for missing .core file", fun() -> compile_core_file_missing(TmpDir) end},
+            {"returns error for invalid .core content", fun() ->
+                compile_core_file_invalid(TmpDir)
+            end}
+        ]
+    end}.
 
 compile_core_file_valid(TmpDir) ->
     CoreFile = filename:join(TmpDir, "test_build_worker_mod.core"),
@@ -95,19 +91,13 @@ compile_core_file_invalid(TmpDir) ->
 %%% ---------------------------------------------------------------
 
 inject_docs_chunk_test_() ->
-    {setup,
-     fun setup_temp_dir/0,
-     fun cleanup_temp_dir/1,
-     fun(TmpDir) ->
-         [
-          {"injects docs chunk into .beam file",
-           fun() -> inject_docs_chunk_valid(TmpDir) end},
-          {"silently ignores missing .docs file",
-           fun() -> inject_docs_chunk_no_docs(TmpDir) end},
-          {"silently ignores missing .beam file",
-           fun() -> inject_docs_chunk_no_beam(TmpDir) end}
-         ]
-     end}.
+    {setup, fun setup_temp_dir/0, fun cleanup_temp_dir/1, fun(TmpDir) ->
+        [
+            {"injects docs chunk into .beam file", fun() -> inject_docs_chunk_valid(TmpDir) end},
+            {"silently ignores missing .docs file", fun() -> inject_docs_chunk_no_docs(TmpDir) end},
+            {"silently ignores missing .beam file", fun() -> inject_docs_chunk_no_beam(TmpDir) end}
+        ]
+    end}.
 
 inject_docs_chunk_valid(TmpDir) ->
     %% First compile a .core file to get a real .beam
@@ -118,8 +108,9 @@ inject_docs_chunk_valid(TmpDir) ->
     {ok, test_build_worker_mod} = beamtalk_build_worker:compile_core_file(CoreFile, OutDir),
     %% Create a .docs file next to the .core file
     DocsFile = filename:join(TmpDir, "test_build_worker_mod.docs"),
-    DocsTerm = {docs_v1, erlang:system_info(otp_release), erlang, <<"text/plain">>,
-                #{<<"en">> => <<"Test module doc">>}, #{}, []},
+    DocsTerm =
+        {docs_v1, erlang:system_info(otp_release), erlang, <<"text/plain">>,
+            #{<<"en">> => <<"Test module doc">>}, #{}, []},
     ok = file:write_file(DocsFile, io_lib:format("~p.", [DocsTerm])),
     %% Inject — should succeed silently (ok)
     ok = beamtalk_build_worker:inject_docs_chunk(CoreFile, test_build_worker_mod, OutDir),
@@ -138,7 +129,9 @@ inject_docs_chunk_no_beam(TmpDir) ->
     %% .docs file exists but no .beam — should return ok (silently ignored)
     CoreFile = filename:join(TmpDir, "no_beam_mod.core"),
     DocsFile = filename:join(TmpDir, "no_beam_mod.docs"),
-    ok = file:write_file(DocsFile, io_lib:format("~p.", [{docs_v1, [], erlang, none, none, #{}, []}])),
+    ok = file:write_file(
+        DocsFile, io_lib:format("~p.", [{docs_v1, [], erlang, none, none, #{}, []}])
+    ),
     ok = beamtalk_build_worker:inject_docs_chunk(CoreFile, no_beam_mod, TmpDir).
 
 %%% ---------------------------------------------------------------
@@ -146,19 +139,17 @@ inject_docs_chunk_no_beam(TmpDir) ->
 %%% ---------------------------------------------------------------
 
 compile_modules_test_() ->
-    {setup,
-     fun setup_temp_dir/0,
-     fun cleanup_temp_dir/1,
-     fun(TmpDir) ->
-         [
-          {"compiles multiple .core files in parallel",
-           fun() -> compile_modules_batch(TmpDir) end},
-          {"returns error for invalid output directory",
-           fun() -> compile_modules_bad_outdir() end},
-          {"handles mix of valid and invalid files",
-           fun() -> compile_modules_mixed(TmpDir) end}
-         ]
-     end}.
+    {setup, fun setup_temp_dir/0, fun cleanup_temp_dir/1, fun(TmpDir) ->
+        [
+            {"compiles multiple .core files in parallel", fun() ->
+                compile_modules_batch(TmpDir)
+            end},
+            {"returns error for invalid output directory", fun() ->
+                compile_modules_bad_outdir()
+            end},
+            {"handles mix of valid and invalid files", fun() -> compile_modules_mixed(TmpDir) end}
+        ]
+    end}.
 
 compile_modules_batch(TmpDir) ->
     OutDir = filename:join(TmpDir, "batch_out"),
@@ -199,18 +190,24 @@ compile_modules_mixed(TmpDir) ->
 %%% ---------------------------------------------------------------
 
 setup_temp_dir() ->
-    TmpBase = case os:getenv("TMPDIR") of
-        false ->
-            case os:getenv("TEMP") of
-                false -> "/tmp";
-                "" -> "/tmp";
-                WinDir -> WinDir
-            end;
-        "" -> "/tmp";
-        Dir -> Dir
-    end,
-    TmpDir = filename:join([TmpBase, "beamtalk_build_worker_test_" ++
-                            integer_to_list(erlang:unique_integer([positive]))]),
+    TmpBase =
+        case os:getenv("TMPDIR") of
+            false ->
+                case os:getenv("TEMP") of
+                    false -> "/tmp";
+                    "" -> "/tmp";
+                    WinDir -> WinDir
+                end;
+            "" ->
+                "/tmp";
+            Dir ->
+                Dir
+        end,
+    TmpDir = filename:join([
+        TmpBase,
+        "beamtalk_build_worker_test_" ++
+            integer_to_list(erlang:unique_integer([positive]))
+    ]),
     ok = filelib:ensure_dir(filename:join(TmpDir, "dummy")),
     TmpDir.
 
@@ -220,13 +217,16 @@ cleanup_temp_dir(TmpDir) ->
 remove_dir_recursive(Dir) ->
     case file:list_dir(Dir) of
         {ok, Files} ->
-            lists:foreach(fun(F) ->
-                Path = filename:join(Dir, F),
-                case filelib:is_dir(Path) of
-                    true -> remove_dir_recursive(Path);
-                    false -> file:delete(Path)
-                end
-            end, Files),
+            lists:foreach(
+                fun(F) ->
+                    Path = filename:join(Dir, F),
+                    case filelib:is_dir(Path) of
+                        true -> remove_dir_recursive(Path);
+                        false -> file:delete(Path)
+                    end
+                end,
+                Files
+            ),
             file:del_dir(Dir),
             ok;
         {error, _} ->
@@ -235,15 +235,18 @@ remove_dir_recursive(Dir) ->
 
 %% Minimal valid Core Erlang module with a hello/0 function.
 valid_core_erlang_source() ->
-    <<"module 'test_build_worker_mod' ['hello'/0]\n"
-      "  attributes []\n"
-      "  'hello'/0 = fun () -> 'world'\n"
-      "end\n">>.
+    <<
+        "module 'test_build_worker_mod' ['hello'/0]\n"
+        "  attributes []\n"
+        "  'hello'/0 = fun () -> 'world'\n"
+        "end\n"
+    >>.
 
 %% Generate a Core Erlang module with a given name.
 core_erlang_module(Name) ->
     NameBin = atom_to_binary(Name, utf8),
-    <<"module '", NameBin/binary, "' ['hello'/0]\n"
-      "  attributes []\n"
-      "  'hello'/0 = fun () -> 'ok'\n"
-      "end\n">>.
+    <<"module '", NameBin/binary,
+        "' ['hello'/0]\n"
+        "  attributes []\n"
+        "  'hello'/0 = fun () -> 'ok'\n"
+        "end\n">>.

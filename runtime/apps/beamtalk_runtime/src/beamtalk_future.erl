@@ -66,8 +66,15 @@
 -module(beamtalk_future).
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
--export([new/0, resolve/2, reject/2, await/1, await/2, await_forever/1,
-         when_resolved/2, when_rejected/2]).
+-export([
+    new/0,
+    resolve/2,
+    reject/2,
+    await/1, await/2,
+    await_forever/1,
+    when_resolved/2,
+    when_rejected/2
+]).
 
 %% @doc Create a new future in the pending state.
 %% Returns the process ID of the future.
@@ -159,18 +166,20 @@ pending(Waiters) ->
             pending([{await, Pid, infinity} | Waiters]);
         {await, Pid, Timeout} ->
             %% Add to waiters list with timeout
-            TRef = case Timeout of
-                infinity -> infinity;
-                _ -> erlang:send_after(Timeout, self(), {timeout, Pid})
-            end,
+            TRef =
+                case Timeout of
+                    infinity -> infinity;
+                    _ -> erlang:send_after(Timeout, self(), {timeout, Pid})
+                end,
             pending([{await, Pid, TRef} | Waiters]);
         {timeout, Pid} ->
             %% Send timeout message to the waiter
             Pid ! {future_timeout, self()},
             %% Remove this waiter from the list
             NewWaiters = lists:filter(
-                fun({await, P, _}) -> P =/= Pid;
-                   (_) -> true
+                fun
+                    ({await, P, _}) -> P =/= Pid;
+                    (_) -> true
                 end,
                 Waiters
             ),
@@ -253,7 +262,8 @@ rejected(Reason) ->
 %% Notify all waiters when future completes
 notify_waiters(Waiters, State, ValueOrReason) ->
     lists:foreach(
-        fun({await, Pid, TRef}) ->
+        fun
+            ({await, Pid, TRef}) ->
                 %% Cancel timeout timer if it exists
                 case TRef of
                     infinity -> ok;
@@ -264,9 +274,9 @@ notify_waiters(Waiters, State, ValueOrReason) ->
                     resolved -> Pid ! {future_resolved, self(), ValueOrReason};
                     rejected -> Pid ! {future_rejected, self(), ValueOrReason}
                 end;
-           ({callback, CallbackState, Callback}) when CallbackState =:= State ->
+            ({callback, CallbackState, Callback}) when CallbackState =:= State ->
                 execute_callback(Callback, ValueOrReason);
-           ({callback, _OtherState, _Callback}) ->
+            ({callback, _OtherState, _Callback}) ->
                 %% Don't execute callbacks for wrong state
                 ok
         end,

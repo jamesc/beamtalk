@@ -22,7 +22,7 @@ init([]) ->
         intensity => 5,
         period => 10
     },
-    
+
     ChildSpecs = [
         %% Bootstrap the class hierarchy first
         #{
@@ -52,5 +52,5 @@ init([]) ->
             modules => [beamtalk_object_instances]
         }
     ],
-    
+
     {ok, {SupFlags, ChildSpecs}}.

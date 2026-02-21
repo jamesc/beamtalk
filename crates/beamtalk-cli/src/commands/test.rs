@@ -23,6 +23,8 @@ use std::fs;
 use std::time::Instant;
 use tracing::{debug, info, instrument, warn};
 
+use super::manifest;
+
 // ──────────────────────────────────────────────────────────────────────────
 // Test discovery from AST
 // ──────────────────────────────────────────────────────────────────────────
@@ -294,10 +296,13 @@ struct EunitResult {
 }
 
 /// Run all `EUnit` test wrapper modules in a single BEAM process.
+#[allow(clippy::too_many_lines)] // test orchestration: bootstrap, load modules, run, parse results
 fn run_eunit_tests(
     test_module_names: &[&str],
     fixture_modules: &[String],
+    package_modules: &[String],
     build_dir: &Utf8Path,
+    package_ebin_dir: Option<&Utf8Path>,
 ) -> Result<EunitResult> {
     debug!(
         "Running {} EUnit modules in single process",
@@ -327,11 +332,24 @@ fn run_eunit_tests(
             + ", "
     };
 
+    // Build package module loading commands (triggers on_load → class registration)
+    let package_load_cmd = if package_modules.is_empty() {
+        String::new()
+    } else {
+        package_modules
+            .iter()
+            .map(|m| format!("code:ensure_loaded('{m}')"))
+            .collect::<Vec<_>>()
+            .join(", ")
+            + ", "
+    };
+
     let eval_cmd = format!(
         "beamtalk_extensions:init(), \
          pg:start_link(), \
          beamtalk_bootstrap:start_link(), \
          beamtalk_stdlib:init(), \
+         {package_load_cmd}\
          {fixture_load_cmd}\
          Modules = [{module_list}], \
          Failed = lists:foldl(fun(M, Acc) -> \
@@ -360,6 +378,19 @@ fn run_eunit_tests(
     #[cfg(not(windows))]
     {
         cmd.arg("-noshell").arg("-pa").arg(build_dir.as_str());
+    }
+
+    // Add package ebin directory to code path so package modules can be loaded
+    if let Some(ebin_dir) = package_ebin_dir {
+        #[cfg(windows)]
+        {
+            let ebin_dir_path = ebin_dir.as_str().replace('\\', "/");
+            cmd.arg("-pa").arg(ebin_dir_path);
+        }
+        #[cfg(not(windows))]
+        {
+            cmd.arg("-pa").arg(ebin_dir.as_str());
+        }
     }
 
     for arg in &pa_args {
@@ -427,6 +458,36 @@ fn find_test_files(dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
 
     files.sort();
     Ok(files)
+}
+
+/// Collect BEAM module names from `.beam` files in a directory.
+///
+/// Each `.beam` file's stem is returned as a module name (e.g. `bt@my_app@counter`).
+/// Only `.beam` files are considered; `.core`, `.app`, and other files are skipped.
+fn collect_beam_module_names(ebin_dir: &Utf8Path) -> Result<Vec<String>> {
+    let mut modules = Vec::new();
+
+    if !ebin_dir.exists() {
+        return Ok(modules);
+    }
+
+    for entry in fs::read_dir(ebin_dir)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read ebin directory '{ebin_dir}'"))?
+    {
+        let entry = entry.into_diagnostic()?;
+        let path = Utf8PathBuf::from_path_buf(entry.path())
+            .map_err(|_| miette::miette!("Non-UTF-8 path in '{}'", ebin_dir))?;
+
+        if path.extension() == Some("beam") {
+            if let Some(stem) = path.file_stem() {
+                modules.push(stem.to_string());
+            }
+        }
+    }
+
+    modules.sort();
+    Ok(modules)
 }
 
 /// Recursively collect `.bt` files from `dir` into `files`.
@@ -793,6 +854,33 @@ pub fn run_tests(path: &str) -> Result<()> {
     all_fixture_modules.sort();
     all_fixture_modules.dedup();
 
+    // Phase 1b: Build package modules if a beamtalk.toml manifest exists.
+    // This ensures package-defined classes are compiled and their on_load
+    // hooks will register them in the class registry when loaded.
+    let project_root = Utf8PathBuf::from(".");
+    let pkg_manifest = manifest::find_manifest(&project_root)?;
+    let (package_modules, package_ebin_dir) = if let Some(ref pkg) = pkg_manifest {
+        let ebin_dir = project_root.join("_build").join("dev").join("ebin");
+
+        // Build the package to ensure .beam files are up to date
+        println!("Building package '{}'...", pkg.name);
+        let build_options = beamtalk_core::CompilerOptions {
+            stdlib_mode: false,
+            allow_primitives: false,
+            workspace_mode: false,
+            ..Default::default()
+        };
+        super::build::build(project_root.as_str(), &build_options)
+            .wrap_err("Failed to build package before running tests")?;
+
+        // Collect module names from .beam files in _build/dev/ebin/
+        let modules = collect_beam_module_names(&ebin_dir)?;
+        debug!(count = modules.len(), "Discovered package modules");
+        (modules, Some(ebin_dir))
+    } else {
+        (Vec::new(), None)
+    };
+
     let total_bunit_tests: usize = compiled_tests
         .iter()
         .map(|t| t.test_class.test_methods.len())
@@ -816,7 +904,13 @@ pub fn run_tests(path: &str) -> Result<()> {
         eunit_modules.push(&dt.eunit_module);
     }
 
-    let result = run_eunit_tests(&eunit_modules, &all_fixture_modules, &build_dir)?;
+    let result = run_eunit_tests(
+        &eunit_modules,
+        &all_fixture_modules,
+        &package_modules,
+        &build_dir,
+        package_ebin_dir.as_deref(),
+    )?;
 
     // Phase 4: Report results
     let mut total_passed = 0;
@@ -974,6 +1068,39 @@ mod tests {
         assert!(!wrapper.contains("setUp"));
         assert!(!wrapper.contains("tearDown"));
         assert!(!wrapper.contains("try"));
+    }
+
+    #[test]
+    fn test_collect_beam_module_names() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Create some .beam files and non-.beam files
+        fs::write(dir.join("bt@my_app@counter.beam"), b"fake beam").unwrap();
+        fs::write(dir.join("bt@my_app@math.beam"), b"fake beam").unwrap();
+        fs::write(dir.join("bt@my_app@counter.core"), b"fake core").unwrap();
+        fs::write(dir.join("my_app.app"), b"fake app").unwrap();
+
+        let modules = collect_beam_module_names(&dir).unwrap();
+        assert_eq!(modules.len(), 2);
+        assert!(modules.contains(&"bt@my_app@counter".to_string()));
+        assert!(modules.contains(&"bt@my_app@math".to_string()));
+    }
+
+    #[test]
+    fn test_collect_beam_module_names_empty_dir() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let modules = collect_beam_module_names(&dir).unwrap();
+        assert!(modules.is_empty());
+    }
+
+    #[test]
+    fn test_collect_beam_module_names_nonexistent_dir() {
+        let dir = Utf8PathBuf::from("/nonexistent/path");
+        let modules = collect_beam_module_names(&dir).unwrap();
+        assert!(modules.is_empty());
     }
 
     #[test]

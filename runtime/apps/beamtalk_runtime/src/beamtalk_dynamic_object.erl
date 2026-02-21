@@ -60,8 +60,14 @@
 -export([start_link/2, start_link/3]).
 
 %% gen_server callbacks
--export([init/1, handle_cast/2, handle_call/3, handle_info/2,
-         code_change/3, terminate/2]).
+-export([
+    init/1,
+    handle_cast/2,
+    handle_call/3,
+    handle_info/2,
+    code_change/3,
+    terminate/2
+]).
 
 %% Internal dispatch
 -export([dispatch/4]).
@@ -94,7 +100,7 @@ start_link(Name, ClassName, InitState) ->
 init({ClassName, InitState}) ->
     %% Extract required fields from InitState
     ClassPid = maps:get('__class_pid__', InitState),
-    
+
     %% Build internal state (methods stored in fields as '__methods__')
     State = #state{
         class_name = ClassName,
@@ -116,7 +122,6 @@ handle_call({Selector, Args}, _From, State) ->
         {error, Reason} ->
             {reply, {error, Reason}, State}
     end;
-
 handle_call(_Msg, _From, State) ->
     {reply, {error, unknown_message}, State}.
 
@@ -137,7 +142,6 @@ handle_cast({Selector, Args, FuturePid}, State) ->
             beamtalk_future:reject(FuturePid, Reason),
             {noreply, State}
     end;
-
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -161,7 +165,7 @@ code_change(OldVsn, State, Extra) ->
 dispatch(Selector, Args, Self, State) ->
     %% Extract methods map from state
     Methods = maps:get('__methods__', State, #{}),
-    
+
     case maps:find(Selector, Methods) of
         {ok, MethodFun} ->
             %% Found method - invoke closure
@@ -205,7 +209,9 @@ dispatch(Selector, Args, Self, State) ->
                     ClassName = beamtalk_tagged_map:class_of(State, unknown),
                     Error0 = beamtalk_error:new(does_not_understand, ClassName),
                     Error1 = beamtalk_error:with_selector(Error0, Selector),
-                    Error = beamtalk_error:with_hint(Error1, <<"Check spelling or use 'respondsTo:' to verify method exists">>),
+                    Error = beamtalk_error:with_hint(
+                        Error1, <<"Check spelling or use 'respondsTo:' to verify method exists">>
+                    ),
                     {error, Error}
             end
     end.

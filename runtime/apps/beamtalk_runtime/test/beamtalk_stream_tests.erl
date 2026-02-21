@@ -32,7 +32,8 @@ take_calls_finalizer_test() ->
     Stream = beamtalk_stream:make_stream(Gen, <<"test">>, Finalizer),
     Result = beamtalk_stream:take(Stream, 2),
     ?assertEqual([1, 2], Result),
-    receive finalizer_called -> ok
+    receive
+        finalizer_called -> ok
     after 100 -> ?assert(false)
     end.
 
@@ -44,7 +45,8 @@ take_calls_finalizer_on_exhaust_test() ->
     Stream = beamtalk_stream:make_stream(Gen, <<"test">>, Finalizer),
     Result = beamtalk_stream:take(Stream, 5),
     ?assertEqual([1, 2], Result),
-    receive finalizer_called -> ok
+    receive
+        finalizer_called -> ok
     after 100 -> ?assert(false)
     end.
 
@@ -56,7 +58,8 @@ detect_calls_finalizer_test() ->
     Stream = beamtalk_stream:make_stream(Gen, <<"test">>, Finalizer),
     Result = beamtalk_stream:detect(Stream, fun(X) -> X =:= 3 end),
     ?assertEqual(3, Result),
-    receive finalizer_called -> ok
+    receive
+        finalizer_called -> ok
     after 100 -> ?assert(false)
     end.
 
@@ -68,7 +71,8 @@ any_satisfy_calls_finalizer_test() ->
     Stream = beamtalk_stream:make_stream(Gen, <<"test">>, Finalizer),
     Result = beamtalk_stream:any_satisfy(Stream, fun(X) -> X =:= 2 end),
     ?assertEqual(true, Result),
-    receive finalizer_called -> ok
+    receive
+        finalizer_called -> ok
     after 100 -> ?assert(false)
     end.
 
@@ -80,7 +84,8 @@ all_satisfy_calls_finalizer_test() ->
     Stream = beamtalk_stream:make_stream(Gen, <<"test">>, Finalizer),
     Result = beamtalk_stream:all_satisfy(Stream, fun(X) -> X < 3 end),
     ?assertEqual(false, Result),
-    receive finalizer_called -> ok
+    receive
+        finalizer_called -> ok
     after 100 -> ?assert(false)
     end.
 
@@ -93,7 +98,8 @@ select_propagates_finalizer_test() ->
     Filtered = beamtalk_stream:'select'(Stream, fun(X) -> X rem 2 =:= 0 end),
     Result = beamtalk_stream:take(Filtered, 2),
     ?assertEqual([2, 4], Result),
-    receive finalizer_called -> ok
+    receive
+        finalizer_called -> ok
     after 100 -> ?assert(false)
     end.
 
@@ -105,7 +111,8 @@ collect_propagates_finalizer_test() ->
     Mapped = beamtalk_stream:'collect'(Stream, fun(X) -> X * 10 end),
     Result = beamtalk_stream:take(Mapped, 2),
     ?assertEqual([10, 20], Result),
-    receive finalizer_called -> ok
+    receive
+        finalizer_called -> ok
     after 100 -> ?assert(false)
     end.
 
@@ -117,7 +124,8 @@ reject_propagates_finalizer_test() ->
     Rejected = beamtalk_stream:'reject'(Stream, fun(X) -> X =:= 2 end),
     Result = beamtalk_stream:take(Rejected, 2),
     ?assertEqual([1, 3], Result),
-    receive finalizer_called -> ok
+    receive
+        finalizer_called -> ok
     after 100 -> ?assert(false)
     end.
 
@@ -129,7 +137,8 @@ drop_propagates_finalizer_test() ->
     Dropped = beamtalk_stream:'drop'(Stream, 2),
     Result = beamtalk_stream:take(Dropped, 2),
     ?assertEqual([3, 4], Result),
-    receive finalizer_called -> ok
+    receive
+        finalizer_called -> ok
     after 100 -> ?assert(false)
     end.
 
@@ -147,7 +156,8 @@ do_calls_finalizer_test() ->
     Finalizer = fun() -> Self ! finalizer_called end,
     Stream = beamtalk_stream:make_stream(Gen, <<"test">>, Finalizer),
     beamtalk_stream:do(Stream, fun(_) -> ok end),
-    receive finalizer_called -> ok
+    receive
+        finalizer_called -> ok
     after 100 -> ?assert(false)
     end.
 
@@ -159,7 +169,8 @@ inject_into_calls_finalizer_test() ->
     Stream = beamtalk_stream:make_stream(Gen, <<"test">>, Finalizer),
     Result = beamtalk_stream:inject_into(Stream, 0, fun(Acc, X) -> Acc + X end),
     ?assertEqual(6, Result),
-    receive finalizer_called -> ok
+    receive
+        finalizer_called -> ok
     after 100 -> ?assert(false)
     end.
 
@@ -171,7 +182,8 @@ as_list_calls_finalizer_test() ->
     Stream = beamtalk_stream:make_stream(Gen, <<"test">>, Finalizer),
     Result = beamtalk_stream:as_list(Stream),
     ?assertEqual([1, 2, 3], Result),
-    receive finalizer_called -> ok
+    receive
+        finalizer_called -> ok
     after 100 -> ?assert(false)
     end.
 
@@ -185,7 +197,8 @@ double_finalizer_safe_test() ->
     end,
     Stream = beamtalk_stream:make_stream(fun() -> done end, <<"test">>, Finalizer),
     beamtalk_stream:take(Stream, 0),
-    receive finalizer_called -> ok
+    receive
+        finalizer_called -> ok
     after 100 -> ?assert(false)
     end,
     ?assertEqual(1, atomics:get(Counter, 1)).
@@ -196,14 +209,17 @@ finalizer_called_on_exception_test() ->
     Gen = make_counter_gen(1),
     Finalizer = fun() -> Self ! finalizer_called end,
     Stream = beamtalk_stream:make_stream(Gen, <<"test">>, Finalizer),
-    ?assertError(boom,
+    ?assertError(
+        boom,
         beamtalk_stream:do(Stream, fun(X) ->
             case X of
                 2 -> error(boom);
                 _ -> ok
             end
-        end)),
-    receive finalizer_called -> ok
+        end)
+    ),
+    receive
+        finalizer_called -> ok
     after 100 -> ?assert(false)
     end.
 

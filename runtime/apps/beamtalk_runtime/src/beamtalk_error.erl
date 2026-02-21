@@ -163,7 +163,9 @@ generate_message(type_error, Class, Selector) ->
 generate_message(actor_dead, Class, undefined) ->
     iolist_to_binary(io_lib:format("~s actor process has terminated", [Class]));
 generate_message(actor_dead, Class, Selector) ->
-    iolist_to_binary(io_lib:format("Cannot send '~s' to ~s (actor process has terminated)", [Selector, Class]));
+    iolist_to_binary(
+        io_lib:format("Cannot send '~s' to ~s (actor process has terminated)", [Selector, Class])
+    );
 generate_message(future_not_awaited, _Class, undefined) ->
     iolist_to_binary(io_lib:format("Sent message to a Future", []));
 generate_message(future_not_awaited, _Class, Selector) ->
@@ -195,15 +197,21 @@ generate_message(user_error, _Class, Selector) ->
 generate_message(stdlib_shadowing, Class, undefined) ->
     iolist_to_binary(io_lib:format("Cannot redefine stdlib class '~s'", [Class]));
 generate_message(stdlib_shadowing, Class, Selector) ->
-    iolist_to_binary(io_lib:format("Cannot redefine stdlib class '~s' (via '~s')", [Class, Selector]));
+    iolist_to_binary(
+        io_lib:format("Cannot redefine stdlib class '~s' (via '~s')", [Class, Selector])
+    );
 generate_message(class_not_found, Class, undefined) ->
     iolist_to_binary(io_lib:format("Class '~s' not found", [Class]));
 generate_message(class_not_found, Class, Selector) ->
-    iolist_to_binary(io_lib:format("Class '~s' not found (while resolving '~s')", [Class, Selector]));
+    iolist_to_binary(
+        io_lib:format("Class '~s' not found (while resolving '~s')", [Class, Selector])
+    );
 generate_message(no_superclass, Class, undefined) ->
     iolist_to_binary(io_lib:format("~s has no superclass", [Class]));
 generate_message(no_superclass, Class, Selector) ->
-    iolist_to_binary(io_lib:format("~s has no superclass (cannot resolve '~s' via super)", [Class, Selector]));
+    iolist_to_binary(
+        io_lib:format("~s has no superclass (cannot resolve '~s' via super)", [Class, Selector])
+    );
 generate_message(class_already_exists, Class, undefined) ->
     iolist_to_binary(io_lib:format("Class '~s' already exists", [Class]));
 generate_message(class_already_exists, Class, Selector) ->

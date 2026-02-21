@@ -23,26 +23,32 @@ handle(<<"eval">>, Params, Msg, SessionPid) ->
             Err1 = beamtalk_error:with_message(Err, <<"Empty expression">>),
             Err2 = beamtalk_error:with_hint(Err1, <<"Enter an expression to evaluate.">>),
             beamtalk_repl_protocol:encode_error(
-                Err2, Msg, fun beamtalk_repl_json:format_error_message/1);
+                Err2, Msg, fun beamtalk_repl_json:format_error_message/1
+            );
         _ ->
             case beamtalk_repl_shell:eval(SessionPid, Code) of
                 {ok, Result, Output, Warnings} ->
                     beamtalk_repl_protocol:encode_result(
-                        Result, Msg, fun beamtalk_repl_json:term_to_json/1, Output, Warnings);
+                        Result, Msg, fun beamtalk_repl_json:term_to_json/1, Output, Warnings
+                    );
                 {error, ErrorReason, Output, Warnings} ->
                     WrappedReason = beamtalk_repl_server:ensure_structured_error(ErrorReason),
                     beamtalk_repl_protocol:encode_error(
-                        WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1, Output, Warnings)
+                        WrappedReason,
+                        Msg,
+                        fun beamtalk_repl_json:format_error_message/1,
+                        Output,
+                        Warnings
+                    )
             end
     end;
-
 handle(<<"clear">>, _Params, Msg, SessionPid) ->
     ok = beamtalk_repl_shell:clear_bindings(SessionPid),
     beamtalk_repl_protocol:encode_status(ok, Msg, fun beamtalk_repl_json:term_to_json/1);
-
 handle(<<"bindings">>, _Params, Msg, SessionPid) ->
     {ok, Bindings} = beamtalk_repl_shell:get_bindings(SessionPid),
     %% ADR 0019 Phase 3: Filter out workspace convenience bindings from display.
     UserBindings = maps:without(beamtalk_workspace_config:binding_names(), Bindings),
     beamtalk_repl_protocol:encode_bindings(
-        UserBindings, Msg, fun beamtalk_repl_json:term_to_json/1).
+        UserBindings, Msg, fun beamtalk_repl_json:term_to_json/1
+    ).

@@ -42,18 +42,21 @@ wrap(_) ->
 %% @doc Convert a single Erlang stacktrace entry to a StackFrame tagged map.
 -spec wrap_frame(tuple()) -> map().
 wrap_frame({Module, Function, ArityOrArgs, Location}) ->
-    Arity = case is_list(ArityOrArgs) of
-        true -> length(ArityOrArgs);
-        false -> ArityOrArgs
-    end,
-    File = case proplists:get_value(file, Location) of
-        undefined -> nil;
-        F -> list_to_binary(F)
-    end,
-    Line = case proplists:get_value(line, Location) of
-        undefined -> nil;
-        L -> L
-    end,
+    Arity =
+        case is_list(ArityOrArgs) of
+            true -> length(ArityOrArgs);
+            false -> ArityOrArgs
+        end,
+    File =
+        case proplists:get_value(file, Location) of
+            undefined -> nil;
+            F -> list_to_binary(F)
+        end,
+    Line =
+        case proplists:get_value(line, Location) of
+            undefined -> nil;
+            L -> L
+        end,
     ClassName = module_to_class(Module),
     #{
         '$beamtalk_class' => 'StackFrame',
@@ -99,7 +102,8 @@ module_to_class(Module) when is_atom(Module) ->
             %% Try to look it up in the class registry
             ClassName = snake_to_class(ModStr),
             case ClassName of
-                nil -> nil;
+                nil ->
+                    nil;
                 _ ->
                     case beamtalk_class_registry:whereis_class(ClassName) of
                         undefined -> nil;
@@ -118,8 +122,10 @@ module_to_class(_) ->
 snake_to_class(Snake) ->
     Words = string:split(Snake, "_", all),
     Capitalized = [capitalize(W) || W <- Words],
-    try list_to_existing_atom(lists:flatten(Capitalized))
-    catch error:badarg -> nil
+    try
+        list_to_existing_atom(lists:flatten(Capitalized))
+    catch
+        error:badarg -> nil
     end.
 
 %% @private
@@ -144,8 +150,10 @@ dispatch('arguments', [], #{arity := Arity}) ->
     Arity;
 dispatch('sourceLocation', [], #{file := File, line := Line}) ->
     case {File, Line} of
-        {nil, _} -> nil;
-        {_, nil} -> nil;
+        {nil, _} ->
+            nil;
+        {_, nil} ->
+            nil;
         _ ->
             LineBin = integer_to_binary(Line),
             <<File/binary, ":", LineBin/binary>>
@@ -185,22 +193,32 @@ has_method(_) -> false.
 %% @private
 %% @doc Format a StackFrame as a human-readable string.
 -spec format_frame(map()) -> binary().
-format_frame(#{class_name := ClassName, function := Function, arity := Arity,
-               file := File, line := Line}) ->
-    ClassPart = case ClassName of
-        nil -> <<"?">>;
-        _ -> atom_to_binary(ClassName, utf8)
-    end,
-    FunPart = case Function of
-        undefined -> <<"?">>;
-        _ -> atom_to_binary(Function, utf8)
-    end,
+format_frame(#{
+    class_name := ClassName,
+    function := Function,
+    arity := Arity,
+    file := File,
+    line := Line
+}) ->
+    ClassPart =
+        case ClassName of
+            nil -> <<"?">>;
+            _ -> atom_to_binary(ClassName, utf8)
+        end,
+    FunPart =
+        case Function of
+            undefined -> <<"?">>;
+            _ -> atom_to_binary(Function, utf8)
+        end,
     ArityBin = integer_to_binary(Arity),
-    LocationPart = case {File, Line} of
-        {nil, _} -> <<>>;
-        {_, nil} -> <<" (", File/binary, ")">>;
-        _ ->
-            LineBin = integer_to_binary(Line),
-            <<" (", File/binary, ":", LineBin/binary, ")">>
-    end,
+    LocationPart =
+        case {File, Line} of
+            {nil, _} ->
+                <<>>;
+            {_, nil} ->
+                <<" (", File/binary, ")">>;
+            _ ->
+                LineBin = integer_to_binary(Line),
+                <<" (", File/binary, ":", LineBin/binary, ")">>
+        end,
     <<ClassPart/binary, ">>", FunPart/binary, "/", ArityBin/binary, LocationPart/binary>>.

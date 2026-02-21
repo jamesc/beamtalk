@@ -15,7 +15,7 @@
 %% This record bundles class metadata with the actor pid, enabling proper
 %% object semantics and reflection:
 %% - class: The class name atom (e.g., 'Counter')
-%% - class_mod: The class module atom (e.g., 'counter')  
+%% - class_mod: The class module atom (e.g., 'counter')
 %% - pid: The actor process pid
 %%
 %% Generated code creates these records in spawn/0 and spawn/1 functions:
@@ -26,9 +26,12 @@
 %%
 %% Following LFE Flavors' #flavor-instance{} pattern.
 -record(beamtalk_object, {
-    class :: atom(),           % Class name (e.g., 'Counter')
-    class_mod :: atom(),       % Class module (e.g., 'counter')
-    pid :: pid()               % The actor process
+    % Class name (e.g., 'Counter')
+    class :: atom(),
+    % Class module (e.g., 'counter')
+    class_mod :: atom(),
+    % The actor process
+    pid :: pid()
 }).
 
 %% @doc Structured error record for runtime errors.
@@ -50,12 +53,18 @@
 %%
 %% See docs/internal/design-self-as-object.md Section 3.8 for full taxonomy.
 -record(beamtalk_error, {
-    kind    :: atom(),              % Error category (see doc above)
-    class   :: atom(),              % 'Integer', 'Counter', 'String'
-    selector:: atom() | undefined,  % method that failed
-    message :: binary(),            % human-readable explanation
-    hint    :: binary() | undefined,% actionable suggestion
-    details :: map()                % additional context (arity, expected types, etc.)
+    % Error category (see doc above)
+    kind :: atom(),
+    % 'Integer', 'Counter', 'String'
+    class :: atom(),
+    % method that failed
+    selector :: atom() | undefined,
+    % human-readable explanation
+    message :: binary(),
+    % actionable suggestion
+    hint :: binary() | undefined,
+    % additional context (arity, expected types, etc.)
+    details :: map()
 }).
 
 %% @doc Located error wrapper for compile-time errors with source spans.
@@ -67,7 +76,7 @@
 %% - span: Source location {file, start_line, start_col, end_line, end_col}
 -record(located_error, {
     error :: #beamtalk_error{},
-    span  :: {binary(), integer(), integer(), integer(), integer()} | undefined
+    span :: {binary(), integer(), integer(), integer(), integer()} | undefined
 }).
 
 %% @doc CompiledMethod value object type.

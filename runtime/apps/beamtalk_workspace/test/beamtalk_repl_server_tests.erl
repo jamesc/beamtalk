@@ -33,7 +33,9 @@ parse_request_load_test() ->
 
 parse_request_load_source_test() ->
     Request = <<"{\"op\": \"load-source\", \"source\": \"Object subclass: Foo\"}">>,
-    ?assertEqual({load_source, <<"Object subclass: Foo">>}, beamtalk_repl_server:parse_request(Request)).
+    ?assertEqual(
+        {load_source, <<"Object subclass: Foo">>}, beamtalk_repl_server:parse_request(Request)
+    ).
 
 parse_request_with_newline_test() ->
     Request = <<"{\"type\": \"eval\", \"expression\": \"1 + 2\"}\n">>,
@@ -50,7 +52,9 @@ parse_request_empty_test() ->
 
 parse_request_unknown_type_test() ->
     Request = <<"{\"type\": \"unknown\"}">>,
-    ?assertMatch({error, {invalid_request, unknown_type}}, beamtalk_repl_server:parse_request(Request)).
+    ?assertMatch(
+        {error, {invalid_request, unknown_type}}, beamtalk_repl_server:parse_request(Request)
+    ).
 
 parse_request_missing_expression_test() ->
     Request = <<"{\"type\": \"eval\"}">>,
@@ -129,7 +133,8 @@ generate_nonce_is_hex_test() ->
     %% Verify all characters are hex digits
     IsHex = lists:all(
         fun(C) -> (C >= $0 andalso C =< $9) orelse (C >= $a andalso C =< $f) end,
-        binary_to_list(Nonce)),
+        binary_to_list(Nonce)
+    ),
     ?assert(IsHex).
 
 %%% Response formatting tests
@@ -301,8 +306,9 @@ format_response_large_number_test() ->
 format_response_complex_pid_test() ->
     %% Test that PID formatting includes #Actor< prefix
     Parent = self(),
-    Pid = spawn(fun() -> 
-        receive stop -> Parent ! stopped
+    Pid = spawn(fun() ->
+        receive
+            stop -> Parent ! stopped
         after 100 -> ok
         end
     end),
@@ -313,22 +319,25 @@ format_response_complex_pid_test() ->
     ?assert(binary:match(Value, <<">">>) =/= nomatch),
     %% Clean up spawned process
     Pid ! stop,
-    receive stopped -> ok after 200 -> ok end.
+    receive
+        stopped -> ok
+    after 200 -> ok
+    end.
 
 format_response_multi_arity_function_test() ->
     %% Test function with different arity
     Fun0 = fun() -> ok end,
     Fun3 = fun(A, B, C) -> {A, B, C} end,
-    
+
     Response0 = beamtalk_repl_json:format_response(Fun0),
     Response3 = beamtalk_repl_json:format_response(Fun3),
-    
+
     Decoded0 = jsx:decode(Response0, [return_maps]),
     Decoded3 = jsx:decode(Response3, [return_maps]),
-    
+
     Value0 = maps:get(<<"value">>, Decoded0),
     Value3 = maps:get(<<"value">>, Decoded3),
-    
+
     ?assert(binary:match(Value0, <<"a Block/0">>) =/= nomatch),
     ?assert(binary:match(Value3, <<"a Block/3">>) =/= nomatch).
 
@@ -405,7 +414,9 @@ parse_request_json_with_extra_fields_test() ->
 
 parse_request_load_with_spaces_in_path_test() ->
     Request = <<"{\"type\": \"load\", \"path\": \"/path/with spaces/file.bt\"}">>,
-    ?assertEqual({load_file, "/path/with spaces/file.bt"}, beamtalk_repl_server:parse_request(Request)).
+    ?assertEqual(
+        {load_file, "/path/with spaces/file.bt"}, beamtalk_repl_server:parse_request(Request)
+    ).
 
 parse_request_string_literal_with_escaped_quotes_test() ->
     %% Test parsing string literal with escaped quotes (BT-227 regression test)
@@ -544,7 +555,7 @@ term_to_json_map_with_list_keys_test() ->
     ?assert(binary:match(Result, <<"42">>) =/= nomatch).
 
 term_to_json_map_with_non_printable_list_key_test() ->
-    Result = beamtalk_repl_json:term_to_json(#{[1,2,3] => <<"val">>}),
+    Result = beamtalk_repl_json:term_to_json(#{[1, 2, 3] => <<"val">>}),
     ?assert(is_binary(Result)).
 
 term_to_json_map_with_integer_key_test() ->
@@ -560,11 +571,18 @@ term_to_json_dead_pid_test() ->
 
 term_to_json_alive_pid_test() ->
     Parent = self(),
-    Pid = spawn(fun() -> receive stop -> Parent ! done end end),
+    Pid = spawn(fun() ->
+        receive
+            stop -> Parent ! done
+        end
+    end),
     Result = beamtalk_repl_json:term_to_json(Pid),
     ?assert(binary:match(Result, <<"#Actor<">>) =/= nomatch),
     Pid ! stop,
-    receive done -> ok after 200 -> ok end.
+    receive
+        done -> ok
+    after 200 -> ok
+    end.
 
 term_to_json_function_arity_0_test() ->
     Result = beamtalk_repl_json:term_to_json(fun() -> ok end),
@@ -575,14 +593,22 @@ term_to_json_function_arity_2_test() ->
     ?assertEqual(<<"a Block/2">>, Result).
 
 term_to_json_beamtalk_object_tuple_test() ->
-    Pid = spawn(fun() -> receive _ -> ok end end),
+    Pid = spawn(fun() ->
+        receive
+            _ -> ok
+        end
+    end),
     Result = beamtalk_repl_json:term_to_json({beamtalk_object, 'Counter', counter, Pid}),
     ?assert(binary:match(Result, <<"#Actor<">>) =/= nomatch),
     ?assert(binary:match(Result, <<"Counter">>) =/= nomatch),
     exit(Pid, kill).
 
 term_to_json_future_timeout_test() ->
-    Pid = spawn(fun() -> receive _ -> ok end end),
+    Pid = spawn(fun() ->
+        receive
+            _ -> ok
+        end
+    end),
     Result = beamtalk_repl_json:term_to_json({future_timeout, Pid}),
     ?assert(binary:match(Result, <<"#Future<timeout,">>) =/= nomatch),
     exit(Pid, kill).
@@ -670,7 +696,8 @@ format_error_message_fallback_test() ->
 
 format_error_message_eval_error_beamtalk_error_test() ->
     Error = beamtalk_error:with_selector(
-        beamtalk_error:new(does_not_understand, 'Integer'), nonExistentMethod),
+        beamtalk_error:new(does_not_understand, 'Integer'), nonExistentMethod
+    ),
     Msg = beamtalk_repl_json:format_error_message({eval_error, error, Error}),
     ?assertEqual(<<"Integer does not understand 'nonExistentMethod'">>, Msg).
 
@@ -722,13 +749,14 @@ format_modules_empty_test() ->
     ?assertEqual([], maps:get(<<"modules">>, Decoded)).
 
 format_modules_single_test() ->
-    Info = {counter, #{
-        name => <<"Counter">>,
-        source_file => "/tmp/counter.bt",
-        actor_count => 3,
-        load_time => 1234567890,
-        time_ago => "2 minutes ago"
-    }},
+    Info =
+        {counter, #{
+            name => <<"Counter">>,
+            source_file => "/tmp/counter.bt",
+            actor_count => 3,
+            load_time => 1234567890,
+            time_ago => "2 minutes ago"
+        }},
     Response = beamtalk_repl_json:format_modules([Info]),
     Decoded = jsx:decode(Response, [return_maps]),
     Modules = maps:get(<<"modules">>, Decoded),
@@ -788,7 +816,8 @@ format_response_with_warnings_multiple_warnings_test() ->
 
 format_response_with_warnings_complex_value_test() ->
     Response = beamtalk_repl_json:format_response_with_warnings(
-        #{x => 1, y => 2}, [<<"shadow">>]),
+        #{x => 1, y => 2}, [<<"shadow">>]
+    ),
     Decoded = jsx:decode(Response, [return_maps]),
     Value = maps:get(<<"value">>, Decoded),
     %% BT-535: Maps are pre-formatted as Beamtalk syntax strings
@@ -807,7 +836,8 @@ format_error_with_warnings_no_warnings_test() ->
 
 format_error_with_warnings_single_warning_test() ->
     Response = beamtalk_repl_json:format_error_with_warnings(
-        empty_expression, [<<"deprecated syntax">>]),
+        empty_expression, [<<"deprecated syntax">>]
+    ),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(<<"Empty expression">>, maps:get(<<"message">>, Decoded)),
@@ -859,8 +889,10 @@ safe_to_existing_atom_existing_test() ->
 
 safe_to_existing_atom_nonexistent_test() ->
     %% A random string should fail
-    ?assertEqual({error, badarg},
-        beamtalk_repl_server:safe_to_existing_atom(<<"xyzzy_nonexistent_atom_9999">>)).
+    ?assertEqual(
+        {error, badarg},
+        beamtalk_repl_server:safe_to_existing_atom(<<"xyzzy_nonexistent_atom_9999">>)
+    ).
 
 safe_to_existing_atom_empty_test() ->
     ?assertEqual({error, badarg}, beamtalk_repl_server:safe_to_existing_atom(<<>>)).
@@ -1038,14 +1070,21 @@ term_to_json_nested_list_with_maps_test() ->
 
 term_to_json_list_with_pids_test() ->
     Parent = self(),
-    Pid = spawn(fun() -> receive stop -> Parent ! done end end),
+    Pid = spawn(fun() ->
+        receive
+            stop -> Parent ! done
+        end
+    end),
     Result = beamtalk_repl_json:term_to_json([Pid, 42]),
     ?assertEqual(2, length(Result)),
     [PidJson, NumJson] = Result,
     ?assert(binary:match(PidJson, <<"#Actor<">>) =/= nomatch),
     ?assertEqual(42, NumJson),
     Pid ! stop,
-    receive done -> ok after 200 -> ok end.
+    receive
+        done -> ok
+    after 200 -> ok
+    end.
 
 term_to_json_reference_test() ->
     Ref = make_ref(),
@@ -1056,10 +1095,11 @@ term_to_json_reference_test() ->
 term_to_json_port_test() ->
     %% Create a port deterministically so the test doesn't depend on environment state
     %% Use cross-platform command: Windows cmd /c exit, Unix true
-    Command = case os:type() of
-        {win32, _} -> "cmd /c exit 0";
-        _ -> "true"
-    end,
+    Command =
+        case os:type() of
+            {win32, _} -> "cmd /c exit 0";
+            _ -> "true"
+        end,
     Port = open_port({spawn, Command}, []),
     Result = beamtalk_repl_json:term_to_json(Port),
     ?assert(is_binary(Result)),
@@ -1083,7 +1123,8 @@ format_response_with_warnings_error_fallback_test() ->
 format_error_with_warnings_fallback_test() ->
     %% Generic atom errors should still produce valid JSON with warnings
     Response = beamtalk_repl_json:format_error_with_warnings(
-        some_bizarre_error, [<<"w1">>]),
+        some_bizarre_error, [<<"w1">>]
+    ),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
     ?assert(is_binary(maps:get(<<"message">>, Decoded))),
@@ -1197,7 +1238,11 @@ term_to_json_list_with_bad_unicode_test() ->
 term_to_json_beamtalk_class_object_test() ->
     %% A class object has Class that is a class name
     %% We need beamtalk_object_class to be accessible; test the tuple pattern
-    Pid = spawn(fun() -> receive _ -> ok end end),
+    Pid = spawn(fun() ->
+        receive
+            _ -> ok
+        end
+    end),
     Result = beamtalk_repl_json:term_to_json({beamtalk_object, 'TestClassName', some_module, Pid}),
     %% Should either be a class display name or #Actor<...> format
     ?assert(is_binary(Result)),
@@ -1220,10 +1265,11 @@ format_error_message_with_complex_reason_test() ->
 format_response_with_unserializable_test() ->
     %% Port references are handled by term_to_json's fallback via io_lib:format
     %% Use cross-platform command: Windows cmd /c exit, Unix true
-    Command = case os:type() of
-        {win32, _} -> "cmd /c exit 0";
-        _ -> "true"
-    end,
+    Command =
+        case os:type() of
+            {win32, _} -> "cmd /c exit 0";
+            _ -> "true"
+        end,
     Port = open_port({spawn, Command}, []),
     Response = beamtalk_repl_json:format_response(Port),
     Decoded = jsx:decode(Response, [return_maps]),
@@ -1246,71 +1292,72 @@ parse_request_binary_causes_crash_test() ->
 
 %% Generator: runs all TCP integration tests within a single workspace instance
 tcp_integration_test_() ->
-    {setup,
-     fun tcp_setup/0,
-     fun tcp_cleanup/1,
-     fun({Port, _SupPid}) ->
-         [
-          {"clear op", fun() -> tcp_clear_test(Port) end},
-          {"bindings op (empty)", fun() -> tcp_bindings_empty_test(Port) end},
-          {"actors op (empty)", fun() -> tcp_actors_empty_test(Port) end},
-          {"sessions op", fun() -> tcp_sessions_test(Port) end},
-          {"close op", fun() -> tcp_close_test(Port) end},
-          {"complete op (empty prefix)", fun() -> tcp_complete_empty_test(Port) end},
-          {"complete op (with prefix)", fun() -> tcp_complete_prefix_test(Port) end},
-          {"info op (unknown symbol)", fun() -> tcp_info_unknown_test(Port) end},
-          {"info op (known atom)", fun() -> tcp_info_known_atom_test(Port) end},
-          {"info op (class enriched)", fun() -> tcp_info_class_enriched_test(Port) end},
-          {"unknown op", fun() -> tcp_unknown_op_test(Port) end},
-          {"empty eval op", fun() -> tcp_eval_empty_test(Port) end},
-          {"simple eval op", fun() -> tcp_eval_simple_test(Port) end},
-          {"unload nonexistent", fun() -> tcp_unload_nonexistent_test(Port) end},
-          {"unload empty module", fun() -> tcp_unload_empty_test(Port) end},
-          {"unload in-use module", fun() -> tcp_unload_in_use_test(Port) end},
-          {"inspect invalid pid", fun() -> tcp_inspect_invalid_pid_test(Port) end},
-          {"kill invalid pid", fun() -> tcp_kill_invalid_pid_test(Port) end},
-          {"reload module not loaded", fun() -> tcp_reload_module_not_loaded_test(Port) end},
-          {"docs unknown class", fun() -> tcp_docs_unknown_class_test(Port) end},
-          {"modules op", fun() -> tcp_modules_test(Port) end},
-          {"clone op", fun() -> tcp_clone_test(Port) end},
-          {"inspect dead actor", fun() -> tcp_inspect_dead_actor_test(Port) end},
-          {"malformed json", fun() -> tcp_malformed_json_test(Port) end},
-          {"raw expression", fun() -> tcp_raw_expression_test(Port) end},
-          %% BT-523: TCP connection lifecycle tests
-          {"multiple sequential connects", fun() -> tcp_multiple_connects_test(Port) end},
-          {"concurrent clients", fun() -> tcp_concurrent_clients_test(Port) end},
-          {"client disconnect", fun() -> tcp_client_disconnect_test(Port) end},
-          {"multi request same connection", fun() -> tcp_multi_request_same_conn_test(Port) end},
-          %% BT-523: Connection error handling tests
-          {"empty line", fun() -> tcp_empty_line_test(Port) end},
-          {"binary garbage", fun() -> tcp_binary_garbage_test(Port) end},
-          {"reload empty module", fun() -> tcp_reload_empty_module_test(Port) end},
-          {"reload with path", fun() -> tcp_reload_with_path_test(Port) end},
-          {"docs with selector unknown class", fun() -> tcp_docs_with_selector_unknown_test(Port) end},
-          {"inspect unknown actor", fun() -> tcp_inspect_unknown_actor_test(Port) end},
-          {"kill unknown actor", fun() -> tcp_kill_unknown_actor_test(Port) end},
-          %% BT-523: gen_server callback tests
-          {"get port", fun() -> tcp_get_port_test(Port) end},
-          {"get nonce", fun() -> tcp_get_nonce_test(Port) end},
-          {"unknown gen_server call", fun() -> tcp_unknown_call_check() end},
-          {"gen_server cast", fun() -> tcp_cast_check() end},
-          {"gen_server info unknown", fun() -> tcp_info_unknown_check2() end},
-          {"health op", fun() -> tcp_health_op_test(Port) end},
-          {"start_link integer port", fun() -> tcp_start_link_integer_test() end},
-          %% BT-523: session ID uniqueness test
-          {"clone uniqueness", fun() -> tcp_clone_uniqueness_test(Port) end},
-          %% BT-666: interrupt operation tests
-          {"interrupt no eval", fun() -> tcp_interrupt_no_eval_test(Port) end},
-          {"interrupt unknown session", fun() -> tcp_interrupt_unknown_session_test(Port) end},
-          %% BT-686: browser page tests
-          {"GET / returns HTML page", fun() -> http_index_page_test(Port) end},
-          {"HTML contains auth panel", fun() -> http_index_has_auth_panel_test(Port) end},
-          {"HTML contains transcript", fun() -> http_index_has_transcript_test(Port) end},
-          {"HTML contains eval panel", fun() -> http_index_has_eval_panel_test(Port) end},
-          {"HTML serves workspace page with static JS", fun() -> http_index_has_websocket_js_test(Port) end},
-          {"GET /ws without upgrade returns error", fun() -> http_ws_no_upgrade_test(Port) end}
-         ]
-     end}.
+    {setup, fun tcp_setup/0, fun tcp_cleanup/1, fun({Port, _SupPid}) ->
+        [
+            {"clear op", fun() -> tcp_clear_test(Port) end},
+            {"bindings op (empty)", fun() -> tcp_bindings_empty_test(Port) end},
+            {"actors op (empty)", fun() -> tcp_actors_empty_test(Port) end},
+            {"sessions op", fun() -> tcp_sessions_test(Port) end},
+            {"close op", fun() -> tcp_close_test(Port) end},
+            {"complete op (empty prefix)", fun() -> tcp_complete_empty_test(Port) end},
+            {"complete op (with prefix)", fun() -> tcp_complete_prefix_test(Port) end},
+            {"info op (unknown symbol)", fun() -> tcp_info_unknown_test(Port) end},
+            {"info op (known atom)", fun() -> tcp_info_known_atom_test(Port) end},
+            {"info op (class enriched)", fun() -> tcp_info_class_enriched_test(Port) end},
+            {"unknown op", fun() -> tcp_unknown_op_test(Port) end},
+            {"empty eval op", fun() -> tcp_eval_empty_test(Port) end},
+            {"simple eval op", fun() -> tcp_eval_simple_test(Port) end},
+            {"unload nonexistent", fun() -> tcp_unload_nonexistent_test(Port) end},
+            {"unload empty module", fun() -> tcp_unload_empty_test(Port) end},
+            {"unload in-use module", fun() -> tcp_unload_in_use_test(Port) end},
+            {"inspect invalid pid", fun() -> tcp_inspect_invalid_pid_test(Port) end},
+            {"kill invalid pid", fun() -> tcp_kill_invalid_pid_test(Port) end},
+            {"reload module not loaded", fun() -> tcp_reload_module_not_loaded_test(Port) end},
+            {"docs unknown class", fun() -> tcp_docs_unknown_class_test(Port) end},
+            {"modules op", fun() -> tcp_modules_test(Port) end},
+            {"clone op", fun() -> tcp_clone_test(Port) end},
+            {"inspect dead actor", fun() -> tcp_inspect_dead_actor_test(Port) end},
+            {"malformed json", fun() -> tcp_malformed_json_test(Port) end},
+            {"raw expression", fun() -> tcp_raw_expression_test(Port) end},
+            %% BT-523: TCP connection lifecycle tests
+            {"multiple sequential connects", fun() -> tcp_multiple_connects_test(Port) end},
+            {"concurrent clients", fun() -> tcp_concurrent_clients_test(Port) end},
+            {"client disconnect", fun() -> tcp_client_disconnect_test(Port) end},
+            {"multi request same connection", fun() -> tcp_multi_request_same_conn_test(Port) end},
+            %% BT-523: Connection error handling tests
+            {"empty line", fun() -> tcp_empty_line_test(Port) end},
+            {"binary garbage", fun() -> tcp_binary_garbage_test(Port) end},
+            {"reload empty module", fun() -> tcp_reload_empty_module_test(Port) end},
+            {"reload with path", fun() -> tcp_reload_with_path_test(Port) end},
+            {"docs with selector unknown class", fun() ->
+                tcp_docs_with_selector_unknown_test(Port)
+            end},
+            {"inspect unknown actor", fun() -> tcp_inspect_unknown_actor_test(Port) end},
+            {"kill unknown actor", fun() -> tcp_kill_unknown_actor_test(Port) end},
+            %% BT-523: gen_server callback tests
+            {"get port", fun() -> tcp_get_port_test(Port) end},
+            {"get nonce", fun() -> tcp_get_nonce_test(Port) end},
+            {"unknown gen_server call", fun() -> tcp_unknown_call_check() end},
+            {"gen_server cast", fun() -> tcp_cast_check() end},
+            {"gen_server info unknown", fun() -> tcp_info_unknown_check2() end},
+            {"health op", fun() -> tcp_health_op_test(Port) end},
+            {"start_link integer port", fun() -> tcp_start_link_integer_test() end},
+            %% BT-523: session ID uniqueness test
+            {"clone uniqueness", fun() -> tcp_clone_uniqueness_test(Port) end},
+            %% BT-666: interrupt operation tests
+            {"interrupt no eval", fun() -> tcp_interrupt_no_eval_test(Port) end},
+            {"interrupt unknown session", fun() -> tcp_interrupt_unknown_session_test(Port) end},
+            %% BT-686: browser page tests
+            {"GET / returns HTML page", fun() -> http_index_page_test(Port) end},
+            {"HTML contains auth panel", fun() -> http_index_has_auth_panel_test(Port) end},
+            {"HTML contains transcript", fun() -> http_index_has_transcript_test(Port) end},
+            {"HTML contains eval panel", fun() -> http_index_has_eval_panel_test(Port) end},
+            {"HTML serves workspace page with static JS", fun() ->
+                http_index_has_websocket_js_test(Port)
+            end},
+            {"GET /ws without upgrade returns error", fun() -> http_ws_no_upgrade_test(Port) end}
+        ]
+    end}.
 
 tcp_setup() ->
     process_flag(trap_exit, true),
@@ -1320,7 +1367,8 @@ tcp_setup() ->
     timer:sleep(100),
     {Port, SupPid}.
 
-tcp_start_workspace(0) -> error(failed_to_start_workspace);
+tcp_start_workspace(0) ->
+    error(failed_to_start_workspace);
 tcp_start_workspace(Retries) ->
     {ok, LSock} = gen_tcp:listen(0, [{reuseaddr, true}]),
     {ok, Port} = inet:port(LSock),
@@ -1347,7 +1395,8 @@ tcp_cleanup({_Port, SupPid}) ->
             unlink(SupPid),
             exit(SupPid, shutdown),
             timer:sleep(200);
-        false -> ok
+        false ->
+            ok
     end.
 
 %% Helper: connect, send a JSON op, receive response via WebSocket
@@ -1362,17 +1411,27 @@ tcp_send_op(Port, OpJson) ->
 %% Performs HTTP upgrade, cookie auth, then supports text frame send/recv.
 
 ws_connect(Port) ->
-    {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port,
-                                 [binary, {active, false}, {packet, raw}], 5000),
+    {ok, Sock} = gen_tcp:connect(
+        {127, 0, 0, 1},
+        Port,
+        [binary, {active, false}, {packet, raw}],
+        5000
+    ),
     %% WebSocket upgrade request
     Key = base64:encode(crypto:strong_rand_bytes(16)),
-    Req = [<<"GET /ws HTTP/1.1\r\n">>,
-           <<"Host: 127.0.0.1:">>, integer_to_binary(Port), <<"\r\n">>,
-           <<"Upgrade: websocket\r\n">>,
-           <<"Connection: Upgrade\r\n">>,
-           <<"Sec-WebSocket-Key: ">>, Key, <<"\r\n">>,
-           <<"Sec-WebSocket-Version: 13\r\n">>,
-           <<"\r\n">>],
+    Req = [
+        <<"GET /ws HTTP/1.1\r\n">>,
+        <<"Host: 127.0.0.1:">>,
+        integer_to_binary(Port),
+        <<"\r\n">>,
+        <<"Upgrade: websocket\r\n">>,
+        <<"Connection: Upgrade\r\n">>,
+        <<"Sec-WebSocket-Key: ">>,
+        Key,
+        <<"\r\n">>,
+        <<"Sec-WebSocket-Version: 13\r\n">>,
+        <<"\r\n">>
+    ],
     ok = gen_tcp:send(Sock, Req),
     %% Read HTTP upgrade response, return any leftover bytes after \r\n\r\n
     {ok, Rest} = ws_consume_http_response(Sock),
@@ -1407,14 +1466,16 @@ ws_consume_http_response(Sock, Buf) ->
 ws_send(Sock, Data) when is_binary(Data) ->
     Len = byte_size(Data),
     MaskKey = crypto:strong_rand_bytes(4),
-    Header = if
-        Len < 126 ->
-            <<1:1, 0:3, 1:4, 1:1, Len:7>>;  % FIN=1, opcode=1 (text), MASK=1
-        Len < 65536 ->
-            <<1:1, 0:3, 1:4, 1:1, 126:7, Len:16>>;
-        true ->
-            <<1:1, 0:3, 1:4, 1:1, 127:7, Len:64>>
-    end,
+    Header =
+        if
+            Len < 126 ->
+                % FIN=1, opcode=1 (text), MASK=1
+                <<1:1, 0:3, 1:4, 1:1, Len:7>>;
+            Len < 65536 ->
+                <<1:1, 0:3, 1:4, 1:1, 126:7, Len:16>>;
+            true ->
+                <<1:1, 0:3, 1:4, 1:1, 127:7, Len:64>>
+        end,
     Masked = ws_mask(Data, MaskKey),
     ok = gen_tcp:send(Sock, [Header, MaskKey, Masked]);
 ws_send(Sock, Data) when is_list(Data) ->
@@ -1430,36 +1491,47 @@ ws_recv(Sock) ->
 ws_recv_with_buf(Sock, Buf) ->
     %% Read 2-byte frame header (may already be in Buf)
     {<<_FIN:1, _RSV:3, Opcode:4, Mask:1, Len0:7>>, Rest0} = ws_read_exact(Sock, 2, Buf),
-    {PayloadLen, Rest1} = case Len0 of
-        126 ->
-            {<<L:16>>, R} = ws_read_exact(Sock, 2, Rest0),
-            {L, R};
-        127 ->
-            {<<L:64>>, R} = ws_read_exact(Sock, 8, Rest0),
-            {L, R};
-        L -> {L, Rest0}
-    end,
-    {MaskKey, Rest2} = case Mask of
-        1 ->
-            {MK, R2} = ws_read_exact(Sock, 4, Rest1),
-            {MK, R2};
-        0 -> {<<0,0,0,0>>, Rest1}
-    end,
+    {PayloadLen, Rest1} =
+        case Len0 of
+            126 ->
+                {<<L:16>>, R} = ws_read_exact(Sock, 2, Rest0),
+                {L, R};
+            127 ->
+                {<<L:64>>, R} = ws_read_exact(Sock, 8, Rest0),
+                {L, R};
+            L ->
+                {L, Rest0}
+        end,
+    {MaskKey, Rest2} =
+        case Mask of
+            1 ->
+                {MK, R2} = ws_read_exact(Sock, 4, Rest1),
+                {MK, R2};
+            0 ->
+                {<<0, 0, 0, 0>>, Rest1}
+        end,
     {Payload, Rest3} = ws_read_exact(Sock, PayloadLen, Rest2),
-    Unmasked = case Mask of
-        1 -> ws_mask(Payload, MaskKey);
-        0 -> Payload
-    end,
+    Unmasked =
+        case Mask of
+            1 -> ws_mask(Payload, MaskKey);
+            0 -> Payload
+        end,
     case Opcode of
-        1 -> {ok, Unmasked};    % text
-        8 -> {close, Unmasked}; % close
+        % text
+        1 ->
+            {ok, Unmasked};
+        % close
+        8 ->
+            {close, Unmasked};
         9 ->
             %% Ping — respond with masked pong (clients must mask all frames per RFC 6455)
             PongMaskKey = crypto:strong_rand_bytes(4),
             Pong = <<1:1, 0:3, 10:4, 1:1, 0:7>>,
             ok = gen_tcp:send(Sock, [Pong, PongMaskKey]),
             ws_recv_with_buf(Sock, Rest3);
-        _ -> ws_recv_with_buf(Sock, Rest3)      % skip other frames
+        % skip other frames
+        _ ->
+            ws_recv_with_buf(Sock, Rest3)
     end.
 
 %% Read exactly N bytes: first from Buf, then from socket if needed.
@@ -1483,14 +1555,16 @@ ws_close(Sock) ->
 ws_mask(Data, <<M1, M2, M3, M4>>) ->
     ws_mask(Data, <<M1, M2, M3, M4>>, 0, <<>>).
 
-ws_mask(<<>>, _Key, _I, Acc) -> Acc;
+ws_mask(<<>>, _Key, _I, Acc) ->
+    Acc;
 ws_mask(<<B, Rest/binary>>, Key = <<K1, K2, K3, K4>>, I, Acc) ->
-    M = case I rem 4 of
-        0 -> B bxor K1;
-        1 -> B bxor K2;
-        2 -> B bxor K3;
-        3 -> B bxor K4
-    end,
+    M =
+        case I rem 4 of
+            0 -> B bxor K1;
+            1 -> B bxor K2;
+            2 -> B bxor K3;
+            3 -> B bxor K4
+        end,
     ws_mask(Rest, Key, I + 1, <<Acc/binary, M>>).
 
 %% Test: clear op returns ok status
@@ -1601,7 +1675,9 @@ tcp_eval_simple_test(Port) ->
 
 %% Test: unload nonexistent module
 tcp_unload_nonexistent_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"unload">>, <<"id">> => <<"t11">>, <<"module">> => <<"XyzzyNotLoaded">>}),
+    Msg = jsx:encode(#{
+        <<"op">> => <<"unload">>, <<"id">> => <<"t11">>, <<"module">> => <<"XyzzyNotLoaded">>
+    }),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t11">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)).
@@ -1616,20 +1692,26 @@ tcp_unload_empty_test(Port) ->
 %% Test: unload module that has active processes returns in-use error
 tcp_unload_in_use_test(Port) ->
     DummyMod = 'bt519_tcp_in_use',
-    Forms = [{attribute,1,module,DummyMod},
-             {attribute,2,export,[{loop,0}]},
-             {function,3,loop,0,
-              [{clause,3,[],[],
-                [{'receive',3,
-                  [{clause,3,[{atom,3,stop}],[],[{atom,3,ok}]}]}]}]}],
+    Forms = [
+        {attribute, 1, module, DummyMod},
+        {attribute, 2, export, [{loop, 0}]},
+        {function, 3, loop, 0, [
+            {clause, 3, [], [], [
+                {'receive', 3, [{clause, 3, [{atom, 3, stop}], [], [{atom, 3, ok}]}]}
+            ]}
+        ]}
+    ],
     {ok, DummyMod, Binary} = compile:forms(Forms),
     {module, DummyMod} = code:load_binary(DummyMod, "test.erl", Binary),
     LoopPid = spawn(DummyMod, loop, []),
     %% Load new version so running process uses "old" code
     {module, DummyMod} = code:load_binary(DummyMod, "test.erl", Binary),
     try
-        Msg = jsx:encode(#{<<"op">> => <<"unload">>, <<"id">> => <<"t12b">>,
-                           <<"module">> => atom_to_binary(DummyMod, utf8)}),
+        Msg = jsx:encode(#{
+            <<"op">> => <<"unload">>,
+            <<"id">> => <<"t12b">>,
+            <<"module">> => atom_to_binary(DummyMod, utf8)
+        }),
         Resp = tcp_send_op(Port, Msg),
         ?assertMatch(#{<<"id">> := <<"t12b">>}, Resp),
         ?assert(maps:is_key(<<"error">>, Resp)),
@@ -1645,21 +1727,27 @@ tcp_unload_in_use_test(Port) ->
 
 %% Test: inspect with invalid PID string
 tcp_inspect_invalid_pid_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"inspect">>, <<"id">> => <<"t13">>, <<"actor">> => <<"not-a-pid">>}),
+    Msg = jsx:encode(#{
+        <<"op">> => <<"inspect">>, <<"id">> => <<"t13">>, <<"actor">> => <<"not-a-pid">>
+    }),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t13">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)).
 
 %% Test: kill with invalid PID string
 tcp_kill_invalid_pid_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"kill">>, <<"id">> => <<"t14">>, <<"actor">> => <<"not-a-pid">>}),
+    Msg = jsx:encode(#{
+        <<"op">> => <<"kill">>, <<"id">> => <<"t14">>, <<"actor">> => <<"not-a-pid">>
+    }),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t14">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)).
 
 %% Test: reload module that hasn't been loaded returns error
 tcp_reload_module_not_loaded_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"reload">>, <<"id">> => <<"t15">>, <<"module">> => <<"Counter">>}),
+    Msg = jsx:encode(#{
+        <<"op">> => <<"reload">>, <<"id">> => <<"t15">>, <<"module">> => <<"Counter">>
+    }),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t15">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)),
@@ -1668,7 +1756,9 @@ tcp_reload_module_not_loaded_test(Port) ->
 
 %% Test: docs for unknown class
 tcp_docs_unknown_class_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"docs">>, <<"id">> => <<"t16">>, <<"class">> => <<"XyzzyUnknown">>}),
+    Msg = jsx:encode(#{
+        <<"op">> => <<"docs">>, <<"id">> => <<"t16">>, <<"class">> => <<"XyzzyUnknown">>
+    }),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t16">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)).
@@ -1693,7 +1783,10 @@ tcp_inspect_dead_actor_test(Port) ->
     Pid = spawn(fun() -> ok end),
     %% Wait until the process is confirmed dead
     MRef = erlang:monitor(process, Pid),
-    receive {'DOWN', MRef, process, Pid, _} -> ok after 1000 -> error(timeout) end,
+    receive
+        {'DOWN', MRef, process, Pid, _} -> ok
+    after 1000 -> error(timeout)
+    end,
     PidStr = list_to_binary(pid_to_list(Pid)),
     Msg = jsx:encode(#{<<"op">> => <<"inspect">>, <<"id">> => <<"t19">>, <<"actor">> => PidStr}),
     Resp = tcp_send_op(Port, Msg),
@@ -1709,7 +1802,10 @@ tcp_malformed_json_test(Port) ->
     ws_close(Ws),
     Resp = jsx:decode(Data, [return_maps]),
     %% The server should try to eval "not valid json" or return error
-    ?assert(maps:is_key(<<"value">>, Resp) orelse maps:is_key(<<"error">>, Resp) orelse maps:is_key(<<"type">>, Resp)).
+    ?assert(
+        maps:is_key(<<"value">>, Resp) orelse maps:is_key(<<"error">>, Resp) orelse
+            maps:is_key(<<"type">>, Resp)
+    ).
 
 %% Test: raw expression (non-JSON) backwards compatibility
 tcp_raw_expression_test(Port) ->
@@ -1758,7 +1854,7 @@ tcp_concurrent_clients_test(Port) ->
 %% Test: client disconnect is handled gracefully (no crash)
 tcp_client_disconnect_test(Port) ->
     %% Connect and immediately close the TCP socket
-    {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port, [binary, {active, false}], 5000),
+    {ok, Sock} = gen_tcp:connect({127, 0, 0, 1}, Port, [binary, {active, false}], 5000),
     gen_tcp:close(Sock),
     timer:sleep(100),
     %% Server should still be responsive
@@ -1793,8 +1889,10 @@ tcp_empty_line_test(Port) ->
     ws_close(Ws),
     Resp = jsx:decode(Data, [return_maps]),
     %% Empty message results in error
-    ?assert(maps:is_key(<<"error">>, Resp) orelse
-            maps:get(<<"type">>, Resp, undefined) =:= <<"error">>).
+    ?assert(
+        maps:is_key(<<"error">>, Resp) orelse
+            maps:get(<<"type">>, Resp, undefined) =:= <<"error">>
+    ).
 
 %% Test: non-JSON text data via WebSocket
 tcp_binary_garbage_test(Port) ->
@@ -1819,8 +1917,11 @@ tcp_reload_empty_module_test(Port) ->
 
 %% Test: reload with path but no module
 tcp_reload_with_path_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"reload">>, <<"id">> => <<"re2">>,
-                       <<"path">> => <<"/nonexistent/path.bt">>}),
+    Msg = jsx:encode(#{
+        <<"op">> => <<"reload">>,
+        <<"id">> => <<"re2">>,
+        <<"path">> => <<"/nonexistent/path.bt">>
+    }),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"re2">>}, Resp),
     %% Should error because file doesn't exist
@@ -1828,33 +1929,50 @@ tcp_reload_with_path_test(Port) ->
 
 %% Test: docs with selector for unknown class
 tcp_docs_with_selector_unknown_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"docs">>, <<"id">> => <<"d1">>,
-                       <<"class">> => <<"XyzzyUnknown523">>,
-                       <<"selector">> => <<"+">>}),
+    Msg = jsx:encode(#{
+        <<"op">> => <<"docs">>,
+        <<"id">> => <<"d1">>,
+        <<"class">> => <<"XyzzyUnknown523">>,
+        <<"selector">> => <<"+">>
+    }),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"d1">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)).
 
 %% Test: inspect unknown actor (valid PID format, not in registry)
 tcp_inspect_unknown_actor_test(Port) ->
-    Pid = spawn(fun() -> receive _ -> ok end end),
+    Pid = spawn(fun() ->
+        receive
+            _ -> ok
+        end
+    end),
     PidStr = list_to_binary(pid_to_list(Pid)),
     exit(Pid, kill),
     timer:sleep(50),
-    Msg = jsx:encode(#{<<"op">> => <<"inspect">>, <<"id">> => <<"iu1">>,
-                       <<"actor">> => PidStr}),
+    Msg = jsx:encode(#{
+        <<"op">> => <<"inspect">>,
+        <<"id">> => <<"iu1">>,
+        <<"actor">> => PidStr
+    }),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"iu1">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)).
 
 %% Test: kill unknown actor (valid PID format, not in registry)
 tcp_kill_unknown_actor_test(Port) ->
-    Pid = spawn(fun() -> receive _ -> ok end end),
+    Pid = spawn(fun() ->
+        receive
+            _ -> ok
+        end
+    end),
     PidStr = list_to_binary(pid_to_list(Pid)),
     exit(Pid, kill),
     timer:sleep(50),
-    Msg = jsx:encode(#{<<"op">> => <<"kill">>, <<"id">> => <<"ku1">>,
-                       <<"actor">> => PidStr}),
+    Msg = jsx:encode(#{
+        <<"op">> => <<"kill">>,
+        <<"id">> => <<"ku1">>,
+        <<"actor">> => PidStr
+    }),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"ku1">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)).
@@ -2050,7 +2168,9 @@ get_symbol_info_unknown_retains_symbol_test() ->
 
 resolve_class_to_module_no_registry_test() ->
     %% With no class registry running, should return the class name itself
-    ?assertEqual(some_unknown_class, beamtalk_repl_server:resolve_class_to_module(some_unknown_class)).
+    ?assertEqual(
+        some_unknown_class, beamtalk_repl_server:resolve_class_to_module(some_unknown_class)
+    ).
 
 %%% resolve_module_atoms/2 tests
 
@@ -2314,7 +2434,12 @@ handle_op_inspect_dead_actor_test() ->
     ?assertMatch(#{<<"id">> := <<"i2">>}, Decoded).
 
 handle_op_inspect_live_non_actor_test() ->
-    Pid = spawn(fun() -> receive stop -> ok after 5000 -> ok end end),
+    Pid = spawn(fun() ->
+        receive
+            stop -> ok
+        after 5000 -> ok
+        end
+    end),
     PidStr = list_to_binary(pid_to_list(Pid)),
     Msg = make_proto_msg(<<"inspect">>, <<"i3">>, #{<<"actor">> => PidStr}),
     Params = #{<<"actor">> => PidStr},
@@ -2331,7 +2456,12 @@ handle_op_kill_invalid_pid_test() ->
     ?assertMatch(#{<<"id">> := <<"k1">>}, Decoded).
 
 handle_op_kill_valid_pid_test() ->
-    Pid = spawn(fun() -> receive _ -> ok after 5000 -> ok end end),
+    Pid = spawn(fun() ->
+        receive
+            _ -> ok
+        after 5000 -> ok
+        end
+    end),
     PidStr = list_to_binary(pid_to_list(Pid)),
     Msg = make_proto_msg(<<"kill">>, <<"k2">>, #{<<"actor">> => PidStr}),
     Params = #{<<"actor">> => PidStr},
@@ -2375,7 +2505,9 @@ handle_op_unload_empty_test() ->
     ?assertMatch(#{<<"id">> := <<"ul1">>}, Decoded).
 
 handle_op_unload_nonexistent_test() ->
-    Msg = make_proto_msg(<<"unload">>, <<"ul2">>, #{<<"module">> => <<"definitely_never_loaded_xyz">>}),
+    Msg = make_proto_msg(<<"unload">>, <<"ul2">>, #{
+        <<"module">> => <<"definitely_never_loaded_xyz">>
+    }),
     Params = #{<<"module">> => <<"definitely_never_loaded_xyz">>},
     Result = beamtalk_repl_server:handle_op(<<"unload">>, Params, Msg, self()),
     Decoded = jsx:decode(Result, [return_maps]),
@@ -2473,8 +2605,11 @@ handle_op_show_codegen_dead_session_test() ->
     %% Using a dead session PID should be caught by handle_protocol_request
     DeadPid = spawn(fun() -> ok end),
     timer:sleep(50),
-    Json = jsx:encode(#{<<"op">> => <<"show-codegen">>, <<"id">> => <<"sc3">>,
-                        <<"params">> => #{<<"code">> => <<"1 + 2">>}}),
+    Json = jsx:encode(#{
+        <<"op">> => <<"show-codegen">>,
+        <<"id">> => <<"sc3">>,
+        <<"params">> => #{<<"code">> => <<"1 + 2">>}
+    }),
     {ok, Msg} = beamtalk_repl_protocol:decode(Json),
     Result = beamtalk_repl_server:handle_protocol_request(Msg, DeadPid),
     Decoded = jsx:decode(Result, [return_maps]),
@@ -2500,8 +2635,11 @@ handle_protocol_request_crash_test() ->
     %% Use eval op with a SessionPid that's dead
     DeadPid = spawn(fun() -> ok end),
     timer:sleep(50),
-    Json = jsx:encode(#{<<"op">> => <<"eval">>, <<"id">> => <<"crash1">>,
-            <<"params">> => #{<<"code">> => <<"test">>}}),
+    Json = jsx:encode(#{
+        <<"op">> => <<"eval">>,
+        <<"id">> => <<"crash1">>,
+        <<"params">> => #{<<"code">> => <<"test">>}
+    }),
     {ok, Msg} = beamtalk_repl_protocol:decode(Json),
     Result = beamtalk_repl_server:handle_protocol_request(Msg, DeadPid),
     Decoded = jsx:decode(Result, [return_maps]),
@@ -2524,7 +2662,8 @@ write_port_file_with_workspace_test() ->
     ?assertEqual(ok, Result),
     %% Clean up if file was created
     case beamtalk_platform:home_dir() of
-        false -> ok;
+        false ->
+            ok;
         Home ->
             PortFile = filename:join([Home, ".beamtalk", "workspaces", "test_ws_627", "port"]),
             file:delete(PortFile)
@@ -2557,9 +2696,11 @@ tcp_interrupt_no_eval_test(Port) ->
 
 %% Test: interrupt op with an unknown session ID falls back to current session
 tcp_interrupt_unknown_session_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"interrupt">>,
-                       <<"id">> => <<"int2">>,
-                       <<"session">> => <<"nonexistent_session">>}),
+    Msg = jsx:encode(#{
+        <<"op">> => <<"interrupt">>,
+        <<"id">> => <<"int2">>,
+        <<"session">> => <<"nonexistent_session">>
+    }),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"int2">>}, Resp),
     ?assert(lists:member(<<"done">>, maps:get(<<"status">>, Resp))).
@@ -2570,12 +2711,22 @@ tcp_interrupt_unknown_session_test(Port) ->
 
 %% Helper: HTTP GET request via raw TCP (avoids inets dependency)
 http_get(Port, Path) ->
-    {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port,
-                                 [binary, {active, false}, {packet, raw}], 5000),
-    Req = [<<"GET ">>, Path, <<" HTTP/1.1\r\n">>,
-           <<"Host: 127.0.0.1:">>, integer_to_binary(Port), <<"\r\n">>,
-           <<"Connection: close\r\n">>,
-           <<"\r\n">>],
+    {ok, Sock} = gen_tcp:connect(
+        {127, 0, 0, 1},
+        Port,
+        [binary, {active, false}, {packet, raw}],
+        5000
+    ),
+    Req = [
+        <<"GET ">>,
+        Path,
+        <<" HTTP/1.1\r\n">>,
+        <<"Host: 127.0.0.1:">>,
+        integer_to_binary(Port),
+        <<"\r\n">>,
+        <<"Connection: close\r\n">>,
+        <<"\r\n">>
+    ],
     ok = gen_tcp:send(Sock, Req),
     {ok, Response} = http_read_all(Sock, <<>>),
     gen_tcp:close(Sock),
@@ -2593,7 +2744,8 @@ http_body(Response) ->
         {Pos, Len} ->
             Start = Pos + Len,
             binary:part(Response, Start, byte_size(Response) - Start);
-        nomatch -> <<>>
+        nomatch ->
+            <<>>
     end.
 
 %% Test: GET / returns 200 with HTML content

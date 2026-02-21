@@ -155,8 +155,14 @@
 -export([async_send/4, sync_send/3]).
 
 %% gen_server callbacks (for generated actors to delegate to)
--export([init/1, handle_cast/2, handle_call/3, handle_info/2,
-         code_change/3, terminate/2]).
+-export([
+    init/1,
+    handle_cast/2,
+    handle_call/3,
+    handle_info/2,
+    code_change/3,
+    terminate/2
+]).
 
 %% Internal dispatch
 -export([dispatch/4, make_self/1]).
@@ -278,7 +284,8 @@ async_send(ActorPid, stop, [], FuturePid) ->
                 actor_dead,
                 unknown,
                 stop,
-                iolist_to_binary(io_lib:format("Actor stop failed: ~p", [Reason]))),
+                iolist_to_binary(io_lib:format("Actor stop failed: ~p", [Reason]))
+            ),
             beamtalk_future:reject(FuturePid, Error)
     end,
     ok;
@@ -368,7 +375,8 @@ actor_dead_error(Selector) ->
         actor_dead,
         unknown,
         Selector,
-        <<"Use 'isAlive' to check, or use monitors for lifecycle events">>),
+        <<"Use 'isAlive' to check, or use monitors for lifecycle events">>
+    ),
     {error, Error}.
 
 %%% gen_server callbacks
@@ -506,7 +514,8 @@ dispatch(Selector, Args, Self, State) ->
             [CheckSelector] = Args,
             Methods = maps:get('__methods__', State),
             case maps:is_key(CheckSelector, Methods) of
-                true -> {reply, true, State};
+                true ->
+                    {reply, true, State};
                 false when CheckSelector =:= isAlive ->
                     %% isAlive is handled by actor dispatch, not in __methods__
                     {reply, true, State};
@@ -519,13 +528,16 @@ dispatch(Selector, Args, Self, State) ->
                 false ->
                     %% Check inherited methods via hierarchy walk
                     ClassName = beamtalk_tagged_map:class_of(State, unknown),
-                    Result = try beamtalk_dispatch:responds_to(CheckSelector, ClassName) of
-                                 true -> true;
-                                 false ->
-                                     %% Class may not be registered — check Object directly
-                                     beamtalk_object_ops:has_method(CheckSelector)
-                             catch _:_ -> beamtalk_object_ops:has_method(CheckSelector)
-                             end,
+                    Result =
+                        try beamtalk_dispatch:responds_to(CheckSelector, ClassName) of
+                            true ->
+                                true;
+                            false ->
+                                %% Class may not be registered — check Object directly
+                                beamtalk_object_ops:has_method(CheckSelector)
+                        catch
+                            _:_ -> beamtalk_object_ops:has_method(CheckSelector)
+                        end,
                     {reply, Result, State}
             end;
         'perform:' when length(Args) =:= 1 ->
@@ -616,13 +628,15 @@ handle_dnu(Selector, Args, Self, State) ->
 -spec call_dnu_handler(function(), list(), #beamtalk_object{}, map(), 2 | 3) ->
     {reply, term(), map()} | {noreply, map()} | {error, term(), map()}.
 call_dnu_handler(DnuFun, DnuArgs, Self, State, 3) ->
-    try DnuFun(DnuArgs, Self, State)
+    try
+        DnuFun(DnuArgs, Self, State)
     catch
         error:#beamtalk_error{} = BtError:_ -> {error, BtError, State};
         Class:Reason:_ -> wrap_dnu_handler_error(hd(DnuArgs), State, Class, Reason)
     end;
 call_dnu_handler(DnuFun, DnuArgs, _Self, State, 2) ->
-    try DnuFun(DnuArgs, State)
+    try
+        DnuFun(DnuArgs, State)
     catch
         error:#beamtalk_error{} = BtError:_ -> {error, BtError, State};
         Class:Reason:_ -> wrap_dnu_handler_error(hd(DnuArgs), State, Class, Reason)
@@ -670,7 +684,8 @@ make_dnu_error(Selector, ClassName, State) ->
         does_not_understand,
         ClassName,
         Selector,
-        <<"Check spelling or use 'respondsTo:' to verify method exists">>),
+        <<"Check spelling or use 'respondsTo:' to verify method exists">>
+    ),
     {error, Error, State}.
 
 %% @private

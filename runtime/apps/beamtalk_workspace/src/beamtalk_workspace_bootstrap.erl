@@ -79,7 +79,9 @@ handle_info({rebootstrap, ClassName, RegName, Retries}, State) when Retries < 5 
             {noreply, NewState}
     end;
 handle_info({rebootstrap, ClassName, RegName, _Retries}, State) ->
-    ?LOG_ERROR("Bootstrap: failed to rewire singleton after retries", #{class => ClassName, name => RegName}),
+    ?LOG_ERROR("Bootstrap: failed to rewire singleton after retries", #{
+        class => ClassName, name => RegName
+    }),
     {noreply, State};
 handle_info(_Msg, State) ->
     {noreply, State}.
@@ -131,11 +133,14 @@ build_object_ref(ClassName, Pid) ->
 class_module(ClassName) ->
     Singletons = beamtalk_workspace_config:singletons(),
     case lists:search(fun(#{class_name := C}) -> C =:= ClassName end, Singletons) of
-        {value, #{module := Module}} -> Module;
+        {value, #{module := Module}} ->
+            Module;
         false ->
             Err0 = beamtalk_error:new(class_not_found, ClassName),
-            Err = beamtalk_error:with_hint(Err0,
-                <<"Not a registered workspace singleton.">>),
+            Err = beamtalk_error:with_hint(
+                Err0,
+                <<"Not a registered workspace singleton.">>
+            ),
             error(Err)
     end.
 
@@ -157,7 +162,9 @@ set_class_variable(ClassName, Obj) ->
 activate_project_modules(undefined) ->
     ok;
 activate_project_modules(ProjectPath) when is_binary(ProjectPath), byte_size(ProjectPath) > 0 ->
-    EbinDir = filename:absname(filename:join([binary_to_list(ProjectPath), "_build", "dev", "ebin"])),
+    EbinDir = filename:absname(
+        filename:join([binary_to_list(ProjectPath), "_build", "dev", "ebin"])
+    ),
     _ = code:add_pathz(EbinDir),
     Modules = find_bt_modules_in_dir(EbinDir),
     Sorted = sort_modules_by_dependency(EbinDir, Modules),
@@ -182,10 +189,11 @@ beam_file_to_project_module(File) ->
     case filename:extension(File) of
         ".beam" ->
             ModName = filename:rootname(filename:basename(File)),
-            IsProject = lists:prefix("bt@", ModName) andalso
-                        not lists:prefix("bt@stdlib@", ModName),
+            IsProject =
+                lists:prefix("bt@", ModName) andalso
+                    not lists:prefix("bt@stdlib@", ModName),
             case IsProject of
-                true  -> {true, list_to_atom(ModName)};
+                true -> {true, list_to_atom(ModName)};
                 false -> false
             end;
         _ ->
@@ -279,8 +287,10 @@ activate_project_module(ModuleName) ->
             beamtalk_workspace_meta:register_module(ModuleName),
             ?LOG_DEBUG("Bootstrap: activated project module", #{module => ModuleName});
         {error, Reason} ->
-            ?LOG_WARNING("Bootstrap: failed to load project module",
-                         #{module => ModuleName, reason => Reason})
+            ?LOG_WARNING(
+                "Bootstrap: failed to load project module",
+                #{module => ModuleName, reason => Reason}
+            )
     end.
 
 %% @private Call register_class/0 on a module if it exports one.
@@ -293,8 +303,10 @@ try_register_class(ModuleName) ->
                 ok
             catch
                 _:Err ->
-                    ?LOG_WARNING("Bootstrap: register_class/0 failed",
-                                 #{module => ModuleName, error => Err})
+                    ?LOG_WARNING(
+                        "Bootstrap: register_class/0 failed",
+                        #{module => ModuleName, error => Err}
+                    )
             end;
         false ->
             ok

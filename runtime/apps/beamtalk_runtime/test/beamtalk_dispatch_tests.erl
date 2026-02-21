@@ -29,14 +29,14 @@ setup() ->
     %% Just start the application to ensure ETS tables and registries are ready
     %% The beamtalk_runtime app should handle starting necessary supervisors
     application:ensure_all_started(beamtalk_runtime),
-    
+
     %% BT-446: Ensure stdlib classes are registered (may have been killed by
     %% earlier test teardowns since class processes are unlinked)
     beamtalk_stdlib:init(),
-    
+
     %% Initialize extensions registry
     beamtalk_extensions:init(),
-    
+
     ok.
 
 %% Teardown function
@@ -50,41 +50,44 @@ teardown(_) ->
 
 %% Run all tests with setup/teardown
 dispatch_test_() ->
-    {setup,
-     fun setup/0,
-     fun teardown/1,
-     fun(_) ->
-         [
-          {"lookup finds local method", fun test_lookup_local_method/0},
-          {"lookup finds inherited method", fun test_lookup_inherited_method/0},
-          {"lookup returns DNU error for missing method", fun test_lookup_missing_method/0},
-          {"super skips current class", fun test_super_skips_current/0},
-          {"super returns error at root", fun test_super_at_root/0},
-          {"lookup checks extensions before class methods", fun test_extension_priority/0},
-          {"dispatch errors are always 2-tuples", fun test_error_tuple_shape/0},
-          {"super finds inherited reflection method", fun test_super_finds_inherited/0},
-          {"responds_to existing method", fun test_responds_to_existing_method/0},
-           {"responds_to missing method", fun test_responds_to_missing_method/0},
-           {"responds_to nonexistent class", fun test_responds_to_nonexistent_class/0},
-           {"responds_to inherited method", fun test_responds_to_inherited_method/0},
-           {"extension error propagation", fun test_extension_error_propagation/0},
-          {"responds_to extension method", fun test_responds_to_extension_method/0},
-          {"BT-283: dispatch lookup performance", fun test_dispatch_lookup_performance/0},
-          {"BT-283: dynamic method found after put_method", fun test_dynamic_method_responds_to/0},
-          {"BT-283: inherited dynamic method found via chain walk", fun test_inherited_responds_to_dynamic_method/0},
-          {"BT-387: out-of-order registration dispatches correctly", fun test_out_of_order_registration/0},
-          {"BT-429: super finds extension on superclass", fun test_super_finds_extension_on_superclass/0},
-          %% BT-623: Additional coverage tests
-          {"lookup on non-existent class returns class_not_found", fun test_lookup_nonexistent_class/0},
-          {"super on non-existent class returns error", fun test_super_nonexistent_class/0},
-          {"lookup returns class_not_found when parent class is gone", fun test_stale_parent_class/0},
-          {"continue_to_superclass at root returns DNU", fun test_continue_to_superclass_root/0},
-          {"lookup returns error for dead class process", fun test_dead_class_process/0},
-          {"super at Object for unknown method", fun test_super_object_unknown/0},
-          {"lookup with class_not_found in superclass chain", fun test_lookup_missing_superclass_in_chain/0}
-         ]
-     end
-    }.
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            {"lookup finds local method", fun test_lookup_local_method/0},
+            {"lookup finds inherited method", fun test_lookup_inherited_method/0},
+            {"lookup returns DNU error for missing method", fun test_lookup_missing_method/0},
+            {"super skips current class", fun test_super_skips_current/0},
+            {"super returns error at root", fun test_super_at_root/0},
+            {"lookup checks extensions before class methods", fun test_extension_priority/0},
+            {"dispatch errors are always 2-tuples", fun test_error_tuple_shape/0},
+            {"super finds inherited reflection method", fun test_super_finds_inherited/0},
+            {"responds_to existing method", fun test_responds_to_existing_method/0},
+            {"responds_to missing method", fun test_responds_to_missing_method/0},
+            {"responds_to nonexistent class", fun test_responds_to_nonexistent_class/0},
+            {"responds_to inherited method", fun test_responds_to_inherited_method/0},
+            {"extension error propagation", fun test_extension_error_propagation/0},
+            {"responds_to extension method", fun test_responds_to_extension_method/0},
+            {"BT-283: dispatch lookup performance", fun test_dispatch_lookup_performance/0},
+            {"BT-283: dynamic method found after put_method",
+                fun test_dynamic_method_responds_to/0},
+            {"BT-283: inherited dynamic method found via chain walk",
+                fun test_inherited_responds_to_dynamic_method/0},
+            {"BT-387: out-of-order registration dispatches correctly",
+                fun test_out_of_order_registration/0},
+            {"BT-429: super finds extension on superclass",
+                fun test_super_finds_extension_on_superclass/0},
+            %% BT-623: Additional coverage tests
+            {"lookup on non-existent class returns class_not_found",
+                fun test_lookup_nonexistent_class/0},
+            {"super on non-existent class returns error", fun test_super_nonexistent_class/0},
+            {"lookup returns class_not_found when parent class is gone",
+                fun test_stale_parent_class/0},
+            {"continue_to_superclass at root returns DNU", fun test_continue_to_superclass_root/0},
+            {"lookup returns error for dead class process", fun test_dead_class_process/0},
+            {"super at Object for unknown method", fun test_super_object_unknown/0},
+            {"lookup with class_not_found in superclass chain",
+                fun test_lookup_missing_superclass_in_chain/0}
+        ]
+    end}.
 
 %%% ============================================================================
 %%% Test Cases
@@ -94,21 +97,22 @@ dispatch_test_() ->
 test_lookup_local_method() ->
     %% Use the Counter class from compiled fixture
     %% Counter defines increment/0 locally
-    
+
     %% First, ensure Counter is loaded and registered
     ok = ensure_counter_loaded(),
-    
+
     %% Create a Counter instance state
     State = #{
         '$beamtalk_class' => 'Counter',
         'value' => 0
     },
-    
-    Self = make_ref(),  % Placeholder self
-    
+
+    % Placeholder self
+    Self = make_ref(),
+
     %% Dispatch increment on Counter
     Result = beamtalk_dispatch:lookup(increment, [], Self, State, 'Counter'),
-    
+
     %% Should succeed (exact result depends on Counter implementation)
     ?assertMatch({reply, _Result, _NewState}, Result).
 
@@ -117,47 +121,50 @@ test_lookup_inherited_method() ->
     %% Counter has 'class' method inlined in its dispatch
     %% This test actually tests that we can find a method in the current class
     %% (Real hierarchy walking is tested with LoggingCounter -> Counter)
-    
+
     ok = ensure_counter_loaded(),
-    
+
     State = #{
         '$beamtalk_class' => 'Counter',
         'value' => 0
     },
-    
+
     Self = make_ref(),
-    
+
     %% Dispatch 'class' on Counter (defined locally in Counter's dispatch)
     Result = beamtalk_dispatch:lookup(class, [], Self, State, 'Counter'),
-    
+
     %% Should succeed and return 'Counter'
     ?assertMatch({reply, 'Counter', _State}, Result).
 
 %% Test that lookup/5 returns structured error for missing method
 test_lookup_missing_method() ->
     ok = ensure_counter_loaded(),
-    
+
     State = #{
         '$beamtalk_class' => 'Counter',
         'value' => 0
     },
-    
+
     Self = make_ref(),
-    
+
     %% Dispatch a method that doesn't exist
     Result = beamtalk_dispatch:lookup(unknownMethod, [], Self, State, 'Counter'),
-    
+
     %% Should return structured error
-    ?assertMatch({error, #beamtalk_error{
-        kind = does_not_understand,
-        class = 'Counter',
-        selector = unknownMethod
-    }}, Result).
+    ?assertMatch(
+        {error, #beamtalk_error{
+            kind = does_not_understand,
+            class = 'Counter',
+            selector = unknownMethod
+        }},
+        Result
+    ).
 
 %% Test that super/5 skips the current class and starts at superclass
 test_super_skips_current() ->
     ok = ensure_counter_loaded(),
-    
+
     %% Counter inherits from Actor. Call super on Counter for 'increment'.
     %% Counter defines 'increment', but super should NOT find it in Counter.
     %% It should look in Actor (no increment there), then Object, etc.
@@ -165,13 +172,13 @@ test_super_skips_current() ->
         '$beamtalk_class' => 'Counter',
         'value' => 0
     },
-    
+
     Self = make_ref(),
-    
+
     %% Super from Counter for 'increment' should NOT find it
     %% (Actor/Object don't define increment)
     Result = beamtalk_dispatch:super(increment, [], Self, State, 'Counter'),
-    
+
     %% Should return does_not_understand since increment is only in Counter
     ?assertMatch({error, #beamtalk_error{kind = does_not_understand}}, Result).
 
@@ -179,21 +186,21 @@ test_super_skips_current() ->
 test_super_at_root() ->
     %% Object has no superclass (or ProtoObject is root)
     %% Calling super from Object should return error
-    
+
     %% We need to know the root class name
     %% For now, assume Object is close to root
-    
+
     ok = ensure_counter_loaded(),
-    
+
     State = #{
         '$beamtalk_class' => 'Object'
     },
-    
+
     Self = make_ref(),
-    
+
     %% Call super on Object for a method that doesn't exist in superclass chain
     Result = beamtalk_dispatch:super(unknownMethod, [], Self, State, 'Object'),
-    
+
     %% Should return error (no superclass or method not found)
     ?assertMatch({error, #beamtalk_error{}}, Result).
 
@@ -202,27 +209,27 @@ test_extension_priority() ->
     %% Register an extension method on Counter
     ok = ensure_counter_loaded(),
     ok = beamtalk_extensions:init(),
-    
-    TestFun = fun(_Args, State) -> 
+
+    TestFun = fun(_Args, State) ->
         %% Return a test value
         {extension_called, State}
     end,
-    
+
     ok = beamtalk_extensions:register('Counter', testExtension, TestFun, test_owner),
-    
+
     State = #{
         '$beamtalk_class' => 'Counter',
         'value' => 0
     },
-    
+
     Self = make_ref(),
-    
+
     %% Call the extension method
     Result = beamtalk_dispatch:lookup(testExtension, [], Self, State, 'Counter'),
-    
+
     %% Clean up the extension to avoid leaking between tests
     catch ets:delete(beamtalk_extensions, {'Counter', testExtension}),
-    
+
     %% Should invoke the extension
     ?assertMatch({reply, {extension_called, _}, _}, Result).
 
@@ -231,20 +238,20 @@ test_extension_priority() ->
 %% 3-tuple {error, Error, State} from dispatch/4 to 2-tuple {error, Error}
 test_error_tuple_shape() ->
     ok = ensure_counter_loaded(),
-    
+
     State = #{
         '$beamtalk_class' => 'Counter',
         'value' => 0
     },
-    
+
     Self = make_ref(),
-    
+
     %% All error paths should return exactly {error, #beamtalk_error{}} (2-tuple)
     %% Never {error, Error, State} (3-tuple)
     LookupResult = beamtalk_dispatch:lookup(noSuchMethod, [], Self, State, 'Counter'),
     ?assertMatch({error, #beamtalk_error{}}, LookupResult),
     ?assertEqual(2, tuple_size(LookupResult)),
-    
+
     SuperResult = beamtalk_dispatch:super(noSuchMethod, [], Self, State, 'Counter'),
     ?assertMatch({error, #beamtalk_error{}}, SuperResult),
     ?assertEqual(2, tuple_size(SuperResult)).
@@ -255,18 +262,18 @@ test_error_tuple_shape() ->
 %% compiled module — demonstrating the hierarchy walk terminates correctly.
 test_super_finds_inherited() ->
     ok = ensure_counter_loaded(),
-    
+
     State = #{
         '$beamtalk_class' => 'Counter',
         'value' => 0
     },
-    
+
     Self = make_ref(),
-    
+
     %% ADR 0006 Phase 1b: 'class' is no longer inlined in Counter's dispatch.
     %% Super walks from Counter → Actor → Object, finds 'class' in beamtalk_object.erl.
     Result = beamtalk_dispatch:super(class, [], Self, State, 'Counter'),
-    
+
     %% Object's dispatch/4 handles 'class' by reading $beamtalk_class from State
     ?assertMatch({reply, 'Counter', _}, Result).
 
@@ -343,8 +350,10 @@ test_extension_error_propagation() ->
 
     try
         %% Extension error should propagate
-        ?assertError(extension_test_crash,
-            beamtalk_dispatch:lookup(crashExt, [], Self, State, 'Counter'))
+        ?assertError(
+            extension_test_crash,
+            beamtalk_dispatch:lookup(crashExt, [], Self, State, 'Counter')
+        )
     after
         catch ets:delete(beamtalk_extensions, {'Counter', crashExt})
     end.
@@ -386,9 +395,12 @@ test_dispatch_lookup_performance() ->
     N = 10000,
 
     Start = erlang:monotonic_time(microsecond),
-    lists:foreach(fun(_) ->
-        _ = beamtalk_dispatch:lookup(class, [], Self, State, 'Counter')
-    end, lists:seq(1, N)),
+    lists:foreach(
+        fun(_) ->
+            _ = beamtalk_dispatch:lookup(class, [], Self, State, 'Counter')
+        end,
+        lists:seq(1, N)
+    ),
     End = erlang:monotonic_time(microsecond),
 
     AvgTime = (End - Start) / N,

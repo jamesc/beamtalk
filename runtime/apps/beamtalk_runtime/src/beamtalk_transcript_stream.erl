@@ -48,11 +48,11 @@
 -type max_buffer() :: pos_integer().
 
 -record(state, {
-    buffer       :: queue:queue(binary()),
-    buffer_size  :: non_neg_integer(),
-    max_buffer   :: max_buffer(),
-    subscribers  :: #{pid() => reference()},
-    self_ref     :: tuple() | undefined
+    buffer :: queue:queue(binary()),
+    buffer_size :: non_neg_integer(),
+    max_buffer :: max_buffer(),
+    subscribers :: #{pid() => reference()},
+    self_ref :: tuple() | undefined
 }).
 
 -type state() :: #state{}.
@@ -89,13 +89,13 @@ spawn(MaxBuffer) ->
 
 %% @doc Check if TranscriptStream responds to the given selector.
 -spec has_method(atom()) -> boolean().
-has_method('show:')      -> true;
-has_method(cr)           -> true;
-has_method(subscribe)    -> true;
-has_method(unsubscribe)  -> true;
-has_method(recent)       -> true;
-has_method(clear)        -> true;
-has_method(_)            -> false.
+has_method('show:') -> true;
+has_method(cr) -> true;
+has_method(subscribe) -> true;
+has_method(unsubscribe) -> true;
+has_method(recent) -> true;
+has_method(clear) -> true;
+has_method(_) -> false.
 
 %% @doc Return class registration metadata for TranscriptStream.
 %%
@@ -145,11 +145,11 @@ unsubscribe(TranscriptRef) ->
 init([MaxBuffer]) when is_integer(MaxBuffer), MaxBuffer > 0 ->
     SelfRef = {beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, self()},
     {ok, #state{
-        buffer       = queue:new(),
-        buffer_size  = 0,
-        max_buffer   = MaxBuffer,
-        subscribers  = #{},
-        self_ref     = SelfRef
+        buffer = queue:new(),
+        buffer_size = 0,
+        max_buffer = MaxBuffer,
+        subscribers = #{},
+        self_ref = SelfRef
     }};
 init([MaxBuffer]) ->
     {stop, {invalid_max_buffer, MaxBuffer}}.
@@ -175,7 +175,9 @@ handle_call(Request, _From, State) ->
 %% @doc Handle asynchronous casts: show:, cr, subscribe, unsubscribe.
 -spec handle_cast(term(), state()) -> {noreply, state()}.
 %% Actor protocol: {Selector, Args, FuturePid} from beamtalk_actor:async_send/4
-handle_cast({'show:', [Value], FuturePid}, #state{self_ref = SelfRef} = State) when is_pid(FuturePid) ->
+handle_cast({'show:', [Value], FuturePid}, #state{self_ref = SelfRef} = State) when
+    is_pid(FuturePid)
+->
     Text = to_string(Value),
     State1 = buffer_text(Text, State),
     push_to_subscribers(Text, State1),
@@ -193,11 +195,15 @@ handle_cast({recent, [], FuturePid}, State) when is_pid(FuturePid) ->
 handle_cast({clear, [], FuturePid}, #state{self_ref = SelfRef} = State) when is_pid(FuturePid) ->
     beamtalk_future:resolve(FuturePid, SelfRef),
     {noreply, State#state{buffer = queue:new(), buffer_size = 0}};
-handle_cast({subscribe, [], FuturePid}, #state{self_ref = SelfRef} = State) when is_pid(FuturePid) ->
+handle_cast({subscribe, [], FuturePid}, #state{self_ref = SelfRef} = State) when
+    is_pid(FuturePid)
+->
     CallerPid = caller_from_future(FuturePid),
     beamtalk_future:resolve(FuturePid, SelfRef),
     {noreply, add_subscriber(CallerPid, State)};
-handle_cast({unsubscribe, [], FuturePid}, #state{self_ref = SelfRef} = State) when is_pid(FuturePid) ->
+handle_cast({unsubscribe, [], FuturePid}, #state{self_ref = SelfRef} = State) when
+    is_pid(FuturePid)
+->
     CallerPid = caller_from_future(FuturePid),
     beamtalk_future:resolve(FuturePid, SelfRef),
     {noreply, remove_subscriber(CallerPid, State)};
@@ -217,10 +223,14 @@ handle_cast({subscribe, Pid}, State) ->
 handle_cast({unsubscribe, Pid}, State) ->
     {noreply, remove_subscriber(Pid, State)};
 %% Actor protocol catch-all: reject Future for unknown selectors
-handle_cast({UnknownSelector, _Args, FuturePid}, State) when is_pid(FuturePid), is_atom(UnknownSelector) ->
+handle_cast({UnknownSelector, _Args, FuturePid}, State) when
+    is_pid(FuturePid), is_atom(UnknownSelector)
+->
     Error0 = beamtalk_error:new(does_not_understand, 'Transcript'),
     Error1 = beamtalk_error:with_selector(Error0, UnknownSelector),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Supported methods: show:, cr, recent, clear, subscribe, unsubscribe">>),
+    Error2 = beamtalk_error:with_hint(
+        Error1, <<"Supported methods: show:, cr, recent, clear, subscribe, unsubscribe">>
+    ),
     beamtalk_future:reject(FuturePid, Error2),
     {noreply, State};
 handle_cast(_Msg, State) ->
@@ -272,9 +282,12 @@ buffer_text(Text, #state{buffer = Buffer, buffer_size = Size, max_buffer = Max} 
 %% @doc Send text to all subscribers.
 -spec push_to_subscribers(binary(), state()) -> ok.
 push_to_subscribers(Text, #state{subscribers = Subs}) ->
-    maps:foreach(fun(Pid, _Ref) ->
-        Pid ! {transcript_output, Text}
-    end, Subs),
+    maps:foreach(
+        fun(Pid, _Ref) ->
+            Pid ! {transcript_output, Text}
+        end,
+        Subs
+    ),
     ok.
 
 %% @private

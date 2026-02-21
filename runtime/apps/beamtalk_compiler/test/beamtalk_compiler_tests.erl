@@ -25,31 +25,28 @@ teardown(_) ->
     ok.
 
 compiler_test_() ->
-    {setup,
-     fun setup/0,
-     fun teardown/1,
-     [
-      {"compile_expression succeeds", fun compile_expression_succeeds/0},
-      {"compile_expression with known vars", fun compile_expression_known_vars/0},
-      {"compile_expression with invalid source returns error", fun compile_expression_error/0},
-      {"compile_expression with empty source returns error", fun compile_expression_empty/0},
-      {"compile file succeeds", fun compile_file_succeeds/0},
-      {"compile file with stdlib mode", fun compile_file_stdlib_mode/0},
-      {"compile file with invalid source returns error", fun compile_file_error/0},
-      {"compile file with no class returns error", fun compile_file_no_class/0},
-      {"diagnostics returns structured diagnostics", fun diagnostics_succeeds/0},
-      {"diagnostics for invalid source includes errors", fun diagnostics_errors/0},
-      {"version returns binary", fun version_succeeds/0},
-      {"compile_core_erlang in memory", fun compile_core_erlang_in_memory/0},
-      {"compile_core_erlang with invalid source", fun compile_core_erlang_invalid/0},
-      {"compile_core_erlang scan error", fun compile_core_erlang_scan_error/0},
-      {"compile_core_erlang parse error", fun compile_core_erlang_parse_error/0},
-      {"backend defaults to port", fun backend_default_port/0},
-      {"multiple compiles on same server", fun multiple_compiles/0},
-      {"compile file with workspace_mode=false", fun compile_file_workspace_mode/0},
-      {"compile_expression with class definition", fun compile_expression_class_def/0},
-      {"compiler app module callbacks", fun compiler_app_callbacks/0}
-     ]}.
+    {setup, fun setup/0, fun teardown/1, [
+        {"compile_expression succeeds", fun compile_expression_succeeds/0},
+        {"compile_expression with known vars", fun compile_expression_known_vars/0},
+        {"compile_expression with invalid source returns error", fun compile_expression_error/0},
+        {"compile_expression with empty source returns error", fun compile_expression_empty/0},
+        {"compile file succeeds", fun compile_file_succeeds/0},
+        {"compile file with stdlib mode", fun compile_file_stdlib_mode/0},
+        {"compile file with invalid source returns error", fun compile_file_error/0},
+        {"compile file with no class returns error", fun compile_file_no_class/0},
+        {"diagnostics returns structured diagnostics", fun diagnostics_succeeds/0},
+        {"diagnostics for invalid source includes errors", fun diagnostics_errors/0},
+        {"version returns binary", fun version_succeeds/0},
+        {"compile_core_erlang in memory", fun compile_core_erlang_in_memory/0},
+        {"compile_core_erlang with invalid source", fun compile_core_erlang_invalid/0},
+        {"compile_core_erlang scan error", fun compile_core_erlang_scan_error/0},
+        {"compile_core_erlang parse error", fun compile_core_erlang_parse_error/0},
+        {"backend defaults to port", fun backend_default_port/0},
+        {"multiple compiles on same server", fun multiple_compiles/0},
+        {"compile file with workspace_mode=false", fun compile_file_workspace_mode/0},
+        {"compile_expression with class definition", fun compile_expression_class_def/0},
+        {"compiler app module callbacks", fun compiler_app_callbacks/0}
+    ]}.
 
 %%% Tests
 
@@ -79,7 +76,8 @@ compile_expression_empty() ->
         beamtalk_compiler:compile_expression(<<"">>, <<"test_mod">>, []).
 
 compile_file_succeeds() ->
-    Source = <<"Actor subclass: TestCounter\n  count => self.count\n  increment => self.count := self.count + 1">>,
+    Source =
+        <<"Actor subclass: TestCounter\n  count => self.count\n  increment => self.count := self.count + 1">>,
     {ok, Result} = beamtalk_compiler:compile(Source, #{}),
     ?assert(is_map(Result)),
     ?assert(is_binary(maps:get(core_erlang, Result))),

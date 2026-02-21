@@ -46,11 +46,15 @@ dispatch_class_test() ->
 
 dispatch_print_string_test() ->
     Proxy = beamtalk_erlang_proxy:new(lists),
-    ?assertEqual(<<"#ErlangModule<lists>">>, beamtalk_erlang_proxy:dispatch('printString', [], Proxy)).
+    ?assertEqual(
+        <<"#ErlangModule<lists>">>, beamtalk_erlang_proxy:dispatch('printString', [], Proxy)
+    ).
 
 dispatch_print_string_erlang_test() ->
     Proxy = beamtalk_erlang_proxy:new(erlang),
-    ?assertEqual(<<"#ErlangModule<erlang>">>, beamtalk_erlang_proxy:dispatch('printString', [], Proxy)).
+    ?assertEqual(
+        <<"#ErlangModule<erlang>">>, beamtalk_erlang_proxy:dispatch('printString', [], Proxy)
+    ).
 
 %%% ===================================================================
 %%% dispatch/3 — Erlang function calls
@@ -329,7 +333,9 @@ dispatch_badarg_from_binary_to_atom_preserves_details_test() ->
     %% which is caught by the specific badarg handler
     Proxy = beamtalk_erlang_proxy:new(erlang),
     try
-        beamtalk_erlang_proxy:dispatch('binary_to_existing_atom:', [<<"zzzz_nonexistent_atom_xyz">>], Proxy),
+        beamtalk_erlang_proxy:dispatch(
+            'binary_to_existing_atom:', [<<"zzzz_nonexistent_atom_xyz">>], Proxy
+        ),
         ?assert(false)
     catch
         error:#{error := Inner} ->
@@ -459,7 +465,9 @@ dispatch_wrong_arity_keyword_raises_test() ->
         error:#{error := Inner} ->
             ?assertEqual(arity_mismatch, Inner#beamtalk_error.kind),
             Hint = Inner#beamtalk_error.hint,
-            ?assertNotEqual(nomatch, binary:match(Hint, <<"exists but was called with 3 arguments">>))
+            ?assertNotEqual(
+                nomatch, binary:match(Hint, <<"exists but was called with 3 arguments">>)
+            )
     end.
 
 %%% ===================================================================
@@ -477,8 +485,13 @@ dispatch_missing_function_raises_test() ->
             ?assertEqual(does_not_understand, Inner#beamtalk_error.kind),
             ?assertEqual('ErlangModule', Inner#beamtalk_error.class),
             Hint = Inner#beamtalk_error.hint,
-            ?assertNotEqual(nomatch, binary:match(Hint,
-                <<"This Erlang function does not exist">>))
+            ?assertNotEqual(
+                nomatch,
+                binary:match(
+                    Hint,
+                    <<"This Erlang function does not exist">>
+                )
+            )
     end.
 
 %%% ===================================================================
@@ -494,8 +507,13 @@ dispatch_unloaded_module_raises_test() ->
         error:#{error := Inner} ->
             ?assertEqual(does_not_understand, Inner#beamtalk_error.kind),
             Hint = Inner#beamtalk_error.hint,
-            ?assertNotEqual(nomatch, binary:match(Hint,
-                <<"is not loaded. Is it on the code path?">>))
+            ?assertNotEqual(
+                nomatch,
+                binary:match(
+                    Hint,
+                    <<"is not loaded. Is it on the code path?">>
+                )
+            )
     end.
 
 %%% ===================================================================
@@ -512,9 +530,14 @@ dispatch_methods_returns_exports_test() ->
     %% Should contain sort/1
     ?assert(lists:member(<<"sort/1">>, Result)),
     %% Should NOT contain module_info
-    ?assertNot(lists:any(fun(S) ->
-        binary:match(S, <<"module_info">>) =/= nomatch
-    end, Result)).
+    ?assertNot(
+        lists:any(
+            fun(S) ->
+                binary:match(S, <<"module_info">>) =/= nomatch
+            end,
+            Result
+        )
+    ).
 
 dispatch_methods_sorted_test() ->
     Proxy = beamtalk_erlang_proxy:new(lists),
@@ -530,8 +553,13 @@ dispatch_methods_unloaded_module_raises_test() ->
         error:#{error := Inner} ->
             ?assertEqual(does_not_understand, Inner#beamtalk_error.kind),
             Hint = Inner#beamtalk_error.hint,
-            ?assertNotEqual(nomatch, binary:match(Hint,
-                <<"is not loaded. Is it on the code path?">>))
+            ?assertNotEqual(
+                nomatch,
+                binary:match(
+                    Hint,
+                    <<"is not loaded. Is it on the code path?">>
+                )
+            )
     end.
 
 %%% ===================================================================

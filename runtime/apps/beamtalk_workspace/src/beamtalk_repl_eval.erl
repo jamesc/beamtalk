@@ -18,16 +18,23 @@
 
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
--export([extract_assignment/1,
-         format_formatted_diagnostics/1,
-         maybe_await_future/1, should_purge_module/2,
-         strip_internal_bindings/1,
-         is_stdlib_path/1,
-         inject_output/3,
-         is_internal_key/1, activate_module/2,
-         register_classes/2, trigger_hot_reload/2,
-         handle_class_definition/4, handle_method_definition/4,
-         compile_expression_via_port/3, compile_file_via_port/3]).
+-export([
+    extract_assignment/1,
+    format_formatted_diagnostics/1,
+    maybe_await_future/1,
+    should_purge_module/2,
+    strip_internal_bindings/1,
+    is_stdlib_path/1,
+    inject_output/3,
+    is_internal_key/1,
+    activate_module/2,
+    register_classes/2,
+    trigger_hot_reload/2,
+    handle_class_definition/4,
+    handle_method_definition/4,
+    compile_expression_via_port/3,
+    compile_file_via_port/3
+]).
 -endif.
 
 -define(INTERNAL_REGISTRY_KEY, '__repl_actor_registry__').
@@ -39,28 +46,28 @@
 %% If the result is a Future PID, automatically awaits it before returning.
 %% Returns captured stdout as a binary (empty when no output was produced).
 %% Returns warnings as a list of formatted diagnostic strings.
--spec do_eval(string(), beamtalk_repl_state:state()) -> 
-    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()} | 
-    {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+-spec do_eval(string(), beamtalk_repl_state:state()) ->
+    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
+    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
 do_eval(Expression, State) ->
     do_eval(Expression, State, undefined).
 
 %% @doc Evaluate with optional streaming subscriber (BT-696).
 %% When Subscriber is a pid, IO chunks are forwarded as {eval_out, Chunk}.
--spec do_eval(string(), beamtalk_repl_state:state(), pid() | undefined) -> 
-    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()} | 
-    {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+-spec do_eval(string(), beamtalk_repl_state:state(), pid() | undefined) ->
+    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
+    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
 do_eval(Expression, State, Subscriber) ->
     %% Generate unique module name for this evaluation
     Counter = beamtalk_repl_state:get_eval_counter(State),
     ModuleName = list_to_atom("beamtalk_repl_eval_" ++ integer_to_list(Counter)),
     NewState = beamtalk_repl_state:increment_eval_counter(State),
-    
+
     Bindings = beamtalk_repl_state:get_bindings(State),
-    
+
     %% Get actor registry PID to pass to eval context
     RegistryPid = beamtalk_repl_state:get_actor_registry(State),
-    
+
     %% Compile expression
     case compile_expression(Expression, ModuleName, Bindings) of
         %% BT-571: Inline class definition — load module, register class
@@ -73,8 +80,15 @@ do_eval(Expression, State, Subscriber) ->
             %% Load the compiled module
             case code:load_binary(ModuleName, "", Binary) of
                 {module, ModuleName} ->
-                    eval_loaded_module(ModuleName, Expression, Bindings,
-                                      RegistryPid, Subscriber, Warnings, NewState);
+                    eval_loaded_module(
+                        ModuleName,
+                        Expression,
+                        Bindings,
+                        RegistryPid,
+                        Subscriber,
+                        Warnings,
+                        NewState
+                    );
                 {error, Reason} ->
                     {error, {load_error, Reason}, <<>>, [], NewState}
             end;
@@ -83,49 +97,73 @@ do_eval(Expression, State, Subscriber) ->
     end.
 
 %% @doc Evaluate a loaded module: capture IO, execute, process result, cleanup.
--spec eval_loaded_module(atom(), string(), map(), pid() | undefined,
-                         pid() | undefined, [binary()],
-                         beamtalk_repl_state:state()) ->
-    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()} |
-    {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
-eval_loaded_module(ModuleName, Expression, Bindings, RegistryPid,
-                   Subscriber, Warnings, State) ->
+-spec eval_loaded_module(
+    atom(),
+    string(),
+    map(),
+    pid() | undefined,
+    pid() | undefined,
+    [binary()],
+    beamtalk_repl_state:state()
+) ->
+    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
+    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+eval_loaded_module(
+    ModuleName,
+    Expression,
+    Bindings,
+    RegistryPid,
+    Subscriber,
+    Warnings,
+    State
+) ->
     CaptureRef = beamtalk_io_capture:start(Subscriber),
-    EvalResult = try
-        execute_and_process(ModuleName, Expression, Bindings, RegistryPid, State)
-    catch
-        Class:Reason:_Stacktrace ->
-            %% ADR 0015: Wrap error as Exception and bind to _error
-            CaughtExObj = beamtalk_exception_handler:ensure_wrapped(Reason),
-            CaughtBindings = maps:put('_error', CaughtExObj, Bindings),
-            CaughtState = beamtalk_repl_state:set_bindings(CaughtBindings, State),
-            {error, {eval_error, Class, CaughtExObj}, CaughtState}
-    after
-        cleanup_module(ModuleName, RegistryPid)
-    end,
+    EvalResult =
+        try
+            execute_and_process(ModuleName, Expression, Bindings, RegistryPid, State)
+        catch
+            Class:Reason:_Stacktrace ->
+                %% ADR 0015: Wrap error as Exception and bind to _error
+                CaughtExObj = beamtalk_exception_handler:ensure_wrapped(Reason),
+                CaughtBindings = maps:put('_error', CaughtExObj, Bindings),
+                CaughtState = beamtalk_repl_state:set_bindings(CaughtBindings, State),
+                {error, {eval_error, Class, CaughtExObj}, CaughtState}
+        after
+            cleanup_module(ModuleName, RegistryPid)
+        end,
     Output = beamtalk_io_capture:stop(CaptureRef),
     inject_output(EvalResult, Output, Warnings).
 
 %% @doc Execute module and process the result (assignment/future handling).
--spec execute_and_process(atom(), string(), map(), pid() | undefined,
-                          beamtalk_repl_state:state()) ->
-    {ok, term(), beamtalk_repl_state:state()} |
-    {error, term(), beamtalk_repl_state:state()}.
+-spec execute_and_process(
+    atom(),
+    string(),
+    map(),
+    pid() | undefined,
+    beamtalk_repl_state:state()
+) ->
+    {ok, term(), beamtalk_repl_state:state()}
+    | {error, term(), beamtalk_repl_state:state()}.
 execute_and_process(ModuleName, Expression, Bindings, RegistryPid, State) ->
-    BindingsWithRegistry = case RegistryPid of
-        undefined -> Bindings;
-        _ -> maps:put(?INTERNAL_REGISTRY_KEY, RegistryPid, Bindings)
-    end,
+    BindingsWithRegistry =
+        case RegistryPid of
+            undefined -> Bindings;
+            _ -> maps:put(?INTERNAL_REGISTRY_KEY, RegistryPid, Bindings)
+        end,
     {RawResult, UpdatedBindings} = apply(ModuleName, eval, [BindingsWithRegistry]),
     CleanBindings = strip_internal_bindings(UpdatedBindings),
     Result = maybe_await_future(RawResult),
     process_eval_result(Result, Expression, CleanBindings, State).
 
 %% @doc Process evaluation result: handle rejected futures and assignments.
--spec process_eval_result(term(), string(), map(),
-                          beamtalk_repl_state:state()) ->
-    {ok, term(), beamtalk_repl_state:state()} |
-    {error, term(), beamtalk_repl_state:state()}.
+-spec process_eval_result(
+    term(),
+    string(),
+    map(),
+    beamtalk_repl_state:state()
+) ->
+    {ok, term(), beamtalk_repl_state:state()}
+    | {error, term(), beamtalk_repl_state:state()}.
 process_eval_result({future_rejected, ErrorReason}, _Expression, CleanBindings, State) ->
     %% ADR 0015: Wrap rejected future error and bind to _error
     FutExObj = beamtalk_exception_handler:ensure_wrapped(ErrorReason),
@@ -160,42 +198,55 @@ cleanup_module(ModuleName, RegistryPid) ->
 %% @doc Compile a Beamtalk expression and return Core Erlang source (BT-700).
 %% Does NOT evaluate — only compiles and returns the generated Core Erlang.
 -spec do_show_codegen(string(), beamtalk_repl_state:state()) ->
-    {ok, binary(), [binary()], beamtalk_repl_state:state()} |
-    {error, term(), [binary()], beamtalk_repl_state:state()}.
+    {ok, binary(), [binary()], beamtalk_repl_state:state()}
+    | {error, term(), [binary()], beamtalk_repl_state:state()}.
 do_show_codegen(Expression, State) ->
     Counter = beamtalk_repl_state:get_eval_counter(State),
     NewState = beamtalk_repl_state:increment_eval_counter(State),
     Bindings = beamtalk_repl_state:get_bindings(State),
     SourceBin = list_to_binary(Expression),
     ModNameBin = iolist_to_binary(["beamtalk_repl_codegen_", integer_to_list(Counter)]),
-    KnownVars = [atom_to_binary(K, utf8)
-                 || K <- maps:keys(Bindings),
-                    is_atom(K),
-                    not is_internal_key(K)],
+    KnownVars = [
+        atom_to_binary(K, utf8)
+     || K <- maps:keys(Bindings),
+        is_atom(K),
+        not is_internal_key(K)
+    ],
     try beamtalk_compiler:compile_expression(SourceBin, ModNameBin, KnownVars) of
         {ok, class_definition, ClassInfo} ->
             #{core_erlang := CoreErlang, warnings := Warnings} = ClassInfo,
             {ok, CoreErlang, Warnings, NewState};
         {ok, method_definition, _MethodInfo} ->
-            {error, {compile_error, <<"show-codegen does not support standalone method definitions">>}, [], NewState};
+            {error,
+                {compile_error, <<"show-codegen does not support standalone method definitions">>},
+                [], NewState};
         {ok, CoreErlang, Warnings} ->
             {ok, CoreErlang, Warnings, NewState};
         {error, Diagnostics} ->
             {error, {compile_error, format_formatted_diagnostics(Diagnostics)}, [], NewState}
     catch
         exit:{noproc, _} ->
-            {error, {internal_error, <<"Compiler not available. Ensure beamtalk_compiler application is started.">>}, [], NewState};
+            {error,
+                {internal_error,
+                    <<"Compiler not available. Ensure beamtalk_compiler application is started.">>},
+                [], NewState};
         exit:{timeout, _} ->
             {error, {timeout, <<"Compilation timed out.">>}, [], NewState};
         exit:{Reason, _} ->
-            {error, {internal_error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason]))}, [], NewState};
+            {error,
+                {internal_error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason]))},
+                [], NewState};
         error:Reason ->
-            {error, {internal_error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason]))}, [], NewState};
+            {error,
+                {internal_error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason]))},
+                [], NewState};
         throw:Reason ->
-            {error, {internal_error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason]))}, [], NewState}
+            {error,
+                {internal_error, iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason]))},
+                [], NewState}
     end.
 %% @doc Load a Beamtalk file and register its classes.
--spec handle_load(string(), beamtalk_repl_state:state()) -> 
+-spec handle_load(string(), beamtalk_repl_state:state()) ->
     {ok, [map()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
 handle_load(Path, State) ->
     %% Check if file exists
@@ -214,8 +265,14 @@ handle_load(Path, State) ->
                     %% Compile and load
                     case compile_file(Source, Path, StdlibMode) of
                         {ok, Binary, ClassNames, ModuleName} ->
-                            load_compiled_module(Binary, ClassNames, ModuleName,
-                                                 Source, Path, State);
+                            load_compiled_module(
+                                Binary,
+                                ClassNames,
+                                ModuleName,
+                                Source,
+                                Path,
+                                State
+                            );
                         {error, Reason} ->
                             {error, Reason, State}
                     end
@@ -224,14 +281,20 @@ handle_load(Path, State) ->
 
 %% @doc Load Beamtalk source from an inline binary string (no file path).
 %% Used by the browser workspace Editor pane to compile and load classes.
--spec handle_load_source(binary(), string(), beamtalk_repl_state:state()) -> 
+-spec handle_load_source(binary(), string(), beamtalk_repl_state:state()) ->
     {ok, [map()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
 handle_load_source(SourceBin, Label, State) ->
     Source = binary_to_list(SourceBin),
     case compile_file(Source, Label, false) of
         {ok, Binary, ClassNames, ModuleName} ->
-            load_compiled_module(Binary, ClassNames, ModuleName,
-                                 Source, undefined, State);
+            load_compiled_module(
+                Binary,
+                ClassNames,
+                ModuleName,
+                Source,
+                undefined,
+                State
+            );
         {error, Reason} ->
             {error, Reason, State}
     end.
@@ -240,20 +303,31 @@ handle_load_source(SourceBin, Label, State) ->
 
 %% @doc Load a compiled module, register classes, and update state.
 %% SourcePath is a file path (for file loads) or undefined (for inline loads).
--spec load_compiled_module(binary(), [map()], atom(), string(),
-                           string() | undefined, beamtalk_repl_state:state()) ->
+-spec load_compiled_module(
+    binary(),
+    [map()],
+    atom(),
+    string(),
+    string() | undefined,
+    beamtalk_repl_state:state()
+) ->
     {ok, [map()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
 load_compiled_module(Binary, ClassNames, ModuleName, Source, SourcePath, State) ->
-    LoadPath = case SourcePath of undefined -> ""; _ -> SourcePath end,
+    LoadPath =
+        case SourcePath of
+            undefined -> "";
+            _ -> SourcePath
+        end,
     case code:load_binary(ModuleName, LoadPath, Binary) of
         {module, ModuleName} ->
             activate_module(ModuleName, ClassNames),
             %% Track loaded module (avoid duplicates on reload)
             LoadedModules = beamtalk_repl_state:get_loaded_modules(State),
-            NewState1 = case lists:member(ModuleName, LoadedModules) of
-                true -> State;
-                false -> beamtalk_repl_state:add_loaded_module(ModuleName, State)
-            end,
+            NewState1 =
+                case lists:member(ModuleName, LoadedModules) of
+                    true -> State;
+                    false -> beamtalk_repl_state:add_loaded_module(ModuleName, State)
+                end,
             %% Track module in module tracker (SourcePath may be undefined for inline loads)
             Tracker = beamtalk_repl_state:get_module_tracker(NewState1),
             NewTracker = beamtalk_repl_modules:add_module(ModuleName, SourcePath, Tracker),
@@ -263,9 +337,12 @@ load_compiled_module(Binary, ClassNames, ModuleName, Source, SourcePath, State) 
                 fun(#{name := Name}, AccState) ->
                     NameBin = list_to_binary(Name),
                     beamtalk_repl_state:set_class_source(
-                        NameBin, Source, AccState)
+                        NameBin, Source, AccState
+                    )
                 end,
-                NewState2, ClassNames),
+                NewState2,
+                ClassNames
+            ),
             {ok, ClassNames, NewState3};
         {error, Reason} ->
             %% BT-738: Check for a structured stdlib_shadowing error stored in the
@@ -289,24 +366,28 @@ handle_class_definition(ClassInfo, Warnings, Expression, State) ->
             activate_module(ClassModName, Classes),
             %% Track loaded module
             LoadedModules = beamtalk_repl_state:get_loaded_modules(State),
-            NewState1 = case lists:member(ClassModName, LoadedModules) of
-                true -> State;
-                false -> beamtalk_repl_state:add_loaded_module(ClassModName, State)
-            end,
+            NewState1 =
+                case lists:member(ClassModName, LoadedModules) of
+                    true -> State;
+                    false -> beamtalk_repl_state:add_loaded_module(ClassModName, State)
+                end,
             %% Store class source for later method patching (all classes)
-            {ClassName, NewState2} = case Classes of
-                [#{name := FirstName} | _] ->
-                    StoreFun = fun(#{name := Name}, AccState) ->
-                        beamtalk_repl_state:set_class_source(
-                            Name, Expression, AccState)
-                    end,
-                    {FirstName, lists:foldl(StoreFun, NewState1, Classes)};
-                _ ->
-                    FallbackName = atom_to_binary(ClassModName, utf8),
-                    {FallbackName,
-                     beamtalk_repl_state:set_class_source(
-                         FallbackName, Expression, NewState1)}
-            end,
+            {ClassName, NewState2} =
+                case Classes of
+                    [#{name := FirstName} | _] ->
+                        StoreFun = fun(#{name := Name}, AccState) ->
+                            beamtalk_repl_state:set_class_source(
+                                Name, Expression, AccState
+                            )
+                        end,
+                        {FirstName, lists:foldl(StoreFun, NewState1, Classes)};
+                    _ ->
+                        FallbackName = atom_to_binary(ClassModName, utf8),
+                        {FallbackName,
+                            beamtalk_repl_state:set_class_source(
+                                FallbackName, Expression, NewState1
+                            )}
+                end,
             {ok, ClassName, <<>>, Warnings, NewState2};
         {error, Reason} ->
             %% BT-738: Check for a structured stdlib_shadowing error stored in the
@@ -328,8 +409,9 @@ handle_method_definition(MethodInfo, Warnings, Expression, State) ->
     ExistingSource = beamtalk_repl_state:get_class_source(ClassNameBin, State),
     case ExistingSource of
         undefined ->
-            ErrorMsg = <<"Class not found: ", ClassNameBin/binary,
-                         ". Define the class first before adding methods.">>,
+            ErrorMsg =
+                <<"Class not found: ", ClassNameBin/binary,
+                    ". Define the class first before adding methods.">>,
             {error, {compile_error, ErrorMsg}, <<>>, Warnings, State};
         ClassSource ->
             %% Combine class source with new method definition
@@ -337,8 +419,12 @@ handle_method_definition(MethodInfo, Warnings, Expression, State) ->
             SourceBin = list_to_binary(CombinedSource),
             Options = #{stdlib_mode => false, workspace_mode => true},
             case beamtalk_compiler:compile(SourceBin, Options) of
-                {ok, #{core_erlang := CoreErlang, module_name := ModNameBin,
-                       classes := Classes} = CompileResult} ->
+                {ok,
+                    #{
+                        core_erlang := CoreErlang,
+                        module_name := ModNameBin,
+                        classes := Classes
+                    } = CompileResult} ->
                     %% Combine warnings from initial parse and recompile
                     RecompileWarnings = maps:get(warnings, CompileResult, []),
                     AllWarnings = Warnings ++ RecompileWarnings,
@@ -351,29 +437,36 @@ handle_method_definition(MethodInfo, Warnings, Expression, State) ->
                                     activate_module(ModName, Classes),
                                     %% Update stored class source with the combined version
                                     NewState = beamtalk_repl_state:set_class_source(
-                                        ClassNameBin, CombinedSource, State),
-                                    Result = <<ClassNameBin/binary, ">>",
-                                               SelectorBin/binary>>,
+                                        ClassNameBin, CombinedSource, State
+                                    ),
+                                    Result = <<ClassNameBin/binary, ">>", SelectorBin/binary>>,
                                     {ok, Result, <<>>, AllWarnings, NewState};
                                 {error, LoadReason} ->
                                     %% BT-738: Check for a structured stdlib_shadowing error stored
                                     %% in the pending errors table by update_class before on_load failed.
                                     ClassAtoms = class_name_atoms(Classes),
-                                    case beamtalk_class_registry:drain_pending_load_errors_by_names(ClassAtoms) of
+                                    case
+                                        beamtalk_class_registry:drain_pending_load_errors_by_names(
+                                            ClassAtoms
+                                        )
+                                    of
                                         [{_ClassName, StructuredError} | _] ->
                                             {error, StructuredError, <<>>, AllWarnings, State};
                                         [] ->
-                                            {error, {load_error, LoadReason}, <<>>, AllWarnings, State}
+                                            {error, {load_error, LoadReason}, <<>>, AllWarnings,
+                                                State}
                                     end
                             end;
                         {error, Reason} ->
                             ErrorMsg = iolist_to_binary(
-                                io_lib:format("Core compile error: ~p", [Reason])),
+                                io_lib:format("Core compile error: ~p", [Reason])
+                            ),
                             {error, {compile_error, ErrorMsg}, <<>>, AllWarnings, State}
                     end;
                 {error, Diagnostics} ->
                     ErrorMsg = iolist_to_binary(
-                        io_lib:format("Compile error: ~p", [Diagnostics])),
+                        io_lib:format("Compile error: ~p", [Diagnostics])
+                    ),
                     {error, {compile_error, ErrorMsg}, <<>>, Warnings, State}
             end
     end.
@@ -382,7 +475,8 @@ handle_method_definition(MethodInfo, Warnings, Expression, State) ->
 %% Matches both relative paths (lib/Integer.bt) and absolute paths
 %% containing /lib/ as a path component.
 -spec is_stdlib_path(string()) -> boolean().
-is_stdlib_path("lib/" ++ _) -> true;
+is_stdlib_path("lib/" ++ _) ->
+    true;
 is_stdlib_path(Path) ->
     case string:find(Path, "/lib/") of
         nomatch -> false;
@@ -391,10 +485,10 @@ is_stdlib_path(Path) ->
 
 %% @doc Compile a Beamtalk expression to bytecode via OTP Port backend.
 -spec compile_expression(string(), atom(), map()) ->
-    {ok, binary(), term(), [binary()]} |
-    {ok, class_definition, map(), [binary()]} |
-    {ok, method_definition, map(), [binary()]} |
-    {error, term()}.
+    {ok, binary(), term(), [binary()]}
+    | {ok, class_definition, map(), [binary()]}
+    | {ok, method_definition, map(), [binary()]}
+    | {error, term()}.
 compile_expression(Expression, ModuleName, Bindings) ->
     compile_expression_via_port(Expression, ModuleName, Bindings).
 
@@ -402,45 +496,73 @@ compile_expression(Expression, ModuleName, Bindings) ->
 compile_expression_via_port(Expression, ModuleName, Bindings) ->
     SourceBin = list_to_binary(Expression),
     ModNameBin = atom_to_binary(ModuleName, utf8),
-    KnownVars = [atom_to_binary(K, utf8)
-                 || K <- maps:keys(Bindings),
-                    is_atom(K),
-                    not is_internal_key(K)],
-    wrap_compiler_errors(fun() ->
-        case beamtalk_compiler:compile_expression(SourceBin, ModNameBin, KnownVars) of
-            %% BT-571: Inline class definition
-            {ok, class_definition, ClassInfo} ->
-                #{core_erlang := CoreErlang, module_name := ClassModNameBin,
-                  classes := Classes, warnings := Warnings} = ClassInfo,
-                ClassModName = binary_to_atom(ClassModNameBin, utf8),
-                case beamtalk_compiler:compile_core_erlang(CoreErlang) of
-                    {ok, _CompiledMod, Binary} ->
-                        {ok, class_definition, #{binary => Binary, module_name => ClassModName,
-                                                 classes => Classes}, Warnings};
-                    {error, Reason} ->
-                        {error, iolist_to_binary(io_lib:format("Core Erlang compile error: ~p", [Reason]))}
-                end;
-            %% BT-571: Standalone method definition
-            {ok, method_definition, MethodInfo} ->
-                #{class_name := ClassName, selector := Selector,
-                  is_class_method := IsClassMethod,
-                  method_source := MethodSource} = MethodInfo,
-                Warnings = maps:get(warnings, MethodInfo, []),
-                {ok, method_definition, #{class_name => ClassName, selector => Selector,
-                                          is_class_method => IsClassMethod,
-                                          method_source => MethodSource}, Warnings};
-            %% Standard expression
-            {ok, CoreErlang, Warnings} ->
-                case beamtalk_compiler:compile_core_erlang(CoreErlang) of
-                    {ok, _CompiledMod, Binary} ->
-                        {ok, Binary, {port_compiled}, Warnings};
-                    {error, Reason} ->
-                        {error, iolist_to_binary(io_lib:format("Core Erlang compile error: ~p", [Reason]))}
-                end;
-            {error, Diagnostics} ->
-                {error, format_formatted_diagnostics(Diagnostics)}
-        end
-    end, direct).
+    KnownVars = [
+        atom_to_binary(K, utf8)
+     || K <- maps:keys(Bindings),
+        is_atom(K),
+        not is_internal_key(K)
+    ],
+    wrap_compiler_errors(
+        fun() ->
+            case beamtalk_compiler:compile_expression(SourceBin, ModNameBin, KnownVars) of
+                %% BT-571: Inline class definition
+                {ok, class_definition, ClassInfo} ->
+                    #{
+                        core_erlang := CoreErlang,
+                        module_name := ClassModNameBin,
+                        classes := Classes,
+                        warnings := Warnings
+                    } = ClassInfo,
+                    ClassModName = binary_to_atom(ClassModNameBin, utf8),
+                    case beamtalk_compiler:compile_core_erlang(CoreErlang) of
+                        {ok, _CompiledMod, Binary} ->
+                            {ok, class_definition,
+                                #{
+                                    binary => Binary,
+                                    module_name => ClassModName,
+                                    classes => Classes
+                                },
+                                Warnings};
+                        {error, Reason} ->
+                            {error,
+                                iolist_to_binary(
+                                    io_lib:format("Core Erlang compile error: ~p", [Reason])
+                                )}
+                    end;
+                %% BT-571: Standalone method definition
+                {ok, method_definition, MethodInfo} ->
+                    #{
+                        class_name := ClassName,
+                        selector := Selector,
+                        is_class_method := IsClassMethod,
+                        method_source := MethodSource
+                    } = MethodInfo,
+                    Warnings = maps:get(warnings, MethodInfo, []),
+                    {ok, method_definition,
+                        #{
+                            class_name => ClassName,
+                            selector => Selector,
+                            is_class_method => IsClassMethod,
+                            method_source => MethodSource
+                        },
+                        Warnings};
+                %% Standard expression
+                {ok, CoreErlang, Warnings} ->
+                    case beamtalk_compiler:compile_core_erlang(CoreErlang) of
+                        {ok, _CompiledMod, Binary} ->
+                            {ok, Binary, {port_compiled}, Warnings};
+                        {error, Reason} ->
+                            {error,
+                                iolist_to_binary(
+                                    io_lib:format("Core Erlang compile error: ~p", [Reason])
+                                )}
+                    end;
+                {error, Diagnostics} ->
+                    {error, format_formatted_diagnostics(Diagnostics)}
+            end
+        end,
+        direct
+    ).
 
 %% @doc Compile a file and extract class metadata via OTP Port backend.
 -spec compile_file(string(), string(), boolean()) ->
@@ -452,25 +574,36 @@ compile_file(Source, Path, StdlibMode) ->
 compile_file_via_port(Source, _Path, StdlibMode) ->
     SourceBin = list_to_binary(Source),
     Options = #{stdlib_mode => StdlibMode},
-    wrap_compiler_errors(fun() ->
-        case beamtalk_compiler:compile(SourceBin, Options) of
-            {ok, #{core_erlang := CoreErlang, module_name := ModNameBin,
-                   classes := Classes}} ->
-                ModuleName = binary_to_atom(ModNameBin, utf8),
-                case beamtalk_compiler:compile_core_erlang(CoreErlang) of
-                    {ok, _CompiledMod, Binary} ->
-                        ClassNames = [#{
-                            name => binary_to_list(maps:get(name, C, <<"">>)),
-                            superclass => binary_to_list(maps:get(superclass, C, <<"Object">>))
-                        } || C <- Classes],
-                        {ok, Binary, ClassNames, ModuleName};
-                    {error, Reason} ->
-                        {error, {core_compile_error, Reason}}
-                end;
-            {error, Diagnostics} ->
-                {error, {compile_error, format_formatted_diagnostics(Diagnostics)}}
-        end
-    end, wrapped).
+    wrap_compiler_errors(
+        fun() ->
+            case beamtalk_compiler:compile(SourceBin, Options) of
+                {ok, #{
+                    core_erlang := CoreErlang,
+                    module_name := ModNameBin,
+                    classes := Classes
+                }} ->
+                    ModuleName = binary_to_atom(ModNameBin, utf8),
+                    case beamtalk_compiler:compile_core_erlang(CoreErlang) of
+                        {ok, _CompiledMod, Binary} ->
+                            ClassNames = [
+                                #{
+                                    name => binary_to_list(maps:get(name, C, <<"">>)),
+                                    superclass => binary_to_list(
+                                        maps:get(superclass, C, <<"Object">>)
+                                    )
+                                }
+                             || C <- Classes
+                            ],
+                            {ok, Binary, ClassNames, ModuleName};
+                        {error, Reason} ->
+                            {error, {core_compile_error, Reason}}
+                    end;
+                {error, Diagnostics} ->
+                    {error, {compile_error, format_formatted_diagnostics(Diagnostics)}}
+            end
+        end,
+        wrapped
+    ).
 
 %% @doc Wrap compiler calls with shared error handling for exit/error/throw.
 %% ErrorStyle controls error wrapping:
@@ -478,10 +611,14 @@ compile_file_via_port(Source, _Path, StdlibMode) ->
 %%   wrapped - wraps as {error, {compile_error, Message}} (for file compilation)
 -spec wrap_compiler_errors(fun(() -> term()), direct | wrapped) -> term().
 wrap_compiler_errors(Fun, ErrorStyle) ->
-    try Fun()
+    try
+        Fun()
     catch
         exit:{noproc, _} ->
-            wrap_error(<<"Compiler not available. Ensure beamtalk_compiler application is started.">>, ErrorStyle);
+            wrap_error(
+                <<"Compiler not available. Ensure beamtalk_compiler application is started.">>,
+                ErrorStyle
+            );
         exit:{timeout, _} ->
             wrap_error(<<"Compilation timed out.">>, ErrorStyle);
         exit:{Reason, _} ->
@@ -539,8 +676,10 @@ activate_module(ModuleName, Classes) ->
 register_classes(_ClassInfoList, ModuleName) ->
     case erlang:function_exported(ModuleName, register_class, 0) of
         true ->
-            try ModuleName:register_class()
-            catch _:_ -> ok
+            try
+                ModuleName:register_class()
+            catch
+                _:_ -> ok
             end;
         false ->
             ok
@@ -553,33 +692,45 @@ register_classes(_ClassInfoList, ModuleName) ->
 trigger_hot_reload(ModuleName, Classes) ->
     lists:foreach(
         fun(ClassMap) ->
-            ClassName = case maps:get(name, ClassMap, undefined) of
-                N when is_binary(N) ->
-                    try binary_to_existing_atom(N, utf8)
-                    catch error:badarg -> undefined
-                    end;
-                N when is_atom(N) -> N;
-                N when is_list(N) ->
-                    try list_to_existing_atom(N)
-                    catch error:badarg -> undefined
-                    end;
-                _ -> undefined
-            end,
+            ClassName =
+                case maps:get(name, ClassMap, undefined) of
+                    N when is_binary(N) ->
+                        try
+                            binary_to_existing_atom(N, utf8)
+                        catch
+                            error:badarg -> undefined
+                        end;
+                    N when is_atom(N) -> N;
+                    N when is_list(N) ->
+                        try
+                            list_to_existing_atom(N)
+                        catch
+                            error:badarg -> undefined
+                        end;
+                    _ ->
+                        undefined
+                end,
             case ClassName of
-                undefined -> ok;
+                undefined ->
+                    ok;
                 _ ->
                     Pids = beamtalk_object_instances:all(ClassName),
                     case Pids of
-                        [] -> ok;
+                        [] ->
+                            ok;
                         _ ->
                             %% Get new instance vars from class process for migration
-                            IVars = case beamtalk_class_registry:whereis_class(ClassName) of
-                                undefined -> [];
-                                ClassPid ->
-                                    try gen_server:call(ClassPid, instance_variables)
-                                    catch _:_ -> []
-                                    end
-                            end,
+                            IVars =
+                                case beamtalk_class_registry:whereis_class(ClassName) of
+                                    undefined ->
+                                        [];
+                                    ClassPid ->
+                                        try
+                                            gen_server:call(ClassPid, instance_variables)
+                                        catch
+                                            _:_ -> []
+                                        end
+                                end,
                             Extra = {IVars, ModuleName},
                             beamtalk_hot_reload:trigger_code_change(ModuleName, Pids, Extra)
                     end
@@ -686,17 +837,19 @@ inject_output({error, Reason, State}, Output, Warnings) ->
 -spec class_name_atoms([map()]) -> [atom()].
 class_name_atoms(Classes) ->
     lists:filtermap(
-        fun(#{name := Name}) when is_list(Name) ->
-            case beamtalk_repl_server:safe_to_existing_atom(list_to_binary(Name)) of
-                {ok, Atom} -> {true, Atom};
-                {error, badarg} -> false
-            end;
-        (#{name := Name}) when is_binary(Name) ->
-            case beamtalk_repl_server:safe_to_existing_atom(Name) of
-                {ok, Atom} -> {true, Atom};
-                {error, badarg} -> false
-            end;
-        (_) ->
-            false
+        fun
+            (#{name := Name}) when is_list(Name) ->
+                case beamtalk_repl_server:safe_to_existing_atom(list_to_binary(Name)) of
+                    {ok, Atom} -> {true, Atom};
+                    {error, badarg} -> false
+                end;
+            (#{name := Name}) when is_binary(Name) ->
+                case beamtalk_repl_server:safe_to_existing_atom(Name) of
+                    {ok, Atom} -> {true, Atom};
+                    {error, badarg} -> false
+                end;
+            (_) ->
+                false
         end,
-        Classes).
+        Classes
+    ).

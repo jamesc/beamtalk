@@ -62,8 +62,7 @@
 
 -type selector() :: atom().
 
--record(workspace_environment_state, {
-}).
+-record(workspace_environment_state, {}).
 
 %%====================================================================
 %% API
@@ -124,21 +123,17 @@ init([false]) ->
 handle_call({actors, []}, _From, State) ->
     Result = handle_actors(),
     {reply, Result, State};
-
 handle_call({'actorAt:', [PidStr]}, _From, State) ->
     Result = handle_actor_at(PidStr),
     {reply, Result, State};
-
 handle_call({'actorsOf:', [ClassName]}, _From, State) ->
     Result = handle_actors_of(ClassName),
     {reply, Result, State};
-
 handle_call({UnknownSelector, _Args}, _From, State) ->
     Error0 = beamtalk_error:new(does_not_understand, 'Workspace'),
     Error1 = beamtalk_error:with_selector(Error0, UnknownSelector),
     Error2 = beamtalk_error:with_hint(Error1, <<"Supported methods: actors, actorAt:, actorsOf:">>),
     {reply, {error, Error2}, State};
-
 handle_call(Request, _From, State) ->
     Error0 = beamtalk_error:new(does_not_understand, 'Workspace'),
     Error1 = beamtalk_error:with_hint(Error0, <<"Expected {Selector, Args} format">>),
@@ -148,36 +143,36 @@ handle_call(Request, _From, State) ->
 %% @doc Handle asynchronous messages.
 %% Workspace binding dispatch uses beamtalk_actor:async_send/4 which
 %% sends {Selector, Args, FuturePid} as a cast.
--spec handle_cast(term(), #workspace_environment_state{}) -> {noreply, #workspace_environment_state{}}.
+-spec handle_cast(term(), #workspace_environment_state{}) ->
+    {noreply, #workspace_environment_state{}}.
 
 handle_cast({actors, [], FuturePid}, State) when is_pid(FuturePid) ->
     Result = handle_actors(),
     beamtalk_future:resolve(FuturePid, Result),
     {noreply, State};
-
 handle_cast({'actorAt:', [PidStr], FuturePid}, State) when is_pid(FuturePid) ->
     Result = handle_actor_at(PidStr),
     beamtalk_future:resolve(FuturePid, Result),
     {noreply, State};
-
 handle_cast({'actorsOf:', [ClassName], FuturePid}, State) when is_pid(FuturePid) ->
     Result = handle_actors_of(ClassName),
     beamtalk_future:resolve(FuturePid, Result),
     {noreply, State};
-
-handle_cast({UnknownSelector, _Args, FuturePid}, State) when is_pid(FuturePid), is_atom(UnknownSelector) ->
+handle_cast({UnknownSelector, _Args, FuturePid}, State) when
+    is_pid(FuturePid), is_atom(UnknownSelector)
+->
     Error0 = beamtalk_error:new(does_not_understand, 'Workspace'),
     Error1 = beamtalk_error:with_selector(Error0, UnknownSelector),
     Error2 = beamtalk_error:with_hint(Error1, <<"Supported methods: actors, actorAt:, actorsOf:">>),
     beamtalk_future:reject(FuturePid, Error2),
     {noreply, State};
-
 handle_cast(Msg, State) ->
     ?LOG_WARNING("Workspace received unexpected cast", #{message => Msg}),
     {noreply, State}.
 
 %% @doc Handle info messages.
--spec handle_info(term(), #workspace_environment_state{}) -> {noreply, #workspace_environment_state{}}.
+-spec handle_info(term(), #workspace_environment_state{}) ->
+    {noreply, #workspace_environment_state{}}.
 handle_info(Info, State) ->
     ?LOG_DEBUG("Workspace received info", #{info => Info}),
     {noreply, State}.
@@ -188,7 +183,8 @@ terminate(_Reason, _State) ->
     ok.
 
 %% @doc Handle code change during hot reload.
--spec code_change(term(), #workspace_environment_state{}, term()) -> {ok, #workspace_environment_state{}}.
+-spec code_change(term(), #workspace_environment_state{}, term()) ->
+    {ok, #workspace_environment_state{}}.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
@@ -200,7 +196,8 @@ code_change(_OldVsn, State, _Extra) ->
 -spec handle_actors() -> [tuple()].
 handle_actors() ->
     case whereis(beamtalk_actor_registry) of
-        undefined -> [];
+        undefined ->
+            [];
         RegistryPid ->
             Actors = beamtalk_repl_actors:list_actors(RegistryPid),
             lists:filtermap(fun wrap_actor/1, Actors)
@@ -215,7 +212,8 @@ handle_actor_at(PidStr) when is_list(PidStr) ->
     try
         Pid = list_to_pid(PidStr),
         case whereis(beamtalk_actor_registry) of
-            undefined -> nil;
+            undefined ->
+                nil;
             RegistryPid ->
                 case beamtalk_repl_actors:get_actor(RegistryPid, Pid) of
                     {ok, Metadata} ->
@@ -223,13 +221,15 @@ handle_actor_at(PidStr) when is_list(PidStr) ->
                             {true, Obj} -> Obj;
                             false -> nil
                         end;
-                    {error, not_found} -> nil
+                    {error, not_found} ->
+                        nil
                 end
         end
     catch
         error:badarg -> nil
     end;
-handle_actor_at(_) -> nil.
+handle_actor_at(_) ->
+    nil.
 
 %% @doc Get all actors of a given class.
 %% Accepts a class name atom, binary, or a class object tuple.
@@ -251,19 +251,22 @@ handle_actors_of(ClassName) when is_binary(ClassName) ->
     end;
 handle_actors_of(ClassName) when is_atom(ClassName) ->
     case whereis(beamtalk_actor_registry) of
-        undefined -> [];
+        undefined ->
+            [];
         RegistryPid ->
             Actors = beamtalk_repl_actors:list_actors(RegistryPid),
             lists:filtermap(
-                fun(#{class := Class} = Meta) when Class =:= ClassName ->
-                    wrap_actor(Meta);
-                   (_) ->
-                    false
+                fun
+                    (#{class := Class} = Meta) when Class =:= ClassName ->
+                        wrap_actor(Meta);
+                    (_) ->
+                        false
                 end,
                 Actors
             )
     end;
-handle_actors_of(_) -> [].
+handle_actors_of(_) ->
+    [].
 
 %% @doc Wrap actor metadata into a #beamtalk_object{} tuple.
 %% Filters out dead actors.
@@ -298,6 +301,8 @@ register_class() ->
         end
     catch
         Kind:CrashReason ->
-            ?LOG_WARNING("Workspace class registration failed", #{kind => Kind, reason => CrashReason})
+            ?LOG_WARNING("Workspace class registration failed", #{
+                kind => Kind, reason => CrashReason
+            })
     end,
     ok.

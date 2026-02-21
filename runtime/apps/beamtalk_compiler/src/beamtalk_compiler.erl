@@ -38,10 +38,10 @@
 %% `{ok, method_definition, MethodInfo}' for standalone method definitions (BT-571),
 %% or `{error, Diagnostics}' on failure.
 -spec compile_expression(binary(), binary(), [binary()]) ->
-    {ok, binary(), [binary()]} |
-    {ok, class_definition, map()} |
-    {ok, method_definition, map()} |
-    {error, [binary()]}.
+    {ok, binary(), [binary()]}
+    | {ok, class_definition, map()}
+    | {ok, method_definition, map()}
+    | {error, [binary()]}.
 compile_expression(Source, ModuleName, KnownVars) ->
     beamtalk_compiler_server:compile_expression(Source, ModuleName, KnownVars).
 

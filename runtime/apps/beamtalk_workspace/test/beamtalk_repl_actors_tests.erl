@@ -14,7 +14,7 @@ registry_starts_and_stops_test() ->
     %% Start registry
     {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
     ?assert(is_process_alive(RegistryPid)),
-    
+
     %% Stop registry
     gen_server:stop(RegistryPid),
     ?assertNot(is_process_alive(RegistryPid)).
@@ -25,20 +25,20 @@ registry_starts_and_stops_test() ->
 
 register_actor_stores_metadata_test() ->
     {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
-    
+
     %% Spawn a test counter actor
     {ok, ActorPid} = test_counter:start_link(0),
-    
+
     %% Register it
     ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
-    
+
     %% Verify it's in the registry
     {ok, Metadata} = beamtalk_repl_actors:get_actor(RegistryPid, ActorPid),
     ?assertEqual(ActorPid, maps:get(pid, Metadata)),
     ?assertEqual('Counter', maps:get(class, Metadata)),
     ?assertEqual(test_counter, maps:get(module, Metadata)),
     ?assert(is_integer(maps:get(spawned_at, Metadata))),
-    
+
     %% Cleanup
     gen_server:stop(ActorPid),
     gen_server:stop(RegistryPid).
@@ -46,16 +46,16 @@ register_actor_stores_metadata_test() ->
 unregister_actor_removes_from_registry_test() ->
     {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
     {ok, ActorPid} = test_counter:start_link(0),
-    
+
     ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
     {ok, _} = beamtalk_repl_actors:get_actor(RegistryPid, ActorPid),
-    
+
     %% Unregister
     ok = beamtalk_repl_actors:unregister_actor(RegistryPid, ActorPid),
-    
+
     %% Verify it's gone
     ?assertEqual({error, not_found}, beamtalk_repl_actors:get_actor(RegistryPid, ActorPid)),
-    
+
     %% Cleanup
     gen_server:stop(ActorPid),
     gen_server:stop(RegistryPid).
@@ -63,19 +63,19 @@ unregister_actor_removes_from_registry_test() ->
 actor_termination_auto_unregisters_test() ->
     {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
     {ok, ActorPid} = test_counter:start_link(0),
-    
+
     ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
     {ok, _} = beamtalk_repl_actors:get_actor(RegistryPid, ActorPid),
-    
+
     %% Kill the actor
     gen_server:stop(ActorPid),
-    
+
     %% Give monitor time to process DOWN message
     timer:sleep(50),
-    
+
     %% Verify it's automatically unregistered
     ?assertEqual({error, not_found}, beamtalk_repl_actors:get_actor(RegistryPid, ActorPid)),
-    
+
     gen_server:stop(RegistryPid).
 
 %%% ===========================================================================
@@ -84,34 +84,34 @@ actor_termination_auto_unregisters_test() ->
 
 list_actors_returns_empty_initially_test() ->
     {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
-    
+
     Actors = beamtalk_repl_actors:list_actors(RegistryPid),
     ?assertEqual([], Actors),
-    
+
     gen_server:stop(RegistryPid).
 
 list_actors_returns_all_registered_actors_test() ->
     {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
-    
+
     %% Register multiple actors
     {ok, Actor1} = test_counter:start_link(0),
     {ok, Actor2} = test_counter:start_link(10),
     {ok, Actor3} = test_counter:start_link(20),
-    
+
     ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor1, 'Counter', test_counter),
     ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor2, 'Counter', test_counter),
     ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor3, 'OtherClass', other_module),
-    
+
     %% List actors
     Actors = beamtalk_repl_actors:list_actors(RegistryPid),
     ?assertEqual(3, length(Actors)),
-    
+
     %% Verify PIDs are present
     Pids = [maps:get(pid, A) || A <- Actors],
     ?assert(lists:member(Actor1, Pids)),
     ?assert(lists:member(Actor2, Pids)),
     ?assert(lists:member(Actor3, Pids)),
-    
+
     %% Cleanup
     gen_server:stop(Actor1),
     gen_server:stop(Actor2),
@@ -125,29 +125,33 @@ list_actors_returns_all_registered_actors_test() ->
 kill_actor_terminates_actor_test() ->
     {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
     {ok, ActorPid} = test_counter:start_link(0),
-    
+
     ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
     ?assert(is_process_alive(ActorPid)),
-    
+
     %% Kill actor - use process flag to not propagate the kill signal to test process
     process_flag(trap_exit, true),
     ok = beamtalk_repl_actors:kill_actor(RegistryPid, ActorPid),
-    
+
     %% Give time for termination
     timer:sleep(50),
-    
+
     %% Verify actor is dead
     ?assertNot(is_process_alive(ActorPid)),
-    
+
     gen_server:stop(RegistryPid).
 
 kill_nonexistent_actor_returns_error_test() ->
     {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
-    
+
     %% Try to kill a non-registered PID
-    FakePid = spawn(fun() -> receive _ -> ok end end),
+    FakePid = spawn(fun() ->
+        receive
+            _ -> ok
+        end
+    end),
     ?assertEqual({error, not_found}, beamtalk_repl_actors:kill_actor(RegistryPid, FakePid)),
-    
+
     %% Cleanup fake PID
     exit(FakePid, kill),
     gen_server:stop(RegistryPid).
@@ -158,28 +162,28 @@ kill_nonexistent_actor_returns_error_test() ->
 
 registry_termination_kills_all_actors_test() ->
     process_flag(trap_exit, true),
-    
+
     {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
-    
+
     %% Register multiple actors
     {ok, Actor1} = test_counter:start_link(0),
     {ok, Actor2} = test_counter:start_link(10),
     {ok, Actor3} = test_counter:start_link(20),
-    
+
     ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor1, 'Counter', test_counter),
     ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor2, 'Counter', test_counter),
     ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor3, 'Counter', test_counter),
-    
+
     ?assert(is_process_alive(Actor1)),
     ?assert(is_process_alive(Actor2)),
     ?assert(is_process_alive(Actor3)),
-    
+
     %% Stop registry
     gen_server:stop(RegistryPid),
-    
+
     %% Give time for shutdown signals
     timer:sleep(100),
-    
+
     %% All actors should be dead
     ?assertNot(is_process_alive(Actor1)),
     ?assertNot(is_process_alive(Actor2)),
@@ -192,14 +196,14 @@ registry_termination_kills_all_actors_test() ->
 on_actor_spawned_succeeds_with_running_registry_test() ->
     {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
     {ok, ActorPid} = test_counter:start_link(0),
-    
+
     Result = beamtalk_repl_actors:on_actor_spawned(RegistryPid, ActorPid, 'Counter', test_counter),
     ?assertEqual(ok, Result),
-    
+
     %% Verify actor was registered
     {ok, Metadata} = beamtalk_repl_actors:get_actor(RegistryPid, ActorPid),
     ?assertEqual('Counter', maps:get(class, Metadata)),
-    
+
     gen_server:stop(ActorPid),
     gen_server:stop(RegistryPid).
 
@@ -208,25 +212,25 @@ on_actor_spawned_returns_error_when_registry_down_test() ->
     {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
     gen_server:stop(RegistryPid),
     timer:sleep(50),
-    
+
     {ok, ActorPid} = test_counter:start_link(0),
-    
+
     %% on_actor_spawned should return error, not crash
     Result = beamtalk_repl_actors:on_actor_spawned(RegistryPid, ActorPid, 'Counter', test_counter),
     ?assertMatch({error, {registry_failed, _}}, Result),
-    
+
     gen_server:stop(ActorPid).
 
 on_actor_spawned_returns_error_when_registry_not_a_process_test() ->
     %% Use a PID that was never a gen_server
     FakePid = spawn(fun() -> ok end),
     timer:sleep(50),
-    
+
     {ok, ActorPid} = test_counter:start_link(0),
-    
+
     Result = beamtalk_repl_actors:on_actor_spawned(FakePid, ActorPid, 'Counter', test_counter),
     ?assertMatch({error, {registry_failed, _}}, Result),
-    
+
     gen_server:stop(ActorPid).
 
 %%% ===========================================================================
@@ -255,11 +259,17 @@ on_actor_spawned_returns_error_on_registry_failure_test() ->
     {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
     gen_server:stop(RegistryPid),
 
-    ActorPid = spawn(fun() -> receive stop -> ok end end),
+    ActorPid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
 
     %% Returns {error, _} since BT-391 surfaces registry failures
-    ?assertMatch({error, {registry_failed, _}},
-                 beamtalk_repl_actors:on_actor_spawned(RegistryPid, ActorPid, 'Counter', test_counter)),
+    ?assertMatch(
+        {error, {registry_failed, _}},
+        beamtalk_repl_actors:on_actor_spawned(RegistryPid, ActorPid, 'Counter', test_counter)
+    ),
 
     exit(ActorPid, kill).
 
@@ -370,14 +380,16 @@ subscriber_receives_actor_spawned_notification_test() ->
     process_flag(trap_exit, true),
     unregister_if_alive(beamtalk_actor_registry),
     {ok, RegistryPid} = gen_server:start_link(
-        {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []),
+        {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []
+    ),
     try
         beamtalk_repl_actors:subscribe(),
-        sys:get_state(RegistryPid),  %% Sync point — ensures cast is processed
-        
+        %% Sync point — ensures cast is processed
+        sys:get_state(RegistryPid),
+
         {ok, ActorPid} = test_counter:start_link(0),
         ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
-        
+
         receive
             {actor_spawned, Metadata} ->
                 ?assertEqual(ActorPid, maps:get(pid, Metadata)),
@@ -396,18 +408,22 @@ subscriber_receives_actor_stopped_notification_test() ->
     process_flag(trap_exit, true),
     unregister_if_alive(beamtalk_actor_registry),
     {ok, RegistryPid} = gen_server:start_link(
-        {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []),
+        {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []
+    ),
     try
         beamtalk_repl_actors:subscribe(),
         sys:get_state(RegistryPid),
-        
+
         {ok, ActorPid} = test_counter:start_link(0),
         ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
-        
-        receive {actor_spawned, _} -> ok after 500 -> ok end,
-        
+
+        receive
+            {actor_spawned, _} -> ok
+        after 500 -> ok
+        end,
+
         gen_server:stop(ActorPid),
-        
+
         receive
             {actor_stopped, StopInfo} ->
                 ?assertEqual(ActorPid, maps:get(pid, StopInfo)),
@@ -424,17 +440,18 @@ unsubscribe_stops_notifications_test() ->
     process_flag(trap_exit, true),
     unregister_if_alive(beamtalk_actor_registry),
     {ok, RegistryPid} = gen_server:start_link(
-        {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []),
+        {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []
+    ),
     try
         beamtalk_repl_actors:subscribe(),
         sys:get_state(RegistryPid),
-        
+
         beamtalk_repl_actors:unsubscribe(),
         sys:get_state(RegistryPid),
-        
+
         {ok, ActorPid} = test_counter:start_link(0),
         ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
-        
+
         receive
             {actor_spawned, _} -> ?assert(false)
         after 100 ->
@@ -450,31 +467,38 @@ dead_subscriber_auto_removed_test() ->
     process_flag(trap_exit, true),
     unregister_if_alive(beamtalk_actor_registry),
     {ok, RegistryPid} = gen_server:start_link(
-        {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []),
+        {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []
+    ),
     try
         Self = self(),
         SubPid = spawn(fun() ->
             beamtalk_repl_actors:subscribe(),
             Self ! subscribed,
-            receive stop -> ok end
+            receive
+                stop -> ok
+            end
         end),
-        receive subscribed -> ok after 500 -> ok end,
-        sys:get_state(RegistryPid),  %% Sync: ensure subscribe cast processed
-        
+        receive
+            subscribed -> ok
+        after 500 -> ok
+        end,
+        %% Sync: ensure subscribe cast processed
+        sys:get_state(RegistryPid),
+
         %% Verify subscriber was added
         {state, _A1, _M1, SubsBefore} = sys:get_state(RegistryPid),
         ?assertEqual(1, maps:size(SubsBefore)),
-        
+
         exit(SubPid, kill),
         timer:sleep(50),
-        
+
         %% Verify subscriber was auto-removed
         {state, _A2, _M2, SubsAfter} = sys:get_state(RegistryPid),
         ?assertEqual(0, maps:size(SubsAfter)),
-        
+
         {ok, ActorPid} = test_counter:start_link(0),
         ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
-        
+
         ?assert(is_process_alive(RegistryPid)),
         gen_server:stop(ActorPid)
     after
@@ -488,7 +512,11 @@ unregister_if_alive(Name) ->
         undefined ->
             ok;
         Pid ->
-            try gen_server:stop(Pid) catch _:_ -> ok end,
+            try
+                gen_server:stop(Pid)
+            catch
+                _:_ -> ok
+            end,
             case whereis(Name) of
                 Pid -> unregister(Name);
                 _ -> ok
@@ -497,7 +525,10 @@ unregister_if_alive(Name) ->
 
 %% Helper: drain all messages from the test process mailbox.
 flush_messages() ->
-    receive _ -> flush_messages() after 0 -> ok end.
+    receive
+        _ -> flush_messages()
+    after 0 -> ok
+    end.
 
 %%% ===========================================================================
 %%% Workspace App Callback Env Tests
@@ -511,20 +542,27 @@ workspace_app_start_sets_callback_env_test() ->
     %% Call actual start/2 — supervisor has no static children, safe to start
     {ok, SupPid} = beamtalk_workspace_app:start(normal, []),
     try
-        ?assertEqual({ok, beamtalk_repl_actors},
-                     application:get_env(beamtalk_runtime, actor_spawn_callback))
+        ?assertEqual(
+            {ok, beamtalk_repl_actors},
+            application:get_env(beamtalk_runtime, actor_spawn_callback)
+        )
     after
         process_flag(trap_exit, true),
         exit(SupPid, shutdown),
-        receive {'EXIT', SupPid, _} -> ok after 1000 -> ok end,
+        receive
+            {'EXIT', SupPid, _} -> ok
+        after 1000 -> ok
+        end,
         application:unset_env(beamtalk_runtime, actor_spawn_callback)
     end.
 
 workspace_app_stop_unsets_callback_env_test() ->
     %% Set the env first (simulating what start/2 does)
     application:set_env(beamtalk_runtime, actor_spawn_callback, beamtalk_repl_actors),
-    ?assertEqual({ok, beamtalk_repl_actors},
-                 application:get_env(beamtalk_runtime, actor_spawn_callback)),
+    ?assertEqual(
+        {ok, beamtalk_repl_actors},
+        application:get_env(beamtalk_runtime, actor_spawn_callback)
+    ),
 
     %% Call actual stop/1 function
     ok = beamtalk_workspace_app:stop(undefined),

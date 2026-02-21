@@ -16,12 +16,16 @@
 %%% ============================================================================
 
 registry_name_test() ->
-    ?assertEqual(beamtalk_class_Counter,
-                 beamtalk_class_registry:registry_name('Counter')).
+    ?assertEqual(
+        beamtalk_class_Counter,
+        beamtalk_class_registry:registry_name('Counter')
+    ).
 
 registry_name_object_test() ->
-    ?assertEqual(beamtalk_class_Object,
-                 beamtalk_class_registry:registry_name('Object')).
+    ?assertEqual(
+        beamtalk_class_Object,
+        beamtalk_class_registry:registry_name('Object')
+    ).
 
 %%% ============================================================================
 %%% class_object_tag tests
@@ -75,16 +79,22 @@ is_class_object_wrong_tuple_test() ->
 %%% ============================================================================
 
 class_display_name_strips_suffix_test() ->
-    ?assertEqual(<<"Counter">>,
-                 beamtalk_class_registry:class_display_name('Counter class')).
+    ?assertEqual(
+        <<"Counter">>,
+        beamtalk_class_registry:class_display_name('Counter class')
+    ).
 
 class_display_name_no_suffix_test() ->
-    ?assertEqual(<<"Counter">>,
-                 beamtalk_class_registry:class_display_name('Counter')).
+    ?assertEqual(
+        <<"Counter">>,
+        beamtalk_class_registry:class_display_name('Counter')
+    ).
 
 class_display_name_object_test() ->
-    ?assertEqual(<<"Object">>,
-                 beamtalk_class_registry:class_display_name('Object class')).
+    ?assertEqual(
+        <<"Object">>,
+        beamtalk_class_registry:class_display_name('Object class')
+    ).
 
 %%% ============================================================================
 %%% ensure_pg_started tests
@@ -101,31 +111,32 @@ ensure_pg_started_test() ->
 
 ensure_hierarchy_table_test_() ->
     {setup,
-     fun() ->
-         %% Save existing entries to restore after test
-         case ets:info(beamtalk_class_hierarchy) of
-             undefined -> {missing, []};
-             _ -> {exists, ets:tab2list(beamtalk_class_hierarchy)}
-         end
-     end,
-     fun({missing, _}) ->
-         %% Table didn't exist before; delete if we created it and we own it
-         case ets:info(beamtalk_class_hierarchy, owner) of
-             undefined -> ok;
-             Owner when Owner =:= self() -> ets:delete(beamtalk_class_hierarchy);
-             _ -> ok
-         end;
-        ({exists, Saved}) ->
-         %% Restore original entries
-         ets:delete_all_objects(beamtalk_class_hierarchy),
-         ets:insert(beamtalk_class_hierarchy, Saved)
-     end,
-     fun() ->
-         ?assertEqual(ok, beamtalk_class_registry:ensure_hierarchy_table()),
-         ?assertNotEqual(undefined, ets:info(beamtalk_class_hierarchy)),
-         %% Idempotent
-         ?assertEqual(ok, beamtalk_class_registry:ensure_hierarchy_table())
-     end}.
+        fun() ->
+            %% Save existing entries to restore after test
+            case ets:info(beamtalk_class_hierarchy) of
+                undefined -> {missing, []};
+                _ -> {exists, ets:tab2list(beamtalk_class_hierarchy)}
+            end
+        end,
+        fun
+            ({missing, _}) ->
+                %% Table didn't exist before; delete if we created it and we own it
+                case ets:info(beamtalk_class_hierarchy, owner) of
+                    undefined -> ok;
+                    Owner when Owner =:= self() -> ets:delete(beamtalk_class_hierarchy);
+                    _ -> ok
+                end;
+            ({exists, Saved}) ->
+                %% Restore original entries
+                ets:delete_all_objects(beamtalk_class_hierarchy),
+                ets:insert(beamtalk_class_hierarchy, Saved)
+        end,
+        fun() ->
+            ?assertEqual(ok, beamtalk_class_registry:ensure_hierarchy_table()),
+            ?assertNotEqual(undefined, ets:info(beamtalk_class_hierarchy)),
+            %% Idempotent
+            ?assertEqual(ok, beamtalk_class_registry:ensure_hierarchy_table())
+        end}.
 
 %%% ============================================================================
 %%% inherits_from tests
@@ -133,46 +144,40 @@ ensure_hierarchy_table_test_() ->
 
 inherits_from_test_() ->
     {setup,
-     fun() ->
-         beamtalk_class_registry:ensure_hierarchy_table(),
-         Saved = ets:tab2list(beamtalk_class_hierarchy),
-         ets:delete_all_objects(beamtalk_class_hierarchy),
-         ets:insert(beamtalk_class_hierarchy, {'Object', none}),
-         ets:insert(beamtalk_class_hierarchy, {'Actor', 'Object'}),
-         ets:insert(beamtalk_class_hierarchy, {'Counter', 'Actor'}),
-         Saved
-     end,
-     fun(Saved) ->
-         %% Restore original state
-         ets:delete_all_objects(beamtalk_class_hierarchy),
-         ets:insert(beamtalk_class_hierarchy, Saved)
-     end,
-     [
-      {"same class",
-       fun() ->
-           ?assertEqual(true, beamtalk_class_registry:inherits_from('Counter', 'Counter'))
-       end},
-      {"direct parent",
-       fun() ->
-           ?assertEqual(true, beamtalk_class_registry:inherits_from('Counter', 'Actor'))
-       end},
-      {"grandparent",
-       fun() ->
-           ?assertEqual(true, beamtalk_class_registry:inherits_from('Counter', 'Object'))
-       end},
-      {"not related",
-       fun() ->
-           ?assertEqual(false, beamtalk_class_registry:inherits_from('Object', 'Counter'))
-       end},
-      {"none ancestor",
-       fun() ->
-           ?assertEqual(false, beamtalk_class_registry:inherits_from(none, 'Object'))
-       end},
-      {"unknown class",
-       fun() ->
-           ?assertEqual(false, beamtalk_class_registry:inherits_from('Unknown', 'Object'))
-       end}
-     ]}.
+        fun() ->
+            beamtalk_class_registry:ensure_hierarchy_table(),
+            Saved = ets:tab2list(beamtalk_class_hierarchy),
+            ets:delete_all_objects(beamtalk_class_hierarchy),
+            ets:insert(beamtalk_class_hierarchy, {'Object', none}),
+            ets:insert(beamtalk_class_hierarchy, {'Actor', 'Object'}),
+            ets:insert(beamtalk_class_hierarchy, {'Counter', 'Actor'}),
+            Saved
+        end,
+        fun(Saved) ->
+            %% Restore original state
+            ets:delete_all_objects(beamtalk_class_hierarchy),
+            ets:insert(beamtalk_class_hierarchy, Saved)
+        end,
+        [
+            {"same class", fun() ->
+                ?assertEqual(true, beamtalk_class_registry:inherits_from('Counter', 'Counter'))
+            end},
+            {"direct parent", fun() ->
+                ?assertEqual(true, beamtalk_class_registry:inherits_from('Counter', 'Actor'))
+            end},
+            {"grandparent", fun() ->
+                ?assertEqual(true, beamtalk_class_registry:inherits_from('Counter', 'Object'))
+            end},
+            {"not related", fun() ->
+                ?assertEqual(false, beamtalk_class_registry:inherits_from('Object', 'Counter'))
+            end},
+            {"none ancestor", fun() ->
+                ?assertEqual(false, beamtalk_class_registry:inherits_from(none, 'Object'))
+            end},
+            {"unknown class", fun() ->
+                ?assertEqual(false, beamtalk_class_registry:inherits_from('Unknown', 'Object'))
+            end}
+        ]}.
 
 %%% ============================================================================
 %%% direct_subclasses tests
@@ -180,39 +185,35 @@ inherits_from_test_() ->
 
 direct_subclasses_test_() ->
     {setup,
-     fun() ->
-         beamtalk_class_registry:ensure_hierarchy_table(),
-         Saved = ets:tab2list(beamtalk_class_hierarchy),
-         ets:delete_all_objects(beamtalk_class_hierarchy),
-         ets:insert(beamtalk_class_hierarchy, {'Object', none}),
-         ets:insert(beamtalk_class_hierarchy, {'Actor', 'Object'}),
-         ets:insert(beamtalk_class_hierarchy, {'Counter', 'Actor'}),
-         ets:insert(beamtalk_class_hierarchy, {'Timer', 'Actor'}),
-         Saved
-     end,
-     fun(Saved) ->
-         ets:delete_all_objects(beamtalk_class_hierarchy),
-         ets:insert(beamtalk_class_hierarchy, Saved)
-     end,
-     [
-      {"direct children of Actor",
-       fun() ->
-           Result = beamtalk_class_registry:direct_subclasses('Actor'),
-           ?assertEqual(['Counter', 'Timer'], Result)
-       end},
-      {"direct children of Object",
-       fun() ->
-           ?assertEqual(['Actor'], beamtalk_class_registry:direct_subclasses('Object'))
-       end},
-      {"leaf class has no children",
-       fun() ->
-           ?assertEqual([], beamtalk_class_registry:direct_subclasses('Counter'))
-       end},
-      {"unknown class",
-       fun() ->
-           ?assertEqual([], beamtalk_class_registry:direct_subclasses('Unknown'))
-       end}
-     ]}.
+        fun() ->
+            beamtalk_class_registry:ensure_hierarchy_table(),
+            Saved = ets:tab2list(beamtalk_class_hierarchy),
+            ets:delete_all_objects(beamtalk_class_hierarchy),
+            ets:insert(beamtalk_class_hierarchy, {'Object', none}),
+            ets:insert(beamtalk_class_hierarchy, {'Actor', 'Object'}),
+            ets:insert(beamtalk_class_hierarchy, {'Counter', 'Actor'}),
+            ets:insert(beamtalk_class_hierarchy, {'Timer', 'Actor'}),
+            Saved
+        end,
+        fun(Saved) ->
+            ets:delete_all_objects(beamtalk_class_hierarchy),
+            ets:insert(beamtalk_class_hierarchy, Saved)
+        end,
+        [
+            {"direct children of Actor", fun() ->
+                Result = beamtalk_class_registry:direct_subclasses('Actor'),
+                ?assertEqual(['Counter', 'Timer'], Result)
+            end},
+            {"direct children of Object", fun() ->
+                ?assertEqual(['Actor'], beamtalk_class_registry:direct_subclasses('Object'))
+            end},
+            {"leaf class has no children", fun() ->
+                ?assertEqual([], beamtalk_class_registry:direct_subclasses('Counter'))
+            end},
+            {"unknown class", fun() ->
+                ?assertEqual([], beamtalk_class_registry:direct_subclasses('Unknown'))
+            end}
+        ]}.
 
 %%% ============================================================================
 %%% all_subclasses tests
@@ -220,44 +221,43 @@ direct_subclasses_test_() ->
 
 all_subclasses_test_() ->
     {setup,
-     fun() ->
-         beamtalk_class_registry:ensure_hierarchy_table(),
-         Saved = ets:tab2list(beamtalk_class_hierarchy),
-         ets:delete_all_objects(beamtalk_class_hierarchy),
-         ets:insert(beamtalk_class_hierarchy, {'Object', none}),
-         ets:insert(beamtalk_class_hierarchy, {'Actor', 'Object'}),
-         ets:insert(beamtalk_class_hierarchy, {'Counter', 'Actor'}),
-         ets:insert(beamtalk_class_hierarchy, {'Timer', 'Actor'}),
-         Saved
-     end,
-     fun(Saved) ->
-         ets:delete_all_objects(beamtalk_class_hierarchy),
-         ets:insert(beamtalk_class_hierarchy, Saved)
-     end,
-     [
-      {"all subclasses of Object",
-       fun() ->
-           Result = beamtalk_class_registry:all_subclasses('Object'),
-           ?assertEqual(['Actor', 'Counter', 'Timer'], Result)
-       end},
-      {"all subclasses of Actor",
-       fun() ->
-           Result = beamtalk_class_registry:all_subclasses('Actor'),
-           ?assertEqual(['Counter', 'Timer'], Result)
-       end},
-      {"leaf class has no subclasses",
-       fun() ->
-           ?assertEqual([], beamtalk_class_registry:all_subclasses('Counter'))
-       end}
-     ]}.
+        fun() ->
+            beamtalk_class_registry:ensure_hierarchy_table(),
+            Saved = ets:tab2list(beamtalk_class_hierarchy),
+            ets:delete_all_objects(beamtalk_class_hierarchy),
+            ets:insert(beamtalk_class_hierarchy, {'Object', none}),
+            ets:insert(beamtalk_class_hierarchy, {'Actor', 'Object'}),
+            ets:insert(beamtalk_class_hierarchy, {'Counter', 'Actor'}),
+            ets:insert(beamtalk_class_hierarchy, {'Timer', 'Actor'}),
+            Saved
+        end,
+        fun(Saved) ->
+            ets:delete_all_objects(beamtalk_class_hierarchy),
+            ets:insert(beamtalk_class_hierarchy, Saved)
+        end,
+        [
+            {"all subclasses of Object", fun() ->
+                Result = beamtalk_class_registry:all_subclasses('Object'),
+                ?assertEqual(['Actor', 'Counter', 'Timer'], Result)
+            end},
+            {"all subclasses of Actor", fun() ->
+                Result = beamtalk_class_registry:all_subclasses('Actor'),
+                ?assertEqual(['Counter', 'Timer'], Result)
+            end},
+            {"leaf class has no subclasses", fun() ->
+                ?assertEqual([], beamtalk_class_registry:all_subclasses('Counter'))
+            end}
+        ]}.
 
 %%% ============================================================================
 %%% whereis_class tests
 %%% ============================================================================
 
 whereis_class_unregistered_test() ->
-    ?assertEqual(undefined,
-                 beamtalk_class_registry:whereis_class('NonExistentClass12345')).
+    ?assertEqual(
+        undefined,
+        beamtalk_class_registry:whereis_class('NonExistentClass12345')
+    ).
 
 whereis_class_registered_test() ->
     RegName = beamtalk_class_registry:registry_name('TestClassBT708'),

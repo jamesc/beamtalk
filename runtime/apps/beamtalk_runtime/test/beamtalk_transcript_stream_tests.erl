@@ -124,7 +124,9 @@ subscriber_receives_output_test() ->
 dead_subscriber_auto_removed_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     Sub = erlang:spawn(fun() ->
-        receive stop -> ok end
+        receive
+            stop -> ok
+        end
     end),
     gen_server:cast(Pid, {subscribe, Sub}),
     %% Sync barrier: ensure subscribe is processed before killing
@@ -231,12 +233,16 @@ spawn_with_max_buffer_test() ->
 %% --- invalid max_buffer rejected ---
 
 invalid_max_buffer_zero_test() ->
-    ?assertEqual({error, {invalid_max_buffer, 0}},
-                 beamtalk_transcript_stream:spawn(0)).
+    ?assertEqual(
+        {error, {invalid_max_buffer, 0}},
+        beamtalk_transcript_stream:spawn(0)
+    ).
 
 invalid_max_buffer_negative_test() ->
-    ?assertEqual({error, {invalid_max_buffer, -1}},
-                 beamtalk_transcript_stream:spawn(-1)).
+    ?assertEqual(
+        {error, {invalid_max_buffer, -1}},
+        beamtalk_transcript_stream:spawn(-1)
+    ).
 
 %% --- non-pid subscribe is safe (no crash) ---
 

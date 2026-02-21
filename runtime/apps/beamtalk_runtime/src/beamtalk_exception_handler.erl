@@ -131,10 +131,11 @@ matches_class_name(ClassName, #beamtalk_error{kind = Kind, class = ErrorClass}) 
     BaseName = strip_class_suffix(ClassName),
     %% BT-480: If error.class is an exception class, use it directly.
     %% Otherwise fall back to kind_to_class (built-in error kinds).
-    ActualClass = case is_exception_class(ErrorClass) of
-        true -> ErrorClass;
-        false -> kind_to_class(Kind)
-    end,
+    ActualClass =
+        case is_exception_class(ErrorClass) of
+            true -> ErrorClass;
+            false -> kind_to_class(Kind)
+        end,
     beamtalk_class_registry:inherits_from(ActualClass, BaseName);
 matches_class_name(ClassName, RawError) when not is_map(RawError) ->
     %% Raw Erlang error (e.g. badarith) — wrap to get a kind, then match
@@ -161,10 +162,11 @@ strip_class_suffix(ClassName) ->
 %% (BT-480: user-defined error subclasses).
 -spec wrap(#beamtalk_error{} | term()) -> map().
 wrap(#beamtalk_error{kind = Kind, class = ErrorClass} = Error) ->
-    Class = case is_exception_class(ErrorClass) of
-        true -> ErrorClass;
-        false -> kind_to_class(Kind)
-    end,
+    Class =
+        case is_exception_class(ErrorClass) of
+            true -> ErrorClass;
+            false -> kind_to_class(Kind)
+        end,
     #{'$beamtalk_class' => Class, error => Error};
 wrap(Other) ->
     wrap_raw(Other).
@@ -174,10 +176,14 @@ wrap(Other) ->
 wrap_raw({badarity, {Fun, Args}}) when is_function(Fun), is_list(Args) ->
     {arity, Expected} = erlang:fun_info(Fun, arity),
     Actual = length(Args),
-    Message = iolist_to_binary(io_lib:format(
-        "Wrong number of arguments: block expects ~B but was called with ~B",
-        [Expected, Actual])),
-    Hint = <<"Check that your block has the right number of parameters (e.g., [:x | ...] for 1 argument)">>,
+    Message = iolist_to_binary(
+        io_lib:format(
+            "Wrong number of arguments: block expects ~B but was called with ~B",
+            [Expected, Actual]
+        )
+    ),
+    Hint =
+        <<"Check that your block has the right number of parameters (e.g., [:x | ...] for 1 argument)">>,
     GenError = #beamtalk_error{
         kind = arity_mismatch,
         class = 'Block',

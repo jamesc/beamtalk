@@ -30,10 +30,7 @@ stdlib_teardown(_) ->
     ok.
 
 stdlib_test_() ->
-    {setup,
-     fun stdlib_setup/0,
-     fun stdlib_teardown/1,
-     [
+    {setup, fun stdlib_setup/0, fun stdlib_teardown/1, [
         {"init registers all primitive classes", fun init_registers_all_classes_test/0},
         {"init is idempotent", fun init_idempotent_test/0},
         {"Integer class is registered", fun integer_class_registered_test/0},
@@ -50,11 +47,12 @@ stdlib_test_() ->
         %% Beamtalk class method tests
         {"Beamtalk allClasses returns all class names", fun beamtalk_all_classes_test/0},
         {"Beamtalk classNamed: finds existing class", fun beamtalk_class_named_found_test/0},
-        {"Beamtalk classNamed: returns nil for missing class", fun beamtalk_class_named_not_found_test/0},
+        {"Beamtalk classNamed: returns nil for missing class",
+            fun beamtalk_class_named_not_found_test/0},
         {"Beamtalk globals returns map", fun beamtalk_globals_test/0},
         {"Beamtalk version returns version string", fun beamtalk_version_test/0},
         {"Beamtalk has_method returns true for known methods", fun beamtalk_has_method_test/0}
-     ]}.
+    ]}.
 
 %%% ============================================================================
 %%% Test Cases
@@ -63,13 +61,16 @@ stdlib_test_() ->
 init_registers_all_classes_test() ->
     %% Initialize stdlib (may already be initialized from fixture)
     ok = beamtalk_stdlib:init(),
-    
+
     %% After init, should have bootstrap + stdlib classes
-    ClassesAfter = [beamtalk_object_class:class_name(Pid) || Pid <- beamtalk_class_registry:all_classes()],
+    ClassesAfter = [
+        beamtalk_object_class:class_name(Pid)
+     || Pid <- beamtalk_class_registry:all_classes()
+    ],
     %% At least 15 expected (3 bootstrap + 10 primitives + 2 workspace globals).
     %% May be more if test fixtures have registered additional classes via on_load.
     ?assert(length(ClassesAfter) >= 15),
-    
+
     %% Verify expected classes are present
     ?assert(lists:member('ProtoObject', ClassesAfter)),
     ?assert(lists:member('Object', ClassesAfter)),
@@ -89,9 +90,12 @@ init_idempotent_test() ->
     %% Call init multiple times
     ok = beamtalk_stdlib:init(),
     ok = beamtalk_stdlib:init(),
-    
+
     %% Should still have same number of classes (no duplicates)
-    Classes = [beamtalk_object_class:class_name(Pid) || Pid <- beamtalk_class_registry:all_classes()],
+    Classes = [
+        beamtalk_object_class:class_name(Pid)
+     || Pid <- beamtalk_class_registry:all_classes()
+    ],
     ?assert(length(Classes) >= 15).
 
 integer_class_registered_test() ->
@@ -175,14 +179,15 @@ integer_methods_test() ->
 
 beamtalk_all_classes_test() ->
     ok = beamtalk_stdlib:init(),
-    
+
     %% Call Beamtalk allClasses via dispatch
     Classes = beamtalk_stdlib:dispatch(allClasses, [], 'Beamtalk'),
-    
+
     %% Should return a list of atoms (class names)
     ?assert(is_list(Classes)),
-    ?assert(length(Classes) >= 10),  % At least bootstrap + stdlib classes
-    
+    % At least bootstrap + stdlib classes
+    ?assert(length(Classes) >= 10),
+
     %% All stdlib classes should be present
     ?assert(lists:member('Integer', Classes)),
     ?assert(lists:member('String', Classes)),
@@ -197,13 +202,13 @@ beamtalk_all_classes_test() ->
 
 beamtalk_class_named_found_test() ->
     ok = beamtalk_stdlib:init(),
-    
+
     %% Look up an existing class
     Result = beamtalk_stdlib:dispatch('classNamed:', ['Integer'], 'Beamtalk'),
-    
+
     %% Should return a wrapped class object
     ?assertMatch({beamtalk_object, 'Integer', beamtalk_object_class, _Pid}, Result),
-    
+
     %% Extract the pid and verify it's the Integer class
     {beamtalk_object, 'Integer', beamtalk_object_class, Pid} = Result,
     ?assert(is_pid(Pid)),
@@ -211,28 +216,28 @@ beamtalk_class_named_found_test() ->
 
 beamtalk_class_named_not_found_test() ->
     ok = beamtalk_stdlib:init(),
-    
+
     %% Look up a non-existent class
     Result = beamtalk_stdlib:dispatch('classNamed:', ['NonExistentClass'], 'Beamtalk'),
-    
+
     %% Should return nil
     ?assertEqual(nil, Result).
 
 beamtalk_globals_test() ->
     ok = beamtalk_stdlib:init(),
-    
+
     %% Call Beamtalk globals
     Globals = beamtalk_stdlib:dispatch(globals, [], 'Beamtalk'),
-    
+
     %% Should return a map (currently empty placeholder)
     ?assert(is_map(Globals)).
 
 beamtalk_version_test() ->
     ok = beamtalk_stdlib:init(),
-    
+
     %% Call Beamtalk version
     Version = beamtalk_stdlib:dispatch(version, [], 'Beamtalk'),
-    
+
     %% Should return a binary version string
     ?assert(is_binary(Version)),
     ?assertEqual(<<"0.1.0">>, Version).
@@ -243,7 +248,7 @@ beamtalk_has_method_test() ->
     ?assert(beamtalk_stdlib:has_method('classNamed:')),
     ?assert(beamtalk_stdlib:has_method(globals)),
     ?assert(beamtalk_stdlib:has_method(version)),
-    
+
     %% Check has_method for unknown methods
     ?assertNot(beamtalk_stdlib:has_method(unknownMethod)),
     ?assertNot(beamtalk_stdlib:has_method(fooBar)).
@@ -307,15 +312,16 @@ pos([_ | T], Elem, N) -> pos(T, Elem, N + 1).
 %%% ============================================================================
 
 dispatch_unknown_selector_test_() ->
-    {setup,
-     fun stdlib_setup/0,
-     fun stdlib_teardown/1,
-     [
+    {setup, fun stdlib_setup/0, fun stdlib_teardown/1, [
         {"dispatch unknown selector raises does_not_understand",
-         fun dispatch_unknown_selector_test/0}
-     ]}.
+            fun dispatch_unknown_selector_test/0}
+    ]}.
 
 dispatch_unknown_selector_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand, class = 'Beamtalk'}},
-        beamtalk_stdlib:dispatch(nonExistentMethod, [], 'Beamtalk')).
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = does_not_understand, class = 'Beamtalk'}
+        },
+        beamtalk_stdlib:dispatch(nonExistentMethod, [], 'Beamtalk')
+    ).

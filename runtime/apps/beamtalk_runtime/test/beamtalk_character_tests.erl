@@ -88,8 +88,10 @@ is_whitespace_basic_test() ->
     ?assert(beamtalk_character:is_whitespace($\t)),
     ?assert(beamtalk_character:is_whitespace($\n)),
     ?assert(beamtalk_character:is_whitespace($\r)),
-    ?assert(beamtalk_character:is_whitespace(16#0B)),  % vertical tab
-    ?assert(beamtalk_character:is_whitespace(16#0C)),  % form feed
+    % vertical tab
+    ?assert(beamtalk_character:is_whitespace(16#0B)),
+    % form feed
+    ?assert(beamtalk_character:is_whitespace(16#0C)),
     ?assert(beamtalk_character:is_whitespace($\ )),
     ?assertNot(beamtalk_character:is_whitespace($A)).
 
@@ -189,15 +191,35 @@ value_valid_test() ->
     ?assertEqual(16#10FFFF, beamtalk_character:value(16#10FFFF)).
 
 value_surrogate_error_test() ->
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Character', selector = 'value:'}},
-                 beamtalk_character:value(16#D800)),
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Character', selector = 'value:'}},
-                 beamtalk_character:value(16#DFFF)).
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'Character', selector = 'value:'}
+        },
+        beamtalk_character:value(16#D800)
+    ),
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'Character', selector = 'value:'}
+        },
+        beamtalk_character:value(16#DFFF)
+    ).
 
 value_negative_error_test() ->
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Character', selector = 'value:'}},
-                 beamtalk_character:value(-1)).
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'Character', selector = 'value:'}
+        },
+        beamtalk_character:value(-1)
+    ).
 
 value_out_of_range_error_test() ->
-    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Character', selector = 'value:'}},
-                 beamtalk_character:value(16#110000)).
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'Character', selector = 'value:'}
+        },
+        beamtalk_character:value(16#110000)
+    ).

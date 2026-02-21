@@ -73,7 +73,8 @@
 
 -type selector() :: atom().
 -type args() :: [term()].
--type bt_self() :: term().  % #beamtalk_object{} or value
+% #beamtalk_object{} or value
+-type bt_self() :: term().
 -type state() :: map().
 -type class_name() :: atom().
 -type dispatch_result() :: {reply, term(), state()} | {error, #beamtalk_error{}}.
@@ -108,7 +109,7 @@
 -spec lookup(selector(), args(), bt_self(), state(), class_name()) -> dispatch_result().
 lookup(Selector, Args, Self, State, CurrentClass) ->
     ?LOG_DEBUG("Dispatching ~p on class ~p", [Selector, CurrentClass]),
-    
+
     %% Step 1: Check extension registry first (guard against missing ETS table)
     case check_extension(CurrentClass, Selector) of
         {ok, Fun} ->
@@ -144,7 +145,7 @@ lookup(Selector, Args, Self, State, CurrentClass) ->
 -spec super(selector(), args(), bt_self(), state(), class_name()) -> dispatch_result().
 super(Selector, Args, Self, State, CurrentClass) ->
     ?LOG_DEBUG("Super dispatch ~p from class ~p", [Selector, CurrentClass]),
-    
+
     %% Look up the current class to get its superclass
     case beamtalk_class_registry:whereis_class(CurrentClass) of
         undefined ->
@@ -156,13 +157,19 @@ super(Selector, Args, Self, State, CurrentClass) ->
                 none ->
                     %% No superclass - method not found
                     Error = beamtalk_error:new(
-                        does_not_understand, CurrentClass, Selector, <<"Method not found in superclass chain">>),
+                        does_not_understand,
+                        CurrentClass,
+                        Selector,
+                        <<"Method not found in superclass chain">>
+                    ),
                     {error, Error};
                 SuperclassName ->
                     %% Check extension registry on superclass before hierarchy walk
                     case check_extension(SuperclassName, Selector) of
                         {ok, Fun} ->
-                            ?LOG_DEBUG("Found extension method ~p on superclass ~p via super", [Selector, SuperclassName]),
+                            ?LOG_DEBUG("Found extension method ~p on superclass ~p via super", [
+                                Selector, SuperclassName
+                            ]),
                             invoke_extension(Fun, Args, Self, State);
                         not_found ->
                             %% Start lookup at superclass (skip current class)
@@ -206,7 +213,8 @@ responds_to_chain(Selector, ClassPid) ->
             true;
         false ->
             case beamtalk_object_class:superclass(ClassPid) of
-                none -> false;
+                none ->
+                    false;
                 SuperclassName ->
                     case beamtalk_class_registry:whereis_class(SuperclassName) of
                         undefined -> false;
@@ -227,7 +235,8 @@ responds_to_chain(Selector, ClassPid) ->
 %% (typical 4), this means at most ~12 gen_server calls — microseconds on a
 %% local node. The flattened table cache was removed to eliminate BT-510's
 %% race window and O(N) rebuild broadcast cascade.
--spec lookup_in_class_chain(selector(), args(), bt_self(), state(), class_name()) -> dispatch_result().
+-spec lookup_in_class_chain(selector(), args(), bt_self(), state(), class_name()) ->
+    dispatch_result().
 lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
@@ -241,7 +250,8 @@ lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
 %%
 %% Used when flattened table is missing, stale, or incomplete.
 %% This is the original ADR 0006 Phase 1 implementation.
--spec lookup_in_class_chain_slow(selector(), args(), bt_self(), state(), class_name(), pid()) -> dispatch_result().
+-spec lookup_in_class_chain_slow(selector(), args(), bt_self(), state(), class_name(), pid()) ->
+    dispatch_result().
 lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid) ->
     %% Check if this class has the method
     case beamtalk_object_class:has_method(ClassPid, Selector) of
@@ -259,16 +269,21 @@ lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid) ->
                         does_not_understand,
                         beamtalk_tagged_map:class_of(State, ClassName),
                         Selector,
-                        <<"Check spelling or use 'respondsTo:' to verify method exists">>),
+                        <<"Check spelling or use 'respondsTo:' to verify method exists">>
+                    ),
                     {error, Error};
                 SuperclassName ->
                     %% Recurse to superclass
-                    ?LOG_DEBUG("Method ~p not in ~p, trying superclass ~p", [Selector, ClassName, SuperclassName]),
+                    ?LOG_DEBUG("Method ~p not in ~p, trying superclass ~p", [
+                        Selector, ClassName, SuperclassName
+                    ]),
                     case beamtalk_class_registry:whereis_class(SuperclassName) of
                         undefined ->
                             {error, beamtalk_error:new(class_not_found, SuperclassName, Selector)};
                         SuperclassPid ->
-                            lookup_in_class_chain_slow(Selector, Args, Self, State, SuperclassName, SuperclassPid)
+                            lookup_in_class_chain_slow(
+                                Selector, Args, Self, State, SuperclassName, SuperclassPid
+                            )
                     end
             end
     end.
@@ -282,7 +297,8 @@ lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid) ->
 %%
 %% The class process knows the module name, so we can determine which strategy to use.
 %% ClassPid is passed from the caller to avoid a redundant whereis_class lookup.
--spec invoke_method(class_name(), pid(), selector(), args(), bt_self(), state()) -> dispatch_result().
+-spec invoke_method(class_name(), pid(), selector(), args(), bt_self(), state()) ->
+    dispatch_result().
 invoke_method(_ClassName, ClassPid, Selector, Args, Self, State) ->
     %% Get the module name for this class
     case beamtalk_object_class:module_name(ClassPid) of
@@ -328,14 +344,17 @@ continue_to_superclass(Selector, Args, Self, State, ClassPid) ->
                 does_not_understand,
                 ClassName,
                 Selector,
-                <<"Check spelling or use 'respondsTo:' to verify method exists">>),
+                <<"Check spelling or use 'respondsTo:' to verify method exists">>
+            ),
             {error, Error};
         SuperclassName ->
             case beamtalk_class_registry:whereis_class(SuperclassName) of
                 undefined ->
                     {error, beamtalk_error:new(class_not_found, SuperclassName, Selector)};
                 SuperclassPid ->
-                    lookup_in_class_chain_slow(Selector, Args, Self, State, SuperclassName, SuperclassPid)
+                    lookup_in_class_chain_slow(
+                        Selector, Args, Self, State, SuperclassName, SuperclassPid
+                    )
             end
     end.
 
@@ -357,8 +376,10 @@ invoke_extension(Fun, Args, _Self, State) ->
         {reply, Result, State}
     catch
         error:Reason:Stacktrace ->
-            ?LOG_ERROR("Extension method threw error: ~p~nStacktrace: ~p",
-                        [Reason, Stacktrace]),
+            ?LOG_ERROR(
+                "Extension method threw error: ~p~nStacktrace: ~p",
+                [Reason, Stacktrace]
+            ),
             erlang:raise(error, Reason, Stacktrace)
     end.
 
@@ -377,4 +398,3 @@ check_extension(ClassName, Selector) ->
             %% ETS table doesn't exist yet (early bootstrap)
             not_found
     end.
-

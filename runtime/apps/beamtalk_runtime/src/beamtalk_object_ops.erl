@@ -72,53 +72,41 @@ dispatch(class, [], _Self, State) ->
     ClassName = beamtalk_tagged_map:class_of(State),
     ClassObj = beamtalk_primitive:class_of_object_by_name(ClassName),
     {reply, ClassObj, State};
-
 dispatch('respondsTo:', [Selector], _Self, State) when is_atom(Selector) ->
     ClassName = beamtalk_tagged_map:class_of(State),
     Result = beamtalk_dispatch:responds_to(Selector, ClassName),
     {reply, Result, State};
-
 dispatch('instVarNames', [], _Self, State) ->
     {reply, beamtalk_reflection:field_names(State), State};
-
 dispatch('instVarAt:', [FieldName], _Self, State) ->
     {reply, beamtalk_reflection:read_field(FieldName, State), State};
-
 dispatch('instVarAt:put:', [FieldName, Value], _Self, State) ->
     {WrittenValue, NewState} = beamtalk_reflection:write_field(FieldName, Value, State),
     {reply, WrittenValue, NewState};
-
 %% --- Display methods ---
 
 dispatch('printString', [], _Self, State) ->
     ClassName = beamtalk_tagged_map:class_of(State, 'Object'),
     Str = iolist_to_binary([<<"a ">>, atom_to_binary(ClassName, utf8)]),
     {reply, Str, State};
-
 dispatch(inspect, [], _Self, State) ->
     Str = beamtalk_reflection:inspect_string(State),
     {reply, Str, State};
-
 dispatch(describe, [], _Self, State) ->
     ClassName = beamtalk_tagged_map:class_of(State, 'Object'),
     Str = iolist_to_binary([<<"an instance of ">>, atom_to_binary(ClassName, utf8)]),
     {reply, Str, State};
-
 %% --- Utility methods ---
 
 dispatch(yourself, [], Self, State) ->
     {reply, Self, State};
-
 dispatch(hash, [], Self, State) ->
     Hash = erlang:phash2(Self),
     {reply, Hash, State};
-
 dispatch(isNil, [], _Self, State) ->
     {reply, false, State};
-
 dispatch(notNil, [], _Self, State) ->
     {reply, true, State};
-
 %% --- Dynamic dispatch methods (BT-427) ---
 
 dispatch('perform:', [TargetSelector], Self, State) when is_atom(TargetSelector) ->
@@ -127,30 +115,29 @@ dispatch('perform:', [TargetSelector], Self, State) when is_atom(TargetSelector)
     ClassName = beamtalk_tagged_map:class_of(State),
     Result = beamtalk_dispatch:lookup(TargetSelector, [], Self, State, ClassName),
     normalize_dispatch_result(Result, State);
-
-dispatch('perform:withArguments:', [TargetSelector, ArgList], Self, State)
-  when is_atom(TargetSelector), is_list(ArgList) ->
+dispatch('perform:withArguments:', [TargetSelector, ArgList], Self, State) when
+    is_atom(TargetSelector), is_list(ArgList)
+->
     %% Dynamic message send with argument list
     %% obj perform: #'at:put:' withArguments: #(1, 'x')
     ClassName = beamtalk_tagged_map:class_of(State),
     Result = beamtalk_dispatch:lookup(TargetSelector, ArgList, Self, State, ClassName),
     normalize_dispatch_result(Result, State);
-
 dispatch('perform:withArguments:', [_TargetSelector, _ArgList], _Self, State) ->
     ClassName = beamtalk_tagged_map:class_of(State, 'Object'),
     Error0 = beamtalk_error:new(type_error, ClassName),
     Error1 = beamtalk_error:with_selector(Error0, 'perform:withArguments:'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Expected atom selector and list of arguments">>),
     {error, Error2, State};
-
 %% BT-405: Abstract method contract — mirrors Object.bt pure method body
 %% Runtime clause needed until compiled stdlib dispatch is wired up
 dispatch(subclassResponsibility, [], _Self, State) ->
     ClassName = beamtalk_tagged_map:class_of(State, 'Object'),
     Error0 = beamtalk_error:new(user_error, ClassName),
-    Error1 = beamtalk_error:with_message(Error0, <<"This method is abstract and must be overridden by a subclass">>),
+    Error1 = beamtalk_error:with_message(
+        Error0, <<"This method is abstract and must be overridden by a subclass">>
+    ),
     {error, Error1, State};
-
 %% --- Fallback: method not found ---
 
 dispatch(Selector, _Args, _Self, State) ->
@@ -192,12 +179,16 @@ normalize_dispatch_result(Other, _State) ->
 normalize_dispatch_result_error_test() ->
     State = #{},
     Error = beamtalk_error:new(does_not_understand, 'Test'),
-    ?assertMatch({error, #beamtalk_error{kind = does_not_understand}, #{}},
-                 normalize_dispatch_result({error, Error}, State)).
+    ?assertMatch(
+        {error, #beamtalk_error{kind = does_not_understand}, #{}},
+        normalize_dispatch_result({error, Error}, State)
+    ).
 
 normalize_dispatch_result_reply_test() ->
     State = #{},
-    ?assertMatch({reply, 42, #{}},
-                 normalize_dispatch_result({reply, 42, State}, State)).
+    ?assertMatch(
+        {reply, 42, #{}},
+        normalize_dispatch_result({reply, 42, State}, State)
+    ).
 
 -endif.

@@ -7,7 +7,8 @@
     {mod, {beamtalk_workspace_app, []}},
     {env, [
         {repl_port, 9000},
-        {idle_timeout, 3600000},  % 1 hour in milliseconds
+        % 1 hour in milliseconds
+        {idle_timeout, 3600000},
         {workspace_cleanup_enabled, true}
     ]}
 ]}.

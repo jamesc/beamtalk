@@ -19,20 +19,21 @@ test_config() ->
         workspace_id => <<"test123">>,
         project_path => <<"/tmp/test">>,
         tcp_port => 49152,
-        auto_cleanup => false  % Disable for testing
+        % Disable for testing
+        auto_cleanup => false
     }.
 
 %%% Supervisor flags tests
 
 supervisor_strategy_test() ->
     {ok, {SupFlags, _ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
-    
+
     %% Should use one_for_one strategy
     ?assertEqual(one_for_one, maps:get(strategy, SupFlags)).
 
 supervisor_intensity_test() ->
     {ok, {SupFlags, _ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
-    
+
     %% Should allow 5 restarts in 10 seconds
     ?assertEqual(5, maps:get(intensity, SupFlags)),
     ?assertEqual(10, maps:get(period, SupFlags)).
@@ -41,13 +42,13 @@ supervisor_intensity_test() ->
 
 children_count_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
-    
+
     %% Should have 10 children: workspace_meta, transcript_stream, system_dictionary, actor_registry, workspace_environment, workspace_bootstrap, repl_server, idle_monitor, actor_sup, session_sup
     ?assertEqual(10, length(ChildSpecs)).
 
 children_ids_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
-    
+
     %% Verify all expected children are present
     Ids = [maps:get(id, Spec) || Spec <- ChildSpecs],
     ?assert(lists:member(beamtalk_workspace_meta, Ids)),
@@ -63,14 +64,14 @@ children_ids_test() ->
 
 workspace_meta_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
-    
+
     %% Find workspace_meta child spec
     [MetaSpec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_workspace_meta],
-    
+
     %% Should be a worker, permanent, with correct module
     ?assertEqual(worker, maps:get(type, MetaSpec)),
     ?assertEqual(permanent, maps:get(restart, MetaSpec)),
-    
+
     %% Start function should use beamtalk_workspace_meta:start_link with config map
     {Mod, Fun, [Config]} = maps:get(start, MetaSpec),
     ?assertEqual(beamtalk_workspace_meta, Mod),
@@ -79,45 +80,56 @@ workspace_meta_spec_test() ->
 
 actor_registry_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
-    
+
     %% Find actor_registry child spec
     [RegistrySpec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_actor_registry],
     ?assertEqual(worker, maps:get(type, RegistrySpec)),
     ?assertEqual(permanent, maps:get(restart, RegistrySpec)),
-    ?assertEqual({beamtalk_repl_actors, start_link, [registered]}, 
-                 maps:get(start, RegistrySpec)).
+    ?assertEqual(
+        {beamtalk_repl_actors, start_link, [registered]},
+        maps:get(start, RegistrySpec)
+    ).
 
 repl_server_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
-    
+
     %% Find repl_server child spec
     [ReplSpec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_repl_server],
     ?assertEqual(worker, maps:get(type, ReplSpec)),
     ?assertEqual(permanent, maps:get(restart, ReplSpec)),
-    ?assertEqual({beamtalk_repl_server, start_link, [#{port => 49152, workspace_id => <<"test123">>, bind_addr => {127, 0, 0, 1}, web_port => undefined}]}, 
-                 maps:get(start, ReplSpec)).
+    ?assertEqual(
+        {beamtalk_repl_server, start_link, [
+            #{
+                port => 49152,
+                workspace_id => <<"test123">>,
+                bind_addr => {127, 0, 0, 1},
+                web_port => undefined
+            }
+        ]},
+        maps:get(start, ReplSpec)
+    ).
 
 idle_monitor_spec_test() ->
     Config = test_config(),
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(Config),
-    
+
     %% Find idle_monitor child specs
     MonitorSpecs = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_idle_monitor],
-    
+
     %% With auto_cleanup => false, idle_monitor should still be in child specs
     %% (supervisor filters at runtime, not init time)
     ?assertEqual(1, length(MonitorSpecs)),
-    
+
     [MonitorSpec] = MonitorSpecs,
     ?assertEqual(worker, maps:get(type, MonitorSpec)),
     ?assertEqual(permanent, maps:get(restart, MonitorSpec)).
 
 actor_sup_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
-    
+
     %% Find actor_sup child spec
     [ActorSupSpec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_actor_sup],
-    
+
     %% Should be a supervisor, permanent
     ?assertEqual(supervisor, maps:get(type, ActorSupSpec)),
     ?assertEqual(permanent, maps:get(restart, ActorSupSpec)),
@@ -125,10 +137,10 @@ actor_sup_spec_test() ->
 
 session_sup_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
-    
+
     %% Find session_sup child spec
     [SessionSupSpec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_session_sup],
-    
+
     %% Should be a supervisor, permanent
     ?assertEqual(supervisor, maps:get(type, SessionSupSpec)),
     ?assertEqual(permanent, maps:get(restart, SessionSupSpec)),
@@ -138,23 +150,28 @@ session_sup_spec_test() ->
 
 transcript_stream_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
-    
+
     [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_transcript_stream],
     ?assertEqual(worker, maps:get(type, Spec)),
     ?assertEqual(permanent, maps:get(restart, Spec)),
-    ?assertEqual({beamtalk_transcript_stream, start_link, [{local, 'Transcript'}, 1000]}, maps:get(start, Spec)).
+    ?assertEqual(
+        {beamtalk_transcript_stream, start_link, [{local, 'Transcript'}, 1000]},
+        maps:get(start, Spec)
+    ).
 
 system_dictionary_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
-    
+
     [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_system_dictionary],
     ?assertEqual(worker, maps:get(type, Spec)),
     ?assertEqual(permanent, maps:get(restart, Spec)),
-    ?assertEqual({beamtalk_system_dictionary, start_link, [{local, 'Beamtalk'}, []]}, maps:get(start, Spec)).
+    ?assertEqual(
+        {beamtalk_system_dictionary, start_link, [{local, 'Beamtalk'}, []]}, maps:get(start, Spec)
+    ).
 
 singletons_after_metadata_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
-    
+
     Ids = [maps:get(id, S) || S <- ChildSpecs],
     %% Singletons must come after workspace_meta (boot ordering)
     MetaIdx = index_of(beamtalk_workspace_meta, Ids),
@@ -167,16 +184,18 @@ singletons_after_metadata_test() ->
 
 bootstrap_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
-    
+
     [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_workspace_bootstrap],
     ?assertEqual(worker, maps:get(type, Spec)),
     ?assertEqual(permanent, maps:get(restart, Spec)),
     %% ProjectPath from test_config is <<"/tmp/test">> — passed for BT-739 module activation
-    ?assertEqual({beamtalk_workspace_bootstrap, start_link, [<<"/tmp/test">>]}, maps:get(start, Spec)).
+    ?assertEqual(
+        {beamtalk_workspace_bootstrap, start_link, [<<"/tmp/test">>]}, maps:get(start, Spec)
+    ).
 
 bootstrap_after_singletons_before_repl_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
-    
+
     Ids = [maps:get(id, S) || S <- ChildSpecs],
     BootstrapIdx = index_of(beamtalk_workspace_bootstrap, Ids),
     WorkspaceEnvironmentIdx = index_of(beamtalk_workspace_environment, Ids),
@@ -211,11 +230,12 @@ all_children_alive_test() ->
     Config = Config0#{tcp_port => 0},
 
     %% Handle already-started supervisor (registered name)
-    {Sup, WeStarted} = case beamtalk_workspace_sup:start_link(Config) of
-        {ok, Pid} -> {Pid, true};
-        {error, {already_started, Pid}} -> {Pid, false}
-    end,
-    
+    {Sup, WeStarted} =
+        case beamtalk_workspace_sup:start_link(Config) of
+            {ok, Pid} -> {Pid, true};
+            {error, {already_started, Pid}} -> {Pid, false}
+        end,
+
     %% If supervisor was already running, give children time to stabilize
     case WeStarted of
         false -> timer:sleep(100);
@@ -247,15 +267,21 @@ all_children_alive_test() ->
         ?assertEqual(lists:sort(ExpectedIds), lists:sort(ActualIds)),
 
         %% Verify each child process is alive
-        lists:foreach(fun({_Id, ChildPid, _Type, _Modules}) ->
-            ?assert(is_process_alive(ChildPid))
-        end, Children)
+        lists:foreach(
+            fun({_Id, ChildPid, _Type, _Modules}) ->
+                ?assert(is_process_alive(ChildPid))
+            end,
+            Children
+        )
     after
         %% Only shut down supervisor if we started it
         case WeStarted of
             true ->
                 exit(Sup, shutdown),
-                receive {'EXIT', Sup, _} -> ok after 1000 -> ok end;
+                receive
+                    {'EXIT', Sup, _} -> ok
+                after 1000 -> ok
+                end;
             false ->
                 ok
         end,
@@ -322,8 +348,10 @@ workspace_environment_spec_test() ->
     [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_workspace_environment],
     ?assertEqual(worker, maps:get(type, Spec)),
     ?assertEqual(permanent, maps:get(restart, Spec)),
-    ?assertEqual({beamtalk_workspace_environment, start_link, [{local, 'Workspace'}]},
-                 maps:get(start, Spec)).
+    ?assertEqual(
+        {beamtalk_workspace_environment, start_link, [{local, 'Workspace'}]},
+        maps:get(start, Spec)
+    ).
 
 %%% Registry interleaving test
 
@@ -368,12 +396,17 @@ singleton_specs_have_local_registration_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
 
     %% Every singleton should use {local, Name} registration
-    SingletonIds = [beamtalk_transcript_stream, beamtalk_system_dictionary, beamtalk_workspace_environment],
-    lists:foreach(fun(Id) ->
-        [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == Id],
-        {_Mod, start_link, [{local, _Name} | _Args]} = maps:get(start, Spec),
-        ok
-    end, SingletonIds).
+    SingletonIds = [
+        beamtalk_transcript_stream, beamtalk_system_dictionary, beamtalk_workspace_environment
+    ],
+    lists:foreach(
+        fun(Id) ->
+            [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == Id],
+            {_Mod, start_link, [{local, _Name} | _Args]} = maps:get(start, Spec),
+            ok
+        end,
+        SingletonIds
+    ).
 
 %%% REPL server config test
 
@@ -383,8 +416,17 @@ repl_server_config_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(Config),
 
     [ReplSpec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_repl_server],
-    ?assertEqual({beamtalk_repl_server, start_link, [#{port => 12345, workspace_id => <<"ws-custom">>, bind_addr => {127, 0, 0, 1}, web_port => undefined}]},
-                 maps:get(start, ReplSpec)).
+    ?assertEqual(
+        {beamtalk_repl_server, start_link, [
+            #{
+                port => 12345,
+                workspace_id => <<"ws-custom">>,
+                bind_addr => {127, 0, 0, 1},
+                web_port => undefined
+            }
+        ]},
+        maps:get(start, ReplSpec)
+    ).
 
 %%% Bind address config test
 

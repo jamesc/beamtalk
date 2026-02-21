@@ -12,7 +12,6 @@
 on_actor_spawned(RegistryPid, ActorPid, ClassName, ModuleName) ->
     case whereis(spawn_callback_test) of
         undefined -> ok;
-        TestPid ->
-            TestPid ! {callback_invoked, RegistryPid, ActorPid, ClassName, ModuleName}
+        TestPid -> TestPid ! {callback_invoked, RegistryPid, ActorPid, ClassName, ModuleName}
     end,
     ok.

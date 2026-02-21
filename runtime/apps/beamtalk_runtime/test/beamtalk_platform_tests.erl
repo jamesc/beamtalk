@@ -46,11 +46,11 @@ home_dir_falls_back_to_userprofile_test() ->
         %% Restore original state
         case OrigUserProfile of
             false -> os:unsetenv("USERPROFILE");
-            UP    -> os:putenv("USERPROFILE", UP)
+            UP -> os:putenv("USERPROFILE", UP)
         end,
         case OrigHome of
             false -> ok;
-            Val   -> os:putenv("HOME", Val)
+            Val -> os:putenv("HOME", Val)
         end
     end.
 
@@ -66,10 +66,10 @@ home_dir_returns_false_when_no_env_test() ->
         %% Restore original state
         case OrigUserProfile of
             false -> ok;
-            UP    -> os:putenv("USERPROFILE", UP)
+            UP -> os:putenv("USERPROFILE", UP)
         end,
         case OrigHome of
             false -> ok;
-            H     -> os:putenv("HOME", H)
+            H -> os:putenv("HOME", H)
         end
     end.

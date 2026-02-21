@@ -67,33 +67,26 @@ is_builtin(_) -> false.
 %% selector => returns the method's selector atom
 builtin_dispatch('selector', [], #{'__selector__' := Sel}) ->
     {ok, Sel};
-
 %% source => returns the method's source code binary
 builtin_dispatch('source', [], #{'__source__' := Src}) ->
     {ok, Src};
-
 %% argumentCount => returns the method's arity
 builtin_dispatch('argumentCount', [], #{'__method_info__' := Info}) ->
     {ok, maps:get(arity, Info, 0)};
-
 %% class => returns 'CompiledMethod'
 builtin_dispatch('class', [], _Value) ->
     {ok, 'CompiledMethod'};
-
 %% printString => human-readable representation
 builtin_dispatch('printString', [], #{
     '__selector__' := Sel
 }) ->
     {ok, iolist_to_binary(io_lib:format("a CompiledMethod(~s)", [Sel]))};
-
 %% asString => same as printString
 builtin_dispatch('asString', [], Value) ->
     builtin_dispatch('printString', [], Value);
-
 %% respondsTo: => check if responds to a selector
 builtin_dispatch('respondsTo:', [Sel], _Value) ->
     {ok, is_builtin(Sel)};
-
 builtin_dispatch(_Selector, _Args, _Value) ->
     not_found.
 
@@ -106,6 +99,8 @@ builtin_dispatch(_Selector, _Args, _Value) ->
 does_not_understand(Selector, _Args, _Value) ->
     Error0 = beamtalk_error:new(does_not_understand, 'CompiledMethod'),
     Error1 = beamtalk_error:with_selector(Error0, Selector),
-    Error2 = beamtalk_error:with_hint(Error1,
-        <<"CompiledMethod supports: selector, source, argumentCount, class, printString, asString, respondsTo:">>),
+    Error2 = beamtalk_error:with_hint(
+        Error1,
+        <<"CompiledMethod supports: selector, source, argumentCount, class, printString, asString, respondsTo:">>
+    ),
     beamtalk_error:raise(Error2).

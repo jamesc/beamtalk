@@ -20,12 +20,12 @@ home_dir() ->
     normalize_env(
         case os:getenv("HOME") of
             false -> os:getenv("USERPROFILE");
-            Home  -> Home
+            Home -> Home
         end
     ).
 
 %% @private Treat empty env var values as unset.
 -spec normalize_env(string() | false) -> string() | false.
 normalize_env(false) -> false;
-normalize_env("")    -> false;
-normalize_env(Val)   -> Val.
+normalize_env("") -> false;
+normalize_env(Val) -> Val.
