@@ -1,4 +1,17 @@
 {
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/worktree-init.sh"
+          }
+        ]
+      }
+    ]
+  },
   "permissions": {
     "allow": [
       "Bash(just build:*)",
@@ -24,6 +37,9 @@
       "Bash(just clippy:*)",
       "Bash(just clippy)",
       "Bash(just lint:*)",
+      "Bash(just lint-rust:*)",
+      "Bash(just lint-erlang:*)",
+      "Bash(just lint-js:*)",
       "Bash(just dialyzer:*)",
       "Bash(just clean:*)",
       "Bash(just coverage:*)",

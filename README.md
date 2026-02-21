@@ -307,7 +307,11 @@ npm install -g @devcontainers/cli
 2. Open in VS Code: **File → Open Folder**
 3. When prompted, click **Reopen in Container**
 4. Wait for container build (~5 minutes first time)
-5. Open a terminal and run: `cargo build`
+5. Open a terminal and run: `just build`
+6. Enable the pre-push lint hook:
+   ```bash
+   git config core.hooksPath .githooks
+   ```
 
 The devcontainer includes all dependencies pre-configured:
 - Rust toolchain with `clippy`, `rustfmt`, `rust-analyzer`
