@@ -339,32 +339,10 @@ impl CoreErlangGenerator {
 
             self.current_nlr_token = None;
 
-            // BT-761: Sealed methods are standalone functions (not inside case arms),
-            // so the try/catch can be placed directly at function level.
+            // BT-761/BT-764: Sealed methods are standalone functions (not inside case arms),
+            // so the try/catch can be placed directly at function level (no letrec needed).
             let body_str = if let Some(ref token_var) = nlr_token_var {
-                let result_var = self.fresh_temp_var("NlrResult");
-                let cls_var = self.fresh_temp_var("NlrCls");
-                let err_var = self.fresh_temp_var("NlrErr");
-                let stk_var = self.fresh_temp_var("NlrStk");
-                let ctk_var = self.fresh_temp_var("CatchTok");
-                let val_var = self.fresh_temp_var("NlrVal");
-                let state_var = self.fresh_temp_var("NlrState");
-                let ot_pair_var = self.fresh_temp_var("OtherPair");
-
-                format!(
-                    "let {token_var} = call 'erlang':'make_ref'() in\n\
-                     try\n\
-                     {body_str}\n\
-                     of {result_var} -> {result_var}\n\
-                     catch <{cls_var}, {err_var}, {stk_var}> ->\n\
-                       case {{{cls_var}, {err_var}}} of\n\
-                         <{{'throw', {{'$bt_nlr', {ctk_var}, {val_var}, {state_var}}}}}> \
-                     when call 'erlang':'=:='({ctk_var}, {token_var}) -> \
-                     {{'reply', {val_var}, {state_var}}}\n\
-                         <{ot_pair_var}> when 'true' -> \
-                     primop 'raw_raise'({cls_var}, {err_var}, {stk_var})\n\
-                       end"
-                )
+                self.wrap_actor_body_with_nlr_catch(&body_str, token_var, false)
             } else {
                 body_str
             };
