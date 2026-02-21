@@ -51,7 +51,12 @@ const REPL_PORT: u16 = 9000;
 /// Explicit cookie for E2E test BEAM nodes.
 /// Both the `erl` process and the WebSocket client use this value so that
 /// authentication succeeds regardless of whether `~/.erlang.cookie` exists.
-const E2E_COOKIE: &str = "beamtalk_e2e_test_cookie";
+/// The value can be overridden at compile time via the `E2E_COOKIE` environment
+/// variable to avoid a single, predictable repo-wide cookie.
+const E2E_COOKIE: &str = match option_env!("E2E_COOKIE") {
+    Some(v) => v,
+    None => "beamtalk_e2e_test_cookie",
+};
 
 /// Timeout for REPL operations.
 /// Cover-instrumented BEAM is slower; `E2E_COVER` bumps this to 120s.
