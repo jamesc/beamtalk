@@ -608,7 +608,7 @@ fn generate_doc_test_eunit_wrapper(
         let escaped_file = source_file.replace('\\', "\\\\").replace('"', "\\\"");
         let escaped_expr = case.expression.replace('\\', "\\\\").replace('"', "\\\"");
         let location = format!("{escaped_file}:{} `{escaped_expr}`", case.source_line);
-        let location_bin = format!("<<\"{location}\">>");
+        let location_bin = format!("<<\"{location}\"/utf8>>");
 
         let var_atom = match extract_assignment_var(&case.expression) {
             Some(name) => format!("'{name}'"),
