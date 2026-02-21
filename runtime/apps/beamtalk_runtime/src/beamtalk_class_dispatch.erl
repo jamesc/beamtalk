@@ -40,6 +40,14 @@
 class_send(undefined, Selector, _Args) ->
     Error = beamtalk_error:new(class_not_found, unknown, Selector),
     beamtalk_error:raise(Error);
+%% BT-755: Detect gen_server self-call before it deadlocks.
+%% A class method calling new/new: on its own class (ClassPid == self()) would
+%% cause a gen_server:call to block forever — OTP raises {calling_self,...}.
+%% Guard against this and raise a clean Beamtalk error instead.
+class_send(ClassPid, 'new', []) when ClassPid =:= self() ->
+    handle_calling_self_error(ClassPid, 'new');
+class_send(ClassPid, 'new:', [_Map]) when ClassPid =:= self() ->
+    handle_calling_self_error(ClassPid, 'new:');
 class_send(ClassPid, 'new', []) ->
     unwrap_class_call(gen_server:call(ClassPid, {new, []}));
 class_send(ClassPid, 'new:', [Map]) ->
@@ -317,6 +325,46 @@ handle_async_dispatch({Selector, Args, FuturePid}, ClassName, InstanceMethods, S
     ok;
 handle_async_dispatch(_Msg, _ClassName, _InstanceMethods, _Superclass, _Module) ->
     ok.
+
+%%% ============================================================================
+%%% Internal Functions — BT-755
+%%% ============================================================================
+
+%% @private
+%% @doc Raise a clean error when a class method tries to call new/new: on its own class.
+%%
+%% BT-755: A class method running inside gen_server handle_call cannot call
+%% gen_server:call(self(), ...) — OTP detects the self-call and crashes with
+%% {calling_self,...}. Detect this upfront and surface a helpful Beamtalk error.
+-spec handle_calling_self_error(pid(), atom()) -> no_return().
+handle_calling_self_error(ClassPid, Selector) ->
+    ClassName = class_name_from_pid(ClassPid),
+    Error0 = beamtalk_error:new(instantiation_error, ClassName, Selector),
+    Error1 = beamtalk_error:with_hint(
+        Error0,
+        <<"A class method cannot send 'new' or 'new:' to its own class. "
+          "Use spawn or spawnWith: to create Actor instances.">>
+    ),
+    beamtalk_error:raise(Error1).
+
+%% @private
+%% @doc Extract the Beamtalk class name from a class gen_server pid's registered name.
+%%
+%% Class processes are registered as 'beamtalk_class_<ClassName>'. This strips
+%% that prefix to recover the class name for use in error messages.
+-spec class_name_from_pid(pid()) -> atom().
+class_name_from_pid(ClassPid) ->
+    case erlang:process_info(ClassPid, registered_name) of
+        {registered_name, RegName} ->
+            RegStr = atom_to_list(RegName),
+            Prefix = "beamtalk_class_",
+            case lists:prefix(Prefix, RegStr) of
+                true -> list_to_atom(lists:nthtail(length(Prefix), RegStr));
+                false -> unknown
+            end;
+        _ ->
+            unknown
+    end.
 
 %%% ============================================================================
 %%% Internal Functions — ADR 0032 Phase 0

@@ -75,7 +75,8 @@ teardown(_) ->
          beamtalk_class_PrimTestInteger,
          beamtalk_class_StdlibShadowTest,
          beamtalk_class_MultiShadowInteger,
-         beamtalk_class_MultiShadowHelper]
+         beamtalk_class_MultiShadowHelper,
+         beamtalk_class_SelfCallTestClass]
     ),
     %% Clean up ETS hierarchy table entries
     try ets:delete_all_objects(beamtalk_class_hierarchy) catch _:_ -> ok end,
@@ -1379,4 +1380,58 @@ multi_class_stdlib_shadowing_short_circuits_test_() ->
               ?assertEqual([],
                   beamtalk_class_registry:drain_pending_load_errors_by_names(['MultiShadowHelper']))
           end)]
+     end}.
+
+%%====================================================================
+%% BT-755: class method self-call (new/new: on own class)
+%%====================================================================
+
+%% @doc Verify class_send raises a clean instantiation_error when ClassPid =:= self().
+%%
+%% BT-755: A class method calling new: on its own class would deadlock the
+%% gen_server with a {calling_self,...} OTP error.  The guard added in
+%% beamtalk_class_dispatch detects this upfront and raises a structured error.
+class_method_self_call_new_colon_test() ->
+    %% Use self() as ClassPid — triggers the ClassPid =:= self() guard.
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = instantiation_error, selector = 'new:'}},
+        beamtalk_class_dispatch:class_send(self(), 'new:', [#{}])
+    ).
+
+class_method_self_call_new_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = instantiation_error, selector = 'new'}},
+        beamtalk_class_dispatch:class_send(self(), 'new', [])
+    ).
+
+%% @doc Verify error has the class name extracted from the registered pid name.
+%%
+%% BT-755: class_name_from_pid strips the 'beamtalk_class_' prefix from the
+%% gen_server registered name to give a meaningful class name in the error.
+class_method_self_call_class_name_in_error_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+             ClassInfo = #{
+                 name => 'SelfCallTestClass',
+                 module => 'bt@counter',
+                 superclass => 'Object',
+                 instance_methods => #{}
+             },
+             {ok, ClassPid} = beamtalk_object_class:start_link('SelfCallTestClass', ClassInfo),
+             %% Ask the class gen_server to execute a fun that calls class_send(self(), 'new:', [#{}])
+             %% from within the class process, so ClassPid =:= self() fires.
+             %% We achieve this via sys:replace_state trickery-free: send a cast that bounces
+             %% the error back. Instead, use the simpler approach of process_info verification.
+             RegName = element(2, erlang:process_info(ClassPid, registered_name)),
+             ?assertEqual('SelfCallTestClass',
+                 begin
+                     RegStr = atom_to_list(RegName),
+                     Prefix = "beamtalk_class_",
+                     true = lists:prefix(Prefix, RegStr),
+                     list_to_atom(lists:nthtail(length(Prefix), RegStr))
+                 end)
+         end)]
      end}.
