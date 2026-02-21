@@ -274,6 +274,7 @@ module_for_value(X) when is_map(X) ->
         'TestCase' -> 'bt@stdlib@test_case';
         'Regex' -> 'bt@stdlib@regex';
         'DateTime' -> 'bt@stdlib@date_time';
+        'TestResult' -> 'bt@stdlib@test_result';
         undefined -> 'bt@stdlib@dictionary';
         _ -> undefined
     end;

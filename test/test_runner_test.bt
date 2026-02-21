@@ -1,0 +1,33 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for TestRunner and TestResult (BT-762)
+// @load test/fixtures/sample_test_case.bt
+
+TestCase subclass: TestRunnerTest
+
+  testResultTotal =>
+    result := TestRunner run: SampleTestCase.
+    self assert: (result total) equals: 2
+
+  testResultPassed =>
+    result := TestRunner run: SampleTestCase.
+    self assert: (result passed) equals: 2
+
+  testResultFailed =>
+    result := TestRunner run: SampleTestCase.
+    self assert: (result failed) equals: 0
+
+  testResultHasPassed =>
+    result := TestRunner run: SampleTestCase.
+    self assert: (result hasPassed)
+
+  testResultSummary =>
+    result := TestRunner run: SampleTestCase.
+    self deny: (result summary == nil)
+
+  testRunSingleMethod =>
+    result := TestRunner run: SampleTestCase method: #testPassing.
+    self assert: (result total) equals: 1.
+    self assert: (result passed) equals: 1.
+    self assert: (result hasPassed)

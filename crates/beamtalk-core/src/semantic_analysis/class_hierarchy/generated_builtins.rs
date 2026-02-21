@@ -59,6 +59,8 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "System"
             | "SystemDictionary"
             | "TestCase"
+            | "TestResult"
+            | "TestRunner"
             | "ThrowError"
             | "TranscriptStream"
             | "True"
@@ -1258,6 +1260,51 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![
                 MethodInfo { selector: "runAll".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestCase".into(), is_sealed: false, return_type: None, param_types: vec![] },
                 MethodInfo { selector: "run:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "TestCase".into(), is_sealed: false, return_type: None, param_types: vec![None] },
+            ],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "TestResult".into(),
+        ClassInfo {
+            name: "TestResult".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "passed".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestResult".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![] },
+                MethodInfo { selector: "failed".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestResult".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![] },
+                MethodInfo { selector: "total".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestResult".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![] },
+                MethodInfo { selector: "duration".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestResult".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
+                MethodInfo { selector: "failures".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestResult".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![] },
+                MethodInfo { selector: "hasPassed".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestResult".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![] },
+                MethodInfo { selector: "summary".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestResult".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestResult".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "TestRunner".into(),
+        ClassInfo {
+            name: "TestRunner".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "runAll".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestRunner".into(), is_sealed: false, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "run:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "TestRunner".into(), is_sealed: false, return_type: None, param_types: vec![None] },
+                MethodInfo { selector: "run:method:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "TestRunner".into(), is_sealed: false, return_type: None, param_types: vec![None, None] },
             ],
             class_variables: vec![],
         },
