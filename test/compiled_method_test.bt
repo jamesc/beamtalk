@@ -35,5 +35,9 @@ TestCase subclass: CompiledMethodTest
   testPrintString =>
     (Counter >> #getValue) printString
 
+  testLookupOnNonClass =>
+    // >> on non-class value produces type_error
+    self should: [42 >> #foo] raise: #type_error
+
   testAsString =>
     (Counter >> #getValue) asString

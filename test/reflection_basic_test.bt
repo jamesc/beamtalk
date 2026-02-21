@@ -33,5 +33,5 @@ TestCase subclass: ReflectionBasicTest
     self assert: ((c perform: #increment) await) equals: 43.
     // Verify increment worked via getValue
     self assert: (c getValue await) equals: 43.
-    // BT-359: some reflection methods trigger compile-time type errors in BUnit
-    nil
+    // BT-359: instVarAt: on value types raises immutable_value error
+    self should: [42 instVarAt: #x] raise: #immutable_value

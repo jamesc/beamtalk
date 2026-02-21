@@ -80,6 +80,7 @@ TestCase subclass: StreamTest
     self assert: ((Stream on: #()) inject: 0 into: [:acc :x | acc + x]) equals: 0.
     self assert: (((Stream on: #(1, 2, 3)) drop: 10) asList) equals: #()
 
-  testNoteConstructorErrorPathsStreamFromXCannotBeTestedIn =>
-    // Compile-time type errors; tested in tests/stdlib/stream.bt
-    nil
+  testInstanceMethodTypeErrors =>
+    // Instance method type errors (constructor errors cannot be tested due to gen_server limitation)
+    self should: [(Stream from: 1) select: "not a block"] raise: #type_error.
+    self should: [(Stream from: 1) collect: 42] raise: #type_error

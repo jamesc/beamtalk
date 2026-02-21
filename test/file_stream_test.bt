@@ -95,9 +95,9 @@ TestCase subclass: FileStreamTest
     self should: [File open: "tests/stdlib/fixtures/nonexistent.txt" do: [:h | h lines asList]] raise: #file_not_found
 
   testErrorPathsTypeErrors =>
-    // Compile-time type errors; tested in tests/stdlib/file_stream.bt
-    // self should: [File open: 42 do: [:h | h lines asList]] raise: #type_error.
-    // self should: [File open: "tests/stdlib/fixtures/stream_test.txt" do: "not a block"] raise: #type_error.
+    // Type errors that produce compile-time warnings but still run correctly
+    self should: [File open: 42 do: [:h | h lines asList]] raise: #type_error.
+    self should: [File open: "tests/stdlib/fixtures/stream_test.txt" do: "not a block"] raise: #type_error.
     // lines: with absolute path (security)
     self should: [File lines: "/etc/passwd"] raise: #invalid_path.
     // lines: with directory traversal

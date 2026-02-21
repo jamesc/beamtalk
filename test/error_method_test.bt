@@ -30,5 +30,8 @@ TestCase subclass: ErrorMethodTest
     self assert: (v check: 5) equals: 5
 
   testErrorWithNonStringArgument =>
-    // Compile-time type error in BUnit: error: expects String argument
-    nil
+    // Integer error message is coerced — raises user_error not type_error
+    self should: [42 error: 99] raise: #user_error.
+    // Verify kind and errorClass via on:do:
+    self assert: ([42 error: 99] on: Exception do: [:e | e kind]) equals: #user_error.
+    self assert: ([42 error: 99] on: Exception do: [:e | e errorClass]) equals: #Integer
