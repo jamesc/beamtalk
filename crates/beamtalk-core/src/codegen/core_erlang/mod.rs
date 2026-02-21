@@ -498,6 +498,13 @@ pub(super) struct CoreErlangGenerator {
     /// BT-245: Name of the dispatch tuple variable from the last `generate_self_dispatch_open`.
     /// Contains `{Result, State}` — callers can extract element 1 for the result value.
     last_dispatch_var: Option<String>,
+    /// BT-754: Core Erlang variable name holding the non-local return token for the current
+    /// value type method, or `None` when no NLR infrastructure is active.
+    ///
+    /// Set by `generate_value_type_method` when the method body contains blocks with `^`.
+    /// When set, `generate_expression` for `Expression::Return` generates a throw instead
+    /// of a plain value, causing the return to escape from the enclosing block closure.
+    current_nlr_token: Option<String>,
 }
 
 impl CoreErlangGenerator {
@@ -524,6 +531,7 @@ impl CoreErlangGenerator {
             last_open_scope_result: None,
             repl_loop_mutated: false,
             last_dispatch_var: None,
+            current_nlr_token: None,
         }
     }
 
@@ -550,6 +558,7 @@ impl CoreErlangGenerator {
             last_open_scope_result: None,
             repl_loop_mutated: false,
             last_dispatch_var: None,
+            current_nlr_token: None,
         }
     }
 
@@ -824,8 +833,22 @@ impl CoreErlangGenerator {
                 self.generate_expression(value)
             }
             Expression::Return { value, .. } => {
-                // Return in Core Erlang is just the value
-                self.generate_expression(value)
+                // BT-754: If inside a block with NLR infrastructure active, generate a throw
+                // so the return escapes from the block closure back to the enclosing method.
+                // Otherwise (at method body level, or no NLR), just emit the value.
+                if let Some(nlr_token) = self.current_nlr_token.clone() {
+                    let val_doc = self.generate_expression(value)?;
+                    Ok(docvec![
+                        "call 'erlang':'throw'({'$bt_nlr', ",
+                        nlr_token,
+                        ", ",
+                        val_doc,
+                        "})"
+                    ])
+                } else {
+                    // Return in Core Erlang is just the value
+                    self.generate_expression(value)
+                }
             }
             Expression::FieldAccess {
                 receiver, field, ..

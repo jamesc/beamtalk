@@ -14,10 +14,10 @@ module 'intrinsic_keyword' ['new'/0, 'new'/1, 'blockValue'/1, 'size'/1, 'dispatc
     call 'maps':'merge'(DefaultState, InitArgs)
 
 
-'blockValue'/1= fun (Self) ->
+'blockValue'/1 = fun (Self) ->
 call 'bt@stdlib@foo':'dispatch'('blockValue', [], Self)
 
-'size'/1= fun (Self) ->
+'size'/1 = fun (Self) ->
 call 'bt@stdlib@foo':'dispatch'('size', [], Self)
 
 'dispatch'/3 = fun (Selector, Args, Self) ->
@@ -93,8 +93,7 @@ call 'bt@stdlib@foo':'dispatch'('size', [], Self)
             'instance_variables' => [],
             'class_methods' => ~{
                 'new' => ~{'arity' => 0}~,
-                'new:' => ~{'arity' => 1}~,
-                'superclass' => ~{'arity' => 0}~
+                'new:' => ~{'arity' => 1}~
             }~,
             'method_source' => ~{'blockValue' => #{#<98>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<107>(8,1,'integer',['unsigned'|['big']]),#<86>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']])}#, 'size' => #{#<115>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<122>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']])}#}~,
             'class_variables' => ~{}~

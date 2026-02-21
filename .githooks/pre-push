@@ -4,7 +4,7 @@
 #
 # Pre-push hook: run linting before pushing.
 #
-# - lint-rust (clippy + fmt-check) always runs (~1s)
+# - lint-rust (clippy + fmt-check-rust) always runs (~1s)
 # - lint-erlang (dialyzer) runs only if Erlang sources changed (~9s)
 # - lint-js runs only if JS/TS sources changed
 #

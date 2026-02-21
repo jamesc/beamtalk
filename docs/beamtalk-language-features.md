@@ -283,6 +283,23 @@ true ifTrue: [self.x := 5]
 [:x | temp := x * 2. temp + 1]
 ```
 
+**Non-local returns:** `^` inside a block returns from the *enclosing method*, not just from the block. This is the standard Smalltalk non-local return semantics and enables clean early-exit patterns:
+
+```beamtalk
+Object subclass: Finder
+  firstPositive: items =>
+    items do: [:x | x > 0 ifTrue: [^x]]
+    nil   // returned only if no positive element found
+
+Object subclass: Validator
+  validate: x =>
+    x isNil ifTrue: [^"missing"]
+    x isEmpty ifTrue: [^"empty"]
+    "ok"
+```
+
+`^` at the top level of a method body is an early return (the method exits immediately). `^` inside a block argument causes the *method* to exit with that value.
+
 ---
 
 ## Gradual Typing (ADR 0025)

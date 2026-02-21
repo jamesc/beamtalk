@@ -14,43 +14,43 @@ module 'stdlib_class_set' ['new'/0, 'new'/1, 'size'/1, 'isEmpty'/1, 'includes:'/
     call 'maps':'merge'(DefaultState, InitArgs)
 
 
-'size'/1= fun (Self) ->
+'size'/1 = fun (Self) ->
 call 'beamtalk_set_ops':'size'(Self)
 
-'isEmpty'/1= fun (Self) ->
+'isEmpty'/1 = fun (Self) ->
 call 'beamtalk_set_ops':'is_empty'(Self)
 
-'includes:'/2= fun (Self, _element1) ->
+'includes:'/2 = fun (Self, _element1) ->
 call 'beamtalk_set_ops':'includes'(Self, _element1)
 
-'add:'/2= fun (Self, _element2) ->
+'add:'/2 = fun (Self, _element2) ->
 call 'beamtalk_set_ops':'add'(Self, _element2)
 
-'remove:'/2= fun (Self, _element3) ->
+'remove:'/2 = fun (Self, _element3) ->
 call 'beamtalk_set_ops':'remove'(Self, _element3)
 
-'union:'/2= fun (Self, _other4) ->
+'union:'/2 = fun (Self, _other4) ->
 call 'beamtalk_set_ops':'union'(Self, _other4)
 
-'intersection:'/2= fun (Self, _other5) ->
+'intersection:'/2 = fun (Self, _other5) ->
 call 'beamtalk_set_ops':'intersection'(Self, _other5)
 
-'difference:'/2= fun (Self, _other6) ->
+'difference:'/2 = fun (Self, _other6) ->
 call 'beamtalk_set_ops':'difference'(Self, _other6)
 
-'isSubsetOf:'/2= fun (Self, _other7) ->
+'isSubsetOf:'/2 = fun (Self, _other7) ->
 call 'beamtalk_set_ops':'is_subset_of'(Self, _other7)
 
-'asList'/1= fun (Self) ->
+'asList'/1 = fun (Self) ->
 call 'beamtalk_set_ops':'as_list'(Self)
 
-'fromList:'/2= fun (Self, _list8) ->
+'fromList:'/2 = fun (Self, _list8) ->
 call 'beamtalk_set_ops':'from_list'(_list8)
 
-'do:'/2= fun (Self, _block9) ->
+'do:'/2 = fun (Self, _block9) ->
 call 'beamtalk_set_ops':'do'(Self, _block9)
 
-'describe'/1= fun (Self) ->
+'describe'/1 = fun (Self) ->
 #{#<97>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<83>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}#
 
 'dispatch'/3 = fun (Selector, Args, Self) ->
@@ -157,8 +157,7 @@ call 'beamtalk_set_ops':'do'(Self, _block9)
             'instance_variables' => ['elements'],
             'class_methods' => ~{
                 'new' => ~{'arity' => 0}~,
-                'new:' => ~{'arity' => 1}~,
-                'superclass' => ~{'arity' => 0}~
+                'new:' => ~{'arity' => 1}~
             }~,
             'method_source' => ~{'size' => #{#<115>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<122>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']])}#, 'isEmpty' => #{#<105>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<69>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']])}#, 'includes:' => #{#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']])}#, 'add:' => #{#<97>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']])}#, 'remove:' => #{#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<118>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']])}#, 'union:' => #{#<117>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']])}#, 'intersection:' => #{#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']])}#, 'difference:' => #{#<100>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']])}#, 'isSubsetOf:' => #{#<105>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<83>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<79>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']])}#, 'asList' => #{#<97>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<76>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}#, 'fromList:' => #{#<102>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<76>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']])}#, 'do:' => #{#<100>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']])}#, 'describe' => #{#<100>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']])}#}~,
             'class_variables' => ~{}~

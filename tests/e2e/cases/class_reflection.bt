@@ -6,9 +6,9 @@
 // Tests Beamtalk class introspection capabilities:
 // - Beamtalk classNamed: - Look up class by name
 // - Class methods - Get list of instance methods
-// - Class class_name - Get the class name
+// - Class name - Get the class name
 // - Class superclass - Get the superclass name
-// - Class module_name - Get the module name
+// - Class name - Get the class name (ADR 0032: replaces class_name)
 //
 // Class objects are returned by `Beamtalk classNamed:` and support
 // reflection messages to introspect the class definition.
@@ -30,7 +30,7 @@
 stringClass := (Beamtalk classNamed: #String) await
 // => String
 
-stringClass class_name
+stringClass name
 // => String
 
 // ---------------------------------------------------------------------------
@@ -40,7 +40,7 @@ stringClass class_name
 counterClass := (Beamtalk classNamed: #Counter) await
 // => Counter
 
-counterClass class_name
+counterClass name
 // => Counter
 
 // ---------------------------------------------------------------------------
@@ -93,16 +93,16 @@ counterMethods includes: #decrement
 counterMethods includes: #getValue
 // => true
 
-// ADR 0032 Phase 1: methods returns local-only selectors.
-// Inherited Object methods are NOT included in the local list.
+// ADR 0032 Phase 2: methods returns full hierarchy (local + inherited).
+// Inherited Object methods ARE included via Behaviour.methods chain walk.
 counterMethods includes: #isNil
-// => false
+// => true
 
 counterMethods includes: #printString
-// => false
+// => true
 
 counterMethods includes: #respondsTo:
-// => false
+// => true
 
 // ---------------------------------------------------------------------------
 // Get methods list from Integer class
@@ -154,30 +154,6 @@ actorClass superclass
 // => Object
 
 // ===========================================================================
-// MODULE NAME INTROSPECTION
-// ===========================================================================
-
-// ---------------------------------------------------------------------------
-// Get module name for primitive class
-// ---------------------------------------------------------------------------
-
-stringClass := (Beamtalk classNamed: #String) await
-// => String
-
-stringClass module_name
-// => bt@stdlib@string
-
-// ---------------------------------------------------------------------------
-// Get module name for actor class
-// ---------------------------------------------------------------------------
-
-counterClass := (Beamtalk classNamed: #Counter) await
-// => Counter
-
-counterClass module_name
-// => bt@counter
-
-// ===========================================================================
 // CLASS NAME CONSISTENCY
 // ===========================================================================
 
@@ -188,19 +164,19 @@ counterClass module_name
 stringClass := (Beamtalk classNamed: #String) await
 // => String
 
-stringClass class_name
+stringClass name
 // => String
 
 integerClass := (Beamtalk classNamed: #Integer) await
 // => Integer
 
-integerClass class_name
+integerClass name
 // => Integer
 
 trueClass := (Beamtalk classNamed: #True) await
 // => True
 
-trueClass class_name
+trueClass name
 // => True
 
 // ===========================================================================
@@ -209,8 +185,8 @@ trueClass class_name
 //
 // ✅ Beamtalk classNamed: - Returns wrapped class object (async, needs await)
 // ✅ Class methods - Returns list of instance methods
-// ✅ Class class_name - Returns class name atom
+// ✅ Class name - Returns class name atom
 // ✅ Class superclass - Returns superclass name atom
-// ✅ Class module_name - Returns module name atom
+// ✅ Class name - Returns class name atom (ADR 0032: replaces class_name/module_name)
 // ✅ Async dispatch support in handle_cast - Classes handle Future protocol
 // ✅ E2E test coverage - This file

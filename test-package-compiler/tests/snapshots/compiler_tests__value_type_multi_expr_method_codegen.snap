@@ -14,11 +14,11 @@ module 'value_type_multi_expr_method' ['new'/0, 'new'/1, 'addAndDouble:'/2, 'tri
     call 'maps':'merge'(DefaultState, InitArgs)
 
 
-'addAndDouble:'/2= fun (Self, _x1) ->
+'addAndDouble:'/2 = fun (Self, _x1) ->
     let _seq2 = case call 'beamtalk_class_registry':'whereis_class'('Transcript') of <'undefined'> when 'true' -> 'nil' <_ClassPid3> when 'true' -> call 'beamtalk_object_class':'class_send'(_ClassPid3, 'show:', [_x1]) end in
     call 'erlang':'*'(_x1, 2)
 
-'tripleStep:with:'/3= fun (Self, _a4, _b5) ->
+'tripleStep:with:'/3 = fun (Self, _a4, _b5) ->
     let _seq6 = call 'erlang':'+'(_a4, _b5) in
     let _seq7 = call 'erlang':'-'(_a4, _b5) in
     call 'erlang':'*'(_a4, _b5)
@@ -99,8 +99,7 @@ module 'value_type_multi_expr_method' ['new'/0, 'new'/1, 'addAndDouble:'/2, 'tri
             'instance_variables' => [],
             'class_methods' => ~{
                 'new' => ~{'arity' => 0}~,
-                'new:' => ~{'arity' => 1}~,
-                'superclass' => ~{'arity' => 0}~
+                'new:' => ~{'arity' => 1}~
             }~,
             'method_source' => ~{'addAndDouble:' => #{#<97>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<65>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<68>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']])}#, 'tripleStep:with:' => #{#<116>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<83>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<119>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']])}#}~,
             'class_variables' => ~{}~

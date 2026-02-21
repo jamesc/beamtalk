@@ -1,14 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import * as vscode from "vscode";
 import {
   LanguageClient,
-  LanguageClientOptions,
+  type LanguageClientOptions,
   RevealOutputChannelOn,
-  ServerOptions,
+  type ServerOptions,
 } from "vscode-languageclient/node";
 
 let client: LanguageClient | undefined;
@@ -80,11 +80,7 @@ function resolveServerPath(context: vscode.ExtensionContext): ResolvedServerPath
 
   // 2. Bundled binary
   const ext = process.platform === "win32" ? ".exe" : "";
-  const bundled = path.join(
-    context.extensionPath,
-    "bin",
-    `beamtalk-lsp${ext}`
-  );
+  const bundled = path.join(context.extensionPath, "bin", `beamtalk-lsp${ext}`);
   if (fs.existsSync(bundled)) {
     return { serverPath: bundled, warning };
   }
@@ -94,9 +90,7 @@ function resolveServerPath(context: vscode.ExtensionContext): ResolvedServerPath
 }
 
 /** Creates the LSP client and starts it. */
-async function startClient(
-  context: vscode.ExtensionContext
-): Promise<void> {
+async function startClient(context: vscode.ExtensionContext): Promise<void> {
   const config = vscode.workspace.getConfiguration("beamtalk");
   const stdlibSourceDir = config.get<string>("stdlib.sourceDir", "").trim();
   const resolved = resolveServerPath(context);
@@ -107,14 +101,10 @@ async function startClient(
     args: [],
   };
 
-  outputChannel ??= vscode.window.createOutputChannel(
-    "Beamtalk Language Server",
-    { log: true }
-  );
-  traceOutputChannel ??= vscode.window.createOutputChannel(
-    "Beamtalk Language Server Trace",
-    { log: true }
-  );
+  outputChannel ??= vscode.window.createOutputChannel("Beamtalk Language Server", { log: true });
+  traceOutputChannel ??= vscode.window.createOutputChannel("Beamtalk Language Server Trace", {
+    log: true,
+  });
 
   if (resolved.warning) {
     outputChannel.warn(resolved.warning);
@@ -133,16 +123,10 @@ async function startClient(
     revealOutputChannelOn: RevealOutputChannelOn.Never,
   };
 
-  client = new LanguageClient(
-    "beamtalk",
-    "Beamtalk Language Server",
-    serverOptions,
-    clientOptions
-  );
+  client = new LanguageClient("beamtalk", "Beamtalk Language Server", serverOptions, clientOptions);
 
   // Auto-restart up to 5 times on crash before giving up.
-  client.clientOptions.errorHandler =
-    client.createDefaultErrorHandler(5);
+  client.clientOptions.errorHandler = client.createDefaultErrorHandler(5);
 
   outputChannel.info(`Starting language server: ${serverPath}`);
 
@@ -150,8 +134,7 @@ async function startClient(
     await client.start();
     outputChannel.info("Language server started successfully");
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : String(error);
+    const message = error instanceof Error ? error.message : String(error);
     outputChannel.error(`Failed to start language server: ${message}`);
     vscode.window.showErrorMessage(
       `Failed to start Beamtalk language server (${serverPath}): ${message}`
@@ -160,21 +143,16 @@ async function startClient(
   }
 }
 
-export async function activate(
-  context: vscode.ExtensionContext
-): Promise<void> {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
   context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "beamtalk.restartServer",
-      async () => {
-        outputChannel?.info("Restarting language server…");
-        if (client) {
-          await client.stop();
-          client = undefined;
-        }
-        await startClient(context);
+    vscode.commands.registerCommand("beamtalk.restartServer", async () => {
+      outputChannel?.info("Restarting language server…");
+      if (client) {
+        await client.stop();
+        client = undefined;
       }
-    )
+      await startClient(context);
+    })
   );
 
   await startClient(context);

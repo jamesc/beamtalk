@@ -14,7 +14,7 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
     call 'maps':'merge'(DefaultState, InitArgs)
 
 
-'frozen'/1= fun (Self) ->
+'frozen'/1 = fun (Self) ->
 42
 
 'dispatch'/3 = fun (Selector, Args, Self) ->
@@ -88,8 +88,7 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
             'instance_variables' => [],
             'class_methods' => ~{
                 'new' => ~{'arity' => 0}~,
-                'new:' => ~{'arity' => 1}~,
-                'superclass' => ~{'arity' => 0}~
+                'new:' => ~{'arity' => 1}~
             }~,
             'method_source' => ~{'frozen' => #{#<102>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<122>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']])}#}~,
             'class_variables' => ~{}~
@@ -118,8 +117,7 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
                     'instance_variables' => [],
                     'class_methods' => ~{
                         'new' => ~{'arity' => 0}~,
-                        'new:' => ~{'arity' => 1}~,
-                        'superclass' => ~{'arity' => 0}~
+                        'new:' => ~{'arity' => 1}~
                     }~,
                     'method_source' => ~{'frozen' => #{#<102>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<122>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']])}#}~,
                     'class_variables' => ~{}~
@@ -148,8 +146,7 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
                             'instance_variables' => [],
                             'class_methods' => ~{
                                 'new' => ~{'arity' => 0}~,
-                                'new:' => ~{'arity' => 1}~,
-                                'superclass' => ~{'arity' => 0}~
+                                'new:' => ~{'arity' => 1}~
                             }~,
                             'method_source' => ~{'frozen' => #{#<102>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<122>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']])}#}~,
                             'class_variables' => ~{}~

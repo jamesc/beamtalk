@@ -48,6 +48,16 @@ use tungstenite::WebSocket;
 /// Default port for the REPL TCP server.
 const REPL_PORT: u16 = 9000;
 
+/// Explicit cookie for E2E test BEAM nodes.
+/// Both the `erl` process and the WebSocket client use this value so that
+/// authentication succeeds regardless of whether `~/.erlang.cookie` exists.
+/// The value can be overridden at compile time via the `E2E_COOKIE` environment
+/// variable to avoid a single, predictable repo-wide cookie.
+const E2E_COOKIE: &str = match option_env!("E2E_COOKIE") {
+    Some(v) => v,
+    None => "beamtalk_e2e_test_cookie",
+};
+
 /// Timeout for REPL operations.
 /// Cover-instrumented BEAM is slower; `E2E_COVER` bumps this to 120s.
 fn repl_timeout() -> Duration {
@@ -397,6 +407,10 @@ impl ProcessManager {
 
         let beam_child = Command::new("erl")
             .arg("-noshell")
+            .arg("-sname")
+            .arg("beamtalk_e2e_test")
+            .arg("-setcookie")
+            .arg(E2E_COOKIE)
             .args(&pa_args)
             .current_dir(workspace_root())
             .env("BEAMTALK_WORKSPACE", E2E_SESSION_NAME)
@@ -511,20 +525,6 @@ struct ReplClient {
     last_warnings: Vec<String>,
 }
 
-/// Read the Erlang cookie for WebSocket authentication.
-/// Falls back to "nocookie" which matches BEAM nodes started without -setcookie.
-fn read_erlang_cookie() -> String {
-    if let Some(home) = dirs::home_dir() {
-        if let Ok(cookie) = fs::read_to_string(home.join(".erlang.cookie")) {
-            let trimmed = cookie.trim();
-            if !trimmed.is_empty() {
-                return trimmed.to_string();
-            }
-        }
-    }
-    "nocookie".to_string()
-}
-
 impl ReplClient {
     /// Connect to the REPL via WebSocket with cookie auth.
     fn connect() -> Result<Self, std::io::Error> {
@@ -548,11 +548,10 @@ impl ReplClient {
             }
         }
 
-        // Send cookie auth handshake
-        let cookie = read_erlang_cookie();
+        // Send cookie auth handshake (uses the same E2E_COOKIE passed via -setcookie)
         let auth_msg = serde_json::json!({
             "type": "auth",
-            "cookie": cookie
+            "cookie": E2E_COOKIE
         });
         ws.send(tungstenite::Message::Text(auth_msg.to_string().into()))
             .map_err(std::io::Error::other)?;
