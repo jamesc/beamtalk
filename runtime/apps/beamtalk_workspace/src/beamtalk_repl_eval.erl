@@ -471,14 +471,14 @@ handle_method_definition(MethodInfo, Warnings, Expression, State) ->
             end
     end.
 
-%% @doc Check if a file path refers to a stdlib file (under lib/ directory).
-%% Matches both relative paths (lib/Integer.bt) and absolute paths
-%% containing /lib/ as a path component.
+%% @doc Check if a file path refers to a stdlib file (under stdlib/src/ directory).
+%% Matches both relative paths (stdlib/src/Integer.bt) and absolute paths
+%% containing /stdlib/src/ as a path component.
 -spec is_stdlib_path(string()) -> boolean().
-is_stdlib_path("lib/" ++ _) ->
+is_stdlib_path("stdlib/src/" ++ _) ->
     true;
 is_stdlib_path(Path) ->
-    case string:find(Path, "/lib/") of
+    case string:find(Path, "/stdlib/src/") of
         nomatch -> false;
         _ -> true
     end.

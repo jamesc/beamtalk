@@ -337,7 +337,7 @@ literal := "Hello, {name}!"          // no prefix = no interpolation
 ### Negative
 - **Breaking change**: ~150 `.bt` files must be updated from `'...'` to `"..."` (mechanical find-replace, but large diff)
 - Departs from Smalltalk's single-quote convention — Smalltalk developers must adjust
-- Documentation overhaul: `beamtalk-syntax-rationale.md`, `beamtalk-language-features.md`, examples, tests, and `lib/*.bt` all reference single-quoted strings
+- Documentation overhaul: `beamtalk-syntax-rationale.md`, `beamtalk-language-features.md`, examples, tests, and `stdlib/src/*.bt` all reference single-quoted strings
 - `\{` escaping required for literal braces in strings — minor but new escape to learn
 - Symbols (`#'hello world'`) use single quotes for quoting — this is a different context but could cause momentary confusion if single quotes appear nowhere else
 
@@ -367,8 +367,8 @@ Since the language is pre-release with no external users, the quote change and i
 - Insert `printString` dispatch for non-literal segments via object system
 - Plain strings (no `{expr}`) compile to simple binary literals as today — zero overhead
 - Ensure `printString` is implemented on all stdlib classes (currently implemented on 18 core classes)
-- Update `tests/stdlib/string_interpolation.bt` and `test-package-compiler/cases/future_string_interpolation/main.bt`
-- **Affected**: `codegen/core_erlang/expressions.rs`, `lib/*.bt`, `tests/stdlib/`, `test-package-compiler/cases/`
+- Update `stdlib/bootstrap-test/string_interpolation.bt` and `test-package-compiler/cases/future_string_interpolation/main.bt`
+- **Affected**: `codegen/core_erlang/expressions.rs`, `stdlib/src/*.bt`, `stdlib/bootstrap-test/`, `test-package-compiler/cases/`
 
 ### Phase 3: Documentation
 - Update `docs/beamtalk-language-features.md` — string section, examples

@@ -21,7 +21,7 @@ Step-by-step guides for common tasks in the Beamtalk codebase.
 
 **Follow this example-driven workflow:**
 
-1. **Define the class** in `lib/YourClass.bt`
+1. **Define the class** in `stdlib/src/YourClass.bt`
    - Include comprehensive documentation
    - Use `@primitive intrinsicName` pragmas for methods backed by runtime dispatch (see [ADR 0007](../ADR/0007-compilable-stdlib-with-primitive-injection.md))
    - Pure Beamtalk methods need no pragma — they compile directly
@@ -54,18 +54,18 @@ Step-by-step guides for common tasks in the Beamtalk codebase.
    # Must show: "X/X tests passed" (all pass)
    ```
 
-7. **Update `lib/README.md`**
+7. **Update `stdlib/src/README.md`**
    - Add to class hierarchy or core classes section
    - Update BEAM mapping table
    - Update implementation status table
 
 **Example from BT-176 (ProtoObject):**
-- ✅ Class: `lib/ProtoObject.bt` — pragma declarations + pure Beamtalk methods
+- ✅ Class: `stdlib/src/ProtoObject.bt` --- pragma declarations + pure Beamtalk methods
 - ✅ Runtime: `runtime/src/beamtalk_primitive.erl` — dispatch for ProtoObject methods
 - ✅ Fixtures: `tests/e2e/fixtures/simple_proxy.bt`
 - ✅ E2E Tests: `tests/e2e/cases/protoobject.bt`, `protoobject_actors.bt`
 - ✅ Example: `examples/protoobject_proxy.bt` (194 lines with walkthrough)
-- ✅ Docs: Updated `lib/README.md` with class hierarchy
+- ✅ Docs: Updated `stdlib/src/README.md` with class hierarchy
 - ✅ Result: All 224 E2E tests pass
 
 ## Debugging Compilation

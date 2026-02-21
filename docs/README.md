@@ -90,17 +90,17 @@ The foundational classes implementing Smalltalk's "everything is a message" phil
 
 | Class | Description |
 |-------|-------------|
-| [Object](../lib/Object.bt) | Base class for all user-defined classes (actors/BEAM processes) |
-| [Block](../lib/Block.bt) | First-class closures |
-| [True](../lib/True.bt) / [False](../lib/False.bt) | Boolean control flow via messages |
-| [Nil](../lib/Nil.bt) | Null object pattern |
-| [Integer](../lib/Integer.bt) | Arbitrary precision arithmetic |
-| [String](../lib/String.bt) | UTF-8 text with grapheme operations |
-| [Array](../lib/Array.bt) | Fixed-size indexed collection (tuple) |
-| [List](../lib/List.bt) | Linked list with fast prepend |
-| [Set](../lib/Set.bt) | Unordered unique elements |
-| [Dictionary](../lib/Dictionary.bt) | Key-value map |
-| [Collection](../lib/Collection.bt) | Abstract collection protocol |
+| [Object](../stdlib/src/Object.bt) | Base class for all user-defined classes (actors/BEAM processes) |
+| [Block](../stdlib/src/Block.bt) | First-class closures |
+| [True](../stdlib/src/True.bt) / [False](../stdlib/src/False.bt) | Boolean control flow via messages |
+| [Nil](../stdlib/src/Nil.bt) | Null object pattern |
+| [Integer](../stdlib/src/Integer.bt) | Arbitrary precision arithmetic |
+| [String](../stdlib/src/String.bt) | UTF-8 text with grapheme operations |
+| [Array](../stdlib/src/Array.bt) | Fixed-size indexed collection (tuple) |
+| [List](../stdlib/src/List.bt) | Linked list with fast prepend |
+| [Set](../stdlib/src/Set.bt) | Unordered unique elements |
+| [Dictionary](../stdlib/src/Dictionary.bt) | Key-value map |
+| [Collection](../stdlib/src/Collection.bt) | Abstract collection protocol |
 
 See [lib/README.md](../lib/README.md) for detailed documentation.
 

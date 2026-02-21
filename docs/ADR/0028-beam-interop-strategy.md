@@ -65,7 +65,7 @@ Erlang string uppercase: "hello"
 
 **How it works:**
 
-1. `Erlang` is a **class** (ProtoObject subclass) in `lib/Erlang.bt` — always loaded as part of stdlib. Since `Erlang` is an uppercase identifier, the parser treats it as a `ClassReference` — it works everywhere: REPL, compiled code, and inside actor methods. No workspace binding is needed; `Erlang lists` is a class-side message send, just like `Counter spawn` or `Integer methods`.
+1. `Erlang` is a **class** (ProtoObject subclass) in `stdlib/src/Erlang.bt` — always loaded as part of stdlib. Since `Erlang` is an uppercase identifier, the parser treats it as a `ClassReference` — it works everywhere: REPL, compiled code, and inside actor methods. No workspace binding is needed; `Erlang lists` is a class-side message send, just like `Counter spawn` or `Integer methods`.
 2. `Erlang`'s class-side `doesNotUnderstand:args:` is an **`@intrinsic`** — the compiler recognizes it and emits inline proxy construction (or direct `erlang:apply/3`) rather than routing through the class process gen_server. This follows the same pattern as `@intrinsic blockValue` on Block.
 3. Sending a unary message like `lists` returns an **ErlangModule proxy** for the atom `lists`
 4. The proxy translates Beamtalk message sends to Erlang function calls:
@@ -201,7 +201,7 @@ ERROR: #RuntimeError
   Hint: Erlang function raised 'function_clause'. Check argument types and values.
 ```
 
-**Note:** `BEAMError`, `ExitError`, and `ThrowError` are new classes extending ADR 0015's exception hierarchy. Implementation requires adding these classes to `lib/` and updating `beamtalk_exception_handler.erl`. The proxy's catch clause must use Erlang's three-class catch (`catch Class:Reason:Stack`) and preserve the `Class` (`error`/`exit`/`throw`) to map correctly — the current `wrap/1` only handles `error` class exceptions. Existing classes (`RuntimeError`, `TypeError`) are reused for Erlang `error:*` exceptions — no changes needed.
+**Note:** `BEAMError`, `ExitError`, and `ThrowError` are new classes extending ADR 0015's exception hierarchy. Implementation requires adding these classes to `stdlib/src/` and updating `beamtalk_exception_handler.erl`. The proxy's catch clause must use Erlang's three-class catch (`catch Class:Reason:Stack`) and preserve the `Class` (`error`/`exit`/`throw`) to map correctly — the current `wrap/1` only handles `error` class exceptions. Existing classes (`RuntimeError`, `TypeError`) are reused for Erlang `error:*` exceptions — no changes needed.
 
 **Proxy selector collision — minimal surface via ProtoObject:**
 
@@ -456,12 +456,12 @@ Erlang call: "lists" function: "reverse" args: #(#(1, 2, 3))
 ## Implementation
 
 ### Phase 0: Wire Check — Single Erlang Call Round-Trip
-- Add `lib/Erlang.bt` as a ProtoObject subclass with class-side `doesNotUnderstand:args:`
+- Add `stdlib/src/Erlang.bt` as a ProtoObject subclass with class-side `doesNotUnderstand:args:`
 - Class-side handler returns an ErlangModule proxy map for the module name
 - Proxy handles one keyword message via `erlang:apply/3`
 - Verify in REPL: `Erlang lists reverse: #(1, 2, 3)` returns `#(3, 2, 1)`
 - Works in actors too — `Erlang` is a stdlib class, always loaded
-- **Components:** `lib/Erlang.bt`, `lib/ErlangModule.bt`, `beamtalk_erlang_proxy.erl` (new)
+- **Components:** `stdlib/src/Erlang.bt`, `stdlib/src/ErlangModule.bt`, `beamtalk_erlang_proxy.erl` (new)
 - **Tests:** One stdlib test, one REPL E2E test
 
 ### Phase 1: Full Erlang Class and Module Proxies
@@ -472,7 +472,7 @@ Erlang call: "lists" function: "reverse" args: #(#(1, 2, 3))
   - Runtime arity validation with actionable error messages
   - LSP completions: typing `Erlang lists` triggers `lists:module_info(exports)` to offer `reverse:`, `seq:with:`, `map:with:`, etc.
   - REPL discoverability: `(Erlang lists) methods` returns all exported functions
-- **Components:** `lib/Erlang.bt`, `lib/ErlangModule.bt`, runtime dispatch in `beamtalk_primitive.erl`, LSP completion extension in `completion_provider.rs`
+- **Components:** `stdlib/src/Erlang.bt`, `stdlib/src/ErlangModule.bt`, runtime dispatch in `beamtalk_primitive.erl`, LSP completion extension in `completion_provider.rs`
 
 ### Phase 2: Pid/Port/Reference Methods
 - Add basic Object protocol to opaque BEAM types

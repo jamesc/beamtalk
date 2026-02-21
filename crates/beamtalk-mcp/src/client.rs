@@ -1024,7 +1024,10 @@ mod tests {
         let client = ReplClient::connect(port, &cookie).await?;
 
         // Load BUnit test fixture first
-        let load_resp = client.load_file("test/arithmetic_test.bt").await.unwrap();
+        let load_resp = client
+            .load_file("stdlib/test/arithmetic_test.bt")
+            .await
+            .unwrap();
         assert!(
             !load_resp.is_error(),
             "load should succeed: {:?}",

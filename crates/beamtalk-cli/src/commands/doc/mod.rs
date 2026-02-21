@@ -535,7 +535,7 @@ mod tests {
     #[test]
     fn test_generate_site() {
         let temp = TempDir::new().unwrap();
-        let lib_dir = Utf8PathBuf::from_path_buf(temp.path().join("lib")).unwrap();
+        let lib_dir = Utf8PathBuf::from_path_buf(temp.path().join("stdlib/src")).unwrap();
         let docs_dir = Utf8PathBuf::from_path_buf(temp.path().join("docs")).unwrap();
         let out_dir = Utf8PathBuf::from_path_buf(temp.path().join("site")).unwrap();
         fs::create_dir_all(&lib_dir).unwrap();

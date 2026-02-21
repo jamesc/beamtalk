@@ -123,7 +123,7 @@ beamtalk/
 ├── crates/
 │   ├── beamtalk-core/       # Lexer, parser, AST, codegen
 │   └── beamtalk-cli/        # CLI, REPL client, test runners
-├── lib/                      # Standard library (.bt source files)
+├── stdlib/src/                # Standard library (.bt source files)
 ├── runtime/                  # Erlang runtime (OTP apps)
 │   └── apps/
 │       ├── beamtalk_runtime/ # Core runtime (primitives, actors, objects)
@@ -204,7 +204,7 @@ Look for issues labeled `agent-ready` with size `S` in Linear — these are well
 
 ### Areas That Need Help
 
-- **Standard library** — Implementing methods on core classes (`lib/`)
+— **Standard library** — Implementing methods on core classes (`stdlib/src/`)
 - **Documentation** — Examples, tutorials, API docs
 - **Tests** — Expanding stdlib and E2E test coverage
 - **Examples** — Real-world Beamtalk programs in `examples/`

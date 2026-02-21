@@ -76,8 +76,8 @@ Key insight: **there is no "raw error" that later gets wrapped.** The Exception 
 
 The wrapping machinery already exists but is only used in `on:do:` catch clauses:
 
-- `lib/Exception.bt` — Class with `message`, `hint`, `kind`, `selector`, `errorClass`, `printString`
-- `lib/Error.bt` — Subclass of Exception
+- `stdlib/src/Exception.bt` — Class with `message`, `hint`, `kind`, `selector`, `errorClass`, `printString`
+- `stdlib/src/Error.bt` — Subclass of Exception
 - `beamtalk_exception_handler:wrap/1` — Wraps `#beamtalk_error{}` as tagged maps
 - `beamtalk_exception_handler:dispatch/3` — Message dispatch for Exception objects
 - `beamtalk_error.erl` — 15+ error kinds, structured construction, formatting
@@ -195,15 +195,15 @@ Exception                    (base — catches everything in on:do:)
 Each stdlib class is a `.bt` file:
 
 ```beamtalk
-// lib/RuntimeError.bt
+// stdlib/src/RuntimeError.bt
 Error subclass: RuntimeError
   describe => 'a RuntimeError'
 
-// lib/TypeError.bt
+// stdlib/src/TypeError.bt
 Error subclass: TypeError
   describe => 'a TypeError'
 
-// lib/InstantiationError.bt
+// stdlib/src/InstantiationError.bt
 Error subclass: InstantiationError
   describe => 'an InstantiationError'
 ```
@@ -676,7 +676,7 @@ format_error_message({eval_error, error, #beamtalk_error{} = Error}) ->
 
 **Note:** The `matches_hierarchy/3` implementation shown in §4 is deliberately hardcoded for the initial set of error classes. True dynamic hierarchy walking for value types is not yet defined in ADR 0006 (Unified Method Dispatch). If user-defined exception subclasses are needed in the future, this should be revisited with a proper hierarchy walking mechanism. For the initial 4 error classes (RuntimeError, TypeError, InstantiationError, IOError), hardcoding is pragmatic and sufficient.
 
-1. **New stdlib files**: `lib/RuntimeError.bt`, `lib/TypeError.bt`, `lib/InstantiationError.bt`
+1. **New stdlib files**: `stdlib/src/RuntimeError.bt`, `stdlib/src/TypeError.bt`, `stdlib/src/InstantiationError.bt`
 2. **`beamtalk_exception_handler.erl`** — Add `kind_to_class/1` mapping in `wrap/1`
 3. **`matches_class/2`** — Hierarchy-aware matching (RuntimeError is-a Error is-a Exception)
 4. **Tests** — `on: TypeError do:` matching, `on: Error do:` catches all subclasses, class display in errors
@@ -717,7 +717,7 @@ catch error:#{'$beamtalk_class' := _, error := #beamtalk_error{kind = Kind}} -> 
 
 ### Existing Tests
 - `tests/e2e/cases/errors.bt` — `ERROR:` assertion format may need updating for wrapped objects
-- `tests/stdlib/error_method.bt` — Method-level error behavior; should continue to pass
+- `stdlib/bootstrap-test/error_method.bt` — Method-level error behavior; should continue to pass
 - Runtime tests that catch `#beamtalk_error{}` directly — Update to match wrapped objects
 
 ## Implementation Tracking
@@ -733,7 +733,7 @@ catch error:#{'$beamtalk_class' := _, error := #beamtalk_error{kind = Kind}} -> 
 
 ## References
 - Related ADRs: [ADR 0005](0005-beam-object-model-pragmatic-hybrid.md) (object model), [ADR 0006](0006-unified-method-dispatch.md) (dispatch), [ADR 0007](0007-compilable-stdlib-with-primitive-injection.md) (stdlib)
-- Existing implementation: `beamtalk_exception_handler.erl`, `lib/Exception.bt`, `lib/Error.bt`
+- Existing implementation: `beamtalk_exception_handler.erl`, `stdlib/src/Exception.bt`, `stdlib/src/Error.bt`
 - Design doc: `docs/internal/design-self-as-object.md` (§3.8 Error Taxonomy)
-- Test coverage: `tests/e2e/cases/errors.bt`, `tests/stdlib/error_method.bt`
+- Test coverage: `tests/e2e/cases/errors.bt`, `stdlib/bootstrap-test/error_method.bt`
 - Prior art: [Pharo Exception handling](https://docs.huihoo.com/smalltalk/pharo/MOOC/PharoMOOC/Week5/C019-W5S04-Exceptions.pdf), [Taking Exception to Smalltalk](http://laputan.org/pub/papers/ExceptionHandlingPart1.pdf), [Elixir exceptions](https://hexdocs.pm/elixir/main/try-catch-and-rescue.html), [Pry `_ex_`](https://github.com/pry/pry)

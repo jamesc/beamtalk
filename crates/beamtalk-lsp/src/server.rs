@@ -954,7 +954,7 @@ mod tests {
     fn configured_stdlib_source_dirs_accepts_in_root_absolute_path() {
         let temp = unique_temp_dir("beamtalk_lsp_stdlib_in_root");
         let project_root = temp.join("project");
-        let stdlib = project_root.join("lib");
+        let stdlib = project_root.join("stdlib/src");
         fs::create_dir_all(&stdlib).expect("create stdlib dir");
 
         let dirs = configured_stdlib_source_dirs(
@@ -990,13 +990,13 @@ mod tests {
     fn configured_stdlib_source_dir_reads_initialize_option() {
         let params = InitializeParams {
             initialization_options: Some(serde_json::json!({
-                "stdlibSourceDir": "lib"
+                "stdlibSourceDir": "stdlib/src"
             })),
             ..Default::default()
         };
 
         let configured = configured_stdlib_source_dir(&params);
-        assert_eq!(configured.as_deref(), Some("lib"));
+        assert_eq!(configured.as_deref(), Some("stdlib/src"));
     }
 
     #[test]

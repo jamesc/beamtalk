@@ -369,7 +369,7 @@ numbers := List with: 1 with: 2 with: 3
 - E2E tests for pattern matching
 
 ### Phase 4: Stdlib + Runtime Dispatch (M)
-- Create `lib/List.bt` with primitive-backed methods
+- Create `stdlib/src/List.bt` with primitive-backed methods
 - Implement `beamtalk_list.erl` runtime dispatch module
 - Wire up `head`, `tail`, `prepend:`, `size`, `at:`, `reversed`, `++`
 

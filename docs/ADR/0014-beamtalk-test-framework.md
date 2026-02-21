@@ -382,11 +382,11 @@ Focus on property-based testing (QuickCheck/PropEr style) instead of unit tests.
 
 | Component | Location | Description |
 |-----------|----------|-------------|
-| TestCase class | `lib/TestCase.bt` | Assertion methods, lifecycle hooks |
+| TestCase class | `stdlib/src/TestCase.bt` | Assertion methods, lifecycle hooks |
 | TestCase runtime | `runtime/apps/beamtalk_runtime/src/` | `beamtalk_test_case.erl` — assertion primitives |
 | Test discovery | `crates/beamtalk-cli/src/commands/test.rs` | Find TestCase subclasses, extract `test*` methods |
 | EUnit bridge | `crates/beamtalk-core/src/codegen/core_erlang/` | Generate EUnit wrappers from TestCase methods |
-| TestResult class | `lib/TestResult.bt` (optional) | Collect and report test results |
+| TestResult class | `stdlib/src/TestResult.bt` (optional) | Collect and report test results |
 
 **Depends on:** ADR 0013 (class instantiation protocol — `new` for value objects), method introspection.
 
