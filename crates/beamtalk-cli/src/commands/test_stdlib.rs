@@ -471,19 +471,39 @@ pub fn run_tests(path: &str, no_warnings: bool, quiet: bool, verbose: bool) -> R
 
     let total_tests: usize = compiled_files.iter().map(|f| f.assertion_count).sum();
 
-    let eunit_result =
-        run_all_eunit_tests(&test_module_names, &all_fixture_modules, &build_dir, verbose)?;
+    let eunit_result = run_all_eunit_tests(
+        &test_module_names,
+        &all_fixture_modules,
+        &build_dir,
+        verbose,
+    )?;
 
-    // Phase 5: Report results per file
+    // Phase 5: Report results
+    report_results(
+        &compiled_files,
+        &eunit_result,
+        test_files.len(),
+        total_tests,
+        quiet,
+    )
+}
+
+/// Print per-file results and final summary.
+fn report_results(
+    compiled_files: &[CompiledTestFile],
+    eunit_result: &EunitBatchResult,
+    file_count: usize,
+    total_tests: usize,
+    quiet: bool,
+) -> Result<()> {
     let mut total_passed = 0;
     let mut total_failed = 0;
     let mut failed_details = Vec::new();
 
-    for compiled in &compiled_files {
+    for compiled in compiled_files {
         let file_stem = compiled.source_file.file_stem().unwrap_or("unknown");
 
         if let Some(result) = eunit_result.module_results.get(&compiled.module_name) {
-            // Structured results from beamtalk_stdlib_test
             total_passed += result.passed;
             total_failed += result.failed;
             if result.failed > 0 {
@@ -503,7 +523,6 @@ pub fn run_tests(path: &str, no_warnings: bool, quiet: bool, verbose: bool) -> R
                 );
             }
         } else if let Some(failure) = eunit_result.failed_modules.get(&compiled.module_name) {
-            // Fallback: unstructured failure
             total_failed += compiled.assertion_count;
             println!(
                 "  {file_stem}: {} tests, 0 passed ✗",
@@ -511,7 +530,6 @@ pub fn run_tests(path: &str, no_warnings: bool, quiet: bool, verbose: bool) -> R
             );
             failed_details.push(format!("FAIL {}:\n  {failure}", compiled.source_file));
         } else {
-            // No structured result and no failure — assume all passed
             total_passed += compiled.assertion_count;
             if !quiet {
                 println!(
@@ -524,23 +542,14 @@ pub fn run_tests(path: &str, no_warnings: bool, quiet: bool, verbose: bool) -> R
 
     println!();
     if total_failed == 0 {
-        println!(
-            "{} file(s), {} tests, {} passed, 0 failed",
-            test_files.len(),
-            total_tests,
-            total_passed
-        );
+        println!("{file_count} file(s), {total_tests} tests, {total_passed} passed, 0 failed");
     } else {
         for detail in &failed_details {
             eprintln!("{detail}");
         }
         eprintln!();
         eprintln!(
-            "{} file(s), {} tests, {} passed, {} failed",
-            test_files.len(),
-            total_tests,
-            total_passed,
-            total_failed
+            "{file_count} file(s), {total_tests} tests, {total_passed} passed, {total_failed} failed"
         );
         miette::bail!("{total_failed} test(s) failed");
     }
@@ -713,7 +722,7 @@ fn compile_erl_files(erl_files: &[Utf8PathBuf], output_dir: &Utf8Path) -> Result
 struct ModuleResult {
     passed: usize,
     failed: usize,
-    /// Individual failure messages (FAIL lines from beamtalk_stdlib_test).
+    /// Individual failure messages (FAIL lines from `beamtalk_stdlib_test`).
     failures: Vec<String>,
 }
 
@@ -862,10 +871,26 @@ fn run_all_eunit_tests(
     debug!("EUnit stderr: {}", stderr);
 
     let combined = format!("{stdout}\n{stderr}");
+    Ok(parse_eunit_output(
+        &combined,
+        output.status.success(),
+        test_module_names,
+    ))
+}
+
+/// Parse structured output from `beamtalk_stdlib_test:run_and_assert/2`.
+///
+/// Extracts `RESULTS:module:passed:failed` lines for per-module counts
+/// and `FAIL location` blocks for failure details.
+fn parse_eunit_output(
+    combined: &str,
+    success: bool,
+    test_module_names: &[&str],
+) -> EunitBatchResult {
     let mut module_results = std::collections::HashMap::new();
     let mut failed_modules = std::collections::HashMap::new();
 
-    // Parse structured RESULTS: lines from beamtalk_stdlib_test
+    // Parse structured RESULTS: lines
     for line in combined.lines() {
         if let Some(rest) = line.strip_prefix("RESULTS:") {
             let parts: Vec<&str> = rest.splitn(3, ':').collect();
@@ -873,11 +898,14 @@ fn run_all_eunit_tests(
                 let module_name = parts[0].to_string();
                 let passed = parts[1].parse::<usize>().unwrap_or(0);
                 let failed = parts[2].parse::<usize>().unwrap_or(0);
-                module_results.insert(module_name, ModuleResult {
-                    passed,
-                    failed,
-                    failures: Vec::new(),
-                });
+                module_results.insert(
+                    module_name,
+                    ModuleResult {
+                        passed,
+                        failed,
+                        failures: Vec::new(),
+                    },
+                );
             }
         }
     }
@@ -894,11 +922,8 @@ fn run_all_eunit_tests(
                 block.push_str(lines[i]);
                 i += 1;
             }
-            // Associate with the right module by searching for matching RESULTS
-            for (module_name, result) in &mut module_results {
-                // Match by checking if this FAIL's location matches the module's test file
-                // The module name is like "arithmetic_tests" and location starts with file path
-                let _ = module_name; // any module with failures gets the block
+            // Associate with any module that has failures
+            for result in module_results.values_mut() {
                 if result.failed > 0 {
                     result.failures.push(block.clone());
                 }
@@ -908,7 +933,7 @@ fn run_all_eunit_tests(
         }
     }
 
-    if !output.status.success() {
+    if !success {
         // Also parse FAILED_MODULE: markers as fallback
         for line in combined.lines() {
             if let Some(module_name) = line.strip_prefix("FAILED_MODULE:") {
@@ -928,7 +953,10 @@ fn run_all_eunit_tests(
         }
     }
 
-    Ok(EunitBatchResult { module_results, failed_modules })
+    EunitBatchResult {
+        module_results,
+        failed_modules,
+    }
 }
 
 /// Find `.bt` test files from a path (file or directory).
@@ -1057,13 +1085,16 @@ mod tests {
         let eval_modules = vec!["test_arith_0".to_string()];
         let wrapper = generate_eunit_wrapper("arith_tests", "test/arith.bt", &cases, &eval_modules);
         assert!(wrapper.contains("-module('arith_tests')."));
-        assert!(wrapper.contains("?assertEqual"));
-        assert!(wrapper.contains("test_arith_0"));
+        assert!(wrapper.contains("beamtalk_stdlib_test:run_and_assert"));
+        assert!(wrapper.contains("'test_arith_0'"));
         // Verify timeout wrapper is generated (BT-729)
         assert!(wrapper.contains("_test_()"));
         assert!(wrapper.contains("timeout, 60"));
-        // Verify Beamtalk source location in assertion comment (BT-729)
+        // Verify Beamtalk source location in assertion spec (BT-729)
         assert!(wrapper.contains("test/arith.bt:1 `1 + 2`"));
+        // Value assertion spec tuple
+        assert!(wrapper.contains("{value,"));
+        assert!(wrapper.contains("<<\"3\"/utf8>>"));
     }
 
     #[test]
@@ -1075,10 +1106,11 @@ mod tests {
         }];
         let eval_modules = vec!["test_spawn_0".to_string()];
         let wrapper = generate_eunit_wrapper("spawn_tests", "test/spawn.bt", &cases, &eval_modules);
-        assert!(wrapper.contains("test_spawn_0"));
-        // Bare wildcard should not generate assertEqual or assert(matches_pattern(...))
-        assert!(!wrapper.contains("assertEqual"));
-        assert!(!wrapper.contains("?assert(matches_pattern"));
+        assert!(wrapper.contains("'test_spawn_0'"));
+        // Bare wildcard should generate value_any spec (no expected value)
+        assert!(wrapper.contains("{value_any,"));
+        assert!(!wrapper.contains("{value,"));
+        assert!(!wrapper.contains("{value_wildcard,"));
     }
 
     #[test]
@@ -1090,8 +1122,9 @@ mod tests {
         }];
         let eval_modules = vec!["test_spawn_0".to_string()];
         let wrapper = generate_eunit_wrapper("spawn_tests", "test/spawn.bt", &cases, &eval_modules);
-        assert!(wrapper.contains("matches_pattern"));
-        assert!(!wrapper.contains("assertEqual"));
+        // Pattern with wildcard generates value_wildcard spec
+        assert!(wrapper.contains("{value_wildcard,"));
+        assert!(!wrapper.contains("{value,"));
     }
 
     #[test]
@@ -1162,19 +1195,14 @@ mod tests {
         }];
         let eval_modules = vec!["test_err_0".to_string()];
         let wrapper = generate_eunit_wrapper("err_tests", "test/err.bt", &cases, &eval_modules);
-        assert!(wrapper.contains("try 'test_err_0':eval("));
-        assert!(wrapper.contains("beamtalk_error"));
+        // Error assertion generates {error, ...} spec tuple
+        assert!(wrapper.contains("{error,"));
+        assert!(wrapper.contains("'test_err_0'"));
         assert!(wrapper.contains("does_not_understand"));
-        // Error assertions should not call format_result in the assertion
-        assert!(!wrapper.contains("format_result(Result"));
-        // Assertions must be outside try/catch (not caught by own catch clause)
-        assert!(wrapper.contains("case TryResult0 of"));
-        assert!(wrapper.contains("{ok, _}"));
-        assert!(wrapper.contains("CaughtKind0"));
-        // Error wrapper catches future_rejected throws (actor errors via await)
-        assert!(wrapper.contains("throw:{future_rejected, {beamtalk_error,"));
-        // Verify Beamtalk source location in error assertion comment (BT-729)
+        // Verify Beamtalk source location in assertion spec (BT-729)
         assert!(wrapper.contains("test/err.bt:1 `42 foo`"));
+        // Error handling is in beamtalk_stdlib_test.erl, not inline
+        assert!(wrapper.contains("beamtalk_stdlib_test:run_and_assert"));
     }
 
     #[test]
@@ -1195,10 +1223,12 @@ mod tests {
         ];
         let eval_modules = vec!["test_mix_0".to_string(), "test_mix_1".to_string()];
         let wrapper = generate_eunit_wrapper("mix_tests", "test/mix.bt", &cases, &eval_modules);
-        // First case: normal value assertion
-        assert!(wrapper.contains("format_result(Result0)"));
-        // Second case: error try/catch
-        assert!(wrapper.contains("try 'test_mix_1':eval("));
+        // First case: value assertion spec
+        assert!(wrapper.contains("{value,"));
+        assert!(wrapper.contains("'test_mix_0'"));
+        // Second case: error assertion spec
+        assert!(wrapper.contains("{error,"));
+        assert!(wrapper.contains("'test_mix_1'"));
     }
 
     #[test]

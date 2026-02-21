@@ -172,7 +172,7 @@ enum Command {
         #[arg(long, short)]
         quiet: bool,
 
-        /// Show detailed test output including EUnit verbose mode
+        /// Show detailed test output including `EUnit` verbose mode
         #[arg(long = "show-output")]
         show_output: bool,
     },
