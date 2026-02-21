@@ -25,7 +25,7 @@ default:
 ci: build lint test test-integration test-mcp test-e2e
 
 [windows]
-ci: build clippy fmt-check test test-integration test-mcp test-e2e
+ci: build clippy fmt-check-rust test test-integration test-mcp test-e2e
 
 # Clean all build artifacts (Rust, Erlang, VS Code, caches, examples)
 [unix]
@@ -137,9 +137,10 @@ build-examples: build-stdlib
 lint: lint-rust lint-erlang lint-js
 
 # Lint Rust: clippy + formatting check
-lint-rust: clippy fmt-check
+lint-rust: clippy fmt-check-rust
 
 # Lint Erlang: Dialyzer type checking
+# TODO: add fmt-check-erlang here once bulk-format commit lands
 lint-erlang: dialyzer
 
 # Lint JS/TS: placeholder for future JS tooling
@@ -153,14 +154,35 @@ clippy:
     @echo "✅ Clippy passed"
 
 # Check Rust code formatting
-fmt-check:
+fmt-check-rust:
     @echo "📋 Checking Rust formatting..."
     cargo fmt --all -- --check
 
+# Check all code formatting
+# TODO: add fmt-check-erlang here once bulk-format commit lands
+fmt-check: fmt-check-rust
+
 # Format all Rust code
-fmt:
+fmt-rust:
     @echo "✨ Formatting Rust code..."
     cargo fmt --all
+
+# Format all code (Rust + Erlang)
+fmt: fmt-rust fmt-erlang
+
+# Check Erlang code formatting
+[working-directory: 'runtime']
+fmt-check-erlang:
+    @echo "📋 Checking Erlang formatting..."
+    rebar3 fmt --check
+    @echo "✅ Erlang formatting check passed"
+
+# Format all Erlang code
+[working-directory: 'runtime']
+fmt-erlang:
+    @echo "✨ Formatting Erlang code..."
+    rebar3 fmt -w
+    @echo "✅ Erlang code formatted"
 
 # Run Dialyzer on Erlang runtime
 [working-directory: 'runtime']
