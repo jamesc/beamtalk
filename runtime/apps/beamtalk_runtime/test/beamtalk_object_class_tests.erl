@@ -1367,7 +1367,7 @@ multi_class_stdlib_shadowing_short_circuits_test_() ->
 
               %% 2. MyHelper must NOT be registered (short-circuit skipped it)
               ?assertEqual(undefined,
-                  erlang:whereis(beamtalk_class_registry:registry_name('MultiShadowHelper'))),
+                  beamtalk_class_registry:whereis_class('MultiShadowHelper')),
 
               %% 3. The error must be in the pending load errors ETS table
               PendingErrors = beamtalk_class_registry:drain_pending_load_errors_by_names(
