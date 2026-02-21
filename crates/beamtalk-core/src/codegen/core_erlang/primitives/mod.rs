@@ -13,6 +13,7 @@
 //! This is part of BT-340: making compiled stdlib modules self-sufficient
 //! so hand-written Erlang dispatch modules can be deleted.
 
+mod behaviour;
 mod block;
 mod character;
 mod collection;
@@ -68,6 +69,8 @@ pub fn generate_primitive_bif(
         "System" => misc::generate_system_bif(selector, params),
         "DateTime" => misc::generate_datetime_bif(selector, params),
         "Collection" => collection::generate_collection_bif(selector, params),
+        "Behaviour" => behaviour::generate_behaviour_bif(selector, params),
+        "Class" => behaviour::generate_class_bif(selector, params),
         "StackFrame" => misc::generate_stack_frame_bif(selector, params),
         "Pid" => misc::generate_pid_bif(selector, params),
         "Port" => misc::generate_port_bif(selector, params),

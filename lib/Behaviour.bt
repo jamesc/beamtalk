@@ -1,0 +1,166 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Behaviour — Abstract superclass of all class-describing objects.
+///
+/// Provides method dictionary access, hierarchy queries, and instance
+/// creation protocol for class objects. Every class (Counter, Integer,
+/// Actor subclasses, etc.) is an instance of Class, which inherits
+/// from Behaviour.
+///
+/// In Smalltalk terms, Behaviour defines the protocol shared by Class
+/// and Metaclass. In Beamtalk, class objects dispatch to Behaviour
+/// methods via the class-side fallback chain.
+///
+/// All Behaviour methods are sealed — users cannot override the class
+/// protocol. This limits the blast radius of class protocol changes.
+///
+/// ## Examples
+/// ```beamtalk
+/// Counter superclass             // => Actor
+/// Counter subclasses             // => []
+/// Counter canUnderstand: #class  // => true
+/// Counter localMethods           // => [increment, getValue]
+/// ```
+abstract Object subclass: Behaviour
+
+  // --- Hierarchy queries ---
+
+  /// Return the superclass of the receiver as a class object, or nil for roots.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter superclass      // => Actor (as class object)
+  /// ProtoObject superclass  // => nil
+  /// ```
+  sealed superclass => @primitive "classSuperclass"
+
+  /// Return all superclasses in order from immediate parent to root.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter allSuperclasses   // => [Actor, Object, ProtoObject]
+  /// ```
+  sealed allSuperclasses => @primitive "classAllSuperclasses"
+
+  /// Return direct subclasses of the receiver as a list of class objects.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Object subclasses   // => [Behaviour, Actor, Integer, ...]
+  /// ```
+  sealed subclasses => @primitive "classSubclasses"
+
+  /// Return all subclasses transitively (breadth-first) as class objects.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Object allSubclasses   // => [Behaviour, Class, Actor, ...]
+  /// ```
+  sealed allSubclasses => @primitive "classAllSubclasses"
+
+  /// Test whether the receiver strictly inherits from aClass (self not included).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter inheritsFrom: Actor    // => true
+  /// Counter inheritsFrom: Counter  // => false
+  /// ```
+  sealed inheritsFrom: aClass => @primitive "classInheritsFrom"
+
+  /// Test whether aBehaviour is the receiver or one of its ancestors.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter includesBehaviour: Counter  // => true
+  /// Counter includesBehaviour: Actor    // => true
+  /// Counter includesBehaviour: Integer  // => false
+  /// ```
+  sealed includesBehaviour: aBehaviour => @primitive "classIncludesBehaviour"
+
+  // --- Method dictionary ---
+
+  /// Return all selectors understood by instances (includes inherited).
+  ///
+  /// Walks the class chain collecting local methods at each level.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter methods   // => [increment, getValue, class, respondsTo:, ...]
+  /// ```
+  sealed methods => @primitive "classMethods"
+
+  /// Return only selectors defined locally in this class (not inherited).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter localMethods   // => [increment, getValue]
+  /// ```
+  sealed localMethods => @primitive "classLocalMethods"
+
+  /// Test whether instances of the receiver understand the given selector
+  /// (checks full inheritance chain).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter canUnderstand: #increment  // => true
+  /// Counter canUnderstand: #class      // => true (inherited from ProtoObject)
+  /// Counter canUnderstand: #bogus      // => false
+  /// ```
+  sealed canUnderstand: selector => @primitive "classCanUnderstand"
+
+  /// Test whether the selector is defined locally in this class
+  /// (does not check superclasses).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter includesSelector: #increment  // => true
+  /// Counter includesSelector: #class      // => false (defined in ProtoObject)
+  /// ```
+  sealed includesSelector: selector => @primitive "classIncludesSelector"
+
+  /// Walk the hierarchy and return the class that defines the given selector,
+  /// or nil if no class defines it.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter whichClassIncludesSelector: #class  // => ProtoObject
+  /// ```
+  sealed whichClassIncludesSelector: selector => @primitive "classWhichIncludesSelector"
+
+  // --- Instance variable queries ---
+
+  /// Return the names of instance variables declared in this class (not inherited).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter instanceVariableNames   // => [value]
+  /// ```
+  sealed instanceVariableNames => @primitive "classInstVarNames"
+
+  /// Return all instance variable names including inherited, in slot order.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter allInstanceVariableNames   // => [value]
+  /// ```
+  sealed allInstanceVariableNames => @primitive "classAllInstVarNames"
+
+  // --- Identity ---
+
+  /// Test whether this is a Behaviour (class-describing object).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter isBehaviour   // => true
+  /// 42 isBehaviour        // => false
+  /// ```
+  sealed isBehaviour => true
+
+  /// Test whether this is a metaclass. Returns false; overridden in Metaclass.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter isMeta   // => false
+  /// ```
+  sealed isMeta => false

@@ -21,20 +21,20 @@
 numSubs := Number subclasses
 // => _
 
-numSubs includes: #Integer
+numSubs includes: Integer
 // => true
 
-numSubs includes: #Float
+numSubs includes: Float
 // => true
 
 // Boolean has True and False as direct subclasses
 boolSubs := Boolean subclasses
 // => _
 
-boolSubs includes: #True
+boolSubs includes: True
 // => true
 
-boolSubs includes: #False
+boolSubs includes: False
 // => true
 
 // Float is sealed — always a leaf
@@ -52,7 +52,7 @@ True subclasses
 actorSubs := Actor subclasses
 // => _
 
-actorSubs includes: #Counter
+actorSubs includes: Counter
 // => true
 
 // ---------------------------------------------------------------------------
@@ -63,30 +63,30 @@ actorSubs includes: #Counter
 numAllSubs := Number allSubclasses
 // => _
 
-numAllSubs includes: #Integer
+numAllSubs includes: Integer
 // => true
 
-numAllSubs includes: #Float
+numAllSubs includes: Float
 // => true
 
 // Boolean allSubclasses includes True and False
 boolAllSubs := Boolean allSubclasses
 // => _
 
-boolAllSubs includes: #True
+boolAllSubs includes: True
 // => true
 
-boolAllSubs includes: #False
+boolAllSubs includes: False
 // => true
 
 // Collection allSubclasses includes List and Dictionary
 collSubs := Collection allSubclasses
 // => _
 
-collSubs includes: #List
+collSubs includes: List
 // => true
 
-collSubs includes: #Dictionary
+collSubs includes: Dictionary
 // => true
 
 // Float is sealed — always a leaf, allSubclasses returns empty

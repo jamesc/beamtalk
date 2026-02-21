@@ -48,32 +48,9 @@ class_send(ClassPid, spawn, []) ->
     unwrap_class_call(gen_server:call(ClassPid, {spawn, []}));
 class_send(ClassPid, 'spawnWith:', [Map]) ->
     unwrap_class_call(gen_server:call(ClassPid, {spawn, [Map]}));
-class_send(ClassPid, methods, []) ->
-    gen_server:call(ClassPid, methods);
-class_send(ClassPid, superclass, []) ->
-    case gen_server:call(ClassPid, superclass) of
-        none -> nil;  % Beamtalk nil, not Erlang 'none'
-        Super -> Super
-    end;
-class_send(ClassPid, class_name, []) ->
-    gen_server:call(ClassPid, class_name);
-class_send(ClassPid, module_name, []) ->
-    gen_server:call(ClassPid, module_name);
-class_send(ClassPid, 'printString', []) ->
-    %% BT-477: Class objects return their display name as a string.
-    ClassName = gen_server:call(ClassPid, class_name),
-    atom_to_binary(ClassName, utf8);
-class_send(_ClassPid, class, []) ->
-    %% BT-412: Metaclass terminal — returns 'Metaclass' sentinel atom.
-    'Metaclass';
-class_send(ClassPid, subclasses, []) ->
-    %% BT-573: Return direct subclass names as a sorted list.
-    ClassName = gen_server:call(ClassPid, class_name),
-    beamtalk_class_registry:direct_subclasses(ClassName);
-class_send(ClassPid, allSubclasses, []) ->
-    %% BT-573: Return all subclass names recursively as a sorted list.
-    ClassName = gen_server:call(ClassPid, class_name),
-    beamtalk_class_registry:all_subclasses(ClassName);
+%% ADR 0032 Phase 2 (BT-734): methods, superclass, class_name, module_name,
+%% printString, class, subclasses, allSubclasses now fall through to the
+%% Class/Behaviour dispatch chain via the catch-all below.
 class_send(ClassPid, Selector, Args) ->
     %% BT-411: Try user-defined class methods before raising does_not_understand
     %% BT-440: Test execution may take a long time; use longer timeout.

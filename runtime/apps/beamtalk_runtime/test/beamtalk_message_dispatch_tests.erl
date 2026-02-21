@@ -62,7 +62,7 @@ class_object_returns_value() ->
     ClassTag = beamtalk_class_registry:class_object_tag('Object'),
     ClassMod = beamtalk_object_class:module_name(ClassPid),
     ClassObj = #beamtalk_object{class = ClassTag, class_mod = ClassMod, pid = ClassPid},
-    Result = beamtalk_message_dispatch:send(ClassObj, class_name, []),
+    Result = beamtalk_message_dispatch:send(ClassObj, name, []),
     ?assertEqual('Object', Result).
 
 %% ============================================================================

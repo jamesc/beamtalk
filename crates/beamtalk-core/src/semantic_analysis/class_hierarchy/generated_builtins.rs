@@ -21,9 +21,11 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
         "Actor"
             | "Association"
             | "BEAMError"
+            | "Behaviour"
             | "Block"
             | "Boolean"
             | "Character"
+            | "Class"
             | "Collection"
             | "CompiledMethod"
             | "DateTime"
@@ -138,6 +140,38 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     classes.insert(
+        "Behaviour".into(),
+        ClassInfo {
+            name: "Behaviour".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: true,
+            is_typed: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "superclass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "allSuperclasses".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "subclasses".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "allSubclasses".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "inheritsFrom:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![None] },
+                MethodInfo { selector: "includesBehaviour:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![None] },
+                MethodInfo { selector: "methods".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "localMethods".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "canUnderstand:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![None] },
+                MethodInfo { selector: "includesSelector:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![None] },
+                MethodInfo { selector: "whichClassIncludesSelector:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![None] },
+                MethodInfo { selector: "instanceVariableNames".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "allInstanceVariableNames".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "isBehaviour".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "isMeta".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
         "Block".into(),
         ClassInfo {
             name: "Block".into(),
@@ -224,6 +258,27 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![
                 MethodInfo { selector: "value:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Character".into(), is_sealed: true, return_type: Some("Character".into()), param_types: vec![Some("Integer".into())] },
             ],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "Class".into(),
+        ClassInfo {
+            name: "Class".into(),
+            superclass: Some("Behaviour".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "name".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Class".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Class".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "isClass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Class".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "class".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Class".into(), is_sealed: true, return_type: None, param_types: vec![] },
+            ],
+            class_methods: vec![],
             class_variables: vec![],
         },
     );

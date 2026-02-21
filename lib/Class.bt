@@ -1,0 +1,55 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Class — A concrete class in the Beamtalk system.
+///
+/// Adds name, class identity protocol on top of Behaviour.
+/// Class is sealed — users cannot subclass it at v0.1.
+///
+/// Every class object (Counter, Integer, Actor, etc.) is an instance of Class
+/// for dispatch purposes. When a class-side message is not found in user-defined
+/// class methods, dispatch walks the Class → Behaviour → Object chain.
+///
+/// ## Examples
+/// ```beamtalk
+/// Counter name         // => #Counter
+/// Counter printString  // => "Counter"
+/// Counter isClass      // => true
+/// ```
+sealed Behaviour subclass: Class
+
+  /// Return the name of the class as a Symbol.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter name   // => #Counter
+  /// Integer name   // => #Integer
+  /// ```
+  sealed name => @primitive "className"
+
+  /// Return a human-readable string representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter printString   // => "Counter"
+  /// ```
+  sealed printString => self name asString
+
+  /// Test whether this is a Class (not a Metaclass).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter isClass   // => true
+  /// ```
+  sealed isClass => true
+
+  /// Return the metaclass sentinel.
+  ///
+  /// Full metaclass tower is future work — see design-metaprogramming.md.
+  /// Returns the 'Metaclass' sentinel atom for now (ADR 0013).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter class   // => Metaclass
+  /// ```
+  sealed class => @primitive "classClass"
