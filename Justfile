@@ -143,9 +143,13 @@ lint-rust: clippy fmt-check-rust
 # TODO: add fmt-check-erlang here once bulk-format commit lands
 lint-erlang: dialyzer
 
-# Lint JS/TS: placeholder for future JS tooling
-lint-js:
-    @echo "⏭️  No JS linting configured"
+# Lint JS/TS: Biome lint + format check
+[working-directory: 'editors/vscode']
+lint-js: fmt-check-js
+    @echo "🔍 Running Biome lint..."
+    npm install --quiet
+    npm run lint
+    @echo "✅ Biome lint passed"
 
 # Run clippy (Rust linter) - warnings are errors
 clippy:
@@ -160,15 +164,31 @@ fmt-check-rust:
 
 # Check all code formatting
 # TODO: add fmt-check-erlang here once bulk-format commit lands
-fmt-check: fmt-check-rust
+fmt-check: fmt-check-rust fmt-check-js
 
 # Format all Rust code
 fmt-rust:
     @echo "✨ Formatting Rust code..."
     cargo fmt --all
 
-# Format all code (Rust + Erlang)
-fmt: fmt-rust fmt-erlang
+# Format all code (Rust + Erlang + JS)
+fmt: fmt-rust fmt-erlang fmt-js
+
+# Check JS/TS formatting (Biome)
+[working-directory: 'editors/vscode']
+fmt-check-js:
+    @echo "📋 Checking JS/TS formatting..."
+    npm install --quiet
+    npm run format:check
+    @echo "✅ JS/TS formatting check passed"
+
+# Format all JS/TS code (Biome)
+[working-directory: 'editors/vscode']
+fmt-js:
+    @echo "✨ Formatting JS/TS code..."
+    npm install --quiet
+    npm run format
+    @echo "✅ JS/TS code formatted"
 
 # Check Erlang code formatting
 [working-directory: 'runtime']

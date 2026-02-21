@@ -12,7 +12,9 @@
   "engines": {
     "vscode": "^1.82.0"
   },
-  "categories": ["Programming Languages"],
+  "categories": [
+    "Programming Languages"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -24,8 +26,13 @@
     "languages": [
       {
         "id": "beamtalk",
-        "aliases": ["Beamtalk", "beamtalk"],
-        "extensions": [".bt"],
+        "aliases": [
+          "Beamtalk",
+          "beamtalk"
+        ],
+        "extensions": [
+          ".bt"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
@@ -47,7 +54,11 @@
         },
         "beamtalk.trace.server": {
           "type": "string",
-          "enum": ["off", "messages", "verbose"],
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
           "default": "off",
           "description": "Trace communication between VS Code and the Beamtalk language server."
         },
@@ -63,15 +74,19 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package"
+    "package": "vsce package",
+    "lint": "biome lint src/",
+    "format": "biome format --write src/",
+    "format:check": "biome format --diagnostic-level=error src/"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
-    "@vscode/vsce": "^3.7.1",
+    "@biomejs/biome": "^2.4.4",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.82.0",
+    "@vscode/vsce": "^3.7.1",
     "typescript": "^5.0.0"
   }
 }
