@@ -83,12 +83,15 @@ classSubclasses(Self) ->
     ClassPid = erlang:element(4, Self),
     ClassName = gen_server:call(ClassPid, class_name),
     Subclasses = beamtalk_class_registry:direct_subclasses(ClassName),
-    lists:filtermap(fun(SC) ->
-        case atom_to_class_object(SC) of
-            nil -> false;
-            Obj -> {true, Obj}
-        end
-    end, Subclasses).
+    lists:filtermap(
+        fun(SC) ->
+            case atom_to_class_object(SC) of
+                nil -> false;
+                Obj -> {true, Obj}
+            end
+        end,
+        Subclasses
+    ).
 
 %% @doc Return all subclasses transitively (breadth-first) as class objects.
 %%
@@ -98,12 +101,15 @@ classAllSubclasses(Self) ->
     ClassPid = erlang:element(4, Self),
     ClassName = gen_server:call(ClassPid, class_name),
     AllSubclasses = beamtalk_class_registry:all_subclasses(ClassName),
-    lists:filtermap(fun(SC) ->
-        case atom_to_class_object(SC) of
-            nil -> false;
-            Obj -> {true, Obj}
-        end
-    end, AllSubclasses).
+    lists:filtermap(
+        fun(SC) ->
+            case atom_to_class_object(SC) of
+                nil -> false;
+                Obj -> {true, Obj}
+            end
+        end,
+        AllSubclasses
+    ).
 
 %% @doc Return the local method selectors of the receiver (non-inherited).
 %%
@@ -119,21 +125,48 @@ classLocalMethods(Self) ->
 classAllSuperclasses(Self) ->
     ClassPid = erlang:element(4, Self),
     SuperName = gen_server:call(ClassPid, superclass),
-    collect_superclasses(SuperName, []).
+    Supers = walk_hierarchy(
+        SuperName,
+        fun(CN, CPid, Acc) ->
+            Module = gen_server:call(CPid, module_name),
+            Tag = beamtalk_class_registry:class_object_tag(CN),
+            ClassObj = #beamtalk_object{class = Tag, class_mod = Module, pid = CPid},
+            {cont, [ClassObj | Acc]}
+        end,
+        []
+    ),
+    lists:reverse(Supers).
 
 %% @doc Return all method selectors understood by instances (full inheritance chain).
 -spec classMethods(#beamtalk_object{}) -> [atom()].
 classMethods(Self) ->
     ClassPid = erlang:element(4, Self),
     ClassName = gen_server:call(ClassPid, class_name),
-    collect_all_methods(ClassName, ordsets:new()).
+    Acc = walk_hierarchy(
+        ClassName,
+        fun(_CN, CPid, A) ->
+            Methods = gen_server:call(CPid, methods),
+            {cont, ordsets:union(A, ordsets:from_list(Methods))}
+        end,
+        ordsets:new()
+    ),
+    ordsets:to_list(Acc).
 
 %% @doc Test whether instances understand the selector (full inheritance chain).
 -spec classCanUnderstand(#beamtalk_object{}, atom()) -> boolean().
 classCanUnderstand(Self, Selector) ->
     ClassPid = erlang:element(4, Self),
     ClassName = gen_server:call(ClassPid, class_name),
-    can_understand_check(ClassName, Selector).
+    walk_hierarchy(
+        ClassName,
+        fun(_CN, CPid, _Acc) ->
+            case beamtalk_object_class:has_method(CPid, Selector) of
+                true -> {halt, true};
+                false -> {cont, false}
+            end
+        end,
+        false
+    ).
 
 %% @doc Test whether the receiver strictly inherits from aClass (self not included).
 -spec classInheritsFrom(#beamtalk_object{}, #beamtalk_object{}) -> boolean().
@@ -142,7 +175,21 @@ classInheritsFrom(Self, TargetClassObj) ->
     TargetName = gen_server:call(TargetPid, class_name),
     ClassPid = erlang:element(4, Self),
     SuperName = gen_server:call(ClassPid, superclass),
-    inherits_from_check(SuperName, TargetName).
+    case SuperName of
+        TargetName ->
+            true;
+        _ ->
+            walk_hierarchy(
+                SuperName,
+                fun(CN, _CPid, _Acc) ->
+                    case CN of
+                        TargetName -> {halt, true};
+                        _ -> {cont, false}
+                    end
+                end,
+                false
+            )
+    end.
 
 %% @doc Test whether aBehaviour is the receiver or one of its ancestors.
 -spec classIncludesBehaviour(#beamtalk_object{}, #beamtalk_object{}) -> boolean().
@@ -151,21 +198,55 @@ classIncludesBehaviour(Self, TargetClassObj) ->
     SelfName = gen_server:call(SelfPid, class_name),
     TargetPid = erlang:element(4, TargetClassObj),
     TargetName = gen_server:call(TargetPid, class_name),
-    includes_behaviour_check(SelfName, TargetName).
+    case SelfName of
+        TargetName ->
+            true;
+        _ ->
+            walk_hierarchy(
+                SelfName,
+                fun(CN, _CPid, _Acc) ->
+                    case CN of
+                        TargetName -> {halt, true};
+                        _ -> {cont, false}
+                    end
+                end,
+                false
+            )
+    end.
 
 %% @doc Walk the hierarchy and return the class object that defines the selector, or nil.
 -spec classWhichIncludesSelector(#beamtalk_object{}, atom()) -> #beamtalk_object{} | nil.
 classWhichIncludesSelector(Self, Selector) ->
     ClassPid = erlang:element(4, Self),
     ClassName = gen_server:call(ClassPid, class_name),
-    which_includes_check(ClassName, Selector).
+    walk_hierarchy(
+        ClassName,
+        fun(CN, CPid, _Acc) ->
+            case beamtalk_object_class:has_method(CPid, Selector) of
+                true ->
+                    Module = gen_server:call(CPid, module_name),
+                    Tag = beamtalk_class_registry:class_object_tag(CN),
+                    {halt, #beamtalk_object{class = Tag, class_mod = Module, pid = CPid}};
+                false ->
+                    {cont, nil}
+            end
+        end,
+        nil
+    ).
 
 %% @doc Return all instance variable names including inherited, in slot order.
 -spec classAllInstVarNames(#beamtalk_object{}) -> [atom()].
 classAllInstVarNames(Self) ->
     ClassPid = erlang:element(4, Self),
     ClassName = gen_server:call(ClassPid, class_name),
-    collect_all_inst_vars(ClassName, []).
+    walk_hierarchy(
+        ClassName,
+        fun(_CN, CPid, Acc) ->
+            IVars = gen_server:call(CPid, instance_variables),
+            {cont, IVars ++ Acc}
+        end,
+        []
+    ).
 
 %% @doc Test whether the selector is defined locally in this class.
 %%
@@ -202,6 +283,32 @@ classClass(_Self) ->
 %%% ============================================================================
 
 %% @private
+%% @doc Generic fold over the superclass chain starting from ClassName.
+%%
+%% Fun receives (ClassName, ClassPid, Acc) and returns:
+%%   {cont, NewAcc}   — continue walking to superclass
+%%   {halt, Result}   — stop and return Result immediately
+%%
+%% Returns Acc when the chain is exhausted (none or unregistered class).
+-spec walk_hierarchy(atom() | none, fun((atom(), pid(), Acc) -> {cont, Acc} | {halt, Result}), Acc) ->
+    Acc | Result.
+walk_hierarchy(none, _Fun, Acc) ->
+    Acc;
+walk_hierarchy(ClassName, Fun, Acc) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined ->
+            Acc;
+        ClassPid ->
+            case Fun(ClassName, ClassPid, Acc) of
+                {halt, Result} ->
+                    Result;
+                {cont, NewAcc} ->
+                    Super = gen_server:call(ClassPid, superclass),
+                    walk_hierarchy(Super, Fun, NewAcc)
+            end
+    end.
+
+%% @private
 %% @doc Convert a class name atom to a class object (#beamtalk_object{}).
 %%
 %% Looks up the class process, gets its module name, and constructs
@@ -217,94 +324,4 @@ atom_to_class_object(ClassName) ->
             Module = gen_server:call(ClassPid, module_name),
             Tag = beamtalk_class_registry:class_object_tag(ClassName),
             #beamtalk_object{class = Tag, class_mod = Module, pid = ClassPid}
-    end.
-
-%% @private
-collect_superclasses(none, Acc) ->
-    lists:reverse(Acc);
-collect_superclasses(ClassName, Acc) ->
-    case atom_to_class_object(ClassName) of
-        nil -> lists:reverse(Acc);
-        ClassObj ->
-            ClassPid = erlang:element(4, ClassObj),
-            Super = gen_server:call(ClassPid, superclass),
-            collect_superclasses(Super, [ClassObj | Acc])
-    end.
-
-%% @private
-collect_all_methods(none, Acc) ->
-    ordsets:to_list(Acc);
-collect_all_methods(ClassName, Acc) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined -> ordsets:to_list(Acc);
-        ClassPid ->
-            Methods = gen_server:call(ClassPid, methods),
-            NewAcc = ordsets:union(Acc, ordsets:from_list(Methods)),
-            Super = gen_server:call(ClassPid, superclass),
-            collect_all_methods(Super, NewAcc)
-    end.
-
-%% @private
-can_understand_check(none, _Selector) -> false;
-can_understand_check(ClassName, Selector) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined -> false;
-        ClassPid ->
-            case beamtalk_object_class:has_method(ClassPid, Selector) of
-                true -> true;
-                false ->
-                    Super = gen_server:call(ClassPid, superclass),
-                    can_understand_check(Super, Selector)
-            end
-    end.
-
-%% @private
-inherits_from_check(none, _Target) -> false;
-inherits_from_check(Target, Target) -> true;
-inherits_from_check(ClassName, Target) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined -> false;
-        ClassPid ->
-            Super = gen_server:call(ClassPid, superclass),
-            inherits_from_check(Super, Target)
-    end.
-
-%% @private
-includes_behaviour_check(Name, Name) -> true;
-includes_behaviour_check(Name, Target) ->
-    case beamtalk_class_registry:whereis_class(Name) of
-        undefined -> false;
-        ClassPid ->
-            Super = gen_server:call(ClassPid, superclass),
-            includes_behaviour_check_super(Super, Target)
-    end.
-
-includes_behaviour_check_super(none, _Target) -> false;
-includes_behaviour_check_super(Name, Target) ->
-    includes_behaviour_check(Name, Target).
-
-%% @private
-which_includes_check(none, _Selector) -> nil;
-which_includes_check(ClassName, Selector) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined -> nil;
-        ClassPid ->
-            case beamtalk_object_class:has_method(ClassPid, Selector) of
-                true -> atom_to_class_object(ClassName);
-                false ->
-                    Super = gen_server:call(ClassPid, superclass),
-                    which_includes_check(Super, Selector)
-            end
-    end.
-
-%% @private
-collect_all_inst_vars(none, Acc) ->
-    Acc;
-collect_all_inst_vars(ClassName, Acc) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined -> Acc;
-        ClassPid ->
-            IVars = gen_server:call(ClassPid, instance_variables),
-            Super = gen_server:call(ClassPid, superclass),
-            collect_all_inst_vars(Super, IVars ++ Acc)
     end.
