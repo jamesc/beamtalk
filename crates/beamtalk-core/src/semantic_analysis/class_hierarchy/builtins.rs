@@ -42,10 +42,24 @@ pub(super) fn builtin_method(selector: &str, arity: usize, defined_in: &str) -> 
 /// Returns true if the given class name is a built-in class.
 ///
 /// This is a fast O(1) check using a static set, suitable for hot paths
-/// like `merge()` and `remove_classes()`.
+/// like `merge()`, `remove_classes()`, and project index filtering.
+///
+/// Includes both generated stdlib classes (from `lib/*.bt`) and runtime-only
+/// built-ins like `Future`.
 pub(super) fn is_builtin_class(name: &str) -> bool {
     // Runtime-only classes (no lib/*.bt source file)
     name == "Future" || generated::is_generated_builtin_class(name)
+}
+
+/// Returns true if the given class name has runtime shadowing protection.
+///
+/// Only classes with the `bt@stdlib@` module prefix are protected at runtime
+/// (via `is_stdlib_module` in `beamtalk_object_class`). This excludes
+/// runtime-only built-ins like `Future` that lack this prefix (BT-750).
+///
+/// Used by `check_stdlib_name_shadowing` to avoid inaccurate warnings.
+pub(super) fn is_runtime_protected_class(name: &str) -> bool {
+    generated::is_generated_builtin_class(name)
 }
 
 /// Returns all built-in class definitions.
