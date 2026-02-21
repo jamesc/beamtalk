@@ -28,7 +28,7 @@ Documentation in Beamtalk is currently accessible only through EEP-48 chunks bak
 - `method_info()` maps contain `arity`, `block`, and `is_sealed` — no doc
 - `CompiledMethod` maps contain `__selector__`, `__source__`, `__method_info__` — no doc
 - Dynamic classes store methods but have no documentation path
-- The `>>` operator returns a CompiledMethod for the local method only — it does not walk the class hierarchy
+- The `>>` operator returns a CompiledMethod for the local method only — it does not walk the class hierarchy (this ADR changes that)
 
 ### Constraints
 
@@ -40,6 +40,8 @@ Documentation in Beamtalk is currently accessible only through EEP-48 chunks bak
 ## Decision
 
 Add documentation strings as first-class state on `Behaviour` and `CompiledMethod`, with post-hoc setter messages for programmatic doc assignment. The `///` syntax compiles to the same data path as the setters — one unified mechanism for compiled and dynamic classes.
+
+**Fix `>>` to walk the class hierarchy.** Currently `Counter >> #class` returns `nil` because `#class` is inherited from ProtoObject. This is inconsistent with Pharo (where `>>` walks the hierarchy) and makes method doc access unnecessarily difficult. After this change, `Counter >> #class` returns ProtoObject's CompiledMethod for `#class`, and `(Counter >> #class) doc` just works.
 
 **Remove EEP-48 doc chunk generation.** Runtime-embedded docs replace EEP-48 as the single source of truth for documentation. This eliminates the `doc_chunks.rs` codegen, the `.docs` file intermediate, and the post-`erlc` beam chunk injection step. EEP-48 generation can be re-added later if BEAM ecosystem interop becomes a priority — the data is all available in `class_state`.
 
@@ -76,16 +78,10 @@ When constructing a `CompiledMethod` via `handle_call({method, Selector}, ...)`,
 ```beamtalk
 Counter doc                      // => 'A counter actor that maintains state.'
 (Counter >> #increment) doc      // => 'Increment the counter by 1.'
+(Counter >> #class) doc          // => 'Return the class of the receiver.' (inherited)
 ```
 
-`Counter doc` returns the class doc string or `nil`.
-
-**Method doc access**: The `>>` operator returns a CompiledMethod from the local method dict only (it does not walk the hierarchy). To access docs for inherited methods, use `docForMethod:` which walks the chain:
-
-```beamtalk
-Counter docForMethod: #increment   // => 'Increment the counter by 1.' (local)
-Counter docForMethod: #class       // => 'Return the class of the receiver.' (inherited from ProtoObject)
-```
+`Counter doc` returns the class doc string or `nil`. The `>>` operator walks the class hierarchy (matching Pharo's behaviour), so `(Counter >> #class) doc` returns ProtoObject's doc for `#class` even though Counter doesn't define it locally.
 
 **Setting docs — post-hoc setters on Behaviour:**
 
@@ -96,12 +92,23 @@ Counter setDocForMethod: #increment to: 'Increment the counter by 1.'.
 
 These are ordinary message sends to the class object, handled by methods on `Behaviour`. They update the class gen_server state. Doc setters only work for locally defined methods — you cannot set a doc on an inherited method without first overriding the method itself.
 
-### Doc Inheritance
+### `>>` Hierarchy Walking
 
-Doc reading walks the class hierarchy; doc writing is local-only. This mirrors the method dispatch asymmetry — you can *call* inherited methods but can only *define* methods locally.
+The `>>` operator is changed to walk the class hierarchy, matching Pharo's semantics. Previously it only checked local methods.
 
-- `Counter docForMethod: #increment` — returns doc from Counter (local method)
-- `Counter docForMethod: #class` — walks to ProtoObject, returns its doc for `#class`
+```beamtalk
+Counter >> #increment   // => CompiledMethod (local — works today)
+Counter >> #class       // => CompiledMethod (inherited from ProtoObject — previously nil)
+```
+
+Implementation: `beamtalk_method_resolver:resolve/2` is updated to walk the superclass chain via the class gen_server, checking local methods at each level. When an inherited method is found, the returned CompiledMethod includes the `__doc__` from the defining class's `method_info()`.
+
+### Doc Write/Read Asymmetry
+
+Doc reading walks the hierarchy via `>>`; doc writing is local-only via `setDocForMethod:to:`. This mirrors method dispatch — you can *call* inherited methods but only *define* methods locally.
+
+- `(Counter >> #increment) doc` — returns doc from Counter (local method)
+- `(Counter >> #class) doc` — returns ProtoObject's doc for `#class` (inherited)
 - `Counter setDocForMethod: #class to: 'text'` — **error**: `#class` is not defined locally on Counter
 
 ### Behaviour.bt Additions
@@ -126,32 +133,13 @@ sealed doc => @intrinsic classDoc
 /// ```
 sealed doc: aString => @intrinsic classSetDoc
 
-/// Return the documentation string for a method, walking the class
-/// hierarchy if the method is inherited. Returns nil if the method
-/// has no documentation or does not exist.
-///
-/// ## Examples
-/// ```beamtalk
-/// Counter docForMethod: #increment  // => 'Increment the counter by 1.'
-/// Counter docForMethod: #class      // => 'Return the class of the receiver.'
-/// ```
-sealed docForMethod: selector =>
-  current := self.
-  [current notNil] whileTrue: [
-    (current includesSelector: selector) ifTrue: [
-      ^ @intrinsic classMethodDoc
-    ].
-    current := current superclass
-  ].
-  nil
-
 /// Set the documentation string for a locally defined method.
 /// The method must exist in this class (not inherited).
 ///
 /// ## Examples
 /// ```beamtalk
 /// Counter setDocForMethod: #increment to: 'Increment by 1'.
-/// Counter docForMethod: #increment   // => 'Increment by 1'
+/// (Counter >> #increment) doc   // => 'Increment by 1'
 /// ```
 sealed setDocForMethod: selector to: aString => @intrinsic classSetMethodDoc
 ```
@@ -164,9 +152,8 @@ In `beamtalk_compiled_method_ops.erl`, add `doc` to the builtin dispatch:
 (Counter >> #increment) doc            // => 'Increment the counter by 1.'
 (Counter >> #increment) selector       // => #increment
 (Counter >> #increment) source         // => 'increment => self.count := ...'
+(Counter >> #class) doc                // => 'Return the class of the receiver.'
 ```
-
-Note: `>>` only returns local methods. For inherited method docs, use `docForMethod:` on the class instead.
 
 ### Compiler Integration
 
@@ -191,8 +178,12 @@ In `generate_register_class` codegen (`methods.rs`), the `ClassInfo` map gains:
 >> Counter doc
 => "A counter actor that maintains state."
 
->> Counter docForMethod: #increment
+>> (Counter >> #increment) doc
 => "Increment the counter by 1."
+
+>> // Inherited method docs — >> walks the hierarchy
+>> (Counter >> #class) doc
+=> "Return the class of the receiver."
 
 >> Counter doc: 'Updated documentation.'
 => "Updated documentation."
@@ -203,12 +194,8 @@ In `generate_register_class` codegen (`methods.rs`), the `ClassInfo` map gains:
 >> Counter setDocForMethod: #increment to: 'Add one to the count.'
 => "Add one to the count."
 
->> Counter docForMethod: #increment
+>> (Counter >> #increment) doc
 => "Add one to the count."
-
->> // Inherited method docs work via docForMethod:
->> Counter docForMethod: #class
-=> "Return the class of the receiver."
 
 >> // Dynamic class — docs work without .beam files
 >> Greeter doc: 'A simple greeter actor.'
@@ -217,8 +204,8 @@ In `generate_register_class` codegen (`methods.rs`), the `ClassInfo` map gains:
 >> Greeter setDocForMethod: #greet to: 'Return a greeting.'
 => "Return a greeting."
 
->> Greeter doc
-=> "A simple greeter actor."
+>> (Greeter >> #greet) doc
+=> "Return a greeting."
 ```
 
 ### Error Examples
@@ -334,7 +321,7 @@ Counter doc: 'new docs'         // => Error: does not understand #doc:
 - **Self-describing objects**: Classes and CompiledMethods carry their documentation — no external lookup required
 - **Works for dynamic classes**: Post-hoc setters provide docs for classes without `.beam` files
 - **Simpler build pipeline**: Removing EEP-48 generation eliminates `doc_chunks.rs`, the `.docs` intermediate file, and post-`erlc` beam chunk injection
-- **Simpler `:h` implementation**: `beamtalk_repl_docs.erl` can use `doc` / `docForMethod:` messages instead of parsing EEP-48 tuples and walking the hierarchy manually
+- **Simpler `:h` implementation**: `beamtalk_repl_docs.erl` can use `doc` messages and `>>` instead of parsing EEP-48 tuples and walking the hierarchy manually
 - **Single source of truth**: Runtime `class_state` is the only place docs live — no divergence between beam chunks and process state
 - **Principle alignment**: Satisfies Principle 6 (Messages All The Way Down) and 8 (Reflection as Primitive) — docs are just messages
 - **Unified mechanism**: `///` and post-hoc setters both populate the same state — one runtime representation
@@ -342,13 +329,14 @@ Counter doc: 'new docs'         // => Error: does not understand #doc:
 ### Negative
 - **No BEAM doc interop**: `code:get_doc(counter)` will no longer return Beamtalk docs. Erlang `h/1` and Elixir `h/1` won't show Beamtalk class docs. Mitigated by: no v0.1 user needs this; EEP-48 can be re-added later by reading from `class_state`.
 - **Memory cost**: Doc strings consume RAM proportional to total documentation volume (~50-100KB for a typical system)
-- **Three new intrinsics**: `classDoc`, `classSetDoc`, `classSetMethodDoc` added to the intrinsic set
+- **Two new intrinsics**: `classDoc`, `classSetDoc` added to the intrinsic set; `classSetMethodDoc` added as a gen_server call (not an intrinsic — operates on class state directly)
 - **Session-local mutations**: Unlike Pharo's changes file, `doc:` mutations don't persist to disk. This may surprise Smalltalk developers who expect image-like persistence.
 
 ### Neutral
 - **`:h` REPL command unchanged**: Continues to work as before; implementation simplified to use `doc` messages internally, but the user-facing command is the same
 - **`///` syntax unchanged**: No authoring changes — this ADR affects storage and access, not how docs are written
-- **Doc write/read asymmetry**: `docForMethod:` reads inherited docs (walks chain), `setDocForMethod:to:` writes local docs only. This mirrors method dispatch — you can call inherited methods but only define methods locally.
+- **`>>` walks the hierarchy**: Previously local-only, now walks the superclass chain matching Pharo's behaviour. This is a semantic change — `Counter >> #class` returns a CompiledMethod instead of `nil`.
+- **Doc write/read asymmetry**: `(Counter >> #selector) doc` reads inherited docs (via `>>` hierarchy walk); `setDocForMethod:to:` writes local docs only. This mirrors method dispatch — you can call inherited methods but only define methods locally.
 
 ## Implementation
 
@@ -361,13 +349,14 @@ Counter doc: 'new docs'         // => Error: does not understand #doc:
 3. Add `__doc__` field to `CompiledMethod` map construction (in `handle_call({method, Selector}, ...)`), populated from the `doc` key in local `method_info()`
 4. Add `doc` dispatch to `beamtalk_compiled_method_ops.erl`
 5. Handle `doc` and `method_docs` keys in `ClassInfo` map during `init/1` and `handle_call({update_class, ...}, ...)`
-6. Implement three intrinsics in `beamtalk_behaviour_intrinsics.erl`:
+6. **Fix `>>` to walk the class hierarchy**: Update `beamtalk_method_resolver:resolve/2` to walk the superclass chain when a selector is not found in the local method dict. Return the CompiledMethod from the defining class (with its `__doc__`).
+7. Implement two intrinsics in `beamtalk_behaviour_intrinsics.erl`:
    - `classDoc/1` — read `doc` from `class_state`
    - `classSetDoc/2` — write `doc` to `class_state`
-   - `classSetMethodDoc/3` — write `doc` into `method_info()` for a given selector (error if selector not in local methods)
-7. Add `doc`, `doc:`, `docForMethod:`, `setDocForMethod:to:` methods to `lib/Behaviour.bt`
-8. Register intrinsics in the compiler's intrinsic table
-9. Add tests: roundtrip via setters, CompiledMethod `doc` access, error on non-local method, `docForMethod:` walks hierarchy
+8. Add `setDocForMethod:to:` as a gen_server call handler in `beamtalk_object_class.erl` — writes `doc` into `method_info()` for a given selector (error if selector not in local methods)
+9. Add `doc`, `doc:`, `setDocForMethod:to:` methods to `lib/Behaviour.bt`
+10. Register intrinsics in the compiler's intrinsic table
+11. Add tests: `>>` walks hierarchy, CompiledMethod `doc` access, roundtrip via setters, error on non-local method
 
 ### Phase 2: Compiler Integration (M)
 
@@ -384,7 +373,7 @@ Counter doc: 'new docs'         // => Error: does not understand #doc:
 1. Remove `doc_chunks.rs` from codegen
 2. Remove `.docs` file generation from the compile pipeline
 3. Remove EEP-48 chunk injection from the compile escript
-4. Rewrite `beamtalk_repl_docs.erl` to use `doc` / `docForMethod:` messages exclusively — remove all `code:get_doc/1` calls and EEP-48 parsing
+4. Rewrite `beamtalk_repl_docs.erl` to use `doc` messages and `>>` exclusively — remove all `code:get_doc/1` calls and EEP-48 parsing
 5. Simplify `format_class_docs/1` and `format_method_doc/2` to delegate to the object protocol
 6. Update any tests that assert on EEP-48 chunk contents
 
