@@ -19,6 +19,10 @@
     get_method_signatures/2
 ]).
 
+%% Maximum class hierarchy depth before aborting chain walks.
+%% Prevents infinite loops if the ETS hierarchy table ever contains a cycle.
+-define(MAX_HIERARCHY_DEPTH, 20).
+
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
 -export([
@@ -444,19 +448,25 @@ format_modifiers(_) ->
 %% shadow inherited ones, walking from ClassName upward.
 -spec collect_flattened_methods(atom(), pid()) -> map().
 collect_flattened_methods(ClassName, ClassPid) ->
+    collect_flattened_methods(ClassName, ClassPid, 0).
+
+-spec collect_flattened_methods(atom(), pid(), non_neg_integer()) -> map().
+collect_flattened_methods(_ClassName, _ClassPid, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+    #{};
+collect_flattened_methods(ClassName, ClassPid, Depth) ->
     {ok, LocalMethods} = gen_server:call(ClassPid, get_instance_methods, 5000),
     LocalFlat = maps:map(fun(_Sel, Info) -> {ClassName, Info} end, LocalMethods),
     Superclass = gen_server:call(ClassPid, superclass, 5000),
-    SuperFlat = collect_chain_methods(Superclass),
+    SuperFlat = collect_chain_methods(Superclass, Depth + 1),
     maps:merge(SuperFlat, LocalFlat).
 
--spec collect_chain_methods(atom() | none) -> map().
-collect_chain_methods(none) ->
+-spec collect_chain_methods(atom() | none, non_neg_integer()) -> map().
+collect_chain_methods(none, _Depth) ->
     #{};
-collect_chain_methods(SuperName) ->
+collect_chain_methods(SuperName, Depth) ->
     case beamtalk_class_registry:whereis_class(SuperName) of
         undefined -> #{};
-        SuperPid -> collect_flattened_methods(SuperName, SuperPid)
+        SuperPid -> collect_flattened_methods(SuperName, SuperPid, Depth)
     end.
 
 %% @private
@@ -470,6 +480,12 @@ collect_chain_methods(SuperName) ->
 %% defining class rather than the class that dispatches the method.
 -spec find_method_in_chain(pid(), atom()) -> {ok, atom()} | not_found.
 find_method_in_chain(ClassPid, Selector) ->
+    find_method_in_chain(ClassPid, Selector, 0).
+
+-spec find_method_in_chain(pid(), atom(), non_neg_integer()) -> {ok, atom()} | not_found.
+find_method_in_chain(_ClassPid, _Selector, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+    not_found;
+find_method_in_chain(ClassPid, Selector, Depth) ->
     ClassName = gen_server:call(ClassPid, class_name, 5000),
     case gen_server:call(ClassPid, {method, Selector}, 5000) of
         nil ->
@@ -480,7 +496,7 @@ find_method_in_chain(ClassPid, Selector) ->
                 Super ->
                     case beamtalk_class_registry:whereis_class(Super) of
                         undefined -> not_found;
-                        SuperPid -> find_method_in_chain(SuperPid, Selector)
+                        SuperPid -> find_method_in_chain(SuperPid, Selector, Depth + 1)
                     end
             end;
         _MethodInfo ->
