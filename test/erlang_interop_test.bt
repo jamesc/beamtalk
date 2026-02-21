@@ -6,11 +6,10 @@
 TestCase subclass: ErlangInteropTest
 
   testModuleProxyConstruction =>
-    Erlang lists.
-    Erlang maps.
-    Erlang erlang.
-    // Proxy class is ErlangModule
-    self assert: ((Erlang lists) class) equals: ErlangModule
+    // Unary message on Erlang constructs ErlangModule proxy
+    self assert: ((Erlang lists) class) equals: ErlangModule.
+    self assert: ((Erlang maps) class) equals: ErlangModule.
+    self assert: ((Erlang erlang) class) equals: ErlangModule
 
   testErlangFunctionCallsKeywordMessages =>
     // Single keyword: lists:reverse/1
@@ -23,14 +22,14 @@ TestCase subclass: ErlangInteropTest
     self assert: (Erlang lists nth: 2 with: #(10, 20, 30)) equals: 20
 
   testErlangFunctionCallsZeroArgUnaryOnProxy =>
-    // erlang:node/0
-    (Erlang erlang) node
+    // erlang:node/0 — returns current node atom
+    self assert: ((Erlang erlang) node) notNil
 
   testCachedProxy =>
     // Store proxy in variable and reuse
     proxy := Erlang lists.
     self assert: (proxy reverse: #(1, 2, 3)) equals: #(3, 2, 1).
-    proxy reverse: #(#a, #b, #c)
+    self assert: (proxy reverse: #(#a, #b, #c)) equals: #(#c, #b, #a)
 
   testClassProtocolOnErlang =>
     // Class-protocol selectors should NOT generate proxy maps

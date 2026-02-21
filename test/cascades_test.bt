@@ -6,8 +6,8 @@
 TestCase subclass: CascadesTest
 
   testBasicCascadeInfrastructureTest =>
-    // Simple value to test cascade infrastructure works
+    // Cascade tests require compiled modules with @load (REPL cascades return futures).
+    // Full cascade testing is covered in tests/e2e/cases/cascades.bt.
+    // This verifies basic variable binding infrastructure used by cascades.
     x := 5.
-    self assert: x equals: 5.
-    // Verify variable persists for future cascade tests
     self assert: x equals: 5

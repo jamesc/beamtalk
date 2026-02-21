@@ -11,5 +11,7 @@ TestCase subclass: EmptyMethodSelfTest
     a := EmptyMethodActor spawn.
     // Call empty method — should return self (the actor), not nil
     ref := a doNothing await.
-    // Returned reference should be the same actor — verify by reading state
+    // Returned reference should be the same actor
+    self assert: (ref =:= a).
+    // Verify by reading state through the returned reference
     self assert: (ref getValue await) equals: 42

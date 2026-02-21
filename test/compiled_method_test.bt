@@ -30,14 +30,14 @@ TestCase subclass: CompiledMethodTest
     self assert: ((Counter >> #increment) argumentCount) equals: 0
 
   testSource =>
-    (Counter >> #getValue) source
+    self assert: ((Counter >> #getValue) source) equals: "getValue => ^self.value"
 
   testPrintString =>
-    (Counter >> #getValue) printString
+    self assert: ((Counter >> #getValue) printString) equals: "a CompiledMethod(getValue)"
 
   testLookupOnNonClass =>
     // >> on non-class value produces type_error
     self should: [42 >> #foo] raise: #type_error
 
   testAsString =>
-    (Counter >> #getValue) asString
+    self assert: ((Counter >> #getValue) asString) equals: "a CompiledMethod(getValue)"

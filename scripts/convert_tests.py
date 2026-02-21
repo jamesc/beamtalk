@@ -324,8 +324,10 @@ def needs_parens(expr):
         # Check balanced
         depth = 0
         for c in expr:
-            if c == '(': depth += 1
-            elif c == ')': depth -= 1
+            if c == '(':
+                depth += 1
+            elif c == ')':
+                depth -= 1
             if depth == 0 and c == ')':
                 break
         if depth == 0:
@@ -515,7 +517,8 @@ def parse_test_file(filepath):
                     i += 1
                     continue
             
-            # No assertion - orphaned expression (skip)
+            # No assertion - orphaned expression (warn but preserve as side-effect call)
+            print(f"  WARNING: orphaned expression at line {i+1} (no // => assertion): {expression[:60]}", file=sys.stderr)
             continue
         
         i += 1

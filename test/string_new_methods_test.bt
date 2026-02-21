@@ -28,10 +28,10 @@ TestCase subclass: StringNewMethodsTest
     self assert: ("hello" drop: 10) equals: ""
 
   testPadding =>
-    // padLeft: (leading spaces significant, cannot assert exact value)
-    "hi" padLeft: 5.
-    // padRight: (trailing spaces significant, cannot assert exact value)
-    "hi" padRight: 5.
+    // padLeft: with spaces — verify correct length
+    self assert: ("hi" padLeft: 5) size equals: 5.
+    // padRight: with spaces — verify correct length
+    self assert: ("hi" padRight: 5) size equals: 5.
     // padLeft:with: - pad with specific character
     self assert: ("42" padLeft: 5 with: "0") equals: "00042".
     // padRight:with: - pad with specific character
