@@ -11,7 +11,15 @@
 %%% @see docs/internal/design-self-as-object.md Section 3.3
 
 -module(beamtalk_primitive).
--export([class_of/1, class_of_object/1, class_of_object_by_name/1, send/3, responds_to/2, class_name_to_module/1, print_string/1]).
+-export([
+    class_of/1,
+    class_of_object/1,
+    class_of_object_by_name/1,
+    send/3,
+    responds_to/2,
+    class_name_to_module/1,
+    print_string/1
+]).
 
 -include("beamtalk.hrl").
 
@@ -27,21 +35,26 @@
 class_of(X) when is_integer(X) -> 'Integer';
 class_of(X) when is_float(X) -> 'Float';
 class_of(X) when is_binary(X) -> 'String';
-class_of(true) -> 'True';
-class_of(false) -> 'False';
-class_of(nil) -> 'UndefinedObject';
+class_of(true) ->
+    'True';
+class_of(false) ->
+    'False';
+class_of(nil) ->
+    'UndefinedObject';
 class_of(X) when is_function(X) -> 'Block';
 class_of(X) when is_atom(X) -> 'Symbol';
 class_of(X) when is_list(X) -> 'List';
 class_of(X) when is_map(X) ->
     beamtalk_tagged_map:class_of(X, 'Dictionary');
 class_of(X) when is_tuple(X), tuple_size(X) >= 2, element(1, X) =:= beamtalk_object ->
-    element(2, X);  % Extract class field from #beamtalk_object{}
+    % Extract class field from #beamtalk_object{}
+    element(2, X);
 class_of(X) when is_tuple(X) -> 'Tuple';
 class_of(X) when is_pid(X) -> 'Pid';
 class_of(X) when is_port(X) -> 'Port';
 class_of(X) when is_reference(X) -> 'Reference';
-class_of(_) -> 'Object'.
+class_of(_) ->
+    'Object'.
 
 %% @doc Return the class of any value as a first-class class object (BT-412).
 -spec class_of_object(term()) -> tuple() | atom().
@@ -65,7 +78,8 @@ class_of_object_inner(ClassName) ->
 -spec class_of_object_by_name(atom()) -> tuple() | atom().
 class_of_object_by_name(ClassName) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined -> ClassName;
+        undefined ->
+            ClassName;
         Pid when is_pid(Pid) ->
             ModuleName = beamtalk_object_class:module_name(Pid),
             ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
@@ -77,10 +91,14 @@ class_of_object_by_name(ClassName) ->
 print_string(X) when is_integer(X) -> erlang:integer_to_binary(X);
 print_string(X) when is_float(X) -> erlang:float_to_binary(X, [short]);
 print_string(X) when is_binary(X) -> X;
-print_string(true) -> <<"true">>;
-print_string(false) -> <<"false">>;
-print_string(nil) -> <<"nil">>;
-print_string('Metaclass') -> <<"Metaclass">>;
+print_string(true) ->
+    <<"true">>;
+print_string(false) ->
+    <<"false">>;
+print_string(nil) ->
+    <<"nil">>;
+print_string('Metaclass') ->
+    <<"Metaclass">>;
 print_string(X) when is_atom(X) ->
     iolist_to_binary([<<"#">>, erlang:atom_to_binary(X, utf8)]);
 print_string(X) when is_list(X) ->
@@ -99,20 +117,26 @@ print_string(X) when is_tuple(X) ->
 print_string(X) when is_pid(X) -> beamtalk_opaque_ops:pid_to_string(X);
 print_string(X) when is_port(X) -> beamtalk_opaque_ops:port_to_string(X);
 print_string(X) when is_reference(X) -> beamtalk_opaque_ops:ref_to_string(X);
-print_string(X) -> iolist_to_binary(io_lib:format("~p", [X])).
+print_string(X) ->
+    iolist_to_binary(io_lib:format("~p", [X])).
 
 %% @private Format tagged maps for display.
 -spec print_string_map(map()) -> binary().
 print_string_map(X) ->
     case beamtalk_tagged_map:class_of(X) of
-        'Association' -> beamtalk_association:format_string(X);
+        'Association' ->
+            beamtalk_association:format_string(X);
         'Set' ->
             ElemStrs = [print_string(E) || E <- maps:get(elements, X, [])],
             iolist_to_binary([<<"Set(">>, lists:join(<<", ">>, ElemStrs), <<")">>]);
-        'Stream' -> beamtalk_stream:print_string(X);
-        'CompiledMethod' -> beamtalk_compiled_method_ops:dispatch('printString', [], X);
-        'ErlangModule' -> beamtalk_erlang_proxy:dispatch('printString', [], X);
-        undefined -> beamtalk_map_ops:print_string(X);
+        'Stream' ->
+            beamtalk_stream:print_string(X);
+        'CompiledMethod' ->
+            beamtalk_compiled_method_ops:dispatch('printString', [], X);
+        'ErlangModule' ->
+            beamtalk_erlang_proxy:dispatch('printString', [], X);
+        undefined ->
+            beamtalk_map_ops:print_string(X);
         Class ->
             case beamtalk_exception_handler:is_exception_class(Class) of
                 true ->
@@ -170,10 +194,17 @@ send_file_handle(X, 'lines', _Args) ->
     beamtalk_file:handle_lines(X);
 send_file_handle(X, Selector, Args) ->
     case try_object_ops(Selector, Args, X) of
-        {ok, Result} -> Result;
+        {ok, Result} ->
+            Result;
         false ->
-            beamtalk_error:raise(beamtalk_error:new(does_not_understand, 'FileHandle', Selector,
-                <<"FileHandle does not understand this message">>))
+            beamtalk_error:raise(
+                beamtalk_error:new(
+                    does_not_understand,
+                    'FileHandle',
+                    Selector,
+                    <<"FileHandle does not understand this message">>
+                )
+            )
     end.
 
 %% @private Fallback for tagged maps without a compiled stdlib module.
@@ -226,7 +257,8 @@ responds_to_map(X, Selector) ->
                         true -> beamtalk_exception_handler:has_method(Selector);
                         false -> value_type_responds_to(Class, Selector)
                     end;
-                Mod -> Mod:has_method(Selector)
+                Mod ->
+                    Mod:has_method(Selector)
             end
     end.
 
@@ -235,8 +267,14 @@ responds_to_map(X, Selector) ->
 dispatch_via_module(X, Selector, Args) ->
     case module_for_value(X) of
         undefined ->
-            beamtalk_error:raise(beamtalk_error:new(does_not_understand, class_of(X),
-                Selector, <<"Primitive type does not support this message">>));
+            beamtalk_error:raise(
+                beamtalk_error:new(
+                    does_not_understand,
+                    class_of(X),
+                    Selector,
+                    <<"Primitive type does not support this message">>
+                )
+            );
         Mod ->
             Mod:dispatch(Selector, Args, X)
     end.
@@ -253,9 +291,12 @@ responds_via_module(X, Selector) ->
 -spec module_for_value(term()) -> atom() | undefined.
 module_for_value(X) when is_integer(X) -> 'bt@stdlib@integer';
 module_for_value(X) when is_binary(X) -> 'bt@stdlib@string';
-module_for_value(true) -> 'bt@stdlib@true';
-module_for_value(false) -> 'bt@stdlib@false';
-module_for_value(nil) -> 'bt@stdlib@undefined_object';
+module_for_value(true) ->
+    'bt@stdlib@true';
+module_for_value(false) ->
+    'bt@stdlib@false';
+module_for_value(nil) ->
+    'bt@stdlib@undefined_object';
 module_for_value(X) when is_atom(X) -> 'bt@stdlib@symbol';
 module_for_value(X) when is_function(X) -> 'bt@stdlib@block';
 module_for_value(X) when is_tuple(X) -> 'bt@stdlib@tuple';
@@ -300,7 +341,8 @@ value_type_send(Self, Class, Selector, Args) ->
     case is_ivar_method(Selector) of
         {true, Hint} ->
             beamtalk_error:raise(beamtalk_error:new(immutable_value, Class, Selector, Hint));
-        false -> ok
+        false ->
+            ok
     end,
     Module = class_name_to_module(Class),
     code:ensure_loaded(Module),
@@ -314,11 +356,17 @@ value_type_send(Self, Class, Selector, Args) ->
                     erlang:apply(Module, Selector, [Self | Args]);
                 false ->
                     case try_object_ops(Selector, Args, Self) of
-                        {ok, Result} -> Result;
+                        {ok, Result} ->
+                            Result;
                         false ->
-                            beamtalk_error:raise(beamtalk_error:new(
-                                does_not_understand, Class, Selector,
-                                <<"Value type does not understand this message">>))
+                            beamtalk_error:raise(
+                                beamtalk_error:new(
+                                    does_not_understand,
+                                    Class,
+                                    Selector,
+                                    <<"Value type does not understand this message">>
+                                )
+                            )
                     end
             end
     end.
@@ -340,17 +388,28 @@ erlang_class_dispatch(_Self, 'printString', _Args) ->
     <<"Erlang">>;
 erlang_class_dispatch(Self, Selector, Args) ->
     case try_object_ops(Selector, Args, Self) of
-        {ok, Result} -> Result;
+        {ok, Result} ->
+            Result;
         false ->
             case lists:member($:, atom_to_list(Selector)) of
                 true ->
-                    beamtalk_error:raise(beamtalk_error:new(does_not_understand,
-                        'Erlang', Selector,
-                        <<"Use unary message for module name: Erlang moduleName">>));
+                    beamtalk_error:raise(
+                        beamtalk_error:new(
+                            does_not_understand,
+                            'Erlang',
+                            Selector,
+                            <<"Use unary message for module name: Erlang moduleName">>
+                        )
+                    );
                 false when Args =/= [] ->
-                    beamtalk_error:raise(beamtalk_error:new(arity_mismatch,
-                        'Erlang', Selector,
-                        <<"Module lookup takes no arguments: Erlang moduleName">>));
+                    beamtalk_error:raise(
+                        beamtalk_error:new(
+                            arity_mismatch,
+                            'Erlang',
+                            Selector,
+                            <<"Module lookup takes no arguments: Erlang moduleName">>
+                        )
+                    );
                 false ->
                     beamtalk_erlang_proxy:new(Selector)
             end
@@ -365,24 +424,51 @@ value_type_responds_to(Class, Selector) ->
         true ->
             Module:has_method(Selector);
         false ->
-            Exports = case erlang:function_exported(Module, module_info, 1) of
-                true -> Module:module_info(exports);
-                false -> []
-            end,
-            lists:any(fun({Name, _Arity}) -> Name =:= Selector end, Exports)
-                orelse beamtalk_object_ops:has_method(Selector)
+            Exports =
+                case erlang:function_exported(Module, module_info, 1) of
+                    true -> Module:module_info(exports);
+                    false -> []
+                end,
+            lists:any(fun({Name, _Arity}) -> Name =:= Selector end, Exports) orelse
+                beamtalk_object_ops:has_method(Selector)
     end.
 
 %% @private Convert a CamelCase class name atom to a module name atom (ADR 0016).
+%%
+%% First tries the static naming convention (bt@{snake_case}).
+%% If that module is not loaded, falls back to the class registry to
+%% resolve package-qualified module names (e.g. bt@{package}@{snake_case}).
+%% BT-760: This fallback enables `beamtalk test` to dispatch on package classes.
 -spec class_name_to_module(atom()) -> atom().
 class_name_to_module(Class) when is_atom(Class) ->
+    StaticModule = static_class_module_name(Class),
+    case code:is_loaded(StaticModule) of
+        {file, _} ->
+            StaticModule;
+        false ->
+            %% Module not yet loaded — try loading it
+            case code:ensure_loaded(StaticModule) of
+                {module, _} ->
+                    StaticModule;
+                {error, _} ->
+                    %% BT-760: Fall back to class registry for package-qualified modules
+                    case beamtalk_class_registry:whereis_class(Class) of
+                        undefined -> StaticModule;
+                        ClassPid -> beamtalk_object_class:module_name(ClassPid)
+                    end
+            end
+    end.
+
+%% @private Static module name from class name (bt@{snake_case}).
+-spec static_class_module_name(atom()) -> atom().
+static_class_module_name(Class) ->
     SnakeCase = camel_to_snake(atom_to_list(Class)),
     ModName = "bt@" ++ SnakeCase,
-    try list_to_existing_atom(ModName)
-    catch error:badarg ->
-        %% Class is already a known atom; creating bt@{snake} is bounded
-        %% by the number of registered classes.
-        list_to_atom(ModName)
+    try
+        list_to_existing_atom(ModName)
+    catch
+        error:badarg ->
+            list_to_atom(ModName)
     end.
 
 %% @private CamelCase string to snake_case string conversion.
@@ -392,11 +478,11 @@ camel_to_snake(Str) ->
 
 camel_to_snake([], _PrevWasLower, Acc) ->
     lists:reverse(Acc);
-camel_to_snake([H|T], PrevWasLower, Acc) when H >= $A, H =< $Z ->
+camel_to_snake([H | T], PrevWasLower, Acc) when H >= $A, H =< $Z ->
     Lower = H + 32,
     case PrevWasLower of
         true -> camel_to_snake(T, false, [Lower, $_ | Acc]);
         false -> camel_to_snake(T, false, [Lower | Acc])
     end;
-camel_to_snake([H|T], _PrevWasLower, Acc) ->
+camel_to_snake([H | T], _PrevWasLower, Acc) ->
     camel_to_snake(T, (H >= $a andalso H =< $z), [H | Acc]).
