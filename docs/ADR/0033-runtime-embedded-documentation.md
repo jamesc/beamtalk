@@ -377,7 +377,40 @@ Counter doc: "new docs"          // => Error: does not understand #doc:
 3. Remove EEP-48 chunk injection from the compile escript
 4. Rewrite `beamtalk_repl_docs.erl` to use `doc` messages and `>>` exclusively — remove all `code:get_doc/1` calls and EEP-48 parsing
 5. Simplify `format_class_docs/1` and `format_method_doc/2` to delegate to the object protocol
-6. Update any tests that assert on EEP-48 chunk contents
+6. Simplify the `docs` REPL op in `beamtalk_repl_ops_dev.erl` — currently calls `beamtalk_repl_docs:format_class_docs/1` and `format_method_doc/2`; after this, delegates to `ClassName doc` / `(ClassName >> #selector) doc` message sends. The MCP `docs` tool benefits automatically (unchanged API, simpler backend).
+7. Update any tests that assert on EEP-48 chunk contents
+
+### MCP Integration
+
+The MCP server (`beamtalk-mcp`) already exposes a `docs` tool that calls the REPL `docs` op, which currently delegates to `beamtalk_repl_docs.erl` and its EEP-48 parsing. After this ADR, the `docs` REPL op simplifies to message sends on live objects — the same path as `:h` in the REPL.
+
+**Current flow (EEP-48):**
+```
+MCP docs tool → REPL "docs" op → beamtalk_repl_docs → code:get_doc/1 → EEP-48 chunk parsing
+```
+
+**After this ADR:**
+```
+MCP docs tool → REPL "docs" op → ClassName doc / (ClassName >> #selector) doc
+```
+
+The MCP `docs` tool's interface (`class`, `selector` params) remains unchanged — agents won't notice the difference. But the backend becomes dramatically simpler: `format_class_docs(ClassName)` becomes a single `ClassName doc` message send, and `format_method_doc(ClassName, Selector)` becomes `(ClassName >> Selector) doc`.
+
+This also means the MCP `docs` tool works for dynamic classes automatically — no `.beam` file needed.
+
+**Example MCP interaction (unchanged API, new backend):**
+```json
+{"op": "docs", "class": "Counter"}
+→ {"docs": "A counter actor that maintains state."}
+
+{"op": "docs", "class": "Counter", "selector": "increment"}
+→ {"docs": "Increment the counter by 1."}
+
+{"op": "docs", "class": "Counter", "selector": "class"}
+→ {"docs": "Return the class of the receiver."}  // inherited — >> walks hierarchy
+```
+
+The MCP `info` tool also benefits — its `documentation` field in the response currently calls the same EEP-48 path and will switch to the object protocol.
 
 ## Future Considerations
 
