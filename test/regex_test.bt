@@ -8,11 +8,7 @@ TestCase subclass: RegexTest
   testRegexConstruction =>
     self assert: ((Regex from: "[0-9]+") class) equals: Regex.
     // Source returns the original pattern
-    (Regex from: "[0-9]+") source.
-    // printString shows Regex(pattern)
-    (Regex from: "[0-9]+") printString.
-    // describe is same as printString
-    (Regex from: "[0-9]+") describe.
+    self assert: ((Regex from: "[0-9]+") source) equals: "[0-9]+".
     // Compile with options
     self assert: ((Regex from: "[a-z]+" options: #(#caseless)) class) equals: Regex
 

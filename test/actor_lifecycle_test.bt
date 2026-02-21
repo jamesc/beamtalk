@@ -21,7 +21,7 @@ TestCase subclass: ActorLifecycleTest
     self assert: (counter stop await) equals: #ok.
     // isAlive returns false after stop
     self deny: (counter isAlive await).
-    // Sending a message to a stopped actor returns actor_dead error
+    // Sending a message to a stopped actor raises an error
     self should: [counter increment await] raise: #error
 
   testNonMapArgumentToSpawnwith =>

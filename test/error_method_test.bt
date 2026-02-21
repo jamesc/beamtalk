@@ -30,5 +30,5 @@ TestCase subclass: ErrorMethodTest
     self assert: (v check: 5) equals: 5
 
   testErrorWithNonStringArgument =>
-    // Compile-time type error; tested in tests/stdlib/error_method.bt
+    // Compile-time type error in BUnit: error: expects String argument
     nil
