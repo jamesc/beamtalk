@@ -20,7 +20,7 @@ Object subclass: TestCase
 
   // Core assertions — @primitive methods implemented in beamtalk_test_case.erl
   assert: condition: Object -> Nil => @primitive "assert:"
-  assert: actual: Object equals: expected: Object -> Nil => @primitive "assert:equals:"
+  assert: actual equals: expected -> Nil => @primitive "assert:equals:"
   deny: condition: Object -> Nil => @primitive "deny:"
   should: block: Block raise: errorKind: Object -> Nil => @primitive "should:raise:"
   fail: message: String -> Nil => @primitive "fail:"

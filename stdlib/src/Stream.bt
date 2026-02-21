@@ -37,7 +37,7 @@ sealed Object subclass: Stream
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3)) asList     // => #(1, 2, 3)
   /// ```
-  class sealed on: collection: Collection -> Stream => @primitive "on:"
+  class sealed on: collection -> Stream => @primitive "on:"
 
   /// Filter elements matching predicate (lazy).
   ///

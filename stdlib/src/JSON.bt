@@ -42,7 +42,7 @@ sealed Object subclass: JSON
   /// JSON parse: "42"                   // => 42
   /// JSON parse: "null"                 // => nil
   /// ```
-  class sealed parse: jsonString: String -> Object => @primitive "parse:"
+  class sealed parse: jsonString: String => @primitive "parse:"
 
   /// Generate a JSON string from a Beamtalk value (class method).
   ///
