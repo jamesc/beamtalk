@@ -179,8 +179,7 @@ module 'workspace_binding_cascade' ['start_link'/1, 'init'/1, 'handle_cast'/2, '
             'instance_variables' => [],
             'class_methods' => ~{
                 'spawn' => ~{'arity' => 0}~,
-                'spawnWith:' => ~{'arity' => 1}~,
-                'superclass' => ~{'arity' => 0}~
+                'spawnWith:' => ~{'arity' => 1}~
             }~,
             'method_source' => ~{'run' => #{#<114>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']])}#}~,
             'class_variables' => ~{}~

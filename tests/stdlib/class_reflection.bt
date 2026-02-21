@@ -1,17 +1,42 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Stdlib tests for class methods reflection (BT-510 / ADR 0032 Phase 1)
+// Stdlib tests for class methods reflection (BT-510 / ADR 0032 Phase 2)
 //
-// ADR 0032 Phase 1: `methods` returns local-only selectors.
-// Phase 2 will add `Behaviour methods` for the full hierarchy walk.
-//
-// Inherited methods are found via `respondsTo:` (chain walk), not `methods`.
+// ADR 0032 Phase 2: `methods` returns the full inheritance chain.
+// `localMethods` returns only selectors defined directly in the class.
 
 // @load tests/e2e/fixtures/counter.bt
 
 // ---------------------------------------------------------------------------
-// Counter local methods (local-only per ADR 0032 Phase 1)
+// Counter localMethods — local-only selectors
+// ---------------------------------------------------------------------------
+
+counterLocal := Counter localMethods
+// => _
+
+counterLocal isEmpty
+// => false
+
+// Counter defines increment, decrement, getValue locally
+counterLocal includes: #increment
+// => true
+
+counterLocal includes: #decrement
+// => true
+
+counterLocal includes: #getValue
+// => true
+
+// Inherited methods are NOT in localMethods
+counterLocal includes: #isNil
+// => false
+
+counterLocal includes: #respondsTo:
+// => false
+
+// ---------------------------------------------------------------------------
+// Counter methods — full inheritance chain (Phase 2)
 // ---------------------------------------------------------------------------
 
 counterMethods := Counter methods
@@ -20,32 +45,19 @@ counterMethods := Counter methods
 counterMethods isEmpty
 // => false
 
-// Counter defines increment, decrement, getValue locally
+// Local methods are present
 counterMethods includes: #increment
-// => true
-
-counterMethods includes: #decrement
 // => true
 
 counterMethods includes: #getValue
 // => true
 
-// ---------------------------------------------------------------------------
-// Inherited methods are NOT in `methods` (local-only in Phase 1)
-// They are accessible via respondsTo: (chain walk at dispatch time)
-// ---------------------------------------------------------------------------
-
+// Inherited methods ARE in methods (full chain)
 counterMethods includes: #isNil
-// => false
-
-counterMethods includes: #printString
-// => false
+// => true
 
 counterMethods includes: #respondsTo:
-// => false
-
-counterMethods includes: #yourself
-// => false
+// => true
 
 // ---------------------------------------------------------------------------
 // Primitive class methods still work
@@ -57,6 +69,6 @@ intMethods := Integer methods
 intMethods isEmpty
 // => false
 
-// Integer local methods do not include inherited Object methods in Phase 1
+// isNil is inherited from Object/ProtoObject — included in full chain
 intMethods includes: #isNil
-// => false
+// => true

@@ -179,8 +179,7 @@ module 'workspace_binding_send' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'han
             'instance_variables' => [],
             'class_methods' => ~{
                 'spawn' => ~{'arity' => 0}~,
-                'spawnWith:' => ~{'arity' => 1}~,
-                'superclass' => ~{'arity' => 0}~
+                'spawnWith:' => ~{'arity' => 1}~
             }~,
             'method_source' => ~{'greet' => #{#<103>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}#}~,
             'class_variables' => ~{}~
