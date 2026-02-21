@@ -535,22 +535,22 @@ struct CompiledTestFile {
 
 /// Run stdlib tests.
 ///
-/// Finds all `.bt` files in the test directory, parses `// =>` assertions,
-/// compiles expressions to Core Erlang, generates `EUnit` wrappers, and runs
-/// all tests in a single BEAM process.
+/// Finds all `.bt` files in the given path (file or directory), parses
+/// `// =>` assertions, compiles expressions to Core Erlang, generates
+/// `EUnit` wrappers, and runs all tests in a single BEAM process.
 #[instrument(skip_all)]
-pub fn run_tests(path: &str, no_warnings: bool, quiet: bool) -> Result<()> {
+pub fn run_tests(path: &str, no_warnings: bool, quiet: bool, verbose: bool) -> Result<()> {
     info!("Starting stdlib test run");
 
-    let test_dir = Utf8PathBuf::from(path);
-    if !test_dir.exists() {
-        miette::bail!("Test directory '{}' not found", test_dir);
+    let test_path = Utf8PathBuf::from(path);
+    if !test_path.exists() {
+        miette::bail!("Test path '{}' not found", test_path);
     }
 
     // Find all .bt test files
-    let test_files = find_test_files(&test_dir)?;
+    let test_files = find_test_files(&test_path)?;
     if test_files.is_empty() {
-        println!("No .bt test files found in '{test_dir}'");
+        println!("No .bt test files found in '{test_path}'");
         return Ok(());
     }
 
@@ -607,7 +607,8 @@ pub fn run_tests(path: &str, no_warnings: bool, quiet: bool) -> Result<()> {
 
     let total_tests: usize = compiled_files.iter().map(|f| f.assertion_count).sum();
 
-    let eunit_result = run_all_eunit_tests(&test_module_names, &all_fixture_modules, &build_dir)?;
+    let eunit_result =
+        run_all_eunit_tests(&test_module_names, &all_fixture_modules, &build_dir, verbose)?;
 
     // Phase 5: Report results per file
     let mut total_passed = 0;
@@ -899,6 +900,7 @@ fn run_all_eunit_tests(
     test_module_names: &[&str],
     fixture_modules: &[String],
     build_dir: &Utf8Path,
+    verbose: bool,
 ) -> Result<EunitBatchResult> {
     debug!(
         "Running {} EUnit modules in single process",
@@ -931,6 +933,8 @@ fn run_all_eunit_tests(
             + ", "
     };
 
+    let eunit_opts = if verbose { "[verbose]" } else { "[]" };
+
     let eval_cmd = format!(
         "{cover_preamble}\
          beamtalk_extensions:init(), \
@@ -940,7 +944,7 @@ fn run_all_eunit_tests(
          {fixture_load_cmd}\
          Modules = [{module_list}], \
          Failed = lists:foldl(fun(M, Acc) -> \
-           case eunit:test(M, []) of \
+           case eunit:test(M, {eunit_opts}) of \
              ok -> Acc; \
              error -> [M | Acc] \
            end \
@@ -982,6 +986,14 @@ fn run_all_eunit_tests(
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
+    if verbose {
+        if !stdout.is_empty() {
+            eprintln!("{stdout}");
+        }
+        if !stderr.is_empty() {
+            eprintln!("{stderr}");
+        }
+    }
     debug!("EUnit stdout: {}", stdout);
     debug!("EUnit stderr: {}", stderr);
 
@@ -1055,17 +1067,22 @@ fn run_all_eunit_tests(
     Ok(EunitBatchResult { module_results, failed_modules })
 }
 
-/// Find all `.bt` files in the test directory.
-fn find_test_files(dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
+/// Find `.bt` test files from a path (file or directory).
+fn find_test_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
+    // If path is a single .bt file, return it directly
+    if path.extension() == Some("bt") && path.is_file() {
+        return Ok(vec![path.to_owned()]);
+    }
+
     let mut files = Vec::new();
 
-    for entry in fs::read_dir(dir)
+    for entry in fs::read_dir(path)
         .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to read directory '{dir}'"))?
+        .wrap_err_with(|| format!("Failed to read directory '{path}'"))?
     {
         let entry = entry.into_diagnostic()?;
         let path = Utf8PathBuf::from_path_buf(entry.path())
-            .map_err(|_| miette::miette!("Non-UTF-8 path in '{}'", dir))?;
+            .map_err(|_| miette::miette!("Non-UTF-8 path in '{}'", path))?;
 
         if path.extension() == Some("bt") {
             files.push(path);

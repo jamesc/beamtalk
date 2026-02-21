@@ -160,7 +160,7 @@ enum Command {
 
     /// Run compiled stdlib tests (ADR 0014 Phase 1)
     TestStdlib {
-        /// Directory containing .bt test files
+        /// File or directory containing .bt test files
         #[arg(default_value = "tests/stdlib")]
         path: String,
 
@@ -171,6 +171,10 @@ enum Command {
         /// Suppress per-file output, show only summary
         #[arg(long, short)]
         quiet: bool,
+
+        /// Show detailed test output including EUnit verbose mode
+        #[arg(long = "show-output")]
+        show_output: bool,
     },
 
     /// Run `BUnit` tests — discover and run `TestCase` subclasses (ADR 0014 Phase 2)
@@ -326,7 +330,8 @@ fn main() -> Result<()> {
             path,
             no_warnings,
             quiet,
-        } => commands::test_stdlib::run_tests(&path, no_warnings, quiet),
+            show_output,
+        } => commands::test_stdlib::run_tests(&path, no_warnings, quiet, show_output),
         Command::Test { path } => commands::test::run_tests(&path),
         Command::Doc {
             path,
