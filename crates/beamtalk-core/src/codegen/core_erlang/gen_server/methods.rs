@@ -676,11 +676,13 @@ impl CoreErlangGenerator {
             // BT-411: User-defined class methods
             for method in &class.class_methods {
                 if method.kind == MethodKind::Primary {
-                    class_method_entries.push(Document::String(format!(
-                        "'{}' => ~{{'arity' => {}}}~",
-                        method.selector.name(),
-                        method.selector.arity()
-                    )));
+                    class_method_entries.push(docvec![
+                        "'",
+                        Document::String(method.selector.name().to_string()),
+                        "' => ~{'arity' => ",
+                        Document::String(method.selector.arity().to_string()),
+                        "}~",
+                    ]);
                 }
             }
 

@@ -3,7 +3,7 @@
 
 %%% @doc Bootstrap stub for the 'Behaviour' class (ADR 0032 Phase 2, BT-734).
 %%%
-%%% **DDD Context:** Object System
+%% **DDD Context:** Object System
 %%%
 %%% This module acts as a minimal placeholder for the 'Behaviour' class,
 %%% registered during bootstrap before compiled stdlib modules load.
@@ -60,7 +60,7 @@ has_method(_) -> false.
 %% Called during bootstrap to ensure 'Behaviour' is available before
 %% stdlib modules load. The class chain dispatch requires Behaviour to
 %% be registered so that Class → Behaviour → Object lookups succeed.
--spec register_class() -> ok.
+-spec register_class() -> ok | {error, term()}.
 register_class() ->
     ClassInfo = #{
         name => 'Behaviour',
@@ -76,9 +76,13 @@ register_class() ->
             ?LOG_INFO("Registered Behaviour (ADR 0032 Phase 2 stub)", #{module => ?MODULE}),
             ok;
         {error, {already_started, _}} ->
-            beamtalk_object_class:update_class('Behaviour', ClassInfo),
-            ok;
+            case beamtalk_object_class:update_class('Behaviour', ClassInfo) of
+                {ok, _} -> ok;
+                {error, UpdErr} ->
+                    ?LOG_ERROR("Failed to update Behaviour class", #{reason => UpdErr}),
+                    {error, UpdErr}
+            end;
         {error, Reason} ->
-            ?LOG_WARNING("Failed to register Behaviour", #{reason => Reason}),
-            ok
+            ?LOG_ERROR("Failed to register Behaviour", #{reason => Reason}),
+            {error, Reason}
     end.
