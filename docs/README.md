@@ -84,7 +84,7 @@ $ beamtalk repl
 Loaded
 ```
 
-### Standard Library ([lib/](../lib/))
+### Standard Library ([stdlib/src/](../stdlib/src/))
 
 The foundational classes implementing Smalltalk's "everything is a message" philosophy:
 
@@ -102,7 +102,7 @@ The foundational classes implementing Smalltalk's "everything is a message" phil
 | [Dictionary](../stdlib/src/Dictionary.bt) | Key-value map |
 | [Collection](../stdlib/src/Collection.bt) | Abstract collection protocol |
 
-See [lib/README.md](../lib/README.md) for detailed documentation.
+See [stdlib/src/README.md](../stdlib/src/README.md) for detailed documentation.
 
 ### Test Cases ([test-package-compiler/cases/](../test-package-compiler/cases/))
 

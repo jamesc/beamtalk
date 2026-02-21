@@ -68,7 +68,7 @@ pub fn find_definition_cross_file<'a>(
 
     // 2. Class definition in the project index.
     //
-    // Built-in/stdlib classes can still have source files (e.g. lib/*.bt),
+    // Built-in/stdlib classes can still have source files (e.g. stdlib/src/*.bt),
     // so we always search indexed files for a concrete declaration span.
     if project_index.hierarchy().has_class(name) {
         // Find which file defines this class
