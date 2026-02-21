@@ -3,7 +3,8 @@ source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
 module 'stdlib_class_list' ['new'/0, 'new'/1, 'size'/1, 'isEmpty'/1, 'first'/1, 'rest'/1, 'last'/1, 'at:'/2, 'includes:'/2, 'sort'/1, 'sort:'/2, 'reversed'/1, 'unique'/1, 'detect:'/2, 'detect:ifNone:'/3, 'do:'/2, 'collect:'/2, 'select:'/2, 'reject:'/2, 'inject:into:'/3, 'take:'/2, 'drop:'/2, 'flatten'/1, 'flatMap:'/2, 'count:'/2, 'anySatisfy:'/2, 'allSatisfy:'/2, '++'/2, 'from:to:'/3, 'indexOf:'/2, 'eachWithIndex:'/2, 'zip:'/2, 'groupBy:'/2, 'partition:'/2, 'takeWhile:'/2, 'dropWhile:'/2, 'intersperse:'/2, 'add:'/2, 'describe'/1, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0]
-  attributes ['on_load' = [{'register_class', 0}]]
+  attributes ['on_load' = [{'register_class', 0}],
+     'beamtalk_class' = [{'List', 'Object'}]]
 
 'new'/0 = fun () ->
     []

@@ -2154,7 +2154,11 @@ fn test_class_registration_generation() {
         "Should include is_abstract flag. Got:\n{code}"
     );
 
-    // Check instance_methods map
+    // BT-745: Check beamtalk_class module attribute for dependency sorting
+    assert!(
+        code.contains("'beamtalk_class' = [{'Counter', 'Actor'}]"),
+        "Should include beamtalk_class attribute with class and superclass. Got:\n{code}"
+    );
     assert!(
         code.contains("'instance_methods' => ~{"),
         "Should include instance_methods map. Got:\n{code}"
@@ -2219,6 +2223,12 @@ fn test_no_class_registration_for_empty_module() {
     assert!(
         !code.contains("'register_class'/0"),
         "Module without classes should not export register_class. Got:\n{code}"
+    );
+
+    // BT-745: Should NOT have beamtalk_class attribute
+    assert!(
+        !code.contains("'beamtalk_class'"),
+        "Module without classes should not have beamtalk_class attribute. Got:\n{code}"
     );
 }
 
@@ -2358,6 +2368,12 @@ fn test_multiple_classes_registration() {
     assert!(
         code.contains("<{'error', _RegErr0}> when 'true' -> {'error', _RegErr0}"),
         "Should propagate _Reg0 error. Got:\n{code}"
+    );
+
+    // BT-745: Check beamtalk_class attribute lists both classes
+    assert!(
+        code.contains("'beamtalk_class' = [{'Counter', 'Actor'}, {'Logger', 'Actor'}]"),
+        "Should include beamtalk_class attribute with both classes. Got:\n{code}"
     );
 }
 

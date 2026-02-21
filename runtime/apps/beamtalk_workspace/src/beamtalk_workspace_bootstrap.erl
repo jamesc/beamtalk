@@ -22,6 +22,7 @@
 -export([start_link/0, start_link/1]).
 -export([init/1, handle_continue/2, handle_info/2, handle_call/3, handle_cast/2, terminate/2]).
 -export([find_bt_modules_in_dir/1, activate_project_modules/1]).
+-export([sort_modules_by_dependency/2]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -154,8 +155,9 @@ set_class_variable(ClassName, Obj) ->
 
 %% @private Activate compiled project modules from _build/dev/ebin/ (BT-739).
 %% Scans `{ProjectPath}/_build/dev/ebin/` for `bt@*.beam` files (excluding
-%% `bt@stdlib@*`), loads each, calls register_class/0, and registers the
-%% module with workspace_meta. Failures are logged but do not abort startup.
+%% `bt@stdlib@*`), sorts them by superclass dependency order (BT-745), loads
+%% each, calls register_class/0, and registers the module with workspace_meta.
+%% Failures are logged but do not abort startup.
 -spec activate_project_modules(binary() | undefined) -> ok.
 activate_project_modules(undefined) ->
     ok;
@@ -165,7 +167,8 @@ activate_project_modules(ProjectPath) when is_binary(ProjectPath), byte_size(Pro
     ),
     _ = code:add_pathz(EbinDir),
     Modules = find_bt_modules_in_dir(EbinDir),
-    lists:foreach(fun activate_project_module/1, Modules);
+    Sorted = sort_modules_by_dependency(EbinDir, Modules),
+    lists:foreach(fun activate_project_module/1, Sorted);
 activate_project_modules(_Other) ->
     ok.
 
@@ -195,6 +198,84 @@ beam_file_to_project_module(File) ->
             end;
         _ ->
             false
+    end.
+
+%% @private Sort modules by superclass dependency order (BT-745).
+%% Reads the `beamtalk_class` attribute from each BEAM file using beam_lib
+%% to determine {ClassName, SuperclassName}, then topologically sorts so
+%% superclasses are loaded before subclasses. Modules without the attribute
+%% (e.g., older compiled modules) are placed first as they have no known deps.
+-spec sort_modules_by_dependency(string(), [module()]) -> [module()].
+sort_modules_by_dependency(_EbinDir, []) ->
+    [];
+sort_modules_by_dependency(EbinDir, Modules) ->
+    {WithClass, WithoutClass} = lists:foldl(
+        fun(Mod, {WC, WOC}) ->
+            case extract_class_info(EbinDir, Mod) of
+                {ok, ClassName, Superclass} ->
+                    {[{Mod, ClassName, Superclass} | WC], WOC};
+                error ->
+                    {WC, [Mod | WOC]}
+            end
+        end,
+        {[], []},
+        Modules
+    ),
+    Sorted = topo_sort(lists:reverse(WithClass)),
+    lists:reverse(WithoutClass) ++ [Mod || {Mod, _, _} <- Sorted].
+
+%% @private Extract class name and superclass from a BEAM file's attributes.
+%% Reads the `beamtalk_class` module attribute without loading the module.
+-spec extract_class_info(string(), module()) -> {ok, atom(), atom()} | error.
+extract_class_info(EbinDir, ModuleName) ->
+    BeamFile = filename:join(EbinDir, atom_to_list(ModuleName) ++ ".beam"),
+    case beam_lib:chunks(BeamFile, [attributes]) of
+        {ok, {_, [{attributes, Attrs}]}} ->
+            case proplists:get_value(beamtalk_class, Attrs) of
+                [{ClassName, Superclass}] ->
+                    {ok, ClassName, Superclass};
+                [{ClassName, Superclass} | _] ->
+                    %% Multi-class module: use primary (first) class
+                    {ok, ClassName, Superclass};
+                _ ->
+                    error
+            end;
+        _ ->
+            error
+    end.
+
+%% @private Topologically sort class entries so superclasses come before subclasses.
+%% Same wave-based algorithm as beamtalk_stdlib:topo_sort/1 (BT-745).
+-spec topo_sort([{module(), atom(), atom()}]) -> [{module(), atom(), atom()}].
+topo_sort(Entries) ->
+    ClassSet = sets:from_list([Class || {_, Class, _} <- Entries]),
+    topo_sort_waves(Entries, ClassSet, sets:new(), []).
+
+-spec topo_sort_waves(
+    [{module(), atom(), atom()}], sets:set(atom()), sets:set(atom()),
+    [{module(), atom(), atom()}]
+) -> [{module(), atom(), atom()}].
+topo_sort_waves([], _ClassSet, _Emitted, Acc) ->
+    lists:reverse(Acc);
+topo_sort_waves(Remaining, ClassSet, Emitted, Acc) ->
+    {Ready, Deferred} = lists:partition(
+        fun({_Mod, _Class, Super}) ->
+            (not sets:is_element(Super, ClassSet)) orelse sets:is_element(Super, Emitted)
+        end,
+        Remaining
+    ),
+    case Ready of
+        [] ->
+            ?LOG_WARNING(
+                "Bootstrap topo_sort: unresolvable dependencies",
+                #{remaining => [C || {_, C, _} <- Deferred]}
+            ),
+            lists:reverse(Acc) ++ Deferred;
+        _ ->
+            NewEmitted = lists:foldl(
+                fun({_, Class, _}, S) -> sets:add_element(Class, S) end, Emitted, Ready
+            ),
+            topo_sort_waves(Deferred, ClassSet, NewEmitted, lists:reverse(Ready) ++ Acc)
     end.
 
 %% @private Ensure a module is loaded, call register_class/0, and track it.
