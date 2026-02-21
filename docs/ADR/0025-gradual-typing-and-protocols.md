@@ -252,7 +252,7 @@ For inline suppression of specific warnings, a comment directive works:
 - Production services: "this actor handles money — type everything"
 - Gradual adoption: type the critical classes, leave the rest loose
 
-**Stdlib note:** Standard library classes (`lib/*.bt`) should be **fully annotated** (parameter types, return types) in Phase 2 to generate complete Dialyzer specs and enable precise LSP completions. However, they do not need the `typed` modifier — their method bodies are primitive-dispatched (`@primitive`), so there is no Beamtalk logic for the type checker to verify. Annotations are the valuable part; `typed` is for classes where the compiler can verify that the implementation matches the contract.
+**Stdlib note:** Standard library classes (`stdlib/src/*.bt`) should be **fully annotated** (parameter types, return types) in Phase 2 to generate complete Dialyzer specs and enable precise LSP completions. However, they do not need the `typed` modifier — their method bodies are primitive-dispatched (`@primitive`), so there is no Beamtalk logic for the type checker to verify. Annotations are the valuable part; `typed` is for classes where the compiler can verify that the implementation matches the contract.
 
 ### Phase 3: Protocols (Structural Typing)
 

@@ -656,7 +656,7 @@ cargo run -- repl
 > :load examples/hello.bt
 ```
 
-### Standard Library ([lib/](lib/))
+### Standard Library ([stdlib/src/](stdlib/src/))
 
 Foundational classes implementing "everything is a message":
 
@@ -672,7 +672,7 @@ Foundational classes implementing "everything is a message":
 | `Nil` | Null object pattern |
 | `TestCase` | SUnit-style test framework |
 
-See [lib/README.md](lib/README.md) for full documentation.
+See [stdlib/src/README.md](stdlib/src/README.md) for full documentation.
 
 ---
 
@@ -684,9 +684,9 @@ beamtalk/
 │   ├── beamtalk-core/       # Lexer, parser, AST, codegen
 │   ├── beamtalk-cli/        # Command-line interface & REPL
 │   └── beamtalk-lsp/        # Language server (LSP)
-├── lib/                      # Standard library (.bt files)
+├── stdlib/src/                # Standard library (.bt files)
 ├── runtime/                  # Erlang runtime (actors, REPL backend)
-├── test/                     # BUnit test cases (TestCase classes)
+├── stdlib/test/               # BUnit test cases (TestCase classes)
 ├── tests/                    # Stdlib & E2E tests
 ├── docs/                     # Design documents
 ├── examples/                 # Example programs

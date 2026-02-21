@@ -279,7 +279,7 @@ Closest model. Simple TOML manifest, compiles to OTP applications, publishes to 
 **Adopted:** TOML format, package-as-project terminology, `@` naming (already in ADR 0016), `.app` generation, `_build/` directory.
 
 ### Cargo (`Cargo.toml`)
-Rich manifest supporting workspaces, multiple targets (lib/bin/test/bench), feature flags. Distinguishes "package" (manifest unit) from "crate" (compilation unit). Extremely mature dependency resolution.
+Rich manifest supporting workspaces, multiple targets (stdlib/src/bin/test/bench), feature flags. Distinguishes "package" (manifest unit) from "crate" (compilation unit). Extremely mature dependency resolution.
 
 **Adopted:** Manifest-driven builds, semantic versioning, required `name`+`version`. **Not adopted:** Package/crate distinction (too complex for Beamtalk's needs), `[[bin]]` target syntax.
 
@@ -508,7 +508,7 @@ No migration needed. `beamtalk build file.bt` continues to work as before — no
 
 ### Stdlib and test suites
 
-The stdlib (`lib/*.bt`) and test suites (`tests/stdlib/`, `tests/e2e/`) are **not packages** — they are compiled by dedicated build commands (`just build-stdlib`, `just test-stdlib`, `just test-e2e`) that use their own module naming conventions. Package-mode compilation only activates when a `beamtalk.toml` is found, so these existing workflows are unaffected.
+The stdlib (`stdlib/src/*.bt`) and test suites (`stdlib/bootstrap-test/`, `tests/e2e/`) are **not packages** — they are compiled by dedicated build commands (`just build-stdlib`, `just test-stdlib`, `just test-e2e`) that use their own module naming conventions. Package-mode compilation only activates when a `beamtalk.toml` is found, so these existing workflows are unaffected.
 
 ## Future Direction: Toward Workspace-as-Package (Option C)
 

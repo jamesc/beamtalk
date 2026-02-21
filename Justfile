@@ -117,7 +117,7 @@ build-erlang:
     @rebar3 compile
     @echo "✅ Erlang build complete"
 
-# Build standard library (lib/*.bt → BEAM, incremental — skips if up to date)
+# Build standard library (stdlib/src/*.bt → BEAM, incremental — skips if up to date)
 build-stdlib: build-rust build-erlang
     @echo "🔨 Building standard library..."
     @cargo run --bin beamtalk --quiet -- build-stdlib --quiet
@@ -321,7 +321,7 @@ test-install: build-release build-stdlib
     fi
 
 # Run compiled stdlib tests (ADR 0014 Phase 1, ~14s)
-# Accepts optional path to run a single file: just test-stdlib tests/stdlib/arithmetic.bt
+# Accepts optional path to run a single file: just test-stdlib stdlib/bootstrap-test/arithmetic.bt
 # Output: summary only (--quiet suppresses per-file lines)
 test-stdlib *ARGS: build-stdlib
     @echo "🧪 Running stdlib tests..."
@@ -329,7 +329,7 @@ test-stdlib *ARGS: build-stdlib
     @echo "✅ Stdlib tests complete"
 
 # Run BUnit TestCase tests (ADR 0014 Phase 2)
-# Accepts optional path: just test-bunit test/dictionary_test.bt
+# Accepts optional path: just test-bunit stdlib/test/dictionary_test.bt
 test-bunit *ARGS: build-stdlib
     @echo "🧪 Running BUnit tests..."
     @cargo run --bin beamtalk --quiet -- test {{ ARGS }}
@@ -856,7 +856,7 @@ docs:
 # Generate stdlib API documentation (HTML)
 docs-api:
     @echo "📚 Generating stdlib API documentation..."
-    cargo run --bin beamtalk -- doc lib/ --output docs/api/
+    cargo run --bin beamtalk -- doc stdlib/src/ --output docs/api/
 
 # Check documentation for broken links
 docs-check:

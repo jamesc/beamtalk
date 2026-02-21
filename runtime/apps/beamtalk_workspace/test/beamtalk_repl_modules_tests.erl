@@ -243,11 +243,11 @@ full_lifecycle_test() ->
     ?assertEqual([], beamtalk_repl_modules:list_modules(Tracker)),
 
     %% Add first module
-    Tracker2 = beamtalk_repl_modules:add_module(counter, "/lib/Counter.bt", Tracker),
+    Tracker2 = beamtalk_repl_modules:add_module(counter, "/stdlib/src/Counter.bt", Tracker),
     ?assert(beamtalk_repl_modules:module_exists(counter, Tracker2)),
 
     %% Add second module
-    Tracker3 = beamtalk_repl_modules:add_module(worker, "/lib/Worker.bt", Tracker2),
+    Tracker3 = beamtalk_repl_modules:add_module(worker, "/stdlib/src/Worker.bt", Tracker2),
     ?assertEqual(2, length(beamtalk_repl_modules:list_modules(Tracker3))),
 
     %% Get info and format

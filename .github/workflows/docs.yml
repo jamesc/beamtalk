@@ -7,7 +7,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'lib/**'
+      - 'stdlib/src/**'
       - 'docs/beamtalk-*.md'
       - 'docs/known-limitations.md'
       - 'crates/beamtalk-cli/src/commands/doc.rs'
@@ -80,7 +80,7 @@ jobs:
         run: just build-stdlib
 
       - name: Generate documentation site
-        run: cargo run --bin beamtalk -- doc lib/ --output _site/ --site --docs-path docs/
+        run: cargo run --bin beamtalk -- doc stdlib/src/ --output _site/ --site --docs-path docs/
 
       - name: Copy install script to site root
         run: cp scripts/install.sh _site/install.sh

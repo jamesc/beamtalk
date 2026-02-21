@@ -15,7 +15,7 @@ Transcript show: 'Hello'   // codegen → call 'transcript':'show:'(<<"Hello">>)
 Transcript cr               // codegen → call 'transcript':'cr'()
 ```
 
-**Beamtalk** is a global workspace binding backed by `SystemDictionary` (defined in `lib/SystemDictionary.bt`) and implemented by `beamtalk_system_dictionary.erl`:
+**Beamtalk** is a global workspace binding backed by `SystemDictionary` (defined in `stdlib/src/SystemDictionary.bt`) and implemented by `beamtalk_system_dictionary.erl`:
 ```beamtalk
 Beamtalk allClasses         // dispatched via workspace binding → beamtalk_system_dictionary
 Beamtalk classNamed: #Counter
@@ -305,10 +305,10 @@ lookup_binding(Name) ->
 - **~13ns overhead** on workspace binding sends (`Transcript show:`, `Beamtalk allClasses`) — one `persistent_term:get/1` call
 - **No workspace = compile error** — in batch mode (`beamtalk build`), the compiler recognizes `Transcript` as a workspace binding name but has no workspace context, producing a clear error: "Transcript is a workspace binding, not available in batch compilation"
 
-### Class Definitions (Future — not yet in `lib/`)
+### Class Definitions (Future — not yet in `stdlib/src/`)
 
 ```beamtalk
-// lib/TranscriptStream.bt (future)
+// stdlib/src/TranscriptStream.bt (future)
 Actor subclass: TranscriptStream
   show: value => @primitive 'show:'
   cr => @primitive 'cr'
@@ -317,7 +317,7 @@ Actor subclass: TranscriptStream
   recent => @primitive 'recent'
   clear => @primitive 'clear'
 
-// lib/SystemDictionary.bt (renamed from lib/Beamtalk.bt)
+// stdlib/src/SystemDictionary.bt (renamed from stdlib/src/Beamtalk.bt)
 Actor subclass: SystemDictionary
   allClasses => @primitive 'allClasses'
   classNamed: className => @primitive 'classNamed:'
@@ -502,7 +502,7 @@ Transcript = #{'__class__' => 'TranscriptStream'}
 - Newcomer confusion — `Transcript show:` returns `nil` in REPL, output goes to separate channel
 
 ### Neutral
-- `lib/Beamtalk.bt` renamed to `lib/SystemDictionary.bt` (completed)
+- `stdlib/src/Beamtalk.bt` renamed to `stdlib/src/SystemDictionary.bt` (completed)
 - Transcript module renamed from `transcript.erl` to `beamtalk_transcript_stream.erl` (completed)
 - Workspace bindings use `persistent_term` internally — implementation detail, not public API
 
@@ -552,8 +552,8 @@ beamtalk_workspace_sup (one_for_one)          [beamtalk_workspace app]
 Restarted processes update their own `persistent_term` binding in `init/1` — no external monitoring needed.
 
 ### Phase 1: Singleton Actor Classes
-- Create `TranscriptStream` class with pub/sub actor dispatch (`lib/TranscriptStream.bt`)
-- Create `SystemDictionary` class with actor dispatch (`lib/SystemDictionary.bt`)
+- Create `TranscriptStream` class with pub/sub actor dispatch (`stdlib/src/TranscriptStream.bt`)
+- Create `SystemDictionary` class with actor dispatch (`stdlib/src/SystemDictionary.bt`)
 - Runtime modules: `beamtalk_transcript_stream.erl`, `beamtalk_system_dictionary.erl`
 
 ### Phase 2: Workspace Binding Injection
@@ -567,7 +567,7 @@ Restarted processes update their own `persistent_term` binding in `init/1` — n
 - Class method calls (`Counter spawn`, `Point new`) are completely unchanged
 
 ### Phase 4: Migration (Completed)
-- Renamed `lib/Beamtalk.bt` → `lib/SystemDictionary.bt`
+- Renamed `stdlib/src/Beamtalk.bt` → `stdlib/src/SystemDictionary.bt`
 - Renamed `transcript.erl` → `beamtalk_transcript_stream.erl`
 - Updated E2E tests and examples
 - Old `beamtalk_module.rs` codegen removed (legacy dead code)
@@ -576,7 +576,7 @@ Restarted processes update their own `persistent_term` binding in `init/1` — n
 - **Codegen:** `dispatch_codegen.rs` — `ClassReference` checks workspace bindings first
 - **Workspace:** Startup code spawns singletons, injects `persistent_term` bindings
 - **Runtime (new):** `beamtalk_transcript_stream.erl`, `beamtalk_system_dictionary.erl`
-- **Stdlib:** `lib/TranscriptStream.bt`, `lib/SystemDictionary.bt`
+- **Stdlib:** `stdlib/src/TranscriptStream.bt`, `stdlib/src/SystemDictionary.bt`
 - **Tests:** E2E and unit tests for workspace bindings and singletons
 
 ## Migration Path

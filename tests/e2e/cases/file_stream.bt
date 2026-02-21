@@ -4,7 +4,7 @@
 // E2E tests for File streaming (BT-513)
 // Tests File lines: and File open:do: in the REPL environment.
 //
-// Uses stdlib fixture files in tests/stdlib/fixtures/ (relative to project
+// Uses stdlib fixture files in stdlib/test/fixtures/ (relative to project
 // root). The BEAM process cwd is set to the project root.
 
 // ===========================================================================
@@ -12,7 +12,7 @@
 // ===========================================================================
 
 // Read lines and persist stream result across expressions
-lines := (File lines: "tests/stdlib/fixtures/stream_test.txt") asList
+lines := (File lines: "stdlib/test/fixtures/stream_test.txt") asList
 // => ["line one","line two","line three"]
 
 // Variable binding persists
@@ -20,7 +20,7 @@ lines size
 // => 3
 
 // Pipeline composition in REPL
-(File lines: "tests/stdlib/fixtures/stream_test.txt") take: 2
+(File lines: "stdlib/test/fixtures/stream_test.txt") take: 2
 // => ["line one","line two"]
 
 // ===========================================================================
@@ -28,11 +28,11 @@ lines size
 // ===========================================================================
 
 // Block-scoped handle with auto-close
-File open: "tests/stdlib/fixtures/stream_test.txt" do: [:handle | handle lines take: 1]
+File open: "stdlib/test/fixtures/stream_test.txt" do: [:handle | handle lines take: 1]
 // => ["line one"]
 
 // Block return value is available
-result := File open: "tests/stdlib/fixtures/stream_test.txt" do: [:handle | handle lines inject: 0 into: [:c :l | c + 1]]
+result := File open: "stdlib/test/fixtures/stream_test.txt" do: [:handle | handle lines inject: 0 into: [:c :l | c + 1]]
 // => 3
 
 // ===========================================================================
@@ -40,5 +40,5 @@ result := File open: "tests/stdlib/fixtures/stream_test.txt" do: [:handle | hand
 // ===========================================================================
 
 // File not found produces structured error
-File lines: "tests/stdlib/fixtures/does_not_exist.txt"
+File lines: "stdlib/test/fixtures/does_not_exist.txt"
 // => ERROR: file not found

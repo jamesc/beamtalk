@@ -18,16 +18,16 @@ fn main() {
         .parent()
         .and_then(Path::parent)
         .expect("Cannot find workspace root");
-    let lib_dir = workspace_root.join("lib");
+    let lib_dir = workspace_root.join("stdlib/src");
 
     assert!(
         lib_dir.exists(),
         "Expected stdlib directory at `{}` — \
-         ensure `lib/` is present at the workspace root.",
+         ensure `stdlib/src/` is present at the workspace root.",
         lib_dir.display()
     );
 
-    // Rerun when lib/ or runtime sources change
+    // Rerun when stdlib/src/ or runtime sources change
     println!("cargo:rerun-if-changed={}", lib_dir.display());
     let dispatch_erl =
         workspace_root.join("runtime/apps/beamtalk_runtime/src/beamtalk_class_dispatch.erl");

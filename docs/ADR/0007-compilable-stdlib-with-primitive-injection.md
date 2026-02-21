@@ -7,7 +7,7 @@ Implemented (2026-02-07) — Epic BT-286
 
 ### The Problem
 
-Beamtalk's standard library in `lib/` currently exists as **API-only documentation files**. The `.bt` files define class hierarchies, method signatures, and contracts, but are not compilable. Primitive methods use a comment convention:
+Beamtalk's standard library in `stdlib/src/` currently exists as **API-only documentation files**. The `.bt` files define class hierarchies, method signatures, and contracts, but are not compilable. Primitive methods use a comment convention:
 
 ```beamtalk
 + other => // implemented by compiler - erlang:'+'
@@ -27,11 +27,11 @@ Today, primitive dispatch works through two tiers:
 1. **Compile-time specialization** (`dispatch_codegen.rs`) — The codegen recognizes known patterns (e.g., `Integer + Integer`) and emits direct Erlang BIF calls.
 2. **Runtime dispatch** (`beamtalk_primitive.erl` → `beamtalk_integer.erl`, etc.) — For messages not caught at compile time, `beamtalk_primitive:send/3` routes by type to per-type dispatch modules.
 
-The `lib/*.bt` files are not involved in either path — they're purely documentation.
+The `stdlib/src/*.bt` files are not involved in either path — they're purely documentation.
 
 ### What We Need
 
-A mechanism to make `lib/*.bt` files compilable while:
+A mechanism to make `stdlib/src/*.bt` files compilable while:
 - Connecting method signatures to their primitive implementations
 - Allowing the compiler to generate optimized code for primitives
 - Supporting fallback Beamtalk code when primitives fail
@@ -40,7 +40,7 @@ A mechanism to make `lib/*.bt` files compilable while:
 
 ### Experimental Validation
 
-We tested the current compiler against `lib/Integer.bt` to understand the real gaps. Three distinct problems emerged:
+We tested the current compiler against `stdlib/src/Integer.bt` to understand the real gaps. Three distinct problems emerged:
 
 #### Problem 1: Class declaration syntax
 
@@ -366,7 +366,7 @@ spawn => @primitive actorSpawn
 
 4. ~~**Two categories of intrinsics, one keyword**~~ **SUPERSEDED by Amendment (2026-02-11): see `@intrinsic` keyword below.** The original design used one keyword with quoting to distinguish categories. This proved confusing in practice — see the amendment at the end of this document for the replacement: `@primitive 'selector'` for runtime dispatch, `@intrinsic name` for structural intrinsics.
 
-5. **Stdlib becomes compilable** — The compiler processes `lib/*.bt` files through the normal pipeline. Pragma methods compile to intrinsic-generated code that routes through the runtime safety layer.
+5. **Stdlib becomes compilable** — The compiler processes `stdlib/src/*.bt` files through the normal pipeline. Pragma methods compile to intrinsic-generated code that routes through the runtime safety layer.
 
 6. **Non-primitive methods compile normally** — Methods like `abs`, `min:`, `isEven` that are defined in terms of other messages compile as regular Beamtalk code. No pragma needed.
 
@@ -743,7 +743,7 @@ beamtalk build --allow-primitives MyExtension.bt
 **Stdlib detection mechanisms** (in priority order):
 
 1. **Module metadata flag** - Stdlib modules set `is_stdlib: true` in compiled metadata (most robust)
-2. **Source path heuristic** - Module path starts with `lib/` (simple, works for source builds)
+2. **Source path heuristic** - Module path starts with `stdlib/src/` (simple, works for source builds)
 3. **Compiler flag** - `--stdlib-mode` flag when compiling stdlib (bootstrap scenario)
 4. **Package manifest** - `beamtalk.toml` declares `[package.stdlib = true]` (future package system)
 
@@ -758,9 +758,9 @@ The first available mechanism applies. This prevents:
 #### Migration Path
 
 1. **Phase 1:** Add `@primitive` to the parser and AST. Add semantic validation (stdlib-only restriction). Existing codegen continues to work via the current dispatch tables.
-2. **Phase 2:** Convert `lib/*.bt` files from comment-based markers to pragmas. Compiler compiles stdlib with `--stdlib-mode` flag.
+2. **Phase 2:** Convert `stdlib/src/*.bt` files from comment-based markers to pragmas. Compiler compiles stdlib with `--stdlib-mode` flag.
 3. **Phase 3:** Move dispatch knowledge from `dispatch_codegen.rs` into the compiled stdlib. The codegen reads primitive bindings from compiled class metadata instead of hardcoded tables.
-4. **Phase 4:** Remove hardcoded dispatch tables. All primitive knowledge lives in `lib/*.bt`.
+4. **Phase 4:** Remove hardcoded dispatch tables. All primitive knowledge lives in `stdlib/src/*.bt`.
 
 #### Developer Workflow: Adding a New Primitive
 
@@ -774,7 +774,7 @@ Adding a new method that delegates to Erlang/runtime code (e.g., `Integer>>facto
 |------|------|-------|----------|
 | 1. Implement | Add `factorial` clause to dispatch function | `runtime/src/beamtalk_integer.erl` | Erlang |
 | 2. Register | Add `intFactorial` → dispatch mapping | Compiler intrinsic registry (one line) | Rust |
-| 3. Declare | `factorial => @primitive intFactorial` | `lib/Integer.bt` | Beamtalk |
+| 3. Declare | `factorial => @primitive intFactorial` | `stdlib/src/Integer.bt` | Beamtalk |
 | 4. Test | Add E2E test, run `just test-e2e` | `tests/e2e/cases/` | Beamtalk |
 
 **No Rust compiler recompilation needed** — the intrinsic registry is a static lookup table. In practice, step 2 is adding one entry to a match arm. The runtime dispatch module provides type checking, error handling, and extension registry support automatically.
@@ -787,7 +787,7 @@ Adding a new code generation pattern (e.g., a new iteration construct, new insta
 |------|------|-------|----------|
 | 1. Implement codegen | Write the code generation function | `crates/beamtalk-core/src/codegen/` | Rust |
 | 2. Register | Add intrinsic name → codegen function | Compiler intrinsic registry | Rust |
-| 3. Declare | `newMethod: arg => @primitive newIntrinsic` | `lib/*.bt` | Beamtalk |
+| 3. Declare | `newMethod: arg => @primitive newIntrinsic` | `stdlib/src/*.bt` | Beamtalk |
 | 4. Test | Unit test for codegen + E2E test | `crates/*/tests/`, `tests/e2e/cases/` | Rust + Beamtalk |
 
 This requires recompiling the Rust compiler, but it's rare — structural intrinsics are things like loop constructs, gen_server wrapping, and instantiation patterns. The set is small (~35 today) and grows slowly.
@@ -808,7 +808,7 @@ The key insight: **most stdlib evolution becomes an Erlang + Beamtalk task, not 
 ### Positive
 
 - **Single source of truth** — Each stdlib method defines its own primitive binding. No disconnect between API docs and implementation.
-- **Compilable stdlib** — `lib/*.bt` files go through the real compiler pipeline, catching syntax errors, enabling IDE features, and producing real BEAM code.
+- **Compilable stdlib** — `stdlib/src/*.bt` files go through the real compiler pipeline, catching syntax errors, enabling IDE features, and producing real BEAM code.
 - **Smalltalk-aligned** — Primitive pragmas are a well-proven pattern from 40+ years of Smalltalk. Beamtalk users familiar with Squeak/Pharo will recognize the approach.
 - **Fallback support** — Graceful degradation when primitives fail (type errors, overflow) without separate error handling logic.
 - **Safety by construction** — Named intrinsics route through runtime dispatch modules, guaranteeing type checking, structured error handling, and extension registry support. No way to accidentally bypass the safety layer with a raw Erlang MFA call.
@@ -840,15 +840,15 @@ This is **not primarily a line-count reduction.** The codegen machinery (state t
 
 | Today (hardcoded) | Lines | After (pragma-driven) |
 |--------------------|-------|-----------------------|
-| `builtins.rs`: 60+ selector→Erlang mappings per type | ~400 | Moves to `lib/*.bt` as pragma declarations |
-| `dispatch_codegen.rs`: special-cased selectors | ~60 | Moves to `lib/*.bt` as pragma declarations |
-| `gen_server.rs`: auto-generated `spawn`/`new`/error methods | ~150 | Moves to `lib/Actor.bt` and `lib/Object.bt` |
+| `builtins.rs`: 60+ selector→Erlang mappings per type | ~400 | Moves to `stdlib/src/*.bt` as pragma declarations |
+| `dispatch_codegen.rs`: special-cased selectors | ~60 | Moves to `stdlib/src/*.bt` as pragma declarations |
+| `gen_server.rs`: auto-generated `spawn`/`new`/error methods | ~150 | Moves to `stdlib/src/Actor.bt` and `stdlib/src/Object.bt` |
 | `mod.rs`: `is_actor_class()` heuristic | ~20 | Replaced by three-kind routing from class metadata |
-| **Total knowledge lines that move** | **~630** | **Into `lib/*.bt` files** |
+| **Total knowledge lines that move** | **~630** | **Into `stdlib/src/*.bt` files** |
 
 The real simplification is **architectural, not volumetric:**
 
-1. **Stdlib changes don't require recompiling the Rust compiler.** Today, adding `Integer>>factorial` means editing `builtins.rs` in Rust. With pragmas, it's just editing `lib/Integer.bt` — a Beamtalk file.
+1. **Stdlib changes don't require recompiling the Rust compiler.** Today, adding `Integer>>factorial` means editing `builtins.rs` in Rust. With pragmas, it's just editing `stdlib/src/Integer.bt` — a Beamtalk file.
 2. **The compiler becomes generic.** It doesn't need to know what methods Integer has. It reads the pragma, looks up the intrinsic registry, and generates code. New types can be added without touching the compiler.
 3. **Dispatch tables become declarative.** The 60+ match arms in `builtins.rs` (`try_generate_integer_message`, `try_generate_string_message`, etc.) become declarations in `.bt` files that the compiler processes uniformly.
 4. **Class kind routing becomes data-driven.** Instead of `is_actor_class()` guessing from superclass name, the three-kind distinction (Actor/Value Type/Primitive) is driven by the compiled stdlib's class metadata.
@@ -866,7 +866,7 @@ The real simplification is **architectural, not volumetric:**
 
 ### B. Compiler Magic (Status Quo, Formalized)
 
-Keep `lib/*.bt` as documentation. Formalize the compiler's internal dispatch tables as the source of truth.
+Keep `stdlib/src/*.bt` as documentation. Formalize the compiler's internal dispatch tables as the source of truth.
 
 **Rejected because:** Perpetuates the two-source-of-truth problem. The stdlib remains non-compilable, and users cannot extend stdlib classes through normal Beamtalk code.
 
@@ -969,7 +969,7 @@ Compiling the stdlib introduces a strict build ordering dependency:
 
 ### Stdlib as an OTP Application: `beamtalk_stdlib`
 
-The compiled stdlib is packaged as a proper OTP application within a rebar3 umbrella project. The existing `runtime/` directory becomes a multi-app project containing both `beamtalk_runtime` (hand-written Erlang) and `beamtalk_stdlib` (compiled from `lib/*.bt`).
+The compiled stdlib is packaged as a proper OTP application within a rebar3 umbrella project. The existing `runtime/` directory becomes a multi-app project containing both `beamtalk_runtime` (hand-written Erlang) and `beamtalk_stdlib` (compiled from `stdlib/src/*.bt`).
 
 #### Umbrella Project Structure
 
@@ -994,8 +994,8 @@ runtime/                                  # Rebar3 umbrella project
 │       │   └── beamtalk_stdlib.app.src   # Generated by build-stdlib
 │       └── ebin/
 │           ├── beamtalk_stdlib.app       # Generated
-│           ├── integer.beam              # Compiled from lib/Integer.bt
-│           ├── string.beam               # Compiled from lib/String.bt
+│           ├── integer.beam              # Compiled from stdlib/src/Integer.bt
+│           ├── string.beam               # Compiled from stdlib/src/String.bt
 │           └── ...
 └── _build/default/lib/
     ├── beamtalk_runtime/ebin/            # rebar3-compiled runtime
@@ -1009,7 +1009,7 @@ lib/                                      # Stdlib SOURCE (Beamtalk, not Erlang)
 └── ...
 ```
 
-**Key distinction:** `lib/*.bt` is the *source*. `runtime/apps/beamtalk_stdlib/ebin/` is the *output*. The Beamtalk compiler reads from `lib/`, the BEAM VM loads from `ebin/`. Rebar3 manages the runtime app; the Beamtalk compiler manages the stdlib app.
+**Key distinction:** `stdlib/src/*.bt` is the *source*. `runtime/apps/beamtalk_stdlib/ebin/` is the *output*. The Beamtalk compiler reads from `stdlib/src/`, the BEAM VM loads from `ebin/`. Rebar3 manages the runtime app; the Beamtalk compiler manages the stdlib app.
 
 #### Umbrella rebar.config
 
@@ -1044,7 +1044,7 @@ lib/                                      # Stdlib SOURCE (Beamtalk, not Erlang)
 %% runtime/apps/beamtalk_stdlib/src/beamtalk_stdlib.app.src
 %% (auto-generated by beamtalk build-stdlib)
 {application, beamtalk_stdlib, [
-    {description, "Beamtalk Standard Library - compiled from lib/*.bt"},
+    {description, "Beamtalk Standard Library - compiled from stdlib/src/*.bt"},
     {vsn, "0.1.0"},
     {modules, [integer, string, object, actor, ...]},
     {applications, [kernel, stdlib, beamtalk_runtime]},
@@ -1056,7 +1056,7 @@ lib/                                      # Stdlib SOURCE (Beamtalk, not Erlang)
 
 #### Why an OTP Umbrella (Not Loose `.beam` Files)
 
-| Concern | Loose files in `lib/build/` | OTP umbrella app |
+| Concern | Loose files in `stdlib/src/build/` | OTP umbrella app |
 |---------|---------------------------|------------------|
 | Code path | Manual `-pa` flag | Automatic via rebar3 |
 | Dependencies | Manual load ordering | Declared in `.app.src` |
@@ -1104,7 +1104,7 @@ build-erlang:
     @echo "🔨 Building Erlang runtime..."
     cd runtime && rebar3 compile
 
-# Build stdlib (lib/*.bt → beamtalk_stdlib OTP app)
+# Build stdlib (stdlib/src/*.bt → beamtalk_stdlib OTP app)
 build-stdlib: build-rust build-erlang
     @echo "🔨 Building stdlib..."
     target/debug/beamtalk build-stdlib
@@ -1117,7 +1117,7 @@ ci: build lint test test-e2e
 
 New CLI subcommand that:
 
-1. **Finds** all `lib/*.bt` files
+1. **Finds** all `stdlib/src/*.bt` files
 2. **Compiles** each through the normal pipeline with `--stdlib-mode` flag
 3. **Outputs** `.beam` files to `runtime/_build/default/lib/beamtalk_stdlib/ebin/`
 4. **Generates** `beamtalk_stdlib.app` with module list
@@ -1131,7 +1131,7 @@ fn build_stdlib() -> Result<()> {
     fs::create_dir_all(&out_dir)?;
 
     let mut modules = Vec::new();
-    for bt_file in glob("lib/*.bt") {
+    for bt_file in glob("stdlib/src/*.bt") {
         let beam_file = out_dir.join(module_name(&bt_file) + ".beam");
 
         // Incremental: skip if .beam is newer than .bt
@@ -1177,7 +1177,7 @@ let mut args = vec![
 ```bash
 # Simple timestamp check (sufficient for 16 files)
 # Each .bt compiles independently — no cross-file dependencies
-for f in lib/*.bt; do
+for f in stdlib/src/*.bt; do
     beam="$STDLIB_EBIN/$(basename "$f" .bt).beam"
     if [ ! -f "$beam" ] || [ "$f" -newer "$beam" ]; then
         beamtalk build --stdlib-mode "$f" --output "$STDLIB_EBIN/"
@@ -1241,19 +1241,19 @@ If this ADR is accepted, the following documents need updating:
 
 | Document | What Changes | Severity |
 |----------|-------------|----------|
-| **`docs/development/common-tasks.md`** (lines 26-62) | "Add builtin handler in `builtins.rs`" workflow becomes "Add pragma in `lib/*.bt` + implement in runtime `.erl`". The `// implemented by compiler` marker convention is replaced by pragmas. The BT-176 example pattern needs updating. | **High** — describes the day-to-day developer workflow |
+| **`docs/development/common-tasks.md`** (lines 26-62) | "Add builtin handler in `builtins.rs`" workflow becomes "Add pragma in `stdlib/src/*.bt` + implement in runtime `.erl`". The `// implemented by compiler` marker convention is replaced by pragmas. The BT-176 example pattern needs updating. | **High** — describes the day-to-day developer workflow |
 | **`docs/beamtalk-language-features.md`** (line 1227) | "Most reflection methods are implemented in the `dispatch/4` function...The `perform:` and `perform:withArguments:` methods are handled in the frontend code generator (`builtins.rs`)" — needs to describe pragma-based declarations instead of hardcoded `builtins.rs` | **High** — primary language reference |
-| **`lib/*.bt` files** (all 16 files) | Convert from `// implemented by compiler` comments to `@primitive name` pragmas. This IS the migration itself — Phase 2 of the plan. | **High** — the core deliverable |
+| **`stdlib/src/*.bt` files** (all 16 files) | Convert from `// implemented by compiler` comments to `@primitive name` pragmas. This IS the migration itself — Phase 2 of the plan. | **High** — the core deliverable |
 
 ### Should Update (Cross-references)
 
 | Document | What Changes | Severity |
 |----------|-------------|----------|
-| **`docs/internal/design-self-as-object.md`** (lines 15, 117-189) | Documents `beamtalk_primitive.erl` dispatch architecture. Still accurate (runtime dispatch is unchanged), but should add note: "Primitive method declarations now live in compiled `lib/*.bt` files via pragmas; runtime dispatch modules continue to handle execution." | **Low** — runtime architecture unchanged, just add cross-ref |
+| **`docs/internal/design-self-as-object.md`** (lines 15, 117-189) | Documents `beamtalk_primitive.erl` dispatch architecture. Still accurate (runtime dispatch is unchanged), but should add note: "Primitive method declarations now live in compiled `stdlib/src/*.bt` files via pragmas; runtime dispatch modules continue to handle execution." | **Low** — runtime architecture unchanged, just add cross-ref |
 | **`docs/beamtalk-ddd-model.md`** | Missing a "Standard Library" bounded context. Should document that stdlib compilation is a distinct context feeding class metadata into Code Generation. | **Low** — additive, not corrective |
 | **`docs/ADR/0005-beam-object-model-pragmatic-hybrid.md`** | References sealed primitives and auto-generated constructors. Should cross-reference ADR 0007 for how primitives are now declared (pragma-driven, not auto-generated). | **Low** — add cross-reference |
 | **`docs/ADR/0006-unified-method-dispatch.md`** | Should note that class-kind routing (Actor/Value Type/Primitive) is now driven by compiled stdlib metadata, not `is_actor_class()` heuristic. | **Low** — add cross-reference |
-| **`AGENTS.md`** (line 1058) | `stdlib` label description says "Standard library: collections, primitives, strings" with key directory `lib/`. Should note that `lib/` files are now compiled source, not API-only docs. | **Low** — one-line update |
+| **`AGENTS.md`** (line 1058) | `stdlib` label description says "Standard library: collections, primitives, strings" with key directory `stdlib/src/`. Should note that `stdlib/src/` files are now compiled source, not API-only docs. | **Low** — one-line update |
 
 ### No Change Needed
 
@@ -1302,7 +1302,7 @@ If this ADR is accepted, the following documents need updating:
 
    **Result:** The intrinsic registry shrinks from ~50 entries to ~20 structural intrinsics. All runtime-dispatch primitives use the selector itself — self-documenting, no naming convention to learn. Structural intrinsic names are unquoted identifiers; selector-based names are quoted atoms. The compiler distinguishes the two cases automatically by checking quotes: `'+'` = selector (runtime dispatch), `basicNew` = structural intrinsic.
 
-5. ~~**Where's `yourself`?**~~ **RESOLVED: Add it.** `yourself => self` belongs in `lib/Object.bt`. It's pure Beamtalk (no pragma needed) and is the canonical Smalltalk "this is a real class library" signal. It also has practical use in message cascades. Will be included in the Phase 2 stdlib conversion.
+5. ~~**Where's `yourself`?**~~ **RESOLVED: Add it.** `yourself => self` belongs in `stdlib/src/Object.bt`. It's pure Beamtalk (no pragma needed) and is the canonical Smalltalk "this is a real class library" signal. It also has practical use in message cascades. Will be included in the Phase 2 stdlib conversion.
 
 ---
 
@@ -1360,7 +1360,7 @@ All 187 quoted `@primitive 'selector'` uses are **unchanged**.
 
 1. **Parser**: Add `@intrinsic` as a new pragma keyword, producing a distinct AST node (or a flag on `Primitive`)
 2. **Codegen**: `PrimitiveBinding::StructuralIntrinsic` matches `@intrinsic`; `PrimitiveBinding::SelectorBased` matches `@primitive`
-3. **Stdlib files**: Change 25 unquoted `@primitive x` → `@intrinsic x` across `lib/*.bt`
+3. **Stdlib files**: Change 25 unquoted `@primitive x` → `@intrinsic x` across `stdlib/src/*.bt`
 4. **Deprecation**: Unquoted `@primitive x` emits a warning for one release, then becomes an error
 
 ### Consequences
@@ -1372,7 +1372,7 @@ All 187 quoted `@primitive 'selector'` uses are **unchanged**.
 
 **Negative:**
 - One more keyword to learn (but only for stdlib maintainers)
-- 25 lines change in `lib/*.bt`
+- 25 lines change in `stdlib/src/*.bt`
 
 **Neutral:**
 - Selector-based primitives are always written as `@primitive 'selector'`; unquoted `@primitive x` is deprecated in favor of `@intrinsic x`, so there is no change for existing quoted `@primitive` usage.

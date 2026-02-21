@@ -85,7 +85,7 @@ This eliminates all 12 hardcoded selector clauses. Class objects are just object
 ### Behaviour.bt — The Core Class Protocol
 
 ```beamtalk
-// lib/Behaviour.bt
+// stdlib/src/Behaviour.bt
 /// The abstract superclass of all class-describing objects.
 /// Provides method dictionary access, hierarchy queries,
 /// and instance creation protocol.
@@ -234,7 +234,7 @@ abstract Object subclass: Behaviour
 ### Class.bt — Concrete Class Identity
 
 ```beamtalk
-// lib/Class.bt
+// stdlib/src/Class.bt
 /// A concrete class in the Beamtalk system. Adds name, class variable
 /// access, and class identity protocol on top of Behaviour.
 sealed Behaviour subclass: Class
@@ -267,7 +267,7 @@ sealed Behaviour subclass: Class
 ### Updated Object.bt — respondsTo: Delegates to canUnderstand:
 
 ```beamtalk
-// In lib/Object.bt — replace the intrinsic with a Beamtalk method
+// In stdlib/src/Object.bt — replace the intrinsic with a Beamtalk method
 sealed respondsTo: selector: Symbol -> Boolean =>
   self class canUnderstand: selector
 ```
@@ -277,7 +277,7 @@ This single line replaces five Erlang code paths. `canUnderstand:` is a pure Bea
 ### New Instance-Side Methods on Object
 
 ```beamtalk
-// In lib/Object.bt — hierarchy-aware type testing
+// In stdlib/src/Object.bt — hierarchy-aware type testing
 
 /// Test whether the receiver is an instance of aClass or any of its subclasses.
 ///
@@ -583,7 +583,7 @@ Prove the core assumption before building the full feature: a class-side message
 
 ### Phase 2: Bootstrap, Intrinsics, and Stdlib Classes
 
-**Affected components:** Runtime, stdlib (`lib/`), codegen (`beamtalk-core`)
+**Affected components:** Runtime, stdlib (`stdlib/src/`), codegen (`beamtalk-core`)
 
 1. Implement 8 thin data-access intrinsics in a new `beamtalk_behaviour_intrinsics.erl`:
    - `classSuperclass/1` — returns class object (not atom)
@@ -600,9 +600,9 @@ Prove the core assumption before building the full feature: a class-side message
 
 3. Update `class_send/3` in `beamtalk_class_dispatch.erl`: replace 12 hardcoded selector clauses with a fallback to `beamtalk_dispatch:dispatch('Class', Selector, Args, ClassObject)`.
 
-4. Create `lib/Behaviour.bt` — hierarchy queries and method dictionary (chain walks in Beamtalk)
-5. Create `lib/Class.bt` — name, identity, printString (sealed)
-6. Update `lib/Object.bt`:
+4. Create `stdlib/src/Behaviour.bt` — hierarchy queries and method dictionary (chain walks in Beamtalk)
+5. Create `stdlib/src/Class.bt` — name, identity, printString (sealed)
+6. Update `stdlib/src/Object.bt`:
    - Replace `respondsTo:` intrinsic with `self class canUnderstand: selector`
    - Add `isKindOf:` and `isMemberOf:`
 7. Register Behaviour and Class in the static `ClassHierarchy` (Rust semantic analysis)
@@ -616,7 +616,7 @@ Prove the core assumption before building the full feature: a class-side message
 1. Consolidate `responds_to` implementations in `beamtalk_dispatch.erl`, `beamtalk_primitive.erl`, and `beamtalk_actor.erl` to delegate to `canUnderstand:` via the class process
 2. Remove duplicate `has_method` paths in `beamtalk_object_class.erl`
 3. Remove the 12 hardcoded selector clauses from `class_send/3` (now handled by Behaviour/Class chain)
-4. Update tests in `tests/stdlib/` for the new API
+4. Update tests in `stdlib/bootstrap-test/` for the new API
 
 ### Phase 4: Extended Protocol (Future)
 

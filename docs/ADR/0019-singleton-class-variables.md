@@ -363,8 +363,8 @@ SystemDictionary current allClasses
 
 ### Phase 1: Add class variables and setters to stdlib classes
 
-- Add `classVar: current = nil`, `class current`, and `class current:` to `lib/SystemDictionary.bt` and `lib/TranscriptStream.bt`
-- Create `lib/WorkspaceEnvironment.bt` with actor introspection methods (`actors`, `actorAt:`, `actorsOf:`)
+- Add `classVar: current = nil`, `class current`, and `class current:` to `stdlib/src/SystemDictionary.bt` and `stdlib/src/TranscriptStream.bt`
+- Create `stdlib/src/WorkspaceEnvironment.bt` with actor introspection methods (`actors`, `actorAt:`, `actorsOf:`)
 - Verify class variable access works via `SystemDictionary current` (returns nil before bootstrap)
 
 ### Phase 2: Supervisor bootstrap wires class variables
@@ -400,9 +400,9 @@ SystemDictionary current allClasses
 
 | Component | Change |
 |-----------|--------|
-| `lib/SystemDictionary.bt` | Add `classVar: current`, `class current`, `class current:` |
-| `lib/TranscriptStream.bt` | Add `classVar: current`, `class current`, `class current:` |
-| `lib/WorkspaceEnvironment.bt` | **New file** — stdlib class for workspace introspection (modeled on Squeak's `Environment`) |
+| `stdlib/src/SystemDictionary.bt` | Add `classVar: current`, `class current`, `class current:` |
+| `stdlib/src/TranscriptStream.bt` | Add `classVar: current`, `class current`, `class current:` |
+| `stdlib/src/WorkspaceEnvironment.bt` | **New file** — stdlib class for workspace introspection (modeled on Squeak's `Environment`) |
 | `dispatch_codegen.rs` | Remove workspace binding codegen path |
 | `beamtalk_workspace_sup.erl` | Set class variables after child startup (replace persistent_term) |
 | `beamtalk_system_dictionary.erl` | Remove persistent_term singleton logic |

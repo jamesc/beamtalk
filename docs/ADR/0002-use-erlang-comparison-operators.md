@@ -84,7 +84,7 @@ This design was chosen to avoid conflict with compound assignment (`/=` for "div
 
 3. **Update documentation:**
    - `docs/beamtalk-syntax-rationale.md` - Update operator table
-   - `lib/ProtoObject.bt` - Update equality operator documentation
+   - `stdlib/src/ProtoObject.bt` - Update equality operator documentation
    - All code examples using comparison operators
 
 ## Examples

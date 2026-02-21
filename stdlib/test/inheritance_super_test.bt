@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for super sends - Inheritance and Method Dispatch
+
+// @load stdlib/test/fixtures/counter.bt
+
+TestCase subclass: InheritanceSuperTest
+
+  testSection1 =>
+    c := Counter spawn.
+    self assert: (c class) equals: Counter.
+    // Counter methods work (no super involved)
+    self assert: (c increment await) equals: 1.
+    self assert: (c getValue await) equals: 1
