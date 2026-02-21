@@ -366,14 +366,13 @@ cleanup_activation_test_class() ->
     case beamtalk_class_registry:whereis_class('BT748ActivationFixture') of
         undefined -> ok;
         Pid ->
-            unlink(Pid),
             gen_server:stop(Pid, normal, 1000),
             timer:sleep(50)
     end.
 
 purge_activation_fixture_module() ->
-    code:delete('bt@BT748ActivationFixture'),
     code:purge('bt@BT748ActivationFixture'),
+    code:delete('bt@BT748ActivationFixture'),
     ok.
 
 make_temp_project_dir() ->
