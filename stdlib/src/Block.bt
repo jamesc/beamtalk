@@ -103,7 +103,7 @@ sealed Object subclass: Block
   /// ```beamtalk
   /// [:x :y | x + y] valueWithArguments: #(3, 4)   // => 7
   /// ```
-  valueWithArguments: args: Tuple => @primitive "valueWithArguments:"
+  valueWithArguments: args: List => @primitive "valueWithArguments:"
 
   /// Human-readable description of the receiver.
   ///
