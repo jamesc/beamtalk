@@ -342,11 +342,9 @@ pub(crate) fn generate_compiled_method_bif(
     params: &[String],
 ) -> Option<Document<'static>> {
     match selector {
-        "selector" | "source" | "argumentCount" | "printString" | "asString" => Some(ops_dispatch(
-            "beamtalk_compiled_method_ops",
-            selector,
-            params,
-        )),
+        "selector" | "source" | "doc" | "argumentCount" | "printString" | "asString" => Some(
+            ops_dispatch("beamtalk_compiled_method_ops", selector, params),
+        ),
         _ => None,
     }
 }

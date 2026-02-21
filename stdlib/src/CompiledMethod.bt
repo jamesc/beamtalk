@@ -30,6 +30,14 @@ sealed Object subclass: CompiledMethod
   /// ```
   source -> String => @primitive "source"
 
+  /// Return the method documentation string, or nil if none set.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Counter >> #increment) doc   // => nil (or doc string if set)
+  /// ```
+  doc => @primitive "doc"
+
   /// Return the number of arguments the method expects.
   ///
   /// ## Examples

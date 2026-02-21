@@ -165,6 +165,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "whichClassIncludesSelector:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![None] },
                 MethodInfo { selector: "instanceVariableNames".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
                 MethodInfo { selector: "allInstanceVariableNames".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "doc".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "doc:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![None] },
+                MethodInfo { selector: "setDocForMethod:to:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![None, None] },
                 MethodInfo { selector: "isBehaviour".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
                 MethodInfo { selector: "isMeta".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
             ],
@@ -330,6 +333,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             methods: vec![
                 MethodInfo { selector: "selector".into(), arity: 0, kind: MethodKind::Primary, defined_in: "CompiledMethod".into(), is_sealed: false, return_type: Some("Symbol".into()), param_types: vec![] },
                 MethodInfo { selector: "source".into(), arity: 0, kind: MethodKind::Primary, defined_in: "CompiledMethod".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "doc".into(), arity: 0, kind: MethodKind::Primary, defined_in: "CompiledMethod".into(), is_sealed: false, return_type: None, param_types: vec![] },
                 MethodInfo { selector: "argumentCount".into(), arity: 0, kind: MethodKind::Primary, defined_in: "CompiledMethod".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![] },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "CompiledMethod".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
                 MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "CompiledMethod".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },

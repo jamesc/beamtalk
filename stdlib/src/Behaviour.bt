@@ -146,6 +146,34 @@ abstract Object subclass: Behaviour
   /// ```
   sealed allInstanceVariableNames => @primitive "classAllInstVarNames"
 
+  // --- Documentation (ADR 0033) ---
+
+  /// Return the class documentation string, or nil if none set.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter doc           // => nil (or "A counter actor" if set)
+  /// ```
+  sealed doc => @primitive "classDoc"
+
+  /// Set the class documentation string. Returns the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter doc: "A counter actor"
+  /// Counter doc           // => "A counter actor"
+  /// ```
+  sealed doc: aString => @primitive "classSetDoc"
+
+  /// Set the documentation string for a specific method. Returns the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter setDocForMethod: #increment to: "Increment the counter by 1"
+  /// (Counter >> #increment) doc   // => "Increment the counter by 1"
+  /// ```
+  sealed setDocForMethod: aSelector to: aString => @primitive "classSetMethodDoc"
+
   // --- Identity ---
 
   /// Test whether this is a Behaviour (class-describing object).

@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for runtime doc tests (ADR 0033, BT-769)
+
+Object subclass: DocTestHelper
+
+  greet => "hello"
+
+  add: a to: b => a + b
+
+  answer => 42
