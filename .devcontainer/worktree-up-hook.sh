@@ -25,6 +25,9 @@ else
     fi
     log "Cloning skills repo into $SKILLS_DIR..."
     mkdir -p "$(dirname "$SKILLS_DIR")"
-    git clone "$SKILLS_REPO" "$SKILLS_DIR" || log "Could not clone skills repo (offline?), skipping"
-    log "Skills repo cloned"
+    if git clone "$SKILLS_REPO" "$SKILLS_DIR"; then
+        log "Skills repo cloned"
+    else
+        log "Could not clone skills repo (offline?), skipping"
+    fi
 fi
