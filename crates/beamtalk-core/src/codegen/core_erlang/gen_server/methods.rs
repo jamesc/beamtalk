@@ -726,11 +726,12 @@ impl CoreErlangGenerator {
 
             let is_sealed = if class.is_sealed { "true" } else { "false" };
             let is_abstract = if class.is_abstract { "true" } else { "false" };
-            let let_prefix = if i > 0 { "in " } else { "" };
 
             let class_doc = docvec![
                 line(),
-                format!("{let_prefix}let ClassInfo{i} = ~{{",),
+                "let ClassInfo",
+                i,
+                " = ~{",
                 nest(
                     INDENT,
                     docvec![
@@ -767,39 +768,51 @@ impl CoreErlangGenerator {
                 line(),
                 "}~",
                 line(),
-                format!(
-                    "in let _Reg{i} = case call 'beamtalk_object_class':'start'('{}', ClassInfo{i}) of",
-                    class.name.name
-                ),
+                "in let _Reg",
+                i,
+                " = case call 'beamtalk_object_class':'start'('",
+                class.name.name.to_string(),
+                "', ClassInfo",
+                i,
+                ") of",
                 nest(
                     INDENT,
                     docvec![
                         line(),
-                        format!("<{{'ok', _Pid{i}}}> when 'true' -> 'ok'"),
+                        "<{'ok', _Pid",
+                        i,
+                        "}> when 'true' -> 'ok'",
                         line(),
                         // BT-572: On redefinition, update class metadata for hot reload.
                         // BT-738: Normalize update_class result so errors propagate from on_load.
-                        format!(
-                            "<{{'error', {{'already_started', _Existing{i}}}}}> when 'true' ->"
-                        ),
+                        "<{'error', {'already_started', _Existing",
+                        i,
+                        "}}> when 'true' ->",
                         nest(
                             INDENT,
                             docvec![
                                 line(),
-                                format!(
-                                    "let _UpdRes{i} = call 'beamtalk_object_class':'update_class'('{}', ClassInfo{i})",
-                                    class.name.name
-                                ),
-                                format!(" in case _UpdRes{i} of"),
+                                "let _UpdRes",
+                                i,
+                                " = call 'beamtalk_object_class':'update_class'('",
+                                class.name.name.to_string(),
+                                "', ClassInfo",
+                                i,
+                                ")",
+                                " in case _UpdRes",
+                                i,
+                                " of",
                                 nest(
                                     INDENT,
                                     docvec![
                                         line(),
-                                        format!("<{{'ok', _}}> when 'true' -> 'ok'"),
+                                        "<{'ok', _}> when 'true' -> 'ok'",
                                         line(),
-                                        format!(
-                                            "<{{'error', _UpdErr{i}}}> when 'true' -> {{'error', _UpdErr{i}}}"
-                                        ),
+                                        "<{'error', _UpdErr",
+                                        i,
+                                        "}> when 'true' -> {'error', _UpdErr",
+                                        i,
+                                        "}",
                                     ]
                                 ),
                                 line(),
@@ -807,7 +820,9 @@ impl CoreErlangGenerator {
                             ]
                         ),
                         line(),
-                        format!("<{{'error', _Reason{i}}}> when 'true' -> 'ok'"),
+                        "<{'error', _Reason",
+                        i,
+                        "}> when 'true' -> 'ok'",
                     ]
                 ),
                 line(),
@@ -816,33 +831,57 @@ impl CoreErlangGenerator {
             class_docs.push(class_doc);
         }
 
-        // BT-738: Use the last _RegN variable as the try-body result so that
-        // {error, ...} from update_class propagates out of on_load. When on_load
-        // returns anything other than 'ok', code:load_binary fails, which lets
-        // the REPL surface a structured stdlib_shadowing error.
-        let last_i = module.classes.len().saturating_sub(1);
-        let final_expr = if module.classes.is_empty() {
-            "'ok'".to_string()
-        } else {
-            format!("_Reg{last_i}")
-        };
+        // BT-738 / BT-749: Build a short-circuit chain so that the first
+        // {error, ...} from update_class propagates out of on_load, regardless
+        // of which class position caused it.  Note: non-already_started errors
+        // from start/2 are already normalized to 'ok' in the inner case arms
+        // above, so only update_class errors can produce {error, _} here.
+        //
+        // For N classes, generates:
+        //   let ClassInfo0 = ... in let _Reg0 = case ... end
+        //   in case _Reg0 of
+        //     <{'error', _RegErr0}> when 'true' -> {'error', _RegErr0}
+        //     <_> when 'true' ->
+        //       let ClassInfo1 = ... in let _Reg1 = case ... end
+        //       in _Reg1   % (or nested case if more classes follow)
+        //   end
+        // The early return above already handles the empty case, so class_docs is non-empty here.
+        let last_i = class_docs.len() - 1;
+        // Start from innermost: just last class + final result
+        let mut try_body: Document<'static> =
+            docvec![class_docs[last_i].clone(), "\n", line(), "in _Reg", last_i,];
+        // Wrap from second-to-last down to first, adding short-circuit cases
+        for i in (0..last_i).rev() {
+            try_body = docvec![
+                class_docs[i].clone(),
+                "\n",
+                line(),
+                "in case _Reg",
+                i,
+                " of",
+                nest(
+                    INDENT,
+                    docvec![
+                        line(),
+                        "<{'error', _RegErr",
+                        i,
+                        "}> when 'true' -> {'error', _RegErr",
+                        i,
+                        "}",
+                        line(),
+                        "<_> when 'true' ->",
+                        nest(INDENT, docvec![line(), try_body]),
+                    ]
+                ),
+                line(),
+                "end",
+            ];
+        }
         let doc = docvec![
             "'register_class'/0 = fun () ->",
             nest(
                 INDENT,
-                docvec![
-                    line(),
-                    "try",
-                    nest(
-                        INDENT,
-                        docvec![
-                            Document::Vec(class_docs),
-                            "\n",
-                            line(),
-                            format!("in {final_expr}"),
-                        ]
-                    ),
-                ]
+                docvec![line(), "try", nest(INDENT, docvec![try_body, "\n",]),]
             ),
             nest(
                 INDENT,

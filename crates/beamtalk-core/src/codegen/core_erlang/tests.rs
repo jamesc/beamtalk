@@ -2313,9 +2313,10 @@ fn test_multiple_classes_registration() {
         code.contains("let _Reg0 = case"),
         "Should have first registration with _Reg0. Got:\n{code}"
     );
+    // BT-749: ClassInfo1 no longer has an `in ` prefix — it is inside a short-circuit case arm.
     assert!(
-        code.contains("in let ClassInfo1 = ~{"),
-        "Should chain second ClassInfo binding with let. Got:\n{code}"
+        code.contains("let ClassInfo1 = ~{"),
+        "Should have second ClassInfo binding. Got:\n{code}"
     );
     assert!(
         code.contains("let _Reg1 = case"),
@@ -2332,8 +2333,7 @@ fn test_multiple_classes_registration() {
         "Should call update_class for Logger on already_started. Got:\n{code}"
     );
 
-    // BT-738: Function should propagate last _RegN result (so errors from update_class surface).
-    // For 2 classes the final expression is `in _Reg1` (last index).
+    // BT-738: Final result propagates last _Reg.
     assert!(
         code.contains("in _Reg1"),
         "Should propagate last _Reg result after all registrations. Got:\n{code}"
@@ -2348,6 +2348,155 @@ fn test_multiple_classes_registration() {
     assert!(
         code.contains("<{'ok', _}> when 'true' -> 'ok'"),
         "Should normalize update_class success to ok. Got:\n{code}"
+    );
+
+    // BT-749: Short-circuit: earlier error must propagate before executing later classes.
+    assert!(
+        code.contains("in case _Reg0 of"),
+        "Should short-circuit on _Reg0 error. Got:\n{code}"
+    );
+    assert!(
+        code.contains("<{'error', _RegErr0}> when 'true' -> {'error', _RegErr0}"),
+        "Should propagate _Reg0 error. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_multi_class_early_error_short_circuits() {
+    // BT-749: When an earlier class (not the last) returns {error, ...} from
+    // update_class (e.g. stdlib_shadowing), the error must propagate — the
+    // subsequent class registrations must not mask it with 'ok'.
+    //
+    // We verify this by checking the generated code structure: each _RegN
+    // (except the last) must be wrapped in a case that short-circuits on error.
+    use crate::ast::{ClassDefinition, Identifier, StateDeclaration};
+    use crate::source_analysis::Span;
+
+    fn make_class(name: &str, name_len: u32, span_end: u32) -> ClassDefinition {
+        ClassDefinition {
+            name: Identifier::new(name, Span::new(0, name_len)),
+            superclass: Some(Identifier::new("Actor", Span::new(0, 5))),
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![StateDeclaration {
+                name: Identifier::new("x", Span::new(0, 1)),
+                default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 1))),
+                type_annotation: None,
+                span: Span::new(0, 5),
+            }],
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: Span::new(0, span_end),
+        }
+    }
+
+    // Two classes: ShadowA (index 0), ValidB (index 1, last).
+    // ValidB is fine; ShadowA would be the one shadowing stdlib.
+    // The fix must ensure that if _Reg0 is {error, ...}, we never reach _Reg1.
+    let module = Module {
+        expressions: vec![],
+        classes: vec![make_class("ShadowA", 7, 20), make_class("ValidB", 6, 30)],
+        method_definitions: Vec::new(),
+        span: Span::new(0, 50),
+        leading_comments: vec![],
+    };
+
+    let code = generate_module(&module, CodegenOptions::new("multi_shadow"))
+        .expect("codegen should succeed");
+
+    // BT-749: First class must be wrapped in a short-circuit case check.
+    assert!(
+        code.contains("in case _Reg0 of"),
+        "Should wrap _Reg0 in a short-circuit case. Got:\n{code}"
+    );
+    assert!(
+        code.contains("<{'error', _RegErr0}> when 'true' -> {'error', _RegErr0}"),
+        "Should propagate _Reg0 error before executing later classes. Got:\n{code}"
+    );
+
+    // The last class's result is returned directly (no further wrapping needed).
+    assert!(
+        code.contains("in _Reg1"),
+        "Should use _Reg1 as the final result. Got:\n{code}"
+    );
+
+    // The second class must NOT be wrapped in its own short-circuit case
+    // (it is the last, so its result flows out directly).
+    assert!(
+        !code.contains("in case _Reg1 of"),
+        "Last _Reg should not be wrapped in a short-circuit case. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_three_class_short_circuit_nesting() {
+    // BT-749: Verify nesting correctness for N=3 classes.
+    // Short-circuit cases are added for indices 0 and 1 (all except the last).
+    // The last class (index 2) is returned directly with no extra wrapping.
+    use crate::ast::{ClassDefinition, Identifier, StateDeclaration};
+    use crate::source_analysis::Span;
+
+    fn make_class(name: &str, name_len: u32) -> ClassDefinition {
+        ClassDefinition {
+            name: Identifier::new(name, Span::new(0, name_len)),
+            superclass: Some(Identifier::new("Actor", Span::new(0, 5))),
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![StateDeclaration {
+                name: Identifier::new("x", Span::new(0, 1)),
+                default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 1))),
+                type_annotation: None,
+                span: Span::new(0, 5),
+            }],
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: Span::new(0, 20),
+        }
+    }
+
+    let module = Module {
+        expressions: vec![],
+        classes: vec![make_class("A", 1), make_class("B", 1), make_class("C", 1)],
+        method_definitions: Vec::new(),
+        span: Span::new(0, 60),
+        leading_comments: vec![],
+    };
+
+    let code = generate_module(&module, CodegenOptions::new("three_classes"))
+        .expect("codegen should succeed");
+
+    // BT-749: Classes 0 and 1 (non-last) must have short-circuit case wrappers.
+    assert!(
+        code.contains("in case _Reg0 of"),
+        "Should short-circuit on _Reg0 error. Got:\n{code}"
+    );
+    assert!(
+        code.contains("<{'error', _RegErr0}> when 'true' -> {'error', _RegErr0}"),
+        "Should propagate _Reg0 error. Got:\n{code}"
+    );
+    assert!(
+        code.contains("in case _Reg1 of"),
+        "Should short-circuit on _Reg1 error. Got:\n{code}"
+    );
+    assert!(
+        code.contains("<{'error', _RegErr1}> when 'true' -> {'error', _RegErr1}"),
+        "Should propagate _Reg1 error. Got:\n{code}"
+    );
+
+    // Class 2 (last) must be returned directly — no extra case wrapping.
+    assert!(
+        code.contains("in _Reg2"),
+        "Should use _Reg2 as final result. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("in case _Reg2 of"),
+        "Last _Reg should not be wrapped in a short-circuit case. Got:\n{code}"
     );
 }
 

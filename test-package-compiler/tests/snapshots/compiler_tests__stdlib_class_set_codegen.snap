@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 76
 expression: core_erlang
 ---
 module 'stdlib_class_set' ['new'/0, 'new'/1, 'size'/1, 'isEmpty'/1, 'includes:'/2, 'add:'/2, 'remove:'/2, 'union:'/2, 'intersection:'/2, 'difference:'/2, 'isSubsetOf:'/2, 'asList'/1, 'fromList:'/2, 'do:'/2, 'describe'/1, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0]
@@ -175,6 +174,7 @@ call 'beamtalk_set_ops':'do'(Self, _block9)
         end
 
         in _Reg0
+
     of RegResult -> RegResult
     catch <CatchType, CatchError, CatchStack> -> 'ok'
 
