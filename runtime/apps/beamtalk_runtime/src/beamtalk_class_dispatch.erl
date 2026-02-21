@@ -352,9 +352,11 @@ handle_calling_self_error(ClassPid, Selector) ->
     Error0 = beamtalk_error:new(instantiation_error, ClassName, Selector),
     Error1 = beamtalk_error:with_hint(
         Error0,
-        <<"A class method cannot send 'new', 'new:', 'spawn', or 'spawnWith:' "
-          "to its own class (would deadlock the class process). "
-          "Delegate to a helper class method or use a factory on a superclass.">>
+        <<
+            "A class method cannot send 'new', 'new:', 'spawn', or 'spawnWith:' "
+            "to its own class (would deadlock the class process). "
+            "Delegate to a helper class method or use a factory on a superclass."
+        >>
     ),
     beamtalk_error:raise(Error1).
 
@@ -372,8 +374,10 @@ class_name_from_pid(ClassPid) ->
             case lists:prefix(Prefix, RegStr) of
                 true ->
                     Suffix = lists:nthtail(length(Prefix), RegStr),
-                    try list_to_existing_atom(Suffix)
-                    catch error:badarg -> unknown
+                    try
+                        list_to_existing_atom(Suffix)
+                    catch
+                        error:badarg -> unknown
                     end;
                 false ->
                     unknown

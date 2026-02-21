@@ -59,15 +59,20 @@ run_and_assert(TestModule, Assertions) ->
     Passed = length([ok || {pass, _} <- RevResults]),
     Failed = length(RevResults) - Passed,
     %% Print individual failures first (before summary)
-    lists:foreach(fun
-        ({fail, Location, Expected, Actual}) ->
-            io:format("FAIL ~s~n  expected: ~s~n  got:      ~s~n",
-                      [Location, Expected, Actual]);
-        ({crash, Location, Class, Reason, _Stack}) ->
-            io:format("FAIL ~s~n  crashed:  ~p:~p~n", [Location, Class, Reason]);
-        ({pass, _}) ->
-            ok
-    end, RevResults),
+    lists:foreach(
+        fun
+            ({fail, Location, Expected, Actual}) ->
+                io:format(
+                    "FAIL ~s~n  expected: ~s~n  got:      ~s~n",
+                    [Location, Expected, Actual]
+                );
+            ({crash, Location, Class, Reason, _Stack}) ->
+                io:format("FAIL ~s~n  crashed:  ~p:~p~n", [Location, Class, Reason]);
+            ({pass, _}) ->
+                ok
+        end,
+        RevResults
+    ),
     %% Print structured results line
     io:format("RESULTS:~s:~p:~p~n", [TestModule, Passed, Failed]),
     %% Signal EUnit pass/fail
@@ -90,13 +95,13 @@ run_one({value, EvalMod, Expected, VarName, Location}, Bindings) ->
             NewBindings = maybe_bind(VarName, Value, RawBindings),
             Actual = format_result(Value),
             case Actual =:= Expected of
-                true  -> {NewBindings, {pass, Location}};
+                true -> {NewBindings, {pass, Location}};
                 false -> {NewBindings, {fail, Location, Expected, Actual}}
             end
-    catch Class:Reason:Stack ->
-        {Bindings, {crash, Location, Class, Reason, Stack}}
+    catch
+        Class:Reason:Stack ->
+            {Bindings, {crash, Location, Class, Reason, Stack}}
     end;
-
 %% Wildcard value assertion: use matches_pattern/2 (BT-502)
 run_one({value_wildcard, EvalMod, Expected, VarName, Location}, Bindings) ->
     try EvalMod:eval(Bindings) of
@@ -104,32 +109,30 @@ run_one({value_wildcard, EvalMod, Expected, VarName, Location}, Bindings) ->
             NewBindings = maybe_bind(VarName, Value, RawBindings),
             Actual = format_result(Value),
             case matches_pattern(Expected, Actual) of
-                true  -> {NewBindings, {pass, Location}};
+                true -> {NewBindings, {pass, Location}};
                 false -> {NewBindings, {fail, Location, Expected, Actual}}
             end
-    catch Class:Reason:Stack ->
-        {Bindings, {crash, Location, Class, Reason, Stack}}
+    catch
+        Class:Reason:Stack ->
+            {Bindings, {crash, Location, Class, Reason, Stack}}
     end;
-
 %% Any value assertion (bare wildcard _): execute but don't check result
 run_one({value_any, EvalMod, VarName, Location}, Bindings) ->
     try EvalMod:eval(Bindings) of
         {Value, RawBindings} ->
             NewBindings = maybe_bind(VarName, Value, RawBindings),
             {NewBindings, {pass, Location}}
-    catch Class:Reason:Stack ->
-        {Bindings, {crash, Location, Class, Reason, Stack}}
+    catch
+        Class:Reason:Stack ->
+            {Bindings, {crash, Location, Class, Reason, Stack}}
     end;
-
 %% Error assertion: expect expression to raise #beamtalk_error{kind = Kind}
 run_one({error, EvalMod, ExpectedKind, _VarName, Location}, Bindings) ->
     try EvalMod:eval(Bindings) of
         {_Value, _RawBindings} ->
             %% Expression succeeded but we expected an error
             ExpectedBin = atom_to_binary(ExpectedKind, utf8),
-            {Bindings, {fail, Location,
-                        <<"ERROR: ", ExpectedBin/binary>>,
-                        <<"no error raised">>}}
+            {Bindings, {fail, Location, <<"ERROR: ", ExpectedBin/binary>>, <<"no error raised">>}}
     catch
         %% Wrapped Exception objects (ADR 0015)
         error:#{
@@ -150,9 +153,8 @@ run_one({error, EvalMod, ExpectedKind, _VarName, Location}, Bindings) ->
         error:OtherReason ->
             OtherBin = iolist_to_binary(io_lib:format("~p", [OtherReason])),
             ExpectedBin = atom_to_binary(ExpectedKind, utf8),
-            {Bindings, {fail, Location,
-                        <<"ERROR: ", ExpectedBin/binary>>,
-                        <<"ERROR: ", OtherBin/binary>>}};
+            {Bindings,
+                {fail, Location, <<"ERROR: ", ExpectedBin/binary>>, <<"ERROR: ", OtherBin/binary>>}};
         Class:Reason:Stack ->
             {Bindings, {crash, Location, Class, Reason, Stack}}
     end.
@@ -166,9 +168,8 @@ check_error_kind(Kind, ExpectedKind, Location, Bindings) ->
         false ->
             KindBin = atom_to_binary(Kind, utf8),
             ExpectedBin = atom_to_binary(ExpectedKind, utf8),
-            {Bindings, {fail, Location,
-                        <<"ERROR: ", ExpectedBin/binary>>,
-                        <<"ERROR: ", KindBin/binary>>}}
+            {Bindings,
+                {fail, Location, <<"ERROR: ", ExpectedBin/binary>>, <<"ERROR: ", KindBin/binary>>}}
     end.
 
 %% @doc Optionally bind a variable name to the result value.
@@ -209,8 +210,11 @@ format_result(V) when is_pid(V) ->
     S = pid_to_list(V),
     I = lists:sublist(S, 2, length(S) - 2),
     iolist_to_binary([<<"#Actor<">>, I, <<">">>]);
-format_result(V) when is_tuple(V), tuple_size(V) >= 2,
-                       element(1, V) =:= beamtalk_object ->
+format_result(V) when
+    is_tuple(V),
+    tuple_size(V) >= 2,
+    element(1, V) =:= beamtalk_object
+->
     %% BT-412: Match REPL formatting for class objects vs actor instances
     Class = element(2, V),
     case beamtalk_class_registry:is_class_name(Class) of
@@ -228,10 +232,14 @@ format_result(V) when is_map(V) ->
     beamtalk_primitive:print_string(V);
 format_result(V) when is_list(V) ->
     case V of
-        [] -> <<"[]">>;
+        [] ->
+            <<"[]">>;
         _ ->
-            try jsx:encode([beamtalk_repl_json:term_to_json(E) || E <- V])
-            catch _:_ -> iolist_to_binary(io_lib:format("~p", [V])) end
+            try
+                jsx:encode([beamtalk_repl_json:term_to_json(E) || E <- V])
+            catch
+                _:_ -> iolist_to_binary(io_lib:format("~p", [V]))
+            end
     end;
 format_result(V) ->
     iolist_to_binary(io_lib:format("~p", [V])).
@@ -255,7 +263,11 @@ wildcard_segments(Pattern) ->
 wildcard_split([], CurRev, SegsRev, _Prev) ->
     lists:reverse([lists:reverse(CurRev) | SegsRev]);
 wildcard_split([$_ | Rest], CurRev, SegsRev, Prev) ->
-    Next = case Rest of [N | _] -> N; [] -> none end,
+    Next =
+        case Rest of
+            [N | _] -> N;
+            [] -> none
+        end,
     case is_alnum(Prev) andalso is_alnum(Next) of
         true -> wildcard_split(Rest, [$_ | CurRev], SegsRev, $_);
         false -> wildcard_split(Rest, [], [lists:reverse(CurRev) | SegsRev], $_)
