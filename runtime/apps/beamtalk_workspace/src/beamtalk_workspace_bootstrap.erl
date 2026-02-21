@@ -23,6 +23,13 @@
 -export([init/1, handle_continue/2, handle_info/2, handle_call/3, handle_cast/2, terminate/2]).
 -export([find_bt_modules_in_dir/1, activate_project_modules/1]).
 -export([sort_modules_by_dependency/2]).
+-ifdef(TEST).
+-export([is_valid_module_name/1]).
+-endif.
+
+%% Maximum number of project modules activated per startup (BT-747).
+%% Prevents atom table exhaustion if _build/dev/ebin/ contains excessive files.
+-define(MAX_PROJECT_MODULES, 1000).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -174,16 +181,55 @@ activate_project_modules(_Other) ->
 
 %% @doc Scan a directory for bt@*.beam files that are not stdlib modules.
 %% Returns a list of module atoms. Returns [] for missing or unreadable dirs.
+%% Capped at ?MAX_PROJECT_MODULES to guard against atom table exhaustion (BT-747).
+%% Filters eligible filenames first (no atom creation), sorts for deterministic
+%% selection across platforms, then caps before converting to atoms.
 -spec find_bt_modules_in_dir(string()) -> [module()].
 find_bt_modules_in_dir(Dir) ->
     case file:list_dir(Dir) of
         {ok, Files} ->
-            lists:filtermap(fun beam_file_to_project_module/1, Files);
+            Eligible = lists:sort(lists:filter(fun is_project_beam_file/1, Files)),
+            Count = length(Eligible),
+            Capped =
+                case Count > ?MAX_PROJECT_MODULES of
+                    true ->
+                        ?LOG_WARNING(
+                            "Bootstrap: too many project modules, capping at limit",
+                            #{found => Count, limit => ?MAX_PROJECT_MODULES, dir => Dir}
+                        ),
+                        lists:sublist(Eligible, ?MAX_PROJECT_MODULES);
+                    false ->
+                        Eligible
+                end,
+            lists:filtermap(fun beam_file_to_project_module/1, Capped);
         {error, _} ->
             []
     end.
 
+%% @private Check if a filename is a project beam file (bt@* but not bt@stdlib@*).
+%% This performs no atom creation — used for counting before the cap is applied.
+-spec is_project_beam_file(string()) -> boolean().
+is_project_beam_file(File) ->
+    case filename:extension(File) of
+        ".beam" ->
+            ModName = filename:rootname(filename:basename(File)),
+            lists:prefix("bt@", ModName) andalso
+                not lists:prefix("bt@stdlib@", ModName) andalso
+                is_valid_module_name(ModName);
+        _ ->
+            false
+    end.
+
 %% @private Map a filename to a project module atom, or false to skip it.
+%% Validates that the module name contains only characters valid in Beamtalk
+%% module names (alphanumeric, @, _) before calling list_to_atom/1 (BT-747).
+%%
+%% Threat model: filenames come from the filesystem (_build/dev/ebin/), which
+%% may contain arbitrary .beam files from broken builds or malicious content.
+%% Since Erlang atoms are not garbage-collected, calling list_to_atom/1 on
+%% unvalidated filenames risks permanent atom table exhaustion (default limit
+%% 1,048,576 in OTP 26+). Character validation ensures only well-formed
+%% Beamtalk module names are converted to atoms.
 -spec beam_file_to_project_module(string()) -> {true, module()} | false.
 beam_file_to_project_module(File) ->
     case filename:extension(File) of
@@ -193,12 +239,40 @@ beam_file_to_project_module(File) ->
                 lists:prefix("bt@", ModName) andalso
                     not lists:prefix("bt@stdlib@", ModName),
             case IsProject of
-                true -> {true, list_to_atom(ModName)};
-                false -> false
+                true ->
+                    case is_valid_module_name(ModName) of
+                        true ->
+                            {true, list_to_atom(ModName)};
+                        false ->
+                            ?LOG_WARNING(
+                                "Bootstrap: skipping module with invalid name",
+                                #{filename => File}
+                            ),
+                            false
+                    end;
+                false ->
+                    false
             end;
         _ ->
             false
     end.
+
+%% @doc Validate that a module name contains only characters valid in Beamtalk
+%% module names: alphanumeric (a-z, A-Z, 0-9), @, and _.
+-spec is_valid_module_name(string()) -> boolean().
+is_valid_module_name([]) ->
+    false;
+is_valid_module_name(Name) ->
+    lists:all(fun is_valid_module_char/1, Name).
+
+%% @private
+-spec is_valid_module_char(char()) -> boolean().
+is_valid_module_char(C) when C >= $a, C =< $z -> true;
+is_valid_module_char(C) when C >= $A, C =< $Z -> true;
+is_valid_module_char(C) when C >= $0, C =< $9 -> true;
+is_valid_module_char($@) -> true;
+is_valid_module_char($_) -> true;
+is_valid_module_char(_) -> false.
 
 %% @private Sort modules by superclass dependency order (BT-745).
 %% Reads the `beamtalk_class` attribute from each BEAM file using beam_lib
