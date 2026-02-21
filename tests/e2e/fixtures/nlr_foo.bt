@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-754: NlrFoo — ifTrue:ifFalse: non-local return fixture.
+
+Object subclass: NlrFoo
+  classify: x =>
+    x > 0 ifTrue: [^"positive"] ifFalse: [^"non-positive"]
+    "unreachable"

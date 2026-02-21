@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-754: NlrOnDo — NLR throw propagates through on:do: fixture.
+// Verifies that on:do: does NOT swallow NLR throws (re-raises them).
+
+Object subclass: NlrOnDo
+  test: x =>
+    [x isEmpty ifTrue: [^"early"]] on: Error do: [:e | "caught"]
+    "not early"
