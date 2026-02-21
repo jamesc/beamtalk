@@ -573,8 +573,8 @@ struct CompiledDocTestResult {
 
 /// Generate an `EUnit` wrapper module for doc test assertions.
 ///
-/// Uses the same `format_result/1` + `matches_pattern/2` helpers as
-/// stdlib tests for consistent result formatting and comparison.
+/// Delegates to `beamtalk_stdlib_test:run_and_assert/2` for consistent
+/// result formatting and per-assertion error reporting.
 fn generate_doc_test_eunit_wrapper(
     module_name: &str,
     source_file: &str,
@@ -585,89 +585,69 @@ fn generate_doc_test_eunit_wrapper(
     use super::doc_tests::Expected;
     use super::test_stdlib::{
         expected_to_binary_literal, extract_assignment_var, has_wildcard_underscore,
-        write_error_assertion,
     };
 
     let mut erl = String::new();
 
-    let _ = write!(
+    let _ = writeln!(
         erl,
         "%% Doc tests from {source_file} ({class_name})\n\
          -module('{module_name}').\n\
-         -include_lib(\"eunit/include/eunit.hrl\").\n\n"
+         -include_lib(\"eunit/include/eunit.hrl\").\n"
     );
 
-    // Shared Erlang helpers
-    erl.push_str(super::test_stdlib::eunit_helper_functions());
-
-    // Test generator with timeout wrapper to avoid EUnit's 5s default (BT-729).
+    // Test generator — thin wrapper that delegates to beamtalk_stdlib_test.
     let _ = writeln!(
         erl,
-        "'{module_name}_test_'() ->\n    {{timeout, 60, fun() ->"
+        "'{module_name}_test_'() ->\n\
+         \x20   {{timeout, 60, fun() ->\n\
+         \x20       beamtalk_stdlib_test:run_and_assert('{module_name}', ["
     );
-    erl.push_str("    Bindings0 = #{},\n");
 
     for (i, (case, eval_mod)) in cases.iter().zip(eval_module_names.iter()).enumerate() {
-        let bindings_in = format!("Bindings{i}");
-        let bindings_out = format!("Bindings{}", i + 1);
-
-        // Build assertion comment showing Beamtalk source location (BT-729)
         let escaped_file = source_file.replace('\\', "\\\\").replace('"', "\\\"");
         let escaped_expr = case.expression.replace('\\', "\\\\").replace('"', "\\\"");
-        let comment = format!("{escaped_file}:{} `{escaped_expr}`", case.source_line);
-        let comment_bin = format!("<<\"{comment}\">>");
+        let location = format!("{escaped_file}:{} `{escaped_expr}`", case.source_line);
+        let location_bin = format!("<<\"{location}\">>");
+
+        let var_atom = match extract_assignment_var(&case.expression) {
+            Some(name) => format!("'{name}'"),
+            None => "none".to_string(),
+        };
+
+        let comma = if i < cases.len() - 1 { "," } else { "" };
 
         match &case.expected {
             Expected::Error { kind } => {
-                write_error_assertion(
-                    &mut erl,
-                    i,
-                    eval_mod,
-                    kind,
-                    &bindings_in,
-                    &bindings_out,
-                    &comment,
+                let _ = writeln!(
+                    erl,
+                    "           {{error, '{eval_mod}', '{kind}', {var_atom}, {location_bin}}}{comma}",
+                );
+            }
+            Expected::Value(v) if v == "_" => {
+                let _ = writeln!(
+                    erl,
+                    "           {{value_any, '{eval_mod}', {var_atom}, {location_bin}}}{comma}",
+                );
+            }
+            Expected::Value(v) if has_wildcard_underscore(v) => {
+                let expected_bin = expected_to_binary_literal(v);
+                let _ = writeln!(
+                    erl,
+                    "           {{value_wildcard, '{eval_mod}', {expected_bin}, {var_atom}, {location_bin}}}{comma}",
                 );
             }
             Expected::Value(v) => {
-                let result_var = format!("Result{i}");
-                let raw_bindings = format!("RawBindings{}", i + 1);
+                let expected_bin = expected_to_binary_literal(v);
                 let _ = writeln!(
                     erl,
-                    "    {{{result_var}, {raw_bindings}}} = '{eval_mod}':eval({bindings_in}),"
+                    "           {{value, '{eval_mod}', {expected_bin}, {var_atom}, {location_bin}}}{comma}",
                 );
-
-                // Persist assignment bindings
-                if let Some(var_name) = extract_assignment_var(&case.expression) {
-                    let _ = writeln!(
-                        erl,
-                        "    {bindings_out} = maps:put('{var_name}', {result_var}, {raw_bindings}),"
-                    );
-                } else {
-                    let _ = writeln!(erl, "    {bindings_out} = {raw_bindings},");
-                }
-
-                // Add value assertion
-                if v == "_" {
-                    // Bare wildcard: run but don't check result
-                } else if has_wildcard_underscore(v) {
-                    let expected_bin = expected_to_binary_literal(v);
-                    let _ = writeln!(
-                        erl,
-                        "    ?assert(matches_pattern({expected_bin}, format_result({result_var})), {comment_bin}),"
-                    );
-                } else {
-                    let expected_bin = expected_to_binary_literal(v);
-                    let _ = writeln!(
-                        erl,
-                        "    ?assertEqual({expected_bin}, format_result({result_var}), {comment_bin}),"
-                    );
-                }
             }
         }
     }
 
-    erl.push_str("    ok\n    end}.\n");
+    erl.push_str("       ])\n    end}.\n");
     erl
 }
 
