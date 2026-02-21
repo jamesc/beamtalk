@@ -79,6 +79,10 @@
     span :: {binary(), integer(), integer(), integer(), integer()} | undefined
 }).
 
+%% Maximum class hierarchy depth before aborting chain walks.
+%% Prevents infinite loops if the ETS hierarchy table ever contains a cycle.
+-define(MAX_HIERARCHY_DEPTH, 20).
+
 %% @doc CompiledMethod value object type.
 %%
 %% DDD Context: Object System

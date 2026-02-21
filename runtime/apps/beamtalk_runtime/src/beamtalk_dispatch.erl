@@ -67,10 +67,6 @@
 
 -include_lib("kernel/include/logger.hrl").
 
-%% Maximum class hierarchy depth before aborting chain walks.
-%% Prevents infinite loops if the ETS hierarchy table ever contains a cycle.
--define(MAX_HIERARCHY_DEPTH, 20).
-
 %%% ============================================================================
 %%% Types
 %%% ============================================================================

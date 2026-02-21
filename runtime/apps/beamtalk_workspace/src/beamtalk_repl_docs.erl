@@ -19,11 +19,8 @@
     get_method_signatures/2
 ]).
 
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
-
-%% Maximum class hierarchy depth before aborting chain walks.
-%% Prevents infinite loops if the ETS hierarchy table ever contains a cycle.
--define(MAX_HIERARCHY_DEPTH, 20).
 
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
@@ -489,10 +486,11 @@ find_method_in_chain(ClassPid, Selector) ->
     find_method_in_chain(ClassPid, Selector, 0).
 
 -spec find_method_in_chain(pid(), atom(), non_neg_integer()) -> {ok, atom()} | not_found.
-find_method_in_chain(_ClassPid, Selector, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+find_method_in_chain(ClassPid, Selector, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+    ClassName = gen_server:call(ClassPid, class_name, 5000),
     ?LOG_WARNING(
-        "find_method_in_chain: max hierarchy depth ~p exceeded for selector ~p — possible cycle",
-        [?MAX_HIERARCHY_DEPTH, Selector]
+        "find_method_in_chain: max hierarchy depth ~p exceeded at ~p for selector ~p — possible cycle",
+        [?MAX_HIERARCHY_DEPTH, ClassName, Selector]
     ),
     not_found;
 find_method_in_chain(ClassPid, Selector, Depth) ->
