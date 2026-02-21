@@ -147,7 +147,6 @@ lint-erlang: dialyzer
 [working-directory: 'editors/vscode']
 lint-js: fmt-check-js
     @echo "🔍 Running Biome lint..."
-    npm ci --quiet
     npm run lint
     @echo "✅ Biome lint passed"
 
