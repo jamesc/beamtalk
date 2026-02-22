@@ -3,7 +3,6 @@
 
 // BT-412: Class variable tests
 
-// @load stdlib/test/fixtures/class_var_counter.bt
 
 TestCase subclass: ClassVariablesTest
 

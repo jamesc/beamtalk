@@ -3,7 +3,6 @@
 
 // E2E tests for sealed class codegen optimization (BT-403)
 
-// @load stdlib/test/fixtures/sealed_counter.bt
 
 TestCase subclass: SealedClassTest
 

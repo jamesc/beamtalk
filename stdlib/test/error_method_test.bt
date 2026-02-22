@@ -3,7 +3,6 @@
 
 // E2E tests for Object>>error: (BT-424)
 
-// @load stdlib/test/fixtures/validator.bt
 
 TestCase subclass: ErrorMethodTest
 

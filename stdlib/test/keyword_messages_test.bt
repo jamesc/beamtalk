@@ -3,7 +3,6 @@
 
 // Keyword message tests (block value: dispatch)
 
-// @load stdlib/test/fixtures/multi_keyword.bt
 
 TestCase subclass: KeywordMessagesTest
 

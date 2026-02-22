@@ -3,8 +3,6 @@
 
 // Typed class behavior smoke tests (BT-673)
 
-// @load stdlib/test/fixtures/typed_counter.bt
-// @load examples/bank/typed_account.bt
 
 TestCase subclass: TypedClassesTest
 

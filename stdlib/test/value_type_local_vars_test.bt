@@ -3,7 +3,6 @@
 
 // BT-744: Local variable bindings in Object subclass method bodies
 
-// @load stdlib/test/fixtures/calculator.bt
 
 TestCase subclass: ValueTypeLocalVarsTest
 

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BUnit tests for TestRunner and TestResult (BT-762)
-// @load stdlib/test/fixtures/sample_test_case.bt
 
 TestCase subclass: TestRunnerTest
 

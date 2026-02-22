@@ -1,8 +1,0 @@
-// Copyright 2026 James Casey
-// SPDX-License-Identifier: Apache-2.0
-
-// Invalid: class method accesses instance field
-Actor subclass: BadClassMethod
-  state: value = 0
-
-  class broken => self.value

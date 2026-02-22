@@ -3,12 +3,6 @@
 
 // BT-761: Non-local return (^) inside block arguments in Actor subclass methods.
 
-// @load stdlib/test/fixtures/actor_nlr_basic.bt
-// @load stdlib/test/fixtures/actor_nlr_local_var.bt
-// @load stdlib/test/fixtures/actor_nlr_computed.bt
-// @load stdlib/test/fixtures/actor_nlr_on_do.bt
-// @load stdlib/test/fixtures/actor_nlr_recursive.bt
-// @load stdlib/test/fixtures/actor_nlr_mutate.bt
 
 TestCase subclass: ActorNonLocalReturnTest
 

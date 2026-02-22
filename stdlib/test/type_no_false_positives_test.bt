@@ -3,10 +3,6 @@
 
 // Regression coverage for permissive typing paths (BT-673)
 
-// @load stdlib/test/fixtures/typed_ledger.bt
-// @load stdlib/test/fixtures/untyped_container.bt
-// @load stdlib/test/fixtures/typed_math.bt
-// @load examples/bank/typed_account.bt
 
 TestCase subclass: TypeNoFalsePositivesTest
 

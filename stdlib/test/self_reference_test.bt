@@ -3,7 +3,6 @@
 
 // Tests for self-reference behavior (BT-172)
 
-// @load stdlib/test/fixtures/self_ref_actor.bt
 
 TestCase subclass: SelfReferenceTest
 

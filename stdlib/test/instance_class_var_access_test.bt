@@ -3,7 +3,6 @@
 
 // BT-413: Instance-side class variable access tests (Actor)
 
-// @load stdlib/test/fixtures/instance_access_counter.bt
 
 TestCase subclass: InstanceClassVarAccessTest
 

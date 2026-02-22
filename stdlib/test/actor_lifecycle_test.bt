@@ -3,7 +3,6 @@
 
 // Tests for actor lifecycle (BT-172, BT-397)
 
-// @load stdlib/test/fixtures/counter.bt
 
 TestCase subclass: ActorLifecycleTest
 

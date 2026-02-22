@@ -3,7 +3,6 @@
 
 // Test basic reflection API (BT-97)
 
-// @load stdlib/test/fixtures/counter.bt
 
 TestCase subclass: ReflectionBasicTest
 

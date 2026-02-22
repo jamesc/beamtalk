@@ -3,7 +3,6 @@
 
 // Tests for ProtoObject with actors - identity and inheritance
 
-// @load stdlib/test/fixtures/counter.bt
 
 TestCase subclass: ProtoobjectActorsTest
 

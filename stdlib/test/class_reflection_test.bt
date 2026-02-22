@@ -3,7 +3,6 @@
 
 // Stdlib tests for class methods reflection (BT-510 / ADR 0032 Phase 2)
 
-// @load stdlib/test/fixtures/counter.bt
 
 TestCase subclass: ClassReflectionTest
 

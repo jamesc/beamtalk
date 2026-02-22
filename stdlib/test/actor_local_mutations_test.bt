@@ -3,8 +3,6 @@
 
 // BT-598: Test local variable mutation in actor method blocks
 
-// @load stdlib/test/fixtures/local_mutation_actor.bt
-// @load stdlib/test/fixtures/field_mutation_accumulator.bt
 
 TestCase subclass: ActorLocalMutationsTest
 

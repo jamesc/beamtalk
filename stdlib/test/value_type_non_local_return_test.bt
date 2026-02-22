@@ -3,13 +3,6 @@
 
 // BT-754: Non-local return (^) inside block arguments in Object subclass methods.
 
-// @load stdlib/test/fixtures/nlr_return_test.bt
-// @load stdlib/test/fixtures/nlr_foo.bt
-// @load stdlib/test/fixtures/nlr_bar.bt
-// @load stdlib/test/fixtures/nlr_baz.bt
-// @load stdlib/test/fixtures/nlr_skipper.bt
-// @load stdlib/test/fixtures/nlr_doubler.bt
-// @load stdlib/test/fixtures/nlr_on_do.bt
 
 TestCase subclass: ValueTypeNonLocalReturnTest
 
