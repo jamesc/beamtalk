@@ -63,12 +63,22 @@ impl CoreErlangGenerator {
                     format!("State{}", self.state_version())
                 };
 
+                // BT-790: In REPL mode, use the plain variable name as the key
+                // (no __local__ prefix) since there are no actor fields to collide with.
+                // This ensures reads (`maps:get('x', StateAcc)`) match writes
+                // (`maps:put('x', ..., StateAcc)`), allowing mutations to accumulate
+                // correctly across loop iterations.
+                let state_key = if self.is_repl_mode {
+                    id.name.clone()
+                } else {
+                    Self::local_state_key(&id.name).into()
+                };
+
                 return Ok(docvec![
                     format!("let {val_var} = "),
                     value_code,
                     format!(
-                        " in let {new_state} = call 'maps':'put'('{}', {val_var}, {current_state}) in ",
-                        Self::local_state_key(&id.name)
+                        " in let {new_state} = call 'maps':'put'('{state_key}', {val_var}, {current_state}) in ",
                     ),
                 ]);
             }
