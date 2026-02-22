@@ -4,8 +4,6 @@
 // BT-773: self and explicit class name in class methods should both use
 // direct dispatch (not actor message send) to avoid deadlock.
 
-// @load stdlib/test/fixtures/class_self_dispatch.bt
-
 TestCase subclass: ClassSelfDispatchTest
 
   testSelfNewInClassMethod =>

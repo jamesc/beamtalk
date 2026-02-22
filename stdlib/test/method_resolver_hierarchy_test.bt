@@ -6,9 +6,6 @@
 // Verifies that >> walks the superclass chain to find inherited methods,
 // matching Pharo's semantics.
 
-// @load stdlib/test/fixtures/hierarchy_test_classes.bt
-// @load stdlib/test/fixtures/hierarchy_test_child.bt
-
 TestCase subclass: MethodResolverHierarchyTest
 
   // --- Inherited method resolution ---

@@ -3,8 +3,6 @@
 
 // BUnit tests for doc comment codegen emission (ADR 0033, BT-771)
 
-// @load stdlib/test/fixtures/doc_counter.bt
-
 TestCase subclass: CodegenDocTest
 
   // --- Class doc from /// comment ---
