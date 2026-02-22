@@ -22,6 +22,9 @@
 .PARAMETER Command
     Command to run in container (default: "copilot")
 
+.PARAMETER Amp
+    Start Amp instead of Copilot (sets Command to "amp")
+
 .PARAMETER Rebuild
     Force rebuild of the devcontainer image (no cache)
 
@@ -33,6 +36,9 @@
 
 .EXAMPLE
     .\worktree-up.ps1 feature-branch -Command bash
+
+.EXAMPLE
+    .\worktree-up.ps1 feature-branch -Amp
 
 .EXAMPLE
     .\worktree-up.ps1 feature-branch -Rebuild
@@ -52,19 +58,27 @@ param(
     [string]$Command = "copilot --yolo",
     
     [Parameter(Mandatory=$false)]
+    [switch]$Amp,
+    
+    [Parameter(Mandatory=$false)]
     [switch]$Rebuild
 )
+
+if ($Amp) {
+    $Command = "amp"
+}
 
 $ErrorActionPreference = "Stop"
 
 # Show usage if no branch specified
 if (-not $Branch) {
-    Write-Host "Usage: worktree-up.ps1 <branch-name> [-BaseBranch <branch>] [-Command <cmd>] [-Rebuild]" -ForegroundColor Cyan
+    Write-Host "Usage: worktree-up.ps1 <branch-name> [-BaseBranch <branch>] [-Command <cmd>] [-Amp] [-Rebuild]" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Examples:" -ForegroundColor Gray
     Write-Host "  .\scripts\worktree-up.ps1 feature-branch"
     Write-Host "  .\scripts\worktree-up.ps1 issue-123 -BaseBranch main"
     Write-Host "  .\scripts\worktree-up.ps1 feature-branch -Command bash"
+    Write-Host "  .\scripts\worktree-up.ps1 feature-branch -Amp"
     Write-Host "  .\scripts\worktree-up.ps1 feature-branch -Rebuild"
     exit 0
 }
@@ -400,6 +414,14 @@ if (-not $env:GH_TOKEN) {
     exit 1
 }
 
+# Check AMP_API_KEY if using Amp
+if ($Amp -and -not $env:AMP_API_KEY) {
+    Write-Host "❌ AMP_API_KEY not set. Required for Amp." -ForegroundColor Red
+    Write-Host "   Sign in at: ampcode.com/install" -ForegroundColor Gray
+    Write-Host "   Then set: `$env:AMP_API_KEY = <your-key>" -ForegroundColor Gray
+    exit 1
+}
+
 # Set MAIN_GIT_PATH (auto-derived from main repo)
 $env:MAIN_GIT_PATH = Join-Path $mainRepo ".git"
 
@@ -529,6 +551,16 @@ if ($LASTEXITCODE -eq 0) {
 }
 else {
     Write-Host "⚠️  Could not configure Copilot CLI" -ForegroundColor Yellow
+}
+
+# Set up Amp CLI config
+Write-Host "⚡ Setting up Amp CLI config..." -ForegroundColor Cyan
+devcontainer exec --workspace-folder $worktreePath bash -c "mkdir -p ~/.config/amp && envsubst < .devcontainer/amp-settings.json > ~/.config/amp/settings.json" 2>$null
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "✅ Amp CLI configured" -ForegroundColor Green
+}
+else {
+    Write-Host "⚠️  Could not configure Amp CLI" -ForegroundColor Yellow
 }
 
 Invoke-WorktreeUpHook -WorktreePath $worktreePath
