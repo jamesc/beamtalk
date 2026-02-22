@@ -60,6 +60,12 @@ RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/ca
 # Install streamlinear CLI for Linear issue management (used by Copilot skill)
 RUN npm install -g streamlinear@github:obra/streamlinear --ignore-scripts
 
+# Install Sourcegraph Amp CLI
+RUN curl -fsSL https://ampcode.com/install.sh | bash \
+    && echo 'export PATH="/root/.amp/bin:/root/.local/bin:$PATH"' > /etc/profile.d/amp.sh \
+    && chmod +x /etc/profile.d/amp.sh
+ENV PATH="/root/.amp/bin:/root/.local/bin:${PATH}"
+
 # Install rebar3 (pinned version for reproducible builds)
 ARG REBAR3_VERSION=3.26.0
 RUN git clone --depth 1 --branch ${REBAR3_VERSION} https://github.com/erlang/rebar3.git /tmp/rebar3 \
@@ -71,7 +77,7 @@ RUN git clone --depth 1 --branch ${REBAR3_VERSION} https://github.com/erlang/reb
 
 # Verify installations
 RUN rustc --version && cargo --version && erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell \
-    && node --version && npm --version && gh --version && (streamlinear-cli --version 2>/dev/null || true) \
+    && node --version && npm --version && gh --version && (streamlinear-cli --version 2>/dev/null || true) && amp --version \
     && rebar3 --version
 
 # Pre-create cargo registry directory with correct ownership
