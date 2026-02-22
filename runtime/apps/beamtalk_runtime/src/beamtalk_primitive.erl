@@ -218,25 +218,34 @@ send_tagged_map_fallback(X, Class, Selector, Args) ->
     end.
 
 %% @doc Check if a value responds to a given selector.
+%%
+%% ADR 0032 Phase 3: For actor instances (#beamtalk_object{}), delegate to
+%% beamtalk_dispatch:responds_to/2 which walks the full class hierarchy.
+%% The previous approach (Mod:has_method/1) only checked locally-defined methods,
+%% causing inherited methods (e.g. 'class' from ProtoObject) to return false.
 -spec responds_to(term(), atom()) -> boolean().
-responds_to(#beamtalk_object{class_mod = Mod} = Obj, Selector) ->
+responds_to(#beamtalk_object{class = Tag} = Obj, Selector) ->
     %% BT-776: Class objects (e.g., Counter as a value) are instances of 'Class'.
     %% Walk the Class → Behaviour → Object hierarchy instead of checking class_mod.
     case beamtalk_class_registry:is_class_object(Obj) of
-        true -> beamtalk_dispatch:responds_to(Selector, 'Class');
-        false -> erlang:function_exported(Mod, has_method, 1) andalso Mod:has_method(Selector)
+        true ->
+            beamtalk_dispatch:responds_to(Selector, 'Class');
+        false ->
+            ClassName = class_name_from_tag(Tag),
+            beamtalk_dispatch:responds_to(Selector, ClassName)
     end;
 responds_to(X, Selector) when is_tuple(X) ->
     %% Handle tuples that might be beamtalk_objects not matching the record pattern
-    case tuple_size(X) >= 2 andalso element(1, X) =:= beamtalk_object of
+    case tuple_size(X) >= 4 andalso element(1, X) =:= beamtalk_object of
         true ->
+            %% BT-776: Class objects walk Class hierarchy.
             case beamtalk_class_registry:is_class_object(X) of
                 true ->
-                    %% BT-776: Class objects walk Class hierarchy.
                     beamtalk_dispatch:responds_to(Selector, 'Class');
                 false ->
-                    Mod = element(3, X),
-                    erlang:function_exported(Mod, has_method, 1) andalso Mod:has_method(Selector)
+                    Tag = element(2, X),
+                    ClassName = class_name_from_tag(Tag),
+                    beamtalk_dispatch:responds_to(Selector, ClassName)
             end;
         false ->
             responds_via_module(X, Selector)
@@ -498,3 +507,17 @@ camel_to_snake([H | T], PrevWasLower, Acc) when H >= $A, H =< $Z ->
     end;
 camel_to_snake([H | T], _PrevWasLower, Acc) ->
     camel_to_snake(T, (H >= $a andalso H =< $z), [H | Acc]).
+
+%% @private Extract the class name atom from a class tag or class object tag.
+%%
+%% Handles both plain instance tags (e.g. 'Counter') and class object tags
+%% (e.g. 'Counter class') — in both cases returns the class name atom 'Counter'.
+%% Used by responds_to/2 to delegate to beamtalk_dispatch:responds_to/2.
+-spec class_name_from_tag(atom()) -> atom() | undefined.
+class_name_from_tag(Tag) ->
+    Bin = beamtalk_class_registry:class_display_name(Tag),
+    try
+        binary_to_existing_atom(Bin, utf8)
+    catch
+        error:badarg -> undefined
+    end.

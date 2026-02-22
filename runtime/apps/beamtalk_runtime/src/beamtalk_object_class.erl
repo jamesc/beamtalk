@@ -174,7 +174,10 @@ method(ClassRef, Selector) ->
     beamtalk_method_resolver:resolve(ClassRef, Selector).
 
 %% @doc Check if a class has a method (does not walk hierarchy).
-%% First checks class metadata, then falls back to module's has_method/1.
+%% First checks the gen_server state (instance_methods map for compiled methods),
+%% then falls back to the module's has_method/1. The fallback is needed for
+%% abstract/value-type classes (e.g., Behaviour) where @primitive methods appear
+%% in the compiled module but may not be tracked in the gen_server instance_methods.
 -spec has_method(pid(), selector()) -> boolean().
 has_method(ClassPid, Selector) ->
     case gen_server:call(ClassPid, {method, Selector}) of

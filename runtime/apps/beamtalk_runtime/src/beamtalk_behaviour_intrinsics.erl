@@ -52,6 +52,7 @@
     classMethods/1,
     classIncludesSelector/2,
     classCanUnderstand/2,
+    classCanUnderstandFromName/2,
     classInheritsFrom/2,
     classIncludesBehaviour/2,
     classWhichIncludesSelector/2,
@@ -164,6 +165,25 @@ classMethods(Self) ->
 classCanUnderstand(Self, Selector) ->
     ClassPid = erlang:element(4, Self),
     ClassName = gen_server:call(ClassPid, class_name),
+    walk_hierarchy(
+        ClassName,
+        fun(_CN, CPid, _Acc) ->
+            case beamtalk_object_class:has_method(CPid, Selector) of
+                true -> {halt, true};
+                false -> {cont, false}
+            end
+        end,
+        false
+    ).
+
+%% @doc Test whether the class named ClassName has instances that understand Selector.
+%%
+%% ADR 0032 Phase 3: Canonical single-source hierarchy walk used by
+%% beamtalk_dispatch:responds_to/2. Takes ClassName directly (not a class object)
+%% to avoid the extra gen_server:call that classCanUnderstand/2 needs to re-fetch
+%% the class name from the pid.
+-spec classCanUnderstandFromName(atom(), atom()) -> boolean().
+classCanUnderstandFromName(ClassName, Selector) ->
     walk_hierarchy(
         ClassName,
         fun(_CN, CPid, _Acc) ->
@@ -327,11 +347,27 @@ classSetMethodDoc(Self, Selector, DocBinary) ->
 %%   {halt, Result}   — stop and return Result immediately
 %%
 %% Returns Acc when the chain is exhausted (none or unregistered class).
+%% Guards against cycles via ?MAX_HIERARCHY_DEPTH.
 -spec walk_hierarchy(atom() | none, fun((atom(), pid(), Acc) -> {cont, Acc} | {halt, Result}), Acc) ->
     Acc | Result.
-walk_hierarchy(none, _Fun, Acc) ->
-    Acc;
 walk_hierarchy(ClassName, Fun, Acc) ->
+    walk_hierarchy(ClassName, Fun, Acc, 0).
+
+-spec walk_hierarchy(
+    atom() | none,
+    fun((atom(), pid(), Acc) -> {cont, Acc} | {halt, Result}),
+    Acc,
+    non_neg_integer()
+) -> Acc | Result.
+walk_hierarchy(none, _Fun, Acc, _Depth) ->
+    Acc;
+walk_hierarchy(_ClassName, _Fun, Acc, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+    ?LOG_WARNING(
+        "walk_hierarchy: max hierarchy depth ~p exceeded — possible cycle",
+        [?MAX_HIERARCHY_DEPTH]
+    ),
+    Acc;
+walk_hierarchy(ClassName, Fun, Acc, Depth) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
             Acc;
@@ -341,7 +377,7 @@ walk_hierarchy(ClassName, Fun, Acc) ->
                     Result;
                 {cont, NewAcc} ->
                     Super = gen_server:call(ClassPid, superclass),
-                    walk_hierarchy(Super, Fun, NewAcc)
+                    walk_hierarchy(Super, Fun, NewAcc, Depth + 1)
             end
     end.
 
