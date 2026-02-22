@@ -826,7 +826,8 @@ pub(crate) fn repl_loop(
                             continue;
                         }
                         _ if line.starts_with(":load ") || line.starts_with(":l ") => {
-                            let path = extract_command_arg(line, ":load ", Some(":l "));
+                            let raw = extract_command_arg(line, ":load ", Some(":l "));
+                            let path = strip_path_quotes(raw);
 
                             if path.is_empty() {
                                 eprintln!("Usage: :load <path>");
@@ -854,7 +855,8 @@ pub(crate) fn repl_loop(
                             continue;
                         }
                         _ if line.starts_with(":reload ") || line.starts_with(":r ") => {
-                            let module_name = extract_command_arg(line, ":reload ", Some(":r "));
+                            let raw = extract_command_arg(line, ":reload ", Some(":r "));
+                            let module_name = strip_path_quotes(raw);
                             match client.reload_module(module_name) {
                                 Ok(response) => {
                                     display_reload_result(&response, Some(module_name));
@@ -1249,6 +1251,18 @@ pub(crate) fn extract_command_arg<'a>(
         .or_else(|| short_prefix.and_then(|s| line.strip_prefix(s)))
         .unwrap_or("")
         .trim()
+}
+
+/// Strip surrounding double-quotes from a path argument.
+///
+/// Handles both quoted (`"path/to/file.bt"`) and unquoted (`path/to/file.bt`) forms.
+/// Quoted paths support spaces in the path; unquoted paths remain unchanged.
+pub(crate) fn strip_path_quotes(arg: &str) -> &str {
+    if arg.len() >= 2 && arg.starts_with('"') && arg.ends_with('"') {
+        &arg[1..arg.len() - 1]
+    } else {
+        arg
+    }
 }
 
 #[cfg(test)]
@@ -1710,5 +1724,49 @@ mod tests {
     #[test]
     fn extract_command_arg_whitespace_only_argument() {
         assert_eq!(extract_command_arg(":inspect   ", ":inspect ", None), "");
+    }
+
+    #[test]
+    fn strip_path_quotes_removes_surrounding_quotes() {
+        assert_eq!(
+            strip_path_quotes("\"examples/counter.bt\""),
+            "examples/counter.bt"
+        );
+    }
+
+    #[test]
+    fn strip_path_quotes_removes_quotes_with_spaces() {
+        assert_eq!(
+            strip_path_quotes("\"path with spaces/file.bt\""),
+            "path with spaces/file.bt"
+        );
+    }
+
+    #[test]
+    fn strip_path_quotes_unquoted_unchanged() {
+        assert_eq!(
+            strip_path_quotes("examples/counter.bt"),
+            "examples/counter.bt"
+        );
+    }
+
+    #[test]
+    fn strip_path_quotes_empty_string() {
+        assert_eq!(strip_path_quotes(""), "");
+    }
+
+    #[test]
+    fn strip_path_quotes_only_opening_quote() {
+        assert_eq!(strip_path_quotes("\"foo.bt"), "\"foo.bt");
+    }
+
+    #[test]
+    fn strip_path_quotes_only_closing_quote() {
+        assert_eq!(strip_path_quotes("foo.bt\""), "foo.bt\"");
+    }
+
+    #[test]
+    fn strip_path_quotes_empty_quoted() {
+        assert_eq!(strip_path_quotes("\"\""), "");
     }
 }
