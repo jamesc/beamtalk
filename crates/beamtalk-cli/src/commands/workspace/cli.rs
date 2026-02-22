@@ -27,8 +27,8 @@ pub enum WorkspaceCommand {
 
     /// Stop a running workspace
     Stop {
-        /// Workspace name or ID to stop
-        name: String,
+        /// Workspace name or ID to stop (default: current project's workspace)
+        name: Option<String>,
 
         /// Force stop without graceful shutdown
         #[arg(long)]
@@ -84,7 +84,7 @@ pub enum WorkspaceCommand {
 pub fn run(command: WorkspaceCommand) -> Result<()> {
     match command {
         WorkspaceCommand::List { json } => run_list(json),
-        WorkspaceCommand::Stop { name, force } => stop_workspace(&name, force),
+        WorkspaceCommand::Stop { name, force } => stop_workspace(name.as_deref(), force),
         WorkspaceCommand::Status { name } => run_status(name.as_deref()),
         WorkspaceCommand::Create {
             name,

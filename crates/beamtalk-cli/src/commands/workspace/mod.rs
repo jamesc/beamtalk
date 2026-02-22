@@ -669,7 +669,7 @@ mod tests {
 
     #[test]
     fn test_stop_workspace_fails_for_nonexistent() {
-        let result = stop_workspace("nonexistent_stop_test_ws", false);
+        let result = stop_workspace(Some("nonexistent_stop_test_ws"), false);
         assert!(result.is_err());
     }
 
@@ -683,7 +683,7 @@ mod tests {
         };
         save_workspace_metadata(&metadata).unwrap();
 
-        let result = stop_workspace(&ws.id, false);
+        let result = stop_workspace(Some(&ws.id), false);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("is not running"), "Error: {err}");
@@ -1140,7 +1140,7 @@ mod tests {
         assert_eq!(info2.pid, info1.pid, "should return same PID");
 
         // Step 3: Stop the node gracefully via TCP shutdown
-        stop_workspace(&tw.id, false).expect("graceful stop should succeed");
+        stop_workspace(Some(&tw.id), false).expect("graceful stop should succeed");
         assert_node_stopped(&info1, "node should not be running after stop");
 
         // Wait for epmd to deregister the old node name before restarting.
@@ -1330,7 +1330,7 @@ mod tests {
 
         // Graceful stop (force=false) uses TCP shutdown + init:stop(),
         // which should succeed for detached BEAM nodes
-        let result = stop_workspace(&tw.id, false);
+        let result = stop_workspace(Some(&tw.id), false);
         assert!(
             result.is_ok(),
             "Graceful TCP shutdown should succeed, got: {:?}",
@@ -1377,7 +1377,7 @@ mod tests {
         );
 
         // Force stop (SIGKILL) should succeed
-        let result = stop_workspace(&tw.id, true);
+        let result = stop_workspace(Some(&tw.id), true);
         assert!(
             result.is_ok(),
             "Force stop should succeed, got: {:?}",
@@ -1397,7 +1397,7 @@ mod tests {
         let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
 
         // Workspace exists but no node is running
-        let result = stop_workspace(&tw.id, false);
+        let result = stop_workspace(Some(&tw.id), false);
         assert!(
             result.is_err(),
             "Stopping non-running workspace should fail"

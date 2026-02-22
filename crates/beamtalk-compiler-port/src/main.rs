@@ -381,9 +381,8 @@ fn handle_compile_expression(request: &Map) -> Term {
         return error_response(&["No expressions to compile".to_string()]);
     }
 
-    // Generate Core Erlang for the first expression
-    let expression = &module.expressions[0];
-    match beamtalk_core::erlang::generate_repl_expression(expression, &module_name) {
+    // BT-780: Generate Core Erlang for all expressions (multi-statement support)
+    match beamtalk_core::erlang::generate_repl_expressions(&module.expressions, &module_name) {
         Ok(code) => ok_response(&code, &warnings),
         Err(e) => error_response(&[format!("Code generation failed: {e}")]),
     }
