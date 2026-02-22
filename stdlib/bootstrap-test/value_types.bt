@@ -5,7 +5,7 @@
 // Value types are plain Erlang terms with no process
 // They are created with "new", not "spawn"
 
-// @load stdlib/test/fixtures/point.bt
+// @load test/fixtures/point.bt
 
 // ===========================================================================
 // VALUE TYPE INSTANTIATION
@@ -87,6 +87,6 @@ p4 == p5
 // ===========================================================================
 
 // Actors MUST use "spawn", not "new"
-// @load stdlib/test/fixtures/counter.bt
+// @load test/fixtures/counter.bt
 // Counter new
 // // => Error: Actors must use spawn, not new

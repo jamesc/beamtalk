@@ -11,7 +11,7 @@
 // for non-leaf classes. We only assert isEmpty on primitive classes
 // that cannot be subclassed (sealed).
 
-// @load stdlib/test/fixtures/counter.bt
+// @load test/fixtures/counter.bt
 
 // ---------------------------------------------------------------------------
 // subclasses — direct children only

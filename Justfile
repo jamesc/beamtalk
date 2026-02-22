@@ -319,15 +319,17 @@ test-install: build-release build-stdlib
     fi
 
 # Run compiled stdlib tests (ADR 0014 Phase 1, ~14s)
-# Accepts optional path to run a single file: just test-stdlib stdlib/bootstrap-test/arithmetic.bt
+# Accepts optional path to run a single file: just test-stdlib bootstrap-test/arithmetic.bt
 # Output: summary only (--quiet suppresses per-file lines)
+[working-directory: 'stdlib']
 test-stdlib *ARGS: build-stdlib
     @echo "🧪 Running stdlib tests..."
     @cargo run --bin beamtalk --quiet -- test-stdlib --no-warnings --quiet {{ ARGS }}
     @echo "✅ Stdlib tests complete"
 
 # Run BUnit TestCase tests (ADR 0014 Phase 2)
-# Accepts optional path: just test-bunit stdlib/test/dictionary_test.bt
+# Accepts optional path: just test-bunit test/dictionary_test.bt
+[working-directory: 'stdlib']
 test-bunit *ARGS: build-stdlib
     @echo "🧪 Running BUnit tests..."
     @cargo run --bin beamtalk --quiet -- test {{ ARGS }}
@@ -443,7 +445,7 @@ coverage-stdlib: build-stdlib
     set -euo pipefail
     echo "📊 Running stdlib tests with Erlang cover instrumentation..."
     echo "   (This is slower than normal stdlib tests due to cover overhead)"
-    STDLIB_COVER=1 cargo run --bin beamtalk --quiet -- test-stdlib --no-warnings || true
+    STDLIB_COVER=1 cargo run --bin beamtalk --quiet -- test-stdlib --no-warnings stdlib/bootstrap-test || true
     if [ -f runtime/_build/test/cover/stdlib.coverdata ]; then
         SIZE=$(wc -c < runtime/_build/test/cover/stdlib.coverdata)
         echo "  📁 Coverdata: runtime/_build/test/cover/stdlib.coverdata (${SIZE} bytes)"

@@ -13,6 +13,31 @@
 
 set -euo pipefail
 
+# Skip lint entirely if all changes are in non-code directories
+all_changes_in_skip_dirs() {
+  local changed_files merge_base
+  if merge_base="$(git merge-base HEAD origin/main 2>/dev/null)"; then
+    changed_files="$(git diff --name-only "$merge_base"..HEAD 2>/dev/null || true)"
+  else
+    changed_files="$(git diff --name-only HEAD 2>/dev/null || true)"
+  fi
+  if [[ -z "$changed_files" ]]; then
+    return 1 # no changes detected, run lint to be safe
+  fi
+  while IFS= read -r file; do
+    case "$file" in
+      .devcontainer/*|scripts/*|docs/*) ;;
+      *) return 1 ;;
+    esac
+  done <<< "$changed_files"
+  return 0
+}
+
+if all_changes_in_skip_dirs; then
+  echo "⏭️  All changes in .devcontainer/, scripts/, or docs/ — skipping lint"
+  exit 0
+fi
+
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 ERLANG_STAMP="$REPO_ROOT/.lint-erlang-stamp"
 JS_STAMP="$REPO_ROOT/.lint-js-stamp"
