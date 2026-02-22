@@ -61,7 +61,10 @@ RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/ca
 RUN npm install -g streamlinear@github:obra/streamlinear --ignore-scripts
 
 # Install Sourcegraph Amp CLI
-RUN curl -fsSL https://ampcode.com/install.sh | bash
+RUN curl -fsSL https://ampcode.com/install.sh | bash \
+    && echo 'export PATH="/root/.amp/bin:/root/.local/bin:$PATH"' > /etc/profile.d/amp.sh \
+    && chmod +x /etc/profile.d/amp.sh
+ENV PATH="/root/.amp/bin:/root/.local/bin:${PATH}"
 
 # Install rebar3 (pinned version for reproducible builds)
 ARG REBAR3_VERSION=3.26.0

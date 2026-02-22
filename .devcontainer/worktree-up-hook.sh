@@ -24,7 +24,10 @@ clone_or_update_skills() {
     else
         if [ -d "$dir" ] && [ ! -d "$dir/.git" ] && [ "$(ls -A "$dir" 2>/dev/null)" ]; then
             log "Skills dir $dir exists but is not a git repo; moving aside"
-            mv "$dir" "${dir}.bak.$(date +%s)"
+            if ! mv "$dir" "${dir}.bak.$(date +%s)"; then
+                log "Could not move $dir; skipping clone"
+                return 0
+            fi
         fi
         log "Cloning skills repo into $dir..."
         mkdir -p "$(dirname "$dir")"

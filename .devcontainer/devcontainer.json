@@ -37,7 +37,7 @@
       }
     }
   },
-  "postCreateCommand": "sudo chown -R vscode:vscode ${containerWorkspaceFolder} /usr/local/cargo/registry /home/vscode/.copilot && cargo fetch",
+  "postCreateCommand": "sudo chown -R vscode:vscode ${containerWorkspaceFolder} /usr/local/cargo/registry /home/vscode/.copilot /home/vscode/.config/amp && cargo fetch",
   "postStartCommand": "bash .devcontainer/setup-git-auth.sh || true",
   "remoteUser": "vscode",
   // Cargo caching for faster builds
