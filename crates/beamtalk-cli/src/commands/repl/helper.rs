@@ -151,11 +151,13 @@ impl Completer for ReplHelper {
         }
 
         // Find the start of the current word (identifier boundary).
-        // Used for the replacement offset returned to rustyline.
+        // Colons are treated as identifier chars so keyword selectors like
+        // `ifTrue:` and `ifTrue:ifFalse:` complete as a unit (BT-783).
+        // This must stay in sync with is_identifier_char/1 in beamtalk_repl_ops_dev.erl.
         let word_start = line_to_pos
             .char_indices()
             .rev()
-            .find(|&(_, c)| !c.is_ascii_alphanumeric() && c != '_')
+            .find(|&(_, c)| !c.is_ascii_alphanumeric() && c != '_' && c != ':')
             .map_or(0, |(i, c)| i + c.len_utf8());
 
         // Query backend with full line context so it can perform receiver-aware
@@ -350,7 +352,7 @@ mod tests {
     fn find_word_start(line: &str) -> usize {
         line.char_indices()
             .rev()
-            .find(|&(_, c)| !c.is_ascii_alphanumeric() && c != '_')
+            .find(|&(_, c)| !c.is_ascii_alphanumeric() && c != '_' && c != ':')
             .map_or(0, |(i, c)| i + c.len_utf8())
     }
 
@@ -415,8 +417,16 @@ mod tests {
 
     #[test]
     fn word_boundary_after_colon() {
+        // Colons are identifier chars so keyword selectors complete as a unit.
         let start = find_word_start("ifTrue:");
-        assert_eq!(&"ifTrue:"[start..], "");
+        assert_eq!(&"ifTrue:"[start..], "ifTrue:");
+    }
+
+    #[test]
+    fn word_boundary_keyword_selector_with_receiver() {
+        // "Integer ifT:" — word start is "ifT:"
+        let start = find_word_start("Integer ifT:");
+        assert_eq!(&"Integer ifT:"[start..], "ifT:");
     }
 
     #[test]

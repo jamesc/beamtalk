@@ -421,7 +421,11 @@ is_identifier_char(C) ->
     (C >= $a andalso C =< $z) orelse
         (C >= $A andalso C =< $Z) orelse
         (C >= $0 andalso C =< $9) orelse
-        C =:= $_.
+        C =:= $_ orelse
+        %% Colons are identifier chars so keyword selectors like `ifTrue:` and
+        %% `ifTrue:ifFalse:` complete as a unit.  Must stay in sync with
+        %% word_start in crates/beamtalk-cli/src/commands/repl/helper.rs.
+        C =:= $:.
 
 %% @private
 %% @doc Get all instance method selectors for a given receiver token.

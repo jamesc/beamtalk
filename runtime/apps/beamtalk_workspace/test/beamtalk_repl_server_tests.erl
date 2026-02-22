@@ -2183,6 +2183,20 @@ parse_receiver_string_literal_test() ->
         beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"\"hello\" up">>)
     ).
 
+parse_receiver_keyword_selector_test() ->
+    %% Colons are identifier chars — "ifT:" is the prefix, not just "ifT"
+    ?assertEqual(
+        {<<"Integer">>, <<"ifT:">>},
+        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"Integer ifT:">>)
+    ).
+
+parse_receiver_multi_keyword_selector_test() ->
+    %% Multi-keyword selectors like "ifTrue:ifFalse:" complete as a unit
+    ?assertEqual(
+        {<<"Boolean">>, <<"ifTrue:ifFalse:">>},
+        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"Boolean ifTrue:ifFalse:">>)
+    ).
+
 %%% get_context_completions/1 tests (BT-783)
 
 context_completions_empty_test() ->
