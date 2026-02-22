@@ -2165,6 +2165,11 @@ parse_receiver_integer_literal_test() ->
         beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"42 s">>)
     ).
 
+parse_receiver_float_literal_no_completions_test() ->
+    %% Float literal like "3.14" is not an Integer — returns no completions
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"3.14 s">>),
+    ?assertEqual([], Result).
+
 parse_no_receiver_single_word_test() ->
     ?assertEqual(
         {undefined, <<"Counter">>},

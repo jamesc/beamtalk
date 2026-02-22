@@ -459,9 +459,13 @@ receiver_to_class_name(<<H, _/binary>> = Receiver) when H >= $A, H =< $Z ->
         {error, _} ->
             undefined
     end;
-receiver_to_class_name(<<H, _/binary>>) when H >= $0, H =< $9 ->
-    %% Integer literal — complete Integer instance methods
-    maybe_class('Integer');
+receiver_to_class_name(<<H, _/binary>> = Receiver) when H >= $0, H =< $9 ->
+    %% Only treat as Integer when the whole token is digits (guards against
+    %% float literals like "3.14" being misclassified as Integer).
+    case lists:all(fun(C) -> C >= $0 andalso C =< $9 end, binary_to_list(Receiver)) of
+        true -> maybe_class('Integer');
+        false -> undefined
+    end;
 receiver_to_class_name(<<$", _/binary>>) ->
     %% String literal — complete String instance methods
     maybe_class('String');
