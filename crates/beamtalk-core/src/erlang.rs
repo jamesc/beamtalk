@@ -76,7 +76,7 @@
 // Re-export the actual implementation from codegen::core_erlang
 pub use crate::codegen::core_erlang::{
     CodeGenError, CodegenOptions, Result, generate, generate_module, generate_repl_expression,
-    generate_test_expression, primitive_bindings,
+    generate_repl_expressions, generate_test_expression, primitive_bindings,
 };
 
 // Re-export from Shared Kernel (ast.rs) — not from codegen
