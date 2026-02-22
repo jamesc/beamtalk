@@ -139,13 +139,43 @@ send_to_float_test() ->
 %%% ============================================================================
 
 responds_to_beamtalk_object_test() ->
-    %% For now, responds_to returns false for objects without has_method/1
+    %% ADR 0032 Phase 3: responds_to delegates to beamtalk_dispatch:responds_to/2
+    %% which walks the full class hierarchy. Returns false for unknown class.
     Obj = #beamtalk_object{
-        class = 'Counter',
+        class = 'UnregisteredClass',
         class_mod = 'nonexistent_module',
         pid = self()
     },
     ?assertEqual(false, beamtalk_primitive:responds_to(Obj, 'increment')).
+
+%% BT-735: responds_to for actor instances now delegates to beamtalk_dispatch:responds_to
+%% which walks the full hierarchy, so inherited methods are detected correctly.
+responds_to_actor_inherited_method_test_() ->
+    {setup,
+        fun() ->
+            application:ensure_all_started(beamtalk_runtime),
+            beamtalk_stdlib:init(),
+            ok
+        end,
+        fun(_) -> ok end, fun() ->
+            case beamtalk_class_registry:whereis_class('Counter') of
+                undefined ->
+                    %% Counter not loaded — skip test
+                    ok;
+                CounterPid ->
+                    CounterObj = #beamtalk_object{
+                        class = 'Counter',
+                        class_mod = 'bt@counter',
+                        pid = CounterPid
+                    },
+                    %% Local method — defined directly in Counter
+                    ?assertEqual(true, beamtalk_primitive:responds_to(CounterObj, 'increment')),
+                    %% Inherited method — defined in Object/ProtoObject, not Counter
+                    ?assertEqual(true, beamtalk_primitive:responds_to(CounterObj, 'class')),
+                    %% Non-existent method
+                    ?assertEqual(false, beamtalk_primitive:responds_to(CounterObj, 'noSuchMethod'))
+            end
+        end}.
 
 responds_to_integer_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->

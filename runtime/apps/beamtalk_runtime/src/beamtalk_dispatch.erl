@@ -184,9 +184,9 @@ super(Selector, Args, Self, State, CurrentClass) ->
 %% local method table via has_method/2. Returns true if any class in the
 %% chain has the method.
 %%
-%% ADR 0032 Phase 1: Direct chain walk replaces the flattened table fast path.
-%% Fixes BT-721 where responds_to_slow called try_flattened_lookup instead
-%% of has_method, causing inherited method detection to fail.
+%% ADR 0032 Phase 3: Delegates to beamtalk_behaviour_intrinsics:classCanUnderstand_from_name/2,
+%% the single canonical hierarchy-walk implementation, removing the duplicate
+%% responds_to_chain walk that previously lived here.
 %%
 %% Used by Object's `respondsTo:` implementation to check the full hierarchy.
 -spec responds_to(selector(), class_name()) -> boolean().
@@ -196,40 +196,7 @@ responds_to(Selector, ClassName) ->
         {ok, _Fun} ->
             true;
         not_found ->
-            case beamtalk_class_registry:whereis_class(ClassName) of
-                undefined ->
-                    false;
-                ClassPid ->
-                    responds_to_chain(Selector, ClassPid)
-            end
-    end.
-
-%% @private
-%% @doc Walk hierarchy checking each class's local method table via has_method/2.
--spec responds_to_chain(selector(), pid()) -> boolean().
-responds_to_chain(Selector, ClassPid) ->
-    responds_to_chain(Selector, ClassPid, 0).
-
--spec responds_to_chain(selector(), pid(), non_neg_integer()) -> boolean().
-responds_to_chain(_Selector, _ClassPid, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
-    ?LOG_WARNING("responds_to_chain: max hierarchy depth ~p exceeded — possible cycle", [
-        ?MAX_HIERARCHY_DEPTH
-    ]),
-    false;
-responds_to_chain(Selector, ClassPid, Depth) ->
-    case beamtalk_object_class:has_method(ClassPid, Selector) of
-        true ->
-            true;
-        false ->
-            case beamtalk_object_class:superclass(ClassPid) of
-                none ->
-                    false;
-                SuperclassName ->
-                    case beamtalk_class_registry:whereis_class(SuperclassName) of
-                        undefined -> false;
-                        SuperclassPid -> responds_to_chain(Selector, SuperclassPid, Depth + 1)
-                    end
-            end
+            beamtalk_behaviour_intrinsics:classCanUnderstand_from_name(ClassName, Selector)
     end.
 
 %%% ============================================================================

@@ -60,9 +60,15 @@ class_send(ClassPid, spawn, []) ->
     unwrap_class_call(gen_server:call(ClassPid, {spawn, []}));
 class_send(ClassPid, 'spawnWith:', [Map]) ->
     unwrap_class_call(gen_server:call(ClassPid, {spawn, [Map]}));
-%% ADR 0032 Phase 2 (BT-734): methods, superclass, class_name, module_name,
-%% printString, class, subclasses, allSubclasses now fall through to the
-%% Class/Behaviour dispatch chain via the catch-all below.
+%% ADR 0032 Phase 2 (BT-734): 8 of the originally planned 12 hardcoded selector
+%% clauses were removed here (methods, superclass, class_name, module_name,
+%% printString, class, subclasses, allSubclasses); they now dispatch through the
+%% Class/Behaviour chain via the catch-all below.
+%%
+%% The remaining 4 instantiation selectors (new, new:, spawn, spawnWith:) retain
+%% explicit clauses because they must route to the gen_server's {new, _} / {spawn, _}
+%% handlers, not to class_method_call. Moving them to the Behaviour/Class chain
+%% is future work (ADR 0032 Phase 4+).
 class_send(ClassPid, Selector, Args) ->
     %% BT-411: Try user-defined class methods before raising does_not_understand
     %% BT-440: Test execution may take a long time; use longer timeout.

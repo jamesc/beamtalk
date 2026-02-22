@@ -52,6 +52,7 @@
     classMethods/1,
     classIncludesSelector/2,
     classCanUnderstand/2,
+    classCanUnderstand_from_name/2,
     classInheritsFrom/2,
     classIncludesBehaviour/2,
     classWhichIncludesSelector/2,
@@ -164,6 +165,25 @@ classMethods(Self) ->
 classCanUnderstand(Self, Selector) ->
     ClassPid = erlang:element(4, Self),
     ClassName = gen_server:call(ClassPid, class_name),
+    walk_hierarchy(
+        ClassName,
+        fun(_CN, CPid, _Acc) ->
+            case beamtalk_object_class:has_method(CPid, Selector) of
+                true -> {halt, true};
+                false -> {cont, false}
+            end
+        end,
+        false
+    ).
+
+%% @doc Test whether the class named ClassName has instances that understand Selector.
+%%
+%% ADR 0032 Phase 3: Canonical single-source hierarchy walk used by
+%% beamtalk_dispatch:responds_to/2. Takes ClassName directly (not a class object)
+%% to avoid the extra gen_server:call that classCanUnderstand/2 needs to re-fetch
+%% the class name from the pid.
+-spec classCanUnderstand_from_name(atom(), atom()) -> boolean().
+classCanUnderstand_from_name(ClassName, Selector) ->
     walk_hierarchy(
         ClassName,
         fun(_CN, CPid, _Acc) ->
