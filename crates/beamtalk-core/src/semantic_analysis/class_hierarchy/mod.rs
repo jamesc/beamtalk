@@ -216,6 +216,17 @@ impl ClassHierarchy {
             .any(|s| s.as_str() == "Actor")
     }
 
+    /// Returns true if `class_name` is a numeric type (Integer, Float, Number,
+    /// or any subclass thereof, e.g. Character which inherits from Integer).
+    #[must_use]
+    pub fn is_numeric_type(&self, class_name: &str) -> bool {
+        matches!(class_name, "Integer" | "Float" | "Number")
+            || self
+                .superclass_chain(class_name)
+                .iter()
+                .any(|s| matches!(s.as_str(), "Integer" | "Float" | "Number"))
+    }
+
     /// Returns all class variable names for a class, including inherited ones.
     #[must_use]
     pub fn class_variable_names(&self, class_name: &str) -> Vec<EcoString> {
@@ -1152,6 +1163,22 @@ mod tests {
             !h.resolves_selector("Character", "bogusMethod"),
             "Character should NOT understand 'bogusMethod'"
         );
+    }
+
+    #[test]
+    fn character_is_numeric_type() {
+        // BT-778: Character inherits from Integer which inherits from Number,
+        // so it should be treated as numeric for operand-type checks.
+        let h = ClassHierarchy::with_builtins();
+        assert!(h.is_numeric_type("Integer"), "Integer is numeric");
+        assert!(h.is_numeric_type("Float"), "Float is numeric");
+        assert!(h.is_numeric_type("Number"), "Number is numeric");
+        assert!(
+            h.is_numeric_type("Character"),
+            "Character is numeric (inherits Integer)"
+        );
+        assert!(!h.is_numeric_type("String"), "String is not numeric");
+        assert!(!h.is_numeric_type("Boolean"), "Boolean is not numeric");
     }
 
     // --- Sealed method override enforcement tests ---

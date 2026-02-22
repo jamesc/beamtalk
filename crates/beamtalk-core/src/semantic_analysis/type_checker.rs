@@ -464,7 +464,7 @@ impl TypeChecker {
                 (&receiver_ty, arg_types.first())
             {
                 if hierarchy.resolves_selector(recv_ty, &selector_name) {
-                    self.check_binary_operand_types(recv_ty, op, arg_ty, span);
+                    self.check_binary_operand_types(recv_ty, op, arg_ty, span, hierarchy);
                 }
             }
         }
@@ -810,8 +810,9 @@ impl TypeChecker {
         operator: &str,
         arg_ty: &EcoString,
         span: Span,
+        hierarchy: &ClassHierarchy,
     ) {
-        let is_numeric = |ty: &str| ty == "Integer" || ty == "Float" || ty == "Number";
+        let is_numeric = |ty: &str| hierarchy.is_numeric_type(ty);
         let is_arithmetic = matches!(operator, "+" | "-" | "*" | "/");
         let is_comparison = matches!(operator, "<" | ">" | "<=" | ">=");
 
@@ -1321,6 +1322,31 @@ mod tests {
             dnu_warnings.len(),
             1,
             "Character should NOT understand 'bogusMethod': {dnu_warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_character_literal_non_numeric_operand_warns() {
+        // BT-778: $A + 'hello' — Character inherits Integer's +, but 'hello' is not numeric.
+        // The type checker should warn that + expects a numeric argument, not a String.
+        let module = make_module(vec![msg_send(
+            char_lit('A'),
+            MessageSelector::Binary("+".into()),
+            vec![str_lit("hello")],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let type_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("expects a numeric argument"))
+            .collect();
+        assert_eq!(
+            type_warnings.len(),
+            1,
+            "Character + String should warn about non-numeric operand: {:?}",
+            checker.diagnostics()
         );
     }
 
