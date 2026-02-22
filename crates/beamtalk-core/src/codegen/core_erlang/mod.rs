@@ -448,7 +448,10 @@ impl NlrValueTypeCatchVars {
         docvec![
             "    let ",
             self.token_var.clone(),
-            " = call 'erlang':'make_ref'() in\n    try\n",
+            " = call 'erlang':'make_ref'() in",
+            nest(INDENT, line()),
+            "try",
+            line(),
         ]
     }
 
@@ -466,24 +469,27 @@ impl NlrValueTypeCatchVars {
     /// ```
     pub fn format_catch_suffix(&self) -> Document<'static> {
         docvec![
-            "\n    of ",
+            nest(INDENT, line()),
+            "of ",
             self.result_var.clone(),
             " -> ",
             self.result_var.clone(),
-            "\n",
-            "    catch <",
+            nest(INDENT, line()),
+            "catch <",
             self.cls_var.clone(),
             ", ",
             self.err_var.clone(),
             ", ",
             self.stk_var.clone(),
-            "> ->\n",
-            "      case {",
+            "> ->",
+            nest(INDENT + 2, line()),
+            "case {",
             self.cls_var.clone(),
             ", ",
             self.err_var.clone(),
-            "} of\n",
-            "        <{'throw', {'$bt_nlr', ",
+            "} of",
+            nest(INDENT + 4, line()),
+            "<{'throw', {'$bt_nlr', ",
             self.ctk_var.clone(),
             ", ",
             self.val_var.clone(),
@@ -494,8 +500,8 @@ impl NlrValueTypeCatchVars {
             self.token_var.clone(),
             ") -> ",
             self.val_var.clone(),
-            "\n",
-            "        <",
+            nest(INDENT + 4, line()),
+            "<",
             self.ot_pair_var.clone(),
             "> when 'true' -> ",
             "primop 'raw_raise'(",
@@ -504,8 +510,10 @@ impl NlrValueTypeCatchVars {
             self.err_var.clone(),
             ", ",
             self.stk_var.clone(),
-            ")\n",
-            "      end\n",
+            ")",
+            nest(INDENT + 2, line()),
+            "end",
+            line(),
         ]
     }
 }
