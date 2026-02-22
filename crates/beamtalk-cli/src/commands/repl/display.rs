@@ -72,13 +72,18 @@ pub(crate) fn print_help() {
     println!("  :exit, :q       Exit the REPL");
     println!("  :clear          Clear all variable bindings");
     println!("  :bindings       Show current variable bindings");
-    println!("  :load <path>    Load a .bt file or directory (recursive)");
-    println!("  :reload         Reload the last loaded file or directory");
+    println!("  :load <path>    Load a .bt file or directory (recursive; paths may be quoted)");
+    println!("  :reload         Reload the last loaded file or directory (supports quoted paths)");
     println!("  :reload <name>  Reload a module by name");
     println!("  :modules        List loaded modules");
     println!("  :unload <name>  Unload a module (fails if actors exist)");
+    println!("  :actors         List running actors");
+    println!("  :kill <pid>     Kill an actor by PID");
+    println!("  :inspect <pid>  Inspect an actor's state");
+    println!("  :sessions       List active REPL sessions");
     println!("  :test, :t       Run all tests for loaded TestCase classes");
     println!("  :test <Class>   Run tests for a specific TestCase class");
+    println!("  :info, :i <sym> Get information about a symbol");
     println!("  :show-codegen <expr>  Show generated Core Erlang for an expression");
     println!("  :sc <expr>      Short alias for :show-codegen");
     println!();
@@ -95,16 +100,9 @@ pub(crate) fn print_help() {
     println!("  Press Ctrl+C to cancel multi-line input.");
     println!();
     println!("Workspace introspection:");
-    println!("  Workspace actors              # List all live actors");
-    println!("  Workspace actorAt: '<pid>'    # Look up actor by PID");
-    println!("  Workspace actorsOf: Counter   # All actors of a class");
-    println!("  Workspace sessions            # List active REPL sessions");
-    println!();
-    println!("Actor lifecycle:");
-    println!("  counter stop                  # Gracefully stop an actor");
-    println!("  counter kill                  # Forcefully kill an actor");
-    println!("  counter isAlive               # Check if actor is alive");
-    println!("  Workspace actors first stop   # Stop first actor in list");
+    println!("  Workspace actors           # List all live actors");
+    println!("  Workspace actorAt: '<pid>' # Look up actor by PID");
+    println!("  Workspace actorsOf: Counter # All actors of a class");
     println!();
     println!("Actor message sends return Futures, which are automatically");
     println!("awaited for synchronous REPL experience. If you store a Future");
@@ -189,4 +187,64 @@ pub(crate) fn display_test_results(results: &serde_json::Value) {
 pub(crate) fn display_codegen(core_erlang: &str) {
     // Use cyan for Core Erlang source to distinguish from regular output
     println!("{}", color::paint(color::CYAN, core_erlang));
+}
+
+/// Display symbol info from the :info command (BT-724).
+pub(crate) fn display_info(info: &serde_json::Value) {
+    let found = info
+        .get("found")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let symbol = info
+        .get("symbol")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("?");
+
+    if !found {
+        println!("Symbol not found: {symbol}");
+        return;
+    }
+
+    let kind = info
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+
+    println!(
+        "{} {}",
+        color::paint(color::BOLD_CYAN, symbol),
+        color::paint(color::DIM, &format!("({kind})"))
+    );
+
+    // Display additional info fields if present
+    if let Some(obj) = info.as_object() {
+        for (key, value) in obj {
+            // Skip already-displayed fields
+            if matches!(key.as_str(), "found" | "symbol" | "kind") {
+                continue;
+            }
+            if let Some(s) = value.as_str() {
+                if !s.is_empty() {
+                    println!("  {}: {s}", color::paint(color::DIM, key));
+                }
+            } else if let Some(arr) = value.as_array() {
+                if !arr.is_empty() {
+                    println!("  {}:", color::paint(color::DIM, key));
+                    for item in arr {
+                        if let Some(s) = item.as_str() {
+                            println!("    {s}");
+                        } else {
+                            println!("    {item}");
+                        }
+                    }
+                }
+            } else {
+                println!(
+                    "  {}: {}",
+                    color::paint(color::DIM, key),
+                    format_value(value)
+                );
+            }
+        }
+    }
 }
