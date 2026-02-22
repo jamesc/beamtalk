@@ -94,6 +94,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "spawnWith:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, return_type: None, param_types: vec![None] },
                 MethodInfo { selector: "new".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, return_type: None, param_types: vec![] },
                 MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, return_type: None, param_types: vec![None] },
+                MethodInfo { selector: "stop".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "kill".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "isAlive".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, return_type: Some("Boolean".into()), param_types: vec![] },
                 MethodInfo { selector: "describe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
             ],
             class_methods: vec![],
@@ -1471,6 +1474,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "actors".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceEnvironment".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![] },
                 MethodInfo { selector: "actorAt:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceEnvironment".into(), is_sealed: false, return_type: Some("Object".into()), param_types: vec![Some("String".into())] },
                 MethodInfo { selector: "actorsOf:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceEnvironment".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![Some("Object".into())] },
+                MethodInfo { selector: "sessions".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceEnvironment".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![] },
             ],
             class_methods: vec![
                 MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceEnvironment".into(), is_sealed: false, return_type: Some("WorkspaceEnvironment".into()), param_types: vec![] },

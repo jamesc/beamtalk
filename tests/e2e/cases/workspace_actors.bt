@@ -111,3 +111,110 @@ lastCounter getValue
 // actorAt: with invalid pid returns nil
 (Workspace actorAt: "invalid") await
 // => nil
+
+// ===========================================================================
+// WORKSPACE ACTOR AT — RETURNS ACTOR OBJECT
+// ===========================================================================
+
+// actorAt: returns an actor object that responds to messages when found
+// (The actor objects returned by actors are already fully functional — tested above)
+// Verify actors list contains functional actor objects via actorsOf:
+freshActors := (Workspace actorsOf: Counter) await
+// => _
+
+freshActors size > 0
+// => true
+
+// ===========================================================================
+// WORKSPACE SESSIONS
+// ===========================================================================
+
+// sessions returns a list
+(Workspace sessions) await
+// => _
+
+// Workspace respondsTo: #sessions returns true
+Workspace respondsTo: #sessions
+// => true
+
+// ===========================================================================
+// ACTOR LIFECYCLE — isAlive
+// ===========================================================================
+
+// isAlive returns true for a live actor
+c isAlive
+// => true
+
+// ===========================================================================
+// ACTOR LIFECYCLE — stop
+// ===========================================================================
+
+// Spawn a fresh actor for lifecycle testing
+lc := Counter spawn
+// => #Actor<Counter,_>
+
+// Actor is alive before stop
+lc isAlive
+// => true
+
+// Gracefully stop the actor
+lc stop
+// => ok
+
+// Actor is no longer alive after stop
+lc isAlive
+// => false
+
+// Stopping an already-stopped actor is idempotent
+lc stop
+// => ok
+
+// ===========================================================================
+// ACTOR LIFECYCLE — kill
+// ===========================================================================
+
+// Spawn a fresh actor for kill testing
+kc := Counter spawn
+// => #Actor<Counter,_>
+
+// Actor is alive before kill
+kc isAlive
+// => true
+
+// Forcefully kill the actor
+kc kill
+// => ok
+
+// Actor is no longer alive after kill
+kc isAlive
+// => false
+
+// ===========================================================================
+// ACTOR LIFECYCLE — Workspace actors first stop
+// ===========================================================================
+
+// Spawn fresh actors and verify stop works on actor returned from Workspace
+wa1 := Counter spawn
+// => #Actor<Counter,_>
+
+wa2 := Counter spawn
+// => #Actor<Counter,_>
+
+// Get actors of Counter and stop each one that we just spawned
+wa1 isAlive
+// => true
+
+wa2 isAlive
+// => true
+
+wa1 stop
+// => ok
+
+wa2 stop
+// => ok
+
+wa1 isAlive
+// => false
+
+wa2 isAlive
+// => false

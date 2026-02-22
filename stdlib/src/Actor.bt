@@ -48,6 +48,39 @@ Object subclass: Actor
   /// ```
   sealed new: initArgs => self error: "Actors must use spawnWith:, not new:"
 
+  /// Gracefully stop this actor (gen_server:stop).
+  ///
+  /// Idempotent: stopping an already-stopped actor succeeds silently.
+  /// Raises an error if the actor times out during shutdown.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// counter stop   // => ok
+  /// ```
+  sealed stop => @primitive "actorStop"
+
+  /// Forcefully kill this actor (exit(Pid, kill)).
+  ///
+  /// Unlike `stop`, kill cannot be trapped by the actor process.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// counter kill   // => ok
+  /// ```
+  sealed kill => @primitive "actorKill"
+
+  /// Check if this actor's process is still alive.
+  ///
+  /// WARNING: isAlive check-then-act is inherently racy. The actor could die
+  /// between the isAlive check and a subsequent message send. Use monitors
+  /// for robust lifecycle management.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// counter isAlive   // => true or false
+  /// ```
+  sealed isAlive -> Boolean => @primitive "actorIsAlive"
+
   /// Human-readable description of the receiver.
   ///
   /// ## Examples

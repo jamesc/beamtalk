@@ -169,6 +169,7 @@ pub(crate) struct ActorInfo {
     /// Beamtalk class name of the actor (e.g., `Counter`).
     pub(crate) class: String,
     /// BEAM module backing the actor.
+    #[allow(dead_code)] // deserialized from JSON, used in tests
     pub(crate) module: String,
     /// Unix timestamp when the actor was spawned.
     #[allow(dead_code)] // deserialized from JSON, available for future use
@@ -195,6 +196,7 @@ pub(crate) struct ModuleInfo {
 #[derive(Debug, Deserialize)]
 pub(crate) struct SessionInfo {
     /// Unique session identifier.
+    #[allow(dead_code)] // deserialized from JSON, available for future use
     pub(crate) id: String,
     /// Unix timestamp when the session was created.
     #[allow(dead_code)] // deserialized from JSON, available for future use
@@ -873,28 +875,7 @@ pub(crate) fn repl_loop(
                             continue;
                         }
                         ":actors" | ":a" => {
-                            match client.list_actors() {
-                                Ok(response) => {
-                                    if response.is_error() {
-                                        if let Some(msg) = response.error_message() {
-                                            eprintln!("Error: {msg}");
-                                        }
-                                    } else if let Some(actors) = response.actors {
-                                        if actors.is_empty() {
-                                            println!("No running actors.");
-                                        } else {
-                                            println!("Running actors:");
-                                            for actor in actors {
-                                                println!(
-                                                    "  {} - {} ({})",
-                                                    actor.pid, actor.class, actor.module
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(e) => eprintln!("Error: {e}"),
-                            }
+                            eprintln!(":actors is removed. Use: Workspace actors");
                             continue;
                         }
                         ":modules" | ":m" => {
@@ -953,67 +934,33 @@ pub(crate) fn repl_loop(
                             }
                             continue;
                         }
-                        _ if line.starts_with(":kill ") => {
+                        _ if line == ":kill" || line.starts_with(":kill ") => {
                             let pid_str = extract_command_arg(line, ":kill ", None);
                             if pid_str.is_empty() {
-                                eprintln!("Usage: :kill <pid>");
-                                continue;
-                            }
-
-                            match client.kill_actor(pid_str) {
-                                Ok(response) => {
-                                    if response.is_error() {
-                                        if let Some(msg) = response.error_message() {
-                                            eprintln!("Error: {msg}");
-                                        }
-                                    } else {
-                                        println!("Actor {pid_str} killed.");
-                                    }
-                                }
-                                Err(e) => eprintln!("Error: {e}"),
+                                eprintln!(
+                                    ":kill is removed. Use: actor stop  (or: (Workspace actorAt: \"<pid>\") stop)"
+                                );
+                            } else {
+                                eprintln!(
+                                    ":kill is removed. Use: (Workspace actorAt: \"{pid_str}\") stop"
+                                );
                             }
                             continue;
                         }
                         ":sessions" => {
-                            match client.list_sessions() {
-                                Ok(response) => {
-                                    if response.is_error() {
-                                        if let Some(msg) = response.error_message() {
-                                            eprintln!("Error: {msg}");
-                                        }
-                                    } else if let Some(sessions) = response.sessions {
-                                        if sessions.is_empty() {
-                                            println!("No active sessions.");
-                                        } else {
-                                            println!("Active sessions:");
-                                            for s in sessions {
-                                                println!("  {}", s.id);
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(e) => eprintln!("Error: {e}"),
-                            }
+                            eprintln!(":sessions is removed. Use: Workspace sessions");
                             continue;
                         }
-                        _ if line.starts_with(":inspect ") => {
+                        _ if line.starts_with(":inspect ") || line == ":inspect" => {
                             let pid_str = extract_command_arg(line, ":inspect ", None);
                             if pid_str.is_empty() {
-                                eprintln!("Usage: :inspect <pid>");
-                                continue;
-                            }
-
-                            match client.inspect_actor(pid_str) {
-                                Ok(response) => {
-                                    if response.is_error() {
-                                        if let Some(msg) = response.error_message() {
-                                            eprintln!("Error: {msg}");
-                                        }
-                                    } else if let Some(state) = response.state {
-                                        println!("{}", format_value(&state));
-                                    }
-                                }
-                                Err(e) => eprintln!("Error: {e}"),
+                                eprintln!(
+                                    ":inspect is removed. Use: actor inspect  (or: (Workspace actorAt: \"<pid>\") inspect)"
+                                );
+                            } else {
+                                eprintln!(
+                                    ":inspect is removed. Use: (Workspace actorAt: \"{pid_str}\") inspect"
+                                );
                             }
                             continue;
                         }
@@ -1099,30 +1046,17 @@ pub(crate) fn repl_loop(
                             }
                             continue;
                         }
-                        // BT-724: :info / :i command
+                        // :info / :i replaced by :help
                         ":info" | ":i" => {
-                            eprintln!("Usage: :info <symbol>");
+                            eprintln!(":info is removed. Use: :help <symbol>  (or :h <symbol>)");
                             continue;
                         }
                         _ if line.starts_with(":info ") || line.starts_with(":i ") => {
                             let symbol = extract_command_arg(line, ":info ", Some(":i "));
                             if symbol.is_empty() {
-                                eprintln!("Usage: :info <symbol>");
-                                continue;
-                            }
-                            match client.info(symbol) {
-                                Ok(response) => {
-                                    if response.is_error() {
-                                        if let Some(msg) = response.error_message() {
-                                            eprintln!("{}", display::format_error(msg));
-                                        }
-                                    } else if let Some(ref info) = response.info {
-                                        display::display_info(info);
-                                    } else {
-                                        println!("No information available for symbol {symbol}.");
-                                    }
-                                }
-                                Err(e) => eprintln!("Error: {e}"),
+                                eprintln!(":info is removed. Use: :help <symbol>");
+                            } else {
+                                eprintln!(":info is removed. Use: :help {symbol}");
                             }
                             continue;
                         }
@@ -1140,14 +1074,9 @@ pub(crate) fn repl_loop(
                         "exit" | "quit" => Some(":exit"),
                         "clear" => Some(":clear"),
                         "bindings" => Some(":bindings"),
-                        "actors" => Some(":actors"),
                         "modules" => Some(":modules"),
                         "unload" => Some(":unload"),
-                        "kill" => Some(":kill"),
-                        "inspect" => Some(":inspect"),
-                        "sessions" => Some(":sessions"),
                         "test" => Some(":test"),
-                        "info" => Some(":info"),
                         "show-codegen" => Some(":show-codegen"),
                         _ => None,
                     } {

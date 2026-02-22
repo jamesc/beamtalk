@@ -84,6 +84,7 @@ start_link(ServerName) ->
 has_method(actors) -> true;
 has_method('actorAt:') -> true;
 has_method('actorsOf:') -> true;
+has_method(sessions) -> true;
 has_method(_) -> false.
 
 %% @doc Return class registration metadata for Workspace.
@@ -96,7 +97,8 @@ class_info() ->
         instance_methods => #{
             actors => #{arity => 0},
             'actorAt:' => #{arity => 1},
-            'actorsOf:' => #{arity => 1}
+            'actorsOf:' => #{arity => 1},
+            sessions => #{arity => 0}
         },
         class_methods => #{},
         instance_variables => []
@@ -129,10 +131,15 @@ handle_call({'actorAt:', [PidStr]}, _From, State) ->
 handle_call({'actorsOf:', [ClassName]}, _From, State) ->
     Result = handle_actors_of(ClassName),
     {reply, Result, State};
+handle_call({sessions, []}, _From, State) ->
+    Result = handle_sessions(),
+    {reply, Result, State};
 handle_call({UnknownSelector, _Args}, _From, State) ->
     Error0 = beamtalk_error:new(does_not_understand, 'Workspace'),
     Error1 = beamtalk_error:with_selector(Error0, UnknownSelector),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Supported methods: actors, actorAt:, actorsOf:">>),
+    Error2 = beamtalk_error:with_hint(
+        Error1, <<"Supported methods: actors, actorAt:, actorsOf:, sessions">>
+    ),
     {reply, {error, Error2}, State};
 handle_call(Request, _From, State) ->
     Error0 = beamtalk_error:new(does_not_understand, 'Workspace'),
@@ -158,12 +165,18 @@ handle_cast({'actorsOf:', [ClassName], FuturePid}, State) when is_pid(FuturePid)
     Result = handle_actors_of(ClassName),
     beamtalk_future:resolve(FuturePid, Result),
     {noreply, State};
+handle_cast({sessions, [], FuturePid}, State) when is_pid(FuturePid) ->
+    Result = handle_sessions(),
+    beamtalk_future:resolve(FuturePid, Result),
+    {noreply, State};
 handle_cast({UnknownSelector, _Args, FuturePid}, State) when
     is_pid(FuturePid), is_atom(UnknownSelector)
 ->
     Error0 = beamtalk_error:new(does_not_understand, 'Workspace'),
     Error1 = beamtalk_error:with_selector(Error0, UnknownSelector),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Supported methods: actors, actorAt:, actorsOf:">>),
+    Error2 = beamtalk_error:with_hint(
+        Error1, <<"Supported methods: actors, actorAt:, actorsOf:, sessions">>
+    ),
     beamtalk_future:reject(FuturePid, Error2),
     {noreply, State};
 handle_cast(Msg, State) ->
@@ -267,6 +280,17 @@ handle_actors_of(ClassName) when is_atom(ClassName) ->
     end;
 handle_actors_of(_) ->
     [].
+
+%% @doc Get all active REPL session IDs as a list of binaries.
+-spec handle_sessions() -> [binary()].
+handle_sessions() ->
+    case ets:info(beamtalk_sessions) of
+        undefined ->
+            [];
+        _ ->
+            Sessions = ets:tab2list(beamtalk_sessions),
+            [SessionId || {SessionId, _Pid} <- Sessions]
+    end.
 
 %% @doc Wrap actor metadata into a #beamtalk_object{} tuple.
 %% Filters out dead actors.
