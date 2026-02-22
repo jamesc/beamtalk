@@ -862,11 +862,20 @@ pub fn run_tests(path: &str) -> Result<()> {
 
             // Skip if already pre-compiled from the fixtures directory
             if precompiled_modules.contains(&fixture_module) {
-                eprintln!(
-                    "Deprecated: '// @load {load_path}' in '{test_file}' — fixture is already available \
-                     from the fixtures directory. Remove this directive."
+                if fixture_path.starts_with(&fixtures_dir) {
+                    // This @load points into fixtures_dir itself — already compiled in Phase 0
+                    eprintln!(
+                        "Deprecated: '// @load {load_path}' in '{test_file}' — fixture is already available \
+                         from the fixtures directory. Remove this directive."
+                    );
+                    continue;
+                }
+                // A non-fixture @load shares a module name with a precompiled fixture —
+                // running both would silently use the wrong implementation.
+                miette::bail!(
+                    "Fixture module name collision for '{fixture_module}': \
+                     precompiled fixture vs '@load {load_path}' in '{test_file}'"
                 );
-                continue;
             }
 
             // Non-fixture @load (e.g., examples/) — compile and warn
