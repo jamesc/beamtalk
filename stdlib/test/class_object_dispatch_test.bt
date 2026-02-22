@@ -4,8 +4,6 @@
 // BT-753: Class objects correctly dispatch Object base class methods
 // and pure Beamtalk Behaviour methods.
 
-// @load stdlib/test/fixtures/counter.bt
-
 TestCase subclass: ClassObjectDispatchTest
 
   // --- Object base class methods on class objects (BT-753 core fix) ---
