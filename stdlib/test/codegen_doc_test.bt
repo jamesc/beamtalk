@@ -1,0 +1,29 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for doc comment codegen emission (ADR 0033, BT-771)
+
+// @load stdlib/test/fixtures/doc_counter.bt
+
+TestCase subclass: CodegenDocTest
+
+  // --- Class doc from /// comment ---
+
+  testClassDocFromTripleSlash =>
+    self assert: DocCounter doc equals: "A counter that tracks a value."
+
+  // --- Method docs from /// comments ---
+
+  testMethodDocFromTripleSlash =>
+    m := DocCounter >> #increment.
+    self assert: m doc equals: "Increment the counter by one."
+
+  testValueMethodDoc =>
+    m := DocCounter >> #value.
+    self assert: m doc equals: "Return the current count."
+
+  // --- Method without doc comment has nil doc ---
+
+  testMethodWithoutDocHasNilDoc =>
+    m := DocCounter >> #reset.
+    self assert: m doc equals: nil

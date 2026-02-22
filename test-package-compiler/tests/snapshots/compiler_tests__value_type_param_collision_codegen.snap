@@ -94,7 +94,9 @@ module 'value_type_param_collision' ['new'/0, 'new'/1, 'compute:'/2, 'dispatch'/
                 'new:' => ~{'arity' => 1}~
             }~,
             'method_source' => ~{'compute:' => #{#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']])}#}~,
-            'class_variables' => ~{}~
+            'class_variables' => ~{}~,
+            'doc' => 'none',
+            'method_docs' => ~{}~
         }~
         in let _Reg0 = case call 'beamtalk_object_class':'start'('ParamCollisionTest', ClassInfo0) of
             <{'ok', _Pid0}> when 'true' -> 'ok'

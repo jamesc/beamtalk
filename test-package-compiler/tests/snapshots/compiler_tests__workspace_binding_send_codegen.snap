@@ -183,7 +183,9 @@ module 'workspace_binding_send' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'han
                 'spawnWith:' => ~{'arity' => 1}~
             }~,
             'method_source' => ~{'greet' => #{#<103>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}#}~,
-            'class_variables' => ~{}~
+            'class_variables' => ~{}~,
+            'doc' => 'none',
+            'method_docs' => ~{}~
         }~
         in let _Reg0 = case call 'beamtalk_object_class':'start'('Greeter', ClassInfo0) of
             <{'ok', _Pid0}> when 'true' -> 'ok'
