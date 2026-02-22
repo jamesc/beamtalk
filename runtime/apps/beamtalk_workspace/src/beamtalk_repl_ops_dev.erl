@@ -430,7 +430,7 @@ is_identifier_char(C) ->
 get_methods_for_receiver(Receiver) when is_binary(Receiver) ->
     case receiver_to_class_name(Receiver) of
         undefined -> [];
-        ClassName -> collect_all_methods(ClassName, #{})
+        ClassName -> collect_all_methods(ClassName, 0)
     end.
 
 %% @private
@@ -480,41 +480,39 @@ maybe_class(ClassName) ->
 
 %% @private
 %% @doc Collect all instance method selectors for a class by walking the superclass chain.
--spec collect_all_methods(atom(), #{atom() => true}) -> [atom()].
-collect_all_methods(ClassName, Seen) ->
-    case maps:is_key(ClassName, Seen) of
-        true ->
+%% Guards against excessive depth via ?MAX_HIERARCHY_DEPTH (codebase convention).
+-spec collect_all_methods(atom(), non_neg_integer()) -> [atom()].
+collect_all_methods(_ClassName, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+    [];
+collect_all_methods(ClassName, Depth) ->
+    case
+        try
+            beamtalk_class_registry:whereis_class(ClassName)
+        catch
+            _:_ -> undefined
+        end
+    of
+        undefined ->
             [];
-        false ->
-            case
+        ClassPid ->
+            LocalMethods =
                 try
-                    beamtalk_class_registry:whereis_class(ClassName)
+                    beamtalk_object_class:methods(ClassPid)
                 catch
-                    _:_ -> undefined
-                end
-            of
-                undefined ->
-                    [];
-                ClassPid ->
-                    LocalMethods =
-                        try
-                            beamtalk_object_class:methods(ClassPid)
-                        catch
-                            _:_ -> []
-                        end,
-                    Superclass =
-                        try
-                            beamtalk_object_class:superclass(ClassPid)
-                        catch
-                            _:_ -> none
-                        end,
-                    InheritedMethods =
-                        case Superclass of
-                            none -> [];
-                            Super -> collect_all_methods(Super, Seen#{ClassName => true})
-                        end,
-                    LocalMethods ++ InheritedMethods
-            end
+                    _:_ -> []
+                end,
+            Superclass =
+                try
+                    beamtalk_object_class:superclass(ClassPid)
+                catch
+                    _:_ -> none
+                end,
+            InheritedMethods =
+                case Superclass of
+                    none -> [];
+                    Super -> collect_all_methods(Super, Depth + 1)
+                end,
+            LocalMethods ++ InheritedMethods
     end.
 
 %% @private
