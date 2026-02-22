@@ -218,7 +218,20 @@ fn compile_fixtures_directory(
     );
 
     let mut module_names = Vec::new();
+    let mut fixtures_by_module: HashMap<String, Utf8PathBuf> = HashMap::new();
     for fixture_path in &fixture_files {
+        let module_name = fixture_module_name(fixture_path)?;
+        if let Some(existing_path) = fixtures_by_module.get(&module_name) {
+            if existing_path != fixture_path {
+                miette::bail!(
+                    "Fixture module name collision for '{module_name}': '{}' vs '{}'",
+                    existing_path,
+                    fixture_path
+                );
+            }
+        }
+        fixtures_by_module.insert(module_name.clone(), fixture_path.clone());
+
         let module_name = compile_fixture(fixture_path, output_dir)?;
         module_names.push(module_name);
     }
@@ -535,6 +548,11 @@ fn find_test_files_recursive(dir: &Utf8Path, files: &mut Vec<Utf8PathBuf>) -> Re
             .map_err(|_| miette::miette!("Non-UTF-8 path in '{}'", dir))?;
 
         if path.is_dir() {
+            // Skip the fixtures/ subdirectory — fixtures are pre-compiled in Phase 0
+            // and should not be treated as test files.
+            if path.file_name() == Some("fixtures") {
+                continue;
+            }
             find_test_files_recursive(&path, files)?;
         } else if path.extension() == Some("bt") {
             files.push(path);
@@ -844,19 +862,17 @@ pub fn run_tests(path: &str) -> Result<()> {
 
             // Skip if already pre-compiled from the fixtures directory
             if precompiled_modules.contains(&fixture_module) {
-                warn!(
-                    "Deprecated: '// @load {}' in '{}' — fixture is already available \
-                     from the fixtures directory. Remove this directive.",
-                    load_path, test_file
+                eprintln!(
+                    "Deprecated: '// @load {load_path}' in '{test_file}' — fixture is already available \
+                     from the fixtures directory. Remove this directive."
                 );
                 continue;
             }
 
             // Non-fixture @load (e.g., examples/) — compile and warn
-            warn!(
-                "Deprecated: '// @load {}' in '{}' — move fixture to '{}' to \
-                 make it automatically available.",
-                load_path, test_file, fixtures_dir
+            eprintln!(
+                "Deprecated: '// @load {load_path}' in '{test_file}' — move fixture to '{fixtures_dir}' to \
+                 make it automatically available."
             );
 
             if let Some(existing_path) = fixture_modules_by_name.get(&fixture_module) {

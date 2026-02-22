@@ -8,7 +8,7 @@ Actor subclass: EmptyMethodActor
   state: value = 42
 
   // Empty method body — should return self
-  doNothing => self
+  doNothing =>
 
   // Non-empty method for comparison
   getValue => self.value

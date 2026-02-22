@@ -658,7 +658,7 @@ See [BT-115](https://linear.app/beamtalk/issue/BT-115) for the implementation de
 
 **BUnit fixtures (Smalltalk image model):** Place fixture `.bt` files in `stdlib/test/fixtures/`. These are automatically compiled and available to all BUnit test files — no `@load` directives needed. Just use the fixture class name directly in your test methods. This mirrors the Smalltalk approach where all classes exist in the running image.
 
-```
+```text
 stdlib/test/fixtures/
 ├── counter.bt            # Counter actor
 ├── typed_counter.bt      # Typed actor with Integer state
