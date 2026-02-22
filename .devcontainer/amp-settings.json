@@ -1,0 +1,6 @@
+{
+  "amp.permissions": [
+    { "tool": "*", "action": "allow" }
+  ],
+  "amp.updates.mode": "warn"
+}
