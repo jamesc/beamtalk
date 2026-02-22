@@ -514,13 +514,20 @@ compute_package_module_name(Path) ->
 try_package_relative(AbsPath, ProjectRoot, SubDir) ->
     Dir = filename:join(ProjectRoot, SubDir),
     AbsDir = filename:absname(Dir),
-    AbsDirPrefix = AbsDir ++ "/",
-    case lists:prefix(AbsDirPrefix, AbsPath) of
+    %% Use filename:split for platform-safe prefix matching (BT-775)
+    DirParts = filename:split(AbsDir),
+    PathParts = filename:split(AbsPath),
+    DirLen = length(DirParts),
+    case
+        length(PathParts) > DirLen andalso
+            lists:prefix(DirParts, PathParts)
+    of
         true ->
-            RelPath = lists:nthtail(length(AbsDirPrefix), AbsPath),
-            RelNoExt = filename:rootname(RelPath),
-            Segments = filename:split(RelNoExt),
-            SnakeSegments = [to_snake_case(S) || S <- Segments],
+            RelParts = lists:nthtail(DirLen, PathParts),
+            %% Strip extension from the last segment
+            Last = lists:last(RelParts),
+            RelPartsNoExt = lists:droplast(RelParts) ++ [filename:rootname(Last)],
+            SnakeSegments = [to_snake_case(S) || S <- RelPartsNoExt],
             {ok, lists:join("@", SnakeSegments)};
         false ->
             undefined
