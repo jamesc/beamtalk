@@ -50,7 +50,7 @@
 %%% - BT-282: Bootstrap Object with shared reflection methods
 -module(beamtalk_object_ops).
 
--export([dispatch/4, has_method/1]).
+-export([dispatch/4, has_method/1, class_name/3]).
 
 -include("beamtalk.hrl").
 
@@ -90,22 +90,24 @@ dispatch('instVarAt:put:', [FieldName, Value], _Self, State) ->
 %% --- Display methods ---
 
 dispatch('printString', [], Self, State) ->
-    ClassName = class_name(Self, State, 'Object'),
-    Str = iolist_to_binary([<<"a ">>, atom_to_binary(ClassName, utf8)]),
+    DisplayName = class_display_name(Self, State),
+    Str = iolist_to_binary([<<"a ">>, DisplayName]),
     {reply, Str, State};
 dispatch(inspect, [], Self, State) ->
     %% BT-753: For class objects (State is #{}), use Self for identity.
-    case Self of
-        #beamtalk_object{class = Class} ->
-            Str = iolist_to_binary([<<"a ">>, atom_to_binary(Class, utf8)]),
+    %% For actors with state, use detailed inspect_string showing fields.
+    case map_size(State) =:= 0 of
+        true ->
+            DisplayName = class_display_name(Self, State),
+            Str = iolist_to_binary([<<"a ">>, DisplayName]),
             {reply, Str, State};
-        _ ->
+        false ->
             Str = beamtalk_reflection:inspect_string(State),
             {reply, Str, State}
     end;
 dispatch(describe, [], Self, State) ->
-    ClassName = class_name(Self, State, 'Object'),
-    Str = iolist_to_binary([<<"an instance of ">>, atom_to_binary(ClassName, utf8)]),
+    DisplayName = class_display_name(Self, State),
+    Str = iolist_to_binary([<<"an instance of ">>, DisplayName]),
     {reply, Str, State};
 %% --- Utility methods ---
 
@@ -176,6 +178,13 @@ has_method(isNil) -> true;
 has_method(notNil) -> true;
 has_method(subclassResponsibility) -> true;
 has_method(_) -> false.
+
+%% @private
+%% @doc Return a display-friendly class name binary, stripping the " class" suffix.
+-spec class_display_name(term(), map()) -> binary().
+class_display_name(Self, State) ->
+    ClassName = class_name(Self, State, 'Object'),
+    beamtalk_class_registry:class_display_name(ClassName).
 
 %% @private
 %% @doc Extract class name from Self or State.

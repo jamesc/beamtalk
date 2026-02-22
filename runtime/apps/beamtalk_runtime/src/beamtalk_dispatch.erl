@@ -421,13 +421,10 @@ invoke_extension(Fun, Args, _Self, State) ->
 %% @private
 %% @doc Extract class name from Self or State, with a default fallback.
 %%
-%% BT-753: When dispatched on class objects via chain fallthrough, State is
-%% `#{}' (empty map). In that case, derive the class from Self.
+%% Delegates to beamtalk_object_ops:class_name/3 to avoid duplication.
 -spec class_name_from(bt_self(), state(), atom()) -> atom().
-class_name_from(#beamtalk_object{class = Class}, _State, _Default) ->
-    Class;
-class_name_from(_Self, State, Default) ->
-    beamtalk_tagged_map:class_of(State, Default).
+class_name_from(Self, State, Default) ->
+    beamtalk_object_ops:class_name(Self, State, Default).
 
 %% @private
 %% @doc Safe extension registry lookup.
