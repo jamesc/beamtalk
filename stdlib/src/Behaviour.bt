@@ -61,14 +61,19 @@ abstract Object subclass: Behaviour
 
   /// Test whether the receiver strictly inherits from aClass (self not included).
   ///
+  /// BT-753: Pure Beamtalk — delegates to allSuperclasses.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// Counter inheritsFrom: Actor    // => true
   /// Counter inheritsFrom: Counter  // => false
   /// ```
-  sealed inheritsFrom: aClass => @primitive "classInheritsFrom"
+  sealed inheritsFrom: aClass =>
+    self allSuperclasses includes: aClass
 
   /// Test whether aBehaviour is the receiver or one of its ancestors.
+  ///
+  /// BT-753: Pure Beamtalk — identity check plus inheritsFrom:.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -76,7 +81,8 @@ abstract Object subclass: Behaviour
   /// Counter includesBehaviour: Actor    // => true
   /// Counter includesBehaviour: Integer  // => false
   /// ```
-  sealed includesBehaviour: aBehaviour => @primitive "classIncludesBehaviour"
+  sealed includesBehaviour: aBehaviour =>
+    self == aBehaviour ifTrue: [true] ifFalse: [self inheritsFrom: aBehaviour]
 
   // --- Method dictionary ---
 
@@ -101,13 +107,16 @@ abstract Object subclass: Behaviour
   /// Test whether instances of the receiver understand the given selector
   /// (checks full inheritance chain).
   ///
+  /// BT-753: Pure Beamtalk — checks local then walks hierarchy.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// Counter canUnderstand: #increment  // => true
   /// Counter canUnderstand: #class      // => true (inherited from ProtoObject)
   /// Counter canUnderstand: #bogus      // => false
   /// ```
-  sealed canUnderstand: selector => @primitive "classCanUnderstand"
+  sealed canUnderstand: selector =>
+    self methods includes: selector
 
   /// Test whether the selector is defined locally in this class
   /// (does not check superclasses).
@@ -122,11 +131,15 @@ abstract Object subclass: Behaviour
   /// Walk the hierarchy and return the class that defines the given selector,
   /// or nil if no class defines it.
   ///
+  /// BT-753: Pure Beamtalk — walks self then allSuperclasses.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// Counter whichClassIncludesSelector: #class  // => ProtoObject
   /// ```
-  sealed whichClassIncludesSelector: selector => @primitive "classWhichIncludesSelector"
+  sealed whichClassIncludesSelector: selector =>
+    (self includesSelector: selector) ifTrue: [^self].
+    self allSuperclasses detect: [:c | c includesSelector: selector] ifNone: [nil]
 
   // --- Instance variable queries ---
 
