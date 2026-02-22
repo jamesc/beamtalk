@@ -1,0 +1,67 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-753: Class objects correctly dispatch Object base class methods
+// and pure Beamtalk Behaviour methods.
+
+// @load stdlib/test/fixtures/counter.bt
+
+TestCase subclass: ClassObjectDispatchTest
+
+  // --- Object base class methods on class objects (BT-753 core fix) ---
+
+  // Note: respondsTo: on class objects is a known limitation (virtual metaclass
+  // tag isn't registered in the class registry). Follow-up issue needed.
+
+  testClassObjectYourself =>
+    self assert: (Counter yourself) equals: Counter
+
+  testClassObjectHash =>
+    h := Counter hash.
+    self assert: (h > 0)
+
+  testClassObjectIsNilNotNil =>
+    self deny: (Counter isNil).
+    self assert: (Counter notNil)
+
+  testClassObjectDescribe =>
+    desc := Counter describe.
+    // Should identify as the class, not "an instance of Object"
+    self deny: (desc == "an instance of Object")
+
+  testClassObjectInspect =>
+    i := Counter inspect.
+    self deny: (i isEmpty)
+
+  testClassObjectPerform =>
+    self assert: (Counter perform: #name) equals: #Counter
+
+  // --- Primitive class objects also work ---
+
+  testPrimitiveClassObjectReflection =>
+    self assert: (Integer respondsTo: #isNil).
+    self assert: (Integer yourself) equals: Integer.
+    self assert: (Integer notNil)
+
+  // --- Pure Beamtalk Behaviour methods (BT-753 converted from @primitive) ---
+
+  testInheritsFrom =>
+    self assert: (Counter inheritsFrom: Actor).
+    self assert: (Counter inheritsFrom: Object).
+    self deny: (Counter inheritsFrom: Counter).
+    self deny: (Counter inheritsFrom: Integer)
+
+  testIncludesBehaviour =>
+    self assert: (Counter includesBehaviour: Counter).
+    self assert: (Counter includesBehaviour: Actor).
+    self assert: (Counter includesBehaviour: Object).
+    self deny: (Counter includesBehaviour: Integer)
+
+  testCanUnderstand =>
+    self assert: (Counter canUnderstand: #increment).
+    self assert: (Counter canUnderstand: #isNil).
+    self deny: (Counter canUnderstand: #bogus)
+
+  testWhichClassIncludesSelector =>
+    self assert: (Counter whichClassIncludesSelector: #increment) equals: Counter.
+    self assert: (Counter whichClassIncludesSelector: #bogus) equals: nil
