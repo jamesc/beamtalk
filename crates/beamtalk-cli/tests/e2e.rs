@@ -518,11 +518,20 @@ impl Drop for ProcessManager {
     }
 }
 
+/// Tracks the last loaded path for `:reload` support in e2e tests.
+#[derive(Clone, Debug)]
+enum LastLoadedPath {
+    File(String),
+    Directory(String),
+}
+
 /// Client for communicating with the REPL via WebSocket.
 struct ReplClient {
     ws: WebSocket<TcpStream>,
     /// Last warnings from evaluation (for WARNING: assertions)
     last_warnings: Vec<String>,
+    /// Last loaded path for `:reload` without arguments
+    last_loaded_path: Option<LastLoadedPath>,
 }
 
 impl ReplClient {
@@ -592,6 +601,7 @@ impl ReplClient {
         Ok(Self {
             ws,
             last_warnings: Vec::new(),
+            last_loaded_path: None,
         })
     }
 
@@ -981,16 +991,123 @@ impl ReplClient {
         }
     }
 
-    /// Load a file and return a formatted string for test assertions.
+    /// Load a file or directory and return a formatted string for test assertions.
     fn load_and_report(&mut self, path: &str) -> Result<String, String> {
         let root = workspace_root();
         let full_path = root.join(path);
-        let full_path_str = full_path.to_string_lossy().to_string();
-        let classes = self.load_file(&full_path_str)?;
-        if classes.is_empty() {
-            Ok("Loaded".to_string())
+
+        if full_path.is_dir() {
+            self.load_directory_and_report(&full_path, path, "Loaded")
         } else {
-            Ok(format!("Loaded: {}", classes.join(", ")))
+            let full_path_str = full_path.to_string_lossy().to_string();
+            let classes = self.load_file(&full_path_str)?;
+            self.last_loaded_path = Some(LastLoadedPath::File(full_path_str));
+            if classes.is_empty() {
+                Ok("Loaded".to_string())
+            } else {
+                Ok(format!("Loaded: {}", classes.join(", ")))
+            }
+        }
+    }
+
+    /// Load all `.bt` files from a directory recursively and report results.
+    fn load_directory_and_report(
+        &mut self,
+        full_path: &std::path::Path,
+        display_path: &str,
+        verb: &str,
+    ) -> Result<String, String> {
+        let mut files = Vec::new();
+        Self::discover_bt_files(full_path, &mut files)
+            .map_err(|e| format!("Error reading directory {display_path}: {e}"))?;
+        files.sort();
+
+        if files.is_empty() {
+            return Ok(format!("No .bt files found in {display_path}"));
+        }
+
+        let mut loaded: usize = 0;
+        let mut failed: Vec<String> = Vec::new();
+
+        for file in &files {
+            let file_str = file.to_string_lossy().to_string();
+            match self.load_file(&file_str) {
+                Ok(_) => loaded += 1,
+                Err(e) => {
+                    let file_name = file
+                        .file_name()
+                        .map_or_else(|| file_str.clone(), |n| n.to_string_lossy().to_string());
+                    eprintln!("  Error in {file_name}: {e}");
+                    failed.push(file_name);
+                }
+            }
+        }
+
+        self.last_loaded_path = Some(LastLoadedPath::Directory(
+            full_path.to_string_lossy().to_string(),
+        ));
+
+        if failed.is_empty() {
+            let word = if loaded == 1 { "file" } else { "files" };
+            Ok(format!("{verb} {loaded} {word} from {display_path}"))
+        } else {
+            let mut parts = Vec::new();
+            if loaded > 0 {
+                let word = if loaded == 1 { "file" } else { "files" };
+                parts.push(format!("{loaded} {word} loaded"));
+            }
+            let word = if failed.len() == 1 { "file" } else { "files" };
+            parts.push(format!(
+                "{} {word} failed ({})",
+                failed.len(),
+                failed.join(", ")
+            ));
+            Ok(parts.join(", "))
+        }
+    }
+
+    /// Recursively discover `.bt` files under a directory.
+    fn discover_bt_files(dir: &std::path::Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
+        let mut entries: Vec<_> = std::fs::read_dir(dir)?
+            .filter_map(std::result::Result::ok)
+            .collect();
+        entries.sort_by_key(std::fs::DirEntry::file_name);
+
+        for entry in entries {
+            let name = entry.file_name();
+            if name.to_string_lossy().starts_with('.') {
+                continue;
+            }
+            let path = entry.path();
+            let file_type = entry.file_type()?;
+            if file_type.is_dir() {
+                Self::discover_bt_files(&path, files)?;
+            } else if file_type.is_file() && path.extension().is_some_and(|ext| ext == "bt") {
+                files.push(path);
+            }
+        }
+        Ok(())
+    }
+
+    /// Reload the last loaded file or directory.
+    fn reload_last(&mut self) -> Result<String, String> {
+        match self.last_loaded_path.clone() {
+            Some(LastLoadedPath::Directory(full_path)) => {
+                let dir = std::path::Path::new(&full_path);
+                let display_path = dir
+                    .strip_prefix(workspace_root())
+                    .map_or_else(|_| full_path.clone(), |p| p.to_string_lossy().to_string());
+                self.load_directory_and_report(dir, &display_path, "Reloaded")
+            }
+            Some(LastLoadedPath::File(path)) => {
+                let classes = self.load_file(&path)?;
+                if classes.is_empty() {
+                    Ok("Reloaded".to_string())
+                } else {
+                    Ok(format!("Reloaded {}", classes.join(", ")))
+                }
+            }
+            None => Err("No file or directory has been loaded yet".to_string()),
         }
     }
 
@@ -1232,60 +1349,73 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
 
     for case in &test_file.cases {
         // Route REPL commands through their proper protocol ops
-        let eval_result =
-            if case.expression.starts_with(":help ") || case.expression.starts_with(":h ") {
-                let args = if case.expression.starts_with(":help ") {
-                    case.expression.strip_prefix(":help ").unwrap().trim()
-                } else {
-                    case.expression.strip_prefix(":h ").unwrap().trim()
-                };
-                let (class_name, selector) = match args.split_once(' ') {
-                    Some((cls, sel)) => (cls.trim(), Some(sel.trim())),
-                    None => (args, None),
-                };
-                client.get_docs(class_name, selector)
-            } else if case.expression == ":clear" {
-                client.clear_and_report()
-            } else if case.expression == ":bindings" {
-                client.get_bindings()
-            } else if case.expression == ":actors" {
-                client.get_actors()
-            } else if case.expression == ":modules" {
-                client.get_modules()
-            } else if case.expression.starts_with(":load ") {
-                let path = case.expression.strip_prefix(":load ").unwrap().trim();
-                client.load_and_report(path)
-            } else if case.expression.starts_with(":reload ") {
-                let module = case.expression.strip_prefix(":reload ").unwrap().trim();
-                client.reload_module(module)
-            } else if case.expression.starts_with(":inspect ") {
-                let arg = case.expression.strip_prefix(":inspect ").unwrap().trim();
-                if arg.starts_with('<') {
-                    // Direct PID string like <0.123.0>
-                    client.inspect_actor(arg)
-                } else {
-                    // Class name — find first actor of that class
-                    match client.get_first_actor_pid(arg) {
-                        Ok(pid) => client.inspect_actor(&pid),
-                        Err(e) => Err(e),
-                    }
-                }
-            } else if case.expression.starts_with(":kill ") {
-                let arg = case.expression.strip_prefix(":kill ").unwrap().trim();
-                if arg.starts_with('<') {
-                    client.kill_actor(arg)
-                } else {
-                    match client.get_first_actor_pid(arg) {
-                        Ok(pid) => client.kill_actor(&pid),
-                        Err(e) => Err(e),
-                    }
-                }
-            } else if case.expression.starts_with(":unload ") {
-                let module = case.expression.strip_prefix(":unload ").unwrap().trim();
-                client.unload_module(module)
+        let eval_result = if case.expression.starts_with(":help ")
+            || case.expression.starts_with(":h ")
+        {
+            let args = if case.expression.starts_with(":help ") {
+                case.expression.strip_prefix(":help ").unwrap().trim()
             } else {
-                client.eval(&case.expression)
+                case.expression.strip_prefix(":h ").unwrap().trim()
             };
+            let (class_name, selector) = match args.split_once(' ') {
+                Some((cls, sel)) => (cls.trim(), Some(sel.trim())),
+                None => (args, None),
+            };
+            client.get_docs(class_name, selector)
+        } else if case.expression == ":clear" {
+            client.clear_and_report()
+        } else if case.expression == ":bindings" {
+            client.get_bindings()
+        } else if case.expression == ":actors" {
+            client.get_actors()
+        } else if case.expression == ":modules" {
+            client.get_modules()
+        } else if case.expression.starts_with(":load ") || case.expression.starts_with(":l ") {
+            let path = case
+                .expression
+                .strip_prefix(":load ")
+                .or_else(|| case.expression.strip_prefix(":l "))
+                .unwrap()
+                .trim();
+            client.load_and_report(path)
+        } else if case.expression == ":reload" || case.expression == ":r" {
+            client.reload_last()
+        } else if case.expression.starts_with(":reload ") || case.expression.starts_with(":r ") {
+            let module = case
+                .expression
+                .strip_prefix(":reload ")
+                .or_else(|| case.expression.strip_prefix(":r "))
+                .unwrap()
+                .trim();
+            client.reload_module(module)
+        } else if case.expression.starts_with(":inspect ") {
+            let arg = case.expression.strip_prefix(":inspect ").unwrap().trim();
+            if arg.starts_with('<') {
+                // Direct PID string like <0.123.0>
+                client.inspect_actor(arg)
+            } else {
+                // Class name — find first actor of that class
+                match client.get_first_actor_pid(arg) {
+                    Ok(pid) => client.inspect_actor(&pid),
+                    Err(e) => Err(e),
+                }
+            }
+        } else if case.expression.starts_with(":kill ") {
+            let arg = case.expression.strip_prefix(":kill ").unwrap().trim();
+            if arg.starts_with('<') {
+                client.kill_actor(arg)
+            } else {
+                match client.get_first_actor_pid(arg) {
+                    Ok(pid) => client.kill_actor(&pid),
+                    Err(e) => Err(e),
+                }
+            }
+        } else if case.expression.starts_with(":unload ") {
+            let module = case.expression.strip_prefix(":unload ").unwrap().trim();
+            client.unload_module(module)
+        } else {
+            client.eval(&case.expression)
+        };
         match eval_result {
             Ok(result) => {
                 // Check if this is a WARNING assertion (BT-407)

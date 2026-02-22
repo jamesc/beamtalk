@@ -46,7 +46,6 @@
 //! ```
 
 use std::path::{Path, PathBuf};
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -836,23 +835,33 @@ pub(crate) fn repl_loop(
                                 continue;
                             }
 
-                            match client.load_file(path) {
-                                Ok(response) => {
-                                    if response.is_error() {
-                                        if let Some(msg) = response.error_message() {
-                                            eprintln!("Error: {msg}");
-                                        }
-                                    } else if let Some(classes) = response.classes {
-                                        if classes.is_empty() {
-                                            println!("Loaded {path}");
-                                        } else {
-                                            println!("Loaded {}", classes.join(", "));
-                                        }
-                                    } else {
-                                        println!("Loaded {path}");
-                                    }
+                            if Path::new(path).is_dir() {
+                                // Directory load: recursively find and load all .bt files
+                                if load_directory(client, path, "Loaded") {
+                                    client.set_last_loaded_directory(path);
                                 }
-                                Err(e) => eprintln!("Error: {e}"),
+                            } else {
+                                match client.load_file(path) {
+                                    Ok(response) => {
+                                        if response.is_error() {
+                                            if let Some(msg) = response.error_message() {
+                                                eprintln!("Error: {msg}");
+                                            }
+                                        } else {
+                                            client.set_last_loaded_file(path);
+                                            if let Some(classes) = &response.classes {
+                                                if classes.is_empty() {
+                                                    println!("Loaded {path}");
+                                                } else {
+                                                    println!("Loaded {}", classes.join(", "));
+                                                }
+                                            } else {
+                                                println!("Loaded {path}");
+                                            }
+                                        }
+                                    }
+                                    Err(e) => eprintln!("Error: {e}"),
+                                }
                             }
                             continue;
                         }
@@ -868,11 +877,23 @@ pub(crate) fn repl_loop(
                             continue;
                         }
                         ":reload" | ":r" => {
-                            match client.reload_file() {
-                                Ok(response) => {
-                                    display_reload_result(&response, None);
+                            match client.last_loaded_path() {
+                                Some(client::LastLoadedPath::Directory(dir)) => {
+                                    let dir = dir.clone();
+                                    load_directory(client, &dir, "Reloaded");
                                 }
-                                Err(e) => eprintln!("Error: {e}"),
+                                Some(client::LastLoadedPath::File(path)) => {
+                                    let path = path.clone();
+                                    match client.load_file(&path) {
+                                        Ok(response) => {
+                                            display_reload_result(&response, None);
+                                        }
+                                        Err(e) => eprintln!("Error: {e}"),
+                                    }
+                                }
+                                None => {
+                                    eprintln!("No file or directory has been loaded yet");
+                                }
                             }
                             continue;
                         }
@@ -1192,6 +1213,118 @@ pub(crate) fn strip_path_quotes(arg: &str) -> &str {
     } else {
         arg
     }
+}
+
+/// Recursively discover all `.bt` files under a directory, sorted by full path.
+///
+/// Returns file paths relative to the current directory (or absolute if the input was absolute).
+/// Hidden directories (starting with `.`) are skipped.
+fn discover_bt_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    discover_bt_files_recursive(dir, &mut files)?;
+    files.sort();
+    Ok(files)
+}
+
+/// Recursive helper for [`discover_bt_files`].
+fn discover_bt_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    let mut entries: Vec<_> = std::fs::read_dir(dir)?
+        .filter_map(std::result::Result::ok)
+        .collect();
+    entries.sort_by_key(std::fs::DirEntry::file_name);
+
+    for entry in entries {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+
+        // Skip hidden entries
+        if name_str.starts_with('.') {
+            continue;
+        }
+
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+
+        if file_type.is_dir() {
+            discover_bt_files_recursive(&path, files)?;
+        } else if file_type.is_file() && path.extension().is_some_and(|ext| ext == "bt") {
+            files.push(path);
+        }
+    }
+    Ok(())
+}
+
+/// Load all `.bt` files from a directory into the REPL, reporting progress.
+///
+/// Returns `true` if at least one file was loaded successfully.
+fn load_directory(client: &mut ReplClient, dir_path: &str, verb: &str) -> bool {
+    let dir = Path::new(dir_path);
+
+    let files = match discover_bt_files(dir) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("Error reading directory {dir_path}: {e}");
+            return false;
+        }
+    };
+
+    if files.is_empty() {
+        println!("No .bt files found in {dir_path}");
+        return false;
+    }
+
+    let mut loaded: usize = 0;
+    let mut failed: Vec<String> = Vec::new();
+
+    for file in &files {
+        let file_str = file.to_string_lossy();
+        match client.load_file(&file_str) {
+            Ok(response) => {
+                if response.is_error() {
+                    let file_name = file
+                        .file_name()
+                        .map_or_else(|| file_str.to_string(), |n| n.to_string_lossy().to_string());
+                    if let Some(msg) = response.error_message() {
+                        eprintln!("  Error in {file_name}: {msg}");
+                    }
+                    failed.push(file_name);
+                } else {
+                    loaded += 1;
+                }
+            }
+            Err(e) => {
+                let file_name = file
+                    .file_name()
+                    .map_or_else(|| file_str.to_string(), |n| n.to_string_lossy().to_string());
+                eprintln!("  Error loading {file_name}: {e}");
+                failed.push(file_name);
+            }
+        }
+    }
+
+    // Summary
+    if failed.is_empty() {
+        let word = if loaded == 1 { "file" } else { "files" };
+        println!("{verb} {loaded} {word} from {dir_path}");
+    } else if loaded > 0 {
+        let word = if loaded == 1 { "file" } else { "files" };
+        println!("  \u{2713} {loaded} {word} loaded");
+        let fail_word = if failed.len() == 1 { "file" } else { "files" };
+        println!(
+            "  \u{2717} {} {fail_word} failed ({})",
+            failed.len(),
+            failed.join(", ")
+        );
+    } else {
+        let word = if failed.len() == 1 { "file" } else { "files" };
+        println!(
+            "  \u{2717} {} {word} failed ({})",
+            failed.len(),
+            failed.join(", ")
+        );
+    }
+
+    loaded > 0
 }
 
 #[cfg(test)]
@@ -1697,5 +1830,61 @@ mod tests {
     #[test]
     fn strip_path_quotes_empty_quoted() {
         assert_eq!(strip_path_quotes("\"\""), "");
+    }
+
+    // === discover_bt_files tests ===
+
+    #[test]
+    fn discover_bt_files_finds_bt_files_sorted() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("beta.bt"), "// beta").unwrap();
+        std::fs::write(dir.path().join("alpha.bt"), "// alpha").unwrap();
+        std::fs::write(dir.path().join("readme.md"), "# readme").unwrap();
+
+        let files = discover_bt_files(dir.path()).unwrap();
+        assert_eq!(files.len(), 2);
+        assert!(files[0].ends_with("alpha.bt"));
+        assert!(files[1].ends_with("beta.bt"));
+    }
+
+    #[test]
+    fn discover_bt_files_recursive() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("top.bt"), "// top").unwrap();
+        let sub = dir.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("nested.bt"), "// nested").unwrap();
+
+        let files = discover_bt_files(dir.path()).unwrap();
+        assert_eq!(files.len(), 2);
+        // sub/nested.bt sorts before top.bt
+        assert!(files[0].ends_with("nested.bt"));
+        assert!(files[1].ends_with("top.bt"));
+    }
+
+    #[test]
+    fn discover_bt_files_skips_hidden_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("visible.bt"), "// vis").unwrap();
+        let hidden = dir.path().join(".hidden");
+        std::fs::create_dir(&hidden).unwrap();
+        std::fs::write(hidden.join("secret.bt"), "// secret").unwrap();
+
+        let files = discover_bt_files(dir.path()).unwrap();
+        assert_eq!(files.len(), 1);
+        assert!(files[0].ends_with("visible.bt"));
+    }
+
+    #[test]
+    fn discover_bt_files_empty_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = discover_bt_files(dir.path()).unwrap();
+        assert!(files.is_empty());
+    }
+
+    #[test]
+    fn discover_bt_files_nonexistent_dir() {
+        let result = discover_bt_files(Path::new("/nonexistent/path/abc123"));
+        assert!(result.is_err());
     }
 }

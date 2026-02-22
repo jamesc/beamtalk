@@ -72,8 +72,8 @@ pub(crate) fn print_help() {
     println!("  :exit, :q       Exit the REPL");
     println!("  :clear          Clear all variable bindings");
     println!("  :bindings       Show current variable bindings");
-    println!("  :load <path>    Load a .bt file (quoted paths supported)");
-    println!("  :reload         Reload the last loaded file");
+    println!("  :load <path>    Load a .bt file or directory (recursive)");
+    println!("  :reload         Reload the last loaded file or directory");
     println!("  :reload <name>  Reload a module by name");
     println!("  :modules        List loaded modules");
     println!("  :unload <name>  Unload a module (fails if actors exist)");

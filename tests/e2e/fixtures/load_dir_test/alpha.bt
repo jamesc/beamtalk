@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Alpha - simple value type for directory load testing (BT-784)
+
+Object subclass: Alpha
+  state: value = 1
+
+  getValue => self.value

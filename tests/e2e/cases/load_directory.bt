@@ -1,0 +1,75 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for :load <directory> (BT-784).
+//
+// Tests loading all .bt files from a directory recursively,
+// summary output, and :reload after directory load.
+
+// ===========================================================================
+// :load <directory> — LOAD ALL .BT FILES FROM A DIRECTORY
+// ===========================================================================
+
+// Load a directory with two fixture files (Alpha and Beta)
+:load tests/e2e/fixtures/load_dir_test/
+// => Loaded 2 files from tests/e2e/fixtures/load_dir_test/
+
+// Verify both classes were loaded and are usable
+a := Alpha new
+// => _
+
+a getValue
+// => 1
+
+b := Beta new
+// => _
+
+b getValue
+// => 2
+
+// ===========================================================================
+// :reload — RELOADS THE DIRECTORY (re-walks)
+// ===========================================================================
+
+:reload
+// => Reloaded 2 files from tests/e2e/fixtures/load_dir_test
+
+// Classes should still work after reload
+a2 := Alpha new
+// => _
+
+a2 getValue
+// => 1
+
+// ===========================================================================
+// :load <single file> — STILL WORKS AFTER DIRECTORY LOAD
+// ===========================================================================
+
+// Single file load should still work
+:load tests/e2e/fixtures/point.bt
+// => Loaded: Point
+
+p := Point new
+// => _
+
+p getX
+// => 0
+
+// :reload now reloads the single file (not the directory)
+:reload
+// => Reloaded Point
+
+// ===========================================================================
+// :l <directory> — SHORTHAND ALSO WORKS
+// ===========================================================================
+
+:l tests/e2e/fixtures/load_dir_test/
+// => Loaded 2 files from tests/e2e/fixtures/load_dir_test/
+
+// ===========================================================================
+// :load <nonexistent directory> — ERROR
+// ===========================================================================
+
+// Non-existent path falls through to single file load (which errors from backend)
+:load tests/e2e/fixtures/nonexistent_dir/
+// => ERROR: _
