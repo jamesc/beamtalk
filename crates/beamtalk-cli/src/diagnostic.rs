@@ -47,6 +47,7 @@ impl CompileDiagnostic {
         let label = match diagnostic.severity {
             Severity::Error => "error here",
             Severity::Warning => "warning here",
+            Severity::Hint => "hint here",
         };
 
         Self {

@@ -463,7 +463,7 @@ mod tests {
     }
 
     #[test]
-    fn type_checker_warning_severity_is_warning() {
+    fn type_checker_dnu_severity_is_hint() {
         use crate::source_analysis::Severity;
 
         let source = "42 foo";
@@ -471,17 +471,17 @@ mod tests {
         let (module, parse_diags) = parse(tokens);
         let diagnostics = compute_diagnostics(&module, parse_diags);
 
-        let type_warning = diagnostics
+        let dnu_diag = diagnostics
             .iter()
             .find(|d| d.message.contains("does not understand"));
         assert!(
-            type_warning.is_some(),
-            "Should have type warning. Got: {diagnostics:?}"
+            dnu_diag.is_some(),
+            "Should have DNU diagnostic. Got: {diagnostics:?}"
         );
         assert_eq!(
-            type_warning.unwrap().severity,
-            Severity::Warning,
-            "Type checker warnings should be Warning severity"
+            dnu_diag.unwrap().severity,
+            Severity::Hint,
+            "DNU diagnostics should be Hint severity, not Warning"
         );
     }
 

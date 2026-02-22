@@ -276,11 +276,15 @@ fn partition_diagnostics(
             matches!(
                 d.severity,
                 beamtalk_core::source_analysis::Severity::Warning
+                    | beamtalk_core::source_analysis::Severity::Hint
             )
         })
         .map(|d| DiagInfo {
             message: d.message.to_string(),
-            severity: "warning".to_string(),
+            severity: match d.severity {
+                beamtalk_core::source_analysis::Severity::Hint => "hint".to_string(),
+                _ => "warning".to_string(),
+            },
             start: d.span.start(),
             end: d.span.end(),
         })
@@ -337,6 +341,7 @@ fn handle_compile_expression(request: &Map) -> Term {
             matches!(
                 d.severity,
                 beamtalk_core::source_analysis::Severity::Warning
+                    | beamtalk_core::source_analysis::Severity::Hint
             )
         })
         .map(|d| d.message.to_string())
@@ -592,6 +597,7 @@ fn handle_diagnostics(request: &Map) -> Term {
             severity: match d.severity {
                 beamtalk_core::source_analysis::Severity::Error => "error".to_string(),
                 beamtalk_core::source_analysis::Severity::Warning => "warning".to_string(),
+                beamtalk_core::source_analysis::Severity::Hint => "hint".to_string(),
             },
             start: d.span.start(),
             end: d.span.end(),

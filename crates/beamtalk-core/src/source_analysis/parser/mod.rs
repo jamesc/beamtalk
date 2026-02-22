@@ -325,7 +325,7 @@ fn is_diagnostic_error(msg: &str) -> bool {
     msg.starts_with(|c: char| c.is_ascii_lowercase())
 }
 
-/// A diagnostic message (error or warning).
+/// A diagnostic message (error, warning, or hint).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
     /// The severity of the diagnostic.
@@ -360,6 +360,17 @@ impl Diagnostic {
             hint: None,
         }
     }
+
+    /// Creates a new hint diagnostic (informational, lower severity than warning).
+    #[must_use]
+    pub fn hint(message: impl Into<EcoString>, span: Span) -> Self {
+        Self {
+            severity: Severity::Hint,
+            message: message.into(),
+            span,
+            hint: None,
+        }
+    }
 }
 
 /// Diagnostic severity level.
@@ -369,6 +380,8 @@ pub enum Severity {
     Error,
     /// A warning that should be addressed.
     Warning,
+    /// A hint or informational note (e.g. DNU that may be intentional).
+    Hint,
 }
 
 /// Maximum nesting depth for expressions before the parser bails out.

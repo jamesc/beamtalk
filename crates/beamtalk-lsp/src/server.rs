@@ -879,6 +879,7 @@ fn to_lsp_diagnostic(
         severity: Some(match diag.severity {
             Severity::Error => DiagnosticSeverity::ERROR,
             Severity::Warning => DiagnosticSeverity::WARNING,
+            Severity::Hint => DiagnosticSeverity::HINT,
         }),
         source: Some("beamtalk".into()),
         message: if let Some(ref hint) = diag.hint {
