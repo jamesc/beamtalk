@@ -335,19 +335,19 @@ impl CoreErlangGenerator {
 
             // Generate method body with reply tuple (reuse existing codegen)
             let method_body_doc = self.generate_method_definition_body_with_reply(method)?;
-            let body_str = method_body_doc.to_pretty_string();
 
             self.current_nlr_token = None;
 
             // BT-761/BT-764: Sealed methods are standalone functions (not inside case arms),
             // so the try/catch can be placed directly at function level (no letrec needed).
-            let body_str = if let Some(ref token_var) = nlr_token_var {
-                self.wrap_actor_body_with_nlr_catch(&body_str, token_var, false)
+            // BT-774: Compose at Document level without intermediate string rendering.
+            let method_body_doc = if let Some(ref token_var) = nlr_token_var {
+                self.wrap_actor_body_with_nlr_catch(method_body_doc, token_var, false)
             } else {
-                body_str
+                method_body_doc
             };
 
-            let body_doc = docvec![nest(INDENT, docvec![line(), body_str,]), "\n",];
+            let body_doc = docvec![nest(INDENT, docvec![line(), method_body_doc,]), "\n",];
             docs.push(body_doc);
 
             self.pop_scope();

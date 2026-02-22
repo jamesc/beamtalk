@@ -3,7 +3,6 @@
 
 // Stdlib tests for string interpolation (ADR 0023 Phase 3, BT-558)
 
-// @load stdlib/test/fixtures/counter.bt
 
 TestCase subclass: StringInterpolationTest
 

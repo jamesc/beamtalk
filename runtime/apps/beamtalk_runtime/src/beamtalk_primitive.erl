@@ -224,16 +224,29 @@ send_tagged_map_fallback(X, Class, Selector, Args) ->
 %% The previous approach (Mod:has_method/1) only checked locally-defined methods,
 %% causing inherited methods (e.g. 'class' from ProtoObject) to return false.
 -spec responds_to(term(), atom()) -> boolean().
-responds_to(#beamtalk_object{class = Tag}, Selector) ->
-    ClassName = class_name_from_tag(Tag),
-    beamtalk_dispatch:responds_to(Selector, ClassName);
+responds_to(#beamtalk_object{class = Tag} = Obj, Selector) ->
+    %% BT-776: Class objects (e.g., Counter as a value) are instances of 'Class'.
+    %% Walk the Class → Behaviour → Object hierarchy instead of checking class_mod.
+    case beamtalk_class_registry:is_class_object(Obj) of
+        true ->
+            beamtalk_dispatch:responds_to(Selector, 'Class');
+        false ->
+            ClassName = class_name_from_tag(Tag),
+            beamtalk_dispatch:responds_to(Selector, ClassName)
+    end;
 responds_to(X, Selector) when is_tuple(X) ->
     %% Handle tuples that might be beamtalk_objects not matching the record pattern
     case tuple_size(X) >= 4 andalso element(1, X) =:= beamtalk_object of
         true ->
-            Tag = element(2, X),
-            ClassName = class_name_from_tag(Tag),
-            beamtalk_dispatch:responds_to(Selector, ClassName);
+            %% BT-776: Class objects walk Class hierarchy.
+            case beamtalk_class_registry:is_class_object(X) of
+                true ->
+                    beamtalk_dispatch:responds_to(Selector, 'Class');
+                false ->
+                    Tag = element(2, X),
+                    ClassName = class_name_from_tag(Tag),
+                    beamtalk_dispatch:responds_to(Selector, ClassName)
+            end;
         false ->
             responds_via_module(X, Selector)
     end;

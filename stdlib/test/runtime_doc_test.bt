@@ -3,7 +3,6 @@
 
 // BUnit tests for runtime-embedded documentation (ADR 0033, BT-769)
 
-// @load stdlib/test/fixtures/doc_test_counter.bt
 
 TestCase subclass: RuntimeDocTest
 

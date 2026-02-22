@@ -3,8 +3,6 @@
 
 // Tests for recursive method dispatch BT-330
 
-// @load stdlib/test/fixtures/math_helper.bt
-// @load stdlib/test/fixtures/recursive_actor.bt
 
 TestCase subclass: RecursionTest
 

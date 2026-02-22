@@ -3,8 +3,6 @@
 
 // Auto-tests for examples in docs/beamtalk-language-features.md
 
-// @load stdlib/test/fixtures/typed_math.bt
-// @load examples/bank/typed_account.bt
 
 TestCase subclass: LanguageFeaturesDocTest
 

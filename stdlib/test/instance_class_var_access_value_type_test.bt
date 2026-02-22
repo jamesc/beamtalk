@@ -3,7 +3,6 @@
 
 // BT-413: Value type instance-side class variable access
 
-// @load stdlib/test/fixtures/class_var_point.bt
 
 TestCase subclass: InstanceClassVarAccessValueTypeTest
 

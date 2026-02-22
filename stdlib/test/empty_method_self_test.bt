@@ -3,7 +3,6 @@
 
 // Tests that empty method bodies return self instead of nil (BT-631)
 
-// @load stdlib/test/fixtures/empty_method_actor.bt
 
 TestCase subclass: EmptyMethodSelfTest
 

@@ -3,8 +3,11 @@
 
 %%% @doc Unit tests for beamtalk_repl_docs module
 %%%
-%%% Tests EEP-48 doc chunk extraction, formatting, and error handling.
-%%% Uses compiled stdlib .beam files as real fixtures for doc chunk tests.
+%%% **DDD Context:** REPL — Documentation
+%%%
+%%% Tests runtime-embedded documentation formatting and error handling.
+%%% Uses pure formatting functions for unit tests, and running runtime
+%%% for integration tests.
 
 -module(beamtalk_repl_docs_tests).
 -include_lib("eunit/include/eunit.hrl").
@@ -319,152 +322,24 @@ format_method_doc_metaclass_unknown_test() ->
     ).
 
 %%====================================================================
-%% EEP-48 doc chunk tests (require stdlib .beam files)
-%%====================================================================
-
-%% Setup: ensure stdlib code path is available
-stdlib_setup() ->
-    case code:lib_dir(beamtalk_stdlib, ebin) of
-        StdlibEbin when is_list(StdlibEbin) ->
-            case filelib:is_dir(StdlibEbin) of
-                true ->
-                    code:add_pathz(StdlibEbin),
-                    ok;
-                false ->
-                    stdlib_setup_fallback()
-            end;
-        {error, _} ->
-            stdlib_setup_fallback()
-    end.
-
-stdlib_setup_fallback() ->
-    RelPath = "apps/beamtalk_stdlib/ebin",
-    case filelib:is_dir(RelPath) of
-        true ->
-            code:add_pathz(RelPath),
-            ok;
-        false ->
-            {skip, stdlib_not_built}
-    end.
-
-get_module_doc_existing_test_() ->
-    {setup, fun stdlib_setup/0, fun(_) -> ok end, [
-        {"get_module_doc returns doc for Integer", fun() ->
-            Result = beamtalk_repl_docs:get_module_doc('bt@stdlib@integer'),
-            ?assertMatch(B when is_binary(B), Result),
-            ?assert(byte_size(Result) > 0)
-        end}
-    ]}.
-
-get_module_doc_missing_module_test() ->
-    ?assertEqual(none, beamtalk_repl_docs:get_module_doc('nonexistent_module_xyz_123')).
-
-get_doc_entries_existing_test_() ->
-    {setup, fun stdlib_setup/0, fun(_) -> ok end, [
-        {"get_doc_entries returns entries for Integer", fun() ->
-            Entries = beamtalk_repl_docs:get_doc_entries('bt@stdlib@integer'),
-            ?assert(is_list(Entries)),
-            ?assert(length(Entries) > 0)
-        end}
-    ]}.
-
-get_doc_entries_missing_module_test() ->
-    ?assertEqual([], beamtalk_repl_docs:get_doc_entries('nonexistent_module_xyz_123')).
-
-find_doc_entry_found_test_() ->
-    {setup, fun stdlib_setup/0, fun(_) -> ok end, [
-        {"find_doc_entry finds + selector in Integer docs", fun() ->
-            Entries = beamtalk_repl_docs:get_doc_entries('bt@stdlib@integer'),
-            Result = beamtalk_repl_docs:find_doc_entry('+', Entries),
-            ?assertMatch({ok, _, _}, Result),
-            {ok, Sig, DocText} = Result,
-            ?assert(is_binary(Sig)),
-            ?assertMatch(B when is_binary(B), DocText)
-        end}
-    ]}.
-
-find_doc_entry_not_found_test_() ->
-    {setup, fun stdlib_setup/0, fun(_) -> ok end, [
-        {"find_doc_entry returns not_found for unknown selector", fun() ->
-            Entries = beamtalk_repl_docs:get_doc_entries('bt@stdlib@integer'),
-            ?assertEqual(not_found, beamtalk_repl_docs:find_doc_entry('nonexistent_xyz', Entries))
-        end}
-    ]}.
-
-find_doc_entry_empty_entries_test() ->
-    ?assertEqual(not_found, beamtalk_repl_docs:find_doc_entry('+', [])).
-
-get_method_signatures_test_() ->
-    {setup, fun stdlib_setup/0, fun(_) -> ok end, [
-        {"get_method_signatures returns signatures for known selectors", fun() ->
-            Result = beamtalk_repl_docs:get_method_signatures('bt@stdlib@integer', ['+', '-']),
-            ?assertEqual(2, length(Result)),
-            %% Each entry is {Selector, Signature, Doc}
-            [{PlusSel, PlusSig, _PlusDoc}, {MinusSel, MinusSig, _MinusDoc}] = Result,
-            ?assertEqual('+', PlusSel),
-            ?assertEqual('-', MinusSel),
-            ?assert(is_binary(PlusSig)),
-            ?assert(is_binary(MinusSig))
-        end}
-    ]}.
-
-get_method_signatures_unknown_selector_test_() ->
-    {setup, fun stdlib_setup/0, fun(_) -> ok end, [
-        {"get_method_signatures falls back to atom name for unknown selector", fun() ->
-            Result = beamtalk_repl_docs:get_method_signatures('bt@stdlib@integer', [unknownMethod]),
-            ?assertEqual(1, length(Result)),
-            [{unknownMethod, Sig, none}] = Result,
-            ?assertEqual(<<"unknownMethod">>, Sig)
-        end}
-    ]}.
-
-get_method_doc_found_test_() ->
-    {setup, fun stdlib_setup/0, fun(_) -> ok end, [
-        {"get_method_doc returns signature and doc text", fun() ->
-            {Sig, DocText} = beamtalk_repl_docs:get_method_doc('bt@stdlib@integer', '+'),
-            ?assert(is_binary(Sig)),
-            ?assertMatch(B when is_binary(B), DocText)
-        end}
-    ]}.
-
-get_method_doc_not_found_test_() ->
-    {setup, fun stdlib_setup/0, fun(_) -> ok end, [
-        {"get_method_doc falls back for unknown selector", fun() ->
-            {Sig, DocText} = beamtalk_repl_docs:get_method_doc('bt@stdlib@integer', 'xyzzyNotReal'),
-            ?assertEqual(<<"xyzzyNotReal">>, Sig),
-            ?assertEqual(none, DocText)
-        end}
-    ]}.
-
-%%====================================================================
 %% Integration tests (require running runtime with bootstrap)
 %%====================================================================
 
 integration_setup() ->
-    case stdlib_setup() of
-        {skip, _} = Skip ->
-            Skip;
-        ok ->
-            case code:which('bt@stdlib@integer') of
-                non_existing ->
-                    {skip, stdlib_not_built};
-                _ ->
-                    application:ensure_all_started(beamtalk_runtime),
-                    case whereis(beamtalk_bootstrap) of
-                        undefined ->
-                            case beamtalk_bootstrap:start_link() of
-                                {ok, _} -> ok;
-                                {error, {already_started, _}} -> ok
-                            end;
-                        _ ->
-                            ok
-                    end,
-                    beamtalk_stdlib:init(),
-                    %% Wait for Integer class to be registered
-                    wait_for_class('Integer', 50),
-                    ok
-            end
-    end.
+    application:ensure_all_started(beamtalk_runtime),
+    case whereis(beamtalk_bootstrap) of
+        undefined ->
+            case beamtalk_bootstrap:start_link() of
+                {ok, _} -> ok;
+                {error, {already_started, _}} -> ok
+            end;
+        _ ->
+            ok
+    end,
+    beamtalk_stdlib:init(),
+    %% Wait for Integer class to be registered
+    wait_for_class('Integer', 50),
+    ok.
 
 wait_for_class(ClassName, 0) ->
     error({class_not_registered, ClassName});

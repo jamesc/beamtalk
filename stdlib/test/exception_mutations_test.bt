@@ -3,7 +3,6 @@
 
 // BT-410: State mutation threading in on:do: and ensure: handler blocks
 
-// @load stdlib/test/fixtures/error_counter.bt
 
 TestCase subclass: ExceptionMutationsTest
 

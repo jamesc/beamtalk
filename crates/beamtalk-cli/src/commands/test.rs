@@ -17,7 +17,7 @@
 use crate::beam_compiler::BeamCompiler;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::fs;
 use std::time::Instant;
@@ -191,6 +191,53 @@ fn generate_eunit_wrapper(test_class: &TestCaseClass, source_file: &str) -> Stri
 // ──────────────────────────────────────────────────────────────────────────
 // Fixture compilation
 // ──────────────────────────────────────────────────────────────────────────
+
+/// Pre-compile all `.bt` fixture files in a directory into the build directory.
+///
+/// Returns the set of compiled module names. These modules will be available
+/// on the BEAM code path during test execution, making fixture classes
+/// available without explicit `// @load` directives — similar to how all
+/// classes exist in a Smalltalk image.
+fn compile_fixtures_directory(
+    fixtures_dir: &Utf8Path,
+    output_dir: &Utf8Path,
+) -> Result<Vec<String>> {
+    if !fixtures_dir.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let fixture_files = find_test_files(fixtures_dir)?;
+    if fixture_files.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    info!(
+        "Compiling {} fixture(s) from '{}'",
+        fixture_files.len(),
+        fixtures_dir
+    );
+
+    let mut module_names = Vec::new();
+    let mut fixtures_by_module: HashMap<String, Utf8PathBuf> = HashMap::new();
+    for fixture_path in &fixture_files {
+        let module_name = fixture_module_name(fixture_path)?;
+        if let Some(existing_path) = fixtures_by_module.get(&module_name) {
+            if existing_path != fixture_path {
+                miette::bail!(
+                    "Fixture module name collision for '{module_name}': '{}' vs '{}'",
+                    existing_path,
+                    fixture_path
+                );
+            }
+        }
+        fixtures_by_module.insert(module_name.clone(), fixture_path.clone());
+
+        let module_name = compile_fixture(fixture_path, output_dir)?;
+        module_names.push(module_name);
+    }
+
+    Ok(module_names)
+}
 
 /// Compile a fixture file referenced by `@load` directive.
 fn compile_fixture(fixture_path: &Utf8Path, output_dir: &Utf8Path) -> Result<String> {
@@ -501,6 +548,11 @@ fn find_test_files_recursive(dir: &Utf8Path, files: &mut Vec<Utf8PathBuf>) -> Re
             .map_err(|_| miette::miette!("Non-UTF-8 path in '{}'", dir))?;
 
         if path.is_dir() {
+            // Skip the fixtures/ subdirectory — fixtures are pre-compiled in Phase 0
+            // and should not be treated as test files.
+            if path.file_name() == Some("fixtures") {
+                continue;
+            }
             find_test_files_recursive(&path, files)?;
         } else if path.extension() == Some("bt") {
             files.push(path);
@@ -771,21 +823,67 @@ pub fn run_tests(path: &str) -> Result<()> {
     let build_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf())
         .map_err(|_| miette::miette!("Non-UTF-8 temp directory path"))?;
 
-    // Phase 1: Discover test classes and compile
+    // Phase 0: Pre-compile all fixtures in the fixtures/ subdirectory.
+    // This makes all fixture classes available during test execution — like
+    // a Smalltalk image where all classes exist in the running environment.
     let mut compiled_tests = Vec::new();
     let mut compiled_doc_tests: Vec<CompiledDocTest> = Vec::new();
     let mut all_erl_files = Vec::new();
     let mut all_fixture_modules = Vec::new();
+    let mut precompiled_modules: HashSet<String> = HashSet::new();
+
+    let fixtures_dir = if test_path.is_dir() {
+        test_path.join("fixtures")
+    } else {
+        test_path
+            .parent()
+            .map(|p| p.join("fixtures"))
+            .unwrap_or_default()
+    };
+
+    let precompiled = compile_fixtures_directory(&fixtures_dir, &build_dir)?;
+    for module_name in &precompiled {
+        precompiled_modules.insert(module_name.clone());
+    }
+    all_fixture_modules.extend(precompiled);
+
+    // Phase 1: Discover test classes and compile
     let mut fixture_modules_by_name: HashMap<String, Utf8PathBuf> = HashMap::new();
 
     for test_file in &test_files {
         let (test_classes, load_files) = discover_test_classes(test_file)?;
 
-        // Compile @load fixtures (paths are CWD-relative, matching E2E/test_stdlib semantics)
+        // Handle deprecated @load directives as fallback.
+        // Fixtures in the fixtures/ directory are already compiled above.
         for load_path in &load_files {
             let fixture_path = Utf8PathBuf::from(load_path);
 
             let fixture_module = fixture_module_name(&fixture_path)?;
+
+            // Skip if already pre-compiled from the fixtures directory
+            if precompiled_modules.contains(&fixture_module) {
+                if fixture_path.starts_with(&fixtures_dir) {
+                    // This @load points into fixtures_dir itself — already compiled in Phase 0
+                    eprintln!(
+                        "Deprecated: '// @load {load_path}' in '{test_file}' — fixture is already available \
+                         from the fixtures directory. Remove this directive."
+                    );
+                    continue;
+                }
+                // A non-fixture @load shares a module name with a precompiled fixture —
+                // running both would silently use the wrong implementation.
+                miette::bail!(
+                    "Fixture module name collision for '{fixture_module}': \
+                     precompiled fixture vs '@load {load_path}' in '{test_file}'"
+                );
+            }
+
+            // Non-fixture @load (e.g., examples/) — compile and warn
+            eprintln!(
+                "Deprecated: '// @load {load_path}' in '{test_file}' — move fixture to '{fixtures_dir}' to \
+                 make it automatically available."
+            );
+
             if let Some(existing_path) = fixture_modules_by_name.get(&fixture_module) {
                 if existing_path != &fixture_path {
                     miette::bail!(

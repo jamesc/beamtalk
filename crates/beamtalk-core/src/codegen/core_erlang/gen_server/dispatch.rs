@@ -264,25 +264,25 @@ impl CoreErlangGenerator {
                         None
                     };
 
-                    // Generate body as Document, render to string for embedding
+                    // Generate body as Document
                     let body_doc = self.generate_method_body_with_reply(block)?;
-                    let body_str = body_doc.to_pretty_string();
 
                     self.current_nlr_token = None;
 
                     // BT-761/BT-764: Wrap body in letrec function with try/catch
                     // via the shared helper.
-                    let body_str = if let Some(ref token_var) = nlr_token_var {
-                        self.wrap_actor_body_with_nlr_catch(&body_str, token_var, true)
+                    // BT-774: Compose at Document level without intermediate string rendering.
+                    let body_doc = if let Some(ref token_var) = nlr_token_var {
+                        self.wrap_actor_body_with_nlr_catch(body_doc, token_var, true)
                     } else {
-                        body_str
+                        body_doc
                     };
 
                     // Build method clause as Document tree
                     let clause_doc = if param_vars.is_empty() {
                         docvec![
                             format!("<'{}'> when 'true' ->", id.name),
-                            nest(INDENT, docvec![line(), body_str,]),
+                            nest(INDENT, docvec![line(), body_doc,]),
                             "\n",
                         ]
                     } else {
@@ -300,7 +300,7 @@ impl CoreErlangGenerator {
                                         docvec![
                                             line(),
                                             format!("<[{params_str}]> when 'true' ->"),
-                                            nest(INDENT, docvec![line(), body_str,]),
+                                            nest(INDENT, docvec![line(), body_doc,]),
                                             line(),
                                             "<_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}",
                                         ]

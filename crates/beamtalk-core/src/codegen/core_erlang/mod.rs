@@ -90,7 +90,6 @@ mod actor_codegen;
 mod block_analysis;
 mod control_flow;
 mod dispatch_codegen;
-pub mod doc_chunks;
 pub mod document;
 pub mod erlang_types;
 mod expressions;
@@ -436,13 +435,30 @@ pub(super) struct NlrValueTypeCatchVars {
 }
 
 impl NlrValueTypeCatchVars {
-    /// Formats the try/catch wrapper around the given body document.
+    /// Formats the try prefix for the NLR wrapper.
     ///
-    /// Produces a `format!` string for embedding in the value type method:
+    /// BT-774: Returns `Document` instead of `String` for composable codegen.
+    ///
     /// ```text
     /// let TokenVar = call 'erlang':'make_ref'() in
     /// try
-    /// {body}
+    /// ```
+    pub fn format_try_prefix(&self) -> Document<'static> {
+        docvec![
+            "    let ",
+            self.token_var.clone(),
+            " = call 'erlang':'make_ref'() in",
+            nest(INDENT, line()),
+            "try",
+            line(),
+        ]
+    }
+
+    /// Formats the catch suffix for the NLR wrapper.
+    ///
+    /// BT-774: Returns `Document` instead of `String` for composable codegen.
+    ///
+    /// ```text
     /// of Result -> Result
     /// catch <Cls, Err, Stk> ->
     ///   case {Cls, Err} of
@@ -450,35 +466,29 @@ impl NlrValueTypeCatchVars {
     ///     <Other> when 'true' -> primop 'raw_raise'(Cls, Err, Stk)
     ///   end
     /// ```
-    pub fn format_try_prefix(&self) -> String {
+    pub fn format_catch_suffix(&self) -> Document<'static> {
         docvec![
-            "    let ",
-            self.token_var.clone(),
-            " = call 'erlang':'make_ref'() in\n    try\n",
-        ]
-        .to_pretty_string()
-    }
-
-    pub fn format_catch_suffix(&self) -> String {
-        docvec![
-            "\n    of ",
+            nest(INDENT, line()),
+            "of ",
             self.result_var.clone(),
             " -> ",
             self.result_var.clone(),
-            "\n",
-            "    catch <",
+            nest(INDENT, line()),
+            "catch <",
             self.cls_var.clone(),
             ", ",
             self.err_var.clone(),
             ", ",
             self.stk_var.clone(),
-            "> ->\n",
-            "      case {",
+            "> ->",
+            nest(INDENT + 2, line()),
+            "case {",
             self.cls_var.clone(),
             ", ",
             self.err_var.clone(),
-            "} of\n",
-            "        <{'throw', {'$bt_nlr', ",
+            "} of",
+            nest(INDENT + 4, line()),
+            "<{'throw', {'$bt_nlr', ",
             self.ctk_var.clone(),
             ", ",
             self.val_var.clone(),
@@ -489,8 +499,8 @@ impl NlrValueTypeCatchVars {
             self.token_var.clone(),
             ") -> ",
             self.val_var.clone(),
-            "\n",
-            "        <",
+            nest(INDENT + 4, line()),
+            "<",
             self.ot_pair_var.clone(),
             "> when 'true' -> ",
             "primop 'raw_raise'(",
@@ -499,10 +509,11 @@ impl NlrValueTypeCatchVars {
             self.err_var.clone(),
             ", ",
             self.stk_var.clone(),
-            ")\n",
-            "      end\n",
+            ")",
+            nest(INDENT + 2, line()),
+            "end",
+            line(),
         ]
-        .to_pretty_string()
     }
 }
 
@@ -763,7 +774,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-764: Wraps an actor method body string with NLR (non-local return) try/catch.
+    /// BT-764: Wraps an actor method body with NLR (non-local return) try/catch.
     ///
     /// Actor NLR uses a 4-element throw tuple `{$bt_nlr, Token, Value, State}` and
     /// catches it to produce `{reply, Value, State}`.
@@ -772,12 +783,15 @@ impl CoreErlangGenerator {
     /// create a separate function frame, avoiding BEAM validator
     /// `ambiguous_catch_try_state` errors in case arms. When false (sealed methods),
     /// the try/catch is emitted directly.
+    ///
+    /// BT-774: Accepts and returns `Document` instead of `String` to avoid
+    /// intermediate string rendering.
     pub(super) fn wrap_actor_body_with_nlr_catch(
         &mut self,
-        body_str: &str,
+        body_doc: Document<'static>,
         token_var: &str,
         needs_letrec: bool,
-    ) -> String {
+    ) -> Document<'static> {
         let result_var = self.fresh_temp_var("NlrResult");
         let cls_var = self.fresh_temp_var("NlrCls");
         let err_var = self.fresh_temp_var("NlrErr");
@@ -792,7 +806,7 @@ impl CoreErlangGenerator {
             token_var.to_string(),
             " = call 'erlang':'make_ref'() in\n",
             "try\n",
-            body_str.to_string(),
+            body_doc,
             "\n",
             "of ",
             result_var.clone(),
@@ -839,8 +853,7 @@ impl CoreErlangGenerator {
             stk_var,
             ")\n",
             "  end",
-        ]
-        .to_pretty_string();
+        ];
 
         if needs_letrec {
             docvec![
@@ -849,7 +862,6 @@ impl CoreErlangGenerator {
                 "\n",
                 "in apply '__nlr_body'/0 ()",
             ]
-            .to_pretty_string()
         } else {
             try_catch
         }

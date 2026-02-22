@@ -255,7 +255,7 @@ Expression tests for bootstrap-critical primitives that TestCase transitively de
 // => 5
 ```
 
-**With fixtures** (`@load` directive):
+**With fixtures** (`@load` directive, used in bootstrap tests only):
 ```beamtalk
 // @load tests/e2e/fixtures/counter.bt
 
@@ -298,11 +298,14 @@ SUnit-style test classes that subclass `TestCase`. The primary home for language
 
 **Command:** `just test-bunit` or `beamtalk test`
 
-**How it works:** The `beamtalk test` command discovers `.bt` files containing `TestCase subclass:` definitions, compiles them through the normal pipeline, generates EUnit wrapper modules, and runs all test methods. Each test method starting with `test` is auto-discovered and run with a fresh instance. **Limitation:** currently only the first `TestCase` subclass in each `.bt` file is compiled (a warning is emitted if more are found), so put each test class in its own file.
+**How it works:** The `beamtalk test` command first pre-compiles all `.bt` files in the `fixtures/` subdirectory, making fixture classes available on the BEAM code path — similar to how all classes exist in a Smalltalk image. It then discovers `.bt` files containing `TestCase subclass:` definitions, compiles them through the normal pipeline, generates EUnit wrapper modules, and runs all test methods. Each test method starting with `test` is auto-discovered and run with a fresh instance. **Limitation:** currently only the first `TestCase` subclass in each `.bt` file is compiled (a warning is emitted if more are found), so put each test class in its own file.
+
+**Test fixtures:** Place fixture classes in `stdlib/test/fixtures/`. All `.bt` files in this directory are automatically compiled and made available to all test files — no explicit loading needed. Just use the class name directly in your tests.
 
 **Test file format:**
 ```beamtalk
 // stdlib/test/counter_test.bt
+// Counter class is available from stdlib/test/fixtures/counter.bt — no @load needed
 
 TestCase subclass: CounterTest
 
@@ -652,8 +655,21 @@ fn test_directory_change() {
 See [BT-115](https://linear.app/beamtalk/issue/BT-115) for the implementation details of the named lock system.
 
 ### Test Fixtures
-- Erlang: `test_*.erl` in `runtime/apps/beamtalk_runtime/test/` for reusable actors
-- Beamtalk: `test-package-compiler/cases/*/main.bt` for compiler test inputs
+
+**BUnit fixtures (Smalltalk image model):** Place fixture `.bt` files in `stdlib/test/fixtures/`. These are automatically compiled and available to all BUnit test files — no `@load` directives needed. Just use the fixture class name directly in your test methods. This mirrors the Smalltalk approach where all classes exist in the running image.
+
+```text
+stdlib/test/fixtures/
+├── counter.bt            # Counter actor
+├── typed_counter.bt      # Typed actor with Integer state
+├── typed_account.bt      # Typed actor with Integer + String state
+├── math_helper.bt        # Value type with recursion helpers
+└── ...                   # ~46 fixture files
+```
+
+**Erlang fixtures:** `test_*.erl` in `runtime/apps/beamtalk_runtime/test/` for reusable actors.
+
+**Compiler fixtures:** `test-package-compiler/cases/*/main.bt` for compiler test inputs.
 
 ---
 
@@ -716,12 +732,14 @@ sideEffectExpression
 ### Adding a BUnit Test (TestCase Classes)
 
 1. Create `stdlib/test/my_feature_test.bt` with `TestCase subclass: MyFeatureTest`
-2. Add test methods prefixed with `test` (auto-discovered)
-3. Optionally add `setUp`/`tearDown` for fixtures
-4. Run `just test-bunit`
+2. If you need a helper class, add it to `stdlib/test/fixtures/` — it will be auto-compiled
+3. Add test methods prefixed with `test` (auto-discovered)
+4. Optionally add `setUp`/`tearDown` for lifecycle
+5. Run `just test-bunit`
 
 Example test file:
 ```beamtalk
+// Fixture classes from stdlib/test/fixtures/ are automatically available
 TestCase subclass: MyFeatureTest
   setUp =>
     self.thing := MyThing new
