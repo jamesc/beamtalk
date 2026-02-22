@@ -1,0 +1,53 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for >> hierarchy walking (ADR 0033, BT-770)
+//
+// Verifies that >> walks the superclass chain to find inherited methods,
+// matching Pharo's semantics.
+
+// @load stdlib/test/fixtures/hierarchy_test_classes.bt
+// @load stdlib/test/fixtures/hierarchy_test_child.bt
+
+TestCase subclass: MethodResolverHierarchyTest
+
+  // --- Inherited method resolution ---
+
+  testInheritedMethodReturnsCompiledMethod =>
+    // greetParent is defined on HierarchyParent, inherited by HierarchyChild
+    m := HierarchyChild >> #greetParent.
+    self assert: m class equals: CompiledMethod.
+    self assert: m selector equals: #greetParent
+
+  testInheritedMethodFromObject =>
+    // isNil is defined on Object, inherited by HierarchyChild
+    m := HierarchyChild >> #isNil.
+    self assert: m class equals: CompiledMethod.
+    self assert: m selector equals: #isNil
+
+  // --- Local methods still work ---
+
+  testLocalMethodStillReturnsCompiledMethod =>
+    m := HierarchyChild >> #greetChild.
+    self assert: m class equals: CompiledMethod.
+    self assert: m selector equals: #greetChild
+
+  // --- Local method takes precedence over inherited ---
+
+  testLocalMethodShadowsInherited =>
+    // sharedMethod is defined on both parent and child
+    m := HierarchyChild >> #sharedMethod.
+    self assert: m class equals: CompiledMethod.
+    self assert: m selector equals: #sharedMethod
+
+  // --- Non-existent methods still return nil ---
+
+  testNonExistentMethodReturnsNil =>
+    self assert: (HierarchyChild >> #nonExistent) equals: nil
+
+  // --- Inherited method carries doc from defining class ---
+
+  testInheritedMethodDocFromParent =>
+    HierarchyParent setDocForMethod: #greetParent to: "Parent greeting".
+    m := HierarchyChild >> #greetParent.
+    self assert: m doc equals: "Parent greeting"
