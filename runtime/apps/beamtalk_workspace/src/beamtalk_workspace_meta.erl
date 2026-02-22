@@ -506,7 +506,7 @@ extract_package_name(Content) ->
     %% Find the [package] section and extract name = "value"
     case re:run(Content, <<"\\[package\\]">>, [{capture, none}]) of
         match ->
-            %% Extract name = "value" (handles both single and double quotes)
+            %% Extract name = "value" (TOML only supports double-quoted strings)
             case
                 re:run(
                     Content,
