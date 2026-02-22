@@ -523,18 +523,28 @@ fn handle_compile(request: &Map) -> Term {
         }
     }
 
-    // Derive module name from first class in AST (ADR 0016)
-    let base_name = if let Some(first_class) = module.classes.first() {
-        beamtalk_core::erlang::to_module_name(&first_class.name.name)
-    } else {
-        // No class definition — use a fallback
-        return error_response(&["No class definition found in source".to_string()]);
-    };
+    // BT-775: Accept optional module_name override from caller.
+    // When provided, use it directly instead of deriving from the class name.
+    // This allows the REPL/MCP load path to produce package-qualified names
+    // matching the build system (e.g., bt@my_app@scheme@symbol).
+    let module_name_override = map_get(request, "module_name").and_then(term_to_string);
 
-    let module_name = if stdlib_mode {
-        format!("bt@stdlib@{base_name}")
+    let module_name = if let Some(override_name) = module_name_override {
+        override_name
     } else {
-        format!("bt@{base_name}")
+        // Derive module name from first class in AST (ADR 0016)
+        let base_name = if let Some(first_class) = module.classes.first() {
+            beamtalk_core::erlang::to_module_name(&first_class.name.name)
+        } else {
+            // No class definition — use a fallback
+            return error_response(&["No class definition found in source".to_string()]);
+        };
+
+        if stdlib_mode {
+            format!("bt@stdlib@{base_name}")
+        } else {
+            format!("bt@{base_name}")
+        }
     };
 
     // Extract class info

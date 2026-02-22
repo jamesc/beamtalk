@@ -23,6 +23,7 @@
 -export([start_link/1, get_metadata/0, update_activity/0, get_last_activity/0]).
 -export([register_actor/1, unregister_actor/1, supervised_actors/0]).
 -export([register_module/1, loaded_modules/0]).
+-export([get_package_name/0]).
 % Alias for get_metadata/0
 -export([get/0]).
 
@@ -43,6 +44,7 @@
 -record(state, {
     workspace_id :: binary(),
     project_path :: binary() | undefined,
+    package_name :: binary() | undefined,
     created_at :: integer(),
     last_activity :: integer(),
     node_name :: atom(),
@@ -57,6 +59,7 @@
 -type metadata() :: #{
     workspace_id => binary(),
     project_path => binary() | undefined,
+    package_name => binary() | undefined,
     created_at => integer(),
     last_activity => integer(),
     node_name => atom(),
@@ -88,6 +91,17 @@ get_metadata() ->
 -spec get() -> {ok, metadata()} | {error, not_started}.
 get() ->
     get_metadata().
+
+%% @doc Get the package name for the current workspace.
+%% Returns `undefined` if no package is configured or the server is not started.
+-spec get_package_name() -> binary() | undefined.
+get_package_name() ->
+    try
+        gen_server:call(?MODULE, get_package_name)
+    catch
+        exit:{noproc, _} ->
+            undefined
+    end.
 
 %% @doc Update the last activity timestamp to now.
 %% Called by other components when activity occurs (message sent, code loaded, etc.)
@@ -168,6 +182,8 @@ loaded_modules() ->
 init(InitialMetadata) ->
     WorkspaceId = maps:get(workspace_id, InitialMetadata),
     ProjectPath = maps:get(project_path, InitialMetadata, undefined),
+    %% BT-775: Auto-detect package name from beamtalk.toml at project_path
+    PackageName = detect_package_name(ProjectPath),
     CreatedAt = maps:get(created_at, InitialMetadata),
     ReplPort = maps:get(repl_port, InitialMetadata, undefined),
     Now = erlang:system_time(second),
@@ -205,6 +221,7 @@ init(InitialMetadata) ->
     State = #state{
         workspace_id = WorkspaceId,
         project_path = ProjectPath,
+        package_name = PackageName,
         created_at = CreatedAt,
         last_activity = Now,
         node_name = node(),
@@ -229,6 +246,7 @@ handle_call(get_metadata, _From, State) ->
     Metadata = #{
         workspace_id => State#state.workspace_id,
         project_path => State#state.project_path,
+        package_name => State#state.package_name,
         created_at => State#state.created_at,
         last_activity => State#state.last_activity,
         node_name => State#state.node_name,
@@ -237,6 +255,8 @@ handle_call(get_metadata, _From, State) ->
         loaded_modules => State#state.loaded_modules
     },
     {reply, {ok, Metadata}, State};
+handle_call(get_package_name, _From, State) ->
+    {reply, State#state.package_name, State};
 handle_call(get_last_activity, _From, State) ->
     {reply, {ok, State#state.last_activity}, State};
 handle_call(supervised_actors, _From, State) ->
@@ -460,4 +480,45 @@ safe_existing_atom(Binary) ->
         Atom -> Atom
     catch
         _:_ -> undefined
+    end.
+
+%% @private
+%% BT-775: Detect the package name from beamtalk.toml at the given project path.
+%% Uses simple regex extraction — no TOML parser needed since we only need
+%% the `name = "..."` field from the `[package]` section.
+-spec detect_package_name(binary() | undefined) -> binary() | undefined.
+detect_package_name(undefined) ->
+    undefined;
+detect_package_name(ProjectPath) when is_binary(ProjectPath) ->
+    ManifestPath = filename:join(binary_to_list(ProjectPath), "beamtalk.toml"),
+    case file:read_file(ManifestPath) of
+        {ok, Content} ->
+            extract_package_name(Content);
+        {error, _} ->
+            undefined
+    end.
+
+%% @private
+%% Extract the package name from beamtalk.toml content.
+%% Matches `name = "..."` after `[package]` section header.
+-spec extract_package_name(binary()) -> binary() | undefined.
+extract_package_name(Content) ->
+    %% Find the [package] section and extract name = "value"
+    case re:run(Content, <<"\\[package\\]">>, [{capture, none}]) of
+        match ->
+            %% Extract name = "value" (TOML only supports double-quoted strings)
+            case
+                re:run(
+                    Content,
+                    <<"name\\s*=\\s*\"([a-z][a-z0-9_]*)\"">>,
+                    [{capture, [1], binary}]
+                )
+            of
+                {match, [Name]} ->
+                    Name;
+                nomatch ->
+                    undefined
+            end;
+        nomatch ->
+            undefined
     end.
