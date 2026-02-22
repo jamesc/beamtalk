@@ -220,15 +220,29 @@ pub fn list_workspaces() -> Result<Vec<WorkspaceSummary>> {
 
 /// Stop a workspace by name or ID.
 ///
+/// If `name_or_id` is `None`, attempts to find the workspace for the current directory.
+///
 /// Uses TCP shutdown (graceful OTP teardown via `init:stop()`) as primary
 /// mechanism. Falls back to OS-level force-kill if `force` is true or if
 /// graceful shutdown times out.
-pub fn stop_workspace(name_or_id: &str, force: bool) -> Result<()> {
+pub fn stop_workspace(name_or_id: Option<&str>, force: bool) -> Result<()> {
     // Resolve workspace ID
-    let workspace_id = resolve_workspace_id(name_or_id)?;
+    let workspace_id = if let Some(name) = name_or_id {
+        resolve_workspace_id(name)?
+    } else {
+        let cwd = std::env::current_dir().into_diagnostic()?;
+        let project_root = discovery::discover_project_root(&cwd);
+        find_workspace_by_project_path(&project_root)?
+            .unwrap_or(generate_workspace_id(&project_root)?)
+    };
 
     if !workspace_exists(&workspace_id)? {
-        return Err(miette!("Workspace '{name_or_id}' does not exist"));
+        return Err(match name_or_id {
+            Some(name) => miette!("Workspace '{name}' does not exist"),
+            None => miette!(
+                "No workspace found for current directory. Specify a name: beamtalk workspace stop <name>"
+            ),
+        });
     }
 
     let node_info = get_node_info(&workspace_id)?;
