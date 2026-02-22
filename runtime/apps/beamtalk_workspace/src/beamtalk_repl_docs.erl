@@ -1,22 +1,21 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc REPL documentation helper — fetches and formats EEP-48 docs.
+%%% @doc REPL documentation helper — fetches and formats runtime docs.
 %%%
 %%% **DDD Context:** REPL — Documentation
 %%%
 %%% Provides documentation lookup for `:help ClassName` and
-%%% `:help ClassName selector` commands. Fetches EEP-48 doc chunks
-%%% from compiled .beam files via `code:get_doc/1` and walks the
-%%% class hierarchy for inherited method docs.
+%%% `:help ClassName selector` commands. Uses the runtime-embedded
+%%% documentation system (ADR 0033) via message sends on live objects.
+%%% Class docs are retrieved via `gen_server:call(ClassPid, get_doc)`.
+%%% Method docs are retrieved via `>> #selector` (CompiledMethod maps).
 
 -module(beamtalk_repl_docs).
 
 -export([
     format_class_docs/1,
-    format_method_doc/2,
-    get_module_doc/1,
-    get_method_signatures/2
+    format_method_doc/2
 ]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -26,10 +25,7 @@
 -ifdef(TEST).
 -export([
     safe_to_existing_atom/1,
-    get_doc_entries/1,
-    find_doc_entry/2,
-    get_method_signatures_with_sealed/3,
-    get_method_doc/2,
+    get_method_doc_from_class/2,
     group_by_class/1,
     format_class_output/6,
     format_superclass/1,
@@ -52,13 +48,16 @@ format_class_docs(ClassName) ->
             {error, {class_not_found, ClassName}};
         ClassPid ->
             try
-                ModuleName = gen_server:call(ClassPid, module_name, 5000),
                 Superclass = gen_server:call(ClassPid, superclass, 5000),
                 IsSealed = gen_server:call(ClassPid, is_sealed, 5000),
                 IsAbstract = gen_server:call(ClassPid, is_abstract, 5000),
 
-                %% Get module doc from EEP-48 chunks
-                ModuleDoc = get_module_doc(ModuleName),
+                %% Get class doc from runtime (ADR 0033)
+                ModuleDoc =
+                    case gen_server:call(ClassPid, get_doc, 5000) of
+                        none -> none;
+                        Doc when is_binary(Doc) -> Doc
+                    end,
 
                 %% Walk class hierarchy to collect #{Sel => {DefiningClass, MethodInfo}}
                 Flattened = collect_flattened_methods(ClassName, ClassPid),
@@ -78,11 +77,11 @@ format_class_docs(ClassName) ->
                     Flattened
                 ),
 
-                %% Get EEP-48 method signatures for own methods
+                %% Get method signatures and docs from runtime for own methods
                 OwnSelectors = lists:sort([S || {S, _} <- Own]),
                 SealedMap = maps:from_list(Own),
                 OwnDocs = get_method_signatures_with_sealed(
-                    ModuleName, OwnSelectors, SealedMap
+                    ClassPid, OwnSelectors, SealedMap
                 ),
 
                 %% Group inherited by defining class
@@ -122,26 +121,29 @@ format_method_doc(ClassName, SelectorBin) ->
                 {error, badarg} ->
                     {error, {method_not_found, ClassName, SelectorBin}};
                 {ok, SelectorAtom} ->
-                    case find_method_in_chain(ClassPid, SelectorAtom) of
-                        {ok, DefiningClass} ->
-                            %% Found the method — get its doc from the defining class
-                            DocInfo =
-                                case beamtalk_class_registry:whereis_class(DefiningClass) of
-                                    undefined ->
-                                        {atom_to_binary(SelectorAtom, utf8), none};
-                                    DefClassPid ->
-                                        DefModule = gen_server:call(DefClassPid, module_name, 5000),
-                                        get_method_doc(DefModule, SelectorAtom)
-                                end,
-                            Output = format_method_output(
-                                ClassName,
-                                SelectorBin,
-                                DefiningClass,
-                                DocInfo
-                            ),
-                            {ok, Output};
-                        not_found ->
-                            {error, {method_not_found, ClassName, SelectorBin}}
+                    try
+                        %% Use >> to walk hierarchy and get CompiledMethod
+                        case beamtalk_method_resolver:resolve(ClassPid, SelectorAtom) of
+                            nil ->
+                                {error, {method_not_found, ClassName, SelectorBin}};
+                            MethodObj when is_map(MethodObj) ->
+                                %% Find which class defines this method
+                                DefiningClass = find_defining_class(ClassPid, SelectorAtom),
+                                %% Extract doc and signature from CompiledMethod
+                                DocInfo = method_doc_info(MethodObj, SelectorAtom),
+                                Output = format_method_output(
+                                    ClassName,
+                                    SelectorBin,
+                                    DefiningClass,
+                                    DocInfo
+                                ),
+                                {ok, Output}
+                        end
+                    catch
+                        exit:{timeout, _} ->
+                            {error, {class_not_found, ClassName}};
+                        exit:{noproc, _} ->
+                            {error, {class_not_found, ClassName}}
                     end
             end
     end.
@@ -207,97 +209,73 @@ safe_to_existing_atom(Bin) when is_binary(Bin) ->
         error:badarg -> {error, badarg}
     end.
 
-%% @doc Get module-level doc from EEP-48 chunks.
--spec get_module_doc(atom()) -> binary() | none.
-get_module_doc(ModuleName) ->
-    case code:get_doc(ModuleName) of
-        {ok, {docs_v1, _Anno, _Lang, _Format, ModDoc, _Meta, _Docs}} ->
-            case ModDoc of
-                #{<<"en">> := Text} -> Text;
-                _ -> none
-            end;
-        _ ->
-            none
-    end.
+%% @doc Get method doc info from a CompiledMethod map.
+%% Returns {Signature, DocText | none}.
+-spec method_doc_info(map(), atom()) -> {binary(), binary() | none}.
+method_doc_info(MethodObj, SelectorAtom) ->
+    %% Extract doc from __doc__ field
+    Doc =
+        case maps:get('__doc__', MethodObj, nil) of
+            nil -> none;
+            DocBin when is_binary(DocBin) -> DocBin
+        end,
+    %% Use selector as signature (CompiledMethod has selector info)
+    Signature = atom_to_binary(SelectorAtom, utf8),
+    {Signature, Doc}.
 
-%% @doc Get method signatures from EEP-48 doc entries.
--spec get_method_signatures(atom(), [atom()]) -> [{atom(), binary(), binary() | none}].
-get_method_signatures(ModuleName, Selectors) ->
-    DocEntries = get_doc_entries(ModuleName),
-    lists:filtermap(
+%% @doc Get method signatures and docs from runtime for a list of selectors.
+-spec get_method_signatures_with_sealed(pid(), [atom()], map()) ->
+    [{atom(), binary(), binary() | none, boolean()}].
+get_method_signatures_with_sealed(ClassPid, Selectors, SealedMap) ->
+    lists:map(
         fun(Selector) ->
-            case find_doc_entry(Selector, DocEntries) of
-                {ok, Signature, Doc} ->
-                    {true, {Selector, Signature, Doc}};
-                not_found ->
-                    %% Method exists but no doc entry — show selector name
-                    {true, {Selector, atom_to_binary(Selector, utf8), none}}
-            end
+            {Sig, Doc} = get_method_doc_from_class(ClassPid, Selector),
+            IsSealed = maps:get(Selector, SealedMap, false),
+            {Selector, Sig, Doc, IsSealed}
         end,
         Selectors
     ).
 
-%% @doc Get method signatures with sealed flags from EEP-48 doc entries.
--spec get_method_signatures_with_sealed(atom(), [atom()], map()) ->
-    [{atom(), binary(), binary() | none, boolean()}].
-get_method_signatures_with_sealed(ModuleName, Selectors, SealedMap) ->
-    BaseDocs = get_method_signatures(ModuleName, Selectors),
-    lists:map(
-        fun({Selector, Signature, Doc}) ->
-            IsSealed = maps:get(Selector, SealedMap, false),
-            {Selector, Signature, Doc, IsSealed}
-        end,
-        BaseDocs
-    ).
-
-%% @doc Get full method doc (signature + doc text) for a specific selector.
--spec get_method_doc(atom(), atom()) -> {binary(), binary() | none}.
-get_method_doc(ModuleName, Selector) ->
-    DocEntries = get_doc_entries(ModuleName),
-    case find_doc_entry(Selector, DocEntries) of
-        {ok, Signature, Doc} -> {Signature, Doc};
-        not_found -> {atom_to_binary(Selector, utf8), none}
+%% @doc Get method signature and doc text from a class's runtime state.
+-spec get_method_doc_from_class(pid(), atom()) -> {binary(), binary() | none}.
+get_method_doc_from_class(ClassPid, Selector) ->
+    case gen_server:call(ClassPid, {method, Selector}, 5000) of
+        nil ->
+            {atom_to_binary(Selector, utf8), none};
+        MethodObj when is_map(MethodObj) ->
+            method_doc_info(MethodObj, Selector)
     end.
 
-%% @doc Extract doc entries from EEP-48 chunks.
--spec get_doc_entries(atom()) -> list().
-get_doc_entries(ModuleName) ->
-    case code:get_doc(ModuleName) of
-        {ok, {docs_v1, _Anno, _Lang, _Format, _ModDoc, _Meta, Docs}} ->
-            Docs;
-        _ ->
-            []
-    end.
+%% @doc Find which class in the hierarchy defines a selector.
+%% Returns the class name atom.
+-spec find_defining_class(pid(), atom()) -> atom().
+find_defining_class(ClassPid, Selector) ->
+    find_defining_class(ClassPid, Selector, 0).
 
-%% @doc Find a doc entry by selector atom.
--spec find_doc_entry(atom(), list()) -> {ok, binary(), binary() | none} | not_found.
-find_doc_entry(Selector, DocEntries) ->
-    Result = lists:dropwhile(
-        fun(Entry) ->
-            case Entry of
-                {{function, _Name, _Arity}, _Anno, _Sigs, _Doc, #{selector := S}} ->
-                    S =/= Selector;
-                _ ->
-                    true
-            end
-        end,
-        DocEntries
+-spec find_defining_class(pid(), atom(), non_neg_integer()) -> atom().
+find_defining_class(ClassPid, Selector, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+    ClassName = gen_server:call(ClassPid, class_name, 5000),
+    ?LOG_WARNING(
+        "find_defining_class: max hierarchy depth ~p exceeded at ~p for selector ~p — possible cycle",
+        [?MAX_HIERARCHY_DEPTH, ClassName, Selector]
     ),
-    case Result of
-        [{{function, _Name, _Arity}, _Anno, Sigs, Doc, _Meta} | _] ->
-            Signature =
-                case Sigs of
-                    [S | _] -> S;
-                    _ -> atom_to_binary(Selector, utf8)
-                end,
-            DocText =
-                case Doc of
-                    #{<<"en">> := Text} -> Text;
-                    _ -> none
-                end,
-            {ok, Signature, DocText};
-        _ ->
-            not_found
+    ClassName;
+find_defining_class(ClassPid, Selector, Depth) ->
+    ClassName = gen_server:call(ClassPid, class_name, 5000),
+    case gen_server:call(ClassPid, {method, Selector}, 5000) of
+        nil ->
+            %% Not in local instance_methods — check superclass
+            case gen_server:call(ClassPid, superclass, 5000) of
+                none ->
+                    ClassName;
+                Super ->
+                    case beamtalk_class_registry:whereis_class(Super) of
+                        undefined -> ClassName;
+                        SuperPid -> find_defining_class(SuperPid, Selector, Depth + 1)
+                    end
+            end;
+        _MethodInfo ->
+            ClassName
     end.
 
 %% @doc Group inherited methods by defining class.
@@ -470,45 +448,6 @@ collect_chain_methods(SuperName, Depth) ->
     case beamtalk_class_registry:whereis_class(SuperName) of
         undefined -> #{};
         SuperPid -> collect_flattened_methods(SuperName, SuperPid, Depth)
-    end.
-
-%% @private
-%% @doc Walk the class hierarchy to find which class defines a selector.
-%%
-%% ADR 0032 Phase 1: Replaces {lookup_flattened, Selector} gen_server call.
-%% Returns {ok, DefiningClass} or not_found.
-%%
-%% Uses {method, Selector} to check only the local instance_methods map,
-%% NOT the compiled module's has_method/1. This correctly identifies the
-%% defining class rather than the class that dispatches the method.
--spec find_method_in_chain(pid(), atom()) -> {ok, atom()} | not_found.
-find_method_in_chain(ClassPid, Selector) ->
-    find_method_in_chain(ClassPid, Selector, 0).
-
--spec find_method_in_chain(pid(), atom(), non_neg_integer()) -> {ok, atom()} | not_found.
-find_method_in_chain(ClassPid, Selector, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
-    ClassName = gen_server:call(ClassPid, class_name, 5000),
-    ?LOG_WARNING(
-        "find_method_in_chain: max hierarchy depth ~p exceeded at ~p for selector ~p — possible cycle",
-        [?MAX_HIERARCHY_DEPTH, ClassName, Selector]
-    ),
-    not_found;
-find_method_in_chain(ClassPid, Selector, Depth) ->
-    ClassName = gen_server:call(ClassPid, class_name, 5000),
-    case gen_server:call(ClassPid, {method, Selector}, 5000) of
-        nil ->
-            %% Not in local instance_methods — check superclass
-            case gen_server:call(ClassPid, superclass, 5000) of
-                none ->
-                    not_found;
-                Super ->
-                    case beamtalk_class_registry:whereis_class(Super) of
-                        undefined -> not_found;
-                        SuperPid -> find_method_in_chain(SuperPid, Selector, Depth + 1)
-                    end
-            end;
-        _MethodInfo ->
-            {ok, ClassName}
     end.
 
 %% @doc Format method-specific documentation output.

@@ -7,7 +7,8 @@
 //!
 //! Parses `.bt` source files, extracts doc comments and class hierarchy,
 //! and generates static HTML reference documentation. The generated docs
-//! match what would be available at runtime via EEP-48 `code:get_doc/1`.
+//! match what would be available at runtime via the runtime-embedded
+//! documentation system (ADR 0033).
 //!
 //! Part of ADR 0008 (Doc Comments and API Documentation).
 

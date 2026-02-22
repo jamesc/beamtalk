@@ -4,7 +4,7 @@
 %% @doc Tests for beamtalk_build_worker (ADR 0022, Phase 3).
 %%
 %% Tests the batch compiler worker's in-memory compilation pipeline,
-%% file I/O, docs chunk injection, and parallel worker management.
+%% file I/O, and parallel worker management.
 
 -module(beamtalk_build_worker_tests).
 
@@ -85,54 +85,6 @@ compile_core_file_invalid(TmpDir) ->
     ok = file:write_file(CoreFile, <<"not core erlang">>),
     Result = beamtalk_build_worker:compile_core_file(CoreFile, OutDir),
     ?assertEqual(error, Result).
-
-%%% ---------------------------------------------------------------
-%%% inject_docs_chunk/3 — EEP-48 doc chunk injection
-%%% ---------------------------------------------------------------
-
-inject_docs_chunk_test_() ->
-    {setup, fun setup_temp_dir/0, fun cleanup_temp_dir/1, fun(TmpDir) ->
-        [
-            {"injects docs chunk into .beam file", fun() -> inject_docs_chunk_valid(TmpDir) end},
-            {"silently ignores missing .docs file", fun() -> inject_docs_chunk_no_docs(TmpDir) end},
-            {"silently ignores missing .beam file", fun() -> inject_docs_chunk_no_beam(TmpDir) end}
-        ]
-    end}.
-
-inject_docs_chunk_valid(TmpDir) ->
-    %% First compile a .core file to get a real .beam
-    CoreFile = filename:join(TmpDir, "test_build_worker_mod.core"),
-    OutDir = filename:join(TmpDir, "ebin2"),
-    ok = filelib:ensure_dir(filename:join(OutDir, "dummy")),
-    ok = file:write_file(CoreFile, valid_core_erlang_source()),
-    {ok, test_build_worker_mod} = beamtalk_build_worker:compile_core_file(CoreFile, OutDir),
-    %% Create a .docs file next to the .core file
-    DocsFile = filename:join(TmpDir, "test_build_worker_mod.docs"),
-    DocsTerm =
-        {docs_v1, erlang:system_info(otp_release), erlang, <<"text/plain">>,
-            #{<<"en">> => <<"Test module doc">>}, #{}, []},
-    ok = file:write_file(DocsFile, io_lib:format("~p.", [DocsTerm])),
-    %% Inject — should succeed silently (ok)
-    ok = beamtalk_build_worker:inject_docs_chunk(CoreFile, test_build_worker_mod, OutDir),
-    %% Verify the Docs chunk exists
-    BeamFile = filename:join(OutDir, "test_build_worker_mod.beam"),
-    {ok, _, AllChunks} = beam_lib:all_chunks(BeamFile),
-    DocsChunks = [Data || {"Docs", Data} <- AllChunks],
-    ?assertEqual(1, length(DocsChunks)).
-
-inject_docs_chunk_no_docs(TmpDir) ->
-    %% No .docs file exists — should return ok (silently ignored)
-    CoreFile = filename:join(TmpDir, "no_docs_mod.core"),
-    ok = beamtalk_build_worker:inject_docs_chunk(CoreFile, no_docs_mod, TmpDir).
-
-inject_docs_chunk_no_beam(TmpDir) ->
-    %% .docs file exists but no .beam — should return ok (silently ignored)
-    CoreFile = filename:join(TmpDir, "no_beam_mod.core"),
-    DocsFile = filename:join(TmpDir, "no_beam_mod.docs"),
-    ok = file:write_file(
-        DocsFile, io_lib:format("~p.", [{docs_v1, [], erlang, none, none, #{}, []}])
-    ),
-    ok = beamtalk_build_worker:inject_docs_chunk(CoreFile, no_beam_mod, TmpDir).
 
 %%% ---------------------------------------------------------------
 %%% compile_modules/2 — parallel worker pool
