@@ -161,7 +161,7 @@ enum Command {
     /// Run compiled stdlib tests (ADR 0014 Phase 1)
     TestStdlib {
         /// File or directory containing .bt test files
-        #[arg(default_value = "stdlib/bootstrap-test")]
+        #[arg(default_value = "bootstrap-test")]
         path: String,
 
         /// Suppress warning diagnostics when compiling test fixtures
@@ -180,7 +180,7 @@ enum Command {
     /// Run `BUnit` tests — discover and run `TestCase` subclasses (ADR 0014 Phase 2)
     Test {
         /// Test file or directory containing .bt test files
-        #[arg(default_value = "stdlib/test")]
+        #[arg(default_value = "test")]
         path: String,
     },
 
