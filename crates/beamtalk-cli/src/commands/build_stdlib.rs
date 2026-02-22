@@ -555,7 +555,7 @@ fn generate_app_src_file(src_dir: &Utf8Path, class_metadata: &[ClassMeta]) -> Re
             )
         })
         .collect::<Vec<_>>()
-        .join(",\n        ");
+        .join(",\n            ");
 
     let app_src_content = format!(
         "{{application, beamtalk_stdlib, [\n\
@@ -565,7 +565,9 @@ fn generate_app_src_file(src_dir: &Utf8Path, class_metadata: &[ClassMeta]) -> Re
          \x20   {{registered, []}},\n\
          \x20   {{applications, [kernel, stdlib, beamtalk_runtime]}},\n\
          \x20   {{env, [\n\
-         \x20       {{classes, [{classes_list}]}}\n\
+         \x20       {{classes, [\n\
+         \x20           {classes_list}\n\
+         \x20       ]}}\n\
          \x20   ]}}\n\
          ]}}.\n"
     );
