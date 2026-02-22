@@ -545,14 +545,18 @@ impl TypeChecker {
 
         // Check if class-side method exists (skip warning for DNU override classes)
         let has_class_method = hierarchy.find_class_method(class_name, selector).is_some();
-        let has_builtin_class_method = Self::is_builtin_class_method(selector);
 
-        if !has_class_method
-            && !has_builtin_class_method
-            && !hierarchy.has_class_dnu_override(class_name)
-        {
-            // Also check instance-side (some methods are both)
-            if !hierarchy.resolves_selector(class_name, selector) {
+        if !has_class_method && !hierarchy.has_class_dnu_override(class_name) {
+            // Fall back to the Class→Behaviour→Object→ProtoObject instance-method chain.
+            // At runtime, class objects dispatch through this chain (ADR 0032 Phase 0
+            // fallthrough), so the type checker must model the same path.
+            //
+            // Also check instance methods on the receiver class itself: methods like
+            // `spawn` and `new` are defined as instance methods on Actor/Object but
+            // are dispatched class-side by the runtime.
+            let has_class_chain_method = hierarchy.resolves_selector("Class", selector)
+                || hierarchy.resolves_selector(class_name, selector);
+            if !has_class_chain_method {
                 self.emit_unknown_selector_warning(class_name, selector, span, hierarchy, true);
             }
         }
@@ -974,12 +978,6 @@ impl TypeChecker {
         }
 
         self.diagnostics.push(diag);
-    }
-
-    /// Check if a selector is a built-in class method available on all classes.
-    /// Auto-generated from `beamtalk_class_dispatch.erl` via build.rs (BT-722).
-    fn is_builtin_class_method(selector: &str) -> bool {
-        include!(concat!(env!("OUT_DIR"), "/builtin_class_methods.rs"))
     }
 
     /// Find a similar selector for "did you mean" hints.
@@ -3178,6 +3176,189 @@ mod tests {
             checker.diagnostics().is_empty(),
             "Union type annotations should not produce false positives, got: {:?}",
             checker.diagnostics()
+        );
+    }
+
+    // --- Behaviour protocol / Class hierarchy fallback tests (BT-777) ---
+
+    #[test]
+    fn test_behaviour_protocol_superclass_no_warning() {
+        // Integer superclass — should NOT warn (superclass is a Behaviour instance method
+        // resolved via the Class→Behaviour chain fallback)
+        let module = make_module(vec![msg_send(
+            class_ref("Integer"),
+            MessageSelector::Unary("superclass".into()),
+            vec![],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let dnu_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu_warnings.is_empty(),
+            "Integer superclass should produce no warning, got: {dnu_warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_behaviour_protocol_methods_no_warning() {
+        // Integer methods — should NOT warn
+        let module = make_module(vec![msg_send(
+            class_ref("Integer"),
+            MessageSelector::Unary("methods".into()),
+            vec![],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let dnu_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu_warnings.is_empty(),
+            "Integer methods should produce no warning, got: {dnu_warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_behaviour_protocol_subclasses_no_warning() {
+        // Integer subclasses — should NOT warn
+        let module = make_module(vec![msg_send(
+            class_ref("Integer"),
+            MessageSelector::Unary("subclasses".into()),
+            vec![],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let dnu_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu_warnings.is_empty(),
+            "Integer subclasses should produce no warning, got: {dnu_warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_behaviour_protocol_all_superclasses_no_warning() {
+        // String allSuperclasses — should NOT warn
+        let module = make_module(vec![msg_send(
+            class_ref("String"),
+            MessageSelector::Unary("allSuperclasses".into()),
+            vec![],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let dnu_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu_warnings.is_empty(),
+            "String allSuperclasses should produce no warning, got: {dnu_warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_class_protocol_name_no_warning() {
+        // Integer name — should NOT warn (name is a Class instance method)
+        let module = make_module(vec![msg_send(
+            class_ref("Integer"),
+            MessageSelector::Unary("name".into()),
+            vec![],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let dnu_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu_warnings.is_empty(),
+            "Integer name should produce no warning, got: {dnu_warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_class_protocol_is_class_no_warning() {
+        // Integer isClass — should NOT warn
+        let module = make_module(vec![msg_send(
+            class_ref("Integer"),
+            MessageSelector::Unary("isClass".into()),
+            vec![],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let dnu_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu_warnings.is_empty(),
+            "Integer isClass should produce no warning, got: {dnu_warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_unknown_class_side_message_still_warns() {
+        // Integer bogusClassMethod — SHOULD warn (not in Class chain or instance methods)
+        let module = make_module(vec![msg_send(
+            class_ref("Integer"),
+            MessageSelector::Unary("bogusClassMethod".into()),
+            vec![],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let dnu_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert_eq!(
+            dnu_warnings.len(),
+            1,
+            "Integer bogusClassMethod should produce exactly one warning, got: {dnu_warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_behaviour_protocol_can_understand_no_warning() {
+        // Integer canUnderstand: #+ — should NOT warn (canUnderstand: is a Behaviour method)
+        let module = make_module(vec![msg_send(
+            class_ref("Integer"),
+            MessageSelector::Keyword(vec![crate::ast::KeywordPart {
+                keyword: "canUnderstand:".into(),
+                span: span(),
+            }]),
+            vec![Expression::Literal(Literal::Symbol("+".into()), span())],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let dnu_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu_warnings.is_empty(),
+            "Integer canUnderstand: should produce no warning, got: {dnu_warnings:?}"
         );
     }
 }
