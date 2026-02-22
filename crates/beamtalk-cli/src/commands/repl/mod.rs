@@ -644,7 +644,7 @@ pub fn run(
     // Ephemeral mode: stop workspace node on REPL exit (only in workspace mode)
     if should_stop_workspace(ephemeral, beam_guard_opt.is_some()) {
         if let Some(workspace_id) = workspace_id_opt {
-            if let Err(e) = crate::commands::workspace::stop_workspace(&workspace_id, false) {
+            if let Err(e) = crate::commands::workspace::stop_workspace(Some(&workspace_id), false) {
                 eprintln!("Warning: failed to stop workspace {workspace_id}: {e}");
             }
         }
