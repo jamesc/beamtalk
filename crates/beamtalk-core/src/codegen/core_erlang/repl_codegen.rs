@@ -181,11 +181,17 @@ impl CoreErlangGenerator {
         // Process all but the last expression
         for (i, expr) in expressions[..n - 1].iter().enumerate() {
             let result_var = format!("_R{}", i + 1);
+            // BT-790: Reset repl_loop_mutated before each expression so a loop mutation
+            // from one expression doesn't bleed into subsequent expressions.
+            self.repl_loop_mutated = false;
             let part = self.generate_repl_intermediate_expr(expr, &result_var)?;
             body_parts.push(part);
         }
 
         // Process the last expression
+        // BT-790: Reset repl_loop_mutated so a loop in intermediate position doesn't
+        // cause the final expression to incorrectly apply element/2 unwrapping.
+        self.repl_loop_mutated = false;
         let last_expr = &expressions[n - 1];
         let (last_val_doc, return_tuple) = self.generate_repl_last_expr(last_expr)?;
 
@@ -251,15 +257,30 @@ impl CoreErlangGenerator {
                 ]);
             }
         }
-        // Non-assignment: evaluate for side effects, discard value
+        // Non-assignment: evaluate for side effects, discard value.
+        // BT-790: If the expression is a mutation-threaded loop, it returns {Result, StateAcc}.
+        // Extract the updated StateAcc and thread it to subsequent expressions.
         let expr_doc = self.expression_doc(expr)?;
-        Ok(docvec![
-            "    let ",
-            result_var.to_string(),
-            " = ",
-            expr_doc,
-            " in\n",
-        ])
+        if self.repl_loop_mutated {
+            let new_state = self.next_state_var();
+            Ok(docvec![
+                "    let ",
+                result_var.to_string(),
+                " = ",
+                expr_doc,
+                Document::String(format!(
+                    " in let {new_state} = call 'erlang':'element'(2, {result_var}) in\n"
+                )),
+            ])
+        } else {
+            Ok(docvec![
+                "    let ",
+                result_var.to_string(),
+                " = ",
+                expr_doc,
+                " in\n",
+            ])
+        }
     }
 
     /// Generates the value and return tuple for the last expression in a

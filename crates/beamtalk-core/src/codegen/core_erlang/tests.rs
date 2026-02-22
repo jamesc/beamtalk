@@ -919,6 +919,252 @@ fn test_generate_repl_module_with_arithmetic() {
 }
 
 // ========================================================================
+// Multi-Statement REPL with Loop Mutations (BT-790)
+// ========================================================================
+
+#[test]
+fn test_generate_repl_multi_stmt_times_repeat_then_read() {
+    // BT-790: x := 1. 5 timesRepeat: [x := x + 1]. x
+    // The loop in intermediate position must thread its updated state to the final `x` read.
+
+    let span = Span::new(0, 1);
+
+    // x := 1
+    let x_id = Expression::Identifier(Identifier::new("x", span));
+    let one = Expression::Literal(Literal::Integer(1), span);
+    let assign_x = Expression::Assignment {
+        target: Box::new(x_id.clone()),
+        value: Box::new(one),
+        span,
+    };
+
+    // 5 timesRepeat: [x := x + 1]
+    let x_id2 = Expression::Identifier(Identifier::new("x", span));
+    let one2 = Expression::Literal(Literal::Integer(1), span);
+    let add = Expression::MessageSend {
+        receiver: Box::new(x_id2.clone()),
+        selector: MessageSelector::Binary("+".into()),
+        arguments: vec![one2],
+        span,
+    };
+    let loop_assign = Expression::Assignment {
+        target: Box::new(x_id2),
+        value: Box::new(add),
+        span,
+    };
+    let loop_body = Expression::Block(Block {
+        parameters: vec![],
+        body: vec![loop_assign],
+        span,
+    });
+    let five = Expression::Literal(Literal::Integer(5), span);
+    let times_repeat = Expression::MessageSend {
+        receiver: Box::new(five),
+        selector: MessageSelector::Keyword(vec![KeywordPart {
+            keyword: "timesRepeat:".into(),
+            span,
+        }]),
+        arguments: vec![loop_body],
+        span,
+    };
+
+    // x (final read)
+    let x_read = Expression::Identifier(Identifier::new("x", span));
+
+    let expressions = vec![assign_x, times_repeat, x_read];
+    let code = generate_repl_expressions(&expressions, "repl_multi_loop_test")
+        .expect("codegen should work");
+
+    eprintln!("Generated code for x := 1. 5 timesRepeat: [x := x + 1]. x:");
+    eprintln!("{code}");
+
+    // BT-790: The loop in intermediate position must have its StateAcc extracted
+    assert!(
+        code.contains("call 'erlang':'element'(2,"),
+        "Should extract StateAcc from loop result in intermediate position. Got:\n{code}"
+    );
+
+    // BT-790: The final x read must use a state that was updated by the loop
+    // (not the original State or State1 from the x := 1 assignment)
+    assert!(
+        code.contains("let Result ="),
+        "Should bind final result. Got:\n{code}"
+    );
+
+    // The overall structure: should have State1 from assignment, then state extraction from loop
+    assert!(
+        code.contains("maps':'put'('x'"),
+        "Should have maps:put for x assignment. Got:\n{code}"
+    );
+    assert!(
+        code.contains("letrec 'repeat'/2"),
+        "Should use arity-2 repeat function for mutation loop. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_generate_repl_multi_stmt_while_true_then_read() {
+    // BT-790: x := 0. [x < 5] whileTrue: [x := x + 1]. x
+    // whileTrue: in intermediate position must thread state to the final x read.
+
+    let span = Span::new(0, 1);
+
+    // x := 0
+    let x_id = Expression::Identifier(Identifier::new("x", span));
+    let zero = Expression::Literal(Literal::Integer(0), span);
+    let assign_x = Expression::Assignment {
+        target: Box::new(x_id),
+        value: Box::new(zero),
+        span,
+    };
+
+    // [x < 5] whileTrue: [x := x + 1]
+    let x_cond = Expression::Identifier(Identifier::new("x", span));
+    let five = Expression::Literal(Literal::Integer(5), span);
+    let cmp = Expression::MessageSend {
+        receiver: Box::new(x_cond),
+        selector: MessageSelector::Binary("<".into()),
+        arguments: vec![five],
+        span,
+    };
+    let condition = Expression::Block(Block {
+        parameters: vec![],
+        body: vec![cmp],
+        span,
+    });
+    let x_body = Expression::Identifier(Identifier::new("x", span));
+    let one = Expression::Literal(Literal::Integer(1), span);
+    let add = Expression::MessageSend {
+        receiver: Box::new(x_body.clone()),
+        selector: MessageSelector::Binary("+".into()),
+        arguments: vec![one],
+        span,
+    };
+    let loop_assign = Expression::Assignment {
+        target: Box::new(Expression::Identifier(Identifier::new("x", span))),
+        value: Box::new(add),
+        span,
+    };
+    let loop_body = Expression::Block(Block {
+        parameters: vec![],
+        body: vec![loop_assign],
+        span,
+    });
+    let while_true = Expression::MessageSend {
+        receiver: Box::new(condition),
+        selector: MessageSelector::Keyword(vec![KeywordPart {
+            keyword: "whileTrue:".into(),
+            span,
+        }]),
+        arguments: vec![loop_body],
+        span,
+    };
+
+    // x (final read)
+    let x_read = Expression::Identifier(Identifier::new("x", span));
+
+    let expressions = vec![assign_x, while_true, x_read];
+    let code = generate_repl_expressions(&expressions, "repl_multi_while_test")
+        .expect("codegen should work");
+
+    eprintln!("Generated code for x := 0. [x < 5] whileTrue: [x := x + 1]. x:");
+    eprintln!("{code}");
+
+    // BT-790: The loop in intermediate position must have its StateAcc extracted
+    assert!(
+        code.contains("call 'erlang':'element'(2,"),
+        "Should extract StateAcc from whileTrue: loop result in intermediate position. Got:\n{code}"
+    );
+
+    // Should bind the final result
+    assert!(
+        code.contains("let Result ="),
+        "Should bind final result. Got:\n{code}"
+    );
+
+    // Should use whileTrue: mutation-threaded structure
+    assert!(
+        code.contains("letrec 'while'/1"),
+        "Should use whileTrue: loop function. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_generate_repl_multi_stmt_loop_does_not_corrupt_final_expr() {
+    // BT-790: repl_loop_mutated must be reset before the final expression.
+    // x := 1. 5 timesRepeat: [x := x + 1]. 42
+    // The final expression `42` is not a loop, so it must NOT use element/2 unwrapping.
+
+    let span = Span::new(0, 1);
+
+    // x := 1
+    let x_id = Expression::Identifier(Identifier::new("x", span));
+    let one = Expression::Literal(Literal::Integer(1), span);
+    let assign_x = Expression::Assignment {
+        target: Box::new(x_id),
+        value: Box::new(one),
+        span,
+    };
+
+    // 5 timesRepeat: [x := x + 1]
+    let x_id2 = Expression::Identifier(Identifier::new("x", span));
+    let one2 = Expression::Literal(Literal::Integer(1), span);
+    let add = Expression::MessageSend {
+        receiver: Box::new(x_id2.clone()),
+        selector: MessageSelector::Binary("+".into()),
+        arguments: vec![one2],
+        span,
+    };
+    let loop_assign = Expression::Assignment {
+        target: Box::new(x_id2),
+        value: Box::new(add),
+        span,
+    };
+    let loop_body = Expression::Block(Block {
+        parameters: vec![],
+        body: vec![loop_assign],
+        span,
+    });
+    let five = Expression::Literal(Literal::Integer(5), span);
+    let times_repeat = Expression::MessageSend {
+        receiver: Box::new(five),
+        selector: MessageSelector::Keyword(vec![KeywordPart {
+            keyword: "timesRepeat:".into(),
+            span,
+        }]),
+        arguments: vec![loop_body],
+        span,
+    };
+
+    // 42 (final literal - not a loop)
+    let forty_two = Expression::Literal(Literal::Integer(42), span);
+
+    let expressions = vec![assign_x, times_repeat, forty_two];
+    let code = generate_repl_expressions(&expressions, "repl_multi_loop_no_corrupt_test")
+        .expect("codegen should work");
+
+    eprintln!("Generated code for x := 1. 5 timesRepeat: [x := x + 1]. 42:");
+    eprintln!("{code}");
+
+    // BT-790: Final expression is a literal — must NOT apply element/2 unwrapping on Result
+    // The return tuple must be {Result, StateN} where Result = 42 (not extracted from a tuple)
+    assert!(
+        !code.contains("'element'(1, Result)"),
+        "Final non-loop expression must NOT apply element(1, Result) unwrapping. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'element'(2, Result)"),
+        "Final non-loop expression must NOT apply element(2, Result) unwrapping. Got:\n{code}"
+    );
+
+    // The intermediate loop SHOULD still extract state (element(2, _R2))
+    assert!(
+        code.contains("call 'erlang':'element'(2,"),
+        "Intermediate loop must extract StateAcc. Got:\n{code}"
+    );
+}
+
+// ========================================================================
 // Block Evaluation Message Tests (BT-32)
 // ========================================================================
 
