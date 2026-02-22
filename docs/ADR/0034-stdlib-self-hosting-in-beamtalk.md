@@ -255,10 +255,10 @@ unwrapOr: default =>
 
 /// Unwrap an {ok, Value} tuple, or evaluate block with error reason.
 unwrapOrElse: block: Block =>
-  self isOk ifTrue: [self at: 2] ifFalse: [block value: self]
+  self isOk ifTrue: [self at: 2] ifFalse: [block value]
 ```
 
-> **Note:** The Erlang `unwrap` has three clauses: `{ok, Value}`, `{error, Reason}`, and any other tuple. The BT version preserves all three cases using `isOk` and `isError` checks, raising distinct errors for error-tuples vs non-ok/error tuples.
+> **Note:** The Erlang `unwrap` has three clauses: `{ok, Value}`, `{error, Reason}`, and any other tuple. The BT version preserves all three cases using `isOk` and `isError` checks, raising distinct errors for error-tuples vs non-ok/error tuples; implementations MUST preserve the original error details (for example, include the `Reason` or rethrow the original error) when handling `{error, Reason}` so debugging fidelity is not lost compared to the Erlang implementation.
 
 **Dictionary.bt** — iteration-based methods become pure BT:
 ```beamtalk
@@ -309,9 +309,11 @@ The following categories **must remain** as Erlang:
 | Bootstrap stubs | `beamtalk_bootstrap`, `beamtalk_behaviour_bt`, `beamtalk_class_bt` | Needed before stdlib compiles |
 | Future state machine | `beamtalk_future` (internal process loop) | Raw BEAM process, not a gen_server; process-level message receive |
 | Exception handling | `beamtalk_exception_handler` | Called by compiler-generated try/catch |
-| BIF wrappers | `beamtalk_string_ops` (grapheme), `beamtalk_regex`, `beamtalk_file`, `beamtalk_json`, `beamtalk_system`, `beamtalk_random`, `beamtalk_character` | Fundamentally wrap Erlang/OTP modules |
+| BIF wrappers | `beamtalk_string_ops` (grapheme), `beamtalk_regex_ops`, `beamtalk_file_ops`, `beamtalk_json_ops`, `beamtalk_system_ops`, `beamtalk_random_ops`, `beamtalk_character_ops` | Fundamentally wrap Erlang/OTP modules — all renamed to `_ops` suffix to signal they are primitive implementation modules |
 | Concrete collection primitives | `do:`, `size` per concrete class; all BIF-backed overrides on `List`/`Set`/`Dictionary` | Back the primitive surface; BIF fast-paths for concrete types |
 | OTP infrastructure | `beamtalk_runtime_app`, `beamtalk_runtime_sup`, `beamtalk_stdlib` | Supervision, module loading |
+
+> **Naming convention:** All Erlang modules that exist solely to wrap primitives or BIFs for use by `.bt` files **must** use the `_ops` suffix (e.g., `beamtalk_list_ops`, `beamtalk_regex_ops`). This makes the boundary between pure-BT logic and primitive Erlang implementation visually clear in file listings, stack traces, and code review. Modules without `_ops` are infrastructure (actor loop, bootstrap, OTP app/supervisor) that Beamtalk code does not call directly.
 
 ## Prior Art
 
@@ -389,7 +391,7 @@ Ruby 3.4 moved `Array#each`, `Array#map`, `Array#select` from C to pure Ruby (un
 Move `List collect:`, `List select:`, etc. from `@primitive` to pure Beamtalk, eliminating the Erlang `beamtalk_list_ops.erl` module entirely.
 
 Rejected because:
-- `lists:map/2` and `lists:filter/2` are BEAM BIFs — they execute in the VM scheduler with no Erlang/Beamtalk overhead. Replacing them with BT message sends would measurably slow every `collect:` and `select:` on lists.
+- `lists:map/2` and `lists:filter/2` are functions in the stdlib `lists` module, not BEAM BIFs; the compiler may inline some `lists` functions (e.g., when `inline_list_funcs` is enabled), but inlining is distinct from being a BIF. Replacing concrete fast-paths with BT message sends can measurably slow `collect:`/`select:` on lists, so concrete classes should retain their optimized, BIF-backed overrides.
 - Concrete classes can always be reconsidered later if the BEAM JIT improves (Ruby YJIT precedent).
 
 ### Alternative B: Only Add Missing `.bt` Files, No Self-Hosting
