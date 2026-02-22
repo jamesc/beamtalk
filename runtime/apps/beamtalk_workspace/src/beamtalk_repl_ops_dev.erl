@@ -14,6 +14,8 @@
 -export([
     handle/4,
     get_completions/1,
+    get_context_completions/1,
+    parse_receiver_and_prefix/1,
     get_symbol_info/1,
     make_class_not_found_error/1,
     base_protocol_response/1
@@ -22,8 +24,14 @@
 %% @doc Handle complete/info/docs/describe ops.
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(<<"complete">>, Params, Msg, _SessionPid) ->
-    Prefix = maps:get(<<"code">>, Params, <<>>),
-    Completions = get_completions(Prefix),
+    Code = maps:get(<<"code">>, Params, <<>>),
+    %% BT-783: New protocol includes "cursor" field — Code is the full line up to cursor.
+    %% Old protocol omits "cursor" — Code is a bare prefix (backward compat).
+    Completions =
+        case maps:is_key(<<"cursor">>, Params) of
+            true -> get_context_completions(Code);
+            false -> get_completions(Code)
+        end,
     case beamtalk_repl_protocol:is_legacy(Msg) of
         true ->
             jsx:encode(#{
@@ -345,6 +353,171 @@ get_completions(Prefix) when is_binary(Prefix) ->
         ].
 
 %% @private
+%% @doc Context-aware completion: parses the line to find a receiver and returns
+%% matching method selectors (BT-783).  Falls back to get_completions/1 when
+%% no receiver is detected.
+-spec get_context_completions(binary()) -> [binary()].
+get_context_completions(<<>>) ->
+    [];
+get_context_completions(Line) when is_binary(Line) ->
+    case parse_receiver_and_prefix(Line) of
+        {undefined, Prefix} ->
+            %% No receiver — use standard prefix completion
+            get_completions(Prefix);
+        {Receiver, <<>>} ->
+            %% Empty prefix with receiver (e.g., "Integer ") — return all methods
+            MethodSelectors = get_methods_for_receiver(Receiver),
+            lists:usort([atom_to_binary(S, utf8) || S <- MethodSelectors]);
+        {Receiver, Prefix} ->
+            %% Receiver with prefix — look up methods filtered by prefix
+            MethodSelectors = get_methods_for_receiver(Receiver),
+            lists:usort([
+                atom_to_binary(S, utf8)
+             || S <- MethodSelectors,
+                binary:match(atom_to_binary(S, utf8), Prefix) =:= {0, byte_size(Prefix)}
+            ])
+    end.
+
+%% @private
+%% @doc Parse the line up to the cursor into a {Receiver, Prefix} pair.
+%%
+%% Examples:
+%%   <<"Integer s">>  → {<<"Integer">>, <<"s">>}
+%%   <<"Integer ">>   → {<<"Integer">>, <<>>}
+%%   <<"42 s">>       → {<<"42">>, <<"s">>}
+%%   <<"s">>          → {undefined, <<"s">>}
+%%   <<>>             → {undefined, <<>>}
+-spec parse_receiver_and_prefix(binary()) -> {binary() | undefined, binary()}.
+parse_receiver_and_prefix(<<>>) ->
+    {undefined, <<>>};
+parse_receiver_and_prefix(Line) when is_binary(Line) ->
+    Str = binary_to_list(Line),
+    RevStr = lists:reverse(Str),
+    %% Extract trailing identifier characters (the completion prefix)
+    {PrefixCharsRev, Rest} = lists:splitwith(fun is_identifier_char/1, RevStr),
+    Prefix = list_to_binary(lists:reverse(PrefixCharsRev)),
+    %% Skip whitespace before the prefix
+    {SpaceChars, ReceiverPart} = lists:splitwith(
+        fun(C) -> C =:= $\s orelse C =:= $\t end, Rest
+    ),
+    case SpaceChars of
+        [] ->
+            %% No space before prefix — single token, no receiver
+            {undefined, Prefix};
+        _ ->
+            %% Extract the token immediately before the space (the receiver)
+            {ReceiverCharsRev, _} = lists:splitwith(
+                fun(C) -> C =/= $\s andalso C =/= $\t end, ReceiverPart
+            ),
+            case ReceiverCharsRev of
+                [] -> {undefined, Prefix};
+                _ -> {list_to_binary(lists:reverse(ReceiverCharsRev)), Prefix}
+            end
+    end.
+
+%% @private
+-spec is_identifier_char(char()) -> boolean().
+is_identifier_char(C) ->
+    (C >= $a andalso C =< $z) orelse
+        (C >= $A andalso C =< $Z) orelse
+        (C >= $0 andalso C =< $9) orelse
+        C =:= $_.
+
+%% @private
+%% @doc Get all instance method selectors for a given receiver token.
+%% Handles class names, integer literals, and string literals.
+-spec get_methods_for_receiver(binary()) -> [atom()].
+get_methods_for_receiver(Receiver) when is_binary(Receiver) ->
+    case receiver_to_class_name(Receiver) of
+        undefined -> [];
+        ClassName -> collect_all_methods(ClassName, #{})
+    end.
+
+%% @private
+%% @doc Determine the class name from a receiver token.
+-spec receiver_to_class_name(binary()) -> atom() | undefined.
+receiver_to_class_name(<<>>) ->
+    undefined;
+receiver_to_class_name(<<H, _/binary>> = Receiver) when H >= $A, H =< $Z ->
+    %% Starts with uppercase — treat as a class name; look up its instance methods
+    case beamtalk_repl_server:safe_to_existing_atom(Receiver) of
+        {ok, ClassName} ->
+            case
+                try
+                    beamtalk_class_registry:whereis_class(ClassName)
+                catch
+                    _:_ -> undefined
+                end
+            of
+                undefined -> undefined;
+                _Pid -> ClassName
+            end;
+        {error, _} ->
+            undefined
+    end;
+receiver_to_class_name(<<H, _/binary>>) when H >= $0, H =< $9 ->
+    %% Integer literal — complete Integer instance methods
+    maybe_class('Integer');
+receiver_to_class_name(<<$", _/binary>>) ->
+    %% String literal — complete String instance methods
+    maybe_class('String');
+receiver_to_class_name(_) ->
+    undefined.
+
+%% @private
+-spec maybe_class(atom()) -> atom() | undefined.
+maybe_class(ClassName) ->
+    case
+        try
+            beamtalk_class_registry:whereis_class(ClassName)
+        catch
+            _:_ -> undefined
+        end
+    of
+        undefined -> undefined;
+        _Pid -> ClassName
+    end.
+
+%% @private
+%% @doc Collect all instance method selectors for a class by walking the superclass chain.
+-spec collect_all_methods(atom(), #{atom() => true}) -> [atom()].
+collect_all_methods(ClassName, Seen) ->
+    case maps:is_key(ClassName, Seen) of
+        true ->
+            [];
+        false ->
+            case
+                try
+                    beamtalk_class_registry:whereis_class(ClassName)
+                catch
+                    _:_ -> undefined
+                end
+            of
+                undefined ->
+                    [];
+                ClassPid ->
+                    LocalMethods =
+                        try
+                            beamtalk_object_class:methods(ClassPid)
+                        catch
+                            _:_ -> []
+                        end,
+                    Superclass =
+                        try
+                            beamtalk_object_class:superclass(ClassPid)
+                        catch
+                            _:_ -> none
+                        end,
+                    InheritedMethods =
+                        case Superclass of
+                            none -> [];
+                            Super -> collect_all_methods(Super, Seen#{ClassName => true})
+                        end,
+                    LocalMethods ++ InheritedMethods
+            end
+    end.
+
+%% @private
 -spec builtin_keywords() -> [binary()].
 builtin_keywords() ->
     [
@@ -511,7 +684,7 @@ describe_ops() ->
     #{
         <<"eval">> => #{<<"params">> => [<<"code">>]},
         <<"stdin">> => #{<<"params">> => [<<"value">>]},
-        <<"complete">> => #{<<"params">> => [<<"code">>]},
+        <<"complete">> => #{<<"params">> => [<<"code">>], <<"optional">> => [<<"cursor">>]},
         <<"info">> => #{<<"params">> => [<<"symbol">>]},
         <<"docs">> => #{
             <<"params">> => [<<"class">>],

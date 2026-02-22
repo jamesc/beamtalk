@@ -2145,6 +2145,60 @@ get_completions_workspace_binding_prefix_test() ->
     Result = beamtalk_repl_server:get_completions(<<"Work">>),
     ?assert(lists:member(<<"Workspace">>, Result)).
 
+%%% parse_receiver_and_prefix/1 tests (BT-783)
+
+parse_receiver_class_and_prefix_test() ->
+    ?assertEqual(
+        {<<"Integer">>, <<"s">>},
+        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"Integer s">>)
+    ).
+
+parse_receiver_class_empty_prefix_test() ->
+    ?assertEqual(
+        {<<"Integer">>, <<>>},
+        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"Integer ">>)
+    ).
+
+parse_receiver_integer_literal_test() ->
+    ?assertEqual(
+        {<<"42">>, <<"s">>},
+        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"42 s">>)
+    ).
+
+parse_no_receiver_single_word_test() ->
+    ?assertEqual(
+        {undefined, <<"Counter">>},
+        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"Counter">>)
+    ).
+
+parse_no_receiver_empty_test() ->
+    ?assertEqual(
+        {undefined, <<>>},
+        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<>>)
+    ).
+
+parse_receiver_string_literal_test() ->
+    ?assertEqual(
+        {<<"\"hello\"">>, <<"up">>},
+        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"\"hello\" up">>)
+    ).
+
+%%% get_context_completions/1 tests (BT-783)
+
+context_completions_empty_test() ->
+    ?assertEqual([], beamtalk_repl_ops_dev:get_context_completions(<<>>)).
+
+context_completions_no_receiver_falls_back_test() ->
+    %% With no class registry running, bare prefix should still match keywords
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"su">>),
+    ?assert(lists:member(<<"super">>, Result)),
+    ?assert(lists:member(<<"subclass:">>, Result)).
+
+context_completions_unknown_receiver_returns_empty_test() ->
+    %% Unknown class receiver returns no methods
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"NoSuchClass123 s">>),
+    ?assertEqual([], Result).
+
 %%% get_symbol_info/1 tests
 
 get_symbol_info_unknown_atom_test() ->
