@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for >> hierarchy walking tests (ADR 0033, BT-770)
+
+HierarchyParent subclass: HierarchyChild
+
+  greetChild => "hello from child"
+
+  sharedMethod => "child version"
