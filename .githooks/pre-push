@@ -15,8 +15,12 @@ set -euo pipefail
 
 # Skip lint entirely if all changes are in non-code directories
 all_changes_in_skip_dirs() {
-  local changed_files
-  changed_files="$(git diff --name-only "$(git merge-base HEAD origin/main)"..HEAD 2>/dev/null || true)"
+  local changed_files merge_base
+  if merge_base="$(git merge-base HEAD origin/main 2>/dev/null)"; then
+    changed_files="$(git diff --name-only "$merge_base"..HEAD 2>/dev/null || true)"
+  else
+    changed_files="$(git diff --name-only HEAD 2>/dev/null || true)"
+  fi
   if [[ -z "$changed_files" ]]; then
     return 1 # no changes detected, run lint to be safe
   fi
