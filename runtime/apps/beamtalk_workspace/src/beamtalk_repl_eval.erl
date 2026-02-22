@@ -755,10 +755,11 @@ format_formatted_diagnostics(FormattedList) ->
 -spec extract_assignment(string()) -> {ok, atom()} | none.
 extract_assignment(Expression) ->
     %% Detect multi-statement: a period followed by one-or-more whitespace
-    %% characters and then an identifier-start or opening-bracket.
+    %% characters and then any non-whitespace character (covers identifiers,
+    %% digits, parens, quotes, etc. as the start of the next statement).
     %% Requires whitespace to distinguish from floats (1.5) and dotted
     %% names inside strings ("stream_test.txt").
-    case re:run(Expression, "\\.\\s+[a-zA-Z_\\[]", []) of
+    case re:run(Expression, "\\.\\s+\\S", []) of
         {match, _} ->
             %% Multi-statement: codegen already updated all bindings in State
             none;

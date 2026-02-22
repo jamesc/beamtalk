@@ -373,6 +373,12 @@ pub fn generate_repl_expression(expression: &Expression, module_name: &str) -> R
 ///
 /// Returns [`CodeGenError`] if code generation fails.
 pub fn generate_repl_expressions(expressions: &[Expression], module_name: &str) -> Result<String> {
+    if expressions.is_empty() {
+        return Err(CodeGenError::UnsupportedFeature {
+            feature: "empty expression list".to_string(),
+            location: module_name.to_string(),
+        });
+    }
     let mut generator = CoreErlangGenerator::new(module_name);
     let doc = generator.generate_repl_module_multi(expressions)?;
     Ok(doc.to_pretty_string())
