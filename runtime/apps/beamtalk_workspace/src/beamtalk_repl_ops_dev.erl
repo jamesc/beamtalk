@@ -425,10 +425,10 @@ enrich_class_info(Symbol, _ClassName, ClassPid) ->
         %% Source location from BEAM compile info
         {Source, Line} = get_source_location(ModuleName),
 
-        %% Doc comment from EEP-48 chunks
+        %% Doc from runtime-embedded documentation (ADR 0033)
         Doc =
             try
-                beamtalk_repl_docs:get_module_doc(ModuleName)
+                gen_server:call(ClassPid, get_doc, 5000)
             catch
                 _:_ -> none
             end,

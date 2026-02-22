@@ -25,7 +25,6 @@
 -export([
     compile_core_erlang/1,
     compile_core_file/2,
-    inject_docs_chunk/3,
     compile_modules/2
 ]).
 -endif.
@@ -129,7 +128,6 @@ worker_loop(Parent, OutDir) ->
         {module, CoreFile} ->
             case compile_core_file(CoreFile, OutDir) of
                 {ok, ModuleName} ->
-                    inject_docs_chunk(CoreFile, ModuleName, OutDir),
                     erlang:send(Parent, {compiled, ModuleName}),
                     worker_loop(Parent, OutDir);
                 error ->
@@ -217,31 +215,4 @@ compile_core_erlang(CoreErlangBin) ->
             end;
         {error, ScanError, _Loc} ->
             {error, {core_scan_error, ScanError}}
-    end.
-
-%% BT-499: Inject EEP-48 doc chunk into compiled .beam file.
-%% Errors are silently ignored — doc chunks are optional.
-inject_docs_chunk(CoreFile, ModuleName, OutDir) ->
-    try
-        inject_docs_chunk_unsafe(CoreFile, ModuleName, OutDir)
-    catch
-        _:_ -> ok
-    end.
-
-inject_docs_chunk_unsafe(CoreFile, ModuleName, OutDir) ->
-    DocsFile = filename:rootname(CoreFile) ++ ".docs",
-    case file:consult(DocsFile) of
-        {ok, [DocsTerm]} ->
-            BeamFile = filename:join(OutDir, atom_to_list(ModuleName) ++ ".beam"),
-            case beam_lib:all_chunks(BeamFile) of
-                {ok, _, AllChunks} ->
-                    Filtered = [{Id, Data} || {Id, Data} <- AllChunks, Id =/= "Docs"],
-                    DocsChunk = {"Docs", term_to_binary(DocsTerm)},
-                    {ok, NewBinary} = beam_lib:build_module(Filtered ++ [DocsChunk]),
-                    ok = file:write_file(BeamFile, NewBinary);
-                {error, _, _} ->
-                    ok
-            end;
-        _ ->
-            ok
     end.
