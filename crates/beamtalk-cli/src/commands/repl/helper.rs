@@ -739,6 +739,17 @@ mod tests {
     }
 
     #[test]
+    fn complete_path_dir_quoted_no_closing_quote() {
+        let dir = make_test_dir();
+        let path_str = format!("{}/ex", dir.path().to_string_lossy());
+        let candidates = complete_path(&path_str, true);
+        let example = candidates.iter().find(|p| p.display == "examples/");
+        assert!(example.is_some());
+        assert!(example.unwrap().replacement.ends_with('/'));
+        assert!(!example.unwrap().replacement.ends_with('"'));
+    }
+
+    #[test]
     fn complete_path_nonexistent_dir_returns_empty() {
         let candidates = complete_path("/this/path/does/not/exist/", false);
         assert!(candidates.is_empty());
