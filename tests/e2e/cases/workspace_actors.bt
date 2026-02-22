@@ -189,6 +189,13 @@ kc kill
 kc isAlive
 // => false
 
+// Killing an already-dead actor is idempotent
+kc kill
+// => ok
+
+kc isAlive
+// => false
+
 // ===========================================================================
 // ACTOR LIFECYCLE — Workspace actors first stop
 // ===========================================================================

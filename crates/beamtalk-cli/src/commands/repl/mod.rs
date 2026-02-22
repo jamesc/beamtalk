@@ -938,11 +938,11 @@ pub(crate) fn repl_loop(
                             let pid_str = extract_command_arg(line, ":kill ", None);
                             if pid_str.is_empty() {
                                 eprintln!(
-                                    ":kill is removed. Use: actor stop  (or: (Workspace actorAt: \"<pid>\") stop)"
+                                    ":kill is removed. Use: actor kill  (or: (Workspace actorAt: \"<pid>\") kill)"
                                 );
                             } else {
                                 eprintln!(
-                                    ":kill is removed. Use: (Workspace actorAt: \"{pid_str}\") stop"
+                                    ":kill is removed. Use: (Workspace actorAt: \"{pid_str}\") kill"
                                 );
                             }
                             continue;
