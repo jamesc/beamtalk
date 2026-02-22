@@ -607,14 +607,16 @@ impl ClassHierarchy {
 
     /// Emit an error if `class` subclasses a sealed class.
     ///
-    /// Stdlib builtin classes (e.g. `Character`) are exempt: they may legitimately
-    /// subclass sealed classes to mirror BEAM runtime relationships (BT-778).
+    /// Runtime-protected stdlib classes (e.g. `Character`) are exempt: they may
+    /// legitimately subclass sealed classes to mirror BEAM runtime relationships
+    /// (BT-778). Runtime-only builtins like `Future` (which users may define,
+    /// BT-750) are intentionally not exempt.
     fn check_sealed_superclass(
         &self,
         class: &crate::ast::ClassDefinition,
         diagnostics: &mut Vec<Diagnostic>,
     ) {
-        let is_stdlib_builtin = Self::is_builtin_class(class.name.name.as_str());
+        let is_stdlib_builtin = Self::is_runtime_protected_class(class.name.name.as_str());
         if is_stdlib_builtin {
             return;
         }
