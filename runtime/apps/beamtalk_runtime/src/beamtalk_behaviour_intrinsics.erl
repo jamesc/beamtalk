@@ -52,7 +52,7 @@
     classMethods/1,
     classIncludesSelector/2,
     classCanUnderstand/2,
-    classCanUnderstand_from_name/2,
+    classCanUnderstandFromName/2,
     classInheritsFrom/2,
     classIncludesBehaviour/2,
     classWhichIncludesSelector/2,
@@ -182,8 +182,8 @@ classCanUnderstand(Self, Selector) ->
 %% beamtalk_dispatch:responds_to/2. Takes ClassName directly (not a class object)
 %% to avoid the extra gen_server:call that classCanUnderstand/2 needs to re-fetch
 %% the class name from the pid.
--spec classCanUnderstand_from_name(atom(), atom()) -> boolean().
-classCanUnderstand_from_name(ClassName, Selector) ->
+-spec classCanUnderstandFromName(atom(), atom()) -> boolean().
+classCanUnderstandFromName(ClassName, Selector) ->
     walk_hierarchy(
         ClassName,
         fun(_CN, CPid, _Acc) ->

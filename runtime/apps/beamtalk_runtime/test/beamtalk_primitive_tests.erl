@@ -160,8 +160,8 @@ responds_to_actor_inherited_method_test_() ->
         fun(_) -> ok end, fun() ->
             case beamtalk_class_registry:whereis_class('Counter') of
                 undefined ->
-                    %% Counter not loaded — skip test
-                    ok;
+                    %% Counter not loaded — explicitly skip test
+                    {skip, "Counter class not loaded after beamtalk_stdlib:init()"};
                 CounterPid ->
                     CounterObj = #beamtalk_object{
                         class = 'Counter',

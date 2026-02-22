@@ -184,7 +184,7 @@ super(Selector, Args, Self, State, CurrentClass) ->
 %% local method table via has_method/2. Returns true if any class in the
 %% chain has the method.
 %%
-%% ADR 0032 Phase 3: Delegates to beamtalk_behaviour_intrinsics:classCanUnderstand_from_name/2,
+%% ADR 0032 Phase 3: Delegates to beamtalk_behaviour_intrinsics:classCanUnderstandFromName/2,
 %% the single canonical hierarchy-walk implementation, removing the duplicate
 %% responds_to_chain walk that previously lived here.
 %%
@@ -196,7 +196,7 @@ responds_to(Selector, ClassName) ->
         {ok, _Fun} ->
             true;
         not_found ->
-            beamtalk_behaviour_intrinsics:classCanUnderstand_from_name(ClassName, Selector)
+            beamtalk_behaviour_intrinsics:classCanUnderstandFromName(ClassName, Selector)
     end.
 
 %%% ============================================================================
