@@ -79,9 +79,12 @@ impl ReplHelper {
         }
     }
 
-    /// Query the backend for completions matching a prefix.
-    fn backend_complete(&self, prefix: &str) -> Vec<String> {
-        if prefix.is_empty() {
+    /// Query the backend for completions given the full line up to the cursor.
+    ///
+    /// Sends the line context and cursor position so the backend can perform
+    /// receiver-aware method completion (BT-783).
+    fn backend_complete(&self, line_to_pos: &str, cursor: usize) -> Vec<String> {
+        if line_to_pos.is_empty() {
             return Vec::new();
         }
 
@@ -105,7 +108,8 @@ impl ReplHelper {
         let request = serde_json::json!({
             "op": "complete",
             "id": protocol::next_msg_id(),
-            "code": prefix
+            "code": line_to_pos,
+            "cursor": cursor
         });
 
         if let Ok(response) = client.send_request::<ReplResponse>(&request) {
@@ -232,20 +236,19 @@ impl Completer for ReplHelper {
             return Ok((path_start, candidates));
         }
 
-        // Find the start of the current word (identifier boundary)
+        // Find the start of the current word (identifier boundary).
+        // Colons are treated as identifier chars so keyword selectors like
+        // `ifTrue:` and `ifTrue:ifFalse:` complete as a unit (BT-783).
+        // This must stay in sync with is_identifier_char/1 in beamtalk_repl_ops_dev.erl.
         let word_start = line_to_pos
             .char_indices()
             .rev()
-            .find(|&(_, c)| !c.is_ascii_alphanumeric() && c != '_')
+            .find(|&(_, c)| !c.is_ascii_alphanumeric() && c != '_' && c != ':')
             .map_or(0, |(i, c)| i + c.len_utf8());
-        let prefix = &line_to_pos[word_start..];
 
-        if prefix.is_empty() {
-            return Ok((pos, Vec::new()));
-        }
-
-        // Query backend for completions
-        let completions = self.backend_complete(prefix);
+        // Query backend with full line context so it can perform receiver-aware
+        // method completion (BT-783). The backend parses the receiver from the line.
+        let completions = self.backend_complete(line_to_pos, pos);
         let candidates: Vec<Pair> = completions
             .into_iter()
             .map(|c| Pair {
@@ -437,7 +440,7 @@ mod tests {
     fn find_word_start(line: &str) -> usize {
         line.char_indices()
             .rev()
-            .find(|&(_, c)| !c.is_ascii_alphanumeric() && c != '_')
+            .find(|&(_, c)| !c.is_ascii_alphanumeric() && c != '_' && c != ':')
             .map_or(0, |(i, c)| i + c.len_utf8())
     }
 
@@ -502,8 +505,16 @@ mod tests {
 
     #[test]
     fn word_boundary_after_colon() {
+        // Colons are identifier chars so keyword selectors complete as a unit.
         let start = find_word_start("ifTrue:");
-        assert_eq!(&"ifTrue:"[start..], "");
+        assert_eq!(&"ifTrue:"[start..], "ifTrue:");
+    }
+
+    #[test]
+    fn word_boundary_keyword_selector_with_receiver() {
+        // "Integer ifT:" — word start is "ifT:"
+        let start = find_word_start("Integer ifT:");
+        assert_eq!(&"Integer ifT:"[start..], "ifT:");
     }
 
     #[test]
