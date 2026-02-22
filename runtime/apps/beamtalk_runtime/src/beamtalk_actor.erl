@@ -289,6 +289,11 @@ async_send(ActorPid, stop, [], FuturePid) ->
             beamtalk_future:reject(FuturePid, Error)
     end,
     ok;
+async_send(ActorPid, kill, [], FuturePid) ->
+    %% kill is handled locally - forcefully kills the actor process
+    exit(ActorPid, kill),
+    beamtalk_future:resolve(FuturePid, ok),
+    ok;
 async_send(ActorPid, monitor, [], FuturePid) ->
     %% monitor is handled locally - creates an Erlang monitor
     Ref = erlang:monitor(process, ActorPid),
@@ -348,6 +353,10 @@ sync_send(ActorPid, stop, []) ->
             %% Preserve sync_send/3 contract: translate exits to structured errors
             actor_dead_error(stop)
     end;
+sync_send(ActorPid, kill, []) ->
+    %% kill is handled locally - forcefully kills the actor process
+    exit(ActorPid, kill),
+    ok;
 sync_send(ActorPid, monitor, []) ->
     erlang:monitor(process, ActorPid);
 sync_send(ActorPid, Selector, Args) ->

@@ -319,15 +319,6 @@ impl ReplClient {
         }))
     }
 
-    /// Kill an actor by PID string.
-    pub(crate) fn kill_actor(&mut self, pid_str: &str) -> Result<ReplResponse> {
-        self.send_request(&serde_json::json!({
-            "op": "kill",
-            "id": protocol::next_msg_id(),
-            "actor": pid_str
-        }))
-    }
-
     /// List loaded modules.
     pub(crate) fn list_modules(&mut self) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
@@ -342,23 +333,6 @@ impl ReplClient {
             "op": "unload",
             "id": protocol::next_msg_id(),
             "module": module_name
-        }))
-    }
-
-    /// List active sessions.
-    pub(crate) fn list_sessions(&mut self) -> Result<ReplResponse> {
-        self.send_request(&serde_json::json!({
-            "op": "sessions",
-            "id": protocol::next_msg_id()
-        }))
-    }
-
-    /// Inspect an actor's state.
-    pub(crate) fn inspect_actor(&mut self, pid_str: &str) -> Result<ReplResponse> {
-        self.send_request(&serde_json::json!({
-            "op": "inspect",
-            "id": protocol::next_msg_id(),
-            "actor": pid_str
         }))
     }
 
@@ -409,15 +383,6 @@ impl ReplClient {
         self.send_request(&serde_json::json!({
             "op": "test-all",
             "id": protocol::next_msg_id()
-        }))
-    }
-
-    /// Get information about a symbol (BT-724).
-    pub(crate) fn info(&mut self, symbol: &str) -> Result<ReplResponse> {
-        self.send_request(&serde_json::json!({
-            "op": "info",
-            "id": protocol::next_msg_id(),
-            "symbol": symbol
         }))
     }
 }

@@ -49,3 +49,11 @@ Actor subclass: WorkspaceEnvironment
   /// Workspace actorsOf: Counter
   /// ```
   actorsOf: className: Object -> List => @primitive "actorsOf:"
+
+  /// Return all active REPL session IDs.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace sessions
+  /// ```
+  sessions -> List => @primitive "sessions"
