@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-773: self and explicit class name in class methods should both use
+// direct dispatch (not actor message send) to avoid deadlock.
+
+// @load stdlib/test/fixtures/class_self_dispatch.bt
+
+TestCase subclass: ClassSelfDispatchTest
+
+  testSelfNewInClassMethod =>
+    // self new: in a class method uses direct dispatch
+    self assert: (ClassSelfDispatch makeSelf: 42) x equals: 42
+
+  testExplicitClassNameNewInClassMethod =>
+    // ClassName new: in a class method should also use direct dispatch
+    // Before BT-773, this would deadlock because it routed through class_send
+    self assert: (ClassSelfDispatch makeExplicit: 99) x equals: 99

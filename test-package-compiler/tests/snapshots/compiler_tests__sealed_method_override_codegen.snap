@@ -92,7 +92,9 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
                 'new:' => ~{'arity' => 1}~
             }~,
             'method_source' => ~{'frozen' => #{#<102>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<122>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']])}#}~,
-            'class_variables' => ~{}~
+            'class_variables' => ~{}~,
+            'doc' => 'none',
+            'method_docs' => ~{}~
         }~
         in let _Reg0 = case call 'beamtalk_object_class':'start'('Parent', ClassInfo0) of
             <{'ok', _Pid0}> when 'true' -> 'ok'
@@ -121,7 +123,9 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
                         'new:' => ~{'arity' => 1}~
                     }~,
                     'method_source' => ~{'frozen' => #{#<102>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<122>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']])}#}~,
-                    'class_variables' => ~{}~
+                    'class_variables' => ~{}~,
+                    'doc' => 'none',
+                    'method_docs' => ~{}~
                 }~
                 in let _Reg1 = case call 'beamtalk_object_class':'start'('AllowedChild', ClassInfo1) of
                     <{'ok', _Pid1}> when 'true' -> 'ok'
@@ -150,7 +154,9 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
                                 'new:' => ~{'arity' => 1}~
                             }~,
                             'method_source' => ~{'frozen' => #{#<102>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<122>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']])}#}~,
-                            'class_variables' => ~{}~
+                            'class_variables' => ~{}~,
+                            'doc' => 'none',
+                            'method_docs' => ~{}~
                         }~
                         in let _Reg2 = case call 'beamtalk_object_class':'start'('Child', ClassInfo2) of
                             <{'ok', _Pid2}> when 'true' -> 'ok'

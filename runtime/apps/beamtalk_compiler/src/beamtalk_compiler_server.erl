@@ -167,12 +167,19 @@ open_port() ->
 do_compile(Port, Source, Options) ->
     StdlibMode = maps:get(stdlib_mode, Options, false),
     WorkspaceMode = maps:get(workspace_mode, Options, true),
-    Request = #{
+    %% BT-775: Optional module_name override for package-qualified naming
+    ModuleName = maps:get(module_name, Options, undefined),
+    Request0 = #{
         command => compile,
         source => Source,
         stdlib_mode => StdlibMode,
         workspace_mode => WorkspaceMode
     },
+    Request =
+        case ModuleName of
+            undefined -> Request0;
+            _ -> Request0#{module_name => ModuleName}
+        end,
     RequestBin = term_to_binary(Request),
     try port_command(Port, RequestBin) of
         true ->

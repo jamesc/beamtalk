@@ -709,15 +709,44 @@ compile_expr_noproc_with_env_test() ->
 
 compile_file_noproc_test() ->
     %% Covers exit:{noproc, _} clause (line 380-381)
-    Result = beamtalk_repl_eval:compile_file_via_port("x := 1", "/test.bt", false),
+    Result = beamtalk_repl_eval:compile_file_via_port("x := 1", "/test.bt", false, undefined),
     ?assertMatch({error, _}, Result).
 
 compile_file_noproc_stdlib_test() ->
     %% Covers stdlib_mode path too
     Result = beamtalk_repl_eval:compile_file_via_port(
-        "Object subclass: Foo", "/stdlib/src/Foo.bt", true
+        "Object subclass: Foo", "/stdlib/src/Foo.bt", true, undefined
     ),
     ?assertMatch({error, _}, Result).
+
+%% ===================================================================
+%% to_snake_case (BT-775)
+%% ===================================================================
+
+to_snake_case_simple_test() ->
+    ?assertEqual("counter", beamtalk_repl_eval:to_snake_case("counter")).
+
+to_snake_case_camel_test() ->
+    ?assertEqual("counter", beamtalk_repl_eval:to_snake_case("Counter")).
+
+to_snake_case_multi_word_test() ->
+    ?assertEqual("scheme_symbol", beamtalk_repl_eval:to_snake_case("SchemeSymbol")).
+
+to_snake_case_three_words_test() ->
+    ?assertEqual("my_counter_actor", beamtalk_repl_eval:to_snake_case("MyCounterActor")).
+
+to_snake_case_acronym_test() ->
+    %% Acronyms: no underscores within consecutive uppercase
+    ?assertEqual("httprouter", beamtalk_repl_eval:to_snake_case("HTTPRouter")).
+
+to_snake_case_already_snake_test() ->
+    ?assertEqual("already_snake", beamtalk_repl_eval:to_snake_case("already_snake")).
+
+to_snake_case_empty_test() ->
+    ?assertEqual([], beamtalk_repl_eval:to_snake_case([])).
+
+to_snake_case_with_digits_test() ->
+    ?assertEqual("app2", beamtalk_repl_eval:to_snake_case("App2")).
 
 %% ===================================================================
 %% handle_class_definition (BT-627)

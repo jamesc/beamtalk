@@ -289,9 +289,11 @@ lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid, Dep
                 none ->
                     %% Reached root without finding method
                     ?LOG_DEBUG("Method ~p not found in hierarchy (root: ~p)", [Selector, ClassName]),
+                    %% BT-753: Derive class from Self when State is empty (class objects).
+                    ErrorClass = class_name_from(Self, State, ClassName),
                     Error = beamtalk_error:new(
                         does_not_understand,
-                        beamtalk_tagged_map:class_of(State, ClassName),
+                        ErrorClass,
                         Selector,
                         <<"Check spelling or use 'respondsTo:' to verify method exists">>
                     ),
@@ -371,7 +373,8 @@ continue_to_superclass(Selector, Args, Self, State, ClassPid, Depth) ->
     case beamtalk_object_class:superclass(ClassPid) of
         none ->
             %% Reached root without finding dispatchable method
-            ClassName = beamtalk_tagged_map:class_of(State, unknown),
+            %% BT-753: Derive class from Self when State is empty (class objects).
+            ClassName = class_name_from(Self, State, unknown),
             Error = beamtalk_error:new(
                 does_not_understand,
                 ClassName,
@@ -414,6 +417,14 @@ invoke_extension(Fun, Args, _Self, State) ->
             ),
             erlang:raise(error, Reason, Stacktrace)
     end.
+
+%% @private
+%% @doc Extract class name from Self or State, with a default fallback.
+%%
+%% Delegates to beamtalk_object_ops:class_name/3 to avoid duplication.
+-spec class_name_from(bt_self(), state(), atom()) -> atom().
+class_name_from(Self, State, Default) ->
+    beamtalk_object_ops:class_name(Self, State, Default).
 
 %% @private
 %% @doc Safe extension registry lookup.

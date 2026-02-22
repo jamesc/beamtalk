@@ -17,7 +17,7 @@
 | `banner` | `"never"` | Disable animated banner for cleaner automated sessions |
 | `render_markdown` | `true` | Display formatted markdown in responses |
 | `theme` | `"auto"` | UI theme (auto-detect based on terminal) |
-| `model` | `"claude-sonnet-4.5"` | Default AI model |
+| `model` | `"claude-sonnet-4.6"` | Default AI model |
 | `trusted_folders` | `["${containerWorkspaceFolder}"]` | Auto-trust the workspace folder |
 | `allowed_urls` | Array | Whitelisted URLs for documentation access |
 | `experimental` | `true` | Enable experimental Copilot features |

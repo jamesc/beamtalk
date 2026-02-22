@@ -424,6 +424,14 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
         if let Expression::ClassReference { name, .. } = receiver {
+            // BT-773: When inside a class method and the explicit class name matches
+            // the current class, use direct dispatch (same as `self` sends) to avoid
+            // deadlock. The class actor is already processing the outer call, so
+            // routing through class_send would deadlock on gen_server:call.
+            if self.in_class_method && name.name == self.class_name() {
+                let doc = self.generate_class_method_self_send(selector, arguments)?;
+                return Ok(Some(doc));
+            }
             if self.workspace_mode && self.context == CodeGenContext::Repl {
                 // REPL top-level: check session bindings first
                 let doc =
@@ -481,63 +489,77 @@ impl CoreErlangGenerator {
         }
         if let Expression::Identifier(id) = receiver {
             if id.name == "self" {
-                let selector_atom = selector.to_erlang_atom();
-
-                if self.class_method_selectors.contains(&selector_atom) {
-                    // Route to class_<selector>(ClassSelf, ClassVars, ...)
-                    let call_result = self.fresh_temp_var("CMR");
-                    let cv = self.current_class_var();
-                    let module = self.module_name.clone();
-                    let args_doc = self.capture_argument_list_doc(arguments)?;
-                    let comma = if arguments.is_empty() { "" } else { ", " };
-
-                    let new_cv = self.next_class_var();
-                    let inner_cv = self.fresh_temp_var("CV");
-                    let inner_res = self.fresh_temp_var("MR");
-                    let plain_cv = self.fresh_temp_var("PCV");
-                    let result = self.fresh_temp_var("Unwrapped");
-                    let wrapped_res = self.fresh_temp_var("WR");
-                    let plain_res = self.fresh_temp_var("PR");
-
-                    let doc = docvec![
-                        Document::String(format!(
-                            "let {call_result} = call '{module}':'class_{selector_atom}'(ClassSelf, {cv}"
-                        )),
-                        comma,
-                        args_doc,
-                        Document::String(format!(
-                            ") in \
-                             let {new_cv} = case {call_result} of \
-                             <{{'class_var_result', {inner_res}, {inner_cv}}}> when 'true' -> {inner_cv} \
-                             <{plain_cv}> when 'true' -> {cv} \
-                             end in \
-                             let {result} = case {call_result} of \
-                             <{{'class_var_result', {wrapped_res}, _}}> when 'true' -> {wrapped_res} \
-                             <{plain_res}> when 'true' -> {plain_res} \
-                             end in "
-                        ))
-                    ];
-                    // NOTE: scope is OPEN — caller provides continuation
-                    self.last_open_scope_result = Some(result);
-                    return Ok(Some(doc));
-                }
-                // Built-in export (spawn, new, superclass, etc.)
-                let fun_name = match selector_atom.as_str() {
-                    "spawnWith:" => "spawn".to_string(),
-                    _ => selector_atom.replace(':', ""),
-                };
-                let module = self.module_name.clone();
-                let args_doc = self.capture_argument_list_doc(arguments)?;
-
-                let doc = docvec![
-                    Document::String(format!("call '{module}':'{fun_name}'(")),
-                    args_doc,
-                    ")"
-                ];
+                let doc = self.generate_class_method_self_send(selector, arguments)?;
                 return Ok(Some(doc));
             }
         }
         Ok(None)
+    }
+
+    /// Core logic for direct dispatch of class method calls.
+    ///
+    /// Used by both `self` sends and explicit class name sends (BT-773) within
+    /// class methods. Generates direct module function calls to avoid deadlock
+    /// since class methods execute inside a `gen_server:call` handler.
+    fn generate_class_method_self_send(
+        &mut self,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Document<'static>> {
+        let selector_atom = selector.to_erlang_atom();
+
+        if self.class_method_selectors.contains(&selector_atom) {
+            // Route to class_<selector>(ClassSelf, ClassVars, ...)
+            let call_result = self.fresh_temp_var("CMR");
+            let cv = self.current_class_var();
+            let module = self.module_name.clone();
+            let args_doc = self.capture_argument_list_doc(arguments)?;
+            let comma = if arguments.is_empty() { "" } else { ", " };
+
+            let new_cv = self.next_class_var();
+            let inner_cv = self.fresh_temp_var("CV");
+            let inner_res = self.fresh_temp_var("MR");
+            let plain_cv = self.fresh_temp_var("PCV");
+            let result = self.fresh_temp_var("Unwrapped");
+            let wrapped_res = self.fresh_temp_var("WR");
+            let plain_res = self.fresh_temp_var("PR");
+
+            let doc = docvec![
+                Document::String(format!(
+                    "let {call_result} = call '{module}':'class_{selector_atom}'(ClassSelf, {cv}"
+                )),
+                comma,
+                args_doc,
+                Document::String(format!(
+                    ") in \
+                     let {new_cv} = case {call_result} of \
+                     <{{'class_var_result', {inner_res}, {inner_cv}}}> when 'true' -> {inner_cv} \
+                     <{plain_cv}> when 'true' -> {cv} \
+                     end in \
+                     let {result} = case {call_result} of \
+                     <{{'class_var_result', {wrapped_res}, _}}> when 'true' -> {wrapped_res} \
+                     <{plain_res}> when 'true' -> {plain_res} \
+                     end in "
+                ))
+            ];
+            // NOTE: scope is OPEN — caller provides continuation
+            self.last_open_scope_result = Some(result);
+            return Ok(doc);
+        }
+        // Built-in export (spawn, new, superclass, etc.)
+        let fun_name = match selector_atom.as_str() {
+            "spawnWith:" => "spawn".to_string(),
+            _ => selector_atom.replace(':', ""),
+        };
+        let module = self.module_name.clone();
+        let args_doc = self.capture_argument_list_doc(arguments)?;
+
+        let doc = docvec![
+            Document::String(format!("call '{module}':'{fun_name}'(")),
+            args_doc,
+            ")"
+        ];
+        Ok(doc)
     }
 
     /// Generates synchronous self-dispatch for actor self-sends (BT-330).

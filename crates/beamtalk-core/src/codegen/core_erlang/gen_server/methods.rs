@@ -79,36 +79,12 @@ impl CoreErlangGenerator {
 
         self.current_nlr_token = None;
 
-        // BT-761: If NLR was detected, wrap body in a letrec function with
-        // try/catch and immediately apply it. letrec creates a genuine separate
+        // BT-761/BT-764: If NLR was detected, wrap body in a letrec function with
+        // try/catch via the shared helper. letrec creates a genuine separate
         // function frame, avoiding BEAM validator ambiguous_catch_try_state
         // errors that arise when try/catch is nested inside case arms.
         let body_str = if let Some(ref token_var) = nlr_token_var {
-            let result_var = self.fresh_temp_var("NlrResult");
-            let cls_var = self.fresh_temp_var("NlrCls");
-            let err_var = self.fresh_temp_var("NlrErr");
-            let stk_var = self.fresh_temp_var("NlrStk");
-            let ctk_var = self.fresh_temp_var("CatchTok");
-            let val_var = self.fresh_temp_var("NlrVal");
-            let state_var = self.fresh_temp_var("NlrState");
-            let ot_pair_var = self.fresh_temp_var("OtherPair");
-
-            format!(
-                "letrec '__nlr_body'/0 = fun () ->\n\
-                 let {token_var} = call 'erlang':'make_ref'() in\n\
-                 try\n\
-                 {body_str}\n\
-                 of {result_var} -> {result_var}\n\
-                 catch <{cls_var}, {err_var}, {stk_var}> ->\n\
-                   case {{{cls_var}, {err_var}}} of\n\
-                     <{{'throw', {{'$bt_nlr', {ctk_var}, {val_var}, {state_var}}}}}> \
-                 when call 'erlang':'=:='({ctk_var}, {token_var}) -> \
-                 {{'reply', {val_var}, {state_var}}}\n\
-                     <{ot_pair_var}> when 'true' -> \
-                 primop 'raw_raise'({cls_var}, {err_var}, {stk_var})\n\
-                   end\n\
-                 in apply '__nlr_body'/0 ()"
-            )
+            self.wrap_actor_body_with_nlr_catch(&body_str, token_var, true)
         } else {
             body_str
         };
@@ -787,6 +763,29 @@ impl CoreErlangGenerator {
             }
             let class_vars_doc = Document::Vec(class_var_parts);
 
+            // BT-771: Class-level doc comment
+            let class_doc_value: Document<'static> = if let Some(ref doc) = class.doc_comment {
+                Document::String(Self::binary_string_literal(doc))
+            } else {
+                Document::Str("'none'")
+            };
+
+            // BT-771: Method-level doc comments
+            let mut method_docs_parts: Vec<Document<'static>> = Vec::new();
+            for method in &instance_methods {
+                if let Some(ref doc) = method.doc_comment {
+                    if !method_docs_parts.is_empty() {
+                        method_docs_parts.push(Document::Str(", "));
+                    }
+                    let binary = Self::binary_string_literal(doc);
+                    method_docs_parts.push(Document::String(format!(
+                        "'{}' => {binary}",
+                        method.selector.name()
+                    )));
+                }
+            }
+            let method_docs_doc = Document::Vec(method_docs_parts);
+
             let is_sealed = if class.is_sealed { "true" } else { "false" };
             let is_abstract = if class.is_abstract { "true" } else { "false" };
 
@@ -825,6 +824,14 @@ impl CoreErlangGenerator {
                         line(),
                         "'class_variables' => ~{",
                         class_vars_doc,
+                        "}~,",
+                        line(),
+                        "'doc' => ",
+                        class_doc_value,
+                        ",",
+                        line(),
+                        "'method_docs' => ~{",
+                        method_docs_doc,
                         "}~",
                     ]
                 ),
