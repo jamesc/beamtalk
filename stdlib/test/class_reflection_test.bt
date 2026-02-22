@@ -32,4 +32,13 @@ TestCase subclass: ClassReflectionTest
     // Primitive class methods still work
     self deny: (intMethods isEmpty).
     // isNil is inherited from Object/ProtoObject — included in full chain
-    self assert: (intMethods includes: #isNil)
+    self assert: (intMethods includes: #isNil).
+    // ---------------------------------------------------------------------------
+    // BT-776: respondsTo: on class objects (virtual metaclass tag fix)
+    // Class methods defined on Class/Behaviour should be found
+    self assert: (Counter respondsTo: #name).
+    self assert: (Counter respondsTo: #superclass).
+    // Inherited Object methods should be found
+    self assert: (Counter respondsTo: #isNil).
+    // Non-existent methods should return false
+    self deny: (Counter respondsTo: #bogus)

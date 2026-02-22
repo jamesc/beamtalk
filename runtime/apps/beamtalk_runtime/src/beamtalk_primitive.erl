@@ -219,14 +219,25 @@ send_tagged_map_fallback(X, Class, Selector, Args) ->
 
 %% @doc Check if a value responds to a given selector.
 -spec responds_to(term(), atom()) -> boolean().
-responds_to(#beamtalk_object{class_mod = Mod}, Selector) ->
-    erlang:function_exported(Mod, has_method, 1) andalso Mod:has_method(Selector);
+responds_to(#beamtalk_object{class_mod = Mod} = Obj, Selector) ->
+    %% BT-776: Class objects (e.g., Counter as a value) are instances of 'Class'.
+    %% Walk the Class → Behaviour → Object hierarchy instead of checking class_mod.
+    case beamtalk_class_registry:is_class_object(Obj) of
+        true -> beamtalk_dispatch:responds_to(Selector, 'Class');
+        false -> erlang:function_exported(Mod, has_method, 1) andalso Mod:has_method(Selector)
+    end;
 responds_to(X, Selector) when is_tuple(X) ->
     %% Handle tuples that might be beamtalk_objects not matching the record pattern
     case tuple_size(X) >= 2 andalso element(1, X) =:= beamtalk_object of
         true ->
-            Mod = element(3, X),
-            erlang:function_exported(Mod, has_method, 1) andalso Mod:has_method(Selector);
+            case beamtalk_class_registry:is_class_object(X) of
+                true ->
+                    %% BT-776: Class objects walk Class hierarchy.
+                    beamtalk_dispatch:responds_to(Selector, 'Class');
+                false ->
+                    Mod = element(3, X),
+                    erlang:function_exported(Mod, has_method, 1) andalso Mod:has_method(Selector)
+            end;
         false ->
             responds_via_module(X, Selector)
     end;
