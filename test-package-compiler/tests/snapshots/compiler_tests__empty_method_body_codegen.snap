@@ -190,7 +190,9 @@ module 'empty_method_body' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_c
                 'classEmpty' => ~{'arity' => 0}~
             }~,
             'method_source' => ~{'doNothing' => #{#<100>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<78>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']])}#, 'getValue' => #{#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<86>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']])}#}~,
-            'class_variables' => ~{}~
+            'class_variables' => ~{}~,
+            'doc' => 'none',
+            'method_docs' => ~{}~
         }~
         in let _Reg0 = case call 'beamtalk_object_class':'start'('EmptyActor', ClassInfo0) of
             <{'ok', _Pid0}> when 'true' -> 'ok'

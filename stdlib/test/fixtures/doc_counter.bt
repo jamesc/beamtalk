@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for codegen doc emission tests (BT-771)
+
+/// A counter that tracks a value.
+Object subclass: DocCounter
+
+  /// Increment the counter by one.
+  increment => 1
+
+  /// Return the current count.
+  value => 0
+
+  // No doc comment on this method
+  reset => 0

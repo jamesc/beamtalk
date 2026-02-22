@@ -787,6 +787,29 @@ impl CoreErlangGenerator {
             }
             let class_vars_doc = Document::Vec(class_var_parts);
 
+            // BT-771: Class-level doc comment
+            let class_doc_value: Document<'static> = if let Some(ref doc) = class.doc_comment {
+                Document::String(Self::binary_string_literal(doc))
+            } else {
+                Document::Str("'none'")
+            };
+
+            // BT-771: Method-level doc comments
+            let mut method_docs_parts: Vec<Document<'static>> = Vec::new();
+            for method in &instance_methods {
+                if let Some(ref doc) = method.doc_comment {
+                    if !method_docs_parts.is_empty() {
+                        method_docs_parts.push(Document::Str(", "));
+                    }
+                    let binary = Self::binary_string_literal(doc);
+                    method_docs_parts.push(Document::String(format!(
+                        "'{}' => {binary}",
+                        method.selector.name()
+                    )));
+                }
+            }
+            let method_docs_doc = Document::Vec(method_docs_parts);
+
             let is_sealed = if class.is_sealed { "true" } else { "false" };
             let is_abstract = if class.is_abstract { "true" } else { "false" };
 
@@ -825,6 +848,14 @@ impl CoreErlangGenerator {
                         line(),
                         "'class_variables' => ~{",
                         class_vars_doc,
+                        "}~,",
+                        line(),
+                        "'doc' => ",
+                        class_doc_value,
+                        ",",
+                        line(),
+                        "'method_docs' => ~{",
+                        method_docs_doc,
                         "}~",
                     ]
                 ),
