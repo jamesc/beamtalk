@@ -495,10 +495,10 @@ camel_to_snake([H | T], PrevWasLower, Acc) when H >= $A, H =< $Z ->
 camel_to_snake([H | T], _PrevWasLower, Acc) ->
     camel_to_snake(T, (H >= $a andalso H =< $z), [H | Acc]).
 
-%% @private Extract the class name atom from a class object tag.
+%% @private Extract the class name atom from a class tag or class object tag.
 %%
-%% Class object tags have the form 'ClassName class' (e.g. 'Counter class').
-%% Strips the " class" suffix and returns the class name atom.
+%% Handles both plain instance tags (e.g. 'Counter') and class object tags
+%% (e.g. 'Counter class') — in both cases returns the class name atom 'Counter'.
 %% Used by responds_to/2 to delegate to beamtalk_dispatch:responds_to/2.
 -spec class_name_from_tag(atom()) -> atom() | undefined.
 class_name_from_tag(Tag) ->

@@ -347,11 +347,27 @@ classSetMethodDoc(Self, Selector, DocBinary) ->
 %%   {halt, Result}   — stop and return Result immediately
 %%
 %% Returns Acc when the chain is exhausted (none or unregistered class).
+%% Guards against cycles via ?MAX_HIERARCHY_DEPTH.
 -spec walk_hierarchy(atom() | none, fun((atom(), pid(), Acc) -> {cont, Acc} | {halt, Result}), Acc) ->
     Acc | Result.
-walk_hierarchy(none, _Fun, Acc) ->
-    Acc;
 walk_hierarchy(ClassName, Fun, Acc) ->
+    walk_hierarchy(ClassName, Fun, Acc, 0).
+
+-spec walk_hierarchy(
+    atom() | none,
+    fun((atom(), pid(), Acc) -> {cont, Acc} | {halt, Result}),
+    Acc,
+    non_neg_integer()
+) -> Acc | Result.
+walk_hierarchy(none, _Fun, Acc, _Depth) ->
+    Acc;
+walk_hierarchy(_ClassName, _Fun, Acc, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+    ?LOG_WARNING(
+        "walk_hierarchy: max hierarchy depth ~p exceeded — possible cycle",
+        [?MAX_HIERARCHY_DEPTH]
+    ),
+    Acc;
+walk_hierarchy(ClassName, Fun, Acc, Depth) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
             Acc;
@@ -361,7 +377,7 @@ walk_hierarchy(ClassName, Fun, Acc) ->
                     Result;
                 {cont, NewAcc} ->
                     Super = gen_server:call(ClassPid, superclass),
-                    walk_hierarchy(Super, Fun, NewAcc)
+                    walk_hierarchy(Super, Fun, NewAcc, Depth + 1)
             end
     end.
 
