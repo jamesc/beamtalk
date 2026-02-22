@@ -14,10 +14,19 @@ use miette::{Result, miette};
 use super::ReplResponse;
 use crate::commands::protocol::{self, ProtocolClient};
 
+/// Tracks whether the last `:load` was a single file or a directory.
+#[derive(Clone, Debug)]
+pub(crate) enum LastLoadedPath {
+    /// Single file path (e.g., `examples/counter.bt`).
+    File(String),
+    /// Directory path (e.g., `stdlib/test/`).
+    Directory(String),
+}
+
 /// REPL client that wraps [`ProtocolClient`] with REPL-specific operations.
 pub(crate) struct ReplClient {
     inner: ProtocolClient,
-    last_loaded_file: Option<String>,
+    last_loaded_path: Option<LastLoadedPath>,
     /// Session ID assigned by the server (BT-666)
     session_id: Option<String>,
     /// Host address for this connection (BT-694)
@@ -36,7 +45,7 @@ impl ReplClient {
 
         Ok(Self {
             inner,
-            last_loaded_file: None,
+            last_loaded_path: None,
             session_id,
             host: host.to_string(),
             port,
@@ -277,29 +286,28 @@ impl ReplClient {
         }))
     }
 
-    /// Load a Beamtalk file.
+    /// Load a single Beamtalk file.
     pub(crate) fn load_file(&mut self, path: &str) -> Result<ReplResponse> {
-        let response = self.send_request(&serde_json::json!({
+        self.send_request(&serde_json::json!({
             "op": "load-file",
             "id": protocol::next_msg_id(),
             "path": path
-        }))?;
-
-        // Update last loaded file on success
-        if !response.is_error() {
-            self.last_loaded_file = Some(path.to_string());
-        }
-
-        Ok(response)
+        }))
     }
 
-    /// Reload the last loaded file.
-    pub(crate) fn reload_file(&mut self) -> Result<ReplResponse> {
-        let path = self
-            .last_loaded_file
-            .clone()
-            .ok_or_else(|| miette!("No file has been loaded yet"))?;
-        self.load_file(&path)
+    /// Record that the last `:load` was a single file (called after successful load).
+    pub(crate) fn set_last_loaded_file(&mut self, path: &str) {
+        self.last_loaded_path = Some(LastLoadedPath::File(path.to_string()));
+    }
+
+    /// Record that the last `:load` was a directory (called after successful load).
+    pub(crate) fn set_last_loaded_directory(&mut self, path: &str) {
+        self.last_loaded_path = Some(LastLoadedPath::Directory(path.to_string()));
+    }
+
+    /// Get the last loaded path for `:reload` support.
+    pub(crate) fn last_loaded_path(&self) -> Option<&LastLoadedPath> {
+        self.last_loaded_path.as_ref()
     }
 
     /// Reload a specific module by name (looks up source path on server).
