@@ -77,7 +77,7 @@ dispatch(class, [], Self, State) ->
     ClassObj = beamtalk_primitive:class_of_object_by_name(ClassName),
     {reply, ClassObj, State};
 dispatch('respondsTo:', [Selector], Self, State) when is_atom(Selector) ->
-    ClassName = class_name(Self, State),
+    ClassName = class_name_for_responds_to(Self, State),
     Result = beamtalk_dispatch:responds_to(Selector, ClassName),
     {reply, Result, State};
 dispatch('instVarNames', [], _Self, State) ->
@@ -206,7 +206,21 @@ class_name(_Self, State, Default) ->
     beamtalk_tagged_map:class_of(State, Default).
 
 %% @private
-%% @doc Normalize dispatch_result() (2-tuple error) to dispatch/4 contract (3-tuple error).
+%% @doc Return the class name to use for respondsTo: dispatch.
+%%
+%% BT-776: Class objects have a virtual metaclass tag (e.g., 'Counter class')
+%% that is not registered in the class registry. For class objects, start the
+%% responds_to chain walk from 'Class' instead.
+-spec class_name_for_responds_to(term(), map()) -> atom().
+class_name_for_responds_to(Self, State) when is_record(Self, beamtalk_object) ->
+    case beamtalk_class_registry:is_class_object(Self) of
+        true -> 'Class';
+        false -> beamtalk_tagged_map:class_of(State)
+    end;
+class_name_for_responds_to(_Self, State) ->
+    beamtalk_tagged_map:class_of(State).
+
+%% @private
 normalize_dispatch_result({error, Error}, State) ->
     {error, Error, State};
 normalize_dispatch_result(Other, _State) ->
