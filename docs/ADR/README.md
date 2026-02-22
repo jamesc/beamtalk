@@ -60,7 +60,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0031](0031-flat-namespace-for-v01.md) | Flat Namespace for v0.1 | Accepted | 2026-02-18 |
 | [0032](0032-early-class-protocol.md) | Early Class Protocol — Behaviour and Class in Beamtalk Stdlib | Accepted | 2026-02-20 |
 | [0033](0033-runtime-embedded-documentation.md) | Runtime-Embedded Documentation on Class and CompiledMethod | Accepted | 2026-02-21 |
-| [0034](0034-stdlib-self-hosting-in-beamtalk.md) | Stdlib Self-Hosting — Moving Logic from Erlang to Beamtalk | Proposed | 2026-02-22 |
+| [0034](0034-stdlib-self-hosting-in-beamtalk.md) | Stdlib Self-Hosting — Moving Logic from Erlang to Beamtalk | Accepted | 2026-02-22 |
 
 ## Creating New ADRs
 
