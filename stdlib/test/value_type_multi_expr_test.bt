@@ -3,7 +3,6 @@
 
 // BT-367: Tests for multi-expression value-type method codegen sequencing
 
-// @load stdlib/test/fixtures/multi_expr_calc.bt
 
 TestCase subclass: ValueTypeMultiExprTest
 

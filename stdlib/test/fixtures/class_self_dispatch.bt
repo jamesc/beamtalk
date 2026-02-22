@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-773: Test fixture for class method self vs explicit class name dispatch
+Object subclass: ClassSelfDispatch
+  state: x = 0
+
+  class makeSelf: v => self new: #{#x => v}
+
+  class makeExplicit: v => ClassSelfDispatch new: #{#x => v}
+
+  x => self.x

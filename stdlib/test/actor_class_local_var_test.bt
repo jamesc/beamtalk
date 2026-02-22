@@ -3,7 +3,6 @@
 
 // BT-741: Actor class methods must not reference actor State.
 
-// @load stdlib/test/fixtures/actor_class_local_var.bt
 
 TestCase subclass: ActorClassLocalVarTest
 

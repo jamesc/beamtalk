@@ -50,7 +50,7 @@
 %%% - BT-282: Bootstrap Object with shared reflection methods
 -module(beamtalk_object_ops).
 
--export([dispatch/4, has_method/1]).
+-export([dispatch/4, has_method/1, class_name/3]).
 
 -include("beamtalk.hrl").
 
@@ -62,18 +62,22 @@
 %%
 %% This is called by `beamtalk_dispatch` when a method is found in Object
 %% during hierarchy walking. State is the actor's actual state map.
+%%
+%% BT-753: When dispatched on class objects via chain fallthrough, State is
+%% `#{}' (empty map). In that case, class identity is derived from Self
+%% (`#beamtalk_object.class') instead of the State map.
 -spec dispatch(atom(), list(), term(), map()) ->
     {reply, term(), map()} | {error, term(), map()}.
 
 %% --- Reflection methods ---
 
-dispatch(class, [], _Self, State) ->
+dispatch(class, [], Self, State) ->
     %% BT-412: Return class as first-class object (not just an atom)
-    ClassName = beamtalk_tagged_map:class_of(State),
+    ClassName = class_name(Self, State),
     ClassObj = beamtalk_primitive:class_of_object_by_name(ClassName),
     {reply, ClassObj, State};
-dispatch('respondsTo:', [Selector], _Self, State) when is_atom(Selector) ->
-    ClassName = beamtalk_tagged_map:class_of(State),
+dispatch('respondsTo:', [Selector], Self, State) when is_atom(Selector) ->
+    ClassName = class_name_for_responds_to(Self, State),
     Result = beamtalk_dispatch:responds_to(Selector, ClassName),
     {reply, Result, State};
 dispatch('instVarNames', [], _Self, State) ->
@@ -85,16 +89,25 @@ dispatch('instVarAt:put:', [FieldName, Value], _Self, State) ->
     {reply, WrittenValue, NewState};
 %% --- Display methods ---
 
-dispatch('printString', [], _Self, State) ->
-    ClassName = beamtalk_tagged_map:class_of(State, 'Object'),
-    Str = iolist_to_binary([<<"a ">>, atom_to_binary(ClassName, utf8)]),
+dispatch('printString', [], Self, State) ->
+    DisplayName = class_display_name(Self, State),
+    Str = iolist_to_binary([<<"a ">>, DisplayName]),
     {reply, Str, State};
-dispatch(inspect, [], _Self, State) ->
-    Str = beamtalk_reflection:inspect_string(State),
-    {reply, Str, State};
-dispatch(describe, [], _Self, State) ->
-    ClassName = beamtalk_tagged_map:class_of(State, 'Object'),
-    Str = iolist_to_binary([<<"an instance of ">>, atom_to_binary(ClassName, utf8)]),
+dispatch(inspect, [], Self, State) ->
+    %% BT-753: For class objects (State is #{}), use Self for identity.
+    %% For actors with state, use detailed inspect_string showing fields.
+    case map_size(State) =:= 0 of
+        true ->
+            DisplayName = class_display_name(Self, State),
+            Str = iolist_to_binary([<<"a ">>, DisplayName]),
+            {reply, Str, State};
+        false ->
+            Str = beamtalk_reflection:inspect_string(State),
+            {reply, Str, State}
+    end;
+dispatch(describe, [], Self, State) ->
+    DisplayName = class_display_name(Self, State),
+    Str = iolist_to_binary([<<"an instance of ">>, DisplayName]),
     {reply, Str, State};
 %% --- Utility methods ---
 
@@ -112,7 +125,7 @@ dispatch(notNil, [], _Self, State) ->
 dispatch('perform:', [TargetSelector], Self, State) when is_atom(TargetSelector) ->
     %% Dynamic message send with no arguments
     %% obj perform: #increment  => obj increment
-    ClassName = beamtalk_tagged_map:class_of(State),
+    ClassName = class_name(Self, State),
     Result = beamtalk_dispatch:lookup(TargetSelector, [], Self, State, ClassName),
     normalize_dispatch_result(Result, State);
 dispatch('perform:withArguments:', [TargetSelector, ArgList], Self, State) when
@@ -120,19 +133,19 @@ dispatch('perform:withArguments:', [TargetSelector, ArgList], Self, State) when
 ->
     %% Dynamic message send with argument list
     %% obj perform: #'at:put:' withArguments: #(1, 'x')
-    ClassName = beamtalk_tagged_map:class_of(State),
+    ClassName = class_name(Self, State),
     Result = beamtalk_dispatch:lookup(TargetSelector, ArgList, Self, State, ClassName),
     normalize_dispatch_result(Result, State);
-dispatch('perform:withArguments:', [_TargetSelector, _ArgList], _Self, State) ->
-    ClassName = beamtalk_tagged_map:class_of(State, 'Object'),
+dispatch('perform:withArguments:', [_TargetSelector, _ArgList], Self, State) ->
+    ClassName = class_name(Self, State, 'Object'),
     Error0 = beamtalk_error:new(type_error, ClassName),
     Error1 = beamtalk_error:with_selector(Error0, 'perform:withArguments:'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Expected atom selector and list of arguments">>),
     {error, Error2, State};
 %% BT-405: Abstract method contract — mirrors Object.bt pure method body
 %% Runtime clause needed until compiled stdlib dispatch is wired up
-dispatch(subclassResponsibility, [], _Self, State) ->
-    ClassName = beamtalk_tagged_map:class_of(State, 'Object'),
+dispatch(subclassResponsibility, [], Self, State) ->
+    ClassName = class_name(Self, State, 'Object'),
     Error0 = beamtalk_error:new(user_error, ClassName),
     Error1 = beamtalk_error:with_message(
         Error0, <<"This method is abstract and must be overridden by a subclass">>
@@ -140,8 +153,8 @@ dispatch(subclassResponsibility, [], _Self, State) ->
     {error, Error1, State};
 %% --- Fallback: method not found ---
 
-dispatch(Selector, _Args, _Self, State) ->
-    ClassName = beamtalk_tagged_map:class_of(State, 'Object'),
+dispatch(Selector, _Args, Self, State) ->
+    ClassName = class_name(Self, State, 'Object'),
     Error0 = beamtalk_error:new(does_not_understand, ClassName),
     Error1 = beamtalk_error:with_selector(Error0, Selector),
     Error2 = beamtalk_error:with_hint(Error1, <<"Method not found in Object">>),
@@ -167,7 +180,47 @@ has_method(subclassResponsibility) -> true;
 has_method(_) -> false.
 
 %% @private
-%% @doc Normalize dispatch_result() (2-tuple error) to dispatch/4 contract (3-tuple error).
+%% @doc Return a display-friendly class name binary, stripping the " class" suffix.
+-spec class_display_name(term(), map()) -> binary().
+class_display_name(Self, State) ->
+    ClassName = class_name(Self, State, 'Object'),
+    beamtalk_class_registry:class_display_name(ClassName).
+
+%% @private
+%% @doc Extract class name from Self or State.
+%%
+%% BT-753: When dispatched on class objects via chain fallthrough, State is
+%% `#{}' (empty map). In that case, derive the class from Self.
+-spec class_name(term(), map()) -> atom() | undefined.
+class_name(#beamtalk_object{class = Class}, _State) ->
+    Class;
+class_name(_Self, State) ->
+    beamtalk_tagged_map:class_of(State).
+
+%% @private
+%% @doc Extract class name from Self or State, with a default fallback.
+-spec class_name(term(), map(), atom()) -> atom().
+class_name(#beamtalk_object{class = Class}, _State, _Default) ->
+    Class;
+class_name(_Self, State, Default) ->
+    beamtalk_tagged_map:class_of(State, Default).
+
+%% @private
+%% @doc Return the class name to use for respondsTo: dispatch.
+%%
+%% BT-776: Class objects have a virtual metaclass tag (e.g., 'Counter class')
+%% that is not registered in the class registry. For class objects, start the
+%% responds_to chain walk from 'Class' instead.
+-spec class_name_for_responds_to(term(), map()) -> atom().
+class_name_for_responds_to(Self, State) when is_record(Self, beamtalk_object) ->
+    case beamtalk_class_registry:is_class_object(Self) of
+        true -> 'Class';
+        false -> beamtalk_tagged_map:class_of(State)
+    end;
+class_name_for_responds_to(_Self, State) ->
+    beamtalk_tagged_map:class_of(State).
+
+%% @private
 normalize_dispatch_result({error, Error}, State) ->
     {error, Error, State};
 normalize_dispatch_result(Other, _State) ->
