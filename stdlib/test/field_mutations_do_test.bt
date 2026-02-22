@@ -3,8 +3,6 @@
 
 // Tests for field mutations (BT-98)
 
-// @load stdlib/test/fixtures/field_mutation_counter.bt
-// @load stdlib/test/fixtures/field_mutation_accumulator.bt
 
 TestCase subclass: FieldMutationsDoTest
 

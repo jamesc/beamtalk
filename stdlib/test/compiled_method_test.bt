@@ -3,7 +3,6 @@
 
 // Stdlib tests for CompiledMethod introspection (BT-101, BT-323, BT-454)
 
-// @load stdlib/test/fixtures/counter.bt
 
 TestCase subclass: CompiledMethodTest
 

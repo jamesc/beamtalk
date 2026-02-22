@@ -3,7 +3,6 @@
 
 // Tests for abstract classes and subclassResponsibility
 
-// @load stdlib/test/fixtures/circle.bt
 
 TestCase subclass: AbstractClassesTest
 

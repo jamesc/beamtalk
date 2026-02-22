@@ -3,7 +3,6 @@
 
 // Tests for is_list guard in mutation-threading codegen paths (BT-524)
 
-// @load stdlib/test/fixtures/collection_mutation_counter.bt
 
 TestCase subclass: CollectionMutationsTest
 
