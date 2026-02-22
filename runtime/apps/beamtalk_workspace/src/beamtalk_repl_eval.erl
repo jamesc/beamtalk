@@ -25,6 +25,8 @@
     should_purge_module/2,
     strip_internal_bindings/1,
     is_stdlib_path/1,
+    compute_package_module_name/1,
+    to_snake_case/1,
     inject_output/3,
     is_internal_key/1,
     activate_module/2,
@@ -33,7 +35,7 @@
     handle_class_definition/4,
     handle_method_definition/4,
     compile_expression_via_port/3,
-    compile_file_via_port/3
+    compile_file_via_port/4
 ]).
 -endif.
 
@@ -262,8 +264,10 @@ handle_load(Path, State) ->
                     Source = binary_to_list(SourceBin),
                     %% Detect if file is from the stdlib (lib/ directory)
                     StdlibMode = is_stdlib_path(Path),
+                    %% BT-775: Detect package context and compute module name override
+                    ModuleNameOverride = compute_package_module_name(Path),
                     %% Compile and load
-                    case compile_file(Source, Path, StdlibMode) of
+                    case compile_file(Source, Path, StdlibMode, ModuleNameOverride) of
                         {ok, Binary, ClassNames, ModuleName} ->
                             load_compiled_module(
                                 Binary,
@@ -285,7 +289,7 @@ handle_load(Path, State) ->
     {ok, [map()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
 handle_load_source(SourceBin, Label, State) ->
     Source = binary_to_list(SourceBin),
-    case compile_file(Source, Label, false) of
+    case compile_file(Source, Label, false, undefined) of
         {ok, Binary, ClassNames, ModuleName} ->
             load_compiled_module(
                 Binary,
@@ -471,6 +475,81 @@ handle_method_definition(MethodInfo, Warnings, Expression, State) ->
             end
     end.
 
+%% @doc Compute a package-qualified module name for a file being loaded (BT-775).
+%% When the file belongs to the current package (i.e., is under {project_path}/src/
+%% or {project_path}/test/), returns the module name matching the build system
+%% convention: bt@{package}@{relative_path} (or bt@{package}@test@{relative_path}).
+%% Returns `undefined` for non-package files or when no package is configured.
+-spec compute_package_module_name(string()) -> binary() | undefined.
+compute_package_module_name(Path) ->
+    %% Single gen_server call to get both package_name and project_path
+    case beamtalk_workspace_meta:get_metadata() of
+        {ok, #{package_name := PackageName, project_path := ProjectPath}} when
+            is_binary(PackageName), is_binary(ProjectPath)
+        ->
+            AbsPath = filename:absname(Path),
+            ProjectRoot = binary_to_list(ProjectPath),
+            %% Try src/ first, then test/ (BT-775)
+            case try_package_relative(AbsPath, ProjectRoot, "src") of
+                {ok, ModuleName} ->
+                    iolist_to_binary(["bt@", PackageName, "@", ModuleName]);
+                undefined ->
+                    case try_package_relative(AbsPath, ProjectRoot, "test") of
+                        {ok, ModuleName} ->
+                            iolist_to_binary(
+                                ["bt@", PackageName, "@test@", ModuleName]
+                            );
+                        undefined ->
+                            undefined
+                    end
+            end;
+        _ ->
+            undefined
+    end.
+
+%% @private
+%% Check if AbsPath is under ProjectRoot/SubDir and return the relative module path.
+-spec try_package_relative(string(), string(), string()) ->
+    {ok, iodata()} | undefined.
+try_package_relative(AbsPath, ProjectRoot, SubDir) ->
+    Dir = filename:join(ProjectRoot, SubDir),
+    AbsDir = filename:absname(Dir),
+    AbsDirPrefix = AbsDir ++ "/",
+    case lists:prefix(AbsDirPrefix, AbsPath) of
+        true ->
+            RelPath = lists:nthtail(length(AbsDirPrefix), AbsPath),
+            RelNoExt = filename:rootname(RelPath),
+            Segments = filename:split(RelNoExt),
+            SnakeSegments = [to_snake_case(S) || S <- Segments],
+            {ok, lists:join("@", SnakeSegments)};
+        false ->
+            undefined
+    end.
+
+%% @private
+%% Convert a string to snake_case (e.g., "SchemeSymbol" -> "scheme_symbol").
+%% Matches the Rust to_module_name() convention: inserts underscore before
+%% uppercase only when the previous character was lowercase.
+%% This means "HTTPRouter" -> "httprouter" (no underscores within acronyms).
+-spec to_snake_case(string()) -> string().
+to_snake_case([]) ->
+    [];
+to_snake_case([H | T]) ->
+    %% PrevWasLower tracks if prev char was lowercase (like Rust impl)
+    to_snake_case(T, [string:to_lower(H)], false).
+
+to_snake_case([], Acc, _PrevWasLower) ->
+    lists:reverse(Acc);
+to_snake_case([C | Rest], Acc, PrevWasLower) when C >= $A, C =< $Z ->
+    case PrevWasLower of
+        true ->
+            to_snake_case(Rest, [string:to_lower(C), $_ | Acc], false);
+        false ->
+            to_snake_case(Rest, [string:to_lower(C) | Acc], false)
+    end;
+to_snake_case([C | Rest], Acc, _PrevWasLower) ->
+    to_snake_case(Rest, [C | Acc], C >= $a andalso C =< $z).
+
 %% @doc Check if a file path refers to a stdlib file (under stdlib/src/ directory).
 %% Matches both relative paths (stdlib/src/Integer.bt) and absolute paths
 %% containing /stdlib/src/ as a path component.
@@ -565,15 +644,21 @@ compile_expression_via_port(Expression, ModuleName, Bindings) ->
     ).
 
 %% @doc Compile a file and extract class metadata via OTP Port backend.
--spec compile_file(string(), string(), boolean()) ->
+-spec compile_file(string(), string(), boolean(), binary() | undefined) ->
     {ok, binary(), [#{name := string(), superclass := string()}], atom()} | {error, term()}.
-compile_file(Source, Path, StdlibMode) ->
-    compile_file_via_port(Source, Path, StdlibMode).
+compile_file(Source, Path, StdlibMode, ModuleNameOverride) ->
+    compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride).
 
 %% Compile file via beamtalk_compiler OTP app (port backend).
-compile_file_via_port(Source, _Path, StdlibMode) ->
+compile_file_via_port(Source, _Path, StdlibMode, ModuleNameOverride) ->
     SourceBin = list_to_binary(Source),
-    Options = #{stdlib_mode => StdlibMode},
+    Options0 = #{stdlib_mode => StdlibMode},
+    %% BT-775: Pass module_name override when loading a package file
+    Options =
+        case ModuleNameOverride of
+            undefined -> Options0;
+            _ -> Options0#{module_name => ModuleNameOverride}
+        end,
     wrap_compiler_errors(
         fun() ->
             case beamtalk_compiler:compile(SourceBin, Options) of
