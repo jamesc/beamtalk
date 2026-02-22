@@ -464,7 +464,7 @@ impl TypeChecker {
                 (&receiver_ty, arg_types.first())
             {
                 if hierarchy.resolves_selector(recv_ty, &selector_name) {
-                    self.check_binary_operand_types(recv_ty, op, arg_ty, span);
+                    self.check_binary_operand_types(recv_ty, op, arg_ty, span, hierarchy);
                 }
             }
         }
@@ -810,8 +810,9 @@ impl TypeChecker {
         operator: &str,
         arg_ty: &EcoString,
         span: Span,
+        hierarchy: &ClassHierarchy,
     ) {
-        let is_numeric = |ty: &str| ty == "Integer" || ty == "Float" || ty == "Number";
+        let is_numeric = |ty: &str| hierarchy.is_numeric_type(ty);
         let is_arithmetic = matches!(operator, "+" | "-" | "*" | "/");
         let is_comparison = matches!(operator, "<" | ">" | "<=" | ">=");
 
@@ -1136,6 +1137,10 @@ mod tests {
         Expression::Literal(Literal::String(s.into()), span())
     }
 
+    fn char_lit(c: char) -> Expression {
+        Expression::Literal(Literal::Character(c), span())
+    }
+
     fn var(name: &str) -> Expression {
         Expression::Identifier(ident(name))
     }
@@ -1254,6 +1259,94 @@ mod tests {
         assert!(
             dnu_warnings.is_empty(),
             "Erlang class-side DNU should suppress warnings, got: {dnu_warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_character_literal_integer_method_no_warning() {
+        // BT-778: $A + 1 — Character inherits Integer's +, no DNU warning
+        let module = make_module(vec![msg_send(
+            char_lit('A'),
+            MessageSelector::Binary("+".into()),
+            vec![int_lit(1)],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let dnu_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu_warnings.is_empty(),
+            "Character should understand '+' via Integer inheritance: {dnu_warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_character_literal_own_method_no_warning() {
+        // BT-778: $A isLetter — Character's own method, no DNU warning
+        let module = make_module(vec![msg_send(
+            char_lit('A'),
+            MessageSelector::Unary("isLetter".into()),
+            vec![],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "Character should understand 'isLetter': {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn test_character_literal_bogus_method_warning() {
+        // BT-778: $A bogusMethod — should still produce DNU warning
+        let module = make_module(vec![msg_send(
+            char_lit('A'),
+            MessageSelector::Unary("bogusMethod".into()),
+            vec![],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let dnu_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert_eq!(
+            dnu_warnings.len(),
+            1,
+            "Character should NOT understand 'bogusMethod': {dnu_warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_character_literal_non_numeric_operand_warns() {
+        // BT-778: $A + 'hello' — Character inherits Integer's +, but 'hello' is not numeric.
+        // The type checker should warn that + expects a numeric argument, not a String.
+        let module = make_module(vec![msg_send(
+            char_lit('A'),
+            MessageSelector::Binary("+".into()),
+            vec![str_lit("hello")],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let type_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("expects a numeric argument"))
+            .collect();
+        assert_eq!(
+            type_warnings.len(),
+            1,
+            "Character + String should warn about non-numeric operand: {:?}",
+            checker.diagnostics()
         );
     }
 

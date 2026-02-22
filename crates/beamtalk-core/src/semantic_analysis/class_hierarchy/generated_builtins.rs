@@ -237,7 +237,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "Character".into(),
         ClassInfo {
             name: "Character".into(),
-            superclass: Some("Object".into()),
+            superclass: Some("Integer".into()),
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
