@@ -12,7 +12,7 @@
             {'bt@stdlib@behaviour', 'Behaviour', 'Object'},
             {'bt@stdlib@block', 'Block', 'Object'},
             {'bt@stdlib@boolean', 'Boolean', 'Object'},
-            {'bt@stdlib@character', 'Character', 'Object'},
+            {'bt@stdlib@character', 'Character', 'Integer'},
             {'bt@stdlib@class', 'Class', 'Behaviour'},
             {'bt@stdlib@collection', 'Collection', 'Object'},
             {'bt@stdlib@compiled_method', 'CompiledMethod', 'Object'},

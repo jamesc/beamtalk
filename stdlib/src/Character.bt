@@ -13,7 +13,7 @@
 /// $A asInteger             // => 65
 /// $a isLetter              // => true
 /// ```
-sealed Object subclass: Character
+sealed Integer subclass: Character
 
   /// Test strict equality with another character.
   ///

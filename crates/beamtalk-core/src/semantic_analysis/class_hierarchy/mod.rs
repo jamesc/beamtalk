@@ -594,24 +594,39 @@ impl ClassHierarchy {
         }
     }
 
+    /// Emit an error if `class` subclasses a sealed class.
+    ///
+    /// Stdlib builtin classes (e.g. `Character`) are exempt: they may legitimately
+    /// subclass sealed classes to mirror BEAM runtime relationships (BT-778).
+    fn check_sealed_superclass(
+        &self,
+        class: &crate::ast::ClassDefinition,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        let is_stdlib_builtin = Self::is_builtin_class(class.name.name.as_str());
+        if is_stdlib_builtin {
+            return;
+        }
+        if let Some(ref superclass) = class.superclass {
+            if let Some(super_info) = self.classes.get(superclass.name.as_str()) {
+                if !super_info.can_be_subclassed() {
+                    diagnostics.push(Diagnostic::error(
+                        format!("Cannot subclass sealed class `{}`", superclass.name),
+                        superclass.span,
+                    ));
+                    // Still register the class so downstream passes (codegen routing,
+                    // completions) can reason about it despite the error.
+                }
+            }
+        }
+    }
+
     /// Add classes from a parsed module. Returns diagnostics for errors.
     fn add_module_classes(&mut self, module: &Module) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
 
         for class in &module.classes {
-            // Check sealed class enforcement (skip for root classes with no superclass)
-            if let Some(ref superclass) = class.superclass {
-                if let Some(super_info) = self.classes.get(superclass.name.as_str()) {
-                    if !super_info.can_be_subclassed() {
-                        diagnostics.push(Diagnostic::error(
-                            format!("Cannot subclass sealed class `{}`", superclass.name),
-                            superclass.span,
-                        ));
-                        // Still register the class so downstream passes (codegen routing,
-                        // completions) can reason about it despite the error.
-                    }
-                }
-            }
+            self.check_sealed_superclass(class, &mut diagnostics);
 
             // Check sealed method override enforcement
             if let Some(ref superclass) = class.superclass {
@@ -1077,6 +1092,66 @@ mod tests {
         let (h, diags) = ClassHierarchy::build(&module);
         assert!(diags.is_empty());
         assert!(h.has_class("MyActor"));
+    }
+
+    #[test]
+    fn builtin_class_can_subclass_sealed_class() {
+        // BT-778: Character is a builtin that subclasses sealed Integer.
+        // Compiling Character.bt should NOT produce a sealed class error.
+        let module = Module {
+            classes: vec![make_user_class("Character", "Integer")],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (h, diags) = ClassHierarchy::build(&module);
+        assert!(
+            diags.is_empty(),
+            "Builtin classes should be exempt from sealed check: {diags:?}"
+        );
+        assert!(h.has_class("Character"));
+    }
+
+    #[test]
+    fn character_superclass_chain_includes_integer() {
+        // BT-778: Character inherits from Integer in the builtin hierarchy.
+        let h = ClassHierarchy::with_builtins();
+        let chain = h.superclass_chain("Character");
+        assert!(
+            chain.contains(&"Integer".into()),
+            "Chain should include Integer: {chain:?}"
+        );
+        assert!(
+            chain.contains(&"Number".into()),
+            "Chain should include Number: {chain:?}"
+        );
+    }
+
+    #[test]
+    fn character_resolves_integer_selectors() {
+        // BT-778: Character should resolve Integer methods via inheritance.
+        let h = ClassHierarchy::with_builtins();
+        assert!(
+            h.resolves_selector("Character", "+"),
+            "Character should understand '+'"
+        );
+        assert!(
+            h.resolves_selector("Character", "-"),
+            "Character should understand '-'"
+        );
+        assert!(
+            h.resolves_selector("Character", "*"),
+            "Character should understand '*'"
+        );
+        assert!(
+            h.resolves_selector("Character", "isLetter"),
+            "Character should understand 'isLetter'"
+        );
+        assert!(
+            !h.resolves_selector("Character", "bogusMethod"),
+            "Character should NOT understand 'bogusMethod'"
+        );
     }
 
     // --- Sealed method override enforcement tests ---
