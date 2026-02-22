@@ -73,9 +73,8 @@ impl CoreErlangGenerator {
             None
         };
 
-        // Generate body as Document, render to string for embedding
+        // Generate body as Document
         let method_body_doc = self.generate_method_definition_body_with_reply(method)?;
-        let body_str = method_body_doc.to_pretty_string();
 
         self.current_nlr_token = None;
 
@@ -83,10 +82,11 @@ impl CoreErlangGenerator {
         // try/catch via the shared helper. letrec creates a genuine separate
         // function frame, avoiding BEAM validator ambiguous_catch_try_state
         // errors that arise when try/catch is nested inside case arms.
-        let body_str = if let Some(ref token_var) = nlr_token_var {
-            self.wrap_actor_body_with_nlr_catch(&body_str, token_var, true)
+        // BT-774: Compose at Document level without intermediate string rendering.
+        let method_body_doc = if let Some(ref token_var) = nlr_token_var {
+            self.wrap_actor_body_with_nlr_catch(method_body_doc, token_var, true)
         } else {
-            body_str
+            method_body_doc
         };
 
         // Build method clause as Document tree
@@ -105,7 +105,7 @@ impl CoreErlangGenerator {
                             docvec![
                                 line(),
                                 format!("<[{params_pattern}]> when 'true' ->"),
-                                nest(INDENT, docvec![line(), body_str,]),
+                                nest(INDENT, docvec![line(), method_body_doc,]),
                                 line(),
                                 "<_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}",
                             ]
@@ -119,7 +119,7 @@ impl CoreErlangGenerator {
         } else {
             docvec![
                 format!("<'{selector_name}'> when 'true' ->"),
-                nest(INDENT, docvec![line(), body_str,]),
+                nest(INDENT, docvec![line(), method_body_doc,]),
                 "\n",
             ]
         };
