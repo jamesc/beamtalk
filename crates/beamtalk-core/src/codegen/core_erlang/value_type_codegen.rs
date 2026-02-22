@@ -492,34 +492,16 @@ impl CoreErlangGenerator {
         self.current_nlr_token = None;
 
         if let Some(token_var) = nlr_token_var {
-            // BT-754: Wrap the method body in try/catch to catch non-local returns
-            // thrown by ^ inside block closures. The token ensures we only catch
-            // our own NLR throws (not those from nested method activations).
-            let result_var = self.fresh_temp_var("NlrResult");
-            let cls_var = self.fresh_temp_var("NlrCls");
-            let err_var = self.fresh_temp_var("NlrErr");
-            let stk_var = self.fresh_temp_var("NlrStk");
-            let ctk_var = self.fresh_temp_var("CatchTok");
-            let val_var = self.fresh_temp_var("NlrVal");
-            // ONE variable binding the whole 2-tuple (not two separate elements) — BT-754.
-            let ot_pair_var = self.fresh_temp_var("OtherPair");
+            // BT-754/BT-764: Wrap the method body in try/catch to catch non-local returns
+            // thrown by ^ inside block closures. Uses the shared value type NLR helper.
+            let catch_vars = self.wrap_value_type_body_with_nlr_catch(&token_var);
 
             let body_doc = Document::Vec(body_parts);
             Ok(docvec![
                 format!("'{}'/{} = fun ({}) ->\n", mangled, arity, params.join(", ")),
-                format!("    let {token_var} = call 'erlang':'make_ref'() in\n"),
-                format!("    try\n"),
+                catch_vars.format_try_prefix(),
                 body_doc,
-                format!(
-                    "\n    of {result_var} -> {result_var}\n\
-                     \x20   catch <{cls_var}, {err_var}, {stk_var}> ->\n\
-                     \x20     case {{{cls_var}, {err_var}}} of\n\
-                     \x20       <{{'throw', {{'$bt_nlr', {ctk_var}, {val_var}}}}}> \
-                          when call 'erlang':'=:='({ctk_var}, {token_var}) -> {val_var}\n\
-                     \x20       <{ot_pair_var}> when 'true' -> \
-                          primop 'raw_raise'({cls_var}, {err_var}, {stk_var})\n\
-                     \x20     end\n"
-                ),
+                catch_vars.format_catch_suffix(),
             ])
         } else {
             Ok(docvec![
