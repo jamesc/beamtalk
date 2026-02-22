@@ -634,8 +634,10 @@ mod tests {
 
         // Start REPL with stdin=null so it exits after workspace startup.
         // The workspace node remains alive as a detached BEAM process.
+        // --timeout 300: short idle timeout (5 min) so the workspace dies quickly
+        // after the test binary exits, rather than lingering for the default 4h.
         let output = Command::new(&bin)
-            .args(["repl", "--port", "0"])
+            .args(["repl", "--port", "0", "--timeout", "300"])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
