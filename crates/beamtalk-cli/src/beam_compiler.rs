@@ -743,9 +743,13 @@ pub fn compile_source_with_bindings(
             "Found diagnostics during compilation"
         );
         for diagnostic in &diagnostics {
-            // Skip warnings when suppress_warnings is enabled
+            // Skip warnings and hints when suppress_warnings is enabled
             if options.suppress_warnings
-                && diagnostic.severity == beamtalk_core::source_analysis::Severity::Warning
+                && matches!(
+                    diagnostic.severity,
+                    beamtalk_core::source_analysis::Severity::Warning
+                        | beamtalk_core::source_analysis::Severity::Hint
+                )
             {
                 continue;
             }

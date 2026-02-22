@@ -969,7 +969,7 @@ impl TypeChecker {
         let message: EcoString =
             format!("{class_name}{side} does not understand '{selector}'").into();
 
-        let mut diag = Diagnostic::warning(message, span);
+        let mut diag = Diagnostic::hint(message, span);
 
         // Try to suggest similar selectors
         if let Some(suggestion) =
@@ -1549,7 +1549,7 @@ mod tests {
 
     #[test]
     fn test_warnings_only_never_errors() {
-        // All diagnostics should be warnings, never errors
+        // All diagnostics should be warnings or hints, never errors
         let module = make_module(vec![msg_send(
             int_lit(42),
             MessageSelector::Unary("bogus".into()),
@@ -1559,10 +1559,11 @@ mod tests {
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         for diag in checker.diagnostics() {
-            assert_eq!(
+            assert_ne!(
                 diag.severity,
-                crate::source_analysis::Severity::Warning,
-                "type checker should only emit warnings"
+                crate::source_analysis::Severity::Error,
+                "type checker should only emit warnings or hints, not errors: {}",
+                diag.message
             );
         }
     }
