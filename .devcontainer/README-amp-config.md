@@ -7,7 +7,7 @@
 ## How It Works
 
 1. This template file is deployed on container start by `scripts/worktree-up.ps1`
-2. During setup, `envsubst` renders the template and writes the result to `~/.config/amp/settings.json` inside the container
+2. During setup, `envsubst` copies this template to `~/.config/amp/settings.json` inside the container (no environment variable substitution currently occurs)
 3. Amp reads `~/.config/amp/settings.json` automatically on startup
 
 ## Authentication

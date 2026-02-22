@@ -4,7 +4,7 @@
 
 # Beamtalk-specific worktree setup hook.
 # Called inside the devcontainer after startup to configure project-specific resources.
-# Currently: clones the skills repo into ~/.copilot/skills/
+# Currently: clones the skills repo into ~/.copilot/skills/ and ~/.config/agents/skills/
 
 set -euo pipefail
 
@@ -15,19 +15,26 @@ log() {
 SKILLS_DIR="$HOME/.copilot/skills"
 SKILLS_REPO="https://github.com/jamesc/skills.git"
 
-if [ -d "$SKILLS_DIR/.git" ]; then
-    log "Skills repo already present, pulling latest..."
-    git -C "$SKILLS_DIR" pull --ff-only 2>/dev/null || log "Could not pull (offline or diverged), using existing"
-else
-    if [ -d "$SKILLS_DIR" ] && [ ! -d "$SKILLS_DIR/.git" ] && [ "$(ls -A "$SKILLS_DIR" 2>/dev/null)" ]; then
-        log "Skills dir exists but is not a git repo; moving aside"
-        mv "$SKILLS_DIR" "${SKILLS_DIR}.bak.$(date +%s)"
-    fi
-    log "Cloning skills repo into $SKILLS_DIR..."
-    mkdir -p "$(dirname "$SKILLS_DIR")"
-    if git clone "$SKILLS_REPO" "$SKILLS_DIR"; then
-        log "Skills repo cloned"
+clone_or_update_skills() {
+    local dir="$1"
+    local repo="$2"
+    if [ -d "$dir/.git" ]; then
+        log "Skills repo already present at $dir, pulling latest..."
+        git -C "$dir" pull --ff-only 2>/dev/null || log "Could not pull (offline or diverged), using existing"
     else
-        log "Could not clone skills repo (offline?), skipping"
+        if [ -d "$dir" ] && [ ! -d "$dir/.git" ] && [ "$(ls -A "$dir" 2>/dev/null)" ]; then
+            log "Skills dir $dir exists but is not a git repo; moving aside"
+            mv "$dir" "${dir}.bak.$(date +%s)"
+        fi
+        log "Cloning skills repo into $dir..."
+        mkdir -p "$(dirname "$dir")"
+        if git clone "$repo" "$dir"; then
+            log "Skills repo cloned into $dir"
+        else
+            log "Could not clone skills repo (offline?), skipping $dir"
+        fi
     fi
-fi
+}
+
+clone_or_update_skills "$SKILLS_DIR" "$SKILLS_REPO"
+clone_or_update_skills "$HOME/.config/agents/skills" "$SKILLS_REPO"

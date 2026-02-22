@@ -46,7 +46,8 @@
   "mounts": [
     "source=beamtalk-cargo-cache,target=/usr/local/cargo/registry,type=volume",
     "source=${localWorkspaceFolderBasename}-target-cache,target=${containerWorkspaceFolder}/target,type=volume",
-    "source=beamtalk-copilot-state,target=/home/vscode/.copilot,type=volume"
+    "source=beamtalk-copilot-state,target=/home/vscode/.copilot,type=volume",
+    "source=beamtalk-amp-state,target=/home/vscode/.config/amp,type=volume"
   ],
   // ═══════════════════════════════════════════════════════════════════════════
   // DEVELOPMENT WORKFLOWS
@@ -72,6 +73,7 @@
     "GH_TOKEN": "${localEnv:GH_TOKEN}",
     "GITHUB_TOKEN": "${localEnv:GH_TOKEN}",
     "GIT_USER_NAME": "${localEnv:GIT_USER_NAME}",
-    "GIT_USER_EMAIL": "${localEnv:GIT_USER_EMAIL}"
+    "GIT_USER_EMAIL": "${localEnv:GIT_USER_EMAIL}",
+    "AMP_API_KEY": "${localEnv:AMP_API_KEY}"
   }
 }

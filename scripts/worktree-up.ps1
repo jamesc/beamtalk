@@ -64,6 +64,11 @@ param(
     [switch]$Rebuild
 )
 
+if ($Amp -and $PSBoundParameters.ContainsKey('Command')) {
+    Write-Error "-Amp and -Command are mutually exclusive. Use one or the other."
+    exit 1
+}
+
 if ($Amp) {
     $Command = "amp"
 }
