@@ -32,7 +32,7 @@ b getValue
 // ===========================================================================
 
 :reload
-// => Reloaded 2 files from tests/e2e/fixtures/load_dir_test/
+// => Reloaded 2 files from tests/e2e/fixtures/load_dir_test
 
 // Classes should still work after reload
 a2 := Alpha new
