@@ -3,7 +3,6 @@
 
 // BT-483: Mutation-threaded control flow returns {Result, State} tuples
 
-// @load stdlib/test/fixtures/mutation_return_values.bt
 
 TestCase subclass: MutationReturnValuesTest
 

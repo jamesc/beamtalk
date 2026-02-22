@@ -3,7 +3,6 @@
 
 // BT-478: Nested to:do: with field mutations
 
-// @load stdlib/test/fixtures/field_mutation_nested.bt
 
 TestCase subclass: NestedToDoTest
 

@@ -3,7 +3,6 @@
 
 // Tests for variable scope and resolution
 
-// @load stdlib/test/fixtures/counter.bt
 
 TestCase subclass: SemanticScopeTest
 

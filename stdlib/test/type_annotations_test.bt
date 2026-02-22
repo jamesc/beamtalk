@@ -3,7 +3,6 @@
 
 // Type annotation syntax variations (BT-673)
 
-// @load stdlib/test/fixtures/typed_math.bt
 
 TestCase subclass: TypeAnnotationsTest
 
