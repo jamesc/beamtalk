@@ -18,6 +18,7 @@
 -module(beamtalk_method_resolver).
 
 -include("beamtalk.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 -export([resolve/2]).
 
@@ -81,7 +82,7 @@ resolve(Other, _Selector) ->
 resolve_with_hierarchy(ClassPid, Selector) ->
     case gen_server:call(ClassPid, {method, Selector}) of
         nil ->
-            walk_superclass_chain(ClassPid, Selector);
+            walk_superclass_chain(ClassPid, Selector, 0);
         Method ->
             Method
     end.
@@ -91,9 +92,13 @@ resolve_with_hierarchy(ClassPid, Selector) ->
 %%
 %% Gets the superclass name from the current class, looks up its pid,
 %% and checks for the method. Recurses until the method is found or
-%% the chain is exhausted (superclass = none).
--spec walk_superclass_chain(pid(), selector()) -> compiled_method() | nil.
-walk_superclass_chain(ClassPid, Selector) ->
+%% the chain is exhausted (superclass = none). Guarded by
+%% MAX_HIERARCHY_DEPTH to prevent infinite recursion on corrupted hierarchies.
+-spec walk_superclass_chain(pid(), selector(), non_neg_integer()) -> compiled_method() | nil.
+walk_superclass_chain(_ClassPid, _Selector, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+    ?LOG_WARNING(">> hierarchy walk exceeded ~p levels", [?MAX_HIERARCHY_DEPTH]),
+    nil;
+walk_superclass_chain(ClassPid, Selector, Depth) ->
     case beamtalk_object_class:superclass(ClassPid) of
         none ->
             nil;
@@ -104,7 +109,7 @@ walk_superclass_chain(ClassPid, Selector) ->
                 SuperPid ->
                     case gen_server:call(SuperPid, {method, Selector}) of
                         nil ->
-                            walk_superclass_chain(SuperPid, Selector);
+                            walk_superclass_chain(SuperPid, Selector, Depth + 1);
                         Method ->
                             Method
                     end
