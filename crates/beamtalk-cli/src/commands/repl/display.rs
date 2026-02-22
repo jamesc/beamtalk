@@ -190,6 +190,7 @@ pub(crate) fn display_codegen(core_erlang: &str) {
 }
 
 /// Display symbol info from the :info command (BT-724).
+#[allow(dead_code)]
 pub(crate) fn display_info(info: &serde_json::Value) {
     let found = info
         .get("found")
