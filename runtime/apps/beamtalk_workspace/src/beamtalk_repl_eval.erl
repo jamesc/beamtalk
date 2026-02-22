@@ -743,13 +743,35 @@ format_formatted_diagnostics(FormattedList) ->
     iolist_to_binary(lists:join(<<"\n\n">>, FormattedList)).
 
 %% @doc Extract variable name from assignment expression.
+%%
+%% For multi-statement input (e.g. "x := 1. y := 2."), the codegen (BT-780)
+%% handles all binding updates via State threading and returns updated bindings
+%% directly. Returning `none` for multi-statement input ensures these
+%% codegen-managed bindings are not overwritten with the wrong value.
+%%
+%% Multi-statement detection uses ". " (period + whitespace) rather than "."
+%% alone to avoid false positives from float literals (1.5) or string contents
+%% with embedded periods followed directly by non-whitespace (e.g., "file.txt").
 -spec extract_assignment(string()) -> {ok, atom()} | none.
 extract_assignment(Expression) ->
-    case re:run(Expression, "^([a-zA-Z_][a-zA-Z0-9_]*)\\s*:=", [{capture, [1], list}]) of
-        {match, [VarName]} ->
-            {ok, list_to_atom(VarName)};
+    %% Detect multi-statement: a period followed by one-or-more whitespace
+    %% characters and then any non-whitespace character (covers identifiers,
+    %% digits, parens, quotes, etc. as the start of the next statement).
+    %% Requires whitespace to distinguish from floats (1.5) and dotted
+    %% names inside strings ("stream_test.txt").
+    case re:run(Expression, "\\.\\s+\\S", []) of
+        {match, _} ->
+            %% Multi-statement: codegen already updated all bindings in State
+            none;
         nomatch ->
-            none
+            case
+                re:run(Expression, "^\\s*([a-zA-Z_][a-zA-Z0-9_]*)\\s*:=", [{capture, [1], list}])
+            of
+                {match, [VarName]} ->
+                    {ok, list_to_atom(VarName)};
+                nomatch ->
+                    none
+            end
     end.
 
 %% @doc Activate a loaded module: register classes, trigger hot reload,

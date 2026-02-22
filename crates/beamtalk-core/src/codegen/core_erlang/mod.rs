@@ -361,6 +361,29 @@ pub fn generate_repl_expression(expression: &Expression, module_name: &str) -> R
     Ok(doc.to_pretty_string())
 }
 
+/// Generates Core Erlang for multiple REPL expressions (BT-780).
+///
+/// Like [`generate_repl_expression`] but accepts a slice of expressions,
+/// generating a single `eval/1` that evaluates all of them in sequence
+/// and threads the bindings State between identifier assignments.
+///
+/// For a single expression, delegates to [`generate_repl_expression`].
+///
+/// # Errors
+///
+/// Returns [`CodeGenError`] if code generation fails.
+pub fn generate_repl_expressions(expressions: &[Expression], module_name: &str) -> Result<String> {
+    if expressions.is_empty() {
+        return Err(CodeGenError::UnsupportedFeature {
+            feature: "empty expression list".to_string(),
+            location: module_name.to_string(),
+        });
+    }
+    let mut generator = CoreErlangGenerator::new(module_name);
+    let doc = generator.generate_repl_module_multi(expressions)?;
+    Ok(doc.to_pretty_string())
+}
+
 /// Generates Core Erlang for a test expression (no workspace bindings).
 ///
 /// Like [`generate_repl_expression`] but with `workspace_mode = false`,

@@ -1,8 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for multi-statement method bodies (BT-360)
-// Verifies newline-separated statements in methods and blocks
+// E2E tests for multi-statement method bodies (BT-360) and
+// top-level REPL multi-statement input (BT-780).
 
 // @load tests/e2e/fixtures/multi_statement.bt
 
@@ -25,3 +25,55 @@ MultiStatement new twoSideEffects
 // Block with period-separated expressions (backward compat)
 [1 + 1. 2 + 2. 3 + 3] value
 // => 6
+
+// ===========================================================================
+// BT-780: MULTI-STATEMENT TOP-LEVEL REPL INPUT
+// ===========================================================================
+
+// Two assignments: returns last value, binds both variables
+x := 1. y := 2.
+// => 2
+
+// Both bindings should be visible
+x
+// => 1
+
+y
+// => 2
+
+:clear
+// => ok
+
+// Cross-expression reference: second expression uses first's binding
+x := 10. y := x + 5.
+// => 15
+
+y
+// => 15
+
+:clear
+// => ok
+
+// Mix of assignment and expression: returns last result
+x := 1. x + 10
+// => 11
+
+x
+// => 1
+
+:clear
+// => ok
+
+// Pure expressions only: returns last result, no new bindings
+1 + 1. 2 + 2. 3 + 3
+// => 6
+
+:clear
+// => ok
+
+// Single expression still works unchanged
+42
+// => 42
+
+:clear
+// => ok
