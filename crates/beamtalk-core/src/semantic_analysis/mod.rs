@@ -175,7 +175,7 @@ pub enum MutationKind {
 /// assert_eq!(result.diagnostics.len(), 0);
 /// ```
 pub fn analyse(module: &Module) -> AnalysisResult {
-    analyse_with_known_vars(module, &[])
+    analyse_full(module, &[], false)
 }
 
 /// Analyse a module with pre-defined variables (for REPL context).
@@ -189,10 +189,23 @@ pub fn analyse(module: &Module) -> AnalysisResult {
 /// services. Pre-defining known variables is essential for REPL contexts where
 /// users build up state incrementally across multiple evaluations.
 pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> AnalysisResult {
+    analyse_full(module, known_vars, false)
+}
+
+/// Analyse a module with compiler options controlling stdlib-specific behaviour.
+///
+/// When `stdlib_mode` is true, built-in classes are permitted to subclass sealed
+/// classes (BT-791). This should only be set when compiling stdlib sources.
+pub fn analyse_with_options(module: &Module, options: &crate::CompilerOptions) -> AnalysisResult {
+    analyse_full(module, &[], options.stdlib_mode)
+}
+
+/// Internal: full analysis with all knobs.
+fn analyse_full(module: &Module, known_vars: &[&str], stdlib_mode: bool) -> AnalysisResult {
     let mut result = AnalysisResult::new();
 
     // Phase 0: Build Class Hierarchy (ADR 0006 Phase 1a)
-    let (hierarchy, hierarchy_diags) = ClassHierarchy::build(module);
+    let (hierarchy, hierarchy_diags) = ClassHierarchy::build_with_options(module, stdlib_mode);
     result.class_hierarchy = hierarchy;
     result.diagnostics.extend(hierarchy_diags);
 

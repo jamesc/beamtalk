@@ -13,7 +13,7 @@
 //!
 //! The hierarchy uses simple depth-first MRO (no multiple inheritance).
 
-use crate::ast::{MethodKind, Module, TypeAnnotation};
+use crate::ast::{ClassDefinition, MethodKind, Module, TypeAnnotation};
 use crate::source_analysis::Diagnostic;
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
@@ -124,10 +124,22 @@ impl ClassHierarchy {
     /// Build a class hierarchy from built-in definitions and a parsed module.
     ///
     /// Returns the hierarchy and any diagnostics (e.g., sealed class violations).
+    /// Sealed-superclass enforcement applies to all user-defined classes.
     #[must_use]
     pub fn build(module: &Module) -> (Self, Vec<Diagnostic>) {
+        Self::build_with_options(module, false)
+    }
+
+    /// Build a class hierarchy with explicit stdlib compilation mode.
+    ///
+    /// When `stdlib_mode` is true, built-in classes (e.g. `Character`) are
+    /// permitted to subclass sealed classes. This exemption is **not** granted
+    /// based on class name alone — only when the compiler knows it is compiling
+    /// stdlib sources (BT-791).
+    #[must_use]
+    pub fn build_with_options(module: &Module, stdlib_mode: bool) -> (Self, Vec<Diagnostic>) {
         let mut hierarchy = Self::with_builtins();
-        let diagnostics = hierarchy.add_module_classes(module);
+        let diagnostics = hierarchy.add_module_classes(module, stdlib_mode);
         (hierarchy, diagnostics)
     }
 
@@ -605,41 +617,48 @@ impl ClassHierarchy {
         }
     }
 
-    /// Emit an error if `class` subclasses a sealed class.
+    /// Check whether a class is allowed to subclass its declared superclass.
     ///
-    /// Runtime-protected stdlib classes (e.g. `Character`) are exempt: they may
-    /// legitimately subclass sealed classes to mirror BEAM runtime relationships
-    /// (BT-778). Runtime-only builtins like `Future` (which users may define,
-    /// BT-750) are intentionally not exempt.
+    /// Returns a diagnostic if the superclass is sealed and the subclass is not
+    /// exempt. Exemptions are only granted to built-in classes when compiling
+    /// in stdlib mode (BT-791).
+    ///
+    /// Note: This gates on `stdlib_mode` (compilation context) rather than
+    /// class names. Runtime-protected classes (BT-778) are an additional layer
+    /// that applies at runtime; this compile-time check is stricter.
     fn check_sealed_superclass(
         &self,
-        class: &crate::ast::ClassDefinition,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) {
-        let is_stdlib_builtin = Self::is_runtime_protected_class(class.name.name.as_str());
-        if is_stdlib_builtin {
-            return;
+        class: &ClassDefinition,
+        stdlib_mode: bool,
+    ) -> Option<Diagnostic> {
+        let superclass = class.superclass.as_ref()?;
+        let super_info = self.classes.get(superclass.name.as_str())?;
+        if super_info.can_be_subclassed() {
+            return None;
         }
-        if let Some(ref superclass) = class.superclass {
-            if let Some(super_info) = self.classes.get(superclass.name.as_str()) {
-                if !super_info.can_be_subclassed() {
-                    diagnostics.push(Diagnostic::error(
-                        format!("Cannot subclass sealed class `{}`", superclass.name),
-                        superclass.span,
-                    ));
-                    // Still register the class so downstream passes (codegen routing,
-                    // completions) can reason about it despite the error.
-                }
-            }
+        // BT-791: Only exempt built-in classes when compiling stdlib.
+        // A user-defined class with the same name (e.g. `Character`)
+        // must still respect sealed enforcement.
+        if stdlib_mode && Self::is_builtin_class(class.name.name.as_str()) {
+            return None;
         }
+        Some(Diagnostic::error(
+            format!("Cannot subclass sealed class `{}`", superclass.name),
+            superclass.span,
+        ))
     }
 
     /// Add classes from a parsed module. Returns diagnostics for errors.
-    fn add_module_classes(&mut self, module: &Module) -> Vec<Diagnostic> {
+    fn add_module_classes(&mut self, module: &Module, stdlib_mode: bool) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
 
         for class in &module.classes {
-            self.check_sealed_superclass(class, &mut diagnostics);
+            // Check sealed class enforcement (skip for root classes with no superclass).
+            // Still register the class so downstream passes (codegen routing,
+            // completions) can reason about it despite the error.
+            if let Some(diag) = self.check_sealed_superclass(class, stdlib_mode) {
+                diagnostics.push(diag);
+            }
 
             // Check sealed method override enforcement
             if let Some(ref superclass) = class.superclass {
@@ -1107,10 +1126,11 @@ mod tests {
         assert!(h.has_class("MyActor"));
     }
 
+    // --- BT-791: stdlib_mode gating tests ---
+
     #[test]
-    fn builtin_class_can_subclass_sealed_class() {
-        // BT-778: Character is a builtin that subclasses sealed Integer.
-        // Compiling Character.bt should NOT produce a sealed class error.
+    fn stdlib_mode_exempts_builtin_class_from_sealed_check() {
+        // In stdlib_mode, a class named "Character" extending sealed "Integer" is allowed.
         let module = Module {
             classes: vec![make_user_class("Character", "Integer")],
             method_definitions: Vec::new(),
@@ -1118,13 +1138,48 @@ mod tests {
             span: test_span(),
             leading_comments: vec![],
         };
-        let (h, diags) = ClassHierarchy::build(&module);
+        let (h, diags) = ClassHierarchy::build_with_options(&module, true);
         assert!(
             diags.is_empty(),
-            "Builtin classes should be exempt from sealed check: {diags:?}"
+            "stdlib_mode should exempt builtin class: {diags:?}"
         );
         assert!(h.has_class("Character"));
     }
+
+    #[test]
+    fn user_code_character_subclassing_integer_rejected() {
+        // Without stdlib_mode, even a class named "Character" is rejected.
+        let module = Module {
+            classes: vec![make_user_class("Character", "Integer")],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (h, diags) = ClassHierarchy::build_with_options(&module, false);
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("sealed"));
+        assert!(diags[0].message.contains("Integer"));
+        // Class is still registered despite the error
+        assert!(h.has_class("Character"));
+    }
+
+    #[test]
+    fn stdlib_mode_does_not_exempt_non_builtin_class() {
+        // Even in stdlib_mode, a non-builtin name extending a sealed class is rejected.
+        let module = Module {
+            classes: vec![make_user_class("MyCustomClass", "Integer")],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (_, diags) = ClassHierarchy::build_with_options(&module, true);
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("sealed"));
+    }
+
+    // --- BT-778: Character hierarchy tests ---
 
     #[test]
     fn character_superclass_chain_includes_integer() {

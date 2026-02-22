@@ -718,7 +718,8 @@ pub fn compile_source_with_bindings(
 
     // Run semantic analysis (BT-401: sealed enforcement, undefined vars, etc.)
     // Also includes single-class-per-file validation (BT-349)
-    let analysis_result = beamtalk_core::semantic_analysis::analyse(&module);
+    // BT-791: Pass options so stdlib_mode gates sealed-superclass exemptions.
+    let analysis_result = beamtalk_core::semantic_analysis::analyse_with_options(&module, options);
     diagnostics.extend(analysis_result.diagnostics);
 
     // BT-738: Warn when user code shadows a stdlib class name.
