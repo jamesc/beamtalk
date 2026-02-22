@@ -82,7 +82,7 @@ true /= false
 // Actor Identity (Process PIDs)
 // ═══════════════════════════════════════════════════════════════════════════
 
-// @load stdlib/test/fixtures/counter.bt
+// @load test/fixtures/counter.bt
 
 // Actors are compared by pid - different spawns are not equal
 c1 := Counter spawn

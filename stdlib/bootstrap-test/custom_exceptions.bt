@@ -5,7 +5,7 @@
 // Verifies that custom Exception subclasses can be created, signaled,
 // and caught with proper class hierarchy matching.
 
-// @load stdlib/test/fixtures/custom_error.bt
+// @load test/fixtures/custom_error.bt
 
 // ===========================================================================
 // SIGNAL FROM USER-DEFINED EXCEPTION CLASS

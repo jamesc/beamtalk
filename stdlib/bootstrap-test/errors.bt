@@ -133,7 +133,7 @@ Dictionary new: true
 // ===========================================================================
 // Actors must use spawn/spawnWith: — calling new should raise instantiation_error
 
-// @load stdlib/test/fixtures/counter.bt
+// @load test/fixtures/counter.bt
 
 Counter new
 // => ERROR: instantiation_error
