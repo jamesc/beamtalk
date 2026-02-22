@@ -64,4 +64,3 @@ fn generate_stdlib_types(lib_dir: &Path) {
 
     fs::write(dest_path, code).expect("Failed to write stdlib_types.rs");
 }
-
