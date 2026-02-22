@@ -60,8 +60,11 @@ const PORT_DISCOVERY_MAX_RETRIES: usize = 20;
 const READINESS_PROBE_DELAY_MS: u64 = 200;
 
 /// Maximum number of TCP readiness probe attempts.
-/// Total worst-case: 30 × (300ms connect + 500ms read + 200ms sleep) = ~30s.
-const READINESS_PROBE_MAX_RETRIES: usize = 30;
+///
+/// When the port is not yet bound, `connect()` returns ECONNREFUSED immediately,
+/// so the real budget is RETRIES × `DELAY_MS` (not RETRIES × `connect_timeout`).
+/// 150 × 200ms = 30s budget for the BEAM node to start listening.
+const READINESS_PROBE_MAX_RETRIES: usize = 150;
 
 /// TCP read timeout for readiness probe in milliseconds.
 const READINESS_READ_TIMEOUT_MS: u64 = 500;
