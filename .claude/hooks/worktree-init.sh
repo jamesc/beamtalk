@@ -7,6 +7,9 @@
 
 set -euo pipefail
 
+# Ensure the pre-push lint hook is active (local config, needs setting per-clone/worktree)
+git config core.hooksPath .githooks 2>/dev/null || true
+
 GIT_DIR_FILE="${PWD}/.git"
 
 # Only act when we are inside a worktree (.git is a file, not a directory)

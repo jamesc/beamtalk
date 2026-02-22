@@ -313,7 +313,7 @@ pub(crate) fn validate_immutable_mutation(
     };
 
     Some(Diagnostic {
-        severity: crate::source_analysis::Severity::Error,
+        severity: crate::source_analysis::Severity::Warning,
         message: format!("Cannot mutate immutable value ({type_name})").into(),
         span,
         hint: Some("Primitive values like integers, strings, and booleans are immutable".into()),
@@ -450,7 +450,7 @@ impl MethodValidator for IntegerArgumentValidator {
                 Expression::Literal(lit, lit_span) => {
                     let type_name = literal_type_name(lit);
                     diags.push(Diagnostic {
-                        severity: crate::source_analysis::Severity::Error,
+                        severity: crate::source_analysis::Severity::Warning,
                         message: format!(
                             "{selector_name} expects an integer argument, got {type_name}"
                         )

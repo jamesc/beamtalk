@@ -34,4 +34,7 @@ TestCase subclass: ReflectionBasicTest
     // Verify increment worked via getValue
     self assert: (c getValue await) equals: 43.
     // BT-359: instVarAt: on value types raises immutable_value error
-    self should: [42 instVarAt: #x] raise: #immutable_value
+    self should: [42 instVarAt: #x] raise: #immutable_value.
+    // BT-765: instVarAt:put: on immutable literals raises immutable_value error
+    self should: [42 instVarAt: #x put: 99] raise: #immutable_value.
+    self should: ["hello" instVarAt: #x put: "world"] raise: #immutable_value

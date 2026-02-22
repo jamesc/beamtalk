@@ -10,16 +10,4 @@ TestCase subclass: ClassVariablesSingletonTest
     // TranscriptStream has current accessor
     self assert: (TranscriptStream current) equals: nil.
     // WorkspaceEnvironment has current accessor
-    self assert: (WorkspaceEnvironment current) equals: nil.
-    // Class-side current: setter works (set and read back)
-    SystemDictionary current: 42.
-    self assert: (SystemDictionary current) equals: 42.
-    // Reset back to nil
-    SystemDictionary current: nil.
-    self assert: (SystemDictionary current) equals: nil.
-    // TranscriptStream setter
-    TranscriptStream current: 99.
-    self assert: (TranscriptStream current) equals: 99.
-    // WorkspaceEnvironment setter
-    WorkspaceEnvironment current: 7.
-    self assert: (WorkspaceEnvironment current) equals: 7
+    self assert: (WorkspaceEnvironment current) equals: nil

@@ -82,6 +82,29 @@ pub fn generate_behaviour_bif(selector: &str, params: &[String]) -> Option<Docum
         "classAllInstVarNames" => Some(docvec![
             "call 'beamtalk_behaviour_intrinsics':'classAllInstVarNames'(Self)"
         ]),
+        // ADR 0033: Runtime-embedded documentation
+        "classDoc" => Some(docvec![
+            "call 'beamtalk_behaviour_intrinsics':'classDoc'(Self)"
+        ]),
+        "classSetDoc" => {
+            let doc = params.first()?;
+            Some(docvec![
+                "call 'beamtalk_behaviour_intrinsics':'classSetDoc'(Self, ",
+                doc.clone(),
+                ")",
+            ])
+        }
+        "classSetMethodDoc" => {
+            let sel = params.first()?;
+            let doc = params.get(1)?;
+            Some(docvec![
+                "call 'beamtalk_behaviour_intrinsics':'classSetMethodDoc'(Self, ",
+                sel.clone(),
+                ", ",
+                doc.clone(),
+                ")",
+            ])
+        }
         _ => None,
     }
 }
@@ -184,6 +207,42 @@ mod tests {
         assert_eq!(
             result,
             Some("call 'beamtalk_behaviour_intrinsics':'classClass'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_class_doc() {
+        let result = doc_to_string(generate_behaviour_bif("classDoc", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_behaviour_intrinsics':'classDoc'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_class_set_doc() {
+        let result = doc_to_string(generate_behaviour_bif(
+            "classSetDoc",
+            &["DocStr".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_behaviour_intrinsics':'classSetDoc'(Self, DocStr)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_class_set_method_doc() {
+        let result = doc_to_string(generate_behaviour_bif(
+            "classSetMethodDoc",
+            &["Selector".to_string(), "DocStr".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some(
+                "call 'beamtalk_behaviour_intrinsics':'classSetMethodDoc'(Self, Selector, DocStr)"
+                    .to_string()
+            )
         );
     }
 

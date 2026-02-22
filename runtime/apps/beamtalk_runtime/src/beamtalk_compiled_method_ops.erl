@@ -20,6 +20,7 @@
 %%% |------------------|------|------------------------------------|
 %%% | `selector`       | []   | Returns the method's selector atom |
 %%% | `source`         | []   | Returns the method's source code   |
+%%% | `doc`            | []   | Returns the method's doc string    |
 %%% | `argumentCount`  | []   | Returns the method's arity         |
 %%% | `class`          | []   | Returns `'CompiledMethod'`         |
 %%% | `printString`    | []   | Human-readable representation      |
@@ -49,6 +50,7 @@ has_method(Selector) ->
 -spec is_builtin(atom()) -> boolean().
 is_builtin('selector') -> true;
 is_builtin('source') -> true;
+is_builtin('doc') -> true;
 is_builtin('argumentCount') -> true;
 is_builtin('class') -> true;
 is_builtin('printString') -> true;
@@ -70,6 +72,9 @@ builtin_dispatch('selector', [], #{'__selector__' := Sel}) ->
 %% source => returns the method's source code binary
 builtin_dispatch('source', [], #{'__source__' := Src}) ->
     {ok, Src};
+%% doc => returns the method's documentation string (or nil)
+builtin_dispatch('doc', [], #{'__doc__' := Doc}) ->
+    {ok, Doc};
 %% argumentCount => returns the method's arity
 builtin_dispatch('argumentCount', [], #{'__method_info__' := Info}) ->
     {ok, maps:get(arity, Info, 0)};
@@ -101,6 +106,6 @@ does_not_understand(Selector, _Args, _Value) ->
     Error1 = beamtalk_error:with_selector(Error0, Selector),
     Error2 = beamtalk_error:with_hint(
         Error1,
-        <<"CompiledMethod supports: selector, source, argumentCount, class, printString, asString, respondsTo:">>
+        <<"CompiledMethod supports: selector, source, doc, argumentCount, class, printString, asString, respondsTo:">>
     ),
     beamtalk_error:raise(Error2).

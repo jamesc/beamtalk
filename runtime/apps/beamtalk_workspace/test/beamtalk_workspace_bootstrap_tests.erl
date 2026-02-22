@@ -559,6 +559,44 @@ purge_bt745_modules() ->
     ok.
 
 %%====================================================================
+%% Tests for module name validation (BT-747)
+%%====================================================================
+
+%% Test that valid Beamtalk module names are accepted.
+is_valid_module_name_accepts_valid_names_test() ->
+    ?assert(beamtalk_workspace_bootstrap:is_valid_module_name("bt@MyClass")),
+    ?assert(beamtalk_workspace_bootstrap:is_valid_module_name("bt@stdlib@String")),
+    ?assert(beamtalk_workspace_bootstrap:is_valid_module_name("bt@My_Class_123")),
+    ?assert(beamtalk_workspace_bootstrap:is_valid_module_name("abc")).
+
+%% Test that invalid module names are rejected.
+is_valid_module_name_rejects_invalid_names_test() ->
+    ?assertNot(beamtalk_workspace_bootstrap:is_valid_module_name("")),
+    ?assertNot(beamtalk_workspace_bootstrap:is_valid_module_name("bt@My-Class")),
+    ?assertNot(beamtalk_workspace_bootstrap:is_valid_module_name("bt@My Class")),
+    ?assertNot(beamtalk_workspace_bootstrap:is_valid_module_name("bt@My.Class")),
+    ?assertNot(beamtalk_workspace_bootstrap:is_valid_module_name("bt@My/Class")),
+    ?assertNot(beamtalk_workspace_bootstrap:is_valid_module_name("bt@My;Class")).
+
+%% Test that find_bt_modules_in_dir skips files with invalid module names.
+find_bt_modules_skips_invalid_names_test() ->
+    Dir = make_temp_beam_dir([
+        "bt@ValidClass.beam",
+        "bt@Invalid-Name.beam",
+        "bt@Also Invalid.beam",
+        "bt@OK_Name.beam"
+    ]),
+    try
+        Result = beamtalk_workspace_bootstrap:find_bt_modules_in_dir(Dir),
+        ?assertEqual(
+            lists:sort(['bt@OK_Name', 'bt@ValidClass']),
+            lists:sort(Result)
+        )
+    after
+        remove_temp_dir(Dir)
+    end.
+
+%%====================================================================
 %% Test helpers for temp directories
 %%====================================================================
 

@@ -179,7 +179,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 3 perform: #max: withArguments: #(5)   // => 5
   /// ```
-  sealed perform: selector: Symbol withArguments: args: Tuple => @intrinsic dynamicSendWithArgs
+  sealed perform: selector: Symbol withArguments: args: List => @intrinsic dynamicSendWithArgs
 
   /// Create an Association (key-value pair) with the receiver as key.
   ///
