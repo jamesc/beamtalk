@@ -228,6 +228,17 @@ impl ClassHierarchy {
             .any(|s| s.as_str() == "Actor")
     }
 
+    /// Returns true if `class_name` is a numeric type (Integer, Float, Number,
+    /// or any subclass thereof, e.g. Character which inherits from Integer).
+    #[must_use]
+    pub fn is_numeric_type(&self, class_name: &str) -> bool {
+        matches!(class_name, "Integer" | "Float" | "Number")
+            || self
+                .superclass_chain(class_name)
+                .iter()
+                .any(|s| matches!(s.as_str(), "Integer" | "Float" | "Number"))
+    }
+
     /// Returns all class variable names for a class, including inherited ones.
     #[must_use]
     pub fn class_variable_names(&self, class_name: &str) -> Vec<EcoString> {
@@ -611,6 +622,10 @@ impl ClassHierarchy {
     /// Returns a diagnostic if the superclass is sealed and the subclass is not
     /// exempt. Exemptions are only granted to built-in classes when compiling
     /// in stdlib mode (BT-791).
+    ///
+    /// Note: This gates on `stdlib_mode` (compilation context) rather than
+    /// class names. Runtime-protected classes (BT-778) are an additional layer
+    /// that applies at runtime; this compile-time check is stricter.
     fn check_sealed_superclass(
         &self,
         class: &ClassDefinition,
@@ -1162,6 +1177,65 @@ mod tests {
         let (_, diags) = ClassHierarchy::build_with_options(&module, true);
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("sealed"));
+    }
+
+    // --- BT-778: Character hierarchy tests ---
+
+    #[test]
+    fn character_superclass_chain_includes_integer() {
+        // BT-778: Character inherits from Integer in the builtin hierarchy.
+        let h = ClassHierarchy::with_builtins();
+        let chain = h.superclass_chain("Character");
+        assert!(
+            chain.contains(&"Integer".into()),
+            "Chain should include Integer: {chain:?}"
+        );
+        assert!(
+            chain.contains(&"Number".into()),
+            "Chain should include Number: {chain:?}"
+        );
+    }
+
+    #[test]
+    fn character_resolves_integer_selectors() {
+        // BT-778: Character should resolve Integer methods via inheritance.
+        let h = ClassHierarchy::with_builtins();
+        assert!(
+            h.resolves_selector("Character", "+"),
+            "Character should understand '+'"
+        );
+        assert!(
+            h.resolves_selector("Character", "-"),
+            "Character should understand '-'"
+        );
+        assert!(
+            h.resolves_selector("Character", "*"),
+            "Character should understand '*'"
+        );
+        assert!(
+            h.resolves_selector("Character", "isLetter"),
+            "Character should understand 'isLetter'"
+        );
+        assert!(
+            !h.resolves_selector("Character", "bogusMethod"),
+            "Character should NOT understand 'bogusMethod'"
+        );
+    }
+
+    #[test]
+    fn character_is_numeric_type() {
+        // BT-778: Character inherits from Integer which inherits from Number,
+        // so it should be treated as numeric for operand-type checks.
+        let h = ClassHierarchy::with_builtins();
+        assert!(h.is_numeric_type("Integer"), "Integer is numeric");
+        assert!(h.is_numeric_type("Float"), "Float is numeric");
+        assert!(h.is_numeric_type("Number"), "Number is numeric");
+        assert!(
+            h.is_numeric_type("Character"),
+            "Character is numeric (inherits Integer)"
+        );
+        assert!(!h.is_numeric_type("String"), "String is not numeric");
+        assert!(!h.is_numeric_type("Boolean"), "Boolean is not numeric");
     }
 
     // --- Sealed method override enforcement tests ---
