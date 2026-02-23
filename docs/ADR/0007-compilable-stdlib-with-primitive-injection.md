@@ -409,9 +409,9 @@ Structural intrinsics use unquoted descriptive names. These are the ~20 cases wh
 | `doesNotUnderstand` | Generate DNU handler with `#beamtalk_error{}` |
 | `dynamicSend` | `gen_server:cast(Pid, {Selector, Args, Future})` |
 | `respondsTo` | `beamtalk_primitive:responds_to(Receiver, Selector)` |
-| `instVarNames` | Filter `maps:keys(State)` excluding `__` prefixed internals |
-| `instVarAt` | `maps:get(Name, State)` with field-not-found check |
-| `instVarAtPut` | `maps:put(Name, Value, State)` with field-not-found check |
+| `fieldNames` | Filter `maps:keys(State)` excluding `__` prefixed internals |
+| `fieldAt` | `maps:get(Name, State)` with field-not-found check |
+| `fieldAtPut` | `maps:put(Name, Value, State)` with field-not-found check |
 
 **Control flow (Boolean / Block):**
 
@@ -562,9 +562,9 @@ ProtoObject subclass: Object
 
   // Reflection — structural intrinsics
   respondsTo: selector => @primitive respondsTo
-  instVarNames => @primitive instVarNames
-  instVarAt: name => @primitive instVarAt
-  instVarAt: name put: value => @primitive instVarAtPut
+  fieldNames => @primitive fieldNames
+  fieldAt: name => @primitive fieldAt
+  fieldAt: name put: value => @primitive fieldAtPut
 
   // Debugging — pure Beamtalk
   describe => 'an Object'
@@ -1351,7 +1351,7 @@ The 25 structural intrinsic names that move from `@primitive` to `@intrinsic`:
 | **Block evaluation** | `blockValue`, `blockValue1`, `blockValue2`, `blockValue3` |
 | **Control flow** | `whileTrue`, `whileFalse`, `repeat`, `timesRepeat`, `toDo`, `toByDo` |
 | **Exception handling** | `onDo`, `ensure`, `error` |
-| **Reflection** | `respondsTo`, `instVarNames`, `instVarAt`, `instVarAtPut`, `dynamicSend`, `dynamicSendWithArgs` |
+| **Reflection** | `respondsTo`, `fieldNames`, `fieldAt`, `fieldAtPut`, `dynamicSend`, `dynamicSendWithArgs` |
 | **Object protocol** | `printString`, `hash` |
 
 All 187 quoted `@primitive 'selector'` uses are **unchanged**.

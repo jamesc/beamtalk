@@ -298,7 +298,7 @@ impl LanguageService {
 - State map with `__class__` and `__methods__`
 - Message routing (handle_cast/handle_call)
 - Self reference (`#beamtalk_object{}` record)
-- Reflection APIs (class, respondsTo, instVarNames, instVarAt)
+- Reflection APIs (class, respondsTo, fieldNames, fieldAt)
 
 **Gaps:**
 

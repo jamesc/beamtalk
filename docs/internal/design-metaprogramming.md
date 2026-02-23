@@ -327,9 +327,9 @@ beamtalk_registry:lookup(myObject) -> Pid2
 ```
 obj class
 obj respondsTo: #selector
-obj instVarNames
-obj instVarAt: #name
-obj instVarAt: #name put: value
+obj fieldNames
+obj fieldAt: #name
+obj fieldAt: #name put: value
 obj perform: #selector
 obj perform: #selector withArgs: args
 ```

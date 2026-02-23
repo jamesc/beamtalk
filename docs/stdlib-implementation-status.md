@@ -72,9 +72,9 @@
 | `yourself` | intrinsic + pure BT | ✅ | 🧪 | Returns self |
 | `hash` | intrinsic | ✅ | 🧪 | `erlang:phash2/1` |
 | `respondsTo:` | intrinsic | ✅ | 🧪 | `beamtalk_primitive:responds_to/2` |
-| `instVarNames` | intrinsic | ✅ | 🧪 | Async for actors |
-| `instVarAt:` | intrinsic | ✅ | 🧪 | Async for actors |
-| `instVarAt:put:` | intrinsic | ✅ | 🧪 | Async for actors |
+| `fieldNames` | intrinsic | ✅ | 🧪 | Async for actors |
+| `fieldAt:` | intrinsic | ✅ | 🧪 | Async for actors |
+| `fieldAt:put:` | intrinsic | ✅ | 🧪 | Async for actors |
 | `perform:` | intrinsic | ✅ | 🧪 | Dynamic dispatch |
 | `perform:withArgs:` | intrinsic | ✅ | 🧪 | Dynamic dispatch with args |
 | `->` | intrinsic | ✅ | 🧪 | Association creation (key-value pair) |

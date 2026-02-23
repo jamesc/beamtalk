@@ -5,10 +5,10 @@
 //
 // Object extends ProtoObject with reflection and introspection capabilities:
 // - respondsTo: - Check if object understands a message
-// - instVarNames - Get list of instance variable names
-// - instVarAt: - Read instance variable by name
+// - fieldNames - Get list of field names
+// - fieldAt: - Read field by name
 //
-// NOTE: Full actor reflection tests (respondsTo:, instVarNames, instVarAt:)
+// NOTE: Full actor reflection tests (respondsTo:, fieldNames, fieldAt:)
 // require async message sends and state inspection. These are best tested
 // in runtime/test/beamtalk_actor_tests.erl where we have full control.
 //
@@ -140,20 +140,20 @@ nil ifNotNil: [:v | v * 2] ifNil: [0]
 // reflection_test() ->
 //     %% Spawn counter actor
 //     {ok, Pid} = counter:start_link([]),
-//     
+//
 //     %% Test respondsTo:
 //     {ok, true} = gen_server:call(Pid, {respondsTo, [increment]}),
 //     {ok, false} = gen_server:call(Pid, {respondsTo, [unknown]}),
-//     
-//     %% Test instVarNames
-//     {ok, [value]} = gen_server:call(Pid, {instVarNames, []}),
-//     
-//     %% Test instVarAt:
-//     {ok, 0} = gen_server:call(Pid, {instVarAt, [value]}),
-//     
+//
+//     %% Test fieldNames
+//     {ok, [value]} = gen_server:call(Pid, {fieldNames, []}),
+//
+//     %% Test fieldAt:
+//     {ok, 0} = gen_server:call(Pid, {fieldAt, [value]}),
+//
 //     %% Increment and check again
 //     ok = gen_server:cast(Pid, {increment, [], FuturePid}),
-//     {ok, 1} = gen_server:call(Pid, {instVarAt, [value]}).
+//     {ok, 1} = gen_server:call(Pid, {fieldAt, [value]}).
 // ```
 
 // ===========================================================================
@@ -162,8 +162,8 @@ nil ifNotNil: [:v | v * 2] ifNil: [0]
 //
 // Primitives should also respond to reflection messages:
 // - respondsTo: should check primitive's method table
-// - instVarNames should return empty list (primitives have no instance vars)
-// - instVarAt: should return nil
+// - fieldNames should return empty list (primitives have no fields)
+// - fieldAt: should return nil
 //
 // These will be implemented when we add primitive dispatch support.
 
@@ -172,7 +172,7 @@ nil ifNotNil: [:v | v * 2] ifNil: [0]
 // ===========================================================================
 //
 // ✅ Object.bt defined with reflection API
-// ✅ Compiler support for respondsTo:, instVarNames, instVarAt:
+// ✅ Compiler support for respondsTo:, fieldNames, fieldAt:, fieldAt:put:
 // ✅ Runtime support in beamtalk_actor.erl
 // ✅ Nil-testing protocol (isNil, notNil, ifNil:, ifNotNil:) - TESTED HERE
 // ⏳ Actor reflection E2E tests - Need runtime EUnit tests
