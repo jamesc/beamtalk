@@ -15,15 +15,12 @@
 %%% | Function | Args | Description |
 %%% |----------|------|-------------|
 %%% | `at/2` | Tuple, Index | Element at index (1-based) with bounds checking |
-%%% | `unwrap/1` | Tuple | Extract value or raise error |
-%%% | `unwrap_or/2` | Tuple, Default | Extract value or return default |
-%%% | `unwrap_or_else/2` | Tuple, Block | Extract value or evaluate block |
 %%% | `as_string/1` | Tuple | Convert to string |
 %%%
 %%% See: BT-417, ADR 0007
 
 -module(beamtalk_tuple_ops).
--export([at/2, unwrap/1, unwrap_or/2, unwrap_or_else/2, as_string/1, do/2]).
+-export([at/2, as_string/1, do/2]).
 
 -include("beamtalk.hrl").
 
@@ -53,41 +50,6 @@ at(Tuple, Idx) ->
         )
     ),
     beamtalk_error:raise(Error2).
-
-%% @doc Extract value from {ok, Value} or raise error from {error, Reason}.
--spec unwrap(tuple()) -> term().
-unwrap({ok, Value}) ->
-    Value;
-unwrap({error, Reason}) ->
-    Error0 = beamtalk_error:new(type_error, 'Tuple'),
-    Error1 = beamtalk_error:with_selector(Error0, 'unwrap'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Called unwrap on an error tuple">>),
-    Error3 = beamtalk_error:with_details(Error2, #{reason => Reason}),
-    beamtalk_error:raise(Error3);
-unwrap(_Tuple) ->
-    Error0 = beamtalk_error:new(does_not_understand, 'Tuple'),
-    Error1 = beamtalk_error:with_selector(Error0, 'unwrap'),
-    Error = beamtalk_error:with_hint(
-        Error1, <<"unwrap requires {ok, Value} or {error, Reason} tuple">>
-    ),
-    beamtalk_error:raise(Error).
-
-%% @doc Return Value from {ok, Value} or Default otherwise.
--spec unwrap_or(tuple(), term()) -> term().
-unwrap_or({ok, Value}, _Default) -> Value;
-unwrap_or(_Tuple, Default) -> Default.
-
-%% @doc Return Value from {ok, Value} or evaluate block.
--spec unwrap_or_else(tuple(), fun(() -> term())) -> term().
-unwrap_or_else({ok, Value}, _Block) when is_function(_Block, 0) ->
-    Value;
-unwrap_or_else(_Tuple, Block) when is_function(Block, 0) ->
-    Block();
-unwrap_or_else(_Tuple, _NotABlock) ->
-    Error0 = beamtalk_error:new(does_not_understand, 'Tuple'),
-    Error1 = beamtalk_error:with_selector(Error0, 'unwrapOrElse:'),
-    Error = beamtalk_error:with_hint(Error1, <<"Argument must be a block (0-arity function)">>),
-    beamtalk_error:raise(Error).
 
 %% @doc Convert tuple to string representation.
 -spec as_string(tuple()) -> binary().

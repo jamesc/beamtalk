@@ -21,3 +21,47 @@ TestCase subclass: TupleTest
   testSize =>
     // Empty tuple has size 0
     self assert: ((Tuple new) size) equals: 0
+
+  testUnwrapOkTuple =>
+    // {ok, 42} unwrap returns 42
+    okTuple := Erlang erlang list_to_tuple: #(#ok, 42).
+    self assert: okTuple unwrap equals: 42.
+    // {ok, "hello"} unwrap returns the value
+    okStr := Erlang erlang list_to_tuple: #(#ok, "hello").
+    self assert: okStr unwrap equals: "hello"
+
+  testUnwrapErrorTupleRaises =>
+    // {error, 'oops'} unwrap raises user_error with reason in message
+    errTuple := Erlang erlang list_to_tuple: #(#error, #oops).
+    self should: [errTuple unwrap] raise: #user_error
+
+  testUnwrapOtherTupleRaises =>
+    // {other, 'x'} unwrap raises user_error with "unwrap requires..." message
+    otherTuple := Erlang erlang list_to_tuple: #(#other, #x).
+    self should: [otherTuple unwrap] raise: #user_error
+
+  testUnwrapOrOkReturnsValue =>
+    // {ok, 99} unwrapOr: 0 returns 99
+    okTuple := Erlang erlang list_to_tuple: #(#ok, 99).
+    self assert: (okTuple unwrapOr: 0) equals: 99
+
+  testUnwrapOrErrorReturnsDefault =>
+    // {error, 'fail'} unwrapOr: 0 returns 0
+    errTuple := Erlang erlang list_to_tuple: #(#error, #fail).
+    self assert: (errTuple unwrapOr: 0) equals: 0.
+    // {other, 'x'} unwrapOr: 99 returns 99
+    otherTuple := Erlang erlang list_to_tuple: #(#other, #x).
+    self assert: (otherTuple unwrapOr: 99) equals: 99
+
+  testUnwrapOrElseOkReturnsValue =>
+    // {ok, 7} unwrapOrElse: [0] returns 7
+    okTuple := Erlang erlang list_to_tuple: #(#ok, 7).
+    self assert: (okTuple unwrapOrElse: [0]) equals: 7
+
+  testUnwrapOrElseErrorEvaluatesBlock =>
+    // {error, _} unwrapOrElse: [...] evaluates block
+    errTuple := Erlang erlang list_to_tuple: #(#error, #fail).
+    self assert: (errTuple unwrapOrElse: [42]) equals: 42.
+    // {other, _} unwrapOrElse: [...] evaluates block
+    otherTuple := Erlang erlang list_to_tuple: #(#other, #x).
+    self assert: (otherTuple unwrapOrElse: [99]) equals: 99

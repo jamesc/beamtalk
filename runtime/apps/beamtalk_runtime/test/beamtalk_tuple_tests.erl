@@ -63,96 +63,6 @@ at_non_integer_index_test() ->
     ).
 
 %%% ============================================================================
-%%% unwrap/1 Tests
-%%% ============================================================================
-
-unwrap_ok_test() ->
-    ?assertEqual(42, beamtalk_tuple_ops:unwrap({ok, 42})),
-    ?assertEqual(hello, beamtalk_tuple_ops:unwrap({ok, hello})),
-    ?assertEqual({a, b}, beamtalk_tuple_ops:unwrap({ok, {a, b}})).
-
-unwrap_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'Tuple', selector = 'unwrap'}
-        },
-        beamtalk_tuple_ops:unwrap({error, not_found})
-    ),
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'Tuple', selector = 'unwrap'}
-        },
-        beamtalk_tuple_ops:unwrap({error, reason})
-    ).
-
-unwrap_invalid_pattern_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{
-                kind = does_not_understand, class = 'Tuple', selector = 'unwrap'
-            }
-        },
-        beamtalk_tuple_ops:unwrap({a, b})
-    ).
-
-%%% ============================================================================
-%%% unwrap_or/2 Tests
-%%% ============================================================================
-
-unwrap_or_test() ->
-    ?assertEqual(42, beamtalk_tuple_ops:unwrap_or({ok, 42}, default)),
-    ?assertEqual(default, beamtalk_tuple_ops:unwrap_or({error, reason}, default)),
-    ?assertEqual(default, beamtalk_tuple_ops:unwrap_or({a, b}, default)),
-    ?assertEqual(nil, beamtalk_tuple_ops:unwrap_or({error, not_found}, nil)).
-
-%%% ============================================================================
-%%% unwrap_or_else/2 Tests
-%%% ============================================================================
-
-unwrap_or_else_test() ->
-    ?assertEqual(42, beamtalk_tuple_ops:unwrap_or_else({ok, 42}, fun() -> default end)),
-    ?assertEqual(default, beamtalk_tuple_ops:unwrap_or_else({error, reason}, fun() -> default end)),
-    ?assertEqual(default, beamtalk_tuple_ops:unwrap_or_else({a, b}, fun() -> default end)).
-
-unwrap_or_else_side_effects_test() ->
-    Self = self(),
-    %% Block should not be evaluated for {ok, _}
-    beamtalk_tuple_ops:unwrap_or_else({ok, 42}, fun() ->
-        Self ! evaluated,
-        default
-    end),
-    receive
-        evaluated -> ?assert(false)
-    after 10 ->
-        ok
-    end,
-    %% Block should be evaluated for other patterns
-    beamtalk_tuple_ops:unwrap_or_else({error, reason}, fun() ->
-        Self ! evaluated,
-        default
-    end),
-    receive
-        evaluated -> ok
-    after 100 ->
-        ?assert(false)
-    end.
-
-unwrap_or_else_non_function_test() ->
-    %% Non-function argument raises does_not_understand (not type_error)
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{
-                kind = does_not_understand, class = 'Tuple', selector = 'unwrapOrElse:'
-            }
-        },
-        beamtalk_tuple_ops:unwrap_or_else({error, reason}, 42)
-    ).
-
-%%% ============================================================================
 %%% as_string/1 Tests
 %%% ============================================================================
 
@@ -197,10 +107,11 @@ dispatch_is_error_test() ->
 
 dispatch_unwrap_test() ->
     ?assertEqual(42, 'bt@stdlib@tuple':dispatch('unwrap', [], {ok, 42})),
+    %% {error, Reason} now raises user_error (pure BT via self error:)
     ?assertError(
         #{
             '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'Tuple', selector = 'unwrap'}
+            error := #beamtalk_error{kind = user_error, class = 'Tuple'}
         },
         'bt@stdlib@tuple':dispatch('unwrap', [], {error, reason})
     ).
@@ -221,12 +132,11 @@ dispatch_unwrap_or_else_test() ->
     ).
 
 dispatch_unwrap_invalid_pattern_test() ->
+    %% Non-ok/error tuples now raise user_error (pure BT via self error:)
     ?assertError(
         #{
             '$beamtalk_class' := _,
-            error := #beamtalk_error{
-                kind = does_not_understand, class = 'Tuple', selector = 'unwrap'
-            }
+            error := #beamtalk_error{kind = user_error, class = 'Tuple'}
         },
         'bt@stdlib@tuple':dispatch('unwrap', [], {a, b})
     ).
@@ -251,7 +161,8 @@ primitive_send_unwrap_test() ->
     ?assertEqual(42, beamtalk_primitive:send({ok, 42}, 'unwrap', [])).
 
 primitive_send_as_string_test() ->
-    ?assertEqual(<<"{a, b}">>, beamtalk_primitive:send({a, b}, 'asString', [])).
+    %% BT-536: Atoms use #symbol notation via beamtalk_primitive:print_string/1
+    ?assertEqual(<<"{#a, #b}">>, beamtalk_primitive:send({a, b}, 'asString', [])).
 
 %%% ============================================================================
 %%% do/2 Tests — iterate tuple elements
