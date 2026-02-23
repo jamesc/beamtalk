@@ -332,7 +332,9 @@ invoke_method(_ClassName, ClassPid, Selector, Args, Self, State, Depth) ->
                     catch
                         Type:Reason:Stack ->
                             ?LOG_ERROR("Erlang error in ~p:dispatch: ~p", [ModuleName, Reason]),
-                            Wrapped = beamtalk_exception_handler:ensure_wrapped(Type, Reason, Stack),
+                            Wrapped = beamtalk_exception_handler:ensure_wrapped(
+                                Type, Reason, Stack
+                            ),
                             #{error := BtError} = Wrapped,
                             {error, BtError}
                     end
