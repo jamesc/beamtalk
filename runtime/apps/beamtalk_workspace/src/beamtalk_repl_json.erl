@@ -288,6 +288,10 @@ term_to_json(#beamtalk_error{} = Error) ->
     iolist_to_binary(beamtalk_error:format(Error));
 term_to_json(Value) when is_tuple(Value) ->
     case Value of
+        {beamtalk_object, 'Metaclass', _Module, Pid} ->
+            %% ADR 0036: Metaclass objects display as "ClassName class" (e.g. "Integer class").
+            ClassName = beamtalk_object_class:class_name(Pid),
+            iolist_to_binary([atom_to_binary(ClassName, utf8), <<" class">>]);
         {beamtalk_object, Class, _Module, Pid} ->
             case beamtalk_class_registry:is_class_name(Class) of
                 true ->

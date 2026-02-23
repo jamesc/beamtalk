@@ -13,9 +13,11 @@ TestCase subclass: MetaclassTest
     self assert: (false class) equals: False.
     self assert: (nil class) equals: UndefinedObject.
     self assert: (#symbol class) equals: Symbol.
-    // Metaclass terminal: class of a class returns "Metaclass" sentinel
-    self assert: (42 class class) equals: #Metaclass.
-    self assert: ("hello" class class) equals: #Metaclass.
-    self assert: (true class class) equals: #Metaclass.
-    // Metaclass tower terminates
-    self assert: (42 class class class) equals: #Metaclass
+    // BT-802 (ADR 0036 Phase 1): Metaclass objects replace the #Metaclass sentinel
+    self assert: (42 class class) isMeta equals: true.
+    self assert: ("hello" class class) isMeta equals: true.
+    self assert: (true class class) isMeta equals: true.
+    // Metaclass objects are not plain classes
+    self assert: (42 class class) isClass equals: false.
+    // Metaclass tower terminates: self-grounding invariant (class class class == class class)
+    self assert: (42 class class class) equals: (42 class class)
