@@ -74,15 +74,30 @@ Internal primitives are renamed accordingly:
 - `classInstVarNames` → `classFieldNames`
 - `classAllInstVarNames` → `classAllFieldNames`
 
-### Class variable reflection
+### Class state declaration and reflection
 
-For consistency, class variable reflection also adopts "field" terminology:
+The `classVar:` declaration keyword is renamed to `classState:` for two reasons:
+
+1. **Consistency with `state:`** — instance fields use `state:`, class fields should use `classState:`
+2. **Accuracy** — Beamtalk's "class variables" are stored per-class (each class gen_server has its own copy). Subclasses do *not* share the parent's values. In Smalltalk terminology, these are "class instance variables," not "class variables." The name `classVar:` implies Smalltalk's shared-across-hierarchy semantics, which is misleading.
+
+| Current | New |
+|---------|-----|
+| `classVar: count = 0` | `classState: count = 0` |
+
+```beamtalk
+Actor subclass: Counter
+  state: value = 0
+  classState: instanceCount = 0
+```
+
+Class state reflection also adopts "field" terminology:
 
 | Current | New |
 |---------|-----|
 | `classVarNames` (if/when added) | `classFieldNames` |
 
-Note: the *declaration* syntax (`state:` and `classVar:`) is **not** changed. Declaration keywords describe intent ("this is state", "this is a class variable"), while the reflection API describes mechanism ("give me the fields"). Different purposes, different names.
+The declaration keywords (`state:`, `classState:`) describe *intent* ("this is state"). The reflection API (`fieldNames`, `classFieldNames`) describes *mechanism* ("give me the fields").
 
 ### Subclass field access — no positional ambiguity
 
@@ -243,7 +258,7 @@ Honest about the gen_server implementation but leaky as an abstraction. "State" 
 - Accurate representation of the dynamic, map-backed semantics
 
 ### Negative
-- Breaks existing code using `instVarNames`, `instVarAt:`, `instVarAt:put:`
+- Breaks existing code using `instVarNames`, `instVarAt:`, `instVarAt:put:`, `classVar:`, `instanceVariableNames`
 - Departs from Smalltalk tradition (mitigated: Beamtalk is Smalltalk-*like*, not Smalltalk-*compatible*)
 - Tests and documentation must be updated
 
@@ -260,11 +275,14 @@ Honest about the gen_server implementation but leaky as an abstraction. "State" 
 4. **Runtime** (`beamtalk_primitive.erl`): Update `is_ivar_method` checks to new names
 5. **Runtime** (`beamtalk_actor.erl`): Update any direct selector references
 
-### Phase 2: Rename class-side API
+### Phase 2: Rename class-side API and declaration syntax
 1. **Behaviour.bt**: Rename `instanceVariableNames` → `fieldNames`, `allInstanceVariableNames` → `allFieldNames`
-2. **Runtime** (`beamtalk_object_class.erl`): Rename `instance_variables` field in `#class_state{}` to `fields`; update handle_call clauses for new primitive names
-3. **Runtime** (`beamtalk_class_instantiation.erl`): Update references to `instance_variables` key in class spec maps
-4. **Codegen** (`methods.rs`): Update `instance_variables` key in generated class registration maps
+2. **Parser**: Rename `classVar:` keyword to `classState:` in class definition parsing
+3. **Runtime** (`beamtalk_object_class.erl`): Rename `instance_variables` field in `#class_state{}` to `fields`; rename `class_variables` to `class_state`; update handle_call clauses for new primitive names
+4. **Runtime** (`beamtalk_class_instantiation.erl`): Update references to `instance_variables` and `class_variables` keys in class spec maps
+5. **Codegen** (`methods.rs`): Update `instance_variables` key in generated class registration maps
+6. **Stdlib**: Update all `classVar:` declarations to `classState:` in `SystemDictionary.bt`, `WorkspaceEnvironment.bt`, `TranscriptStream.bt`
+7. **Tests**: Update test fixtures using `classVar:` (`class_var_point.bt`, `class_var_counter.bt`, `instance_access_counter.bt`)
 
 ### Phase 3: Add fieldAt:put: access control
 1. **Codegen** (`intrinsics.rs`): For `fieldAt:put:` intrinsic, generate a self-send check — verify the receiver is `self` at compile time, or emit a runtime check
@@ -280,17 +298,20 @@ Honest about the gen_server implementation but leaky as an abstraction. "State" 
 5. **ADR 0005, 0006, 0032**: Add notes referencing this ADR for the renamed API
 
 ### Affected components
-- **Stdlib**: `Object.bt`, `Behaviour.bt`
+- **Parser**: `classVar:` → `classState:` keyword recognition
+- **Stdlib**: `Object.bt`, `Behaviour.bt`, `SystemDictionary.bt`, `WorkspaceEnvironment.bt`, `TranscriptStream.bt`
 - **Codegen**: `intrinsics.rs`, `methods.rs`
 - **Runtime**: `beamtalk_object_ops.erl`, `beamtalk_primitive.erl`, `beamtalk_actor.erl`, `beamtalk_object_class.erl`, `beamtalk_class_instantiation.erl`, `beamtalk_error.erl`
-- **Tests**: `reflection_basic_test.bt`, `beamtalk_object_ops_tests.erl`, `beamtalk_primitive_tests.erl`
-- **Docs**: `beamtalk-language-features.md`
+- **Tests**: `reflection_basic_test.bt`, `beamtalk_object_ops_tests.erl`, `beamtalk_primitive_tests.erl`, `class_var_point.bt`, `class_var_counter.bt`, `instance_access_counter.bt`
+- **Docs**: `beamtalk-language-features.md`, `beamtalk-syntax-rationale.md`
 
 ## Migration Path
 
 This is a breaking change to the reflection API. Since Beamtalk is pre-1.0, no deprecation period is required. The old names will stop working immediately.
 
 Code using `instVarAt:put:` from outside the object will need to be refactored to use a proper method on the target class, or use Erlang-level `sys:replace_state/2` for debugging scenarios.
+
+All `classVar:` declarations must be changed to `classState:`. This is a simple find-and-replace across `.bt` files.
 
 ## References
 - Related issues: BT-796 (remove Flavors before/after infrastructure)
