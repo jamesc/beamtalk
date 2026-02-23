@@ -246,7 +246,7 @@ handle_call({respondsTo, Selector}, _From, State) ->
 
 #### Phase 2: Field Access (BT-153)
 
-```
+```bt
 obj fieldNames              // => [value, name, ...]
 obj fieldAt: #value         // => current value
 obj fieldAt: #value put: 42 // => sets value, returns self
@@ -942,9 +942,15 @@ has_method(Selector) ->
 %% Instead of cryptic error:
 {does_not_understand, 'Integer', 'fieldAt:put:', 2}
 
-%% Provide actionable message:
-{error, {immutable_primitive, 'Integer',
-         <<"Integers are immutable values. Use assignment (x := newValue) instead of mutation.">>}}
+%% Provide actionable message (structured #beamtalk_error{}):
+#beamtalk_error{
+    kind = immutable_value,
+    class = 'Integer',
+    selector = 'fieldAt:put:',
+    message = <<"Integers are immutable values. Use assignment (x := newValue) instead of mutation.">>,
+    hint = <<"fieldAt:put: is only valid on actor objects">>,
+    details = #{}
+}
 ```
 
 **Reflection is synchronous:** All reflection methods (`class`, `respondsTo:`, `fieldNames`, `fieldAt:`, `fieldAt:put:`, `perform:`) are **synchronous** even on actors. This ensures consistent behavior for introspection and debugging. The async-first model applies to user-defined methods, not reflection.
