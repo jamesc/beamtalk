@@ -162,7 +162,7 @@ maybe_pretty_core(CoreErlang) when is_binary(CoreErlang) ->
             end;
         _ -> CoreErlang
     end;
-maybe_pretty_core(Other) -> Other.
+maybe_pretty_core(Other) when not is_binary(Other) -> erlang:error(badarg).
 
 %% @private Find the compiler binary.
 %% Looks for the binary in the cargo target directory first (development),

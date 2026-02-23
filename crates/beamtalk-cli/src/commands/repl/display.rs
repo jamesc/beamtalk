@@ -6,9 +6,9 @@
 //! **DDD Context:** REPL — Presentation
 
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
-use std::io::Write;
 
 use miette::{IntoDiagnostic, Result};
 
@@ -195,9 +195,46 @@ pub(crate) fn display_codegen(core_erlang: &str) {
         if let Some(mut stdin) = child.stdin.take() {
             let _ = stdin.write_all(core_erlang.as_bytes());
         }
-        if let Ok(output) = child.wait_with_output() {
-            if output.status.success() {
-                if let Ok(formatted) = String::from_utf8(output.stdout) {
+
+        // Capture stdout in a separate thread so the main thread can enforce a timeout.
+        if let Some(mut stdout) = child.stdout.take() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let mut buf = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut stdout, &mut buf);
+                let _ = tx.send(buf);
+            });
+
+            let timeout = std::time::Duration::from_secs(2);
+            let start = std::time::Instant::now();
+            let mut exited = false;
+            loop {
+                match child.try_wait() {
+                    Ok(Some(_status)) => {
+                        exited = true;
+                        break;
+                    }
+                    Ok(None) => {
+                        if start.elapsed() >= timeout {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                    }
+                    Err(_) => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break;
+                    }
+                }
+            }
+
+            // Try to receive any captured output (small timeout).
+            let output_bytes = rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap_or_default();
+
+            if exited {
+                if let Ok(formatted) = String::from_utf8(output_bytes) {
                     println!("{}", color::paint(color::CYAN, &formatted));
                     return;
                 }
