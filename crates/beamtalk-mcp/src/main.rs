@@ -173,7 +173,7 @@ async fn start_workspace(
 
     eprintln!("No running workspace found — starting beamtalk workspace...");
 
-    let output = std::process::Command::new("beamtalk")
+    let output = tokio::process::Command::new("beamtalk")
         .args([
             "repl",
             "--port",
@@ -185,6 +185,7 @@ async fn start_workspace(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .output()
+        .await
         .map_err(|e| -> Box<dyn std::error::Error> {
             if e.kind() == std::io::ErrorKind::NotFound {
                 "beamtalk not found on PATH — install beamtalk or start the workspace manually \
@@ -208,35 +209,24 @@ async fn start_workspace(
         .into());
     }
 
-    // Parse "Connected to REPL backend on port N." from stdout
-    let port = stdout
-        .lines()
-        .find_map(|line| {
-            line.strip_prefix("Connected to REPL backend on port ")
-                .and_then(|rest| rest.trim_end_matches('.').trim().parse::<u16>().ok())
-        })
-        .ok_or_else(|| {
-            format!(
-                "beamtalk repl succeeded but did not report a port.\n\
-                 stdout: {stdout}\nstderr: {stderr}"
-            )
-        })?;
+    // Note: port and workspace ID parsing depends on `beamtalk repl` stdout format.
+    // If REPL output changes, update these parsers and the tests below.
+    let port = parse_repl_port(&stdout).ok_or_else(|| {
+        format!(
+            "beamtalk repl succeeded but did not report a port.\n\
+             stdout: {stdout}\nstderr: {stderr}"
+        )
+    })?;
 
     // Determine workspace ID: use explicit ID, or parse from stdout, or derive from cwd
     let ws_id = if let Some(id) = workspace_id {
         id.to_string()
     } else {
-        stdout
-            .lines()
-            .find_map(|line| {
-                line.strip_prefix("  Workspace: ")
-                    .map(|rest| rest.split_whitespace().next().unwrap_or(rest).to_string())
-            })
-            .unwrap_or_else(|| {
-                std::env::current_dir()
-                    .map(|p| workspace::generate_workspace_id(&p))
-                    .unwrap_or_default()
-            })
+        parse_workspace_id(&stdout).unwrap_or_else(|| {
+            std::env::current_dir()
+                .map(|p| workspace::generate_workspace_id(&p))
+                .unwrap_or_default()
+        })
     };
 
     // Read cookie from workspace storage
@@ -261,15 +251,22 @@ async fn start_workspace(
 }
 
 /// Poll TCP until the server accepts connections or the timeout expires.
+///
+/// Each connection attempt is capped at 2s to prevent a single SYN timeout
+/// (which can be 75-120s on Linux) from blowing past the overall deadline.
 async fn wait_for_tcp_ready(
     port: u16,
     timeout: std::time::Duration,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let addr = format!("127.0.0.1:{port}");
     let deadline = tokio::time::Instant::now() + timeout;
+    let per_attempt = std::time::Duration::from_secs(2);
 
     loop {
-        if tokio::net::TcpStream::connect(&addr).await.is_ok() {
+        // Cap each connect attempt so a SYN-timeout doesn't overshoot the deadline.
+        if let Ok(Ok(_)) =
+            tokio::time::timeout(per_attempt, tokio::net::TcpStream::connect(&addr)).await
+        {
             return Ok(());
         }
         if tokio::time::Instant::now() >= deadline {
@@ -282,6 +279,26 @@ async fn wait_for_tcp_ready(
         }
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     }
+}
+
+/// Parse the REPL port from `beamtalk repl` stdout.
+///
+/// Expects a line like: `Connected to REPL backend on port 12345.`
+fn parse_repl_port(stdout: &str) -> Option<u16> {
+    stdout.lines().find_map(|line| {
+        line.strip_prefix("Connected to REPL backend on port ")
+            .and_then(|rest| rest.trim_end_matches('.').trim().parse().ok())
+    })
+}
+
+/// Parse the workspace ID from `beamtalk repl` stdout.
+///
+/// Expects a line like: `  Workspace: abc123def456 (new)`
+fn parse_workspace_id(stdout: &str) -> Option<String> {
+    stdout.lines().find_map(|line| {
+        line.strip_prefix("  Workspace: ")
+            .map(|rest| rest.split_whitespace().next().unwrap_or(rest).to_string())
+    })
 }
 
 fn directive_for_verbosity(v: u8) -> &'static str {
@@ -303,5 +320,46 @@ mod tests {
         assert_eq!(directive_for_verbosity(0), "beamtalk_mcp=info");
         assert_eq!(directive_for_verbosity(1), "beamtalk_mcp=debug");
         assert_eq!(directive_for_verbosity(2), "beamtalk_mcp=trace");
+    }
+
+    #[test]
+    fn parse_repl_port_from_typical_output() {
+        let stdout = "Welcome to beamtalk REPL\nConnected to REPL backend on port 9876.\n  Workspace: abc123def456 (new)\n";
+        assert_eq!(parse_repl_port(stdout), Some(9876));
+    }
+
+    #[test]
+    fn parse_repl_port_missing() {
+        assert_eq!(parse_repl_port("some other output\n"), None);
+        assert_eq!(parse_repl_port(""), None);
+    }
+
+    #[test]
+    fn parse_repl_port_malformed() {
+        assert_eq!(
+            parse_repl_port("Connected to REPL backend on port notanumber.\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_workspace_id_from_typical_output() {
+        let stdout = "Connected to REPL backend on port 9876.\n  Workspace: abc123def456 (new)\n";
+        assert_eq!(parse_workspace_id(stdout), Some("abc123def456".to_string()));
+    }
+
+    #[test]
+    fn parse_workspace_id_missing() {
+        assert_eq!(parse_workspace_id("no workspace line\n"), None);
+        assert_eq!(parse_workspace_id(""), None);
+    }
+
+    #[test]
+    fn parse_workspace_id_bare() {
+        // Workspace line without extra text after ID
+        assert_eq!(
+            parse_workspace_id("  Workspace: deadbeef1234\n"),
+            Some("deadbeef1234".to_string())
+        );
     }
 }

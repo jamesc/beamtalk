@@ -23,7 +23,7 @@ path = "src/main.rs"
 rmcp = { version = "0.16", features = ["server", "macros", "transport-io", "schemars"] }
 
 # Async runtime
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "io-util", "net", "sync", "signal", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "io-util", "net", "process", "sync", "signal", "time"] }
 
 # Serialization
 serde.workspace = true
