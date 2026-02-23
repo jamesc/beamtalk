@@ -439,15 +439,15 @@ coverage-e2e: build-stdlib
 
 # Unix-only: uses bash constructs (wc, file size checks)
 # Collect stdlib test coverage (runs stdlib tests with Erlang cover instrumentation)
+# [working-directory: 'stdlib'] ensures @load fixture paths (e.g. test/fixtures/counter.bt)
+# resolve correctly, matching the test-stdlib recipe.
 [unix]
+[working-directory: 'stdlib']
 coverage-stdlib: build-stdlib
     #!/usr/bin/env bash
     set -euo pipefail
     echo "📊 Running stdlib tests with Erlang cover instrumentation..."
     echo "   (This is slower than normal stdlib tests due to cover overhead)"
-    # Run from stdlib/ so @load fixture paths (e.g. test/fixtures/counter.bt) resolve correctly,
-    # matching the [working-directory: 'stdlib'] behaviour of the test-stdlib recipe.
-    cd stdlib
     STDLIB_COVER=1 cargo run --bin beamtalk --quiet -- test-stdlib --no-warnings bootstrap-test || true
     if [ -f ../runtime/_build/test/cover/stdlib.coverdata ]; then
         SIZE=$(wc -c < ../runtime/_build/test/cover/stdlib.coverdata)
