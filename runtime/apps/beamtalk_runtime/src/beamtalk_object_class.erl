@@ -39,8 +39,6 @@
     is_sealed/1,
     is_abstract/1,
     is_constructible/1,
-    add_before/3,
-    add_after/3,
     class_name/1,
     module_name/1,
     create_subclass/3,
@@ -79,8 +77,6 @@
     instance_variables = [] :: [atom()],
     class_variables = #{} :: map(),
     method_source = #{} :: #{selector() => binary()},
-    before_methods = #{} :: #{selector() => [fun()]},
-    after_methods = #{} :: #{selector() => [fun()]},
     dynamic_methods = #{} :: #{selector() => fun()},
     %% ADR 0033: Runtime-embedded documentation
     doc = none :: binary() | none,
@@ -232,16 +228,6 @@ is_abstract(ClassPid) ->
 is_constructible(ClassPid) ->
     gen_server:call(ClassPid, is_constructible).
 
-%% @doc Add a before daemon (Flavors pattern).
--spec add_before(pid(), selector(), fun()) -> ok.
-add_before(ClassPid, Selector, Fun) ->
-    gen_server:call(ClassPid, {add_before, Selector, Fun}).
-
-%% @doc Add an after daemon (Flavors pattern).
--spec add_after(pid(), selector(), fun()) -> ok.
-add_after(ClassPid, Selector, Fun) ->
-    gen_server:call(ClassPid, {add_after, Selector, Fun}).
-
 %% @doc Create a dynamic subclass at runtime.
 %% Delegates to beamtalk_class_instantiation (BT-704).
 -spec create_subclass(atom(), atom(), map()) -> {ok, pid()} | {error, term()}.
@@ -278,8 +264,6 @@ init({ClassName, ClassInfo}) ->
         instance_variables = maps:get(instance_variables, ClassInfo, []),
         class_variables = maps:get(class_variables, ClassInfo, #{}),
         method_source = maps:get(method_source, ClassInfo, #{}),
-        before_methods = maps:get(before_methods, ClassInfo, #{}),
-        after_methods = maps:get(after_methods, ClassInfo, #{}),
         dynamic_methods = maps:get(dynamic_methods, ClassInfo, #{}),
         doc = maps:get(doc, ClassInfo, none),
         method_docs = maps:get(method_docs, ClassInfo, #{})
@@ -457,14 +441,6 @@ handle_call(
         IsConstructible0, Module, IsAbstract
     ),
     {reply, IsConstructible, State#class_state{is_constructible = IsConstructible}};
-handle_call({add_before, Selector, Fun}, _From, State) ->
-    Befores = maps:get(Selector, State#class_state.before_methods, []),
-    NewBefores = maps:put(Selector, [Fun | Befores], State#class_state.before_methods),
-    {reply, ok, State#class_state{before_methods = NewBefores}};
-handle_call({add_after, Selector, Fun}, _From, State) ->
-    Afters = maps:get(Selector, State#class_state.after_methods, []),
-    NewAfters = maps:put(Selector, Afters ++ [Fun], State#class_state.after_methods),
-    {reply, ok, State#class_state{after_methods = NewAfters}};
 %% ADR 0032 Phase 1: Returns local class_methods for chain walk queries.
 handle_call(get_local_class_methods, _From, #class_state{class_methods = ClassMethods} = State) ->
     {reply, ClassMethods, State};

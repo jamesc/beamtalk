@@ -407,7 +407,7 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
-                    "%% Call terminate method if defined (Flavors pattern)",
+                    "%% Call terminate method if defined",
                     line(),
                     "let Self = call 'beamtalk_actor':'make_self'(State) in",
                     line(),

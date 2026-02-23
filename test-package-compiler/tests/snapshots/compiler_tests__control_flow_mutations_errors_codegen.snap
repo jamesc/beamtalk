@@ -103,7 +103,7 @@ module 'control_flow_mutations_errors' ['start_link'/1, 'init'/1, 'handle_cast'/
 
 
 'terminate'/2 = fun (Reason, State) ->
-    %% Call terminate method if defined (Flavors pattern)
+    %% Call terminate method if defined
     let Self = call 'beamtalk_actor':'make_self'(State) in
     case call 'control_flow_mutations_errors':'dispatch'('terminate', [Reason], Self, State) of
         <{'reply', _TermResult, _TermState}> when 'true' -> 'ok'

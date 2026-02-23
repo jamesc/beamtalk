@@ -451,50 +451,6 @@ replace_method_test_() ->
     end}.
 
 %%====================================================================
-%% Method Combinations (Flavors Pattern)
-%%====================================================================
-
-add_before_method_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'Counter',
-                    module => counter,
-                    instance_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
-
-                BeforeFun = fun() -> ok end,
-                ok = beamtalk_object_class:add_before(Pid, increment, BeforeFun),
-
-                %% Can't easily verify without accessing internal state,
-                %% but at least verify the call succeeds
-                ?assert(true)
-            end)
-        ]
-    end}.
-
-add_after_method_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'Counter',
-                    module => counter,
-                    instance_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
-
-                AfterFun = fun() -> ok end,
-                ok = beamtalk_object_class:add_after(Pid, increment, AfterFun),
-
-                ?assert(true)
-            end)
-        ]
-    end}.
-
-%%====================================================================
 %% All Classes Enumeration
 %%====================================================================
 

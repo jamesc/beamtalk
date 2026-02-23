@@ -237,8 +237,8 @@ impl fmt::Display for ErlangVar {
 /// # DDD: Value Object
 ///
 /// `ModuleName` is a value object in the Code Generation bounded context.
-/// It encapsulates the Two-Module Pattern from the Flavors architecture
-/// where each Beamtalk class generates two Erlang modules.
+/// It encapsulates the two-module actor pattern where each Beamtalk class
+/// generates two Erlang modules.
 ///
 /// # Invariants
 ///
