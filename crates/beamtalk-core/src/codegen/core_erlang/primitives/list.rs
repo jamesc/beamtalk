@@ -212,6 +212,10 @@ fn generate_list_misc_bif(selector: &str, params: &[String]) -> Option<Document<
                 ")",
             ])
         }
+        "addFirst:" => {
+            let p0 = params.first().map_or("_Item", String::as_str);
+            Some(docvec!["[", p0.to_string(), "|Self]"])
+        }
         "add:" => {
             let p0 = params.first().map_or("_Item", String::as_str);
             Some(docvec![
