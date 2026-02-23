@@ -19,8 +19,8 @@
 //! └── stdlib class names (pre-indexed from lib/*.bt)
 //! ```
 
-use crate::semantic_analysis::ClassHierarchy;
-use crate::source_analysis::{lex_with_eof, parse};
+use crate::semantic_analysis::{ClassHierarchy, SemanticError};
+use crate::source_analysis::{Diagnostic, lex_with_eof, parse};
 use camino::Utf8PathBuf;
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
@@ -64,19 +64,28 @@ impl ProjectIndex {
     /// Each `(path, source)` pair is parsed and its class definitions are
     /// merged into the project-wide hierarchy.
     ///
-    /// # Panics
+    /// Returns `(Result<Self, SemanticError>, Vec<Diagnostic>)` following the
+    /// project convention for fallible operations, even though in practice
+    /// `ClassHierarchy::build` is infallible and will always return `Ok`.
     ///
-    /// Panics if `ClassHierarchy::build` returns `Err`, which cannot happen
-    /// since hierarchy construction is infallible.
-    #[must_use]
-    pub fn with_stdlib(stdlib_sources: &[(Utf8PathBuf, String)]) -> Self {
+    /// # Errors
+    ///
+    /// Returns [`SemanticError`] if `ClassHierarchy::build` fails for any
+    /// stdlib source file (cannot happen in practice).
+    pub fn with_stdlib(
+        stdlib_sources: &[(Utf8PathBuf, String)],
+    ) -> (Result<Self, SemanticError>, Vec<Diagnostic>) {
         let mut index = Self::new();
+        let mut all_diagnostics = Vec::new();
         for (path, source) in stdlib_sources {
             let tokens = lex_with_eof(source);
-            let (module, _diagnostics) = parse(tokens);
-            let file_hierarchy = ClassHierarchy::build(&module)
-                .0
-                .expect("ClassHierarchy::build is infallible");
+            let (module, _parse_diagnostics) = parse(tokens);
+            let (file_hierarchy_result, hierarchy_diags) = ClassHierarchy::build(&module);
+            all_diagnostics.extend(hierarchy_diags);
+            let file_hierarchy = match file_hierarchy_result {
+                Ok(h) => h,
+                Err(e) => return (Err(e), all_diagnostics),
+            };
 
             // Track which classes came from this stdlib file
             let class_names: Vec<EcoString> = file_hierarchy
@@ -92,7 +101,7 @@ impl ProjectIndex {
                 .insert(path.clone(), file_hierarchy.clone());
             index.merged_hierarchy.merge(&file_hierarchy);
         }
-        index
+        (Ok(index), all_diagnostics)
     }
 
     /// Returns the merged class hierarchy across all files.
@@ -209,7 +218,8 @@ mod tests {
             Utf8PathBuf::from("stdlib/src/Counter.bt"),
             "Object subclass: Counter\n  increment => 1".to_string(),
         )];
-        let index = ProjectIndex::with_stdlib(&stdlib);
+        let (index_result, _) = ProjectIndex::with_stdlib(&stdlib);
+        let index = index_result.unwrap();
         assert!(index.hierarchy().has_class("Counter"));
         assert!(
             index
@@ -277,7 +287,7 @@ mod tests {
             Utf8PathBuf::from("stdlib/src/Counter.bt"),
             "Object subclass: Counter\n  increment => 1".to_string(),
         )];
-        let mut index = ProjectIndex::with_stdlib(&stdlib);
+        let mut index = ProjectIndex::with_stdlib(&stdlib).0.unwrap();
         assert!(index.hierarchy().has_class("Counter"));
 
         // Remove the stdlib file — Counter should persist because it's stdlib
@@ -348,7 +358,7 @@ mod tests {
             Utf8PathBuf::from("stdlib/src/Counter.bt"),
             "Object subclass: Counter\n  increment => 1".to_string(),
         )];
-        let mut index = ProjectIndex::with_stdlib(&stdlib);
+        let mut index = ProjectIndex::with_stdlib(&stdlib).0.unwrap();
         assert!(index.hierarchy().has_class("Counter"));
 
         // User file shadows stdlib Counter
