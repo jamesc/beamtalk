@@ -522,12 +522,13 @@ pub(crate) fn check_empty_method_bodies(module: &Module, diagnostics: &mut Vec<D
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::source_analysis::Severity;
     use crate::source_analysis::parse;
 
-    /// BT-750: A class named `Future` should NOT trigger the stdlib shadowing
-    /// warning because `Future` lacks runtime protection (no `bt@stdlib@` prefix).
+    /// Future is now a real stdlib class (stdlib/src/Future.bt exists).
+    /// User-defined `Future` classes should trigger a stdlib shadowing warning.
     #[test]
-    fn future_class_no_shadowing_warning() {
+    fn future_class_triggers_shadowing_warning() {
         let tokens = lex_with_eof("Object subclass: Future\n  value => 1");
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
@@ -535,8 +536,8 @@ mod tests {
         let mut diagnostics = Vec::new();
         check_stdlib_name_shadowing(&module, &mut diagnostics);
         assert!(
-            diagnostics.is_empty(),
-            "Expected no warnings for Future, got: {diagnostics:?}"
+            !diagnostics.is_empty() && diagnostics[0].severity == Severity::Warning,
+            "Expected warning for Future shadowing, got: {diagnostics:?}"
         );
     }
 

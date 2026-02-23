@@ -8,7 +8,7 @@
 //! Contains BIF generators for smaller primitive classes:
 //! `File`, `Exception`, `Symbol`, `Tuple`, `Object`, `Association`, `Set`,
 //! `CompiledMethod`, `TestCase`, `TestRunner`, `TestResult`, `Stream`,
-//! `StackFrame`, `JSON`.
+//! `StackFrame`, `JSON`, `Future`, `FileHandle`.
 
 use super::super::document::Document;
 use super::{binary_bif, ops_dispatch};
@@ -905,6 +905,59 @@ fn generate_datetime_instance_bif(selector: &str, p0: &str) -> Option<Document<'
             p0.to_string(),
             ")"
         ]),
+        _ => None,
+    }
+}
+
+/// Future primitive implementations (BT-813).
+///
+/// Futures are BEAM processes returned by async actor message sends.
+/// Each instance method delegates to the `beamtalk_future` runtime module.
+/// Note: `await`, `awaitForever`, and `await:` are also compiler intrinsics
+/// (intercepted by `dispatch_codegen` before reaching here), so these BIFs
+/// serve dynamic-dispatch use cases (e.g., `perform:`).
+pub(crate) fn generate_future_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
+    let p0 = params.first().map_or("_Arg0", String::as_str);
+    match selector {
+        "await" => Some(Document::Str("call 'beamtalk_future':'await'(Self)")),
+        "awaitForever" => Some(Document::Str(
+            "call 'beamtalk_future':'await_forever'(Self)",
+        )),
+        "await:" => Some(docvec![
+            "call 'beamtalk_future':'await'(Self, ",
+            p0.to_string(),
+            ")"
+        ]),
+        "whenResolved:" => Some(docvec![
+            "call 'beamtalk_future':'when_resolved'(Self, ",
+            p0.to_string(),
+            ")"
+        ]),
+        "whenRejected:" => Some(docvec![
+            "call 'beamtalk_future':'when_rejected'(Self, ",
+            p0.to_string(),
+            ")"
+        ]),
+        "printString" => Some(Document::Str(
+            "call 'beamtalk_primitive':'print_string'(Self)",
+        )),
+        _ => None,
+    }
+}
+
+/// `FileHandle` primitive implementations (BT-813).
+///
+/// `FileHandles` are tagged maps produced by `File open:do:`. Instance methods
+/// delegate to the `beamtalk_file` runtime module.
+pub(crate) fn generate_file_handle_bif(
+    selector: &str,
+    _params: &[String],
+) -> Option<Document<'static>> {
+    match selector {
+        "lines" => Some(Document::Str("call 'beamtalk_file':'handle_lines'(Self)")),
+        "printString" => Some(Document::Str(
+            "call 'beamtalk_primitive':'print_string'(Self)",
+        )),
         _ => None,
     }
 }

@@ -177,6 +177,8 @@ send(X, Selector, Args) when is_tuple(X) ->
     end;
 send(X, Selector, Args) when is_map(X) ->
     send_map(X, Selector, Args);
+send(X, Selector, Args) when is_pid(X) ->
+    send_pid(X, Selector, Args);
 send(X, Selector, Args) ->
     %% All other primitives: route through module_for_value/1
     dispatch_via_module(X, Selector, Args).
@@ -222,6 +224,24 @@ send_file_handle(X, Selector, Args) ->
                 )
             )
     end.
+
+%% @private Dispatch messages to a pid value.
+%%
+%% Routes Future-specific selectors (BT-813) directly to beamtalk_future.
+%% All other selectors fall through to the Pid stdlib module.
+-spec send_pid(pid(), atom(), list()) -> term().
+send_pid(X, await, _Args) ->
+    beamtalk_future:await(X);
+send_pid(X, awaitForever, _Args) ->
+    beamtalk_future:await_forever(X);
+send_pid(X, 'await:', [Timeout]) ->
+    beamtalk_future:await(X, Timeout);
+send_pid(X, 'whenResolved:', [Block]) ->
+    beamtalk_future:when_resolved(X, Block);
+send_pid(X, 'whenRejected:', [Block]) ->
+    beamtalk_future:when_rejected(X, Block);
+send_pid(X, Selector, Args) ->
+    dispatch_via_module(X, Selector, Args).
 
 %% @private Fallback for tagged maps without a compiled stdlib module.
 -spec send_tagged_map_fallback(map(), atom(), atom(), list()) -> term().

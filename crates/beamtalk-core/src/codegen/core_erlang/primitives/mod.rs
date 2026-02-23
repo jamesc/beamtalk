@@ -77,6 +77,8 @@ pub fn generate_primitive_bif(
         "Pid" => misc::generate_pid_bif(selector, params),
         "Port" => misc::generate_port_bif(selector, params),
         "Reference" => misc::generate_reference_bif(selector, params),
+        "Future" => misc::generate_future_bif(selector, params),
+        "FileHandle" => misc::generate_file_handle_bif(selector, params),
         _ => None,
     }
 }

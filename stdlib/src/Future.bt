@@ -1,0 +1,105 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Future — result of an asynchronous message send.
+///
+/// Every message sent to an actor returns a Future. A Future is a placeholder
+/// for a value that will be available when the actor finishes processing the
+/// message. Use `await` to block until the result is available, or register
+/// callbacks with `whenResolved:` / `whenRejected:`.
+///
+/// ## Concurrency Model
+///
+/// Futures are BEAM processes. Awaiting a Future blocks the calling process
+/// until the future resolves or the timeout expires. By default `await` uses
+/// a 30-second timeout; use `awaitForever` for no timeout.
+///
+/// ## Examples
+///
+/// ```beamtalk
+/// future := counter increment.
+/// future await.
+/// // => 1
+///
+/// future := counter getValue.
+/// future whenResolved: [:v | Transcript show: v printString].
+/// ```
+///
+/// ## Note
+///
+/// This is the minimal `@primitive` stub for the *existing* Future API.
+/// The full Future design — combinators (`then:`, `all:`, `race:`), auto-await
+/// semantics, and Duration integration — is tracked in BT-507.
+sealed Object subclass: Future
+
+  /// Block until the future resolves (30-second default timeout).
+  ///
+  /// Returns the resolved value. Raises a timeout error if the future
+  /// does not resolve within 30 seconds.
+  ///
+  /// ## Examples
+  ///
+  /// ```beamtalk
+  /// future := counter increment.
+  /// future await.
+  /// // => 1
+  /// ```
+  await => @primitive "await"
+
+  /// Block until the future resolves or the timeout expires.
+  ///
+  /// `timeout` is in milliseconds. Raises a timeout error if the future
+  /// does not resolve within the given time.
+  ///
+  /// ## Examples
+  ///
+  /// ```beamtalk
+  /// future await: 5000.
+  /// ```
+  await: timeout: Integer => @primitive "await:"
+
+  /// Block until the future resolves with no timeout.
+  ///
+  /// Waits indefinitely. Use only for operations that are guaranteed to
+  /// eventually complete.
+  ///
+  /// ## Examples
+  ///
+  /// ```beamtalk
+  /// future awaitForever.
+  /// ```
+  awaitForever => @primitive "awaitForever"
+
+  /// Register a callback to run when the future resolves successfully.
+  ///
+  /// If the future is already resolved, the callback runs immediately.
+  /// The callback receives the resolved value as its argument.
+  ///
+  /// ## Examples
+  ///
+  /// ```beamtalk
+  /// future whenResolved: [:value | Transcript show: value printString].
+  /// ```
+  whenResolved: block: Block => @primitive "whenResolved:"
+
+  /// Register a callback to run when the future is rejected.
+  ///
+  /// If the future is already rejected, the callback runs immediately.
+  /// The callback receives the rejection reason as its argument.
+  ///
+  /// ## Examples
+  ///
+  /// ```beamtalk
+  /// future whenRejected: [:err | Transcript show: err printString].
+  /// ```
+  whenRejected: block: Block => @primitive "whenRejected:"
+
+  /// Return a developer-readable string representation.
+  ///
+  /// ## Examples
+  ///
+  /// ```beamtalk
+  /// future printString.
+  /// // => "a Future"
+  /// ```
+  printString -> String => @primitive "printString"
