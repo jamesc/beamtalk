@@ -394,10 +394,10 @@ value_type_send(Self, Class, Selector, Args) ->
 
 %% @private Check if a selector is an ivar method (BT-359).
 -spec is_ivar_method(atom()) -> {true, binary()} | false.
-is_ivar_method('instVarAt:put:') ->
+is_ivar_method('fieldAt:put:') ->
     {true, <<"Value types are immutable. Use a method that returns a new instance instead.">>};
-is_ivar_method('instVarAt:') ->
-    {true, <<"Value types have no instance variables">>};
+is_ivar_method('fieldAt:') ->
+    {true, <<"Value types have no fields">>};
 is_ivar_method(_) ->
     false.
 

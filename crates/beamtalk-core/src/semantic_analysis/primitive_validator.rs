@@ -31,9 +31,9 @@ const STRUCTURAL_INTRINSICS: &[&str] = &[
     "dynamicSend",
     "dynamicSendWithArgs",
     "respondsTo",
-    "instVarNames",
-    "instVarAt",
-    "instVarAtPut",
+    "fieldNames",
+    "fieldAt",
+    "fieldAtPut",
     // Object protocol
     "printString",
     "hash",
