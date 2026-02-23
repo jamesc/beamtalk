@@ -1,0 +1,43 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// FileHandle — a handle to an open file.
+///
+/// A FileHandle is available within a `File open:do:` block. It provides
+/// access to the file contents while the block is executing. The handle
+/// and any Streams derived from it must be consumed within the block —
+/// they must not escape, as the file descriptor is closed when the block
+/// returns.
+///
+/// ## Examples
+///
+/// ```beamtalk
+/// File open: "data.csv" do: [:handle |
+///   handle lines take: 10.
+/// ].
+/// ```
+sealed Object subclass: FileHandle
+
+  /// Return a lazy Stream of lines from this file handle.
+  ///
+  /// The Stream reads lines one at a time. It must be consumed within the
+  /// `File open:do:` block — the Stream must not escape the block.
+  ///
+  /// ## Examples
+  ///
+  /// ```beamtalk
+  /// File open: "data.csv" do: [:handle |
+  ///   handle lines do: [:line | Transcript show: line].
+  /// ].
+  /// ```
+  lines -> Stream => @primitive "lines"
+
+  /// Return a developer-readable string representation.
+  ///
+  /// ## Examples
+  ///
+  /// ```beamtalk
+  /// handle printString.
+  /// // => "a FileHandle"
+  /// ```
+  printString -> String => @primitive "printString"

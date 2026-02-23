@@ -177,6 +177,8 @@ send(X, Selector, Args) when is_tuple(X) ->
     end;
 send(X, Selector, Args) when is_map(X) ->
     send_map(X, Selector, Args);
+send(X, Selector, Args) when is_pid(X) ->
+    send_pid(X, Selector, Args);
 send(X, Selector, Args) ->
     %% All other primitives: route through module_for_value/1
     dispatch_via_module(X, Selector, Args).
@@ -223,6 +225,36 @@ send_file_handle(X, Selector, Args) ->
             )
     end.
 
+%% @private Dispatch messages to a pid value.
+%%
+%% Routes Future-specific selectors (BT-813) directly to beamtalk_future.
+%% All other selectors fall through to the Pid stdlib module.
+-spec send_pid(pid(), atom(), list()) -> term().
+send_pid(X, await, _Args) ->
+    beamtalk_future:await(X);
+send_pid(X, awaitForever, _Args) ->
+    beamtalk_future:await_forever(X);
+send_pid(X, 'await:', [Timeout]) ->
+    beamtalk_future:await(X, Timeout);
+send_pid(X, 'whenResolved:', [Block]) ->
+    beamtalk_future:when_resolved(X, Block);
+send_pid(X, 'whenRejected:', [Block]) ->
+    beamtalk_future:when_rejected(X, Block);
+send_pid(X, Selector, Args) ->
+    dispatch_via_module(X, Selector, Args).
+
+%% @private True if the selector belongs to the Future protocol.
+%%
+%% Used by both send_pid/3 and responds_to/2 to recognise Future-specific
+%% messages on bare pids.
+-spec is_future_selector(atom()) -> boolean().
+is_future_selector(await) -> true;
+is_future_selector(awaitForever) -> true;
+is_future_selector('await:') -> true;
+is_future_selector('whenResolved:') -> true;
+is_future_selector('whenRejected:') -> true;
+is_future_selector(_) -> false.
+
 %% @private Fallback for tagged maps without a compiled stdlib module.
 -spec send_tagged_map_fallback(map(), atom(), atom(), list()) -> term().
 send_tagged_map_fallback(X, Class, Selector, Args) ->
@@ -268,6 +300,9 @@ responds_to(X, Selector) when is_tuple(X) ->
     end;
 responds_to(X, Selector) when is_map(X) ->
     responds_to_map(X, Selector);
+responds_to(X, Selector) when is_pid(X) ->
+    %% BT-813: Future-specific selectors are handled by send_pid/3.
+    is_future_selector(Selector) orelse responds_via_module(X, Selector);
 responds_to(X, Selector) ->
     %% All other primitives: route through module_for_value/1
     responds_via_module(X, Selector).
