@@ -107,9 +107,8 @@ handle_response(#{
     classes := Classes,
     warnings := Warnings
 }) ->
-    PrettyCore = maybe_pretty_core(CoreErlang),
     {ok, class_definition, #{
-        core_erlang => PrettyCore,
+        core_erlang => CoreErlang,
         module_name => ModuleName,
         classes => Classes,
         warnings => Warnings
@@ -131,41 +130,12 @@ handle_response(#{
         warnings => Warnings
     }};
 handle_response(#{status := ok, core_erlang := CoreErlang, warnings := Warnings}) ->
-    PrettyCore = maybe_pretty_core(CoreErlang),
-    {ok, PrettyCore, Warnings};
+    {ok, CoreErlang, Warnings};
 handle_response(#{status := error, diagnostics := Diagnostics}) ->
     {error, Diagnostics};
 handle_response(Other) ->
     ?LOG_ERROR("Unexpected compiler response", #{response => Other}),
     {error, [<<"Unexpected compiler response">>]}.
-
-%% Try to pretty-print textual Core Erlang using Erlang's core parser/pretty-printer.
-%% Falls back to the original Core Erlang text on any failure.
--spec maybe_pretty_core(binary()) -> binary().
-maybe_pretty_core(CoreErlang) when is_binary(CoreErlang) ->
-    CoreStr = binary_to_list(CoreErlang),
-    case catch core_scan:string(CoreStr) of
-        {ok, Tokens, _} ->
-            case catch core_parse:parse(Tokens) of
-                {ok, CoreModule} ->
-                    case catch core_pp:format(CoreModule) of
-                        {'EXIT', _} ->
-                            CoreErlang;
-                        Formatted ->
-                            %% Ensure we return a binary
-                            try iolist_to_binary(Formatted) of
-                                Bin -> Bin
-                            catch
-                                _:_ -> CoreErlang
-                            end
-                    end;
-                _ ->
-                    CoreErlang
-            end;
-        _ ->
-            CoreErlang
-    end;
-maybe_pretty_core(Other) when not is_binary(Other) -> erlang:error(badarg).
 
 %% @private Find the compiler binary.
 %% Looks for the binary in the cargo target directory first (development),

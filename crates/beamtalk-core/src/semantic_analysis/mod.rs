@@ -205,10 +205,8 @@ fn analyse_full(module: &Module, known_vars: &[&str], stdlib_mode: bool) -> Anal
     let mut result = AnalysisResult::new();
 
     // Phase 0: Build Class Hierarchy (ADR 0006 Phase 1a)
-    let (hierarchy_result, hierarchy_diags) =
-        ClassHierarchy::build_with_options(module, stdlib_mode);
-    // build_with_options is infallible; propagate any diagnostics it produced
-    result.class_hierarchy = hierarchy_result.expect("ClassHierarchy::build is infallible");
+    let (hierarchy, hierarchy_diags) = ClassHierarchy::build_with_options(module, stdlib_mode);
+    result.class_hierarchy = hierarchy;
     result.diagnostics.extend(hierarchy_diags);
 
     // Phase 1: Name Resolution
@@ -1872,11 +1870,11 @@ mod tests {
 
     #[test]
     fn test_inst_var_at_with_integer_emits_error() {
-        // obj fieldAt: 42 — should error
+        // obj instVarAt: 42 — should error
         let expr = Expression::MessageSend {
             receiver: Box::new(Expression::Identifier(Identifier::new("obj", test_span()))),
             selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
-                "fieldAt:",
+                "instVarAt:",
                 test_span(),
             )]),
             arguments: vec![Expression::Literal(Literal::Integer(42), Span::new(15, 17))],
@@ -1901,7 +1899,7 @@ mod tests {
         assert!(
             symbol_errors[0]
                 .message
-                .contains("accesses a field by name")
+                .contains("accesses an instance variable by name")
         );
     }
 

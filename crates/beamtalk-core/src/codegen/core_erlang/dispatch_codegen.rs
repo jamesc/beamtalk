@@ -140,7 +140,7 @@ impl CoreErlangGenerator {
         }
 
         // Special case: Object methods - reflection and introspection
-        // respondsTo:, fieldNames, fieldAt: enable runtime introspection
+        // respondsTo:, instVarNames, instVarAt: enable runtime introspection
         if let Some(doc) = self.try_generate_object_message(receiver, selector, arguments)? {
             return Ok(doc);
         }

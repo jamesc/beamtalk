@@ -244,9 +244,11 @@ handle(<<"test-all">>, _Params, Msg, _SessionPid) ->
                     WrappedReason =
                         case Reason of
                             undef ->
-                                beamtalk_exception_handler:ensure_wrapped(
-                                    error, undef, Stack
-                                );
+                                #{error := Err} =
+                                    beamtalk_exception_handler:ensure_wrapped(
+                                        error, undef, Stack
+                                    ),
+                                Err;
                             _ ->
                                 beamtalk_repl_server:ensure_structured_error(Reason)
                         end,

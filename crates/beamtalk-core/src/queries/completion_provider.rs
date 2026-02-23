@@ -70,7 +70,7 @@ enum ClassContext<'a> {
 /// let source = "x := 42";
 /// let tokens = lex_with_eof(source);
 /// let (module, _) = parse(tokens);
-/// let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+/// let hierarchy = ClassHierarchy::build(&module).0;
 ///
 /// let completions = compute_completions(&module, source, Position::new(0, 0), &hierarchy);
 /// assert!(!completions.is_empty());
@@ -813,7 +813,7 @@ mod tests {
     fn completions_at(source: &str, position: Position) -> Vec<Completion> {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         compute_completions(&module, source, position, &hierarchy)
     }
 
@@ -926,7 +926,7 @@ mod tests {
         let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         let completions = compute_completions(&module, source, Position::new(0, 0), &hierarchy);
 
         // Should include inherited Actor methods (spawn)
@@ -952,7 +952,7 @@ mod tests {
         let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         // Position at the method body (after "=> ")
         let completions = compute_completions(&module, source, Position::new(3, 17), &hierarchy);
@@ -974,7 +974,7 @@ mod tests {
         let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         // Position inside the method body
         let completions = compute_completions(&module, source, Position::new(3, 17), &hierarchy);
@@ -993,7 +993,7 @@ mod tests {
         let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let completions = compute_completions(&module, source, Position::new(0, 0), &hierarchy);
 
@@ -1018,7 +1018,7 @@ mod tests {
         let source = "Actor subclass: Counter\n  state: count = 0\n\n  class withInitial: n => self new: #{count => n}\n\n  increment => self.count := self.count + 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         // Position inside the class method body (line 3, after "=> ")
         let completions = compute_completions(&module, source, Position::new(3, 22), &hierarchy);
@@ -1036,7 +1036,7 @@ mod tests {
         let source = "Actor subclass: Counter\n  state: count = 0\n\n  class withInitial: n => self new: #{count => n}\n\n  increment => self.count := self.count + 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         // Position at top level (line 0 is part of class definition,
         // but completions at any position include all module methods)

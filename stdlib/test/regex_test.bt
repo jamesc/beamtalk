@@ -85,5 +85,5 @@ TestCase subclass: RegexTest
     self should: ["hello" matchesRegex: "[invalid"] raise: #regex_error
 
   testClassIdentity =>
-    // BT-802 (ADR 0036): class on class returns a real metaclass object
-    self assert: (Regex class) isMeta equals: true
+    // Regex class identity
+    self assert: (Regex class) equals: #Metaclass

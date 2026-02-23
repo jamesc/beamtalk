@@ -381,7 +381,7 @@ instance_variables_test_() ->
                 ClassInfo = #{
                     name => 'Counter',
                     module => counter,
-                    fields => [count, name]
+                    instance_variables => [count, name]
                 },
                 {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
                 IVars = beamtalk_object_class:instance_variables(Pid),

@@ -57,24 +57,14 @@ class_of(_) ->
     'Object'.
 
 %% @doc Return the class of any value as a first-class class object (BT-412).
-%%
-%% ADR 0036: For class objects (tagged with " class" suffix) returns a real
-%% metaclass object instead of the sentinel atom 'Metaclass'. For metaclass
-%% objects (tagged with 'Metaclass'), returns the same struct (idempotent) to
-%% enable the self-grounding invariant: `Metaclass class class == Metaclass class`.
--spec class_of_object(term()) -> #beamtalk_object{} | atom().
-class_of_object(#beamtalk_object{class = 'Metaclass', class_mod = ClassMod, pid = Pid}) ->
-    %% ADR 0036 self-grounding: class of a metaclass object is itself (idempotent).
-    %% This ensures `Metaclass class class == Metaclass class` holds via structural
-    %% equality: both produce #beamtalk_object{class='Metaclass', pid=MetaclassPid}.
-    #beamtalk_object{class = 'Metaclass', class_mod = ClassMod, pid = Pid};
-class_of_object(#beamtalk_object{class = ClassName, pid = Pid}) ->
-    %% ADR 0036: class of a class object → real metaclass object (wraps same pid).
+-spec class_of_object(term()) -> tuple() | atom().
+class_of_object('Metaclass') ->
+    'Metaclass';
+class_of_object(#beamtalk_object{class = ClassName}) ->
+    %% BT-412: class of a class object → 'Metaclass' sentinel (terminal)
     case beamtalk_class_registry:is_class_name(ClassName) of
-        true ->
-            #beamtalk_object{class = 'Metaclass', class_mod = beamtalk_metaclass_bt, pid = Pid};
-        false ->
-            class_of_object_inner(ClassName)
+        true -> 'Metaclass';
+        false -> class_of_object_inner(ClassName)
     end;
 class_of_object(X) ->
     ClassName = class_of(X),
@@ -107,14 +97,12 @@ print_string(false) ->
     <<"false">>;
 print_string(nil) ->
     <<"nil">>;
+print_string('Metaclass') ->
+    <<"Metaclass">>;
 print_string(X) when is_atom(X) ->
     iolist_to_binary([<<"#">>, erlang:atom_to_binary(X, utf8)]);
 print_string(X) when is_list(X) ->
     iolist_to_binary([<<"#(">>, lists:join(<<", ">>, [print_string(E) || E <- X]), <<")">>]);
-print_string(#beamtalk_object{class = 'Metaclass', pid = Pid}) ->
-    %% ADR 0036: Metaclass objects display as "ClassName class" (e.g. "Integer class").
-    ClassName = beamtalk_object_class:class_name(Pid),
-    iolist_to_binary([atom_to_binary(ClassName, utf8), <<" class">>]);
 print_string(#beamtalk_object{class = ClassName}) ->
     case beamtalk_class_registry:is_class_name(ClassName) of
         true -> beamtalk_class_registry:class_display_name(ClassName);
@@ -160,10 +148,6 @@ print_string_map(X) ->
 
 %% @doc Send a message to any value (actor or primitive).
 -spec send(term(), atom(), list()) -> term().
-send(#beamtalk_object{class = 'Metaclass', pid = Pid} = Self, Selector, Args) ->
-    %% ADR 0036: Route metaclass objects through the Metaclass dispatch chain.
-    %% Must be matched before the generic #beamtalk_object{} clause below.
-    beamtalk_class_dispatch:metaclass_send(Pid, Selector, Args, Self);
 send(#beamtalk_object{pid = Pid}, Selector, Args) ->
     gen_server:call(Pid, {Selector, Args});
 send(X, Selector, Args) when is_tuple(X) ->
@@ -410,10 +394,10 @@ value_type_send(Self, Class, Selector, Args) ->
 
 %% @private Check if a selector is an ivar method (BT-359).
 -spec is_ivar_method(atom()) -> {true, binary()} | false.
-is_ivar_method('fieldAt:put:') ->
+is_ivar_method('instVarAt:put:') ->
     {true, <<"Value types are immutable. Use a method that returns a new instance instead.">>};
-is_ivar_method('fieldAt:') ->
-    {true, <<"Value types have no fields">>};
+is_ivar_method('instVarAt:') ->
+    {true, <<"Value types have no instance variables">>};
 is_ivar_method(_) ->
     false.
 

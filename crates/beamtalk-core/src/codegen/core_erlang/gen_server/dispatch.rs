@@ -57,8 +57,8 @@ impl CoreErlangGenerator {
             }
         }
 
-        // ADR 0006 Phase 1b: Reflection methods (class, respondsTo:, fieldNames,
-        // fieldAt:, fieldAt:put:, perform:, perform:withArguments:) are now
+        // ADR 0006 Phase 1b: Reflection methods (class, respondsTo:, instVarNames,
+        // instVarAt:, instVarAt:put:, perform:, perform:withArguments:) are now
         // inherited from Object via hierarchy walking.
 
         let entries: Vec<String> = methods
@@ -329,8 +329,8 @@ impl CoreErlangGenerator {
             docs.push(doc);
         }
 
-        // ADR 0006 Phase 1b: Reflection methods (class, respondsTo:, fieldNames,
-        // fieldAt:, fieldAt:put:) are now inherited from Object via hierarchy
+        // ADR 0006 Phase 1b: Reflection methods (class, respondsTo:, instVarNames,
+        // instVarAt:, instVarAt:put:) are now inherited from Object via hierarchy
         // walking, no longer generated per-class.
 
         // Default case: extension check, hierarchy walk, then DNU fallback

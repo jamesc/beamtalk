@@ -81,5 +81,5 @@ TestCase subclass: JsonTest
     self should: [JSON parse: 42] raise: #type_error
 
   testClassIdentity =>
-    // BT-802 (ADR 0036): class on class returns a real metaclass object
-    self assert: (JSON class) isMeta equals: true
+    // JSON is a class — class on class returns Metaclass
+    self assert: (JSON class) equals: #Metaclass

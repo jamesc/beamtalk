@@ -50,16 +50,16 @@ nil nonExistentMethod
 // ===========================================================================
 // Value types (integers, strings) don't have mutable fields
 
-// fieldAt:put: on integer
-42 fieldAt: #x put: 99
+// instVarAt:put: on integer
+42 instVarAt: #x put: 99
 // => ERROR: immutable_value
 
-// fieldAt: on integer
-42 fieldAt: #x
+// instVarAt: on integer
+42 instVarAt: #x
 // => ERROR: immutable_value
 
-// fieldAt:put: on string
-"hello" fieldAt: #x put: "world"
+// instVarAt:put: on string
+"hello" instVarAt: #x put: "world"
 // => ERROR: immutable_value
 
 // ===========================================================================

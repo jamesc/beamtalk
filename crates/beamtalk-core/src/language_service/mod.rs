@@ -515,27 +515,11 @@ impl LanguageService for SimpleLanguageService {
         // This is intentionally lightweight (ClassHierarchy::build only, not full
         // analyse()) since diagnostic_provider lazily runs full semantic analysis
         // when diagnostics are requested, avoiding duplicate work.
-        let (class_hierarchy_result, hierarchy_diags) =
-            crate::semantic_analysis::ClassHierarchy::build(&module);
-        if let Ok(class_hierarchy) = class_hierarchy_result {
-            // Update the project-wide index with this file's class hierarchy
-            self.project_index
-                .update_file(file.clone(), &class_hierarchy);
-        } else {
-            // Hierarchy build failed: store the file with merged diagnostics
-            // but do not update the project index for this file.
-            let mut all_diagnostics = diagnostics;
-            all_diagnostics.extend(hierarchy_diags);
-            self.files.insert(
-                file,
-                FileData {
-                    source: content,
-                    module,
-                    diagnostics: all_diagnostics,
-                },
-            );
-            return;
-        }
+        let (class_hierarchy, _) = crate::semantic_analysis::ClassHierarchy::build(&module);
+
+        // Update the project-wide index with this file's class hierarchy
+        self.project_index
+            .update_file(file.clone(), &class_hierarchy);
 
         self.files.insert(
             file,
@@ -855,7 +839,7 @@ mod tests {
             Utf8PathBuf::from("stdlib/src/Counter.bt"),
             "Object subclass: Counter\n  increment => 1".to_string(),
         )];
-        let index = ProjectIndex::with_stdlib(&stdlib).0.unwrap();
+        let index = ProjectIndex::with_stdlib(&stdlib);
         let mut service = SimpleLanguageService::with_project_index(index);
 
         // Add the stdlib file as an open file too so cross-file lookup can find it

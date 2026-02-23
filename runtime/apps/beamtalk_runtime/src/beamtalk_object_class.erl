@@ -75,8 +75,8 @@
     is_constructible = undefined :: boolean() | undefined,
     instance_methods = #{} :: #{selector() => method_info()},
     class_methods = #{} :: #{selector() => method_info()},
-    fields = [] :: [atom()],
-    class_state = #{} :: map(),
+    instance_variables = [] :: [atom()],
+    class_variables = #{} :: map(),
     method_source = #{} :: #{selector() => binary()},
     dynamic_methods = #{} :: #{selector() => fun()},
     %% ADR 0033: Runtime-embedded documentation
@@ -268,8 +268,8 @@ init({ClassName, ClassInfo}) ->
         is_abstract = IsAbstract,
         instance_methods = InstanceMethods,
         class_methods = ClassMethods,
-        fields = maps:get(fields, ClassInfo, []),
-        class_state = maps:get(class_state, ClassInfo, #{}),
+        instance_variables = maps:get(instance_variables, ClassInfo, []),
+        class_variables = maps:get(class_variables, ClassInfo, #{}),
         method_source = maps:get(method_source, ClassInfo, #{}),
         dynamic_methods = maps:get(dynamic_methods, ClassInfo, #{}),
         doc = maps:get(doc, ClassInfo, none),
@@ -302,7 +302,7 @@ handle_call(
         name = ClassName,
         module = Module,
         dynamic_methods = DynamicMethods,
-        fields = InstanceVars,
+        instance_variables = InstanceVars,
         is_constructible = IsConstructible0
     } = State
 ) ->
@@ -415,13 +415,13 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
             ),
             NewClassMethods = maps:get(class_methods, ClassInfo, State#class_state.class_methods),
             NewIVars = maps:get(
-                fields, ClassInfo, State#class_state.fields
+                instance_variables, ClassInfo, State#class_state.instance_variables
             ),
             NewState = State#class_state{
                 module = maps:get(module, ClassInfo, State#class_state.module),
                 instance_methods = NewInstanceMethods,
                 class_methods = NewClassMethods,
-                fields = NewIVars,
+                instance_variables = NewIVars,
                 method_source = maps:get(method_source, ClassInfo, State#class_state.method_source),
                 is_constructible = undefined,
                 doc = maps:get(doc, ClassInfo, State#class_state.doc),
@@ -429,7 +429,7 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
             },
             {reply, {ok, NewIVars}, NewState}
     end;
-handle_call(instance_variables, _From, #class_state{fields = IVars} = State) ->
+handle_call(instance_variables, _From, #class_state{instance_variables = IVars} = State) ->
     {reply, IVars, State};
 handle_call(is_sealed, _From, #class_state{is_sealed = Sealed} = State) ->
     {reply, Sealed, State};
@@ -462,11 +462,6 @@ handle_call({set_doc, DocBinary}, _From, State) ->
 handle_call({set_method_doc, Selector, DocBinary}, _From, State) ->
     NewMethodDocs = maps:put(Selector, DocBinary, State#class_state.method_docs),
     {reply, ok, State#class_state{method_docs = NewMethodDocs}};
-%% ADR 0036: Metaclass method dispatch stub.
-%% Returns {error, not_found} — the fallthrough to the 'Metaclass' chain is
-%% handled by beamtalk_class_dispatch:metaclass_send/4 in the caller.
-handle_call({metaclass_method_call, _Selector, _Args}, _From, State) ->
-    {reply, {error, not_found}, State};
 %% BT-411/BT-412/BT-440: Class method dispatch.
 %% Delegates to beamtalk_class_dispatch (BT-704).
 %% ADR 0032 Phase 1: Passes local class_methods (no flattened table).
@@ -479,7 +474,7 @@ handle_call(
         instance_methods = InstanceMethods,
         name = ClassName,
         module = Module,
-        class_state = ClassVars
+        class_variables = ClassVars
     } = State
 ) ->
     case
@@ -488,7 +483,7 @@ handle_call(
         )
     of
         {reply, Result, NewClassVars} ->
-            {reply, Result, State#class_state{class_state = NewClassVars}};
+            {reply, Result, State#class_state{class_variables = NewClassVars}};
         test_spawn ->
             beamtalk_test_case:spawn_test_execution(
                 Selector, Args, ClassName, Module, InstanceMethods, From
@@ -501,10 +496,10 @@ handle_call({initialize, _Args}, _From, #class_state{} = State) ->
     {reply, {ok, nil}, State};
 handle_call(get_module, _From, #class_state{module = Module} = State) ->
     {reply, Module, State};
-handle_call({get_class_var, Name}, _From, #class_state{class_state = ClassVars} = State) ->
+handle_call({get_class_var, Name}, _From, #class_state{class_variables = ClassVars} = State) ->
     {reply, maps:get(Name, ClassVars, nil), State};
-handle_call({set_class_var, Name, Value}, _From, #class_state{class_state = ClassVars} = State) ->
-    {reply, Value, State#class_state{class_state = maps:put(Name, Value, ClassVars)}}.
+handle_call({set_class_var, Name, Value}, _From, #class_state{class_variables = ClassVars} = State) ->
+    {reply, Value, State#class_state{class_variables = maps:put(Name, Value, ClassVars)}}.
 
 %% ADR 0032 Phase 1: Passes instance_methods (local only) instead of flattened table.
 handle_cast(

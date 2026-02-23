@@ -43,23 +43,15 @@
 send(Receiver, Selector, Args) ->
     case is_actor(Receiver) of
         true ->
-            case element(2, Receiver) of
-                'Metaclass' ->
-                    %% ADR 0036 (BT-802): Metaclass objects dispatch synchronously via
-                    %% the Metaclass → Class → Behaviour chain. They must NOT be treated
-                    %% as regular actor instances (which would return a Future PID).
-                    beamtalk_primitive:send(Receiver, Selector, Args);
-                _ ->
-                    case beamtalk_class_registry:is_class_object(Receiver) of
-                        true ->
-                            ClassPid = element(4, Receiver),
-                            beamtalk_object_class:class_send(ClassPid, Selector, Args);
-                        false ->
-                            Pid = element(4, Receiver),
-                            Future = beamtalk_future:new(),
-                            beamtalk_actor:async_send(Pid, Selector, Args, Future),
-                            Future
-                    end
+            case beamtalk_class_registry:is_class_object(Receiver) of
+                true ->
+                    ClassPid = element(4, Receiver),
+                    beamtalk_object_class:class_send(ClassPid, Selector, Args);
+                false ->
+                    Pid = element(4, Receiver),
+                    Future = beamtalk_future:new(),
+                    beamtalk_actor:async_send(Pid, Selector, Args, Future),
+                    Future
             end;
         false ->
             beamtalk_primitive:send(Receiver, Selector, Args)

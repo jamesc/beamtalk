@@ -66,7 +66,7 @@ register_class() ->
         name => 'Behaviour',
         superclass => 'Object',
         module => beamtalk_behaviour_bt,
-        fields => [],
+        instance_variables => [],
         is_abstract => true,
         class_methods => #{},
         instance_methods => #{}

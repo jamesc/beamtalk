@@ -21,7 +21,6 @@
 
 -export([
     class_send/3,
-    metaclass_send/4,
     unwrap_class_call/1,
     class_method_fun_name/1,
     is_test_execution_selector/1,
@@ -107,46 +106,6 @@ class_send(ClassPid, Selector, Args) ->
             end;
         Other ->
             unwrap_class_call(Other)
-    end.
-
-%% @doc Send a message to a metaclass object (ADR 0036 Phase 1, BT-802).
-%%
-%% Routes messages on metaclass objects (tagged `class='Metaclass'`) through:
-%%   1. `{metaclass_method_call, Selector, Args}` to the class gen_server — returns
-%%      `{error, not_found}` for the Phase 1 stub (user-defined metaclass methods
-%%      are not yet supported).
-%%   2. Fallthrough to `beamtalk_dispatch:lookup/5` starting at 'Metaclass', which
-%%      walks the Metaclass → Class → Behaviour → Object → ProtoObject chain.
-%%
-%% The class pid is the same as the described class (virtual tag approach, ADR 0013).
-%% Self carries `class='Metaclass'` so method dispatch receives the correct receiver.
--spec metaclass_send(pid(), atom(), list(), #beamtalk_object{}) -> term().
-metaclass_send(Pid, Selector, Args, Self) ->
-    case gen_server:call(Pid, {metaclass_method_call, Selector, Args}) of
-        {ok, Result} ->
-            Result;
-        {error, not_found} ->
-            case beamtalk_dispatch:lookup(Selector, Args, Self, #{}, 'Metaclass') of
-                {reply, Result, _NewState} ->
-                    Result;
-                {error, #beamtalk_error{kind = does_not_understand}} ->
-                    ClassName = gen_server:call(Pid, class_name),
-                    Error = beamtalk_error:new(
-                        does_not_understand,
-                        ClassName,
-                        Selector,
-                        <<"Metaclass does not understand this message">>
-                    ),
-                    beamtalk_error:raise(Error);
-                {error, #beamtalk_error{kind = class_not_found}} ->
-                    %% 'Metaclass' process not registered — graceful fallback.
-                    Error = beamtalk_error:new(does_not_understand, 'Metaclass', Selector),
-                    beamtalk_error:raise(Error);
-                {error, Error} ->
-                    %% A real error from a method in the chain. Wrap idempotently.
-                    Wrapped = beamtalk_exception_handler:ensure_wrapped(Error),
-                    error(Wrapped)
-            end
     end.
 
 %% @doc Unwrap a class gen_server call result for use in class_send.

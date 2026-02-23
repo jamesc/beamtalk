@@ -89,18 +89,25 @@ fn map_get<'a>(map: &'a Map, key: &str) -> Option<&'a Term> {
 }
 
 /// Extract a string→string map from a Term (for `class_module_index`).
-fn term_to_string_map(term: &Term) -> Option<std::collections::HashMap<String, String>> {
+/// Returns `Err` if the term is present but contains non-string keys or values,
+/// so callers can surface the problem rather than silently falling back.
+fn term_to_string_map(term: &Term) -> Result<std::collections::HashMap<String, String>, String> {
     match term {
         Term::Map(m) => {
             let mut result = std::collections::HashMap::new();
             for (k, v) in &m.map {
-                let key = term_to_string(k)?;
-                let val = term_to_string(v)?;
+                let key = term_to_string(k)
+                    .ok_or_else(|| format!("class_module_index key is not a string: {k:?}"))?;
+                let val = term_to_string(v).ok_or_else(|| {
+                    format!("class_module_index value for '{key}' is not a string: {v:?}")
+                })?;
                 result.insert(key, val);
             }
-            Some(result)
+            Ok(result)
         }
-        _ => None,
+        _ => Err(format!(
+            "class_module_index must be a map of string→string, got: {term:?}"
+        )),
     }
 }
 
@@ -576,9 +583,13 @@ fn handle_compile(request: &Map) -> Term {
         .collect();
 
     // Extract optional class module index for resolving subdirectory class references.
-    let class_module_index = map_get(request, "class_module_index")
-        .and_then(term_to_string_map)
-        .unwrap_or_default();
+    let class_module_index = match map_get(request, "class_module_index") {
+        None => std::collections::HashMap::new(),
+        Some(term) => match term_to_string_map(term) {
+            Ok(map) => map,
+            Err(e) => return error_response(&[e]),
+        },
+    };
 
     // Generate Core Erlang
     let warning_msgs: Vec<String> = warnings.iter().map(|w| w.message.clone()).collect();

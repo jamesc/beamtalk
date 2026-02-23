@@ -304,7 +304,7 @@ create_subclass(SuperclassName, ClassName, ClassSpec) ->
             ),
             {error, Error};
         _SuperclassPid ->
-            InstanceVars = maps:get(fields, ClassSpec, []),
+            InstanceVars = maps:get(instance_variables, ClassSpec, []),
             InstanceMethods = maps:get(instance_methods, ClassSpec, #{}),
             try convert_methods_to_info(InstanceMethods) of
                 MethodInfo ->
@@ -313,7 +313,7 @@ create_subclass(SuperclassName, ClassName, ClassSpec) ->
                         module => beamtalk_dynamic_object,
                         superclass => SuperclassName,
                         instance_methods => MethodInfo,
-                        fields => InstanceVars,
+                        instance_variables => InstanceVars,
                         class_methods => #{},
                         dynamic_methods => InstanceMethods
                     },

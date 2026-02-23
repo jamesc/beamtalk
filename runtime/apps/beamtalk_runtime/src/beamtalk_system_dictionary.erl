@@ -129,7 +129,7 @@ class_info() ->
             version => #{arity => 0}
         },
         class_methods => #{},
-        fields => []
+        instance_variables => []
     }.
 
 %%====================================================================

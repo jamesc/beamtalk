@@ -90,7 +90,7 @@ is_tagged(_) ->
 %% @doc Returns the canonical list of internal field names in tagged maps.
 %%
 %% These fields are system metadata, not user-visible instance variables.
-%% Used by reflection methods like `fieldNames` to filter out internals.
+%% Used by reflection methods like `instVarNames` to filter out internals.
 -spec internal_fields() -> [atom()].
 internal_fields() ->
     ['$beamtalk_class', '__class_mod__', '__methods__', '__registry_pid__'].

@@ -1403,7 +1403,7 @@ mod tests {
                 span: span(),
             }],
         );
-        let hierarchy = ClassHierarchy::build(&counter_module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&counter_module);
 
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
@@ -1639,7 +1639,7 @@ mod tests {
                 span: span(),
             }],
         );
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         // Should warn about 'nonExistent' on Greeter
@@ -1813,7 +1813,7 @@ mod tests {
             ],
         );
         let module = make_module_with_classes(vec![], vec![class_def]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         assert!(
@@ -1839,7 +1839,7 @@ mod tests {
             )],
         );
         let module = make_module_with_classes(vec![], vec![class_def]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         assert_eq!(
@@ -1873,7 +1873,7 @@ mod tests {
             vec![],
         );
         let module = make_module_with_classes(vec![], vec![class_def]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         assert!(
@@ -1914,7 +1914,7 @@ mod tests {
             ],
         );
         let module = make_module_with_classes(vec![], vec![class_def]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         assert!(
@@ -1984,7 +1984,7 @@ mod tests {
         };
 
         let module = make_module_with_classes(vec![], vec![parent, child]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let type_map = infer_types(&module, &hierarchy);
 
         // super should be inferred as Parent (not Dynamic)
@@ -2051,7 +2051,7 @@ mod tests {
         };
 
         let module = make_module_with_classes(vec![], vec![parent, child]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
 
@@ -2261,7 +2261,7 @@ mod tests {
         );
         class_def.is_typed = true;
         let module = make_module_with_classes(vec![], vec![class_def]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         let warnings: Vec<_> = checker
@@ -2296,7 +2296,7 @@ mod tests {
         );
         class_def.is_typed = true;
         let module = make_module_with_classes(vec![], vec![class_def]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         let warnings: Vec<_> = checker
@@ -2330,7 +2330,7 @@ mod tests {
         );
         class_def.is_typed = true;
         let module = make_module_with_classes(vec![], vec![class_def]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         let typed_warnings: Vec<_> = checker
@@ -2362,7 +2362,7 @@ mod tests {
             span(),
         );
         let module = make_module_with_classes(vec![], vec![class_def]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         let typed_warnings: Vec<_> = checker
@@ -2399,7 +2399,7 @@ mod tests {
         );
         class_def.is_typed = true;
         let module = make_module_with_classes(vec![], vec![class_def]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         let typed_warnings: Vec<_> = checker
@@ -2523,7 +2523,7 @@ mod tests {
             span(),
         );
         let module = make_module_with_classes(vec![], vec![class_def]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         let return_warnings: Vec<_> = checker
@@ -2559,7 +2559,7 @@ mod tests {
             span(),
         );
         let module = make_module_with_classes(vec![], vec![class_def]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         let return_warnings: Vec<_> = checker
@@ -2596,7 +2596,7 @@ mod tests {
             span(),
         );
         let module = make_module_with_classes(vec![], vec![class_def]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         let return_warnings: Vec<_> = checker
@@ -2628,7 +2628,7 @@ mod tests {
             span(),
         );
         let module = make_module_with_classes(vec![], vec![class_def]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         let return_warnings: Vec<_> = checker
@@ -2705,7 +2705,7 @@ mod tests {
             ],
             vec![class_def],
         );
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         let arg_warnings: Vec<_> = checker
@@ -2759,7 +2759,7 @@ mod tests {
             ],
             vec![class_def],
         );
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         let arg_warnings: Vec<_> = checker
@@ -2813,7 +2813,7 @@ mod tests {
             span(),
         );
         let module = make_module_with_classes(vec![], vec![parent, child]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         let override_warnings: Vec<_> = checker
@@ -2867,7 +2867,7 @@ mod tests {
             span(),
         );
         let module = make_module_with_classes(vec![], vec![parent, child]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         let override_warnings: Vec<_> = checker
@@ -2907,7 +2907,7 @@ mod tests {
             )],
             vec![class_def],
         );
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         for diag in checker.diagnostics() {
@@ -2976,7 +2976,7 @@ mod tests {
             span(),
         );
         let module = make_module_with_classes(vec![], vec![class_def]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         // Dynamic body type — no return type warning (can't infer from empty body)
@@ -3023,7 +3023,7 @@ mod tests {
         let method = make_method("badMethod", vec![field_assign("count", str_lit("bad"))]);
         let class = counter_class_with_typed_state(vec![method], state);
         let module = make_module_with_classes(vec![], vec![class]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         let warnings: Vec<_> = checker
@@ -3054,7 +3054,7 @@ mod tests {
         let method = make_method("goodMethod", vec![field_assign("count", int_lit(42))]);
         let class = counter_class_with_typed_state(vec![method], state);
         let module = make_module_with_classes(vec![], vec![class]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         assert!(
@@ -3083,7 +3083,7 @@ mod tests {
             span(),
         );
         let module = make_module_with_classes(vec![], vec![class_def]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         let return_warnings: Vec<_> = checker
@@ -3111,7 +3111,7 @@ mod tests {
         );
         let class = counter_class_with_typed_state(vec![method], state);
         let module = make_module_with_classes(vec![], vec![class]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         assert!(
@@ -3148,7 +3148,7 @@ mod tests {
             span(),
         );
         let module = make_module_with_classes(vec![], vec![class_def]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         let return_warnings: Vec<_> = checker
@@ -3173,7 +3173,7 @@ mod tests {
         let method = make_method("setNumber", vec![field_assign("value", int_lit(42))]);
         let class = counter_class_with_typed_state(vec![method], state);
         let module = make_module_with_classes(vec![], vec![class]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         assert!(
@@ -3194,7 +3194,7 @@ mod tests {
         )];
         let class = counter_class_with_typed_state(vec![], state);
         let module = make_module_with_classes(vec![], vec![class]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         let warnings: Vec<_> = checker
@@ -3222,7 +3222,7 @@ mod tests {
         )];
         let class = counter_class_with_typed_state(vec![], state);
         let module = make_module_with_classes(vec![], vec![class]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         assert!(
@@ -3243,7 +3243,7 @@ mod tests {
         let method = make_method("setUnknown", vec![field_assign("count", var("unknownVar"))]);
         let class = counter_class_with_typed_state(vec![method], state);
         let module = make_module_with_classes(vec![], vec![class]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         assert!(
@@ -3271,7 +3271,7 @@ mod tests {
         let method = make_method("setValue", vec![field_assign("value", str_lit("hello"))]);
         let class = counter_class_with_typed_state(vec![method], state);
         let module = make_module_with_classes(vec![], vec![class]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (hierarchy, _) = ClassHierarchy::build(&module);
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         assert!(

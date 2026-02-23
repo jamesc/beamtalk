@@ -43,13 +43,13 @@ self_ref() -> make_ref().
 object_reflection_test_() ->
     {"Object reflection methods", [
         {"class returns $beamtalk_class from state", fun test_class/0},
-        {"fieldNames filters internal fields", fun test_inst_var_names/0},
-        {"fieldNames with multiple fields", fun test_inst_var_names_multi/0},
-        {"fieldAt: reads field value", fun test_inst_var_at/0},
-        {"fieldAt: with non-existent field returns nil", fun test_inst_var_at_missing/0},
-        {"fieldAt:put: sets field value and returns value", fun test_inst_var_at_put/0},
-        {"fieldAt:put: with non-existent field creates it", fun test_inst_var_at_put_missing/0},
-        {"fieldAt:put: returns updated state", fun test_inst_var_at_put_state/0}
+        {"instVarNames filters internal fields", fun test_inst_var_names/0},
+        {"instVarNames with multiple fields", fun test_inst_var_names_multi/0},
+        {"instVarAt: reads field value", fun test_inst_var_at/0},
+        {"instVarAt: with non-existent field returns nil", fun test_inst_var_at_missing/0},
+        {"instVarAt:put: sets field value and returns value", fun test_inst_var_at_put/0},
+        {"instVarAt:put: with non-existent field creates it", fun test_inst_var_at_put_missing/0},
+        {"instVarAt:put: returns updated state", fun test_inst_var_at_put_state/0}
     ]}.
 
 test_class() ->
@@ -59,32 +59,32 @@ test_class() ->
 
 test_inst_var_names() ->
     State = counter_state(),
-    {reply, Names, _} = beamtalk_object_ops:dispatch('fieldNames', [], self_ref(), State),
+    {reply, Names, _} = beamtalk_object_ops:dispatch('instVarNames', [], self_ref(), State),
     ?assertEqual([value], Names).
 
 test_inst_var_names_multi() ->
     State = multi_field_state(),
-    {reply, Names, _} = beamtalk_object_ops:dispatch('fieldNames', [], self_ref(), State),
+    {reply, Names, _} = beamtalk_object_ops:dispatch('instVarNames', [], self_ref(), State),
     ?assertEqual(lists:sort([x, y]), lists:sort(Names)).
 
 test_inst_var_at() ->
     State = counter_state(),
-    Result = beamtalk_object_ops:dispatch('fieldAt:', [value], self_ref(), State),
+    Result = beamtalk_object_ops:dispatch('instVarAt:', [value], self_ref(), State),
     ?assertMatch({reply, 0, _}, Result).
 
 test_inst_var_at_missing() ->
     State = counter_state(),
-    Result = beamtalk_object_ops:dispatch('fieldAt:', [nonexistent], self_ref(), State),
+    Result = beamtalk_object_ops:dispatch('instVarAt:', [nonexistent], self_ref(), State),
     ?assertMatch({reply, nil, _}, Result).
 
 test_inst_var_at_put() ->
     State = counter_state(),
-    Result = beamtalk_object_ops:dispatch('fieldAt:put:', [value, 42], self_ref(), State),
+    Result = beamtalk_object_ops:dispatch('instVarAt:put:', [value, 42], self_ref(), State),
     ?assertMatch({reply, 42, _}, Result).
 
 test_inst_var_at_put_missing() ->
     State = counter_state(),
-    Result = beamtalk_object_ops:dispatch('fieldAt:put:', [nonexistent, 42], self_ref(), State),
+    Result = beamtalk_object_ops:dispatch('instVarAt:put:', [nonexistent, 42], self_ref(), State),
     %% BT-427: Smalltalk semantics — creates the field, returns value
     ?assertMatch({reply, 42, _}, Result),
     {reply, _, NewState} = Result,
@@ -93,7 +93,7 @@ test_inst_var_at_put_missing() ->
 test_inst_var_at_put_state() ->
     State = counter_state(),
     {reply, 42, NewState} = beamtalk_object_ops:dispatch(
-        'fieldAt:put:', [value, 42], self_ref(), State
+        'instVarAt:put:', [value, 42], self_ref(), State
     ),
     ?assertEqual(42, maps:get(value, NewState)).
 
@@ -161,14 +161,14 @@ has_method_test_() ->
         {"respondsTo: is a known method", fun() ->
             ?assert(beamtalk_object_ops:has_method('respondsTo:'))
         end},
-        {"fieldNames is a known method", fun() ->
-            ?assert(beamtalk_object_ops:has_method('fieldNames'))
+        {"instVarNames is a known method", fun() ->
+            ?assert(beamtalk_object_ops:has_method('instVarNames'))
         end},
-        {"fieldAt: is a known method", fun() ->
-            ?assert(beamtalk_object_ops:has_method('fieldAt:'))
+        {"instVarAt: is a known method", fun() ->
+            ?assert(beamtalk_object_ops:has_method('instVarAt:'))
         end},
-        {"fieldAt:put: is a known method", fun() ->
-            ?assert(beamtalk_object_ops:has_method('fieldAt:put:'))
+        {"instVarAt:put: is a known method", fun() ->
+            ?assert(beamtalk_object_ops:has_method('instVarAt:put:'))
         end},
         {"perform: is a known method", fun() ->
             ?assert(beamtalk_object_ops:has_method('perform:'))

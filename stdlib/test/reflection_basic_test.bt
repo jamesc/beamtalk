@@ -14,16 +14,16 @@ TestCase subclass: ReflectionBasicTest
     self assert: (c respondsTo: #increment).
     // Test respondsTo: with non-existent method
     self deny: (c respondsTo: #nonExistent).
-    // Test fieldNames
-    self assert: ((c fieldNames) await) equals: #(#value).
-    // Test fieldAt: - read field value
-    self assert: ((c fieldAt: #value) await) equals: 0.
+    // Test instVarNames
+    self assert: ((c instVarNames) await) equals: #(#value).
+    // Test instVarAt: - read field value
+    self assert: ((c instVarAt: #value) await) equals: 0.
     // Increment to change state
     self assert: (c increment await) equals: 1.
-    // Test fieldAt: after state change
-    self assert: ((c fieldAt: #value) await) equals: 1.
-    // Test fieldAt:put: - set field value
-    self assert: ((c fieldAt: #value put: 42) await) equals: 42.
+    // Test instVarAt: after state change
+    self assert: ((c instVarAt: #value) await) equals: 1.
+    // Test instVarAt:put: - set field value
+    self assert: ((c instVarAt: #value put: 42) await) equals: 42.
     // Verify field was set
     self assert: (c getValue await) equals: 42.
     // Test perform: - dynamic dispatch (zero-arity method)
@@ -32,8 +32,10 @@ TestCase subclass: ReflectionBasicTest
     self assert: ((c perform: #increment) await) equals: 43.
     // Verify increment worked via getValue
     self assert: (c getValue await) equals: 43.
-    // BT-359: fieldAt: on value types raises immutable_value error
-    self should: [42 fieldAt: #x] raise: #immutable_value.
-    // BT-765: fieldAt:put: on immutable literals raises immutable_value error
-    self should: [42 fieldAt: #x put: 99] raise: #immutable_value.
-    self should: ["hello" fieldAt: #x put: "world"] raise: #immutable_value
+    // BT-359: instVarAt: on value types raises immutable_value error
+    self should: [42 instVarAt: #x] raise: #immutable_value.
+    // BT-765: instVarAt:put: on immutable literals raises immutable_value error
+    @expect type
+    self should: [42 instVarAt: #x put: 99] raise: #immutable_value.
+    @expect type
+    self should: ["hello" instVarAt: #x put: "world"] raise: #immutable_value

@@ -15,7 +15,7 @@
 //!   - **Nil protocol**: `isNil`, `notNil`, `ifNil:`, `ifNotNil:`, `ifNil:ifNotNil:`, `ifNotNil:ifNil:` → Nil-testing boolean protocol
 //!   - **Error signaling**: `error:` → Error construction and signaling
 //!   - **Object identity**: `yourself`, `hash` → Identity and representation
-//!   - **Object reflection**: `respondsTo:`, `fieldNames`, `fieldAt:`, `fieldAt:put:` → Runtime introspection
+//!   - **Object reflection**: `respondsTo:`, `instVarNames`, `instVarAt:`, `instVarAt:put:` → Runtime introspection
 //! - **Dynamic dispatch**: `perform:`, `perform:withArguments:` → Runtime type-based dispatch (actors → async/Future, primitives → sync/value)
 //!
 //! Unlike type-specific dispatch (which goes through `beamtalk_primitive:send/3`
@@ -502,7 +502,7 @@ impl CoreErlangGenerator {
     /// - Nil protocol (`isNil`, `notNil`, `ifNil:`, `ifNotNil:`, `ifNil:ifNotNil:`, `ifNotNil:ifNil:`)
     /// - Error signaling (`error:`)
     /// - Object identity (`yourself`, `hash`)
-    /// - Object reflection (`respondsTo:`, `fieldNames`, `fieldAt:`, `fieldAt:put:`)
+    /// - Object reflection (`respondsTo:`, `instVarNames`, `instVarAt:`, `instVarAt:put:`)
     ///
     /// - Returns `Ok(Some(doc))` if the message was an Object method and code was generated
     /// - Returns `Ok(None)` if the message is NOT an Object method (caller should continue)
@@ -765,12 +765,12 @@ impl CoreErlangGenerator {
     /// **DDD Context:** Object Protocol — Object Reflection
     ///
     /// - `respondsTo:` — Check if object responds to a selector
-    /// - `fieldNames` — Get list of instance variable names (actors only)
-    /// - `fieldAt:` — Read instance variable by name
-    /// - `fieldAt:put:` — Write instance variable by name
+    /// - `instVarNames` — Get list of instance variable names (actors only)
+    /// - `instVarAt:` — Read instance variable by name
+    /// - `instVarAt:put:` — Write instance variable by name
     #[expect(
         clippy::too_many_lines,
-        reason = "fieldAt: and fieldAt:put: require verbose type guards for actor vs primitive dispatch"
+        reason = "instVarAt: and instVarAt:put: require verbose type guards for actor vs primitive dispatch"
     )]
     fn try_generate_object_reflection(
         &mut self,
@@ -780,7 +780,7 @@ impl CoreErlangGenerator {
     ) -> Result<Option<Document<'static>>> {
         match selector {
             MessageSelector::Unary(name) => match name.as_str() {
-                "fieldNames" if arguments.is_empty() => {
+                "instVarNames" if arguments.is_empty() => {
                     let receiver_var = self.fresh_var("Receiver");
                     let pid_var = self.fresh_var("Pid");
                     let future_var = self.fresh_var("Future");
@@ -793,7 +793,7 @@ impl CoreErlangGenerator {
                         format!(
                             " in let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in \
                                  let {future_var} = call 'beamtalk_future':'new'() in \
-                                 let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'fieldNames', [], {future_var}) in \
+                                 let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'instVarNames', [], {future_var}) in \
                                  {future_var}"
                         ),
                     ];
@@ -823,7 +823,7 @@ impl CoreErlangGenerator {
                         ];
                         Ok(Some(doc))
                     }
-                    "fieldAt:" if arguments.len() == 1 => {
+                    "instVarAt:" if arguments.len() == 1 => {
                         let receiver_var = self.fresh_var("Receiver");
                         let name_var = self.fresh_var("Name");
                         let pid_var = self.fresh_var("Pid");
@@ -856,14 +856,14 @@ impl CoreErlangGenerator {
                                 "<'true'> when 'true' -> \
                                  let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in \
                                  let {future_var} = call 'beamtalk_future':'new'() in \
-                                 let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'fieldAt:', [{name_var}], {future_var}) in \
+                                 let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'instVarAt:', [{name_var}], {future_var}) in \
                                  {future_var} "
                             ),
                             format!(
                                 "<_> when 'true' -> \
                                  let {class_var} = call 'beamtalk_primitive':'class_of'({receiver_var}) in \
                                  let {error_base} = call 'beamtalk_error':'new'('immutable_value', {class_var}) in \
-                                 let {error_sel} = call 'beamtalk_error':'with_selector'({error_base}, 'fieldAt:') in \
+                                 let {error_sel} = call 'beamtalk_error':'with_selector'({error_base}, 'instVarAt:') in \
                                  let {error_hint} = call 'beamtalk_error':'with_hint'({error_sel}, {hint}) in \
                                  call 'beamtalk_error':'raise'({error_hint}) \
                                  end"
@@ -871,7 +871,7 @@ impl CoreErlangGenerator {
                         ];
                         Ok(Some(doc))
                     }
-                    "fieldAt:put:" if arguments.len() == 2 => {
+                    "instVarAt:put:" if arguments.len() == 2 => {
                         let receiver_var = self.fresh_var("Receiver");
                         let name_var = self.fresh_var("Name");
                         let value_var = self.fresh_var("Value");
@@ -909,14 +909,14 @@ impl CoreErlangGenerator {
                                 "<'true'> when 'true' -> \
                                  let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in \
                                  let {future_var} = call 'beamtalk_future':'new'() in \
-                                 let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'fieldAt:put:', [{name_var}, {value_var}], {future_var}) in \
+                                 let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'instVarAt:put:', [{name_var}, {value_var}], {future_var}) in \
                                  {future_var} "
                             ),
                             format!(
                                 "<_> when 'true' -> \
                                  let {class_var} = call 'beamtalk_primitive':'class_of'({receiver_var}) in \
                                  let {error_base} = call 'beamtalk_error':'new'('immutable_value', {class_var}) in \
-                                 let {error_sel} = call 'beamtalk_error':'with_selector'({error_base}, 'fieldAt:put:') in \
+                                 let {error_sel} = call 'beamtalk_error':'with_selector'({error_base}, 'instVarAt:put:') in \
                                  let {error_hint} = call 'beamtalk_error':'with_hint'({error_sel}, {hint}) in \
                                  call 'beamtalk_error':'raise'({error_hint}) \
                                  end"

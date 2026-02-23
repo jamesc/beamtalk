@@ -55,7 +55,7 @@ pub enum SemanticErrorKind {
 
     /// Method expects a symbol literal argument but received something else.
     ///
-    /// Reflection methods like `respondsTo:`, `fieldAt:`, and `classNamed:`
+    /// Reflection methods like `respondsTo:`, `instVarAt:`, and `classNamed:`
     /// require symbol literal arguments (e.g., `#increment`).
     ExpectedSymbolLiteral {
         /// The method selector that expects a symbol.

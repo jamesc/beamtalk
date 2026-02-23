@@ -43,7 +43,7 @@ read_field(Name, State) when is_atom(Name), is_map(State) ->
 %% @doc Writes an instance variable, returning `{Value, NewState}`.
 %%
 %% Creates the field if it doesn't exist (Smalltalk-80 semantics).
-%% Returns the written value (not the object), matching `fieldAt:put:`
+%% Returns the written value (not the object), matching `instVarAt:put:`
 %% convention.
 -spec write_field(atom(), term(), map()) -> {term(), map()}.
 write_field(Name, Value, State) when is_atom(Name), is_map(State) ->
