@@ -547,6 +547,7 @@ builtin_class_methods() ->
 
 %% @private
 %% @doc Collect all class-side method selectors for a class by walking the superclass chain.
+%% Guards against excessive depth via ?MAX_HIERARCHY_DEPTH (codebase convention).
 -spec collect_all_class_methods(atom(), non_neg_integer()) -> [atom()].
 collect_all_class_methods(_ClassName, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
     [];
