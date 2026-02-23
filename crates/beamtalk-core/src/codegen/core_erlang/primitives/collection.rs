@@ -5,9 +5,16 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! Default implementations for abstract Collection protocol methods.
-//! These dispatch `do:` on the actual Self value, which routes to
-//! the concrete subclass (Set, Dictionary, Tuple).
+//! BT-815: Most abstract Collection protocol methods are now self-hosted as
+//! pure Beamtalk in `Collection.bt`.  The exception is `inject:into:`: the
+//! pure-BT implementation requires local-variable mutation threading through
+//! an abstract `do:` call, which the compiler does not yet support for
+//! abstract-class methods (it generates `lists:foreach` rather than
+//! `lists:foldl`).  `inject:into:` therefore remains a `@primitive` backed
+//! by `beamtalk_collection_ops:inject_into/3`.
+//!
+//! Concrete subclasses (List, Set, Dictionary) retain their own `@primitive`
+//! overrides handled by `list.rs`, `misc.rs`, and `dictionary.rs`.
 
 use super::super::document::Document;
 use crate::docvec;
@@ -18,14 +25,6 @@ pub(crate) fn generate_collection_bif(
     params: &[String],
 ) -> Option<Document<'static>> {
     match selector {
-        "includes:" => {
-            let p0 = params.first().map_or("_Element", String::as_str);
-            Some(docvec![
-                "call 'beamtalk_collection_ops':'includes'(Self, ",
-                p0.to_string(),
-                ")",
-            ])
-        }
         "inject:into:" => {
             let p0 = params.first().map_or("_Initial", String::as_str);
             let p1 = params.get(1).map_or("_Block", String::as_str);
@@ -34,66 +33,7 @@ pub(crate) fn generate_collection_bif(
                 p0.to_string(),
                 ", ",
                 p1.to_string(),
-                ")",
-            ])
-        }
-        "collect:" => {
-            let p0 = params.first().map_or("_Block", String::as_str);
-            Some(docvec![
-                "call 'beamtalk_collection_ops':'collect'(Self, ",
-                p0.to_string(),
-                ")",
-            ])
-        }
-        "select:" => {
-            let p0 = params.first().map_or("_Block", String::as_str);
-            Some(docvec![
-                "call 'beamtalk_collection_ops':'select'(Self, ",
-                p0.to_string(),
-                ")",
-            ])
-        }
-        "reject:" => {
-            let p0 = params.first().map_or("_Block", String::as_str);
-            Some(docvec![
-                "call 'beamtalk_collection_ops':'reject'(Self, ",
-                p0.to_string(),
-                ")",
-            ])
-        }
-        "detect:" => {
-            let p0 = params.first().map_or("_Block", String::as_str);
-            Some(docvec![
-                "call 'beamtalk_collection_ops':'detect'(Self, ",
-                p0.to_string(),
-                ")",
-            ])
-        }
-        "detect:ifNone:" => {
-            let p0 = params.first().map_or("_Block", String::as_str);
-            let p1 = params.get(1).map_or("_NoneBlock", String::as_str);
-            Some(docvec![
-                "call 'beamtalk_collection_ops':'detect_if_none'(Self, ",
-                p0.to_string(),
-                ", ",
-                p1.to_string(),
-                ")",
-            ])
-        }
-        "anySatisfy:" => {
-            let p0 = params.first().map_or("_Block", String::as_str);
-            Some(docvec![
-                "call 'beamtalk_collection_ops':'any_satisfy'(Self, ",
-                p0.to_string(),
-                ")",
-            ])
-        }
-        "allSatisfy:" => {
-            let p0 = params.first().map_or("_Block", String::as_str);
-            Some(docvec![
-                "call 'beamtalk_collection_ops':'all_satisfy'(Self, ",
-                p0.to_string(),
-                ")",
+                ")"
             ])
         }
         _ => None,

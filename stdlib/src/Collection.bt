@@ -8,7 +8,7 @@
 ///
 /// Subclasses must implement `size` and `do:` at minimum.
 /// All other iteration methods have default implementations built
-/// on those two primitives via `beamtalk_collection_ops`.
+/// in pure Beamtalk on those two primitives.
 ///
 /// ## Protocol
 /// ```beamtalk
@@ -51,20 +51,29 @@ abstract Object subclass: Collection
 
   /// Test if the collection contains the given element.
   ///
-  /// Default implementation iterates with `do:`. Subclasses
-  /// may override with more efficient lookup.
+  /// Default implementation iterates with `do:` and returns early on match.
+  /// Subclasses may override with more efficient lookup.
   ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2, 3) includes: 2      // => true
   /// #(1, 2, 3) includes: 9      // => false
   /// ```
-  includes: element -> Boolean => @primitive "includes:"
+  includes: element -> Boolean =>
+    self do: [:each | each =:= element ifTrue: [^true]].
+    false
 
   /// Reduce the collection with an accumulator.
   ///
-  /// Evaluates `block` with the accumulator and each element.
+  /// Evaluates `block` with `(accumulator, element)` for each element.
   /// Returns the final accumulator value.
+  ///
+  /// Kept as `@primitive` because the pure-BT implementation using `do:` with
+  /// local-variable mutation does not work for abstract-class methods: the
+  /// compiler generates `lists:foreach` (no state threading) instead of
+  /// `lists:foldl`.  The Erlang helper calls the block as `Block(Acc, Elem)`
+  /// (accumulator first) to match the Beamtalk `block value: acc value: each`
+  /// convention expected by `collect:`, `select:`, and `reject:`.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -74,19 +83,27 @@ abstract Object subclass: Collection
 
   /// Collect results of evaluating `block` on each element.
   ///
+  /// Builds the result in reverse using `addFirst:` then reverses once.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2, 3) collect: [:x | x * 2]  // => #(2, 4, 6)
   /// ```
-  collect: block: Block => @primitive "collect:"
+  collect: block: Block =>
+    (self inject: #() into: [:acc :each | acc addFirst: (block value: each)]) reversed
 
   /// Select elements for which `block` returns true.
+  ///
+  /// Builds the result in reverse using `addFirst:` then reverses once.
   ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2, 3, 4) select: [:x | x > 2]  // => #(3, 4)
   /// ```
-  select: block: Block => @primitive "select:"
+  select: block: Block =>
+    (self inject: #() into: [:acc :each |
+      (block value: each) ifTrue: [acc addFirst: each] ifFalse: [acc]
+    ]) reversed
 
   /// Reject elements for which `block` returns true.
   ///
@@ -94,41 +111,57 @@ abstract Object subclass: Collection
   /// ```beamtalk
   /// #(1, 2, 3, 4) reject: [:x | x > 2]  // => #(1, 2)
   /// ```
-  reject: block: Block => @primitive "reject:"
+  reject: block: Block =>
+    self select: [:each | (block value: each) not]
 
   /// Find the first element for which `block` returns true.
   ///
-  /// Returns nil if no element matches.
+  /// Returns nil if no element matches. Uses `^` (non-local return) for
+  /// early exit — this compiles to throw/catch on BEAM.
   ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2, 3) detect: [:x | x > 1]     // => 2
   /// ```
-  detect: block: Block => @primitive "detect:"
+  detect: block: Block =>
+    self do: [:each | (block value: each) ifTrue: [^each]].
+    nil
 
   /// Find the first element matching `block`, or evaluate `noneBlock` if none.
+  ///
+  /// Uses `^` (non-local return) for early exit — compiles to throw/catch on BEAM.
   ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2) detect: [:x | x > 5] ifNone: [0]  // => 0
   /// ```
-  detect: block: Block ifNone: noneBlock: Block => @primitive "detect:ifNone:"
+  detect: block: Block ifNone: noneBlock: Block =>
+    self do: [:each | (block value: each) ifTrue: [^each]].
+    noneBlock value
 
   /// Test if any element satisfies `block`.
+  ///
+  /// Uses `^` (non-local return) for early exit — compiles to throw/catch on BEAM.
   ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2, 3) anySatisfy: [:x | x > 2]  // => true
   /// ```
-  anySatisfy: block: Block -> Boolean => @primitive "anySatisfy:"
+  anySatisfy: block: Block -> Boolean =>
+    self do: [:each | (block value: each) ifTrue: [^true]].
+    false
 
   /// Test if all elements satisfy `block`.
+  ///
+  /// Uses `^` (non-local return) for early exit — compiles to throw/catch on BEAM.
   ///
   /// ## Examples
   /// ```beamtalk
   /// #(2, 4, 6) allSatisfy: [:x | x isEven]  // => true
   /// ```
-  allSatisfy: block: Block -> Boolean => @primitive "allSatisfy:"
+  allSatisfy: block: Block -> Boolean =>
+    self do: [:each | (block value: each) ifFalse: [^false]].
+    true
 
   /// Return a string representation.
   asString -> String => self printString
