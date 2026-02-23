@@ -180,17 +180,16 @@ impl CoreErlangGenerator {
 
         // Process all but the last expression
         for (i, expr) in expressions[..n - 1].iter().enumerate() {
-            let result_var = format!("_R{}", i + 1);
-            // BT-790: Reset repl_loop_mutated before each expression so a loop mutation
-            // from one expression doesn't bleed into subsequent expressions.
+            // BT-790: Reset mutation flag before each intermediate expression so a loop in
+            // intermediate position doesn't bleed its flag into subsequent expressions.
             self.repl_loop_mutated = false;
+            let result_var = format!("_R{}", i + 1);
             let part = self.generate_repl_intermediate_expr(expr, &result_var)?;
             body_parts.push(part);
         }
 
-        // Process the last expression
-        // BT-790: Reset repl_loop_mutated so a loop in intermediate position doesn't
-        // cause the final expression to incorrectly apply element/2 unwrapping.
+        // BT-790: Reset mutation flag before the last expression so a loop in an intermediate
+        // position doesn't incorrectly trigger element/2 unwrapping on the final return tuple.
         self.repl_loop_mutated = false;
         let last_expr = &expressions[n - 1];
         let (last_val_doc, return_tuple) = self.generate_repl_last_expr(last_expr)?;
@@ -262,6 +261,8 @@ impl CoreErlangGenerator {
         // Extract the updated StateAcc and thread it to subsequent expressions.
         let expr_doc = self.expression_doc(expr)?;
         if self.repl_loop_mutated {
+            // BT-790: Loop with mutations returns {Result, StateAcc} — extract StateAcc and
+            // thread it forward so subsequent expressions see the updated bindings.
             let new_state = self.next_state_var();
             Ok(docvec![
                 "    let ",

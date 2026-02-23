@@ -885,6 +885,117 @@ fn test_generate_repl_module_with_while_true_mutation() {
 }
 
 #[test]
+fn test_repl_multi_stmt_times_repeat_intermediate() {
+    // BT-790: `x := 1. 5 timesRepeat: [x := x + 1]. x` should return 6.
+    // The loop is in intermediate (non-last) position — its StateAcc must be threaded
+    // to the final `x` lookup, not discarded.
+    let src = "x := 1. 5 timesRepeat: [x := x + 1]. x";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_repl_expressions(&module.expressions, "repl_multi_times_test")
+        .expect("codegen should work");
+
+    eprintln!("Generated code for `x := 1. 5 timesRepeat: [x := x + 1]. x`:");
+    eprintln!("{code}");
+
+    // The loop StateAcc must be extracted and threaded: element(2, _R2) → StateN
+    assert!(
+        code.contains("'element'(2, _R2)"),
+        "Loop StateAcc must be extracted via element(2, _R2). Got:\n{code}"
+    );
+
+    // The final `x` lookup must use the updated state (StateN), not a stale State1
+    // StateN is whatever state comes after threading the loop result
+    assert!(
+        !code.contains("maps':'get'('x', State1)"),
+        "Final x lookup must not use stale State1. Got:\n{code}"
+    );
+
+    // The return tuple must NOT use element/2 unwrapping for the last (plain identifier) expr
+    assert!(
+        !code.contains("'element'(1, Result)"),
+        "Final expr is a plain identifier — must not apply element/2 to Result. Got:\n{code}"
+    );
+
+    // The return tuple should be plain {Result, StateN}
+    assert!(
+        code.contains("{Result, State"),
+        "Return tuple should be {{Result, StateN}}. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_repl_multi_stmt_while_true_intermediate() {
+    // BT-790: `x := 0. [x < 3] whileTrue: [x := x + 1]. x` — whileTrue: in intermediate
+    // position must thread its StateAcc so the final `x` lookup sees the updated value.
+    let src = "x := 0. [x < 3] whileTrue: [x := x + 1]. x";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_repl_expressions(&module.expressions, "repl_multi_while_test")
+        .expect("codegen should work");
+
+    eprintln!("Generated code for `x := 0. [x < 3] whileTrue: [x := x + 1]. x`:");
+    eprintln!("{code}");
+
+    // The loop StateAcc must be extracted from the intermediate result
+    assert!(
+        code.contains("'element'(2, _R2)"),
+        "Loop StateAcc must be extracted via element(2, _R2). Got:\n{code}"
+    );
+
+    // The final x lookup must NOT read from State1 (which has x=0 from init only)
+    assert!(
+        !code.contains("maps':'get'('x', State1)"),
+        "Final x lookup must not use stale State1. Got:\n{code}"
+    );
+
+    // Return tuple must be plain {Result, StateN}, not element/2 wrapped
+    assert!(
+        !code.contains("'element'(1, Result)"),
+        "Final expr is a plain identifier — must not apply element/2 to Result. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_repl_multi_stmt_assignment_then_loop_then_plain() {
+    // BT-790: Regression — multiple intermediate expressions including assignment + loop.
+    // `count := 0. 3 timesRepeat: [count := count + 1]. count` generates state chain:
+    //   State → State1 (from assignment) → State2 (from loop StateAcc) → {Result, State2}
+    let src = "count := 0. 3 timesRepeat: [count := count + 1]. count";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_repl_expressions(&module.expressions, "repl_multi_chain_test")
+        .expect("codegen should work");
+
+    eprintln!("Generated code for `count := 0. 3 timesRepeat: [count := count + 1]. count`:");
+    eprintln!("{code}");
+
+    // Assignment creates State1
+    assert!(
+        code.contains("State1 = call 'maps':'put'('count'"),
+        "Assignment should create State1. Got:\n{code}"
+    );
+
+    // Loop in intermediate position: StateAcc extracted as State2
+    assert!(
+        code.contains("'element'(2, _R2)"),
+        "Loop StateAcc must be extracted via element(2, _R2). Got:\n{code}"
+    );
+
+    // Final count lookup must not use stale State1
+    assert!(
+        !code.contains("maps':'get'('count', State1)"),
+        "Final count lookup must not use stale State1. Got:\n{code}"
+    );
+
+    // No element/2 unwrapping on the final return
+    assert!(
+        !code.contains("'element'(1, Result)"),
+        "Final plain identifier expr must not use element/2. Got:\n{code}"
+    );
+}
+
+#[test]
 fn test_generate_repl_module_with_arithmetic() {
     // BT-57: Verify complex expressions with variable references work
     // Expression: x + 1
