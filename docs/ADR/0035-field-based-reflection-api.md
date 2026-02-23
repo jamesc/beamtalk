@@ -51,10 +51,12 @@ Rename the reflection API from `instVar` to `field` at both instance and class l
 ```beamtalk
 c := Counter spawn
 
-c fieldNames              // => #(#value)
-c fieldAt: #value         // => 0
-c fieldAt: #value put: 42 // => 42
+c fieldNames await              // => #(#value)
+c fieldAt: #value await         // => 0
+c fieldAt: #value put: 42 await // => 42
 ```
+
+Note: sends to actors are async and return Futures. `await` resolves to the actual value. The return type annotations (e.g., `-> List`) describe the resolved value, not the Future.
 
 ### Class-side introspection (Behaviour)
 
@@ -64,11 +66,13 @@ c fieldAt: #value put: 42 // => 42
 | `allInstanceVariableNames` | `allFieldNames` |
 
 ```beamtalk
-Counter fieldNames        // => #(#value) — declared fields for this class
-Counter allFieldNames     // => #(#value) — includes inherited fields
+Counter fieldNames await        // => #(#value) — declared fields for this class
+Counter allFieldNames await     // => #(#value) — includes inherited fields
 ```
 
 The class-side `fieldNames` and instance-side `fieldNames` answer different questions — class-side returns the *declared* field names (the schema), instance-side returns the *actual* field names on a live object. Same selector, different receiver — idiomatic Smalltalk polymorphism.
+
+**Tradeoff acknowledged:** Generic tooling iterating over a mixed collection of class objects and instances will get different semantics from the same selector. Tools must know whether they expect class-side or instance-side behavior. This is inherent to Smalltalk's polymorphic design and accepted as the standard tradeoff — alternative selectors like `declaredFieldNames` would break the polymorphic consistency.
 
 Internal primitives are renamed accordingly:
 - `classInstVarNames` → `classFieldNames`
@@ -120,37 +124,15 @@ self fieldNames           // => #(#x, #y) — flat map, all fields visible
 
 This is a direct benefit of the map-backed design: field names are stable identifiers, not fragile positions. The "field" terminology reinforces this — fields are named, not numbered.
 
-### Access control: fieldAt:put: breaks encapsulation
+### Access control: fieldAt:put: encapsulation (deferred)
 
 Beamtalk principle 6 states: *"Encapsulation enforced: only way to interact with an object is via messages."* While `fieldAt:put:` is technically a message, it allows any sender to mutate any field on any actor — bypassing the public method interface that the class author designed.
 
-In Smalltalk-80 and Pharo, `instVarAt:put:` has the same problem. Pharo's documentation [explicitly warns](http://pharo.gforge.inria.fr/PBE1/PBE1ch15.html): *"using them to develop conventional applications is a bad idea: these reflective methods break the encapsulation boundary."* The methods exist for tools — inspectors, debuggers, serializers — not application code.
+In Smalltalk-80 and Pharo, `instVarAt:put:` has the same problem. Pharo's documentation [explicitly warns](http://pharo.gforge.inria.fr/PBE1/PBE1ch15.html): *"using them to develop conventional applications is a bad idea: these reflective methods break the encapsulation boundary."*
 
-**Decision:** `fieldAt:put:` (write) is restricted to **self-sends only**. `fieldAt:` (read) and `fieldNames` (enumerate) remain unrestricted.
+**This ADR does NOT add access control to `fieldAt:put:`.** Restricting `fieldAt:put:` to self-sends requires resolving how the runtime distinguishes self-sends from external sends in a gen_server-backed actor — a non-trivial architectural question with implications for `perform:withArguments:`, Erlang interop, and compile-time vs. runtime enforcement. This is deferred to a separate ADR.
 
-| Method | External sends | Self-sends |
-|--------|---------------|------------|
-| `fieldNames` | Allowed | Allowed |
-| `fieldAt:` | Allowed | Allowed |
-| `fieldAt:put:` | Raises `#encapsulation_violation` | Allowed |
-
-Rationale:
-- **Reading** is safe — it doesn't change state, and BEAM tools (Observer, `sys:get_state/1`) already expose actor state for debugging
-- **Enumerating** is safe — knowing field names is metadata, used for display/inspection
-- **Writing** from outside bypasses invariants the class may enforce — this is where encapsulation matters
-
-Tools that need external write access (debuggers, inspectors, live patching) can use a future mirror-based API (see Newspeak's approach) or direct `sys:replace_state/2` at the Erlang level. This is a deliberate escalation — you must step outside the Beamtalk message protocol to break encapsulation.
-
-```beamtalk
-// Self-send — allowed (inside a method body)
-self fieldAt: #value put: 42         // => 42
-
-// External send — read allowed
-c fieldAt: #value                    // => 42
-
-// External send — write blocked
-c fieldAt: #value put: 99            // => raises #encapsulation_violation
-```
+For now, `fieldAt:put:` remains unrestricted (matching current `instVarAt:put:` behavior). The rename stands on its own merits without the access control change.
 
 ### Error on value types (unchanged behavior)
 
@@ -166,13 +148,16 @@ c fieldAt: #value put: 99            // => raises #encapsulation_violation
 => a Counter
 > c fieldNames await
 => #(#value)
+> (c fieldNames await) class
+=> List
 > c fieldAt: #value await
 => 0
-> c fieldAt: #value put: 42 await
-=> Error: #encapsulation_violation — fieldAt:put: can only be sent to self
-> // Inside a method, self-sends work:
 > c increment await
 => 1
+> c fieldAt: #value await
+=> 1
+> c fieldAt: #value put: 42 await
+=> 42
 ```
 
 ## Prior Art
@@ -264,7 +249,7 @@ Honest about the gen_server implementation but leaky as an abstraction. "State" 
 
 ### Neutral
 - Internal runtime function names (`field_names`, `read_field`, etc.) remain as-is
-- `fieldAt:put:` self-send restriction formalizes what Pharo already recommends informally
+- `fieldAt:put:` access control deferred to a separate ADR — encapsulation enforcement requires resolving self-send detection in gen_server actors
 
 ## Implementation
 
@@ -284,13 +269,7 @@ Honest about the gen_server implementation but leaky as an abstraction. "State" 
 6. **Stdlib**: Update all `classVar:` declarations to `classState:` in `SystemDictionary.bt`, `WorkspaceEnvironment.bt`, `TranscriptStream.bt`
 7. **Tests**: Update test fixtures using `classVar:` (`class_var_point.bt`, `class_var_counter.bt`, `instance_access_counter.bt`)
 
-### Phase 3: Add fieldAt:put: access control
-1. **Codegen** (`intrinsics.rs`): For `fieldAt:put:` intrinsic, generate a self-send check — verify the receiver is `self` at compile time, or emit a runtime check
-2. **Runtime** (`beamtalk_object_ops.erl`): Add guard on `fieldAt:put:` dispatch to verify the call originates from the actor's own process (compare caller pid to `self()`)
-3. **Runtime** (`beamtalk_error.erl`): Add `#encapsulation_violation` error kind
-4. **Tests**: Add test cases for external `fieldAt:put:` being rejected
-
-### Phase 4: Update tests and docs
+### Phase 3: Update tests and docs
 1. **Stdlib tests**: Update `reflection_basic_test.bt` and any other tests using the old API
 2. **E2E tests**: Update any REPL test cases
 3. **Erlang unit tests**: Update `beamtalk_object_ops_tests.erl`, `beamtalk_primitive_tests.erl`
@@ -301,15 +280,13 @@ Honest about the gen_server implementation but leaky as an abstraction. "State" 
 - **Parser**: `classVar:` → `classState:` keyword recognition
 - **Stdlib**: `Object.bt`, `Behaviour.bt`, `SystemDictionary.bt`, `WorkspaceEnvironment.bt`, `TranscriptStream.bt`
 - **Codegen**: `intrinsics.rs`, `methods.rs`
-- **Runtime**: `beamtalk_object_ops.erl`, `beamtalk_primitive.erl`, `beamtalk_actor.erl`, `beamtalk_object_class.erl`, `beamtalk_class_instantiation.erl`, `beamtalk_error.erl`
+- **Runtime**: `beamtalk_object_ops.erl`, `beamtalk_primitive.erl`, `beamtalk_actor.erl`, `beamtalk_object_class.erl`, `beamtalk_class_instantiation.erl`
 - **Tests**: `reflection_basic_test.bt`, `beamtalk_object_ops_tests.erl`, `beamtalk_primitive_tests.erl`, `class_var_point.bt`, `class_var_counter.bt`, `instance_access_counter.bt`
 - **Docs**: `beamtalk-language-features.md`, `beamtalk-syntax-rationale.md`
 
 ## Migration Path
 
-This is a breaking change to the reflection API. Since Beamtalk is pre-1.0, no deprecation period is required. The old names will stop working immediately.
-
-Code using `instVarAt:put:` from outside the object will need to be refactored to use a proper method on the target class, or use Erlang-level `sys:replace_state/2` for debugging scenarios.
+This is a breaking change to the reflection API and declaration syntax. Since Beamtalk is pre-1.0, no deprecation period is required. The old names will stop working immediately.
 
 All `classVar:` declarations must be changed to `classState:`. This is a simple find-and-replace across `.bt` files.
 
