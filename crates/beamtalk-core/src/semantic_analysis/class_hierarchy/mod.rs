@@ -667,10 +667,20 @@ impl ClassHierarchy {
                 diagnostics.push(diag);
             }
 
-            // Check sealed method override enforcement
+            // Check sealed method override enforcement.
             if let Some(ref superclass) = class.superclass {
                 for method in &class.methods {
                     let selector = method.selector.name();
+                    // BT-807: Abstract stdlib classes (e.g. Behaviour) provide
+                    // class-side dispatch methods (e.g. `fieldNames`) whose
+                    // selectors coincide with sealed instance-side methods on
+                    // Object.  These are dispatched through a separate runtime
+                    // namespace (class object vs. instance receiver) so the
+                    // sealed constraint from the instance side does not apply.
+                    // Non-abstract and non-stdlib classes are always checked.
+                    if stdlib_mode && class.is_abstract {
+                        continue;
+                    }
                     if let Some((sealed_class, _)) =
                         self.find_sealed_method_in_ancestors(superclass.name.as_str(), &selector)
                     {

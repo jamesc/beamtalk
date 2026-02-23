@@ -2691,10 +2691,10 @@ fn test_class_registration_generation() {
         "Should include getValue method with arity and sealed flag. Got:\n{code}"
     );
 
-    // Check instance_variables list
+    // Check fields list
     assert!(
-        code.contains("'instance_variables' => ['value']"),
-        "Should include instance_variables list. Got:\n{code}"
+        code.contains("'fields' => ['value']"),
+        "Should include fields list. Got:\n{code}"
     );
 
     // Check class_methods map
@@ -2815,8 +2815,8 @@ fn test_multiple_classes_registration() {
         "Should include Counter metadata. Got:\n{code}"
     );
     assert!(
-        code.contains("'instance_variables' => ['value']"),
-        "Should include Counter instance variables. Got:\n{code}"
+        code.contains("'fields' => ['value']"),
+        "Should include Counter fields. Got:\n{code}"
     );
 
     // Should register second class (Logger)
@@ -2829,8 +2829,8 @@ fn test_multiple_classes_registration() {
         "Should include Logger metadata. Got:\n{code}"
     );
     assert!(
-        code.contains("'instance_variables' => ['messages']"),
-        "Should include Logger instance variables. Got:\n{code}"
+        code.contains("'fields' => ['messages']"),
+        "Should include Logger fields. Got:\n{code}"
     );
 
     // Should use let-binding chain to sequence registrations
