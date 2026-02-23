@@ -24,6 +24,8 @@ These names are inherited from Smalltalk-80, but Beamtalk's underlying implement
 
 The name `instVarAt:` is actively misleading — it implies positional/indexed access (Pharo's `instVarAt:` takes an integer and uses VM primitive 73), but Beamtalk performs keyed map lookup. In Pharo, adding an instance variable to a class triggers a full recompilation cascade: the class is rebuilt, all subclasses are rebuilt, and every existing instance is migrated to a new layout. None of this applies to Beamtalk's map-backed state.
 
+Positional access also creates a subtle inheritance hazard in Smalltalk: `instVarAt: 1` can refer to *different* variables in a class vs. its subclass, because adding subclass variables shifts the array layout. Beamtalk's map-keyed access has no such ambiguity — `#x` is `#x` at every level of the hierarchy.
+
 Additionally, the internal runtime already uses "field" terminology consistently:
 
 - `beamtalk_reflection:field_names/1`
@@ -71,6 +73,37 @@ The class-side `fieldNames` and instance-side `fieldNames` answer different ques
 Internal primitives are renamed accordingly:
 - `classInstVarNames` → `classFieldNames`
 - `classAllInstVarNames` → `classAllFieldNames`
+
+### Class variable reflection
+
+For consistency, class variable reflection also adopts "field" terminology:
+
+| Current | New |
+|---------|-----|
+| `classVarNames` (if/when added) | `classFieldNames` |
+
+Note: the *declaration* syntax (`state:` and `classVar:`) is **not** changed. Declaration keywords describe intent ("this is state", "this is a class variable"), while the reflection API describes mechanism ("give me the fields"). Different purposes, different names.
+
+### Subclass field access — no positional ambiguity
+
+In Smalltalk-80, `instVarAt:` takes an integer index into a fixed-size array. This creates a subtle problem with inheritance: the *position* of a variable can differ between a class and its subclass because subclass variables shift the array layout. `instVarAt: 1` on a parent might refer to `x`, but on a child it might refer to `childField` if the child's variables are prepended.
+
+Beamtalk has no such ambiguity. Fields are keyed by atom in a flat map — `#x` is `#x` regardless of where in the hierarchy it was declared:
+
+```beamtalk
+Actor subclass: Base
+  state: x = 0
+
+Base subclass: Child
+  state: y = 0
+
+// Inside a Child method:
+self fieldAt: #x         // => 0 — accesses parent's field, no ambiguity
+self fieldAt: #x put: 42 // => 42 — self-send, allowed
+self fieldNames           // => #(#x, #y) — flat map, all fields visible
+```
+
+This is a direct benefit of the map-backed design: field names are stable identifiers, not fragile positions. The "field" terminology reinforces this — fields are named, not numbered.
 
 ### Access control: fieldAt:put: breaks encapsulation
 
