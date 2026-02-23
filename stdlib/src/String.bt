@@ -396,11 +396,14 @@ sealed Collection subclass: String
 
   /// Select grapheme clusters for which `block` returns true.
   ///
+  /// Returns a String of the matching grapheme clusters (filtered graphemes
+  /// remain valid graphemes).
+  ///
   /// ## Examples
   /// ```beamtalk
-  /// "a1b2" select: [:c | c isAlpha]    // => #("a", "b")
+  /// "a1b2" select: [:c | c isAlpha]    // => "ab"
   /// ```
-  select: block: Block -> List => @primitive "select:"
+  select: block: Block -> String => @primitive "select:"
 
   /// Return a lazy Stream over the characters (grapheme clusters).
   ///

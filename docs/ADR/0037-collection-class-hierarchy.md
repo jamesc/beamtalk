@@ -9,7 +9,7 @@ When BT-443 was filed, Beamtalk's collection types (`List`, `Dictionary`, `Set`,
 
 Smalltalk-80 solves this with a deep hierarchy:
 
-```
+```text
 Collection (abstract)
   ├── SequenceableCollection (abstract — ordered, indexed)
   │     ├── ArrayedCollection
@@ -45,7 +45,7 @@ This ADR decides how much of that hierarchy Beamtalk should adopt, given the con
 
 We adopt a **shallow single-layer hierarchy**: one abstract class (`Collection`) directly above five sealed concrete types. No intermediate `SequenceableCollection` or other abstract subclasses for v0.1. String **is** a Collection.
 
-```
+```text
 Object
   └── Collection (abstract)
         ├── List     (sealed — Erlang linked list)
@@ -215,7 +215,7 @@ The implementation requires a new `Array` type (see below) before `Array>>withAl
 | Change | Resolution |
 |--------|------------|
 | `do:` | Renamed from `each:` → `do:` to match Collection protocol |
-| `select:` return type | Changed from `-> String` to `-> List`; `List>>join` / `join:` added for re-joining |
+| `select:` return type | Remains `-> String` — the Erlang primitive returns a binary; filtered graphemes are always valid graphemes. `List>>join` / `join:` added for callers who do need a List. |
 | `includes:` | Renamed to `includesSubstring:` for substring containment; Collection default `includes:` handles grapheme membership |
 | `at:` return type | Changed from `-> Character` to `-> String` (grapheme-cluster, matching BEAM runtime) |
 
@@ -232,7 +232,7 @@ The implementation requires a new `Array` type (see below) before `Array>>withAl
 #(1, 2, 3) isEmpty                         // => false
 #(1, 2, 3) includes: 2                     // => true
 #(1, 2, 3) collect: [:x | x * 2]          // => #(2, 4, 6)
-#{#a => 1, #b => 2} collect: [:v | v * 2] // => #(2, 4)
+#{#a => 1, #b => 2} collect: [:v | v * 2] // => #{#a => 2, #b => 4}  (after species/BT-822)
 "hi" collect: [:g | g uppercase]           // => #("H", "I")
 
 // User-defined Collection subclass inherits defaults
@@ -405,7 +405,7 @@ Pharo's `species` method returns the appropriate result class so `aSet collect: 
 - Species pattern is planned (BT-822) but not yet implemented — until then, `collect:`, `select:`, `reject:` return `List` on all types
 - No `SequenceableCollection` — `at:`, `first`, `last` are not part of the shared abstract protocol; cannot be written generically over ordered collections
 - `inject:into:` on abstract `Collection` remains `@primitive` (compiler limitation for local-variable mutation in abstract methods) — user-defined subclasses must implement it if they need custom accumulation
-- String's former `includes:` (substring containment) renamed to `includesSubstring:` — existing code must migrate to the new name
+- String's `includes:` (substring containment) renamed to `includesSubstring:` — existing code must migrate; `each:` renamed to `do:`; `at:` return type changed from `Character` to `String`
 
 ### Neutral
 - Five sealed concrete types: `List`, `Set`, `Dictionary`, `Tuple`, `String` — no new concrete types needed for v0.1
@@ -436,7 +436,7 @@ Future design work deferred by this ADR:
 | Topic | When to revisit | Prerequisite |
 |-------|----------------|--------------|
 | `String>>do:` primitive | ✅ Done | Renamed `each:` → `do:` |
-| `String>>select:` return type | ✅ Done | Changed from `String` to `List`; `List>>join` / `join:` added for re-joining |
+| `String>>select:` return type | ✅ Done | Remains `-> String`; `List>>join` / `join:` added for callers who need a List |
 | `String>>includes:` override | ✅ Done | Renamed to `includesSubstring:`; Collection default handles grapheme membership |
 | Species pattern + `Array` type | Planned — see BT-822 | Requires `Array` implementation for `Array>>withAll:` |
 | `SequenceableCollection` | After `Array` is added | `Array` (O(log n) `at:`) + `Tuple` (O(1) `at:`) + `String` (O(n) `at:`) gives three meaningful subtypes; `at:` performance contracts still diverge so careful design needed |

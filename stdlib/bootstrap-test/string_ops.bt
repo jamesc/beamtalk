@@ -1,3 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
 // String operations E2E tests (BT-361)
 
 // at: - 1-based grapheme access
