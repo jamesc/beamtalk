@@ -1231,9 +1231,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             methods: vec![
                 MethodInfo { selector: "setUp".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestCase".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![] },
                 MethodInfo { selector: "tearDown".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestCase".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![] },
-                MethodInfo { selector: "assert:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "TestCase".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![Some("Object".into())] },
+                MethodInfo { selector: "assert:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "TestCase".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![Some("Boolean".into())] },
+                MethodInfo { selector: "deny:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "TestCase".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![Some("Boolean".into())] },
                 MethodInfo { selector: "assert:equals:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "TestCase".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![None, None] },
-                MethodInfo { selector: "deny:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "TestCase".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![Some("Object".into())] },
                 MethodInfo { selector: "should:raise:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "TestCase".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![Some("Block".into()), Some("Object".into())] },
                 MethodInfo { selector: "fail:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "TestCase".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![Some("String".into())] },
             ],

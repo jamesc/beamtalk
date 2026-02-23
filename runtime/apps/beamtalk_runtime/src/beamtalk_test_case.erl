@@ -16,9 +16,6 @@
 -include_lib("kernel/include/logger.hrl").
 
 -export([
-    assert/1,
-    assert_equals/2,
-    deny/1,
     should_raise/2,
     fail/1,
     run_all/1,
@@ -33,77 +30,6 @@
     structure_results/3,
     resolve_module/1
 ]).
-
-%% @doc Assert that a condition is true.
-%%
-%% Raises assertion_failed error if condition is false.
-%% Condition must be a boolean (true or false atom).
-%%
-%% Example:
-%%   assert(true)   % => passes
-%%   assert(false)  % => fails with assertion_failed
--spec assert(boolean()) -> nil.
-assert(true) ->
-    nil;
-assert(false) ->
-    Error0 = beamtalk_error:new(assertion_failed, 'TestCase'),
-    Error1 = beamtalk_error:with_selector(Error0, 'assert:'),
-    Error2 = beamtalk_error:with_message(
-        Error1, <<"Assertion failed: expected true but got false">>
-    ),
-    Error3 = beamtalk_error:with_details(Error2, #{expected => true, actual => false}),
-    beamtalk_error:raise(Error3);
-assert(Other) ->
-    Error0 = beamtalk_error:new(type_error, 'TestCase'),
-    Error1 = beamtalk_error:with_selector(Error0, 'assert:'),
-    Message = iolist_to_binary(io_lib:format("Expected boolean, got: ~p", [Other])),
-    Error2 = beamtalk_error:with_message(Error1, Message),
-    beamtalk_error:raise(Error2).
-
-%% @doc Assert that two values are equal.
-%%
-%% Uses Erlang's =:= operator for comparison (exact equality, per ADR 0002).
-%% Raises assertion_failed error if values are not equal.
-%%
-%% Example:
-%%   assert_equals(3, 3)   % => passes
-%%   assert_equals(3, 4)   % => fails with assertion_failed
--spec assert_equals(term(), term()) -> nil.
-assert_equals(Expected, Actual) when Expected =:= Actual ->
-    nil;
-assert_equals(Expected, Actual) ->
-    Error0 = beamtalk_error:new(assertion_failed, 'TestCase'),
-    Error1 = beamtalk_error:with_selector(Error0, 'assert:equals:'),
-    Message = format_comparison_error(Expected, Actual),
-    Error2 = beamtalk_error:with_message(Error1, Message),
-    Error3 = beamtalk_error:with_details(Error2, #{expected => Expected, actual => Actual}),
-    beamtalk_error:raise(Error3).
-
-%% @doc Assert that a condition is false.
-%%
-%% Raises assertion_failed error if condition is true.
-%% Condition must be a boolean (true or false atom).
-%%
-%% Example:
-%%   deny(false)  % => passes
-%%   deny(true)   % => fails with assertion_failed
--spec deny(boolean()) -> nil.
-deny(false) ->
-    nil;
-deny(true) ->
-    Error0 = beamtalk_error:new(assertion_failed, 'TestCase'),
-    Error1 = beamtalk_error:with_selector(Error0, 'deny:'),
-    Error2 = beamtalk_error:with_message(
-        Error1, <<"Assertion failed: expected false but got true">>
-    ),
-    Error3 = beamtalk_error:with_details(Error2, #{expected => false, actual => true}),
-    beamtalk_error:raise(Error3);
-deny(Other) ->
-    Error0 = beamtalk_error:new(type_error, 'TestCase'),
-    Error1 = beamtalk_error:with_selector(Error0, 'deny:'),
-    Message = iolist_to_binary(io_lib:format("Expected boolean, got: ~p", [Other])),
-    Error2 = beamtalk_error:with_message(Error1, Message),
-    beamtalk_error:raise(Error2).
 
 %% @doc Assert that a block raises an error of the specified kind.
 %%
@@ -334,34 +260,6 @@ find_test_classes() ->
     beamtalk_class_registry:all_subclasses('TestCase').
 
 %%% Internal helpers
-
-%% @doc Format a comparison error message.
--spec format_comparison_error(term(), term()) -> binary().
-format_comparison_error(Expected, Actual) ->
-    ExpectedStr = format_value(Expected),
-    ActualStr = format_value(Actual),
-    iolist_to_binary(io_lib:format("Expected ~s, got ~s", [ExpectedStr, ActualStr])).
-
-%% @doc Format a value for display in error messages.
--spec format_value(term()) -> binary().
-format_value(Value) when is_binary(Value) ->
-    % String - show as 'string'
-    <<"'", Value/binary, "'">>;
-format_value(Value) when is_atom(Value) ->
-    % Atom - show as #symbol
-    atom_to_binary(Value, utf8);
-format_value(Value) when is_list(Value) ->
-    % List - show as [...] (truncated if long)
-    case length(Value) of
-        Len when Len =< 5 ->
-            iolist_to_binary(io_lib:format("~p", [Value]));
-        Len ->
-            Truncated = lists:sublist(Value, 5),
-            iolist_to_binary(io_lib:format("~p... (~p items)", [Truncated, Len]))
-    end;
-format_value(Value) ->
-    % Other types - use Erlang's ~p formatter
-    iolist_to_binary(io_lib:format("~p", [Value])).
 
 %% @doc Extract the error kind from an exception.
 %%

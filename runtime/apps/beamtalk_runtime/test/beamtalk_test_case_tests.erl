@@ -11,58 +11,8 @@
 -include("beamtalk.hrl").
 
 %%% ============================================================================
-%%% Assertion Tests (direct EUnit coverage of primitives)
+%%% fail: Tests (direct EUnit coverage — fail: remains @primitive)
 %%% ============================================================================
-
-assert_true_test() ->
-    ?assertEqual(nil, beamtalk_test_case:assert(true)).
-
-assert_false_raises_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = assertion_failed, class = 'TestCase'}
-        },
-        beamtalk_test_case:assert(false)
-    ).
-
-assert_non_boolean_raises_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'TestCase'}},
-        beamtalk_test_case:assert(42)
-    ).
-
-deny_false_test() ->
-    ?assertEqual(nil, beamtalk_test_case:deny(false)).
-
-deny_true_raises_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = assertion_failed, class = 'TestCase'}
-        },
-        beamtalk_test_case:deny(true)
-    ).
-
-deny_non_boolean_raises_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'TestCase'}},
-        beamtalk_test_case:deny(<<"not a bool">>)
-    ).
-
-assert_equals_matching_test() ->
-    ?assertEqual(nil, beamtalk_test_case:assert_equals(42, 42)),
-    ?assertEqual(nil, beamtalk_test_case:assert_equals(<<"hello">>, <<"hello">>)),
-    ?assertEqual(nil, beamtalk_test_case:assert_equals(true, true)).
-
-assert_equals_mismatch_raises_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = assertion_failed, class = 'TestCase'}
-        },
-        beamtalk_test_case:assert_equals(1, 2)
-    ).
 
 fail_with_binary_test() ->
     ?assertError(
