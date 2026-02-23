@@ -3125,7 +3125,9 @@ fn test_is_actor_class_direct_actor_subclass() {
         span: Span::new(0, 0),
         leading_comments: vec![],
     };
-    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
     assert!(CoreErlangGenerator::is_actor_class(&module, &hierarchy));
 }
 
@@ -3151,7 +3153,9 @@ fn test_is_actor_class_object_subclass_is_value_type() {
         span: Span::new(0, 0),
         leading_comments: vec![],
     };
-    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
     assert!(!CoreErlangGenerator::is_actor_class(&module, &hierarchy));
 }
 
@@ -3193,7 +3197,9 @@ fn test_is_actor_class_multi_level_inheritance() {
         span: Span::new(0, 0),
         leading_comments: vec![],
     };
-    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
 
     // Test with LoggingCounter as the first class
     let module_lc = Module {
@@ -3210,7 +3216,9 @@ fn test_is_actor_class_multi_level_inheritance() {
 #[test]
 fn test_is_actor_class_no_classes_defaults_to_actor() {
     let module = Module::new(Vec::new(), Span::new(0, 0));
-    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
     assert!(CoreErlangGenerator::is_actor_class(&module, &hierarchy));
 }
 
@@ -3238,7 +3246,9 @@ fn test_is_actor_class_unknown_superclass_defaults_to_actor() {
         span: Span::new(0, 0),
         leading_comments: vec![],
     };
-    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
     assert!(CoreErlangGenerator::is_actor_class(&module, &hierarchy));
 }
 
@@ -3265,7 +3275,9 @@ fn test_is_actor_class_collection_subclass_is_value_type() {
         span: Span::new(0, 0),
         leading_comments: vec![],
     };
-    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
     assert!(
         !CoreErlangGenerator::is_actor_class(&module, &hierarchy),
         "Collection subclass should be value type (chain reaches Object)"
@@ -3296,7 +3308,9 @@ fn test_is_actor_class_integer_subclass_is_value_type() {
         span: Span::new(0, 0),
         leading_comments: vec![],
     };
-    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
     assert!(
         !CoreErlangGenerator::is_actor_class(&module, &hierarchy),
         "Integer subclass should be value type (chain reaches Object)"
@@ -3326,7 +3340,9 @@ fn test_is_actor_class_root_class_is_value_type() {
         span: Span::new(0, 0),
         leading_comments: vec![],
     };
-    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
     assert!(
         !CoreErlangGenerator::is_actor_class(&module, &hierarchy),
         "Root class (nil superclass) should be value type"

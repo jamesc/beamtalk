@@ -185,7 +185,7 @@ proptest! {
     #[test]
     fn type_inference_never_panics(input in "\\PC{0,500}") {
         let (module, _) = parse_source(&input);
-        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         let _type_map = infer_types(&module, &hierarchy);
     }
 
@@ -193,7 +193,7 @@ proptest! {
     #[test]
     fn type_inference_never_panics_near_valid(input in near_valid_beamtalk()) {
         let (module, _) = parse_source(&input);
-        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         let _type_map = infer_types(&module, &hierarchy);
     }
 }

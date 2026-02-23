@@ -387,7 +387,7 @@ mod tests {
     fn sig_help_at(source: &str, position: Position) -> Option<SignatureHelp> {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0;
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         compute_signature_help(&module, source, position, &hierarchy)
     }
 
@@ -410,7 +410,7 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (module, diags) = parse(tokens);
         assert!(diags.is_empty(), "Parse errors: {diags:?}");
-        let hierarchy = ClassHierarchy::build(&module).0;
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         // Position in `self add: 1 to: 2` — cursor on `to:` (line 2, col 23)
         // Line 2: "  run => self add: 1 to: 2"
@@ -437,7 +437,7 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (module, diags) = parse(tokens);
         assert!(diags.is_empty(), "Parse errors: {diags:?}");
-        let hierarchy = ClassHierarchy::build(&module).0;
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         // Cursor right after `add:` — should be param 0
         // Line 2: "  run => self add: 1 to: 2"

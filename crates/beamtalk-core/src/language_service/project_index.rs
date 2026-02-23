@@ -63,13 +63,20 @@ impl ProjectIndex {
     ///
     /// Each `(path, source)` pair is parsed and its class definitions are
     /// merged into the project-wide hierarchy.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `ClassHierarchy::build` returns `Err`, which cannot happen
+    /// since hierarchy construction is infallible.
     #[must_use]
     pub fn with_stdlib(stdlib_sources: &[(Utf8PathBuf, String)]) -> Self {
         let mut index = Self::new();
         for (path, source) in stdlib_sources {
             let tokens = lex_with_eof(source);
             let (module, _diagnostics) = parse(tokens);
-            let file_hierarchy = ClassHierarchy::build(&module).0;
+            let file_hierarchy = ClassHierarchy::build(&module)
+                .0
+                .expect("ClassHierarchy::build is infallible");
 
             // Track which classes came from this stdlib file
             let class_names: Vec<EcoString> = file_hierarchy
@@ -218,7 +225,7 @@ mod tests {
 
         let tokens = lex_with_eof("Object subclass: Foo\n  bar => 1");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0;
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(file.clone(), &hierarchy);
 
         assert!(index.hierarchy().has_class("Foo"));
@@ -236,14 +243,14 @@ mod tests {
         // First version defines Foo
         let tokens = lex_with_eof("Object subclass: Foo\n  bar => 1");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0;
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(file.clone(), &hierarchy);
         assert!(index.hierarchy().has_class("Foo"));
 
         // Second version defines Bar instead
         let tokens = lex_with_eof("Object subclass: Bar\n  baz => 2");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0;
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(file.clone(), &hierarchy);
         assert!(index.hierarchy().has_class("Bar"));
         assert!(!index.hierarchy().has_class("Foo"));
@@ -256,7 +263,7 @@ mod tests {
 
         let tokens = lex_with_eof("Object subclass: Foo\n  bar => 1");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0;
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(file.clone(), &hierarchy);
         assert!(index.hierarchy().has_class("Foo"));
 
@@ -289,12 +296,12 @@ mod tests {
 
         let tokens_a = lex_with_eof("Object subclass: ClassA\n  methodA => 1");
         let (module_a, _) = parse(tokens_a);
-        let hierarchy_a = ClassHierarchy::build(&module_a).0;
+        let hierarchy_a = ClassHierarchy::build(&module_a).0.unwrap();
         index.update_file(Utf8PathBuf::from("a.bt"), &hierarchy_a);
 
         let tokens_b = lex_with_eof("Object subclass: ClassB\n  methodB => 2");
         let (module_b, _) = parse(tokens_b);
-        let hierarchy_b = ClassHierarchy::build(&module_b).0;
+        let hierarchy_b = ClassHierarchy::build(&module_b).0.unwrap();
         index.update_file(Utf8PathBuf::from("b.bt"), &hierarchy_b);
 
         // Both classes visible in merged hierarchy
@@ -312,13 +319,13 @@ mod tests {
         // a.bt defines Dup with methodA
         let tokens_a = lex_with_eof("Object subclass: Dup\n  methodA => 1");
         let (module_a, _) = parse(tokens_a);
-        let hierarchy_a = ClassHierarchy::build(&module_a).0;
+        let hierarchy_a = ClassHierarchy::build(&module_a).0.unwrap();
         index.update_file(Utf8PathBuf::from("a.bt"), &hierarchy_a);
 
         // b.bt defines Dup with methodB
         let tokens_b = lex_with_eof("Object subclass: Dup\n  methodB => 2");
         let (module_b, _) = parse(tokens_b);
-        let hierarchy_b = ClassHierarchy::build(&module_b).0;
+        let hierarchy_b = ClassHierarchy::build(&module_b).0.unwrap();
         index.update_file(Utf8PathBuf::from("b.bt"), &hierarchy_b);
 
         // b.bt was last to merge, so Dup currently has methodB
@@ -348,7 +355,7 @@ mod tests {
         let user_file = Utf8PathBuf::from("user/counter.bt");
         let tokens = lex_with_eof("Object subclass: Counter\n  decrement => 1");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0;
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(user_file.clone(), &hierarchy);
 
         // User's Counter (with decrement) is now the active definition

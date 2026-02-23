@@ -515,7 +515,8 @@ impl LanguageService for SimpleLanguageService {
         // This is intentionally lightweight (ClassHierarchy::build only, not full
         // analyse()) since diagnostic_provider lazily runs full semantic analysis
         // when diagnostics are requested, avoiding duplicate work.
-        let (class_hierarchy, _) = crate::semantic_analysis::ClassHierarchy::build(&module);
+        let (class_hierarchy_result, _) = crate::semantic_analysis::ClassHierarchy::build(&module);
+        let class_hierarchy = class_hierarchy_result.expect("ClassHierarchy::build is infallible");
 
         // Update the project-wide index with this file's class hierarchy
         self.project_index
