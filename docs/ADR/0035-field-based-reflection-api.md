@@ -8,9 +8,9 @@ Proposed (2026-02-23)
 Beamtalk's reflection API currently uses Smalltalk-80 naming conventions for instance variable access:
 
 ```beamtalk
-c instVarNames              // => #(#value)
-c instVarAt: #value         // => 0
-c instVarAt: #value put: 42 // => 42
+c instVarNames await              // => #(#value)
+c instVarAt: #value await         // => 0
+c instVarAt: #value put: 42 await // => 42
 ```
 
 These names are inherited from Smalltalk-80, but Beamtalk's underlying implementation is fundamentally different:
