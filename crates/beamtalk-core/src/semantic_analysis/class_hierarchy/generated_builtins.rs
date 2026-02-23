@@ -44,6 +44,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Integer"
             | "JSON"
             | "List"
+            | "Metaclass"
             | "Number"
             | "Object"
             | "Pid"
@@ -171,6 +172,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "setDocForMethod:to:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![None, None] },
                 MethodInfo { selector: "isBehaviour".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
                 MethodInfo { selector: "isMeta".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "isMetaclass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
                 MethodInfo { selector: "removeFromSystem".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
             ],
             class_methods: vec![],
@@ -802,11 +804,41 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "takeWhile:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![Some("Block".into())] },
                 MethodInfo { selector: "dropWhile:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![Some("Block".into())] },
                 MethodInfo { selector: "intersperse:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![None] },
+                MethodInfo { selector: "addFirst:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![None] },
                 MethodInfo { selector: "add:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![None] },
                 MethodInfo { selector: "stream".into(), arity: 0, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, return_type: Some("Stream".into()), param_types: vec![] },
                 MethodInfo { selector: "atRandom".into(), arity: 0, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, return_type: None, param_types: vec![] },
             ],
             class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "Metaclass".into(),
+        ClassInfo {
+            name: "Metaclass".into(),
+            superclass: Some("Class".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "isMeta".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "isClass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "isMetaclass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "thisClass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "name".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "superclass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "classMethods".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "localClassMethods".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "classIncludesSelector:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, return_type: None, param_types: vec![None] },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "new".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, return_type: None, param_types: vec![] },
+            ],
             class_variables: vec![],
         },
     );

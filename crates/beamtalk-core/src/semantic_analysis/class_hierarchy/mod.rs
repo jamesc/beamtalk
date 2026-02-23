@@ -668,17 +668,19 @@ impl ClassHierarchy {
             }
 
             // Check sealed method override enforcement.
+            // BT-803: Built-in stdlib classes (e.g. Metaclass) are allowed to override
+            // sealed methods when compiling in stdlib mode.
+            // BT-807: Abstract stdlib classes (e.g. Behaviour) are also allowed to override
+            // sealed methods, as they provide class-side dispatch methods whose
+            // selectors coincide with sealed instance-side methods on Object, but are
+            // dispatched through a separate runtime namespace.
             if let Some(ref superclass) = class.superclass {
                 for method in &class.methods {
                     let selector = method.selector.name();
-                    // BT-807: Abstract stdlib classes (e.g. Behaviour) provide
-                    // class-side dispatch methods (e.g. `fieldNames`) whose
-                    // selectors coincide with sealed instance-side methods on
-                    // Object.  These are dispatched through a separate runtime
-                    // namespace (class object vs. instance receiver) so the
-                    // sealed constraint from the instance side does not apply.
-                    // Non-abstract and non-stdlib classes are always checked.
-                    if stdlib_mode && class.is_abstract {
+                    let is_stdlib_builtin =
+                        stdlib_mode && Self::is_builtin_class(class.name.name.as_str());
+                    let is_abstract_stdlib = stdlib_mode && class.is_abstract;
+                    if is_stdlib_builtin || is_abstract_stdlib {
                         continue;
                     }
                     if let Some((sealed_class, _)) =

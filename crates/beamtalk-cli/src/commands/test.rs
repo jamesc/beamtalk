@@ -287,6 +287,35 @@ fn fixture_module_name(fixture_path: &Utf8Path) -> Result<String> {
     ))
 }
 
+/// Build a class → module name index from fixture files.
+///
+/// Parses each fixture file to extract class names, then maps each class name
+/// to its module name (e.g. `"Env"` → `"bt@env"` for `fixtures/scheme/env.bt`).
+///
+/// This index is merged into the main `class_module_index` before any
+/// compilation so that both fixture files and test files can correctly resolve
+/// cross-file references to fixture classes in subdirectories.
+fn build_fixture_class_module_index(
+    fixture_files: &[Utf8PathBuf],
+) -> Result<HashMap<String, String>> {
+    let mut index = HashMap::new();
+
+    for file in fixture_files {
+        let module_name = fixture_module_name(file)?;
+        let Ok(source) = fs::read_to_string(file) else {
+            continue;
+        };
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
+        let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+
+        for class in &module.classes {
+            index.insert(class.name.name.to_string(), module_name.clone());
+        }
+    }
+
+    Ok(index)
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // Test file compilation
 // ──────────────────────────────────────────────────────────────────────────
@@ -848,7 +877,7 @@ pub fn run_tests(path: &str) -> Result<()> {
     // references to package classes in subdirectories.
     let project_root_for_index = Utf8PathBuf::from(".");
     let pkg_for_index = manifest::find_manifest(&project_root_for_index)?;
-    let class_module_index: HashMap<String, String> = if let Some(ref pkg) = pkg_for_index {
+    let mut class_module_index: HashMap<String, String> = if let Some(ref pkg) = pkg_for_index {
         let src_dir = project_root_for_index.join("src");
         let source_root = if src_dir.exists() {
             Some(src_dir.clone())
@@ -882,6 +911,15 @@ pub fn run_tests(path: &str) -> Result<()> {
             .map(|p| p.join("fixtures"))
             .unwrap_or_default()
     };
+
+    // Extend the class module index with fixture class → module name mappings so
+    // that both fixture files (referencing each other) and test files (referencing
+    // fixture classes in subdirectories) resolve to the correct module names.
+    if fixtures_dir.is_dir() {
+        let fixture_files = find_test_files(&fixtures_dir)?;
+        let fixture_index = build_fixture_class_module_index(&fixture_files)?;
+        class_module_index.extend(fixture_index);
+    }
 
     let precompiled = compile_fixtures_directory(&fixtures_dir, &build_dir, &class_module_index)?;
     for module_name in &precompiled {
@@ -1240,6 +1278,40 @@ mod tests {
 
         let modules = collect_beam_module_names(&dir).unwrap();
         assert!(modules.is_empty());
+    }
+
+    #[test]
+    fn test_build_fixture_class_module_index_flat() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        fs::write(
+            dir.join("counter.bt"),
+            "Object subclass: Counter\n  count => 0\n",
+        )
+        .unwrap();
+
+        let files = vec![dir.join("counter.bt")];
+        let index = build_fixture_class_module_index(&files).unwrap();
+        assert_eq!(index.get("Counter").map(String::as_str), Some("bt@counter"));
+    }
+
+    #[test]
+    fn test_build_fixture_class_module_index_subdirectory() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let subdir = Utf8PathBuf::from_path_buf(temp.path().join("scheme")).unwrap();
+        fs::create_dir_all(&subdir).unwrap();
+
+        fs::write(
+            subdir.join("env.bt"),
+            "Object subclass: SchemeEnv\n  lookup => nil\n",
+        )
+        .unwrap();
+
+        // fixture_module_name uses the file stem only, so env.bt → bt@env
+        let files = vec![subdir.join("env.bt")];
+        let index = build_fixture_class_module_index(&files).unwrap();
+        assert_eq!(index.get("SchemeEnv").map(String::as_str), Some("bt@env"));
     }
 
     #[test]
