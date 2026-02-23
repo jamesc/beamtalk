@@ -171,7 +171,7 @@ Each sealed type provides a class-side `withAll:` factory:
 ```beamtalk
 #(1, 2, 3) collect: [:x | x * 2]           // => #(2, 4, 6)      (List)
 ((Set new add: 1) add: 2) select: [:x | x > 1]   // => Set(2)     (Set)
-#[10, 20, 30] collect: [:x | x + 1]         // => #[11, 21, 31]   (Array — planned, BT-822)
+#[10, 20, 30] collect: [:x | x + 1]         // => #[11, 21, 31]   (Array)
 "hi" collect: [:g | g uppercase]             // => #("H", "I")     (List — String>>collect: returns List since grapheme-mapped results aren't necessarily valid String graphemes)
 ```
 
@@ -179,7 +179,7 @@ Each sealed type provides a class-side `withAll:` factory:
 
 ### Type annotation narrowing with species
 
-> **Note:** This table describes the target state after BT-822 (species pattern) is implemented. Until then, `collect:`, `select:`, and `reject:` on the abstract class all return `List`. `String.bt` already implements `select: -> String` — filtered graphemes are always valid graphemes, so no species plumbing is needed for `select:`. The `-> String` column for `Array`, `Set`, `Tuple`, and `List` reflect the planned post-BT-822 state.
+> **Note:** This table reflects the implemented state as of BT-822. `collect:`, `select:`, and `reject:` on concrete classes return the receiver's type via `self species withAll:`. `String>>collect:` remains `-> List` (mapped graphemes are not guaranteed valid). `String>>select:` and `reject:` return `-> String` (filtered graphemes are always valid graphemes).
 
 The abstract `Collection` methods carry the widest safe return type. Concrete classes narrow the return type via covariant override:
 
@@ -233,7 +233,7 @@ The implementation requires a new `Array` type (see below) before `Array>>withAl
 #(1, 2, 3) isEmpty                         // => false
 #(1, 2, 3) includes: 2                     // => true
 #(1, 2, 3) collect: [:x | x * 2]          // => #(2, 4, 6)
-#{#a => 1, #b => 2} collect: [:v | v * 2] // => #{#a => 2, #b => 4}  (after species/BT-822)
+#{#a => 1, #b => 2} collect: [:v | v * 2] // => #{#a => 2, #b => 4}  (Dictionary — maps values, preserving keys)
 "hi" collect: [:g | g uppercase]           // => #("H", "I")
 
 // User-defined Collection subclass inherits defaults
@@ -405,7 +405,7 @@ Pharo's `species` method returns the appropriate result class so `aSet collect: 
 - No performance regression for existing code: concrete types retain BIF-backed `@primitive` overrides
 
 ### Negative
-- Species pattern is planned (BT-822) but not yet implemented — until then, `collect:`, `select:`, `reject:` return `List` on all types
+- Species pattern implemented (BT-822) — `collect:`, `select:`, `reject:` return the receiver's type via `self species withAll:`
 - No `SequenceableCollection` — `at:`, `first`, `last` are not part of the shared abstract protocol; cannot be written generically over ordered collections
 - `inject:into:` on abstract `Collection` remains `@primitive` (compiler limitation for local-variable mutation in abstract methods) — the runtime dispatches `do:` generically so user-defined subclasses inherit a working `inject:into:` for free; override only if custom accumulation semantics are needed (e.g., Dictionary's key-preserving fold)
 - String's `includes:` (substring containment) renamed to `includesSubstring:` — existing code must migrate; `each:` renamed to `do:`; `at:` return type changed from `Character` to `String`
@@ -449,7 +449,7 @@ Future design work deferred by this ADR:
 
 | Topic | When to revisit | Prerequisite |
 |-------|----------------|--------------|
-| Species pattern + `Array` type | Planned — see BT-822 | Requires `Array` implementation for `Array>>withAll:` |
+| Species pattern + `Array` type | ✅ Done — BT-822 | `Array` type (`#[...]` syntax), species pattern, `withAll:` on all sealed types |
 | `SequenceableCollection` | After `Array` is added | `Array` (O(log n) `at:`) + `Tuple` (O(1) `at:`) + `String` (O(n) `at:`) gives three meaningful subtypes; `at:` performance contracts still diverge so careful design needed |
 | `Enumerable` as typed protocol | After ADR-0025 (Gradual Typing) is implemented | ADR-0025 implementation |
 
