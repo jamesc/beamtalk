@@ -377,7 +377,7 @@ fn visit_classvar_access(
     {
         if let Some(class_name) = receiver_class_name(receiver) {
             let sel = selector.name();
-            if sel == "classVar:" {
+            if sel == "classState:" {
                 if let Some(Expression::Literal(crate::ast::Literal::Symbol(var_name), _)) =
                     arguments.first()
                 {
@@ -416,7 +416,7 @@ fn visit_classvar_access(
         if let Some(class_name) = receiver_class_name(receiver) {
             for msg in messages {
                 let sel = msg.selector.name();
-                if sel == "classVar:" {
+                if sel == "classState:" {
                     if let Some(Expression::Literal(crate::ast::Literal::Symbol(var_name), _)) =
                         msg.arguments.first()
                     {

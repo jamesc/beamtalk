@@ -3,7 +3,7 @@
 
 // BT-412: Test fixture for class variables
 Actor subclass: ClassVarCounter
-  classVar: instanceCount = 0
+  classState: instanceCount = 0
   state: count = 0
 
   class create =>

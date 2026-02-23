@@ -18,7 +18,7 @@
 /// WorkspaceEnvironment current actorsOf: Counter
 /// ```
 Actor subclass: WorkspaceEnvironment
-  classVar: current = nil
+  classState: current = nil
 
   /// Return the current singleton instance (nil before workspace bootstrap).
   class current -> WorkspaceEnvironment => self.current

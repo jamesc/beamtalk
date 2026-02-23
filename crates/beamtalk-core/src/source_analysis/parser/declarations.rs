@@ -160,8 +160,8 @@ impl Parser {
                     state.push(state_decl);
                 }
             }
-            // Check for class variable declaration: `classVar: varName ...`
-            else if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "classVar:") {
+            // Check for class variable declaration: `classState: varName ...`
+            else if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "classState:") {
                 if let Some(classvar_decl) = self.parse_classvar_declaration() {
                     class_variables.push(classvar_decl);
                 }
@@ -454,16 +454,16 @@ impl Parser {
 
     /// Parses a class variable declaration (BT-412).
     ///
-    /// Syntax is identical to state declarations but uses `classVar:` keyword:
-    /// - `classVar: varName`
-    /// - `classVar: varName = defaultValue`
-    /// - `classVar: varName: TypeName`
-    /// - `classVar: varName: TypeName = defaultValue`
+    /// Syntax is identical to state declarations but uses `classState:` keyword:
+    /// - `classState: varName`
+    /// - `classState: varName = defaultValue`
+    /// - `classState: varName: TypeName`
+    /// - `classState: varName: TypeName = defaultValue`
     fn parse_classvar_declaration(&mut self) -> Option<StateDeclaration> {
         let start = self.current_token().span();
 
-        // Consume `classVar:`
-        if !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "classVar:") {
+        // Consume `classState:`
+        if !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "classState:") {
             return None;
         }
         self.advance();
@@ -478,7 +478,8 @@ impl Parser {
                 (name_ident, Some(type_ann))
             }
             TokenKind::Identifier(_) => {
-                let name_ident = self.parse_identifier("Expected variable name after 'classVar:'");
+                let name_ident =
+                    self.parse_identifier("Expected variable name after 'classState:'");
                 let type_ann = if self.match_token(&TokenKind::Colon) {
                     Some(self.parse_type_annotation())
                 } else {
@@ -487,7 +488,7 @@ impl Parser {
                 (name_ident, type_ann)
             }
             _ => {
-                self.error("Expected variable name after 'classVar:'");
+                self.error("Expected variable name after 'classState:'");
                 let span = self.current_token().span();
                 (Identifier::new("Error", span), None)
             }

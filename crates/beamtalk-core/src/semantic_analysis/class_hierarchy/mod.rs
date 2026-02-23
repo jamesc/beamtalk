@@ -82,7 +82,7 @@ pub struct ClassInfo {
     pub methods: Vec<MethodInfo>,
     /// Class-side methods defined on this class.
     pub class_methods: Vec<MethodInfo>,
-    /// Class variable names (declared with `classVar:`).
+    /// Class variable names (declared with `classState:`).
     pub class_variables: Vec<EcoString>,
 }
 

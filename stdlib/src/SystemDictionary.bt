@@ -15,7 +15,7 @@
 /// Beamtalk classNamed: #Integer
 /// ```
 Actor subclass: SystemDictionary
-  classVar: current = nil
+  classState: current = nil
 
   /// Return the current singleton instance (nil before workspace bootstrap).
   class current -> SystemDictionary => self.current

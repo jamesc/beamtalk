@@ -3,7 +3,7 @@
 
 // BT-413: Test fixture for instance-side class variable access (Actor)
 Actor subclass: InstanceAccessCounter
-  classVar: instanceCount = 0
+  classState: instanceCount = 0
   state: count = 0
 
   class create =>
