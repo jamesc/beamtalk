@@ -243,6 +243,18 @@ send_pid(X, 'whenRejected:', [Block]) ->
 send_pid(X, Selector, Args) ->
     dispatch_via_module(X, Selector, Args).
 
+%% @private True if the selector belongs to the Future protocol.
+%%
+%% Used by both send_pid/3 and responds_to/2 to recognise Future-specific
+%% messages on bare pids.
+-spec is_future_selector(atom()) -> boolean().
+is_future_selector(await) -> true;
+is_future_selector(awaitForever) -> true;
+is_future_selector('await:') -> true;
+is_future_selector('whenResolved:') -> true;
+is_future_selector('whenRejected:') -> true;
+is_future_selector(_) -> false.
+
 %% @private Fallback for tagged maps without a compiled stdlib module.
 -spec send_tagged_map_fallback(map(), atom(), atom(), list()) -> term().
 send_tagged_map_fallback(X, Class, Selector, Args) ->
@@ -288,6 +300,9 @@ responds_to(X, Selector) when is_tuple(X) ->
     end;
 responds_to(X, Selector) when is_map(X) ->
     responds_to_map(X, Selector);
+responds_to(X, Selector) when is_pid(X) ->
+    %% BT-813: Future-specific selectors are handled by send_pid/3.
+    is_future_selector(Selector) orelse responds_via_module(X, Selector);
 responds_to(X, Selector) ->
     %% All other primitives: route through module_for_value/1
     responds_via_module(X, Selector).
