@@ -37,7 +37,7 @@ The gap matters for: SUnit test discovery (iterate metaclasses), code loaders (e
 
 ### Why Now
 
-ADR 0032 established the `Behaviour`/`Class` chain and removed the flattened table dependency. The bootstrap ordering is now `ProtoObject → Object → Behaviour → Class → ...`. Adding `Metaclass` as the next class in the chain — with `Class` as its superclass — is the natural extension. The two-phase circularity fix is well-understood in OTP and requires ~50 lines of back-patching.
+ADR 0032 established the `Behaviour`/`Class` chain and removed the flattened table dependency. The bootstrap ordering is now `ProtoObject → Object → Behaviour → Class → ...`. Adding `Metaclass` as the next class in the chain — with `Class` as its superclass — is the natural extension, and the self-grounding (`Metaclass class class == Metaclass class`) is handled automatically via virtual tags with no two-phase back-patch required (see Section 6).
 
 ### Constraints
 
@@ -408,7 +408,7 @@ No metaclass concept. Module attributes are compile-time constants. Class-like b
 
 The two-phase bootstrap pattern (register with placeholder → back-patch circular reference) is standard in OTP for circular process topologies. Erlang's `ets:insert` and `gen_server:cast` enable safe post-start mutation.
 
-**What we adopt**: The two-phase circular reference pattern for bootstrap.
+**What we adopt**: OTP's general insight that circular process graphs can be bootstrapped safely. **What we do *not* adopt for metaclasses**: the concrete two-phase back-patch mechanism — Beamtalk's virtual-tag trick (same pid, different class tag) makes `classClass/1` idempotent, so circular metaclass references resolve automatically with no explicit back-patch.
 
 ## User Impact
 
@@ -470,7 +470,7 @@ The LSP can now resolve the type of `Counter class class` to `Metaclass` rather 
 
 - Newcomers are neutral between B and C (both fix the atom problem).
 - Smalltalk developers strongly prefer B (algebraically correct parallel hierarchy).
-- BEAM veterans prefer C (simpler bootstrap) but accept B (the circular back-patch is principled OTP).
+- BEAM veterans prefer C (simpler bootstrap) but accept B (it reuses ADR 0013's virtual tag trick: zero new processes, no back-patch needed).
 - Operators prefer C (fewer moving parts) but note that zero new processes makes B acceptable.
 - Language designers unanimously prefer B (the invariant `Foo class superclass == Foo superclass class` is fundamental to the Smalltalk object model; compromising it creates subtle bugs in reflection code).
 
@@ -511,7 +511,7 @@ Allow `Counter class addInstVarNamed: 'cache'` to add dynamic per-class state on
 ### Negative
 
 - **Breaking**: `metaclass_test.bt` sentinel assertions (`equals: #Metaclass`) must become class object assertions. Small migration, but a breaking change.
-- **Bootstrap complexity**: Two-phase initialization adds ~50 lines to the bootstrap sequence. The back-patch must run after all classes are registered; incorrect ordering yields `undefined` metaclass pointers.
+- **Conceptual bootstrap complexity**: Readers must understand virtual tag self-grounding and `classClass/1` idempotency, but the bootstrap sequence itself remains single-phase (no explicit back-patch step).
 - **Erlang API break**: `class_of_object/1` in `beamtalk_primitive.erl` now returns `#beamtalk_object{}` instead of `atom()`. Any Erlang code that pattern-matches on this return must be updated.
 - **Dispatch path added**: `try_class_chain_fallthrough/3` gains a branch to detect metaclass objects and route through the `Metaclass` chain. Slightly more complex dispatch logic.
 - **`Metaclass` is sealed**: No user-defined metaclasses at v0.1. Advanced Pharo-style metaprogramming (per-metaclass traits, `addInstVarNamed:`) is not supported.
@@ -522,7 +522,6 @@ Allow `Counter class addInstVarNamed: 'cache'` to add dynamic per-class state on
 - Class variables continue to serve the per-class state use case that per-metaclass instance variables would otherwise provide.
 - `Metaclass class name == 'Metaclass class'` — the metaclass of `Metaclass` has a name, consistent with the naming rule.
 - Performance: same dispatch path cost as any other class object message. No regression.
-- **`==` semantics dependency**: The self-grounding invariant (`Metaclass class class == Metaclass`) relies on `==` for `#beamtalk_object{}` comparing by **pid identity**, not structural equality. `Metaclass class class` produces `#beamtalk_object{class='Metaclass', pid=P}` while `Metaclass` produces `#beamtalk_object{class='Metaclass class', pid=P}` — same pid, different tags. If `==` ever changes to structural comparison, the self-grounding invariant would break.
 - **`Class allSubclasses`** now includes `Metaclass` — a minor behavioral change for code enumerating class subclasses.
 
 ## Implementation
@@ -532,7 +531,7 @@ Allow `Counter class addInstVarNamed: 'cache'` to add dynamic per-class state on
 **Files**: `beamtalk_metaclass_bt.erl` (new), `beamtalk_primitive.erl`, `beamtalk_behaviour_intrinsics.erl`, `beamtalk_class_dispatch.erl`, `beamtalk_runtime_app.erl`
 
 - Create `beamtalk_metaclass_bt.erl` following `beamtalk_class_bt.erl` pattern
-- Prerequisite: ensure `sealed` on `Class.bt` allows stdlib-internal subclassing, or unseal `Class`
+- Prerequisite: ensure `sealed` allows stdlib-internal subclassing
 - Update `classClass/1` in `beamtalk_behaviour_intrinsics.erl`: return `#beamtalk_object{class='Metaclass', class_mod=beamtalk_metaclass_bt, pid=ClassPid}` instead of atom `'Metaclass'`
 - Update `class_of_object/1` in `beamtalk_primitive.erl`: return metaclass object instead of atom; remove bare atom clause; remove `print_string('Metaclass')` special case
 - Add `{metaclass_method_call, ...}` handler in `beamtalk_object_class.erl`
@@ -541,7 +540,7 @@ Allow `Counter class addInstVarNamed: 'cache'` to add dynamic per-class state on
 - Add post-bootstrap assertion for self-grounding invariant
 - Verify `responds_to/2` and `beamtalk_method_resolver.erl` work for metaclass-tagged objects
 
-**Test**: `Counter class class isMeta` returns `true`. `Metaclass class class == Metaclass` is `true`. No existing tests break.
+**Test**: `Counter class class isMeta` returns `true`. `Metaclass class class == Metaclass class` is `true`. No existing tests break.
 
 ### Phase 2: New Primitives
 
@@ -576,7 +575,7 @@ All follow the thin data-access pattern from ADR 0032: raw data reads only, no l
 | `runtime/apps/beamtalk_runtime/src/beamtalk_runtime_app.erl` | 1 | Bootstrap order + post-bootstrap assertion |
 | `runtime/apps/beamtalk_runtime/src/beamtalk_method_resolver.erl` | 1 | Verify `is_class_name(ClassTag)` code path for metaclass tags |
 | `stdlib/src/Metaclass.bt` | 3 | New file |
-| `stdlib/src/Class.bt` | 1 | Prerequisite: ensure `sealed` allows stdlib-internal subclassing (or unseal Class) |
+| `stdlib/src/Class.bt` | 1 | Note: `sealed` already allows stdlib-internal subclassing via `is_runtime_protected_class` exemption |
 | `stdlib/test/metaclass_test.bt` | 1 | Breaking: sentinel → class object assertions |
 
 ## Migration Path
@@ -593,7 +592,7 @@ self assert: (42 class class isMeta) equals: true.
 self assert: (42 class class isClass) equals: false.
 self assert: (42 class class name) equals: 'Integer class'.
 self assert: (42 class class thisClass) equals: Integer.
-self assert: (Metaclass class class == Metaclass) equals: true.
+self assert: (Metaclass class class == Metaclass class) equals: true.
 ```
 
 **Erlang code** using `class_of_object/1` return value: Check for `#beamtalk_object{class='Metaclass'}` pattern instead of the atom `'Metaclass'`.
