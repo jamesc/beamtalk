@@ -70,7 +70,7 @@ tokio = { version = "1", features = ["full"] }
 stacker = "0.1"
 
 # WebSocket (ADR 0020 — REPL protocol transport)
-tungstenite = "0.26"
+tungstenite = "0.28"
 tokio-tungstenite = "0.28"
 
 # Process management (ADR 0027 — Windows PID discovery)
