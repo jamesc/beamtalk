@@ -31,6 +31,7 @@ The class creation message `subclass:` does not exist as a Beamtalk method in an
 - **Static analysis needs hierarchy early**: Codegen must know whether a class inherits from `Actor` before generating module structure. LSP completions require the hierarchy to be indexed before answering queries.
 - **Bootstrap ordering (ADR 0032)**: `ProtoObject → Object → Behaviour → Class → Actor` must be wired before user classes load. Whatever mechanism creates classes must participate in this sequence.
 - **ADR 0024 (Static-First, Live-Augmented Tooling)**: The LSP operates on parsed source, augmented by live queries when a workspace is running. The static layer must still provide completions without a live process.
+- **REPL self-hosting trajectory (ADR 0034)**: As stdlib self-hosting progresses, the Beamtalk REPL will eventually be ported to pure Beamtalk. At that point, evaluating `Object subclass: Foo ...` in the REPL must work *at runtime* — without invoking the Rust compiler. Whatever dynamic class creation mechanism is chosen now becomes the foundation for that path. A design that makes dynamic creation a second-class afterthought will need to be revisited when REPL self-hosting arrives.
 
 ### The Metaclass Parallel
 
@@ -207,9 +208,9 @@ Ruby has both `class Foo < Bar` (grammar) and `Class.new(Bar) { ... }` (runtime)
 | **Smalltalk purist** | "The pre-pass is still structural analysis of source, not dynamic message dispatch. Until `subclass:` can truly be intercepted at runtime with arbitrary logic (like Pharo's `ClassBuilder`), calling it a 'message' is marketing, not engineering." |
 | **BEAM veteran** | "Every layer of abstraction is a failure mode. Grammar is the simplest possible representation of a class definition. The pre-pass adds a new compiler phase, new code paths, new tests, and new failure modes. For what gain?" |
 | **Operator** | "If it ain't broke, don't fix it. The existing grammar approach is battle-tested and simple. Don't add complexity to satisfy a philosophical principle." |
-| **Language designer** | "Grammar has richer error recovery than message pattern matching. The parser can emit precise, localized diagnostics for a malformed class definition. A pre-pass over message sends is inherently more fragile." |
+| **Language designer** | "You're solving the wrong problem. The question isn't 'grammar or message?' — it's 'what semantics do I want, and what syntax best expresses them?' Keep `Object subclass: Counter` as grammar — it's unambiguous, toolable, learnable. But compile the grammar form to a call on a `ClassBuilder` protocol that the runtime exposes. Then you get clean syntax *and* runtime interceptability *and* a foundation for a self-hosted REPL. TypeScript didn't make `class` a runtime function call — but Roslyn exposes the entire compilation process as an API. That's the model. Separate the concerns rather than conflating them." |
 
-**Tension point**: The BEAM veteran and operator cohorts have the strongest argument for the status quo. The change is architecturally correct but the immediate user-visible benefit is small. For a v0.1 language, stability may outweigh purity.
+**Tension point**: The BEAM veteran and operator cohorts have the strongest argument for the status quo. The language designer cohort makes the most interesting argument — not for the status quo, but for a *different* approach (Alternative D below) that achieves more than Option B while adding less complexity.
 
 ### Option C: Fully Dynamic `subclass:` (No Pre-Pass)
 
@@ -218,8 +219,9 @@ Ruby has both `class Foo < Bar` (grammar) and `Class.new(Bar) { ... }` (runtime)
 | **Smalltalk purist** | "This is the only honest approach. If `subclass:` is a message, it must be dispatched dynamically. The pre-pass approach gives you the *syntax* of a message without the *semantics*. Real Smalltalk lets you replace `ClassBuilder` entirely. Do it right." |
 | **Language designer** | "Option B (pre-pass) creates a split reality: the compiler thinks in terms of statically-extracted class definitions while the runtime thinks in terms of message sends. Eventually these two representations diverge. A fully dynamic approach has one source of truth: the runtime." |
 | **Newcomer (REPL user)** | "I want to define a class dynamically in the REPL without writing a source file. If class creation is truly a message, I can do `Object subclass: (Transcript readLine asSymbol)` interactively." |
+| **REPL self-hosting** | "When the Beamtalk REPL is ported to pure Beamtalk, it will evaluate `Object subclass: Foo` without going through the Rust compiler. Only a fully dynamic mechanism makes this possible without special-casing the REPL." |
 
-**Why we defer it**: The primary blocker is ADR 0024 (Static-First, Live-Augmented Tooling). Without pre-pass extraction, the LSP cannot provide completions for a class until after it has been evaluated in a running workspace. For users not running a workspace (editing a file offline), the IDE would have no knowledge of class structure. This degrades the experience for a majority of users. The fully dynamic approach is the right long-term direction but requires the Live-Augmented layer to be more mature first.
+**Why we defer it**: The primary blocker is ADR 0024 (Static-First, Live-Augmented Tooling). Without pre-pass extraction, the LSP cannot provide completions for a class until after it has been evaluated in a running workspace. For users not running a workspace (editing a file offline), the IDE would have no knowledge of class structure. This degrades the experience for a majority of users. The fully dynamic approach is the right long-term direction but requires the Live-Augmented layer to be more mature first. The ClassBuilder protocol (Alternative D) bridges this gap — it provides the dynamic foundation Option C requires while letting Option B's pre-pass continue to drive the static layer.
 
 ## Alternatives Considered
 
@@ -235,11 +237,48 @@ Make `subclass:` a true runtime message send with no pre-pass extraction. The co
 
 **Rejected because**: Breaks static LSP tooling (ADR 0024 Phase 1). Users editing source without a live workspace would get no completions, hover info, or go-to-definition for class members. Codegen cannot determine actor vs value-type routing without hierarchy information. Deferred until the Live-Augmented tooling layer matures sufficiently to make this viable.
 
-### Alternative D: Two Syntaxes — Grammar for Static, Message for Dynamic
+### Alternative D: Grammar Compiles to ClassBuilder Protocol
+
+Keep `Object subclass: Counter` as dedicated grammar — preserving clean parse-time error messages and unambiguous syntax. But make the grammar form **compile to a call on a `ClassBuilder` protocol** that the runtime exposes as a real message chain. Dynamic class creation (e.g., in a self-hosted REPL) goes through the same protocol directly.
+
+```beamtalk
+// What the user writes (grammar, unchanged):
+Object subclass: Counter
+  state: count = 0
+  increment => count := count + 1
+
+// What the compiler emits (desugar target):
+Class classBuilder
+  createNamed: #Counter
+  superclass: Object
+  fields: #{ count => 0 }
+  methods: #{ increment => [...] }
+```
+
+`Class >> classBuilder` returns a `ClassBuilder` object. `ClassBuilder` is a real stdlib class with methods `createNamed:superclass:fields:methods:`. The grammar form is syntactic sugar — identical in semantics to calling the builder directly.
+
+**For the self-hosted REPL**, evaluating `Object subclass: Foo` at runtime bypasses the Rust compiler entirely and calls `Class classBuilder createNamed: #Foo ...` directly. The static LSP layer continues to use the grammar form and pre-pass for file-based source. No special-casing of the REPL is needed — the dynamic path is just the protocol path.
+
+**Framework authors** can intercept class creation by overriding `classBuilder` on their root class:
+
+```beamtalk
+ProtoObject subclass: TrackedRoot
+  class classBuilder => TrackingClassBuilder new
+```
+
+Every subclass of `TrackedRoot` will go through `TrackingClassBuilder` — without any compiler changes.
+
+**Why this is stronger than Option B**: The pre-pass in Option B is structural pattern matching — it understands `subclass:` because the pre-pass knows to look for it. The ClassBuilder approach makes the grammar form genuinely compositional: the compiler doesn't understand `subclass:` as a special concept, it just desugars to a builder call. If you add a new kind of class definition in future (e.g., `TraitDefinition`), you add a new builder method — not a new pre-pass case.
+
+**Why this is deferred**: `ClassBuilder` requires runtime infrastructure (a new stdlib class, builder protocol methods, integration with `beamtalk_class_registry`) that is best built incrementally on top of the pre-pass mechanism established in Option B. Option B is Phase 1; Alternative D is Phase 2.
+
+**Relationship to Option B**: Alternative D is not a rejection of Option B — it is its completion. Option B establishes the pre-pass seam and makes `subclass:` an inspectable message. Alternative D replaces the `@intrinsic classDefine` backing with a real `ClassBuilder` protocol, giving the REPL and framework authors a clean dynamic creation path.
+
+### Alternative E: Two Syntaxes — Grammar for Static, Message for Dynamic
 
 Retain the grammar form `Object subclass: Counter` for static class definitions, and add a separate runtime method `Object defineSubclass: Counter` for dynamic use.
 
-**Rejected because**: Creates two class creation paths that must be kept in sync. Confuses users about which form to use. The pre-pass approach achieves the same goal (one syntax, both static and runtime semantics) more cleanly.
+**Rejected because**: Creates two class creation paths that must be kept in sync. Confuses users about which form to use. Alternative D achieves the same goal (one syntax, both static and runtime semantics) more cleanly via the builder desugar.
 
 ## Consequences
 
@@ -248,8 +287,9 @@ Retain the grammar form `Object subclass: Counter` for static class definitions,
 - **Inspectable creation protocol**: `Object respondsTo: #subclass:` is `true`; the method can be found via `whichClassIncludesSelector:` and browsed in the REPL
 - **Custom root classes**: Classes rooted at `ProtoObject` (rather than `Object`) can provide custom `subclass:` implementations — enabling future DSL and metaclass work without compiler changes
 - **Cleaner AST**: No dedicated `ClassDefinition` node; class definitions are message sends in the AST like everything else
-- **Precedent for future dynamism**: The pre-pass establishes the pattern for eventually supporting fully dynamic class creation (Alternative C) as the live tooling layer matures
+- **Precedent for future dynamism**: The pre-pass establishes the pattern for eventually supporting fully dynamic class creation (Alternative C / D) as the live tooling layer matures
 - **ADR 0024 LSP seam preserved**: The pre-pass outputs the same `ClassHierarchy` structure; all tooling is unchanged
+- **REPL self-hosting foundation**: The `classDefine` intrinsic established here is the hook that a future `ClassBuilder` protocol (Alternative D) replaces — making it possible to evaluate class definitions in a pure-Beamtalk REPL without involving the Rust compiler
 
 ### Negative
 - **Pre-pass is still structural**: A Smalltalk purist can correctly observe that the pre-pass is pattern matching on syntax, not true dynamic dispatch. The runtime `classDefine` intrinsic fires at module load time, not at parse time. This is a pragmatic compromise.
@@ -292,6 +332,7 @@ Retain the grammar form `Object subclass: Counter` for static class definitions,
 
 ### Future Work (Not Part of This ADR)
 
+- **ClassBuilder Protocol (Alternative D)**: Replace the `@intrinsic classDefine` backing with a real `ClassBuilder` stdlib class. This is the natural Phase 2 — builds directly on top of the pre-pass seam established here. Prerequisite for REPL self-hosting and framework-level class creation interception.
 - **Live-Augmented Dynamic Classes**: Once ADR 0024's Live-Augmented layer is sufficiently mature, lift the pre-pass requirement for classes defined in a running workspace — enabling fully dynamic class creation via `subclass:` message sends at the REPL
 - **Custom `subclass:` on ProtoObject roots**: Document and test the override path for DSL authors
 
