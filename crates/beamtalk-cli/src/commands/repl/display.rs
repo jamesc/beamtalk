@@ -6,7 +6,9 @@
 //! **DDD Context:** REPL — Presentation
 
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
+use std::process::Command;
 
 use miette::{IntoDiagnostic, Result};
 
@@ -184,7 +186,66 @@ pub(crate) fn display_test_results(results: &serde_json::Value) {
 
 /// Display generated Core Erlang source (BT-724).
 pub(crate) fn display_codegen(core_erlang: &str) {
-    // Use cyan for Core Erlang source to distinguish from regular output
+    // Try to pretty-print using external `core_pp` if available; fall back to raw output.
+    if let Ok(mut child) = Command::new("core_pp")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+    {
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(core_erlang.as_bytes());
+        }
+
+        // Capture stdout in a separate thread so the main thread can enforce a timeout.
+        if let Some(mut stdout) = child.stdout.take() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let mut buf = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut stdout, &mut buf);
+                let _ = tx.send(buf);
+            });
+
+            let timeout = std::time::Duration::from_secs(2);
+            let start = std::time::Instant::now();
+            let mut exited = false;
+            loop {
+                match child.try_wait() {
+                    Ok(Some(_status)) => {
+                        exited = true;
+                        break;
+                    }
+                    Ok(None) => {
+                        if start.elapsed() >= timeout {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                    }
+                    Err(_) => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break;
+                    }
+                }
+            }
+
+            // Try to receive any captured output (small timeout).
+            // Only use formatted output when receive succeeds and bytes are non-empty,
+            // to avoid printing a blank line on timeout.
+            if exited {
+                if let Ok(output_bytes) = rx.recv_timeout(std::time::Duration::from_secs(1)) {
+                    if !output_bytes.is_empty() {
+                        if let Ok(formatted) = String::from_utf8(output_bytes) {
+                            println!("{}", color::paint(color::CYAN, &formatted));
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Fallback: print unmodified Core Erlang
     println!("{}", color::paint(color::CYAN, core_erlang));
 }
 
