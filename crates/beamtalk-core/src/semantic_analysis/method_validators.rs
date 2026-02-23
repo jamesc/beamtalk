@@ -22,7 +22,7 @@
 
 use crate::ast::{Expression, Literal, MessageSelector};
 use crate::semantic_analysis::type_checker::InferredType;
-use crate::source_analysis::{Diagnostic, Span};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use std::collections::HashMap;
 
 /// A validator for method-specific argument constraints.
@@ -177,6 +177,7 @@ impl MethodValidator for ReflectionMethodValidator {
                     message: message.into(),
                     span: id.span,
                     hint: Some(format!("Use #{} instead of {}", id.name, id.name).into()),
+                    category: None,
                 }]
             }
 
@@ -193,6 +194,7 @@ impl MethodValidator for ReflectionMethodValidator {
                     message: message.into(),
                     span: *span,
                     hint: Some(format!("Use #{} instead of {}", name.name, name.name).into()),
+                    category: None,
                 }]
             }
 
@@ -209,6 +211,7 @@ impl MethodValidator for ReflectionMethodValidator {
                     message: message.into(),
                     span: other.span(),
                     hint: Some("Use a symbol literal like #methodName".into()),
+                    category: None,
                 }]
             }
         }
@@ -283,6 +286,7 @@ pub(crate) fn validate_primitive_instantiation(
         message: format!("Cannot instantiate primitive class `{class_name}`").into(),
         span,
         hint: Some(hint.into()),
+        category: None,
     })
 }
 
@@ -317,6 +321,7 @@ pub(crate) fn validate_immutable_mutation(
         message: format!("Cannot mutate immutable value ({type_name})").into(),
         span,
         hint: Some("Primitive values like integers, strings, and booleans are immutable".into()),
+        category: Some(DiagnosticCategory::Type),
     })
 }
 
@@ -384,6 +389,7 @@ impl MethodValidator for BlockArityValidator {
             message: message.into(),
             span: block.span,
             hint: Some(hint.into()),
+            category: None,
         }]
     }
 }
@@ -457,6 +463,7 @@ impl MethodValidator for IntegerArgumentValidator {
                         .into(),
                         span: *lit_span,
                         hint: Some(integer_arg_hint(&selector_name).into()),
+                        category: None,
                     });
                 }
                 _ => {}
@@ -523,6 +530,7 @@ impl MethodValidator for StringArgumentValidator {
                         .into(),
                     span: *lit_span,
                     hint: Some(string_arg_hint(&selector_name).into()),
+                    category: None,
                 }]
             }
 
@@ -592,6 +600,7 @@ impl MethodValidator for TypeAwareIntegerArgValidator {
                     .into(),
                     span: *lit_span,
                     hint: Some("Use a 1-based integer index: list at: 1".into()),
+                    category: None,
                 }]
             }
             _ => vec![],
@@ -644,6 +653,7 @@ impl MethodValidator for TypeAwareStringArgValidator {
                         .into(),
                     span: *lit_span,
                     hint: Some(string_arg_hint(&selector_name).into()),
+                    category: None,
                 }]
             }
             _ => vec![],

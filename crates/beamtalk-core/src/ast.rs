@@ -647,6 +647,48 @@ impl TypeAnnotation {
     }
 }
 
+/// The diagnostic category that an `@expect` directive suppresses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExpectCategory {
+    /// Suppress does-not-understand (DNU) hints.
+    Dnu,
+    /// Suppress type-related warnings/hints.
+    Type,
+    /// Suppress unused-variable warnings.
+    Unused,
+    /// Suppress empty-method-body warnings.
+    EmptyBody,
+    /// Suppress any diagnostic on the following expression.
+    All,
+}
+
+impl ExpectCategory {
+    /// Parses a category name from a Beamtalk identifier string.
+    #[must_use]
+    pub fn from_name(s: &str) -> Option<Self> {
+        match s {
+            "dnu" => Some(Self::Dnu),
+            "type" => Some(Self::Type),
+            "unused" => Some(Self::Unused),
+            "emptyBody" => Some(Self::EmptyBody),
+            "all" => Some(Self::All),
+            _ => None,
+        }
+    }
+
+    /// Returns the canonical string representation of this category.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Dnu => "dnu",
+            Self::Type => "type",
+            Self::Unused => "unused",
+            Self::EmptyBody => "emptyBody",
+            Self::All => "all",
+        }
+    }
+}
+
 /// A Beamtalk expression.
 ///
 /// Expressions are the fundamental building blocks of Beamtalk programs.
@@ -808,6 +850,19 @@ pub enum Expression {
         span: Span,
     },
 
+    /// A diagnostic suppression directive (`@expect category`).
+    ///
+    /// Suppresses diagnostics of the given category on the immediately
+    /// following expression in the same expression list.
+    ///
+    /// Example: `@expect dnu` before a message send that may produce a DNU hint.
+    ExpectDirective {
+        /// The category of diagnostic to suppress.
+        category: ExpectCategory,
+        /// Source location of the entire `@expect category` expression.
+        span: Span,
+    },
+
     /// An error node for unparseable code.
     ///
     /// This allows the parser to recover from errors and continue.
@@ -838,6 +893,7 @@ impl Expression {
             | Self::ListLiteral { span, .. }
             | Self::Primitive { span, .. }
             | Self::StringInterpolation { span, .. }
+            | Self::ExpectDirective { span, .. }
             | Self::Error { span, .. } => *span,
             Self::Identifier(id) => id.span,
             Self::Block(block) => block.span,

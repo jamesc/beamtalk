@@ -117,6 +117,8 @@ TestCase subclass: DateTimeTest
     // Invalid string format raises error
     self should: [DateTime fromString: "not-a-date"] raise: #type_error.
     // Non-integer argument raises error
+    @expect type
     self should: [DateTime fromTimestamp: "hello"] raise: #type_error.
     // diffSeconds: with non-DateTime raises error
+    @expect type
     self should: [(DateTime year: 2026 month: 1 day: 1) diffSeconds: "hello"] raise: #type_error

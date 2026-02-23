@@ -325,6 +325,19 @@ fn is_diagnostic_error(msg: &str) -> bool {
     msg.starts_with(|c: char| c.is_ascii_lowercase())
 }
 
+/// The semantic category of a diagnostic, used by `@expect` for suppression.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagnosticCategory {
+    /// Does-not-understand (DNU) hint.
+    Dnu,
+    /// Type-related warning or hint.
+    Type,
+    /// Unused-variable warning.
+    Unused,
+    /// Empty-method-body warning.
+    EmptyBody,
+}
+
 /// A diagnostic message (error, warning, or hint).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
@@ -336,6 +349,8 @@ pub struct Diagnostic {
     pub span: Span,
     /// Optional hint for how to fix the issue.
     pub hint: Option<EcoString>,
+    /// Optional semantic category for `@expect` suppression.
+    pub category: Option<DiagnosticCategory>,
 }
 
 impl Diagnostic {
@@ -347,6 +362,7 @@ impl Diagnostic {
             message: message.into(),
             span,
             hint: None,
+            category: None,
         }
     }
 
@@ -358,6 +374,7 @@ impl Diagnostic {
             message: message.into(),
             span,
             hint: None,
+            category: None,
         }
     }
 
@@ -369,7 +386,15 @@ impl Diagnostic {
             message: message.into(),
             span,
             hint: None,
+            category: None,
         }
+    }
+
+    /// Attaches a semantic category for `@expect` suppression.
+    #[must_use]
+    pub fn with_category(mut self, category: DiagnosticCategory) -> Self {
+        self.category = Some(category);
+        self
     }
 }
 

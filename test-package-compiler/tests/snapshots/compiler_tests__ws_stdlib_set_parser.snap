@@ -158,10 +158,10 @@ Module {
 }
 
 Diagnostics:
-Diagnostic { severity: Error, message: "Expected ']' to close block", span: Span { start: 167, end: 168 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ,", span: Span { start: 167, end: 168 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 182, end: 183 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 229, end: 230 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 649, end: 650 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 708, end: 709 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 765, end: 766 }, hint: None }
+Diagnostic { severity: Error, message: "Expected ']' to close block", span: Span { start: 167, end: 168 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ,", span: Span { start: 167, end: 168 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 182, end: 183 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 229, end: 230 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 649, end: 650 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 708, end: 709 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 765, end: 766 }, hint: None, category: None }

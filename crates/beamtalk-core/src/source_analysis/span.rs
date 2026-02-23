@@ -60,6 +60,12 @@ impl Span {
         self.start == self.end
     }
 
+    /// Returns true if `other` is fully contained within `self`.
+    #[must_use]
+    pub const fn contains(self, other: Self) -> bool {
+        self.start <= other.start && other.end <= self.end
+    }
+
     /// Creates a span that covers both `self` and `other`.
     #[must_use]
     pub const fn merge(self, other: Self) -> Self {

@@ -201,7 +201,8 @@ fn validate_expr(
         | Expression::Identifier(_)
         | Expression::ClassReference { .. }
         | Expression::Super(_)
-        | Expression::Error { .. } => {}
+        | Expression::Error { .. }
+        | Expression::ExpectDirective { .. } => {}
 
         Expression::StringInterpolation { segments, .. } => {
             for segment in segments {

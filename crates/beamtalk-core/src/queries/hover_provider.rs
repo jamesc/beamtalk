@@ -747,6 +747,7 @@ fn find_hover_in_expr(
                 None
             }
         }
+        Expression::ExpectDirective { .. } => None,
     }
 }
 

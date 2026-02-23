@@ -87,8 +87,10 @@ TestCase subclass: RandomTest
     // nextInteger: with negative raises type_error
     self should: [Random nextInteger: -5] raise: #type_error.
     // nextInteger: with non-integer raises type_error
+    @expect type
     self should: [Random nextInteger: "hello"] raise: #type_error.
     // seed: with non-integer raises type_error
+    @expect type
     self should: [Random seed: "bad"] raise: #type_error.
     // Instance nextInteger: with zero raises type_error
     rng5 := Random new.

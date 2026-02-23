@@ -17,8 +17,8 @@
 //! - Field access (`object.field`)
 
 use crate::ast::{
-    Block, BlockParameter, CascadeMessage, Expression, Identifier, KeywordPart, Literal, MapPair,
-    MatchArm, MessageSelector, Pattern, StringSegment,
+    Block, BlockParameter, CascadeMessage, ExpectCategory, Expression, Identifier, KeywordPart,
+    Literal, MapPair, MatchArm, MessageSelector, Pattern, StringSegment,
 };
 use crate::source_analysis::{Token, TokenKind};
 use ecow::EcoString;
@@ -400,6 +400,9 @@ impl Parser {
 
             // Primitive pragma: @primitive/@intrinsic 'name' or @primitive/@intrinsic intrinsicName
             TokenKind::AtPrimitive | TokenKind::AtIntrinsic => self.parse_primitive(),
+
+            // Diagnostic suppression directive: @expect category
+            TokenKind::AtExpect => self.parse_expect_directive(),
 
             // Unexpected token - consume it to avoid getting stuck
             _ => {
@@ -927,6 +930,40 @@ impl Parser {
                     .push(Diagnostic::error(message.clone(), span));
                 Expression::Error { message, span }
             }
+        }
+    }
+
+    /// Parses an `@expect category` directive.
+    ///
+    /// The `@expect` token has already been identified by `parse_primary`.
+    /// This method consumes it and parses the category name that follows.
+    fn parse_expect_directive(&mut self) -> Expression {
+        let start_token = self.advance(); // consume AtExpect
+        let start = start_token.span();
+
+        if let TokenKind::Identifier(name) = self.current_kind() {
+            let name = name.clone();
+            let end_token = self.advance();
+            let span = start.merge(end_token.span());
+            if let Some(category) = ExpectCategory::from_name(&name) {
+                Expression::ExpectDirective { category, span }
+            } else {
+                let valid = "dnu, type, unused, emptyBody, all";
+                let message: EcoString =
+                    format!("unknown @expect category '{name}', valid categories are: {valid}")
+                        .into();
+                self.diagnostics
+                    .push(Diagnostic::error(message.clone(), span));
+                Expression::Error { message, span }
+            }
+        } else {
+            let span = start;
+            let message: EcoString =
+                "@expect must be followed by a category name (dnu, type, unused, emptyBody, all)"
+                    .into();
+            self.diagnostics
+                .push(Diagnostic::error(message.clone(), span));
+            Expression::Error { message, span }
         }
     }
 

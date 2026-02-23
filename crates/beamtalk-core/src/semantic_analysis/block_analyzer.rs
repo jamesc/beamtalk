@@ -255,7 +255,12 @@ impl Analyser {
                 }
             }
 
-            Literal(..) | Super(..) | Error { .. } | ClassReference { .. } | Primitive { .. } => {
+            Literal(..)
+            | Super(..)
+            | Error { .. }
+            | ClassReference { .. }
+            | Primitive { .. }
+            | ExpectDirective { .. } => {
                 // No captures or mutations
             }
 

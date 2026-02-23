@@ -101,7 +101,8 @@ fn analyze_expression(
         | Expression::Error { .. }
         | Expression::Super(_)
         | Expression::ClassReference { .. }
-        | Expression::Primitive { .. } => {
+        | Expression::Primitive { .. }
+        | Expression::ExpectDirective { .. } => {
             // No variable access (ClassReference resolves at compile time)
             // Primitive is a pragma, no variable access
         }

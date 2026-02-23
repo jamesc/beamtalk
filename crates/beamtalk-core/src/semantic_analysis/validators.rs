@@ -15,9 +15,9 @@
 
 use crate::ast::{Expression, Identifier, Module};
 use crate::semantic_analysis::ClassHierarchy;
-use crate::source_analysis::Diagnostic;
 #[cfg(test)]
 use crate::source_analysis::lex_with_eof;
+use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 use ecow::EcoString;
 
 /// BT-105: Check for attempts to instantiate abstract classes.
@@ -496,7 +496,8 @@ pub(crate) fn check_empty_method_bodies(module: &Module, diagnostics: &mut Vec<D
                 let mut diag = Diagnostic::warning(
                     format!("Method `{selector}` has an empty body and will return `self`"),
                     method.span,
-                );
+                )
+                .with_category(DiagnosticCategory::EmptyBody);
                 diag.hint =
                     Some("Add an expression after `=>`, or remove the method if unneeded".into());
                 diagnostics.push(diag);
@@ -509,7 +510,8 @@ pub(crate) fn check_empty_method_bodies(module: &Module, diagnostics: &mut Vec<D
             let mut diag = Diagnostic::warning(
                 format!("Method `{selector}` has an empty body and will return `self`"),
                 standalone.method.span,
-            );
+            )
+            .with_category(DiagnosticCategory::EmptyBody);
             diag.hint =
                 Some("Add an expression after `=>`, or remove the method if unneeded".into());
             diagnostics.push(diag);

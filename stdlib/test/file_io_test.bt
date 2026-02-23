@@ -38,6 +38,7 @@ TestCase subclass: FileIoTest
     // readAll: nonexistent file
     self should: [File readAll: "target/bt-test-tmp/no_such_file_xyz.txt"] raise: #file_not_found.
     // readAll: non-string path
+    @expect type
     self should: [File readAll: 42] raise: #type_error.
     // readAll: absolute path
     self should: [File readAll: "/etc/passwd"] raise: #invalid_path.
@@ -46,8 +47,10 @@ TestCase subclass: FileIoTest
 
   testErrorPathsWriteallContents =>
     // writeAll: non-string path
+    @expect type
     self should: [File writeAll: 42 contents: "data"] raise: #type_error.
     // writeAll: non-string contents
+    @expect type
     self should: [File writeAll: "target/bt-test-tmp/test.txt" contents: 42] raise: #type_error.
     // writeAll: absolute path
     self should: [File writeAll: "/tmp/evil.txt" contents: "data"] raise: #invalid_path.

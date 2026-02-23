@@ -441,8 +441,14 @@ impl CoreErlangGenerator {
         // TODO(BT-213): Consider adding immutable update syntax (e.g., withX: newX) in future
         // Currently, field assignments are rejected at codegen (see generate_field_assignment)
         // Field reads work via CodeGenContext routing to Self parameter
-        for (i, expr) in method.body.iter().enumerate() {
-            let is_last = i == method.body.len() - 1;
+        // Filter out @expect directives — they are compile-time only and generate no code.
+        let body: Vec<&Expression> = method
+            .body
+            .iter()
+            .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
+            .collect();
+        for (i, expr) in body.iter().enumerate() {
+            let is_last = i == body.len() - 1;
 
             // Early return (^) at the method body level — emit value and stop generating.
             // Note: ^ inside a block is handled via the NLR throw mechanism (BT-754).
@@ -600,7 +606,8 @@ impl CoreErlangGenerator {
             | Expression::ClassReference { .. }
             | Expression::Super(..)
             | Expression::Primitive { .. }
-            | Expression::Error { .. } => false,
+            | Expression::Error { .. }
+            | Expression::ExpectDirective { .. } => false,
         }
     }
 

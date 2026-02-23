@@ -190,7 +190,8 @@ fn has_error_node(expr: &Expression) -> bool {
         | Expression::Identifier(..)
         | Expression::ClassReference { .. }
         | Expression::Super(..)
-        | Expression::Primitive { .. } => false,
+        | Expression::Primitive { .. }
+        | Expression::ExpectDirective { .. } => false,
     }
 }
 

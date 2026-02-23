@@ -733,6 +733,9 @@ pub fn compile_source_with_bindings(
         diagnostics.extend(stdlib_shadow_diags);
     }
 
+    // BT-782: Apply @expect directives to suppress matching diagnostics.
+    beamtalk_core::queries::diagnostic_provider::apply_expect_directives(&module, &mut diagnostics);
+
     // Check for errors
     let has_errors = diagnostics
         .iter()
