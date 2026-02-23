@@ -1,7 +1,7 @@
 # ADR 0035: Rename Instance Variable Reflection API from instVar to field
 
 ## Status
-Proposed (2026-02-23)
+Accepted (2026-02-23)
 
 ## Context
 
