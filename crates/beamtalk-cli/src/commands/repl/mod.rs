@@ -1521,7 +1521,7 @@ mod tests {
         system.refresh_processes_specifics(
             ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
             true,
-            ProcessRefreshKind::new(),
+            ProcessRefreshKind::nothing(),
         );
         assert!(
             system.process(Pid::from_u32(pid)).is_none(),

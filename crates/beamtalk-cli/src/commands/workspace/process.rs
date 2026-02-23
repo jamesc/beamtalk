@@ -631,7 +631,7 @@ fn find_beam_pid_by_node(node_name: &str) -> Result<(u32, Option<u64>)> {
     system.refresh_processes_specifics(
         ProcessesToUpdate::All,
         true,
-        ProcessRefreshKind::new().with_cmd(UpdateKind::Always),
+        ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always),
     );
 
     for (pid, process) in system.processes() {
@@ -708,7 +708,7 @@ pub(super) fn force_kill_process(pid: u32) -> Result<()> {
     system.refresh_processes_specifics(
         ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
         true,
-        ProcessRefreshKind::new(),
+        ProcessRefreshKind::nothing(),
     );
 
     if let Some(process) = system.process(Pid::from_u32(pid)) {

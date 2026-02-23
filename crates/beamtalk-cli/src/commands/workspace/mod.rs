@@ -902,7 +902,7 @@ mod tests {
         system.refresh_processes_specifics(
             ProcessesToUpdate::Some(&[pid]),
             true,
-            ProcessRefreshKind::new(),
+            ProcessRefreshKind::nothing(),
         );
         let process = system
             .process(pid)
@@ -1026,7 +1026,7 @@ mod tests {
         system.refresh_processes_specifics(
             ProcessesToUpdate::Some(&[Pid::from_u32(node_info.pid)]),
             true,
-            ProcessRefreshKind::new().with_cmd(UpdateKind::Always),
+            ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always),
         );
         let process = system
             .process(Pid::from_u32(node_info.pid))
