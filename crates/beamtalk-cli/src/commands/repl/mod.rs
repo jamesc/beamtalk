@@ -937,23 +937,15 @@ pub(crate) fn repl_loop(
                             continue;
                         }
                         _ if line.starts_with(":unload ") => {
-                            let module_name = extract_command_arg(line, ":unload ", None);
-                            if module_name.is_empty() {
-                                eprintln!("Usage: :unload <module>");
-                                continue;
-                            }
-
-                            match client.unload_module(module_name) {
-                                Ok(response) => {
-                                    if response.is_error() {
-                                        if let Some(msg) = response.error_message() {
-                                            eprintln!("Error: {msg}");
-                                        }
-                                    } else {
-                                        println!("Module {module_name} unloaded.");
-                                    }
-                                }
-                                Err(e) => eprintln!("Error: {e}"),
+                            let class_name = extract_command_arg(line, ":unload ", None);
+                            if class_name.is_empty() {
+                                eprintln!(
+                                    "':unload' has been removed. Use `ClassName removeFromSystem` to remove a class."
+                                );
+                            } else {
+                                eprintln!(
+                                    "':unload' has been removed. Use `{class_name} removeFromSystem` instead."
+                                );
                             }
                             continue;
                         }
@@ -1098,7 +1090,9 @@ pub(crate) fn repl_loop(
                         "clear" => Some(":clear"),
                         "bindings" => Some(":bindings"),
                         "modules" => Some(":modules"),
-                        "unload" => Some(":unload"),
+                        "kill" => Some(":kill"),
+                        "inspect" => Some(":inspect"),
+                        "sessions" => Some(":sessions"),
                         "test" => Some(":test"),
                         "show-codegen" => Some(":show-codegen"),
                         _ => None,

@@ -148,53 +148,7 @@ handle(<<"modules">>, _Params, Msg, SessionPid) ->
     ),
     beamtalk_repl_protocol:encode_modules(
         ModulesWithInfo, Msg, fun beamtalk_repl_json:term_to_json/1
-    );
-handle(<<"unload">>, Params, Msg, SessionPid) ->
-    ModuleBin = maps:get(<<"module">>, Params, <<>>),
-    case ModuleBin of
-        <<>> ->
-            Err0 = beamtalk_error:new(missing_argument, 'Module'),
-            Err1 = beamtalk_error:with_message(
-                Err0,
-                <<"Missing module name for unload">>
-            ),
-            Err2 = beamtalk_error:with_hint(
-                Err1,
-                <<"Usage: :unload <ModuleName>">>
-            ),
-            beamtalk_repl_protocol:encode_error(
-                Err2, Msg, fun beamtalk_repl_json:format_error_message/1
-            );
-        _ ->
-            case beamtalk_repl_server:safe_to_existing_atom(ModuleBin) of
-                {error, badarg} ->
-                    Err0 = beamtalk_error:new(module_not_found, 'Module'),
-                    Err1 = beamtalk_error:with_message(
-                        Err0,
-                        iolist_to_binary([<<"Module not loaded: ">>, ModuleBin])
-                    ),
-                    Err2 = beamtalk_error:with_hint(Err1, <<"Module was never loaded">>),
-                    beamtalk_repl_protocol:encode_error(
-                        Err2, Msg, fun beamtalk_repl_json:format_error_message/1
-                    );
-                {ok, Module} ->
-                    ResolvedModule =
-                        case code:is_loaded(Module) of
-                            {file, _} -> Module;
-                            false -> resolve_class_to_module(Module)
-                        end,
-                    case beamtalk_repl_shell:unload_module(SessionPid, ResolvedModule) of
-                        ok ->
-                            beamtalk_repl_protocol:encode_status(
-                                ok, Msg, fun beamtalk_repl_json:term_to_json/1
-                            );
-                        {error, #beamtalk_error{} = Err} ->
-                            beamtalk_repl_protocol:encode_error(
-                                Err, Msg, fun beamtalk_repl_json:format_error_message/1
-                            )
-                    end
-            end
-    end.
+    ).
 
 %%% Internal helpers
 

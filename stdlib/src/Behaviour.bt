@@ -205,3 +205,24 @@ abstract Object subclass: Behaviour
   /// Counter isMeta   // => false
   /// ```
   sealed isMeta => false
+
+  // --- Class removal ---
+
+  /// Remove this class from the system, cleaning up all associated state.
+  ///
+  /// Follows Smalltalk convention (`Counter removeFromSystem`). Performs full
+  /// cleanup: stops live actors of the class, terminates the class gen_server,
+  /// removes from class hierarchy ETS table and pg group, and purges the BEAM
+  /// module.
+  ///
+  /// Safety checks:
+  /// - Refuses to remove stdlib/sealed classes (Integer, String, Object, etc.)
+  /// - Refuses if class has subclasses (must remove children first)
+  /// - Stops all live actors of this class before removal
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter removeFromSystem   // => nil (Counter class removed)
+  /// Integer removeFromSystem   // => Error: cannot remove stdlib class
+  /// ```
+  sealed removeFromSystem => @primitive "classRemoveFromSystem"

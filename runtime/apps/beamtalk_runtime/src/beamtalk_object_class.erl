@@ -521,7 +521,13 @@ handle_cast(
 handle_info(_Info, State) ->
     {noreply, State}.
 
-terminate(_Reason, _State) ->
+terminate(_Reason, #class_state{name = ClassName}) ->
+    %% BT-785: Clean up ETS hierarchy entry and pg group membership on shutdown.
+    %% This runs when removeFromSystem stops the gen_server (gen_server:stop/1),
+    %% ensuring the class is fully removed from the runtime registries.
+    %% Wrapped in catch/try to be safe during node shutdown when ETS/pg may be gone.
+    _ = (catch ets:delete(beamtalk_class_hierarchy, ClassName)),
+    _ = (catch pg:leave(beamtalk_classes, self())),
     ok.
 
 %% ADR 0032 Phase 1: No flattened tables to rebuild after hot reload.

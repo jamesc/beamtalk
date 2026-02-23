@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for removeFromSystem subclass rejection test (BT-785).
+// RemovalTestChild extends this class, so removeFromSystem should raise an error.
+
+Object subclass: RemovalTestParent

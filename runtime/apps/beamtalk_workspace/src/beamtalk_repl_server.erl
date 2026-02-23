@@ -12,7 +12,7 @@
 %%%
 %%% Op handlers are delegated to domain-specific modules (BT-705):
 %%% - beamtalk_repl_ops_eval: eval, clear, bindings
-%%% - beamtalk_repl_ops_load: load-file, load-source, reload, unload, modules
+%%% - beamtalk_repl_ops_load: load-file, load-source, reload, modules
 %%% - beamtalk_repl_ops_actors: actors, inspect, kill, interrupt
 %%% - beamtalk_repl_ops_session: sessions, clone, close, health, shutdown
 %%% - beamtalk_repl_ops_dev: complete, info, docs, describe, test, test-all, show-codegen
@@ -330,7 +330,6 @@ handle_op(Op, Params, Msg, SessionPid) when
     Op =:= <<"load-file">>;
     Op =:= <<"load-source">>;
     Op =:= <<"reload">>;
-    Op =:= <<"unload">>;
     Op =:= <<"modules">>
 ->
     beamtalk_repl_ops_load:handle(Op, Params, Msg, SessionPid);
@@ -361,6 +360,21 @@ handle_op(Op, Params, Msg, SessionPid) when
     Op =:= <<"test">>; Op =:= <<"test-all">>
 ->
     beamtalk_repl_ops_dev:handle(Op, Params, Msg, SessionPid);
+handle_op(Op, Params, Msg, _SessionPid) when Op =:= <<"unload">> ->
+    %% BT-785: :unload removed — suggest removeFromSystem instead
+    Module = maps:get(<<"module">>, Params, <<>>),
+    Err0 = beamtalk_error:new(runtime_error, 'REPL'),
+    Err1 = beamtalk_error:with_message(
+        Err0,
+        <<"':unload' has been removed. Use `removeFromSystem` instead.">>
+    ),
+    Err2 = beamtalk_error:with_hint(
+        Err1,
+        iolist_to_binary([<<"Example: ">>, Module, <<" removeFromSystem">>])
+    ),
+    beamtalk_repl_protocol:encode_error(
+        Err2, Msg, fun beamtalk_repl_json:format_error_message/1
+    );
 handle_op(Op, _Params, Msg, _SessionPid) ->
     Err0 = beamtalk_error:new(unknown_op, 'REPL'),
     Err1 = beamtalk_error:with_message(
@@ -385,7 +399,6 @@ handle_op(Op, _Params, Msg, _SessionPid) ->
     | {list_actors}
     | {kill_actor, string()}
     | {list_modules}
-    | {unload_module, string()}
     | {get_docs, binary(), binary() | undefined}
     | {health}
     | {shutdown, string()}
@@ -411,8 +424,6 @@ parse_request(Data) when is_binary(Data) ->
                 {list_actors};
             {ok, #{<<"type">> := <<"modules">>}} ->
                 {list_modules};
-            {ok, #{<<"type">> := <<"unload">>, <<"module">> := ModuleName}} ->
-                {unload_module, binary_to_list(ModuleName)};
             {ok, #{<<"type">> := <<"kill">>, <<"pid">> := PidStr}} ->
                 {kill_actor, binary_to_list(PidStr)};
             {ok, _Other} ->
@@ -441,7 +452,6 @@ parse_request(Data) when is_binary(Data) ->
     | {list_actors}
     | {list_modules}
     | {kill_actor, string()}
-    | {unload_module, string()}
     | {get_docs, binary(), binary() | undefined}
     | {health}
     | {shutdown, string()}
@@ -463,9 +473,6 @@ op_to_request(<<"actors">>, _Map) ->
     {list_actors};
 op_to_request(<<"modules">>, _Map) ->
     {list_modules};
-op_to_request(<<"unload">>, Map) ->
-    Module = maps:get(<<"module">>, Map, <<>>),
-    {unload_module, binary_to_list(Module)};
 op_to_request(<<"kill">>, Map) ->
     Pid = maps:get(<<"actor">>, Map, maps:get(<<"pid">>, Map, <<>>)),
     {kill_actor, binary_to_list(Pid)};

@@ -980,17 +980,15 @@ mod tests {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
 
-        // Load a file first, then unload it
-        let resp = client.load_file("examples/counter.bt").await.unwrap();
-        assert!(!resp.is_error(), "load should succeed");
-        let classes = resp.classes.unwrap_or_default();
-        // Use the actual loaded class name as the module name
-        let module = classes
-            .first()
-            .expect("should have loaded at least one class");
-
-        let resp = client.unload(module).await.unwrap();
-        assert!(!resp.is_error(), "unload should succeed: {:?}", resp.error);
+        // BT-785: :unload was removed in favour of `removeFromSystem`.
+        // The op now always returns an error with a deprecation hint.
+        let resp = client.unload("Counter").await.unwrap();
+        assert!(resp.is_error(), "unload should return a deprecation error");
+        let err = resp.error.expect("error message should be present");
+        assert!(
+            err.contains("removeFromSystem"),
+            "error should mention removeFromSystem: {err}"
+        );
         Ok(())
     }
 

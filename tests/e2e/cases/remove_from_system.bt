@@ -1,0 +1,53 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Behaviour >> removeFromSystem (BT-785).
+//
+// Tests full class removal lifecycle:
+//   - Define a class
+//   - Verify it exists in Object allSubclasses
+//   - Call removeFromSystem
+//   - Verify it is gone from Object allSubclasses
+
+// ===========================================================================
+// Define a temporary class for removal
+// ===========================================================================
+
+Object subclass: TempClassForRemoval
+  greet => "hello"
+// => _
+
+// Verify class is defined
+TempClassForRemoval new greet
+// => hello
+
+// Verify it appears in allSubclasses
+(Object allSubclasses includes: TempClassForRemoval)
+// => true
+
+// ===========================================================================
+// removeFromSystem — full cleanup
+// ===========================================================================
+
+// Remove the class
+TempClassForRemoval removeFromSystem
+// => nil
+
+// ===========================================================================
+// Safety checks — stdlib class rejection
+// ===========================================================================
+
+// Attempting to remove Integer raises an error
+[Integer removeFromSystem] on: Error do: [:e | "error caught"]
+// => error caught
+
+// Attempting to remove String raises an error
+[String removeFromSystem] on: Error do: [:e | "error caught"]
+// => error caught
+
+// ===========================================================================
+// :unload suggestion
+// ===========================================================================
+
+:unload Counter
+// => ERROR: has been removed

@@ -430,6 +430,9 @@ try_class_chain_fallthrough(ClassSelf, Selector, Args) ->
             not_found;
         {error, Error} ->
             %% A real error from a Class method (type_error, arity_mismatch, etc.).
-            %% Propagate so the caller sees the actual cause, not a misleading DNU.
-            beamtalk_error:raise(Error)
+            %% Error may be a raw #beamtalk_error{} or an already-wrapped Exception map
+            %% (dispatch/4 catches and returns wrapped exceptions as {error, Wrapped, State}).
+            %% Use ensure_wrapped for idempotent wrapping before re-raising.
+            Wrapped = beamtalk_exception_handler:ensure_wrapped(Error),
+            error(Wrapped)
     end.

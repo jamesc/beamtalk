@@ -63,7 +63,9 @@
     %% ADR 0033: Runtime-embedded documentation
     classDoc/1,
     classSetDoc/2,
-    classSetMethodDoc/3
+    classSetMethodDoc/3,
+    %% BT-785: Class removal
+    classRemoveFromSystem/1
 ]).
 
 %%% ============================================================================
@@ -335,6 +337,73 @@ classSetMethodDoc(Self, Selector, DocBinary) ->
     ok = gen_server:call(ClassPid, {set_method_doc, Selector, DocBinary}),
     Self.
 
+%% @doc Remove this class from the system, performing full cleanup.
+%%
+%% BT-785: Implements `removeFromSystem` for class objects (Smalltalk convention).
+%%
+%% Safety checks (raises errors for):
+%%   - Stdlib classes (module name starts with `bt@stdlib@`)
+%%   - Classes with direct subclasses (must remove children first)
+%%
+%% Cleanup sequence:
+%%   1. Stop all live actors of this class (via beamtalk_actor_registry)
+%%   2. Stop the class gen_server (terminate/2 removes ETS entry and pg group)
+%%   3. Purge the BEAM module (code:soft_purge + code:delete)
+-spec classRemoveFromSystem(#beamtalk_object{}) -> nil.
+classRemoveFromSystem(Self) ->
+    ClassPid = erlang:element(4, Self),
+    ClassName = gen_server:call(ClassPid, class_name),
+    Module = gen_server:call(ClassPid, module_name),
+    %% Safety: refuse to remove stdlib classes
+    case is_stdlib_module_name(Module) of
+        true ->
+            Error0 = beamtalk_error:new(runtime_error, ClassName),
+            Error1 = beamtalk_error:with_message(
+                Error0,
+                iolist_to_binary([
+                    <<"Cannot remove stdlib class '">>,
+                    atom_to_binary(ClassName, utf8),
+                    <<"'">>
+                ])
+            ),
+            Error2 = beamtalk_error:with_hint(
+                Error1,
+                <<"Stdlib classes are protected and cannot be removed.">>
+            ),
+            beamtalk_error:raise(Error2);
+        false ->
+            %% Safety: refuse if class has direct subclasses
+            case beamtalk_class_registry:direct_subclasses(ClassName) of
+                [] ->
+                    %% Stop live actors of this class
+                    stop_class_actors(ClassName),
+                    %% Stop the class gen_server
+                    %% (terminate/2 in beamtalk_object_class removes ETS entry and pg group)
+                    gen_server:stop(ClassPid),
+                    %% Purge the BEAM module
+                    _ = code:soft_purge(Module),
+                    _ = code:delete(Module),
+                    nil;
+                Subclasses ->
+                    NameBins = [atom_to_binary(S, utf8) || S <- Subclasses],
+                    NamesStr = iolist_to_binary(lists:join(<<", ">>, NameBins)),
+                    Error0 = beamtalk_error:new(runtime_error, ClassName),
+                    Error1 = beamtalk_error:with_message(
+                        Error0,
+                        iolist_to_binary([
+                            <<"Cannot remove class '">>,
+                            atom_to_binary(ClassName, utf8),
+                            <<"' — it has subclasses">>
+                        ])
+                    ),
+                    Error2 = beamtalk_error:with_hint(
+                        Error1,
+                        iolist_to_binary([<<"Remove subclasses first: ">>, NamesStr])
+                    ),
+                    beamtalk_error:raise(Error2)
+            end
+    end.
+
 %%% ============================================================================
 %%% Internal Helpers
 %%% ============================================================================
@@ -397,4 +466,41 @@ atom_to_class_object(ClassName) ->
             Module = gen_server:call(ClassPid, module_name),
             Tag = beamtalk_class_registry:class_object_tag(ClassName),
             #beamtalk_object{class = Tag, class_mod = Module, pid = ClassPid}
+    end.
+
+%% @private
+%% @doc Check if a module name belongs to the Beamtalk stdlib.
+%% BT-785: Stdlib modules have the prefix `bt@stdlib@`.
+-spec is_stdlib_module_name(atom()) -> boolean().
+is_stdlib_module_name(Module) when is_atom(Module) ->
+    case atom_to_binary(Module, utf8) of
+        <<"bt@stdlib@", _/binary>> -> true;
+        _ -> false
+    end;
+is_stdlib_module_name(_) ->
+    false.
+
+%% @private
+%% @doc Stop all live actors of a given class.
+%%
+%% BT-785: Queries the actor registry (if available) for all actors belonging
+%% to the class, then kills each one. The registry is accessed by its
+%% registered name to avoid a module-level dependency on beamtalk_workspace.
+-spec stop_class_actors(atom()) -> ok.
+stop_class_actors(ClassName) ->
+    case erlang:whereis(beamtalk_actor_registry) of
+        undefined ->
+            ok;
+        RegistryPid ->
+            Actors = gen_server:call(RegistryPid, list_actors),
+            ClassActors = [
+                maps:get(pid, Meta)
+             || Meta <- Actors, maps:get(class, Meta, undefined) =:= ClassName
+            ],
+            lists:foreach(
+                fun(Pid) ->
+                    catch gen_server:call(RegistryPid, {kill, Pid})
+                end,
+                ClassActors
+            )
     end.
