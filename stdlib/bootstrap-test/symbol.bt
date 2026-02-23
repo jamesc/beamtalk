@@ -1,3 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
 // Symbol primitive tests (BT-273)
 // Symbols are atoms — interned identifiers used as selectors and names.
 
