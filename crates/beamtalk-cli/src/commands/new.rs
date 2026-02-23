@@ -139,14 +139,110 @@ beamtalk repl
     // Create .github/copilot-instructions.md
     write_copilot_instructions(path, name)?;
 
-    // Create .mcp.json
-    let mcp_content = "{\n  \"mcpServers\": {}\n}\n";
+    // Create .mcp.json — points at beamtalk-mcp with --start so Claude auto-boots
+    // the workspace on first open without requiring `beamtalk repl` to be running.
+    let mcp_content = r#"{
+  "mcpServers": {
+    "beamtalk": {
+      "command": "beamtalk-mcp",
+      "args": ["--start"]
+    }
+  }
+}
+"#;
     fs::write(path.join(".mcp.json"), mcp_content)
         .into_diagnostic()
         .wrap_err("Failed to create .mcp.json")?;
 
     Ok(())
 }
+
+/// Static MCP and pitfalls sections appended to every generated AGENTS.md.
+/// Kept as a constant to keep `write_agents_md` under the line-count limit.
+const AGENTS_MD_MCP_AND_PITFALLS: &str = r#"## Live Workspace (MCP)
+
+The `.mcp.json` in this project configures the `beamtalk` MCP server, which gives
+you live access to a running REPL. Claude Code starts it automatically via
+`beamtalk-mcp --start` — no manual `beamtalk repl` required.
+
+**Prefer MCP tools over guessing.** If you're uncertain what a method returns or
+whether code is correct, evaluate it directly rather than inferring from source.
+
+| Tool | When to use |
+|------|-------------|
+| `evaluate` | Test expressions, explore values, prototype code snippets |
+| `load_file` | Load a `.bt` file into the workspace before evaluating it |
+| `reload_module` | Hot-reload a module after editing — migrates live actors |
+| `list_modules` | Check what's currently loaded |
+| `list_actors` | See running actors and their classes |
+| `inspect` | Examine a live actor's state by PID |
+| `run_tests` | Run BUnit tests (class name, or all) |
+| `docs` | Look up stdlib class or method docs — primary stdlib reference |
+| `info` | Get full symbol info: superclass chain, methods, source location |
+| `show_codegen` | Inspect generated Core Erlang to debug compilation |
+| `get_bindings` | See current REPL variable bindings |
+
+**Stdlib reference:** use `docs` and `info` instead of guessing. The stdlib
+source lives inside the beamtalk installation, not in this project. Ask the
+live workspace:
+- `docs: "Integer"` — all Integer methods with docs
+- `docs: "List" selector: "select:"` — specific method
+- `info: "Dictionary"` — superclass chain, method list, source path
+
+**Typical workflow:**
+1. Edit a `.bt` source file
+2. `load_file` (new module) or `reload_module` (existing) to apply changes
+3. `evaluate` to verify behaviour interactively
+4. `run_tests` to confirm correctness
+
+## Not Smalltalk — Common Pitfalls
+
+Beamtalk looks like Smalltalk but has important differences. The compiler will
+catch most of these, but they waste time:
+
+| Smalltalk habit | Beamtalk equivalent | Notes |
+|---|---|---|
+| `\| temp \|` temp var declarations | Just use `:=` directly | No declaration syntax |
+| Trailing `.` on every statement | Newline is the separator | `.` is optional; use it only to disambiguate cascades |
+| `"this is a comment"` | `// this is a comment` | Double-quoted strings are data, not comments |
+| `^value` on last expression | Just write `value` | `^` is early-return only; last expr is implicitly returned |
+| Left-to-right binary (`2+3*4=20`) | Standard math precedence (`2+3*4=14`) | `*` binds tighter than `+` |
+| `'hello', name` concatenation | `"hello {name}"` interpolation | `++` also works: `"hello" ++ name` |
+| `[:x \| \|temp\| temp := x]` block locals | `[:x \| temp := x]` | No block-local declarations |
+
+**Implicit return rule:** the last expression of a method body is always its
+return value. Never write `^` on the last line — only use it for early exits
+inside the method:
+
+```beamtalk
+// Wrong — redundant ^
+max: other =>
+  ^(self > other ifTrue: [self] ifFalse: [other])
+
+// Correct
+max: other =>
+  self > other ifTrue: [self] ifFalse: [other]
+
+// Correct use of ^ for early return
+safeDiv: other =>
+  other = 0 ifTrue: [^0].
+  self / other
+```
+
+**Binary precedence:**
+
+```beamtalk
+2 + 3 * 4      // => 14  (standard: * before +)
+2 + (3 * 4)    // => 14  (same)
+(2 + 3) * 4    // => 20  (use parens to override)
+```
+
+## Language Documentation
+
+- Language features: https://jamesc.github.io/beamtalk/docs/language-features.html
+- Syntax rationale: https://jamesc.github.io/beamtalk/docs/syntax-rationale.html
+- Examples: see `src/` directory
+"#;
 
 fn write_agents_md(path: &Utf8Path, name: &str) -> Result<()> {
     let content = format!(
@@ -201,12 +297,7 @@ Object subclass: Counter
   count => self.count
 ```
 
-## Language Documentation
-
-- Language features: https://jamesc.github.io/beamtalk/docs/language-features.html
-- Syntax rationale: https://jamesc.github.io/beamtalk/docs/syntax-rationale.html
-- Examples: see `src/` directory
-"#
+{AGENTS_MD_MCP_AND_PITFALLS}"#
     );
     fs::write(path.join("AGENTS.md"), content)
         .into_diagnostic()
@@ -242,6 +333,13 @@ beamtalk build    # Compile the project
 beamtalk repl     # Start interactive REPL
 beamtalk test     # Run tests
 ```
+
+## MCP / Live Workspace
+
+`.mcp.json` configures the `beamtalk` MCP server. In Claude Code it starts
+automatically. Use the MCP tools (`evaluate`, `load_file`, `reload_module`,
+`run_tests`, `docs`, `inspect`) to interact with a live REPL rather than
+inferring behaviour from source. See `AGENTS.md` for the full tool list.
 "
     );
     fs::write(
@@ -578,5 +676,7 @@ mod tests {
 
         let content = fs::read_to_string(mcp_path).unwrap();
         assert!(content.contains("mcpServers"));
+        assert!(content.contains("beamtalk-mcp"));
+        assert!(content.contains("--start"));
     }
 }
