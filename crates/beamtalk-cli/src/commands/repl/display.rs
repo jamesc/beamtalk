@@ -231,12 +231,16 @@ pub(crate) fn display_codegen(core_erlang: &str) {
             }
 
             // Try to receive any captured output (small timeout).
-            let output_bytes = rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap_or_default();
-
+            // Only use formatted output when receive succeeds and bytes are non-empty,
+            // to avoid printing a blank line on timeout.
             if exited {
-                if let Ok(formatted) = String::from_utf8(output_bytes) {
-                    println!("{}", color::paint(color::CYAN, &formatted));
-                    return;
+                if let Ok(output_bytes) = rx.recv_timeout(std::time::Duration::from_secs(1)) {
+                    if !output_bytes.is_empty() {
+                        if let Ok(formatted) = String::from_utf8(output_bytes) {
+                            println!("{}", color::paint(color::CYAN, &formatted));
+                            return;
+                        }
+                    }
                 }
             }
         }

@@ -137,7 +137,7 @@ handle_response(#{status := error, diagnostics := Diagnostics}) ->
     {error, Diagnostics};
 handle_response(Other) ->
     ?LOG_ERROR("Unexpected compiler response", #{response => Other}),
-    {error, [<<"Unexpected compiler response">>]}. 
+    {error, [<<"Unexpected compiler response">>]}.
 
 %% Try to pretty-print textual Core Erlang using Erlang's core parser/pretty-printer.
 %% Falls back to the original Core Erlang text on any failure.
@@ -149,7 +149,8 @@ maybe_pretty_core(CoreErlang) when is_binary(CoreErlang) ->
             case catch core_parse:parse(Tokens) of
                 {ok, CoreModule} ->
                     case catch core_pp:format(CoreModule) of
-                        {'EXIT', _} -> CoreErlang;
+                        {'EXIT', _} ->
+                            CoreErlang;
                         Formatted ->
                             %% Ensure we return a binary
                             try iolist_to_binary(Formatted) of
@@ -158,9 +159,11 @@ maybe_pretty_core(CoreErlang) when is_binary(CoreErlang) ->
                                 _:_ -> CoreErlang
                             end
                     end;
-                _ -> CoreErlang
+                _ ->
+                    CoreErlang
             end;
-        _ -> CoreErlang
+        _ ->
+            CoreErlang
     end;
 maybe_pretty_core(Other) when not is_binary(Other) -> erlang:error(badarg).
 
