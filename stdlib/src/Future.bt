@@ -96,10 +96,12 @@ sealed Object subclass: Future
 
   /// Return a developer-readable string representation.
   ///
+  /// Returns the pid representation of the underlying BEAM process.
+  ///
   /// ## Examples
   ///
   /// ```beamtalk
   /// future printString.
-  /// // => "a Future"
+  /// // => "<0.123.0>"
   /// ```
   printString -> String => @primitive "printString"

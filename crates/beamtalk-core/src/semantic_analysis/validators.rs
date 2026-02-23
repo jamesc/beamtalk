@@ -459,8 +459,8 @@ fn visit_classvar_access(
 /// only generated stdlib classes (from `lib/*.bt`) that have the `bt@stdlib@`
 /// module prefix and are actually protected at runtime.
 ///
-/// Runtime-only built-ins like `Future` are intentionally excluded because
-/// they lack the `bt@stdlib@` prefix and loading actually succeeds (BT-750).
+/// Since BT-813, `Future` and `FileHandle` are also stdlib classes with
+/// `bt@stdlib@` prefixed modules, so they trigger shadowing warnings too.
 ///
 /// This must NOT be called during stdlib compilation (`stdlib_mode = true`).
 /// Call it alongside `validate_primitives`, guarded by `!options.stdlib_mode`.
