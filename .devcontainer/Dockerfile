@@ -60,11 +60,13 @@ RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/ca
 # Install streamlinear CLI for Linear issue management (used by Copilot skill)
 RUN npm install -g streamlinear@github:obra/streamlinear --ignore-scripts
 
-# Install Sourcegraph Amp CLI
-RUN curl -fsSL https://ampcode.com/install.sh | bash \
-    && echo 'export PATH="/root/.amp/bin:/root/.local/bin:$PATH"' > /etc/profile.d/amp.sh \
+# Install Sourcegraph Amp CLI (as vscode user so it lands in the right home dir)
+USER vscode
+RUN curl -fsSL https://ampcode.com/install.sh | bash
+USER root
+RUN echo 'export PATH="/home/vscode/.amp/bin:/home/vscode/.local/bin:$PATH"' > /etc/profile.d/amp.sh \
     && chmod +x /etc/profile.d/amp.sh
-ENV PATH="/root/.amp/bin:/root/.local/bin:${PATH}"
+ENV PATH="/home/vscode/.amp/bin:/home/vscode/.local/bin:${PATH}"
 
 # Install rebar3 (pinned version for reproducible builds)
 ARG REBAR3_VERSION=3.26.0
