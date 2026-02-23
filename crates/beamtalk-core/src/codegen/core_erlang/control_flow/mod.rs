@@ -76,7 +76,7 @@ impl CoreErlangGenerator {
 
                 return Ok(docvec![
                     "let ",
-                    val_var.as_str(),
+                    val_var.clone(),
                     " = ",
                     value_code,
                     " in let ",
@@ -84,7 +84,7 @@ impl CoreErlangGenerator {
                     " = call 'maps':'put'('",
                     state_key.to_string(),
                     "', ",
-                    val_var.as_str(),
+                    val_var.clone(),
                     ", ",
                     current_state,
                     ") in ",
