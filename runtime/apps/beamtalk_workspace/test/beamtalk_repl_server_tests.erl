@@ -2218,6 +2218,23 @@ context_completions_unknown_receiver_returns_empty_test() ->
     Result = beamtalk_repl_ops_dev:get_context_completions(<<"NoSuchClass123 s">>),
     ?assertEqual([], Result).
 
+context_completions_binding_actor_no_registry_test() ->
+    %% Binding with #beamtalk_object{} but no class registry → empty (no crash)
+    Binding = #beamtalk_object{class = 'NoSuchClass123', class_mod = undefined, pid = self()},
+    Bindings = #{c => Binding},
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"c in">>, Bindings),
+    ?assertEqual([], Result).
+
+context_completions_binding_non_actor_no_completions_test() ->
+    %% Binding with a non-actor value (e.g., integer) returns no method completions
+    Bindings = #{x => 42},
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"x ">>, Bindings),
+    ?assertEqual([], Result).
+
+context_completions_with_bindings_empty_line_test() ->
+    %% Empty line with bindings returns empty
+    ?assertEqual([], beamtalk_repl_ops_dev:get_context_completions(<<>>, #{a => 1})).
+
 %%% get_symbol_info/1 tests
 
 get_symbol_info_unknown_atom_test() ->
