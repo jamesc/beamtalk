@@ -445,9 +445,12 @@ coverage-stdlib: build-stdlib
     set -euo pipefail
     echo "📊 Running stdlib tests with Erlang cover instrumentation..."
     echo "   (This is slower than normal stdlib tests due to cover overhead)"
-    STDLIB_COVER=1 cargo run --bin beamtalk --quiet -- test-stdlib --no-warnings stdlib/bootstrap-test || true
-    if [ -f runtime/_build/test/cover/stdlib.coverdata ]; then
-        SIZE=$(wc -c < runtime/_build/test/cover/stdlib.coverdata)
+    # Run from stdlib/ so @load fixture paths (e.g. test/fixtures/counter.bt) resolve correctly,
+    # matching the [working-directory: 'stdlib'] behaviour of the test-stdlib recipe.
+    cd stdlib
+    STDLIB_COVER=1 cargo run --bin beamtalk --quiet -- test-stdlib --no-warnings bootstrap-test || true
+    if [ -f ../runtime/_build/test/cover/stdlib.coverdata ]; then
+        SIZE=$(wc -c < ../runtime/_build/test/cover/stdlib.coverdata)
         echo "  📁 Coverdata: runtime/_build/test/cover/stdlib.coverdata (${SIZE} bytes)"
     else
         echo "⚠️  No stdlib coverdata produced"
