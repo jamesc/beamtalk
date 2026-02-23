@@ -244,26 +244,26 @@ handle_call({respondsTo, Selector}, _From, State) ->
     {reply, maps:is_key(Selector, Methods), State};
 ```
 
-#### Phase 2: Instance Variable Access (BT-153)
+#### Phase 2: Field Access (BT-153)
 
-```
-obj instVarNames            // => [value, name, ...]
-obj instVarAt: #value       // => current value
-obj instVarAt: #value put: 42  // => sets value, returns self
+```bt
+obj fieldNames              // => [value, name, ...]
+obj fieldAt: #value         // => current value
+obj fieldAt: #value put: 42 // => sets value, returns self
 ```
 
 **Implementation:**
 ```erlang
-handle_call({instVarNames}, _From, State) ->
+handle_call({fieldNames}, _From, State) ->
     %% Filter out internal keys
-    Names = [K || K <- maps:keys(State), 
+    Names = [K || K <- maps:keys(State),
              not lists:member(K, ['__class__', '__methods__'])],
     {reply, Names, State};
 
-handle_call({instVarAt, Name}, _From, State) ->
+handle_call({fieldAt, Name}, _From, State) ->
     {reply, maps:get(Name, State, nil), State};
 
-handle_call({instVarAt, Name, put, Value}, _From, State) ->
+handle_call({fieldAt, Name, put, Value}, _From, State) ->
     Self = build_self_from_state(State),  % Reconstruct #beamtalk_object{}
     {reply, Self, maps:put(Name, Value, State)};
 ```
@@ -307,9 +307,9 @@ This mirrors the primitive dispatch decision — start simple, optimize/expand w
 |--------|---------|-------|
 | `class` | Class symbol | 1 |
 | `respondsTo:` | Boolean | 1 |
-| `instVarNames` | Array of symbols | 2 |
-| `instVarAt:` | Field value | 2 |
-| `instVarAt:put:` | Self | 2 |
+| `fieldNames` | Array of symbols | 2 |
+| `fieldAt:` | Field value | 2 |
+| `fieldAt:put:` | Self | 2 |
 | `perform:` | Result | 3 |
 | `perform:withArgs:` | Result | 3 |
 | `methods` | Array of selectors | 4 |
@@ -929,25 +929,31 @@ has_method(Selector) ->
 |--------|-----------|-------------|----------|
 | `class` | `obj class` | Symbol | All values |
 | `respondsTo:` | `obj respondsTo: #sel` | Boolean | All values |
-| `instVarNames` | `obj instVarNames` | Array | All values (empty for primitives) |
-| `instVarAt:` | `obj instVarAt: #name` | Any | All values (nil for primitives) |
-| `instVarAt:put:` | `obj instVarAt: #name put: val` | Self | Actors only (error on primitives) |
+| `fieldNames` | `obj fieldNames` | Array | All values (empty for primitives) |
+| `fieldAt:` | `obj fieldAt: #name` | Any | All values (nil for primitives) |
+| `fieldAt:put:` | `obj fieldAt: #name put: val` | Self | Actors only (error on primitives) |
 | `perform:` | `obj perform: #sel` | Any | All values |
 | `perform:withArgs:` | `obj perform: #sel withArgs: args` | Any | All values |
 
-**Primitive reflection behavior:** Primitives return sensible defaults for read-only reflection (`instVarNames` → `[]`, `instVarAt:` → `nil`). Mutating reflection (`instVarAt:put:`) errors on primitives since they're immutable values.
+**Primitive reflection behavior:** Primitives return sensible defaults for read-only reflection (`fieldNames` → `[]`, `fieldAt:` → `nil`). Mutating reflection (`fieldAt:put:`) errors on primitives since they're immutable values.
 
 **Error messages for primitives:** When mutation is attempted on a primitive, provide helpful guidance:
 ```erlang
 %% Instead of cryptic error:
-{does_not_understand, 'Integer', 'instVarAt:put:', 2}
+{does_not_understand, 'Integer', 'fieldAt:put:', 2}
 
-%% Provide actionable message:
-{error, {immutable_primitive, 'Integer', 
-         <<"Integers are immutable values. Use assignment (x := newValue) instead of mutation.">>}}
+%% Provide actionable message (structured #beamtalk_error{}):
+#beamtalk_error{
+    kind = immutable_value,
+    class = 'Integer',
+    selector = 'fieldAt:put:',
+    message = <<"Integers are immutable values. Use assignment (x := newValue) instead of mutation.">>,
+    hint = <<"fieldAt:put: is only valid on actor objects">>,
+    details = #{}
+}
 ```
 
-**Reflection is synchronous:** All reflection methods (`class`, `respondsTo:`, `instVarNames`, `instVarAt:`, `instVarAt:put:`, `perform:`) are **synchronous** even on actors. This ensures consistent behavior for introspection and debugging. The async-first model applies to user-defined methods, not reflection.
+**Reflection is synchronous:** All reflection methods (`class`, `respondsTo:`, `fieldNames`, `fieldAt:`, `fieldAt:put:`, `perform:`) are **synchronous** even on actors. This ensures consistent behavior for introspection and debugging. The async-first model applies to user-defined methods, not reflection.
 
 **Sync vs Async Mental Model:**
 
@@ -955,9 +961,9 @@ has_method(Selector) ->
 |-----------|----------|------------|-----|
 | `class` | Local (in `#beamtalk_object{}`) | Sync | Metadata in reference |
 | `respondsTo:` | Local (check method table) | Sync | Can query module |
-| `instVarNames` | Actor process | **Async (Future)** | Needs actor state |
-| `instVarAt:` | Actor process | **Async (Future)** | Needs actor state |
-| `instVarAt:put:` | Actor process | **Async (Future)** | Modifies actor state |
+| `fieldNames` | Actor process | **Async (Future)** | Needs actor state |
+| `fieldAt:` | Actor process | **Async (Future)** | Needs actor state |
+| `fieldAt:put:` | Actor process | **Async (Future)** | Modifies actor state |
 | `perform:` | Actor process | **Async (Future)** | Delegates to actor |
 | User methods | Actor process | **Async (Future)** | Actor model |
 
@@ -966,9 +972,9 @@ has_method(Selector) ->
 **Error messages for Future confusion:** When a developer sends a message to a Future instead of awaiting:
 ```
 Error: Sent 'size' to a Future.
-  Did you mean: (counter instVarNames await) size
-  
-  instVarNames returns a Future because it queries actor state.
+  Did you mean: (counter fieldNames await) size
+
+  fieldNames returns a Future because it queries actor state.
   Use 'await' to get the value.
 ```
 
@@ -980,7 +986,7 @@ Error: Sent 'size' to a Future.
 
 2. **`generate_init`**: Add `'__class_mod__'` to initial state map
 
-3. **Add built-in reflection selectors**: Handle `class`, `respondsTo:`, `instVarNames`, etc. in dispatch before user-defined methods
+3. **Add built-in reflection selectors**: Handle `class`, `respondsTo:`, `fieldNames`, etc. in dispatch before user-defined methods
 
 4. **Update method arity**: Methods now receive `(Args, Self, State)` internally
 
@@ -1104,7 +1110,7 @@ All Beamtalk errors use a consistent structure for tooling and developer experie
 | Kind | When | Example |
 |------|------|---------|
 | `does_not_understand` | Unknown method | `42 foo` |
-| `immutable_value` | Mutation on primitive | `42 instVarAt:put:` |
+| `immutable_value` | Mutation on primitive | `42 fieldAt:put:` |
 | `arity_mismatch` | Wrong argument count | `counter at:` (missing arg) |
 | `type_error` | Wrong argument type | `"hello" + 42` |
 | `future_not_awaited` | Message sent to Future | `(counter getValue) size` |
@@ -1156,7 +1162,7 @@ call 'erlang':'error'(Error2)
     selector = 'size',
     message = <<"Sent 'size' to a Future">>,
     hint = <<"Use 'await' to get the value: (expr await) size">>,
-    details = #{original_selector => 'instVarNames'}
+    details = #{original_selector => 'fieldNames'}
 }
 
 #beamtalk_error{
@@ -1210,9 +1216,9 @@ Error: 'self' has no associated process (object not spawned?)
 2. **Reflection tests**
    - `class` returns correct class
    - `respondsTo:` returns true/false correctly
-   - `instVarNames` lists fields
-   - `instVarAt:` reads fields
-   - `instVarAt:put:` writes fields
+   - `fieldNames` lists fields
+   - `fieldAt:` reads fields
+   - `fieldAt:put:` writes fields
 
 3. **Primitive tests**
    - `42 class` returns `'Integer'`
@@ -1321,7 +1327,7 @@ gen_server:call(Pid, {increment, []})
 | **BT-157** | Codegen: Generate dispatch/4 | BT-152 | M |
 | **BT-158** | Codegen: Add __class_mod__ to state | BT-157 | S |
 | **BT-159** | Runtime: Reflection methods (class, respondsTo:) | BT-152 | S |
-| **BT-160** | Runtime: instVar reflection methods | BT-159 | S |
+| **BT-160** | Runtime: field reflection methods | BT-159 | S |
 | **BT-161** | Runtime: perform: dynamic send | BT-159 | S |
 | **BT-162** | Stdlib: Integer class methods | BT-156 | M |
 | **BT-163** | Stdlib: String class methods | BT-156 | M |
@@ -1333,7 +1339,7 @@ gen_server:call(Pid, {increment, []})
 ```
 BT-152 (dispatch/4) ──┬──> BT-157 (codegen dispatch/4) ──> BT-158 (__class_mod__)
                       │
-                      └──> BT-159 (class, respondsTo:) ──┬──> BT-160 (instVar)
+                      └──> BT-159 (class, respondsTo:) ──┬──> BT-160 (field)
                                                          │
                                                          └──> BT-161 (perform:)
                                                          │
@@ -1353,7 +1359,7 @@ BT-156 (primitive) ──┬──> BT-162 (Integer)
 | Question | Decision | Rationale |
 |----------|----------|-----------|
 | Primitive dispatch strategy | Uniform dispatch via `beamtalk_primitive:send/3` | Enables tracing, consistent model. Optimize to direct Erlang later. |
-| Reflection on primitives | Return sensible defaults (`instVarNames` → `[]`) | "Everything is an object" — uniform protocol |
+| Reflection on primitives | Return sensible defaults (`fieldNames` → `[]`) | "Everything is an object" — uniform protocol |
 | `__class_mod__` storage | Explicit — store both class and module | Avoids naming convention lock-in |
 | Method introspection | Module call now, class-as-process later | Unblocks reflection without registry complexity |
 | DNU on primitives | Yes — route to extension registry | Enables runtime extension of String, Integer, etc. |

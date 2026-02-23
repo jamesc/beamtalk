@@ -175,7 +175,7 @@ call 'erlang':'error'(Error2)
 | Kind | When | Example |
 |------|------|---------|
 | `does_not_understand` | Unknown method | `42 foo` |
-| `immutable_value` | Mutation on primitive | `42 instVarAt:put:` |
+| `immutable_value` | Mutation on primitive | `42 fieldAt:put:` |
 | `type_error` | Wrong argument type | `"hello" + 42` |
 | `arity_mismatch` | Wrong argument count | Missing/extra args |
 | `instantiation_error` | Wrong instantiation | `Actor new` (use `spawn`) |

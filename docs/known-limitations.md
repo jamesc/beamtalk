@@ -50,7 +50,7 @@ These Smalltalk reflection features cannot be implemented on the BEAM VM:
 
 ### Classes Are Not Yet First-Class Actor Objects
 
-Classes compile to Erlang modules. They are not yet actor objects that you can pass around, subclass dynamically, or introspect via the metaclass protocol. Reflection (`class`, `respondsTo:`, `instVarNames`) works, but classes don't participate in the actor model.
+Classes compile to Erlang modules. They are not yet actor objects that you can pass around, subclass dynamically, or introspect via the metaclass protocol. Reflection (`class`, `respondsTo:`, `fieldNames`) works, but classes don't participate in the actor model.
 
 ## Concurrency
 

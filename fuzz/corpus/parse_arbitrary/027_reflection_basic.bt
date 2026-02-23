@@ -20,24 +20,24 @@ c respondsTo: #increment
 c respondsTo: #nonExistent
 // => false
 
-// Test instVarNames - returns atoms (displayed as strings in E2E)
-c instVarNames
+// Test fieldNames - returns atoms (displayed as strings in E2E)
+c fieldNames
 // => ["value"]
 
-// Test instVarAt: - read field value
-c instVarAt: #value
+// Test fieldAt: - read field value
+c fieldAt: #value
 // => 0
 
 // Increment to change state
 c increment
 // => 1
 
-// Test instVarAt: after state change
-c instVarAt: #value
+// Test fieldAt: after state change
+c fieldAt: #value
 // => 1
 
-// Test instVarAt:put: - set field value
-c instVarAt: #value put: 42
+// Test fieldAt:put: - set field value
+c fieldAt: #value put: 42
 // => 42
 
 // Verify field was set
