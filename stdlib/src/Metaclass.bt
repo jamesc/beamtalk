@@ -1,0 +1,125 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Metaclass — The class of all metaclass objects in the Beamtalk system.
+///
+/// Implements the full metaclass protocol (ADR 0036). Every class Foo has
+/// a corresponding metaclass `Foo class`, which is an instance of Metaclass.
+/// Metaclass is sealed — users cannot subclass it.
+///
+/// ## Metaclass Tower
+///
+/// ```
+/// Counter class class        => Metaclass  (instance of Metaclass)
+/// Metaclass class class      => Metaclass class  (self-grounding fixed point)
+/// Counter class superclass   => Actor class      (parallel hierarchy)
+/// ```
+///
+/// ## Examples
+/// ```beamtalk
+/// 42 class class isMeta           // => true
+/// 42 class class name             // => 'Integer class'
+/// 42 class class thisClass        // => Integer
+/// Metaclass class class == Metaclass class  // => true
+/// ```
+sealed Class subclass: Metaclass
+
+  // --- Identity predicates ---
+
+  /// Test whether this is a metaclass. Always true for Metaclass instances.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 class class isMeta   // => true
+  /// ```
+  sealed isMeta => true
+
+  /// Test whether this is a Class (not a Metaclass). Always false.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 class class isClass   // => false
+  /// ```
+  sealed isClass => false
+
+  /// Test whether this is a Metaclass. Always true.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 class class isMetaclass   // => true
+  /// ```
+  sealed isMetaclass => true
+
+  // --- Metaclass protocol ---
+
+  /// Return the class that this metaclass describes.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 class class thisClass   // => Integer
+  /// ```
+  sealed thisClass => @primitive "metaclassThisClass"
+
+  /// Return the name of this metaclass (e.g. 'Integer class').
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 class class name   // => 'Integer class'
+  /// ```
+  sealed name => (self thisClass name asString) ++ " class"
+
+  /// Return a human-readable string representation of this metaclass.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 class class printString   // => 'Integer class'
+  /// ```
+  sealed printString => self name
+
+  /// Return the superclass in the parallel metaclass hierarchy.
+  ///
+  /// The superclass of Counter's metaclass is the metaclass of Counter's superclass.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter class class superclass == Actor class class   // => true
+  /// ```
+  sealed superclass => @primitive "metaclassSuperclass"
+
+  // --- Class-side method introspection ---
+
+  /// Return all class-side selectors of the described class (includes inherited).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter class class classMethods   // => [...]
+  /// ```
+  sealed classMethods => @primitive "metaclassClassMethods"
+
+  /// Return class-side selectors defined locally in the described class.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter class class localClassMethods   // => [...]
+  /// ```
+  sealed localClassMethods => @primitive "metaclassLocalClassMethods"
+
+  /// Test whether the described class defines the given class-side selector.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Integer class class classIncludesSelector: #new   // => true
+  /// ```
+  sealed classIncludesSelector: selector => @primitive "metaclassIncludesSelector"
+
+  // --- Constructor guard ---
+
+  /// Raises an error — metaclasses cannot be constructed directly.
+  ///
+  /// Use `x class class` to obtain a metaclass for a class `x`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Metaclass new   // => Error: 'Use x class class to obtain a metaclass'
+  /// ```
+  class sealed new => @primitive "metaclassNew"
