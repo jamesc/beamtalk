@@ -74,7 +74,7 @@ tungstenite = "0.26"
 tokio-tungstenite = "0.28"
 
 # Process management (ADR 0027 — Windows PID discovery)
-sysinfo = "0.32"
+sysinfo = "0.38"
 
 # Testing
 insta = { version = "1", features = ["yaml"] }
