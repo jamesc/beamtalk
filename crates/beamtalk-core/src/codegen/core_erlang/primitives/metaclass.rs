@@ -41,7 +41,7 @@ pub fn generate_metaclass_bif(selector: &str, params: &[String]) -> Option<Docum
         // Used by `class sealed new => @primitive "metaclassNew"`.
         // Generates a no-arg call; the delegating new/0 wrapper supplies no Self.
         "metaclassNew" => Some(docvec![
-            "call 'beamtalk_behaviour_intrinsics':'metaclassNew' ()"
+            "call 'beamtalk_behaviour_intrinsics':'metaclassNew'()"
         ]),
         _ => None,
     }
