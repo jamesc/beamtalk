@@ -29,9 +29,17 @@ TempClassForRemoval new greet
 // removeFromSystem — full cleanup
 // ===========================================================================
 
+// Save a reference to the class before removing it
+tempClass := TempClassForRemoval
+// => _
+
 // Remove the class
 TempClassForRemoval removeFromSystem
 // => nil
+
+// Verify it is gone from allSubclasses
+(Object allSubclasses includes: tempClass)
+// => false
 
 // ===========================================================================
 // Safety checks — stdlib class rejection
@@ -50,4 +58,4 @@ TempClassForRemoval removeFromSystem
 // ===========================================================================
 
 :unload Counter
-// => ERROR: has been removed
+// => ERROR: ':unload' has been removed. Use `removeFromSystem` instead.
