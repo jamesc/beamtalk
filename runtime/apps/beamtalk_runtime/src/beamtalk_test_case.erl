@@ -488,7 +488,12 @@ run_test_method(ClassName, Module, MethodName, FlatMethods) ->
                 error:#beamtalk_error{message = ErrMsg} ->
                     {fail, MethodName, ErrMsg};
                 error:TestReason ->
-                    FailMsg = iolist_to_binary(io_lib:format("~p", [TestReason])),
+                    FailMsg = case TestReason of
+                        {undef, {Mod, Fun, Arity}} ->
+                            iolist_to_binary(io_lib:format("Undefined function: ~p:~p/~p", [Mod, Fun, Arity]));
+                        _ ->
+                            iolist_to_binary(io_lib:format("~p", [TestReason]))
+                    end,
                     {fail, MethodName, FailMsg};
                 TestClass:TestReason:TestST ->
                     FailMsg = iolist_to_binary(
