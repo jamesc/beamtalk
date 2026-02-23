@@ -92,9 +92,10 @@ impl CoreErlangGenerator {
             // so this expect cannot fail unless there's a logic error
             let class = current_class.expect("has_parent_init implies current_class is Some");
             let parent_module = {
-                // ADR 0016: Use the same module naming logic as superclass_module_name()
-                // which handles both stdlib (bt@stdlib@*) and user (bt@*) modules
-                Self::compiled_module_name(class.superclass_name())
+                // ADR 0016 / BT-794: Use the same module naming logic as
+                // superclass_module_name() which handles stdlib (bt@stdlib@*),
+                // package (bt@{pkg}@*), and legacy (bt@*) modules
+                self.compiled_module_name(class.superclass_name())
             };
 
             // Get this class's own state fields

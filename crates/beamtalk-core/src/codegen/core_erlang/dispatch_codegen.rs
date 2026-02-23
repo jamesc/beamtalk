@@ -1087,7 +1087,7 @@ impl CoreErlangGenerator {
         class_name: &str,
         init_args: Option<&Expression>,
     ) -> Result<Document<'static>> {
-        let module_name = Self::compiled_module_name(class_name);
+        let module_name = self.compiled_module_name(class_name);
         let in_repl_context = self.lookup_var("__bindings__").is_some();
 
         let args_doc = match init_args {

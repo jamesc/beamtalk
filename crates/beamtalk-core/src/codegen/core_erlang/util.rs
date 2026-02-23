@@ -177,6 +177,30 @@ pub fn to_module_name(class_name: &str) -> String {
     crate::ast::to_module_name(class_name)
 }
 
+/// Extracts the user package prefix from a workspace-qualified module name (BT-794).
+///
+/// Given `bt@{package}@{rest}`, returns `Some("bt@{package}@")`.
+/// Returns `None` for stdlib modules (`bt@stdlib@...`), unprefixed names, or
+/// names without a package segment.
+///
+/// # Examples
+///
+/// ```ignore
+/// assert_eq!(user_package_prefix("bt@bank@account"), Some("bt@bank@".into()));
+/// assert_eq!(user_package_prefix("bt@sicp@scheme@eval"), Some("bt@sicp@".into()));
+/// assert_eq!(user_package_prefix("bt@stdlib@integer"), None);
+/// assert_eq!(user_package_prefix("counter"), None);
+/// assert_eq!(user_package_prefix("bt@counter"), None);
+/// ```
+pub(super) fn user_package_prefix(module_name: &str) -> Option<String> {
+    let rest = module_name.strip_prefix("bt@")?;
+    let (pkg, suffix) = rest.split_once('@')?;
+    if pkg == "stdlib" || suffix.is_empty() {
+        return None;
+    }
+    Some(format!("bt@{pkg}@"))
+}
+
 /// Returns true if `module_name` corresponds to the compiled form of `class_name`.
 ///
 /// ADR 0016/0026: Module names may be prefixed with `bt@` (user code),
@@ -230,5 +254,36 @@ mod tests {
     #[test]
     fn test_module_matches_class_no_match() {
         assert!(!module_matches_class("bt@other", "Counter"));
+    }
+
+    #[test]
+    fn test_user_package_prefix_package_mode() {
+        assert_eq!(
+            user_package_prefix("bt@bank@account"),
+            Some("bt@bank@".into())
+        );
+    }
+
+    #[test]
+    fn test_user_package_prefix_deep_path() {
+        assert_eq!(
+            user_package_prefix("bt@sicp@scheme@eval"),
+            Some("bt@sicp@".into())
+        );
+    }
+
+    #[test]
+    fn test_user_package_prefix_stdlib() {
+        assert_eq!(user_package_prefix("bt@stdlib@integer"), None);
+    }
+
+    #[test]
+    fn test_user_package_prefix_unprefixed() {
+        assert_eq!(user_package_prefix("counter"), None);
+    }
+
+    #[test]
+    fn test_user_package_prefix_bt_only() {
+        assert_eq!(user_package_prefix("bt@counter"), None);
     }
 }
