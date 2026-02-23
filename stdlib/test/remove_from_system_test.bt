@@ -10,6 +10,9 @@
 //   stdlib/test/fixtures/removal_test_parent.bt  — RemovalTestParent
 //   stdlib/test/fixtures/removal_test_child.bt   — RemovalTestChild (subclass of RemovalTestParent)
 
+// load test/fixtures/removal_test_parent.bt
+// load test/fixtures/removal_test_child.bt
+
 TestCase subclass: RemoveFromSystemTest
 
   testStdlibClassRejected =>

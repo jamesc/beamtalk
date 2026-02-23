@@ -37,6 +37,7 @@
 %%% | classDoc/1                  | Class doc string from class gen_server state (ADR 0033)   |
 %%% | classSetDoc/2               | Set class doc string (ADR 0033)                           |
 %%% | classSetMethodDoc/3         | Set method doc string for a selector (ADR 0033)           |
+%%% | classRemoveFromSystem/1     | Remove class and cleanup runtime state                    |
 
 -module(beamtalk_behaviour_intrinsics).
 

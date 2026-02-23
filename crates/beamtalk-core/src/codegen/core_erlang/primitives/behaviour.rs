@@ -251,6 +251,15 @@ mod tests {
     }
 
     #[test]
+    fn test_class_remove_from_system() {
+        let result = doc_to_string(generate_behaviour_bif("classRemoveFromSystem", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_behaviour_intrinsics':'classRemoveFromSystem'(Self)".to_string())
+        );
+    }
+
+    #[test]
     fn test_unknown_behaviour_selector() {
         let result = doc_to_string(generate_behaviour_bif("unknownMethod", &[]));
         assert!(result.is_none());

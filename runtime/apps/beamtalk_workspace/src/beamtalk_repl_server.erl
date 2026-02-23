@@ -368,9 +368,14 @@ handle_op(Op, Params, Msg, _SessionPid) when Op =:= <<"unload">> ->
         Err0,
         <<"':unload' has been removed. Use `removeFromSystem` instead.">>
     ),
+    HintBody =
+        case Module of
+            <<>> -> <<"MyClass removeFromSystem">>;
+            _ -> iolist_to_binary([Module, <<" removeFromSystem">>])
+        end,
     Err2 = beamtalk_error:with_hint(
         Err1,
-        iolist_to_binary([<<"Example: ">>, Module, <<" removeFromSystem">>])
+        iolist_to_binary([<<"Example: ">>, HintBody])
     ),
     beamtalk_repl_protocol:encode_error(
         Err2, Msg, fun beamtalk_repl_json:format_error_message/1
