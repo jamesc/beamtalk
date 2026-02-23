@@ -327,7 +327,10 @@ pub fn generate_module(module: &Module, options: CodegenOptions) -> Result<Strin
     generator.workspace_mode = options.workspace_mode;
 
     // Build hierarchy once for the entire generation (ADR 0006)
-    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
+    let (hierarchy_result, _) =
+        crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module);
+    let hierarchy =
+        hierarchy_result.map_err(|e| CodeGenError::Internal(format!("hierarchy: {e:?}")))?;
 
     // BT-213: Route based on whether class is actor or value type
     let doc = if CoreErlangGenerator::is_actor_class(module, &hierarchy) {

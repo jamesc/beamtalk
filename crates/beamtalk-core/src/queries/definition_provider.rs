@@ -598,7 +598,7 @@ mod tests {
     fn cross_file_class_definition() {
         let file_a = Utf8PathBuf::from("a.bt");
         let module_a = parse_source("Object subclass: Foo\n  bar => 1");
-        let hierarchy_a = ClassHierarchy::build(&module_a).0;
+        let hierarchy_a = ClassHierarchy::build(&module_a).0.unwrap();
 
         let file_b = Utf8PathBuf::from("b.bt");
         let module_b = parse_source("x := Foo new");
@@ -633,11 +633,11 @@ mod tests {
     fn cross_file_stdlib_class_with_source_loaded() {
         let file_collection = Utf8PathBuf::from("stdlib/src/Collection.bt");
         let module_collection = parse_source("abstract Object subclass: Collection");
-        let hierarchy_collection = ClassHierarchy::build(&module_collection).0;
+        let hierarchy_collection = ClassHierarchy::build(&module_collection).0.unwrap();
 
         let file_set = Utf8PathBuf::from("stdlib/src/Set.bt");
         let module_set = parse_source("sealed Collection subclass: Set");
-        let hierarchy_set = ClassHierarchy::build(&module_set).0;
+        let hierarchy_set = ClassHierarchy::build(&module_set).0.unwrap();
 
         let mut index = ProjectIndex::new();
         index.update_file(file_collection.clone(), &hierarchy_collection);
@@ -663,7 +663,7 @@ mod tests {
     fn cross_file_method_definition() {
         let file_a = Utf8PathBuf::from("a.bt");
         let module_a = parse_source("Object subclass: Foo\n  bar => 1\n  baz: x => x + 1");
-        let hierarchy_a = ClassHierarchy::build(&module_a).0;
+        let hierarchy_a = ClassHierarchy::build(&module_a).0.unwrap();
 
         let mut index = ProjectIndex::new();
         index.update_file(file_a.clone(), &hierarchy_a);
@@ -683,7 +683,7 @@ mod tests {
     fn cross_file_method_definition_not_found() {
         let file_a = Utf8PathBuf::from("a.bt");
         let module_a = parse_source("Object subclass: Foo\n  bar => 1");
-        let hierarchy_a = ClassHierarchy::build(&module_a).0;
+        let hierarchy_a = ClassHierarchy::build(&module_a).0.unwrap();
 
         let mut index = ProjectIndex::new();
         index.update_file(file_a.clone(), &hierarchy_a);
@@ -696,11 +696,11 @@ mod tests {
     fn cross_file_method_definition_across_files() {
         let file_a = Utf8PathBuf::from("a.bt");
         let module_a = parse_source("Object subclass: Foo\n  bar => 1");
-        let hierarchy_a = ClassHierarchy::build(&module_a).0;
+        let hierarchy_a = ClassHierarchy::build(&module_a).0.unwrap();
 
         let file_b = Utf8PathBuf::from("b.bt");
         let module_b = parse_source("x := Foo new\nx bar");
-        let hierarchy_b = ClassHierarchy::build(&module_b).0;
+        let hierarchy_b = ClassHierarchy::build(&module_b).0.unwrap();
 
         let mut index = ProjectIndex::new();
         index.update_file(file_a.clone(), &hierarchy_a);

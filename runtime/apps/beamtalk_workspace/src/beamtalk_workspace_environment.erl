@@ -101,7 +101,7 @@ class_info() ->
             sessions => #{arity => 0}
         },
         class_methods => #{},
-        instance_variables => []
+        fields => []
     }.
 
 %%====================================================================

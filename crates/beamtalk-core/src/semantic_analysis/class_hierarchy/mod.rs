@@ -14,6 +14,7 @@
 //! The hierarchy uses simple depth-first MRO (no multiple inheritance).
 
 use crate::ast::{ClassDefinition, MethodKind, Module, TypeAnnotation};
+use crate::semantic_analysis::SemanticError;
 use crate::source_analysis::Diagnostic;
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
@@ -123,10 +124,11 @@ impl ClassHierarchy {
 
     /// Build a class hierarchy from built-in definitions and a parsed module.
     ///
-    /// Returns the hierarchy and any diagnostics (e.g., sealed class violations).
-    /// Sealed-superclass enforcement applies to all user-defined classes.
-    #[must_use]
-    pub fn build(module: &Module) -> (Self, Vec<Diagnostic>) {
+    /// Returns `(Ok(hierarchy), diagnostics)` where diagnostics may include
+    /// errors (e.g., sealed class violations). The `Result` is always `Ok`
+    /// since hierarchy construction is infallible; the `Result` wrapper follows
+    /// the project convention for user-facing operations.
+    pub fn build(module: &Module) -> (Result<Self, SemanticError>, Vec<Diagnostic>) {
         Self::build_with_options(module, false)
     }
 
@@ -136,11 +138,16 @@ impl ClassHierarchy {
     /// permitted to subclass sealed classes. This exemption is **not** granted
     /// based on class name alone — only when the compiler knows it is compiling
     /// stdlib sources (BT-791).
-    #[must_use]
-    pub fn build_with_options(module: &Module, stdlib_mode: bool) -> (Self, Vec<Diagnostic>) {
+    ///
+    /// Returns `(Ok(hierarchy), diagnostics)` per the project convention for
+    /// user-facing operations that produce both a result and diagnostics.
+    pub fn build_with_options(
+        module: &Module,
+        stdlib_mode: bool,
+    ) -> (Result<Self, SemanticError>, Vec<Diagnostic>) {
         let mut hierarchy = Self::with_builtins();
         let diagnostics = hierarchy.add_module_classes(module, stdlib_mode);
-        (hierarchy, diagnostics)
+        (Ok(hierarchy), diagnostics)
     }
 
     /// Create a hierarchy with only built-in classes.
@@ -660,10 +667,20 @@ impl ClassHierarchy {
                 diagnostics.push(diag);
             }
 
-            // Check sealed method override enforcement
+            // Check sealed method override enforcement.
             if let Some(ref superclass) = class.superclass {
                 for method in &class.methods {
                     let selector = method.selector.name();
+                    // BT-807: Abstract stdlib classes (e.g. Behaviour) provide
+                    // class-side dispatch methods (e.g. `fieldNames`) whose
+                    // selectors coincide with sealed instance-side methods on
+                    // Object.  These are dispatched through a separate runtime
+                    // namespace (class object vs. instance receiver) so the
+                    // sealed constraint from the instance side does not apply.
+                    // Non-abstract and non-stdlib classes are always checked.
+                    if stdlib_mode && class.is_abstract {
+                        continue;
+                    }
                     if let Some((sealed_class, _)) =
                         self.find_sealed_method_in_ancestors(superclass.name.as_str(), &selector)
                     {
@@ -1024,6 +1041,7 @@ mod tests {
             leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build(&module);
+        let h = h.unwrap();
         assert!(diags.is_empty());
         assert!(h.has_class("Counter"));
 
@@ -1043,7 +1061,7 @@ mod tests {
             span: test_span(),
             leading_comments: vec![],
         };
-        let (h, _) = ClassHierarchy::build(&module);
+        let h = ClassHierarchy::build(&module).0.unwrap();
 
         let chain = h.superclass_chain("Counter");
         assert_eq!(
@@ -1065,7 +1083,7 @@ mod tests {
             span: test_span(),
             leading_comments: vec![],
         };
-        let (h, _) = ClassHierarchy::build(&module);
+        let h = ClassHierarchy::build(&module).0.unwrap();
 
         // Local method
         assert!(h.resolves_selector("Counter", "increment"));
@@ -1089,6 +1107,7 @@ mod tests {
             leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build(&module);
+        let h = h.unwrap();
 
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("sealed"));
@@ -1121,6 +1140,7 @@ mod tests {
             leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build(&module);
+        let h = h.unwrap();
         assert!(diags.is_empty());
         assert!(h.has_class("MyActor"));
     }
@@ -1138,6 +1158,7 @@ mod tests {
             leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build_with_options(&module, true);
+        let h = h.unwrap();
         assert!(
             diags.is_empty(),
             "stdlib_mode should exempt builtin class: {diags:?}"
@@ -1156,6 +1177,7 @@ mod tests {
             leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build_with_options(&module, false);
+        let h = h.unwrap();
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("sealed"));
         assert!(diags[0].message.contains("Integer"));
@@ -1283,6 +1305,7 @@ mod tests {
             leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build(&module);
+        let h = h.unwrap();
 
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("sealed method"));
@@ -1324,6 +1347,7 @@ mod tests {
             leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build(&module);
+        let h = h.unwrap();
 
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("sealed method"));
@@ -1345,6 +1369,7 @@ mod tests {
             leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build(&module);
+        let h = h.unwrap();
 
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("sealed method"));
@@ -1366,6 +1391,7 @@ mod tests {
             leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build(&module);
+        let h = h.unwrap();
 
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("sealed method"));
@@ -1386,7 +1412,7 @@ mod tests {
             span: test_span(),
             leading_comments: vec![],
         };
-        let (h, _) = ClassHierarchy::build(&module);
+        let h = ClassHierarchy::build(&module).0.unwrap();
         let methods = h.all_methods("Counter");
 
         // First method should be from Counter (most specific)
@@ -1507,6 +1533,7 @@ mod tests {
             leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build(&module);
+        let h = h.unwrap();
         assert!(diags.is_empty());
 
         // Derived should inherit from Base -> Actor -> Object -> ProtoObject
@@ -1526,6 +1553,7 @@ mod tests {
             leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build(&module);
+        let h = h.unwrap();
 
         // No diagnostic for unknown superclass (sealed check passes)
         assert!(diags.is_empty());
@@ -1708,7 +1736,7 @@ mod tests {
             span: test_span(),
             leading_comments: vec![],
         };
-        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         assert!(
             hierarchy.is_typed("StrictCounter"),
             "explicitly typed class should be typed"
@@ -1730,7 +1758,7 @@ mod tests {
             span: test_span(),
             leading_comments: vec![],
         };
-        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         assert!(hierarchy.is_typed("TypedParent"), "parent should be typed");
         assert!(
@@ -1755,7 +1783,7 @@ mod tests {
             span: test_span(),
             leading_comments: vec![],
         };
-        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         assert!(hierarchy.is_typed("TypedParent"), "parent should be typed");
         assert!(
@@ -1777,7 +1805,7 @@ mod tests {
             span: test_span(),
             leading_comments: vec![],
         };
-        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         assert!(!hierarchy.is_typed("Parent"));
         assert!(!hierarchy.is_typed("Child"));
@@ -1844,7 +1872,7 @@ mod tests {
             span: test_span(),
             leading_comments: vec![],
         };
-        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         let method = hierarchy
             .find_method("Counter", "getValue")
             .expect("Counter >> getValue should exist");
@@ -1889,7 +1917,7 @@ mod tests {
             span: test_span(),
             leading_comments: vec![],
         };
-        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         let method = hierarchy
             .find_method("Counter", "add:")
             .expect("Counter >> add: should exist");
@@ -1932,6 +1960,7 @@ mod tests {
             leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build(&module);
+        let h = h.unwrap();
         assert!(diags.is_empty());
         assert_eq!(
             h.state_field_type("Counter", "count"),
@@ -1948,7 +1977,7 @@ mod tests {
             span: test_span(),
             leading_comments: vec![],
         };
-        let (h, _) = ClassHierarchy::build(&module);
+        let h = ClassHierarchy::build(&module).0.unwrap();
         assert_eq!(h.state_field_type("Counter", "label"), None);
     }
 
@@ -1961,7 +1990,7 @@ mod tests {
             span: test_span(),
             leading_comments: vec![],
         };
-        let (h, _) = ClassHierarchy::build(&module);
+        let h = ClassHierarchy::build(&module).0.unwrap();
         assert_eq!(h.state_field_type("Counter", "nonexistent"), None);
     }
 
@@ -2000,6 +2029,7 @@ mod tests {
             leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build(&module);
+        let h = h.unwrap();
         assert!(diags.is_empty());
 
         // Child's own typed field
@@ -2053,7 +2083,7 @@ mod tests {
             span: test_span(),
             leading_comments: vec![],
         };
-        let (h, _) = ClassHierarchy::build(&module);
+        let h = ClassHierarchy::build(&module).0.unwrap();
 
         // Child's untyped `count` shadows parent's typed `count: Integer`
         assert_eq!(h.state_field_type("Child", "count"), None);

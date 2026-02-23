@@ -566,11 +566,11 @@ value_type_responds_to_object_methods_test() ->
     end.
 
 %%% ============================================================================
-%%% BT-359: instVarAt: / instVarAt:put: on value types
+%%% BT-359: fieldAt: / fieldAt:put: on value types
 %%% ============================================================================
 
 value_type_inst_var_at_put_raises_immutable_value_test() ->
-    %% instVarAt:put: on a value type should raise immutable_value
+    %% fieldAt:put: on a value type should raise immutable_value
     Self = #{'$beamtalk_class' => 'MockVtIvar', x => 42},
     create_mock_value_type_module('bt@mock_vt_ivar', 'MockVtIvar', []),
     try
@@ -580,10 +580,10 @@ value_type_inst_var_at_put_raises_immutable_value_test() ->
                 error := #beamtalk_error{
                     kind = immutable_value,
                     class = 'MockVtIvar',
-                    selector = 'instVarAt:put:'
+                    selector = 'fieldAt:put:'
                 }
             },
-            beamtalk_primitive:send(Self, 'instVarAt:put:', [x, 99])
+            beamtalk_primitive:send(Self, 'fieldAt:put:', [x, 99])
         )
     after
         code:purge('bt@mock_vt_ivar'),
@@ -591,7 +591,7 @@ value_type_inst_var_at_put_raises_immutable_value_test() ->
     end.
 
 value_type_inst_var_at_raises_immutable_value_test() ->
-    %% instVarAt: on a value type should raise immutable_value
+    %% fieldAt: on a value type should raise immutable_value
     Self = #{'$beamtalk_class' => 'MockVtIvar2', x => 42},
     create_mock_value_type_module('bt@mock_vt_ivar2', 'MockVtIvar2', []),
     try
@@ -601,10 +601,10 @@ value_type_inst_var_at_raises_immutable_value_test() ->
                 error := #beamtalk_error{
                     kind = immutable_value,
                     class = 'MockVtIvar2',
-                    selector = 'instVarAt:'
+                    selector = 'fieldAt:'
                 }
             },
-            beamtalk_primitive:send(Self, 'instVarAt:', [x])
+            beamtalk_primitive:send(Self, 'fieldAt:', [x])
         )
     after
         code:purge('bt@mock_vt_ivar2'),
@@ -659,7 +659,9 @@ print_string_nil_test() ->
     ?assertEqual(<<"nil">>, beamtalk_primitive:print_string(nil)).
 
 print_string_metaclass_test() ->
-    ?assertEqual(<<"Metaclass">>, beamtalk_primitive:print_string('Metaclass')).
+    %% ADR 0036 (BT-802): 'Metaclass' atom is no longer a sentinel with special print_string.
+    %% It prints as a Symbol (atom) with '#' prefix, like any other atom.
+    ?assertEqual(<<"#Metaclass">>, beamtalk_primitive:print_string('Metaclass')).
 
 print_string_symbol_test() ->
     ?assertEqual(<<"#hello">>, beamtalk_primitive:print_string(hello)).
@@ -722,7 +724,10 @@ print_string_catchall_test() ->
 %%% ============================================================================
 
 class_of_object_metaclass_sentinel_test() ->
-    ?assertEqual('Metaclass', beamtalk_primitive:class_of_object('Metaclass')).
+    %% ADR 0036 (BT-802): 'Metaclass' atom is no longer a sentinel.
+    %% class_of_object('Metaclass') treats it as a Symbol (atom), returning its class object.
+    Result = beamtalk_primitive:class_of_object('Metaclass'),
+    ?assertMatch({beamtalk_object, _, _, _}, Result).
 
 class_of_object_primitive_test_() ->
     {setup,
@@ -745,14 +750,17 @@ class_of_object_primitive_test_() ->
                 Result = beamtalk_primitive:class_of_object(<<"hello">>),
                 ?assertMatch({beamtalk_object, _, _, _}, Result)
             end},
-            {"class_of_object for class object returns Metaclass", fun() ->
+            {"class_of_object for class object returns real metaclass object", fun() ->
                 IntegerPid = beamtalk_class_registry:whereis_class('Integer'),
                 %% Class objects have class field ending in " class"
                 ClassObj = #beamtalk_object{
                     class = 'Integer class', class_mod = beamtalk_object_class, pid = IntegerPid
                 },
                 Result = beamtalk_primitive:class_of_object(ClassObj),
-                ?assertEqual('Metaclass', Result)
+                %% ADR 0036 (BT-802): Returns real metaclass object (not sentinel atom).
+                ?assertMatch(
+                    {beamtalk_object, 'Metaclass', beamtalk_metaclass_bt, IntegerPid}, Result
+                )
             end}
         ]}.
 

@@ -727,7 +727,7 @@ impl CoreErlangGenerator {
     /// Generates the `dispatch/3` function for a value type.
     ///
     /// This routes selectors to individual method functions, provides reflection
-    /// methods (class, respondsTo:, instVarNames, instVarAt:, instVarAt:put:,
+    /// methods (class, respondsTo:, fieldNames, fieldAt:, fieldAt:put:,
     /// perform:, perform:withArguments:), checks the extension registry for unknown
     /// selectors, and delegates to superclass dispatch/3 for inherited methods.
     /// Only raises `does_not_understand` at the hierarchy root (`ProtoObject`).
@@ -775,12 +775,11 @@ impl CoreErlangGenerator {
             }
         };
 
-        // instVarAt: error
-        let iva_hint = Self::core_erlang_binary(&format!(
-            "{class_name}s are immutable and have no instance variables."
-        ));
+        // fieldAt: error
+        let iva_hint =
+            Self::core_erlang_binary(&format!("{class_name}s are immutable and have no fields."));
 
-        // instVarAt:put: error
+        // fieldAt:put: error
         let immutable_hint = Self::core_erlang_binary(&format!(
             "{class_name}s are immutable. Use assignment (x := newValue) instead."
         ));
@@ -856,25 +855,25 @@ impl CoreErlangGenerator {
             "            end\n",
             // asString (conditional)
             as_string_branch,
-            // instVarNames
-            "        <'instVarNames'> when 'true' ->\n",
+            // fieldNames
+            "        <'fieldNames'> when 'true' ->\n",
             "            []\n",
-            // instVarAt:
-            "        <'instVarAt:'> when 'true' ->\n",
+            // fieldAt:
+            "        <'fieldAt:'> when 'true' ->\n",
             format!(
                 "            let <IvaErr0> = call 'beamtalk_error':'new'('immutable_value', '{class_name}') in\n"
             ),
-            "            let <IvaErr1> = call 'beamtalk_error':'with_selector'(IvaErr0, 'instVarAt:') in\n",
+            "            let <IvaErr1> = call 'beamtalk_error':'with_selector'(IvaErr0, 'fieldAt:') in\n",
             format!(
                 "            let <IvaErr2> = call 'beamtalk_error':'with_hint'(IvaErr1, {iva_hint}) in\n"
             ),
             "            call 'beamtalk_error':'raise'(IvaErr2)\n",
-            // instVarAt:put:
-            "        <'instVarAt:put:'> when 'true' ->\n",
+            // fieldAt:put:
+            "        <'fieldAt:put:'> when 'true' ->\n",
             format!(
                 "            let <ImmErr0> = call 'beamtalk_error':'new'('immutable_value', '{class_name}') in\n"
             ),
-            "            let <ImmErr1> = call 'beamtalk_error':'with_selector'(ImmErr0, 'instVarAt:put:') in\n",
+            "            let <ImmErr1> = call 'beamtalk_error':'with_selector'(ImmErr0, 'fieldAt:put:') in\n",
             format!(
                 "            let <ImmErr2> = call 'beamtalk_error':'with_hint'(ImmErr1, {immutable_hint}) in\n"
             ),
@@ -915,7 +914,7 @@ impl CoreErlangGenerator {
     /// from inheriting Object-level methods.
     ///
     /// For Object specifically, this generates state-aware implementations
-    /// for reflection primitives (instVarAt:, printString, etc.) that need
+    /// for reflection primitives (fieldAt:, printString, etc.) that need
     /// access to the actor's state map. For all other value types, this is
     /// a simple wrapper that delegates to dispatch/3.
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
@@ -944,13 +943,13 @@ impl CoreErlangGenerator {
     fn generate_object_dispatch_4(&self, mod_name: &str) -> Document<'static> {
         let a_space_binary = Self::core_erlang_binary("a ");
 
-        // instVarAt: arity error
-        let inst_var_at_err = self.arity_error_fragment("'instVarAt:'", 1, "                ");
-        // instVarAt:put: arity error (used twice)
+        // fieldAt: arity error
+        let inst_var_at_err = self.arity_error_fragment("'fieldAt:'", 1, "                ");
+        // fieldAt:put: arity error (used twice)
         let inst_var_at_put_err =
-            self.arity_error_fragment("'instVarAt:put:'", 2, "                    ");
+            self.arity_error_fragment("'fieldAt:put:'", 2, "                    ");
         let inst_var_at_put_err2 =
-            self.arity_error_fragment("'instVarAt:put:'", 2, "                ");
+            self.arity_error_fragment("'fieldAt:put:'", 2, "                ");
         // perform: type error
         let perf_type_err =
             self.type_error_fragment("'perform:'", "selector must be an atom", "                ");
@@ -979,11 +978,11 @@ impl CoreErlangGenerator {
             "                    {'reply', call 'beamtalk_dispatch':'responds_to'(RtSel4, RtClass4), State}\n",
             "                <_RtBadArgs> when 'true' -> {'reply', 'false', State}\n",
             "            end\n",
-            // --- instVarNames ---
-            "        <'instVarNames'> when 'true' ->\n",
+            // --- fieldNames ---
+            "        <'fieldNames'> when 'true' ->\n",
             "            {'reply', call 'beamtalk_reflection':'field_names'(State), State}\n",
-            // --- instVarAt: ---
-            "        <'instVarAt:'> when 'true' ->\n",
+            // --- fieldAt: ---
+            "        <'fieldAt:'> when 'true' ->\n",
             "            case Args of\n",
             "                <[IvaName4|_]> when 'true' ->\n",
             "                    {'reply', call 'beamtalk_reflection':'read_field'(IvaName4, State), State}\n",
@@ -991,8 +990,8 @@ impl CoreErlangGenerator {
             inst_var_at_err,
             "\n",
             "            end\n",
-            // --- instVarAt:put: ---
-            "        <'instVarAt:put:'> when 'true' ->\n",
+            // --- fieldAt:put: ---
+            "        <'fieldAt:put:'> when 'true' ->\n",
             "            case Args of\n",
             "                <[IvapName4|IvapRest4]> when 'true' ->\n",
             "                    case IvapRest4 of\n",
@@ -1145,9 +1144,9 @@ impl CoreErlangGenerator {
         let mut selectors: Vec<String> = vec![
             "'class'".to_string(),
             "'respondsTo:'".to_string(),
-            "'instVarNames'".to_string(),
-            "'instVarAt:'".to_string(),
-            "'instVarAt:put:'".to_string(),
+            "'fieldNames'".to_string(),
+            "'fieldAt:'".to_string(),
+            "'fieldAt:put:'".to_string(),
             "'perform:'".to_string(),
             "'perform:withArguments:'".to_string(),
         ];
@@ -1205,8 +1204,8 @@ impl CoreErlangGenerator {
     /// Handles `class`, `respondsTo:`, `perform:`, and `perform:withArguments:`
     /// locally, then checks extensions and delegates everything else to the
     /// superclass. `perform:` must re-dispatch through this module to preserve
-    /// extension lookup and correct error attribution. Skips instVarNames,
-    /// instVarAt:, instVarAt:put: since the superclass already handles them.
+    /// extension lookup and correct error attribution. Skips fieldNames,
+    /// fieldAt:, fieldAt:put: since the superclass already handles them.
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     fn generate_minimal_dispatch(&mut self, class: &ClassDefinition) -> Result<Document<'static>> {
         let class_name = self.class_name().clone();

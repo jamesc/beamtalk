@@ -32,8 +32,9 @@ TestCase subclass: ErlangInteropTest
     self assert: (proxy reverse: #(#a, #b, #c)) equals: #(#c, #b, #a)
 
   testClassProtocolOnErlang =>
+    // BT-802 (ADR 0036): class of a class returns a real metaclass object
     // Class-protocol selectors should NOT generate proxy maps
-    self assert: (Erlang class) equals: #Metaclass
+    self assert: (Erlang class) isMeta equals: true
 
   testProxyObjectProtocol =>
     proxy := Erlang lists.

@@ -117,13 +117,13 @@ module 'abstract_class_spawn' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handl
             'is_sealed' => 'false',
             'is_abstract' => 'true',
             'instance_methods' => ~{'area' => ~{'arity' => 0, 'is_sealed' => 'false'}~}~,
-            'instance_variables' => [],
+            'fields' => [],
             'class_methods' => ~{
                 'spawn' => ~{'arity' => 0}~,
                 'spawnWith:' => ~{'arity' => 1}~
             }~,
             'method_source' => ~{'area' => #{#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']])}#}~,
-            'class_variables' => ~{}~,
+            'class_state' => ~{}~,
             'doc' => 'none',
             'method_docs' => ~{}~
         }~
