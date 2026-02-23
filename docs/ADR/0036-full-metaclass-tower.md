@@ -1,7 +1,7 @@
 # ADR 0036: Full Metaclass Tower
 
 ## Status
-Proposed (2026-02-23)
+Accepted (2026-02-23)
 
 ## Context
 
