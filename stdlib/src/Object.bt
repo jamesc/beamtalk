@@ -133,29 +133,29 @@ ProtoObject subclass: Object
   /// ```
   sealed respondsTo: selector: Symbol -> Boolean => @intrinsic respondsTo
 
-  /// Return the names of instance variables.
+  /// Return the names of fields.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Object new instVarNames
+  /// Object new fieldNames
   /// ```
-  sealed instVarNames -> List => @intrinsic instVarNames
+  sealed fieldNames -> List => @intrinsic fieldNames
 
-  /// Return the value of the named instance variable.
+  /// Return the value of the named field.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// object instVarAt: #name
+  /// object fieldAt: #name
   /// ```
-  sealed instVarAt: name: Symbol => @intrinsic instVarAt
+  sealed fieldAt: name: Symbol => @intrinsic fieldAt
 
-  /// Set the value of the named instance variable (returns new state).
+  /// Set the value of the named field (returns new state).
   ///
   /// ## Examples
   /// ```beamtalk
-  /// object instVarAt: #name put: "Alice"
+  /// object fieldAt: #name put: "Alice"
   /// ```
-  sealed instVarAt: name: Symbol put: value => @intrinsic instVarAtPut
+  sealed fieldAt: name: Symbol put: value => @intrinsic fieldAtPut
 
   /// Send a unary message dynamically.
   ///

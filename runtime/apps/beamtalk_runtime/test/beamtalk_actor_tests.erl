@@ -772,73 +772,73 @@ respondsTo_nonexistent_method_test() ->
 
     gen_server:stop(Counter).
 
-instVarNames_test() ->
-    %% Test instVarNames returns instance variable names
+fieldNames_test() ->
+    %% Test fieldNames returns instance variable names
     application:ensure_all_started(beamtalk_runtime),
     {ok, Counter} = test_counter:start_link(42),
 
     %% Get instance variable names (should exclude $beamtalk_class, __class_mod__, __methods__)
-    Result = gen_server:call(Counter, {instVarNames, []}),
+    Result = gen_server:call(Counter, {fieldNames, []}),
 
     %% Should return [value] - the only user-defined instance variable
     ?assertEqual([value], Result),
 
     gen_server:stop(Counter).
 
-instVarAt_existing_variable_test() ->
-    %% Test instVarAt: with an existing instance variable
+fieldAt_existing_variable_test() ->
+    %% Test fieldAt: with an existing instance variable
     application:ensure_all_started(beamtalk_runtime),
     {ok, Counter} = test_counter:start_link(42),
 
     %% Read the value field
-    Result = gen_server:call(Counter, {'instVarAt:', [value]}),
+    Result = gen_server:call(Counter, {'fieldAt:', [value]}),
     ?assertEqual(42, Result),
 
     %% Modify state and read again
     gen_server:call(Counter, {'setValue:', [99]}),
-    Result2 = gen_server:call(Counter, {'instVarAt:', [value]}),
+    Result2 = gen_server:call(Counter, {'fieldAt:', [value]}),
     ?assertEqual(99, Result2),
 
     gen_server:stop(Counter).
 
-instVarAt_nonexistent_variable_test() ->
-    %% Test instVarAt: with a nonexistent instance variable (should return nil)
+fieldAt_nonexistent_variable_test() ->
+    %% Test fieldAt: with a nonexistent instance variable (should return nil)
     application:ensure_all_started(beamtalk_runtime),
     {ok, Counter} = test_counter:start_link(0),
 
     %% Read nonexistent field
-    Result = gen_server:call(Counter, {'instVarAt:', [nonExistent]}),
+    Result = gen_server:call(Counter, {'fieldAt:', [nonExistent]}),
     ?assertEqual(nil, Result),
 
     gen_server:stop(Counter).
 
-instVarAt_put_test() ->
-    %% Test instVarAt:put: to write instance variable (BT-164)
+fieldAt_put_test() ->
+    %% Test fieldAt:put: to write instance variable (BT-164)
     application:ensure_all_started(beamtalk_runtime),
     {ok, Counter} = test_counter:start_link(42),
 
     %% Read initial value
-    InitialValue = gen_server:call(Counter, {'instVarAt:', [value]}),
+    InitialValue = gen_server:call(Counter, {'fieldAt:', [value]}),
     ?assertEqual(42, InitialValue),
 
-    %% Write new value using instVarAt:put: (returns value, Smalltalk-80 semantics)
-    Result = gen_server:call(Counter, {'instVarAt:put:', [value, 99]}),
+    %% Write new value using fieldAt:put: (returns value, Smalltalk-80 semantics)
+    Result = gen_server:call(Counter, {'fieldAt:put:', [value, 99]}),
     ?assertEqual(99, Result),
 
     %% Verify the value was updated
-    NewValue = gen_server:call(Counter, {'instVarAt:', [value]}),
+    NewValue = gen_server:call(Counter, {'fieldAt:', [value]}),
     ?assertEqual(99, NewValue),
 
     %% Write a new instance variable that didn't exist
-    Result2 = gen_server:call(Counter, {'instVarAt:put:', [newField, <<"hello">>]}),
+    Result2 = gen_server:call(Counter, {'fieldAt:put:', [newField, <<"hello">>]}),
     ?assertEqual(<<"hello">>, Result2),
 
     %% Verify the new field exists
-    NewFieldValue = gen_server:call(Counter, {'instVarAt:', [newField]}),
+    NewFieldValue = gen_server:call(Counter, {'fieldAt:', [newField]}),
     ?assertEqual(<<"hello">>, NewFieldValue),
 
-    %% Verify it appears in instVarNames
-    VarNames = gen_server:call(Counter, {instVarNames, []}),
+    %% Verify it appears in fieldNames
+    VarNames = gen_server:call(Counter, {fieldNames, []}),
     ?assert(lists:member(newField, VarNames)),
 
     gen_server:stop(Counter).
@@ -849,12 +849,12 @@ reflection_combined_test() ->
     {ok, Counter} = test_counter:start_link(123),
 
     %% Discover instance variables
-    VarNames = gen_server:call(Counter, {instVarNames, []}),
+    VarNames = gen_server:call(Counter, {fieldNames, []}),
     ?assertEqual([value], VarNames),
 
     %% Read each discovered variable
     [VarName] = VarNames,
-    Value = gen_server:call(Counter, {'instVarAt:', [VarName]}),
+    Value = gen_server:call(Counter, {'fieldAt:', [VarName]}),
     ?assertEqual(123, Value),
 
     %% Check that we respond to the method we're about to call
@@ -864,7 +864,7 @@ reflection_combined_test() ->
     gen_server:call(Counter, {increment, []}),
 
     %% Read the updated value via reflection
-    NewValue = gen_server:call(Counter, {'instVarAt:', [value]}),
+    NewValue = gen_server:call(Counter, {'fieldAt:', [value]}),
     ?assertEqual(124, NewValue),
 
     gen_server:stop(Counter).
@@ -975,8 +975,8 @@ perform_recursive_dispatch_test() ->
     Result1 = gen_server:call(Counter, {'perform:withArguments:', ['respondsTo:', [increment]]}),
     ?assertEqual(true, Result1),
 
-    %% Use perform: to call instVarAt: (another built-in)
-    Result2 = gen_server:call(Counter, {'perform:withArguments:', ['instVarAt:', [value]]}),
+    %% Use perform: to call fieldAt: (another built-in)
+    Result2 = gen_server:call(Counter, {'perform:withArguments:', ['fieldAt:', [value]]}),
     ?assertEqual(50, Result2),
 
     gen_server:stop(Counter).
