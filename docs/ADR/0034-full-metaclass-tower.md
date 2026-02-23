@@ -43,13 +43,13 @@ ADR 0032 established the `Behaviour`/`Class` chain and removed the flattened tab
 
 - **No new process per metaclass**: Metaclasses are represented as `#beamtalk_object{}` structs backed by the same class gen_server as their associated class. One class process handles both class-side and metaclass-side dispatch (the virtual tag trick from ADR 0013 continues).
 - **Sealed at v0.1**: `Metaclass` is sealed — users cannot subclass it. Per-metaclass instance variables are not supported in this ADR.
-- **`sealed` allows stdlib-internal subclassing**: `Class.bt` is declared `sealed`, preventing user subclassing. However, `sealed` only restricts user code — stdlib-internal classes like `Metaclass` may subclass sealed classes. This is enforced by the compiler checking whether the subclass definition is in stdlib source (`stdlib/src/`). If the compiler does not yet support this distinction, `Class` must be unsealed as a prerequisite.
-- **Bootstrap ordering**: `Metaclass` must be registered after `Class` in the bootstrap chain. Self-grounding (`Metaclass class class == Metaclass`) requires correct dispatch routing (see Section 5).
+- **`sealed` allows stdlib-internal subclassing**: `Class.bt` is declared `sealed`, preventing user subclassing. However, `sealed` already only restricts user code — `check_sealed_superclass` in the semantic analyser explicitly exempts classes recognised by `is_runtime_protected_class` (all stdlib `.bt` sources registered in `generated_builtins.rs`). Once `Metaclass.bt` is added to `stdlib/src/` and `build-stdlib` regenerates `generated_builtins.rs`, `Metaclass` will be exempt automatically. No prerequisite unsealing of `Class` is required.
+- **Bootstrap ordering**: `Metaclass` must be registered after `Class` in the bootstrap chain. Self-grounding (`Metaclass class class == Metaclass class`) requires correct dispatch routing (see Section 5).
 - **Breaking**: `metaclass_test.bt` sentinel assertions (`equals: #Metaclass`) must become class object assertions.
 
 ## Decision
 
-Introduce `Metaclass` as a real sealed Beamtalk stdlib class, subclass of `Class`. Each class object's metaclass is a real `#beamtalk_object{}` that responds to the full `Behaviour` protocol plus metaclass-specific methods. The metaclass tower self-grounds: `Metaclass class class == Metaclass`.
+Introduce `Metaclass` as a real sealed Beamtalk stdlib class, subclass of `Class`. Each class object's metaclass is a real `#beamtalk_object{}` that responds to the full `Behaviour` protocol plus metaclass-specific methods. The metaclass tower self-grounds: `Metaclass class class == Metaclass class`.
 
 ### 1. New `Metaclass.bt` Stdlib Class
 
@@ -121,8 +121,8 @@ sealed Class subclass: Metaclass
 >> Object class superclass == ProtoObject class
 => true
 
-// Self-grounding: the tower terminates cleanly
->> Metaclass class class == Metaclass
+// Self-grounding: the tower terminates in a fixed point
+>> Metaclass class class == Metaclass class
 => true
 
 >> Metaclass class name
@@ -158,7 +158,7 @@ Counter class superclass  ==  Actor class         (✓ already held via virtual 
 Actor class superclass    ==  Object class         (✓)
 Object class superclass   ==  ProtoObject class    (✓)
 ProtoObject class super   ==  Class               (new — terminal of parallel chain)
-Metaclass class class     ==  Metaclass            (new — self-grounding)
+Metaclass class class     ==  Metaclass class      (new — self-grounding fixed point)
 ```
 
 The terminal: `ProtoObject class superclass` returns `Class` (the instance-side `Class`), which is the root of the metaclass protocol chain. This matches Smalltalk-80 and Pharo exactly.
@@ -183,7 +183,7 @@ classClass(Self) ->
 
 The metaclass object wraps the *same* class pid but dispatches through the `'Metaclass'` class chain. No new gen_server process.
 
-**Self-grounding**: When `classClass/1` is called on an object already tagged with `class = 'Metaclass'` (i.e., `Metaclass class class`), the function returns a *new* `#beamtalk_object{}` with `class = 'Metaclass'` and the same pid. Meanwhile, `Metaclass` as a class reference evaluates to `#beamtalk_object{class = 'Metaclass class', pid = MetaclassPid}`. The self-grounding invariant `Metaclass class class == Metaclass` holds because Beamtalk's `==` on `#beamtalk_object{}` compares by **pid identity**, not by struct equality — two references to the same process are equal regardless of their class tags. This matches Smalltalk object identity semantics.
+**Self-grounding**: When `classClass/1` is called on an object already tagged with `class = 'Metaclass'` (i.e., `Metaclass class class`), it extracts the pid and returns a *new* `#beamtalk_object{class = 'Metaclass', pid = Pid}` — structurally identical to the input. Beamtalk's `==` compiles to Erlang's structural `==` (`call 'erlang':'=='(L, R)`), so `Metaclass class class == Metaclass class` holds because both produce `#beamtalk_object{class = 'Metaclass', pid = MetaclassPid}` with the same three fields. Note: `Metaclass class class == Metaclass` is **false** — `Metaclass` as a class reference has tag `'Metaclass class'` (different `class` field).
 
 #### New primitives backing `Metaclass.bt`
 
@@ -305,24 +305,24 @@ register_class() ->
 
 ### 6. Self-Grounding Mechanism
 
-The self-grounding invariant (`Metaclass class class == Metaclass`) works automatically through the virtual tag approach — **no two-phase back-patch is required**. Here's the trace:
+The self-grounding invariant (`Metaclass class class == Metaclass class`) works automatically through the virtual tag approach — **no two-phase back-patch is required**. Here's the trace:
 
 1. `Metaclass` (class reference) → `#beamtalk_object{class = 'Metaclass class', pid = MetaclassPid}`
-2. `Metaclass class` → `classClass/1` returns `#beamtalk_object{class = 'Metaclass', pid = MetaclassPid}` (same pid, different tag)
-3. `Metaclass class class` → `classClass/1` is called again, returns `#beamtalk_object{class = 'Metaclass', pid = MetaclassPid}` (same pid again)
+2. `Metaclass class` → `classClass/1` extracts pid, returns `#beamtalk_object{class = 'Metaclass', pid = MetaclassPid}`
+3. `Metaclass class class` → `classClass/1` is called again on `{class='Metaclass',...}`, extracts same pid, returns `#beamtalk_object{class = 'Metaclass', pid = MetaclassPid}`
 
-`Metaclass class class == Metaclass` evaluates to `true` because Beamtalk's `==` on `#beamtalk_object{}` compares by **pid identity** — both sides reference the same `MetaclassPid`. The different class tags (`'Metaclass'` vs `'Metaclass class'`) do not affect equality.
+Steps 2 and 3 produce **structurally identical** records. Beamtalk's `==` compiles to Erlang `==` (structural equality — `call 'erlang':'=='(L, R)`), so `Metaclass class class == Metaclass class` is `true`. `classClass/1` is **idempotent** on `'Metaclass'`-tagged objects: calling it twice in a row produces the same struct.
 
-**No bootstrap circularity**: Unlike Smalltalk-80 where metaclass objects are heap-allocated and require back-patching, Beamtalk's virtual metaclasses are just re-tagged references to the same gen_server. `classClass/1` is a pure function that stamps `class = 'Metaclass'` on any class object — no state to back-patch.
+**`Metaclass class class == Metaclass` is false**: The left side has `class = 'Metaclass'`; `Metaclass` as a class reference has `class = 'Metaclass class'`. Structural equality detects the difference. The correct invariant is the fixed point `Metaclass class class == Metaclass class`, matching Pharo/Squeak exactly.
+
+**No bootstrap circularity**: Unlike Smalltalk-80 where metaclass objects are heap-allocated and require back-patching, Beamtalk's virtual metaclasses are just re-tagged references to the same gen_server. `classClass/1` is a pure function — no state to back-patch.
 
 **Post-bootstrap assertion** (validates the invariant is working):
 
 ```erlang
 %% post_bootstrap_assertions/0 in beamtalk_runtime_app.erl
-true = (beamtalk_eval("Metaclass class class == Metaclass") =:= true).
+true = (beamtalk_eval("Metaclass class class == Metaclass class") =:= true).
 ```
-
-**Note**: This assertion depends on `==` using pid-based identity for `#beamtalk_object{}`. If the `==` implementation changes to structural comparison, the self-grounding mechanism must be revisited.
 
 ### 7. Bootstrap Order Extension
 
@@ -501,7 +501,7 @@ Allow `Counter class addInstVarNamed: 'cache'` to add dynamic per-class state on
 ### Positive
 
 - `Counter class class` returns a real, message-receiving `Metaclass` object. All Beamtalk tooling (LSP, REPL, reflection) works uniformly.
-- The parallel hierarchy invariant (`Foo class superclass == Foo superclass class`) is algebraically correct at every level, including `Metaclass class class == Metaclass`.
+- The parallel hierarchy invariant (`Foo class superclass == Foo superclass class`) is algebraically correct at every level. The tower terminates at the self-grounding fixed point: `Metaclass class class == Metaclass class`.
 - `isMeta` cleanly distinguishes class objects from metaclass objects in reflective code.
 - `thisClass` enables navigation from metaclass back to the described class — required for framework authors.
 - Zero new gen_server processes. The process tree and supervision topology are unchanged.
