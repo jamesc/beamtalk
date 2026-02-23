@@ -355,33 +355,6 @@ pub(crate) fn generate_test_case_bif(
     params: &[String],
 ) -> Option<Document<'static>> {
     match selector {
-        "assert:" => {
-            let p0 = params.first().map_or("_Condition", String::as_str);
-            Some(docvec![
-                "call 'beamtalk_test_case':'assert'(",
-                p0.to_string(),
-                ")"
-            ])
-        }
-        "assert:equals:" => {
-            let p0 = params.first().map_or("_Actual", String::as_str);
-            let p1 = params.get(1).map_or("_Expected", String::as_str);
-            Some(docvec![
-                "call 'beamtalk_test_case':'assert_equals'(",
-                p1.to_string(),
-                ", ",
-                p0.to_string(),
-                ")",
-            ])
-        }
-        "deny:" => {
-            let p0 = params.first().map_or("_Condition", String::as_str);
-            Some(docvec![
-                "call 'beamtalk_test_case':'deny'(",
-                p0.to_string(),
-                ")"
-            ])
-        }
         "should:raise:" => {
             let p0 = params.first().map_or("_Block", String::as_str);
             let p1 = params.get(1).map_or("_ErrorKind", String::as_str);
