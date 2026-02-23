@@ -1,0 +1,28 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: AtExpect, span: Span { start: 243, end: 250 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test @expect directive parsing — BT-782"), Whitespace("\n"), LineComment("// Verifies that @expect produces ExpectDirective AST nodes"), Whitespace("\n\n"), LineComment("// @expect dnu — suppress a DNU hint on the following expression"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("dnu"), span: Span { start: 251, end: 254 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Integer("42"), span: Span { start: 255, end: 257 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("unknownMessage"), span: Span { start: 258, end: 272 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: AtExpect, span: Span { start: 326, end: 333 }, leading_trivia: [Whitespace("\n\n"), LineComment("// @expect type — suppress type mismatch warnings"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("type"), span: Span { start: 334, end: 338 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Integer("42"), span: Span { start: 339, end: 341 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("+"), span: Span { start: 342, end: 343 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("hello"), span: Span { start: 344, end: 351 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: AtExpect, span: Span { start: 409, end: 416 }, leading_trivia: [Whitespace("\n\n"), LineComment("// @expect unused — suppress unused variable warnings"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("unused"), span: Span { start: 417, end: 423 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("tempVar"), span: Span { start: 424, end: 431 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 432, end: 434 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("99"), span: Span { start: 435, end: 437 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: AtExpect, span: Span { start: 482, end: 489 }, leading_trivia: [Whitespace("\n\n"), LineComment("// @expect all — suppress any diagnostic"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("all"), span: Span { start: 490, end: 493 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("someUndefinedMethod"), span: Span { start: 494, end: 513 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
+Token { kind: AtExpect, span: Span { start: 587, end: 594 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Multiple consecutive @expect directives stack on the same expression"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("dnu"), span: Span { start: 595, end: 598 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: AtExpect, span: Span { start: 599, end: 606 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("type"), span: Span { start: 607, end: 611 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Integer("42"), span: Span { start: 612, end: 614 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("unknownMessage"), span: Span { start: 615, end: 629 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 630, end: 630 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

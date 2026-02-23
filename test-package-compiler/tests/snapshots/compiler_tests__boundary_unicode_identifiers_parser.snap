@@ -81,5 +81,5 @@ Module {
 }
 
 Diagnostics:
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found <error: é>", span: Span { start: 326, end: 328 }, hint: None }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 326, end: 328 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found <error: é>", span: Span { start: 326, end: 328 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 326, end: 328 }, hint: None, category: None }

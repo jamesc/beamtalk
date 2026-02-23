@@ -1,0 +1,199 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [],
+    method_definitions: [],
+    expressions: [
+        ExpectDirective {
+            category: Dnu,
+            span: Span {
+                start: 243,
+                end: 254,
+            },
+        },
+        MessageSend {
+            receiver: Literal(
+                Integer(
+                    42,
+                ),
+                Span {
+                    start: 255,
+                    end: 257,
+                },
+            ),
+            selector: Unary(
+                "unknownMessage",
+            ),
+            arguments: [],
+            span: Span {
+                start: 255,
+                end: 272,
+            },
+        },
+        ExpectDirective {
+            category: Type,
+            span: Span {
+                start: 326,
+                end: 338,
+            },
+        },
+        MessageSend {
+            receiver: Literal(
+                Integer(
+                    42,
+                ),
+                Span {
+                    start: 339,
+                    end: 341,
+                },
+            ),
+            selector: Binary(
+                "+",
+            ),
+            arguments: [
+                Literal(
+                    String(
+                        "hello",
+                    ),
+                    Span {
+                        start: 344,
+                        end: 351,
+                    },
+                ),
+            ],
+            span: Span {
+                start: 339,
+                end: 351,
+            },
+        },
+        ExpectDirective {
+            category: Unused,
+            span: Span {
+                start: 409,
+                end: 423,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "tempVar",
+                    span: Span {
+                        start: 424,
+                        end: 431,
+                    },
+                },
+            ),
+            value: Literal(
+                Integer(
+                    99,
+                ),
+                Span {
+                    start: 435,
+                    end: 437,
+                },
+            ),
+            span: Span {
+                start: 424,
+                end: 437,
+            },
+        },
+        ExpectDirective {
+            category: All,
+            span: Span {
+                start: 482,
+                end: 493,
+            },
+        },
+        Identifier(
+            Identifier {
+                name: "someUndefinedMethod",
+                span: Span {
+                    start: 494,
+                    end: 513,
+                },
+            },
+        ),
+        ExpectDirective {
+            category: Dnu,
+            span: Span {
+                start: 587,
+                end: 598,
+            },
+        },
+        ExpectDirective {
+            category: Type,
+            span: Span {
+                start: 599,
+                end: 611,
+            },
+        },
+        MessageSend {
+            receiver: Literal(
+                Integer(
+                    42,
+                ),
+                Span {
+                    start: 612,
+                    end: 614,
+                },
+            ),
+            selector: Unary(
+                "unknownMessage",
+            ),
+            arguments: [],
+            span: Span {
+                start: 612,
+                end: 629,
+            },
+        },
+    ],
+    span: Span {
+        start: 243,
+        end: 629,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 243,
+                end: 250,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 243,
+                end: 250,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test @expect directive parsing — BT-782",
+            span: Span {
+                start: 243,
+                end: 250,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Verifies that @expect produces ExpectDirective AST nodes",
+            span: Span {
+                start: 243,
+                end: 250,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// @expect dnu — suppress a DNU hint on the following expression",
+            span: Span {
+                start: 243,
+                end: 250,
+            },
+            kind: Line,
+        },
+    ],
+}

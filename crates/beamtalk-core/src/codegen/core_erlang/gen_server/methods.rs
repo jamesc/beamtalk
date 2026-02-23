@@ -156,8 +156,14 @@ impl CoreErlangGenerator {
         let mut docs: Vec<Document<'static>> = Vec::new();
 
         // Generate all expressions except the last with state threading
-        for (i, expr) in method.body.iter().enumerate() {
-            let is_last = i == method.body.len() - 1;
+        // Filter out @expect directives — they are compile-time only and generate no code.
+        let body: Vec<&Expression> = method
+            .body
+            .iter()
+            .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
+            .collect();
+        for (i, expr) in body.iter().enumerate() {
+            let is_last = i == body.len() - 1;
             let is_field_assignment = Self::is_field_assignment(expr);
             let is_local_assignment = Self::is_local_var_assignment(expr);
 
@@ -364,8 +370,14 @@ impl CoreErlangGenerator {
         let mut docs: Vec<Document<'static>> = Vec::new();
 
         // Generate all expressions except the last with state threading
-        for (i, expr) in block.body.iter().enumerate() {
-            let is_last = i == block.body.len() - 1;
+        // Filter out @expect directives — they are compile-time only and generate no code.
+        let body: Vec<&Expression> = block
+            .body
+            .iter()
+            .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
+            .collect();
+        for (i, expr) in body.iter().enumerate() {
+            let is_last = i == body.len() - 1;
             let is_field_assignment = Self::is_field_assignment(expr);
             let is_local_assignment = Self::is_local_var_assignment(expr);
 
@@ -1077,6 +1089,7 @@ impl CoreErlangGenerator {
     /// They simply evaluate expressions and return the last value.
     /// BT-412: If class variables were mutated, wraps the final result
     /// in `{class_var_result, Result, ClassVarsN}`.
+    #[allow(clippy::too_many_lines)]
     fn generate_class_method_body(
         &mut self,
         method: &MethodDefinition,
@@ -1086,8 +1099,14 @@ impl CoreErlangGenerator {
 
         let mut docs: Vec<Document<'static>> = Vec::new();
 
-        for (i, expr) in method.body.iter().enumerate() {
-            let is_last = i == method.body.len() - 1;
+        // Filter out @expect directives (compile-time only, no runtime representation).
+        let body: Vec<&Expression> = method
+            .body
+            .iter()
+            .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
+            .collect();
+        for (i, expr) in body.iter().enumerate() {
+            let is_last = i == body.len() - 1;
 
             if let Expression::Return { value, .. } = expr {
                 if has_class_vars {

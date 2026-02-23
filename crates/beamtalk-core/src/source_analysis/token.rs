@@ -129,6 +129,8 @@ pub enum TokenKind {
     AtPrimitive,
     /// The `@intrinsic` directive, synonym for `@primitive` (ADR 0007 Amendment)
     AtIntrinsic,
+    /// The `@expect` directive for suppressing specific diagnostic categories
+    AtExpect,
 
     // === Special ===
     /// End of file
@@ -230,6 +232,7 @@ impl TokenKind {
             | Self::FatArrow
             | Self::AtPrimitive
             | Self::AtIntrinsic
+            | Self::AtExpect
             | Self::Eof => None,
         }
     }
@@ -271,6 +274,7 @@ impl std::fmt::Display for TokenKind {
             Self::FatArrow => write!(f, "=>"),
             Self::AtPrimitive => write!(f, "@primitive"),
             Self::AtIntrinsic => write!(f, "@intrinsic"),
+            Self::AtExpect => write!(f, "@expect"),
             Self::Eof => write!(f, "<eof>"),
         }
     }

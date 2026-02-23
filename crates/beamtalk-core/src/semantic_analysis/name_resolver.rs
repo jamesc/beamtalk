@@ -17,7 +17,7 @@
 
 use crate::ast::{Block, ClassDefinition, Expression, MatchArm, MethodDefinition, Module};
 use crate::semantic_analysis::scope::{BindingKind, Scope};
-use crate::source_analysis::{Diagnostic, Span};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
 /// Name resolution domain service.
 ///
@@ -274,7 +274,11 @@ impl NameResolver {
                 }
             }
 
-            Literal(..) | Error { .. } | ClassReference { .. } | Primitive { .. } => {
+            Literal(..)
+            | Error { .. }
+            | ClassReference { .. }
+            | Primitive { .. }
+            | ExpectDirective { .. } => {
                 // No name resolution needed
             }
 
@@ -411,7 +415,8 @@ impl NameResolver {
             .map(|b| (b.name.clone(), b.defined_at))
             .collect();
         for (name, span) in unused {
-            let mut diag = Diagnostic::warning(format!("Unused variable `{name}`"), span);
+            let mut diag = Diagnostic::warning(format!("Unused variable `{name}`"), span)
+                .with_category(DiagnosticCategory::Unused);
             diag.hint =
                 Some(format!("If this is intentional, prefix with underscore: _{name}").into());
             self.diagnostics.push(diag);

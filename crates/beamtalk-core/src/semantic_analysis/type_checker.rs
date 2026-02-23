@@ -21,7 +21,7 @@
 use crate::ast::{Expression, Literal, MessageSelector, Module, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::string_utils::edit_distance;
-use crate::source_analysis::{Diagnostic, Span};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 use std::collections::HashMap;
 
@@ -250,7 +250,9 @@ impl TypeChecker {
             }
 
             // Primitives and errors — no type info available
-            Expression::Primitive { .. } | Expression::Error { .. } => InferredType::Dynamic,
+            Expression::Primitive { .. }
+            | Expression::Error { .. }
+            | Expression::ExpectDirective { .. } => InferredType::Dynamic,
 
             // Message sends — the core of type checking
             Expression::MessageSend {
@@ -696,7 +698,8 @@ impl TypeChecker {
                         "Argument {param_pos} of '{selector}' on {class_name} expects {expected_ty}, got {actual_ty}"
                     ),
                     span,
-                );
+                )
+                .with_category(DiagnosticCategory::Type);
                 diag.hint =
                     Some(format!("Expected {expected_ty} (or a subclass), got {actual_ty}").into());
                 self.diagnostics.push(diag);
@@ -740,7 +743,8 @@ impl TypeChecker {
                     "Method '{selector}' in {class_name} declares return type {expected_ty}, but body returns {actual_ty}"
                 ),
                 method.span,
-            );
+            )
+            .with_category(DiagnosticCategory::Type);
             diag.hint = Some(
                 format!("Declared -> {expected_ty}, inferred body type is {actual_ty}").into(),
             );
@@ -821,7 +825,8 @@ impl TypeChecker {
             let mut diag = Diagnostic::warning(
                 format!("`{operator}` on {receiver_ty} expects a numeric argument, got {arg_ty}"),
                 span,
-            );
+            )
+            .with_category(DiagnosticCategory::Type);
             diag.hint = Some("Arithmetic operators require Integer or Float operands".into());
             self.diagnostics.push(diag);
             return;
@@ -836,7 +841,8 @@ impl TypeChecker {
             let mut diag = Diagnostic::warning(
                 format!("`++` on String expects a String argument, got {arg_ty}"),
                 span,
-            );
+            )
+            .with_category(DiagnosticCategory::Type);
             diag.hint = Some("Convert the argument to String first".into());
             self.diagnostics.push(diag);
             return;
@@ -847,7 +853,8 @@ impl TypeChecker {
             let mut diag = Diagnostic::warning(
                 format!("`{operator}` on {receiver_ty} expects a numeric argument, got {arg_ty}"),
                 span,
-            );
+            )
+            .with_category(DiagnosticCategory::Type);
             diag.hint = Some("Comparison operators require compatible types".into());
             self.diagnostics.push(diag);
         }
@@ -970,7 +977,7 @@ impl TypeChecker {
         let message: EcoString =
             format!("{class_name}{side} does not understand '{selector}'").into();
 
-        let mut diag = Diagnostic::hint(message, span);
+        let mut diag = Diagnostic::hint(message, span).with_category(DiagnosticCategory::Dnu);
 
         // Try to suggest similar selectors
         if let Some(suggestion) =

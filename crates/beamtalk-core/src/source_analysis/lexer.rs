@@ -869,14 +869,17 @@ impl<'src> Lexer<'src> {
             if ident == "intrinsic" {
                 return TokenKind::AtIntrinsic;
             }
+            if ident == "expect" {
+                return TokenKind::AtExpect;
+            }
             let text = self.text_for(self.span_from(start));
             return TokenKind::Error(EcoString::from(format!(
-                "unknown directive '{text}', only '@primitive' and '@intrinsic' are supported"
+                "unknown directive '{text}', only '@primitive', '@intrinsic', and '@expect' are supported"
             )));
         }
 
         TokenKind::Error(EcoString::from(
-            "expected directive name after '@', only '@primitive' and '@intrinsic' are supported",
+            "expected directive name after '@', only '@primitive', '@intrinsic', and '@expect' are supported",
         ))
     }
 
@@ -1733,6 +1736,27 @@ mod tests {
         assert_eq!(
             lex_kinds("@intrinsic \"size\""),
             vec![TokenKind::AtIntrinsic, TokenKind::String("size".into())]
+        );
+    }
+
+    #[test]
+    fn lex_at_expect() {
+        assert_eq!(lex_kinds("@expect"), vec![TokenKind::AtExpect]);
+    }
+
+    #[test]
+    fn lex_at_expect_followed_by_identifier() {
+        assert_eq!(
+            lex_kinds("@expect dnu"),
+            vec![TokenKind::AtExpect, TokenKind::Identifier("dnu".into())]
+        );
+    }
+
+    #[test]
+    fn lex_at_expect_followed_by_all_category() {
+        assert_eq!(
+            lex_kinds("@expect all"),
+            vec![TokenKind::AtExpect, TokenKind::Identifier("all".into())]
         );
     }
 

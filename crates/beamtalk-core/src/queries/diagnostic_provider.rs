@@ -27,9 +27,9 @@
 //! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
 //! - LSP specification: Language Server Protocol publishDiagnostics notification
 
-use crate::ast::Module;
+use crate::ast::{ExpectCategory, Expression, Module};
 use crate::semantic_analysis;
-use crate::source_analysis::Diagnostic;
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
 /// Computes diagnostics for a module.
 ///
@@ -78,7 +78,107 @@ pub fn compute_diagnostics_with_known_vars(
     let analysis_result = semantic_analysis::analyse_with_known_vars(module, known_vars);
     all_diagnostics.extend(analysis_result.diagnostics);
 
+    apply_expect_directives(module, &mut all_diagnostics);
+
     all_diagnostics
+}
+
+/// Applies `@expect` directives to suppress matching diagnostics.
+///
+/// For each `@expect category` directive in the module, any diagnostic
+/// whose span is contained within the *following* expression's span and
+/// whose category matches is removed from `diagnostics`. If no matching
+/// diagnostic is found, the directive itself becomes an error ("stale @expect").
+///
+/// This is called by both the language service (LSP/diagnostic provider) and
+/// the CLI compiler after all diagnostics have been collected.
+pub fn apply_expect_directives(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+    let mut directives: Vec<(ExpectCategory, Span, Span)> = Vec::new(); // (cat, directive_span, target_span)
+
+    collect_directives_from_exprs(&module.expressions, &mut directives);
+    for class in &module.classes {
+        for method in class.methods.iter().chain(class.class_methods.iter()) {
+            collect_directives_from_exprs(&method.body, &mut directives);
+        }
+    }
+    for standalone in &module.method_definitions {
+        collect_directives_from_exprs(&standalone.method.body, &mut directives);
+    }
+
+    if directives.is_empty() {
+        return;
+    }
+
+    let mut suppressed_indices: Vec<usize> = Vec::new();
+    let mut stale_directives: Vec<(ExpectCategory, Span)> = Vec::new();
+
+    for (cat, directive_span, target_span) in &directives {
+        let mut matched = false;
+        for (i, diag) in diagnostics.iter().enumerate() {
+            if target_span.contains(diag.span) && category_matches(*cat, diag.category) {
+                suppressed_indices.push(i);
+                matched = true;
+            }
+        }
+        if !matched {
+            stale_directives.push((*cat, *directive_span));
+        }
+    }
+
+    // Remove suppressed diagnostics (in reverse order to preserve indices)
+    suppressed_indices.sort_unstable();
+    suppressed_indices.dedup();
+    for i in suppressed_indices.into_iter().rev() {
+        diagnostics.remove(i);
+    }
+
+    // Emit errors for stale directives
+    for (cat, span) in stale_directives {
+        diagnostics.push(Diagnostic::error(
+            format!(
+                "stale @expect {}: no matching diagnostic found on the following expression",
+                cat.as_str()
+            ),
+            span,
+        ));
+    }
+}
+
+/// Returns true if the `@expect` category matches a diagnostic category.
+fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCategory>) -> bool {
+    expect_cat == ExpectCategory::All
+        || matches!(
+            (expect_cat, diag_cat),
+            (ExpectCategory::Dnu, Some(DiagnosticCategory::Dnu))
+                | (ExpectCategory::Type, Some(DiagnosticCategory::Type))
+                | (ExpectCategory::Unused, Some(DiagnosticCategory::Unused))
+                | (
+                    ExpectCategory::EmptyBody,
+                    Some(DiagnosticCategory::EmptyBody)
+                )
+        )
+}
+
+/// Collects `@expect` directives from an expression list.
+///
+/// For each `ExpectDirective` at index `i`, the target span is the span of
+/// the expression at index `i + 1` (if present).
+fn collect_directives_from_exprs(
+    exprs: &[Expression],
+    directives: &mut Vec<(ExpectCategory, Span, Span)>,
+) {
+    for (i, expr) in exprs.iter().enumerate() {
+        if let Expression::ExpectDirective { category, span } = expr {
+            if let Some(next) = exprs.get(i + 1) {
+                directives.push((*category, *span, next.span()));
+            } else {
+                // Trailing @expect with no following expression — treat as stale.
+                // Use the directive's own span as the target span so it will
+                // never match any real diagnostic and will always be reported stale.
+                directives.push((*category, *span, *span));
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -551,6 +651,76 @@ mod tests {
         assert!(
             warning.unwrap().hint.is_some(),
             "Warning should have a hint"
+        );
+    }
+
+    // ── BT-782: @expect directive ──
+
+    #[test]
+    fn expect_dnu_suppresses_dnu_hint() {
+        // @expect dnu before a message send that has a DNU hint
+        let source = "@expect dnu\n42 foo";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let dnu = diagnostics
+            .iter()
+            .any(|d| d.message.contains("does not understand"));
+        assert!(
+            !dnu,
+            "DNU hint should be suppressed by @expect dnu, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn expect_dnu_stale_when_no_dnu() {
+        // @expect dnu where there is no DNU diagnostic → stale error
+        let source = "@expect dnu\n42";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let stale = diagnostics
+            .iter()
+            .any(|d| d.message.contains("stale @expect"));
+        assert!(
+            stale,
+            "Should emit stale @expect error, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn expect_all_suppresses_any_diagnostic() {
+        // @expect all suppresses any diagnostic on the following expression
+        let source = "@expect all\n42 foo";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let dnu = diagnostics
+            .iter()
+            .any(|d| d.message.contains("does not understand"));
+        assert!(
+            !dnu,
+            "@expect all should suppress DNU, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn expect_dnu_in_method_body() {
+        // @expect dnu inside a method body
+        let source = "Object subclass: Foo\n  test =>\n    @expect dnu\n    42 unknownMethod";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let dnu = diagnostics
+            .iter()
+            .any(|d| d.message.contains("does not understand"));
+        assert!(
+            !dnu,
+            "DNU hint in method should be suppressed, got: {diagnostics:?}"
         );
     }
 }

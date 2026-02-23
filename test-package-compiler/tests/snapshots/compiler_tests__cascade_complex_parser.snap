@@ -284,10 +284,10 @@ Module {
 }
 
 Diagnostics:
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found at:", span: Span { start: 328, end: 331 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ;", span: Span { start: 350, end: 351 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ;", span: Span { start: 378, end: 379 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ;", span: Span { start: 495, end: 496 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ;", span: Span { start: 507, end: 508 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found )", span: Span { start: 517, end: 518 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 574, end: 575 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found at:", span: Span { start: 328, end: 331 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ;", span: Span { start: 350, end: 351 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ;", span: Span { start: 378, end: 379 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ;", span: Span { start: 495, end: 496 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ;", span: Span { start: 507, end: 508 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found )", span: Span { start: 517, end: 518 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 574, end: 575 }, hint: None, category: None }

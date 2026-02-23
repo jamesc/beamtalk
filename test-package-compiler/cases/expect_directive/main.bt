@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test @expect directive parsing — BT-782
+// Verifies that @expect produces ExpectDirective AST nodes
+
+// @expect dnu — suppress a DNU hint on the following expression
+@expect dnu
+42 unknownMessage
+
+// @expect type — suppress type mismatch warnings
+@expect type
+42 + "hello"
+
+// @expect unused — suppress unused variable warnings
+@expect unused
+tempVar := 99
+
+// @expect all — suppress any diagnostic
+@expect all
+someUndefinedMethod
+
+// Multiple consecutive @expect directives stack on the same expression
+@expect dnu
+@expect type
+42 unknownMessage

@@ -1131,6 +1131,7 @@ impl CoreErlangGenerator {
                 feature: format!("expression error: {message}"),
                 location: format!("{span:?}"),
             }),
+            Expression::ExpectDirective { .. } => Ok(Document::Nil),
         }
     }
 

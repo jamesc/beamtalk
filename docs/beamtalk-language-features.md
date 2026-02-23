@@ -937,6 +937,38 @@ s asList
 
 If you need immediate side effects, use the eager collection method (`List do:`) or call a terminal operation right away.
 
+### Diagnostic Suppression (`@expect`)
+
+The `@expect` directive suppresses a specific category of diagnostic on the immediately following expression. It is a first-class language construct (not a comment) parsed as an expression in any expression list.
+
+```beamtalk
+@expect dnu
+someObject unknownMessage   // DNU hint suppressed
+
+@expect type
+42 + "hello"                // type warning suppressed
+
+@expect unused
+x := computeSomething       // unused-variable warning suppressed
+
+@expect all
+anything                    // any diagnostic suppressed
+```
+
+**Suppression categories:**
+
+| Category | Suppresses |
+|----------|-----------|
+| `dnu` | Does-not-understand hints |
+| `type` | Type mismatch warnings |
+| `unused` | Unused variable warnings |
+| `empty-method` | Empty method body warnings |
+| `all` | Any diagnostic on the following expression |
+
+**Stale directives:** If `@expect` does not suppress any diagnostic (because no matching diagnostic exists on the following expression), the compiler emits an error to prevent directives from silently becoming out of date.
+
+`@expect` works inside method bodies, class definitions, and at module scope.
+
 ### Pragma Annotations (`@primitive` and `@intrinsic`)
 
 The standard library uses pragma annotations to declare methods whose implementations are provided by the compiler or runtime rather than written in Beamtalk code.
