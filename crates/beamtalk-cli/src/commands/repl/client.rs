@@ -37,6 +37,7 @@ pub(crate) struct ReplClient {
     cookie: String,
 }
 
+#[allow(dead_code)]
 impl ReplClient {
     /// Connect to the REPL backend.
     pub(crate) fn connect(host: &str, port: u16, cookie: &str) -> Result<Self> {
@@ -335,12 +336,20 @@ impl ReplClient {
         }))
     }
 
-    /// Unload a module by name.
-    pub(crate) fn unload_module(&mut self, module_name: &str) -> Result<ReplResponse> {
+    /// List active sessions.
+    pub(crate) fn list_sessions(&mut self) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
-            "op": "unload",
+            "op": "sessions",
+            "id": protocol::next_msg_id()
+        }))
+    }
+
+    /// Inspect an actor's state.
+    pub(crate) fn inspect_actor(&mut self, pid_str: &str) -> Result<ReplResponse> {
+        self.send_request(&serde_json::json!({
+            "op": "inspect",
             "id": protocol::next_msg_id(),
-            "module": module_name
+            "actor": pid_str
         }))
     }
 

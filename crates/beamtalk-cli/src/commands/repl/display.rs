@@ -76,7 +76,6 @@ pub(crate) fn print_help() {
     println!("  :reload         Reload the last loaded file or directory (supports quoted paths)");
     println!("  :reload <name>  Reload a module by name");
     println!("  :modules        List loaded modules");
-    println!("  :unload <name>  Unload a module (fails if actors exist)");
     println!("  :actors         List running actors");
     println!("  :kill <pid>     Kill an actor by PID");
     println!("  :inspect <pid>  Inspect an actor's state");

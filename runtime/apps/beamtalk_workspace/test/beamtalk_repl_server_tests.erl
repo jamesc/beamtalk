@@ -94,8 +94,9 @@ parse_request_op_kill_test() ->
     ?assertEqual({kill_actor, "<0.123.0>"}, beamtalk_repl_server:parse_request(Request)).
 
 parse_request_op_unload_test() ->
+    %% BT-785: :unload removed — now returns unknown_op error
     Request = <<"{\"op\": \"unload\", \"module\": \"Counter\"}">>,
-    ?assertEqual({unload_module, "Counter"}, beamtalk_repl_server:parse_request(Request)).
+    ?assertMatch({error, {unknown_op, <<"unload">>}}, beamtalk_repl_server:parse_request(Request)).
 
 parse_request_op_unknown_test() ->
     Request = <<"{\"op\": \"foobar\"}">>,
@@ -1180,8 +1181,9 @@ parse_request_op_load_file_missing_path_test() ->
     ?assertEqual({load_file, ""}, beamtalk_repl_server:parse_request(Request)).
 
 parse_request_op_unload_missing_module_test() ->
+    %% BT-785: :unload removed — now returns unknown_op error
     Request = <<"{\"op\": \"unload\"}">>,
-    ?assertEqual({unload_module, ""}, beamtalk_repl_server:parse_request(Request)).
+    ?assertMatch({error, {unknown_op, <<"unload">>}}, beamtalk_repl_server:parse_request(Request)).
 
 parse_request_op_kill_with_pid_field_test() ->
     Request = <<"{\"op\": \"kill\", \"pid\": \"<0.99.0>\"}">>,
@@ -1198,8 +1200,11 @@ parse_request_type_modules_test() ->
     ?assertEqual({list_modules}, beamtalk_repl_server:parse_request(Request)).
 
 parse_request_type_unload_test() ->
+    %% BT-785: :unload removed — legacy type "unload" no longer recognized
     Request = <<"{\"type\": \"unload\", \"module\": \"Counter\"}">>,
-    ?assertEqual({unload_module, "Counter"}, beamtalk_repl_server:parse_request(Request)).
+    ?assertEqual(
+        {error, {invalid_request, unknown_type}}, beamtalk_repl_server:parse_request(Request)
+    ).
 
 parse_request_type_kill_test() ->
     Request = <<"{\"type\": \"kill\", \"pid\": \"<0.1.0>\"}">>,
@@ -1716,7 +1721,8 @@ tcp_unload_in_use_test(Port) ->
         ?assertMatch(#{<<"id">> := <<"t12b">>}, Resp),
         ?assert(maps:is_key(<<"error">>, Resp)),
         ErrorMsg = maps:get(<<"error">>, Resp),
-        ?assert(binary:match(ErrorMsg, <<"Stop actors">>) =/= nomatch)
+        %% BT-785: :unload was removed; now returns a deprecation message.
+        ?assert(binary:match(ErrorMsg, <<"removeFromSystem">>) =/= nomatch)
     after
         LoopPid ! stop,
         timer:sleep(50),

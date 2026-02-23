@@ -1,10 +1,10 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for REPL power-user commands (BT-529).
+// E2E tests for REPL power-user commands (BT-529, BT-785).
 //
-// Tests :inspect and :unload commands
-// routed through their proper protocol operations.
+// Tests :inspect command and removeFromSystem class method.
+// :unload was removed in BT-785 — tests verify the deprecation message.
 //
 // NOTE: :kill is tested separately in zz_repl_kill.bt because
 // killing an actor terminates the REPL session (known issue).
@@ -31,10 +31,10 @@ c increment
 // => a Counter (value: _)
 
 // ===========================================================================
-// :unload — UNLOAD A MODULE
+// removeFromSystem — REMOVE A USER-DEFINED CLASS (BT-785)
 // ===========================================================================
 
-// Load a separate module for unload testing
+// Load a separate module for removal testing
 :load tests/e2e/fixtures/point.bt
 // => Loaded: Point
 
@@ -42,14 +42,14 @@ c increment
 :modules
 // => _
 
-// Unload the point module
-:unload Point
-// => ok
+// Remove the Point class via removeFromSystem
+Point removeFromSystem
+// => nil
 
 // ===========================================================================
-// :unload — ERROR: MODULE NOT LOADED
+// :unload — DEPRECATED (BT-785)
 // ===========================================================================
 
-// Unloading a module that isn't loaded should error
+// :unload now returns a deprecation error pointing to removeFromSystem
 :unload NonExistentModule
-// => ERROR: Module not loaded: NonExistentModule
+// => ERROR: ':unload' has been removed. Use `removeFromSystem` instead.

@@ -82,6 +82,10 @@ pub fn generate_behaviour_bif(selector: &str, params: &[String]) -> Option<Docum
         "classAllInstVarNames" => Some(docvec![
             "call 'beamtalk_behaviour_intrinsics':'classAllInstVarNames'(Self)"
         ]),
+        // BT-785: Class removal (removeFromSystem)
+        "classRemoveFromSystem" => Some(docvec![
+            "call 'beamtalk_behaviour_intrinsics':'classRemoveFromSystem'(Self)"
+        ]),
         // ADR 0033: Runtime-embedded documentation
         "classDoc" => Some(docvec![
             "call 'beamtalk_behaviour_intrinsics':'classDoc'(Self)"
@@ -243,6 +247,15 @@ mod tests {
                 "call 'beamtalk_behaviour_intrinsics':'classSetMethodDoc'(Self, Selector, DocStr)"
                     .to_string()
             )
+        );
+    }
+
+    #[test]
+    fn test_class_remove_from_system() {
+        let result = doc_to_string(generate_behaviour_bif("classRemoveFromSystem", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_behaviour_intrinsics':'classRemoveFromSystem'(Self)".to_string())
         );
     }
 

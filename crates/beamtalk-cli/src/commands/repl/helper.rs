@@ -49,7 +49,11 @@ const REPL_COMMANDS: &[&str] = &[
     ":r",
     ":modules",
     ":m",
-    ":unload",
+    ":actors",
+    ":a",
+    ":kill",
+    ":inspect",
+    ":sessions",
 ];
 
 /// REPL helper providing tab completion and syntax highlighting.
