@@ -30,6 +30,7 @@
             {'bt@stdlib@integer', 'Integer', 'Number'},
             {'bt@stdlib@json', 'JSON', 'Object'},
             {'bt@stdlib@list', 'List', 'Collection'},
+            {'bt@stdlib@metaclass', 'Metaclass', 'Class'},
             {'bt@stdlib@number', 'Number', 'Object'},
             {'bt@stdlib@object', 'Object', 'ProtoObject'},
             {'bt@stdlib@pid', 'Pid', 'Object'},

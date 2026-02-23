@@ -67,6 +67,7 @@
     metaclassClassMethods/1,
     metaclassLocalClassMethods/1,
     metaclassIncludesSelector/2,
+    metaclassNew/0,
     %% ADR 0033: Runtime-embedded documentation
     classDoc/1,
     classSetDoc/2,
@@ -489,6 +490,18 @@ metaclassIncludesSelector(Self, Selector) ->
     Pid = erlang:element(4, Self),
     ClassMethods = gen_server:call(Pid, get_local_class_methods),
     maps:is_key(Selector, ClassMethods).
+
+%% @doc Guard for direct Metaclass instantiation — backs `class sealed new`.
+%%
+%% ADR 0036: Backs `@primitive "metaclassNew"` in Metaclass.bt.
+%% Called from the generated `new/0` constructor of Metaclass.
+%% Always raises a user_error; metaclasses must be obtained via `x class class`.
+-spec metaclassNew() -> no_return().
+metaclassNew() ->
+    Error = beamtalk_error:new(
+        user_error, 'Metaclass', 'new', <<"Use x class class to obtain a metaclass">>
+    ),
+    beamtalk_error:raise(Error).
 
 %%% ============================================================================
 %%% Internal Helpers

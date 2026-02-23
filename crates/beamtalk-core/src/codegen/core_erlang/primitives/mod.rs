@@ -21,6 +21,7 @@ mod dictionary;
 mod float;
 mod integer;
 mod list;
+mod metaclass;
 mod misc;
 mod string;
 
@@ -73,6 +74,7 @@ pub fn generate_primitive_bif(
         "Collection" => collection::generate_collection_bif(selector, params),
         "Behaviour" => behaviour::generate_behaviour_bif(selector, params),
         "Class" => behaviour::generate_class_bif(selector, params),
+        "Metaclass" => metaclass::generate_metaclass_bif(selector, params),
         "StackFrame" => misc::generate_stack_frame_bif(selector, params),
         "Pid" => misc::generate_pid_bif(selector, params),
         "Port" => misc::generate_port_bif(selector, params),

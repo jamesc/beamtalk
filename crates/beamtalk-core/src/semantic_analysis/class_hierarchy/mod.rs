@@ -668,18 +668,24 @@ impl ClassHierarchy {
             }
 
             // Check sealed method override enforcement
-            if let Some(ref superclass) = class.superclass {
-                for method in &class.methods {
-                    let selector = method.selector.name();
-                    if let Some((sealed_class, _)) =
-                        self.find_sealed_method_in_ancestors(superclass.name.as_str(), &selector)
-                    {
-                        diagnostics.push(Diagnostic::error(
-                            format!(
-                                "Cannot override sealed method `{selector}` from class `{sealed_class}`"
-                            ),
-                            method.span,
-                        ));
+            // BT-803: Stdlib-mode exemption mirrors the sealed superclass exemption —
+            // built-in stdlib classes (e.g. Metaclass overriding isMeta from Behaviour)
+            // are allowed to override sealed methods when compiling in stdlib mode.
+            let is_stdlib_builtin = stdlib_mode && Self::is_builtin_class(class.name.name.as_str());
+            if !is_stdlib_builtin {
+                if let Some(ref superclass) = class.superclass {
+                    for method in &class.methods {
+                        let selector = method.selector.name();
+                        if let Some((sealed_class, _)) = self
+                            .find_sealed_method_in_ancestors(superclass.name.as_str(), &selector)
+                        {
+                            diagnostics.push(Diagnostic::error(
+                                format!(
+                                    "Cannot override sealed method `{selector}` from class `{sealed_class}`"
+                                ),
+                                method.span,
+                            ));
+                        }
                     }
                 }
             }

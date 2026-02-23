@@ -101,7 +101,10 @@ impl CoreErlangGenerator {
         if !has_explicit_new {
             exports.push("'new'/0".to_string());
         }
-        if !has_explicit_new_with {
+        // new/1 (the keyword new: constructor, or the auto-generated initializer) is
+        // suppressed if the class explicitly defines either new: (keyword, which emits
+        // 'new'/1 itself) OR unary new (which also emits 'new'/1 via Self parameter).
+        if !has_explicit_new_with && !has_explicit_new {
             exports.push("'new'/1".to_string());
         }
 
@@ -170,8 +173,11 @@ impl CoreErlangGenerator {
             docs.push(Document::Str("\n"));
         }
 
-        // Generate new/1 - creates instance with initialization arguments
-        if !has_explicit_new_with {
+        // Generate new/1 - creates instance with initialization arguments.
+        // Suppressed when a unary `new` instance method exists (has_explicit_new),
+        // because that method compiles to 'new'/1 (Self parameter), which would clash
+        // with the auto-generated 'new'/1 (InitArgs parameter).
+        if !has_explicit_new_with && !has_explicit_new {
             docs.push(self.generate_value_type_new_with_args()?);
             docs.push(Document::Str("\n"));
         }

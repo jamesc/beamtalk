@@ -206,6 +206,15 @@ abstract Object subclass: Behaviour
   /// ```
   sealed isMeta => false
 
+  /// Test whether this is a Metaclass. Returns false; overridden in Metaclass.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter isMetaclass   // => false
+  /// Integer isMetaclass   // => false
+  /// ```
+  sealed isMetaclass => false
+
   // --- Class removal ---
 
   /// Remove this class from the system, cleaning up all associated state.

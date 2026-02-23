@@ -107,9 +107,7 @@ register_class() ->
         instance_methods => #{
             'isMeta' => #{arity => 0},
             'isClass' => #{arity => 0},
-            'isMetaclass' => #{arity => 0},
-            'thisClass' => #{arity => 0},
-            'name' => #{arity => 0}
+            'isMetaclass' => #{arity => 0}
         }
     },
     case beamtalk_object_class:start('Metaclass', ClassInfo) of
