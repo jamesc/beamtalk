@@ -17,6 +17,10 @@
 %%% This is safe because dispatch works via beamtalk_class_bt:has_method/1
 %%% and dispatch/4 even before the superclass (Object) is registered.
 %%% See beamtalk_class_bt for the stub details.
+%%%
+%%% ADR 0036 Phase 1 (BT-802): Bootstrap also registers the 'Metaclass' stub
+%%% (beamtalk_metaclass_bt) immediately after 'Class', completing the bootstrap
+%%% order: ProtoObject → Object → Behaviour → Class → Metaclass → Actor → user modules.
 -module(beamtalk_bootstrap).
 
 -export([start_link/0, init/1]).
@@ -36,6 +40,10 @@ start_link() ->
 %%
 %% ADR 0032 Phase 0 (BT-732): Also registers the 'Class' stub so the
 %% class chain dispatch fallthrough is available from startup.
+%%
+%% ADR 0036 Phase 1 (BT-802): Also registers the 'Metaclass' stub so that
+%% metaclass objects dispatch through the Metaclass → Class chain.
+%% Bootstrap order: ProtoObject → Object → Behaviour → Class → Metaclass → Actor → user modules.
 -spec init(pid()) -> no_return().
 init(Parent) ->
     %% Ensure pg is started (required by beamtalk_object_class for class registry)
@@ -51,6 +59,10 @@ init(Parent) ->
     %% beamtalk_runtime, and dispatch works via beamtalk_class_bt:has_method/1
     %% and dispatch/4 even before the superclass (Object) is registered.
     beamtalk_class_bt:register_class(),
+
+    %% ADR 0036 Phase 1 (BT-802): Register the 'Metaclass' stub after 'Class'.
+    %% Metaclass has superclass 'Class', so Class must be registered first.
+    beamtalk_metaclass_bt:register_class(),
 
     proc_lib:init_ack(Parent, {ok, self()}),
     bootstrap_loop().

@@ -33,7 +33,7 @@
 %%% | classInstVarNames/1         | Instance variable names from class gen_server state       |
 %%% | classAllInstVarNames/1      | Combined instance variable names via superclass chain     |
 %%% | className/1                 | Class name from class gen_server state                    |
-%%% | classClass/1                | Virtual metaclass sentinel                                |
+%%% | classClass/1                | Real metaclass object (ADR 0036)                          |
 %%% | classDoc/1                  | Class doc string from class gen_server state (ADR 0033)   |
 %%% | classSetDoc/2               | Set class doc string (ADR 0033)                           |
 %%% | classSetMethodDoc/3         | Set method doc string for a selector (ADR 0033)           |
@@ -61,6 +61,12 @@
     classAllInstVarNames/1,
     className/1,
     classClass/1,
+    %% ADR 0036: Metaclass primitives
+    metaclassThisClass/1,
+    metaclassSuperclass/1,
+    metaclassClassMethods/1,
+    metaclassLocalClassMethods/1,
+    metaclassIncludesSelector/2,
     %% ADR 0033: Runtime-embedded documentation
     classDoc/1,
     classSetDoc/2,
@@ -300,13 +306,20 @@ className(Self) ->
     ClassPid = erlang:element(4, Self),
     gen_server:call(ClassPid, class_name).
 
-%% @doc Return the virtual metaclass sentinel.
+%% @doc Return the metaclass object for the receiver.
 %%
-%% ADR 0013: Virtual metaclasses — full metaclass tower is future work.
-%% Returns 'Metaclass' as the sentinel atom for now.
--spec classClass(#beamtalk_object{}) -> atom().
-classClass(_Self) ->
-    'Metaclass'.
+%% ADR 0036: Replaces the sentinel atom with a real `#beamtalk_object{}`.
+%% Wraps the same class pid but dispatches through the 'Metaclass' chain.
+%% No new gen_server process — virtual tag approach from ADR 0013 continues.
+%%
+%% Idempotent: when called on a `class='Metaclass'`-tagged object (i.e.,
+%% `Metaclass class class`), extracts pid and returns a new structurally
+%% identical record. This enables `Metaclass class class == Metaclass class`
+%% (Erlang structural `==` compares all three fields: class, class_mod, pid).
+-spec classClass(#beamtalk_object{}) -> #beamtalk_object{}.
+classClass(Self) ->
+    Pid = erlang:element(4, Self),
+    #beamtalk_object{class = 'Metaclass', class_mod = beamtalk_metaclass_bt, pid = Pid}.
 
 %% @doc Return the class documentation string, or nil if none set.
 %%
@@ -404,6 +417,78 @@ classRemoveFromSystem(Self) ->
                     beamtalk_error:raise(Error2)
             end
     end.
+
+%%% ============================================================================
+%%% Metaclass Primitives (ADR 0036 Phase 1)
+%%% ============================================================================
+
+%% @doc Return the class this metaclass describes.
+%%
+%% ADR 0036: Backs `@primitive "metaclassThisClass"` in Metaclass.bt.
+%% A metaclass object carries the class pid; we retrieve its name and return
+%% the class object. Example: `Counter class class thisClass == Counter`.
+-spec metaclassThisClass(#beamtalk_object{}) -> #beamtalk_object{} | nil.
+metaclassThisClass(Self) ->
+    Pid = erlang:element(4, Self),
+    ClassName = gen_server:call(Pid, class_name),
+    atom_to_class_object(ClassName).
+
+%% @doc Return the superclass of the metaclass parallel hierarchy.
+%%
+%% ADR 0036: Backs `@primitive "metaclassSuperclass"` in Metaclass.bt.
+%% The superclass of Counter's metaclass is the metaclass of Counter's superclass.
+%% Example: `Counter class superclass == Actor class`.
+-spec metaclassSuperclass(#beamtalk_object{}) -> #beamtalk_object{} | nil.
+metaclassSuperclass(Self) ->
+    Pid = erlang:element(4, Self),
+    case gen_server:call(Pid, superclass) of
+        none ->
+            nil;
+        SuperName ->
+            case atom_to_class_object(SuperName) of
+                nil -> nil;
+                SuperClassObj -> classClass(SuperClassObj)
+            end
+    end.
+
+%% @doc Return all class-side method selectors (full inheritance chain).
+%%
+%% ADR 0036: Backs `@primitive "metaclassClassMethods"` in Metaclass.bt.
+%% Walks the superclass chain collecting all class-side selectors.
+-spec metaclassClassMethods(#beamtalk_object{}) -> [atom()].
+metaclassClassMethods(Self) ->
+    Pid = erlang:element(4, Self),
+    ClassName = gen_server:call(Pid, class_name),
+    Acc = walk_hierarchy(
+        ClassName,
+        fun(_CN, CPid, A) ->
+            ClassMethods = gen_server:call(CPid, get_local_class_methods),
+            Selectors = maps:keys(ClassMethods),
+            {cont, ordsets:union(A, ordsets:from_list(Selectors))}
+        end,
+        ordsets:new()
+    ),
+    ordsets:to_list(Acc).
+
+%% @doc Return local class-side method selectors (non-inherited).
+%%
+%% ADR 0036: Backs `@primitive "metaclassLocalClassMethods"` in Metaclass.bt.
+%% Returns only class methods defined directly on this class.
+-spec metaclassLocalClassMethods(#beamtalk_object{}) -> [atom()].
+metaclassLocalClassMethods(Self) ->
+    Pid = erlang:element(4, Self),
+    ClassMethods = gen_server:call(Pid, get_local_class_methods),
+    maps:keys(ClassMethods).
+
+%% @doc Test whether the selector is defined as a class-side method.
+%%
+%% ADR 0036: Backs `@primitive "metaclassIncludesSelector"` in Metaclass.bt.
+%% Does NOT check superclasses — local containment only.
+-spec metaclassIncludesSelector(#beamtalk_object{}, atom()) -> boolean().
+metaclassIncludesSelector(Self, Selector) ->
+    Pid = erlang:element(4, Self),
+    ClassMethods = gen_server:call(Pid, get_local_class_methods),
+    maps:is_key(Selector, ClassMethods).
 
 %%% ============================================================================
 %%% Internal Helpers

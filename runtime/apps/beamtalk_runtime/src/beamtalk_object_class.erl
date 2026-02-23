@@ -462,6 +462,11 @@ handle_call({set_doc, DocBinary}, _From, State) ->
 handle_call({set_method_doc, Selector, DocBinary}, _From, State) ->
     NewMethodDocs = maps:put(Selector, DocBinary, State#class_state.method_docs),
     {reply, ok, State#class_state{method_docs = NewMethodDocs}};
+%% ADR 0036: Metaclass method dispatch stub.
+%% Returns {error, not_found} — the fallthrough to the 'Metaclass' chain is
+%% handled by beamtalk_class_dispatch:metaclass_send/4 in the caller.
+handle_call({metaclass_method_call, _Selector, _Args}, _From, State) ->
+    {reply, {error, not_found}, State};
 %% BT-411/BT-412/BT-440: Class method dispatch.
 %% Delegates to beamtalk_class_dispatch (BT-704).
 %% ADR 0032 Phase 1: Passes local class_methods (no flattened table).
