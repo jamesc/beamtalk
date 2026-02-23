@@ -37,6 +37,7 @@ pub(crate) struct ReplClient {
     cookie: String,
 }
 
+#[allow(dead_code)]
 impl ReplClient {
     /// Connect to the REPL backend.
     pub(crate) fn connect(host: &str, port: u16, cookie: &str) -> Result<Self> {
