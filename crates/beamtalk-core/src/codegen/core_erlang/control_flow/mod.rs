@@ -75,11 +75,19 @@ impl CoreErlangGenerator {
                 };
 
                 return Ok(docvec![
-                    format!("let {val_var} = "),
+                    "let ",
+                    val_var.as_str(),
+                    " = ",
                     value_code,
-                    format!(
-                        " in let {new_state} = call 'maps':'put'('{state_key}', {val_var}, {current_state}) in ",
-                    ),
+                    " in let ",
+                    new_state,
+                    " = call 'maps':'put'('",
+                    state_key.to_string(),
+                    "', ",
+                    val_var.as_str(),
+                    ", ",
+                    current_state,
+                    ") in ",
                 ]);
             }
         }
