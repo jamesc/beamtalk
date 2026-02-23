@@ -212,7 +212,7 @@ pub struct ClassDefinition {
     pub methods: Vec<MethodDefinition>,
     /// Class-side method definitions (defined with `class` prefix).
     pub class_methods: Vec<MethodDefinition>,
-    /// Class variable declarations (defined with `classVar:`).
+    /// Class variable declarations (defined with `classState:`).
     pub class_variables: Vec<StateDeclaration>,
     /// Doc comment attached to this class (`///` lines).
     pub doc_comment: Option<String>,

@@ -3,7 +3,7 @@
 
 // BT-413: Test fixture for value type with class variables
 Object subclass: ClassVarPoint
-  classVar: instanceCount = 0
+  classState: instanceCount = 0
   state: x = 0
   state: y = 0
 

@@ -463,7 +463,7 @@ mod tests {
 
     #[test]
     fn warn_undefined_classvar() {
-        let source = "Object subclass: Config\n  classVar: debug = false\n  check => 1\n\nConfig classVar: #verbose";
+        let source = "Object subclass: Config\n  classState: debug = false\n  check => 1\n\nConfig classState: #verbose";
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);
         let diagnostics = compute_diagnostics(&module, parse_diags);
@@ -473,13 +473,13 @@ mod tests {
         });
         assert!(
             has_warning,
-            "Expected undefined classVar warning, got: {diagnostics:?}"
+            "Expected undefined classState warning, got: {diagnostics:?}"
         );
     }
 
     #[test]
     fn no_warn_valid_classvar() {
-        let source = "Object subclass: Config\n  classVar: debug = false\n  check => 1\n\nConfig classVar: #debug";
+        let source = "Object subclass: Config\n  classState: debug = false\n  check => 1\n\nConfig classState: #debug";
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);
         let diagnostics = compute_diagnostics(&module, parse_diags);
@@ -489,13 +489,13 @@ mod tests {
             .any(|d| d.message.contains("Undefined class variable"));
         assert!(
             !has_warning,
-            "Should not warn for valid classVar, got: {diagnostics:?}"
+            "Should not warn for valid classState, got: {diagnostics:?}"
         );
     }
 
     #[test]
     fn warn_classvar_has_hint() {
-        let source = "Object subclass: Config\n  classVar: debug = false\n  check => 1\n\nConfig classVar: #verbose";
+        let source = "Object subclass: Config\n  classState: debug = false\n  check => 1\n\nConfig classState: #verbose";
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);
         let diagnostics = compute_diagnostics(&module, parse_diags);
@@ -503,7 +503,7 @@ mod tests {
         let diag = diagnostics
             .iter()
             .find(|d| d.message.contains("Undefined class variable"))
-            .expect("Should have classVar warning");
+            .expect("Should have classState warning");
         assert!(
             diag.hint.as_ref().is_some_and(|h| h.contains("debug")),
             "Should hint about declared class vars, got: {:?}",
