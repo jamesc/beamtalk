@@ -215,17 +215,25 @@ format_result(V) when
     tuple_size(V) >= 2,
     element(1, V) =:= beamtalk_object
 ->
-    %% BT-412: Match REPL formatting for class objects vs actor instances
+    %% BT-412: Match REPL formatting for class objects vs actor instances.
+    %% ADR 0036: Metaclass objects display as "ClassName class" (e.g. "Integer class").
     Class = element(2, V),
-    case beamtalk_class_registry:is_class_name(Class) of
-        true ->
-            beamtalk_class_registry:class_display_name(Class);
-        false ->
+    case Class of
+        'Metaclass' ->
             Pid = element(4, V),
-            ClassBin = atom_to_binary(Class, utf8),
-            PidStr = pid_to_list(Pid),
-            Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
-            iolist_to_binary([<<"#Actor<">>, ClassBin, <<",">>, Inner, <<">">>])
+            ClassName = beamtalk_object_class:class_name(Pid),
+            iolist_to_binary([atom_to_binary(ClassName, utf8), <<" class">>]);
+        _ ->
+            case beamtalk_class_registry:is_class_name(Class) of
+                true ->
+                    beamtalk_class_registry:class_display_name(Class);
+                false ->
+                    Pid = element(4, V),
+                    ClassBin = atom_to_binary(Class, utf8),
+                    PidStr = pid_to_list(Pid),
+                    Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
+                    iolist_to_binary([<<"#Actor<">>, ClassBin, <<",">>, Inner, <<">">>])
+            end
     end;
 format_result(V) when is_map(V) ->
     %% BT-535: Use print_string for Beamtalk display format

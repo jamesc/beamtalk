@@ -113,6 +113,6 @@ nil class
 3.14 class
 // => Float
 
-// class on a class object returns the metaclass terminal
+// BT-802 (ADR 0036): class on a class object returns a real metaclass object
 Integer class
-// => Metaclass
+// => Integer class

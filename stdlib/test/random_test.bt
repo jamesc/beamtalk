@@ -100,5 +100,5 @@ TestCase subclass: RandomTest
     self should: [rng6 nextInteger: -1] raise: #type_error
 
   testClassIdentity =>
-    // Random is a class — class on class returns Metaclass
-    self assert: (Random class) equals: #Metaclass
+    // BT-802 (ADR 0036): class on class returns a real metaclass object
+    self assert: (Random class) isMeta equals: true
