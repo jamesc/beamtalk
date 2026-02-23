@@ -7,6 +7,8 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
+use std::io::Write;
 
 use miette::{IntoDiagnostic, Result};
 
@@ -184,7 +186,25 @@ pub(crate) fn display_test_results(results: &serde_json::Value) {
 
 /// Display generated Core Erlang source (BT-724).
 pub(crate) fn display_codegen(core_erlang: &str) {
-    // Use cyan for Core Erlang source to distinguish from regular output
+    // Try to pretty-print using external `core_pp` if available; fall back to raw output.
+    if let Ok(mut child) = Command::new("core_pp")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+    {
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(core_erlang.as_bytes());
+        }
+        if let Ok(output) = child.wait_with_output() {
+            if output.status.success() {
+                if let Ok(formatted) = String::from_utf8(output.stdout) {
+                    println!("{}", color::paint(color::CYAN, &formatted));
+                    return;
+                }
+            }
+        }
+    }
+    // Fallback: print unmodified Core Erlang
     println!("{}", color::paint(color::CYAN, core_erlang));
 }
 
