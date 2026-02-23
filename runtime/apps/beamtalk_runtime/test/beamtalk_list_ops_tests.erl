@@ -6,7 +6,10 @@
 %%%
 %%% Tests list operations: at, detect, detect_if_none, do, reject,
 %%% zip, group_by, partition, intersperse, take, drop, sort_with,
-%%% from_to, index_of, each_with_index — including error cases.
+%%% from_to — including error cases.
+%%%
+%%% Note: index_of/2 and each_with_index/2 were removed in BT-816
+%%% (self-hosted in pure Beamtalk in List.bt).
 
 -module(beamtalk_list_ops_tests).
 -include_lib("eunit/include/eunit.hrl").
@@ -584,76 +587,4 @@ from_to_negative_start_test() ->
             }
         },
         beamtalk_list_ops:from_to([1, 2, 3], -1, 2)
-    ).
-
-%%% ============================================================================
-%%% index_of/2 tests
-%%% ============================================================================
-
-index_of_found_test() ->
-    ?assertEqual(2, beamtalk_list_ops:index_of([a, b, c], b)).
-
-index_of_first_test() ->
-    ?assertEqual(1, beamtalk_list_ops:index_of([a, b, c], a)).
-
-index_of_last_test() ->
-    ?assertEqual(3, beamtalk_list_ops:index_of([a, b, c], c)).
-
-index_of_not_found_test() ->
-    ?assertEqual(nil, beamtalk_list_ops:index_of([a, b, c], d)).
-
-index_of_empty_test() ->
-    ?assertEqual(nil, beamtalk_list_ops:index_of([], a)).
-
-%%% ============================================================================
-%%% each_with_index/2 tests
-%%% ============================================================================
-
-each_with_index_test() ->
-    Ref = make_ref(),
-    Self = self(),
-    beamtalk_list_ops:each_with_index(
-        [a, b, c],
-        fun(Elem, Idx) -> Self ! {Ref, Elem, Idx} end
-    ),
-    ?assertEqual(
-        {Ref, a, 1},
-        receive
-            {Ref, E1, I1} -> {Ref, E1, I1}
-        after 100 -> timeout
-        end
-    ),
-    ?assertEqual(
-        {Ref, b, 2},
-        receive
-            {Ref, E2, I2} -> {Ref, E2, I2}
-        after 100 -> timeout
-        end
-    ),
-    ?assertEqual(
-        {Ref, c, 3},
-        receive
-            {Ref, E3, I3} -> {Ref, E3, I3}
-        after 100 -> timeout
-        end
-    ).
-
-each_with_index_returns_nil_test() ->
-    ?assertEqual(nil, beamtalk_list_ops:each_with_index([1], fun(_, _) -> ok end)).
-
-each_with_index_empty_test() ->
-    ?assertEqual(nil, beamtalk_list_ops:each_with_index([], fun(_, _) -> ok end)).
-
-each_with_index_invalid_block_test() ->
-    ?assertException(
-        error,
-        #{
-            '$beamtalk_class' := 'TypeError',
-            error := #beamtalk_error{
-                kind = type_error,
-                class = 'List',
-                selector = 'eachWithIndex:'
-            }
-        },
-        beamtalk_list_ops:each_with_index([1, 2], not_a_function)
     ).

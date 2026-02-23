@@ -24,9 +24,7 @@
     take/2,
     drop/2,
     sort_with/2,
-    from_to/3,
-    index_of/2,
-    each_with_index/2
+    from_to/3
 ]).
 
 -include("beamtalk.hrl").
@@ -274,25 +272,6 @@ from_to(List, Start, _End) when is_list(List), is_integer(Start), Start < 1 ->
     Error2 = beamtalk_error:with_hint(Error1, Hint),
     beamtalk_error:raise(Error2).
 
-%% @doc Find 1-based index of element, nil if not found.
--spec index_of(list(), term()) -> integer() | nil.
-index_of(List, Item) when is_list(List) ->
-    index_of_helper(List, Item, 1).
-
-%% @doc Iterate with 1-based index, calling block with element and index.
--spec each_with_index(list(), function()) -> nil.
-each_with_index(List, Block) when is_list(List), is_function(Block, 2) ->
-    each_with_index_helper(List, Block, 1),
-    nil;
-each_with_index(List, Block) when is_list(List) ->
-    Error0 = beamtalk_error:new(type_error, 'List'),
-    Error1 = beamtalk_error:with_selector(Error0, 'eachWithIndex:'),
-    Hint = iolist_to_binary(
-        io_lib:format("Block must be a 2-argument function (element, index), got: ~p", [Block])
-    ),
-    Error2 = beamtalk_error:with_hint(Error1, Hint),
-    beamtalk_error:raise(Error2).
-
 %% Internal helpers
 
 detect_helper(_Block, []) ->
@@ -310,13 +289,3 @@ safe_nthtail(N, [_ | T]) -> safe_nthtail(N - 1, T).
 zip_to_maps([], _) -> [];
 zip_to_maps(_, []) -> [];
 zip_to_maps([H1 | T1], [H2 | T2]) -> [#{<<"key">> => H1, <<"value">> => H2} | zip_to_maps(T1, T2)].
-
-index_of_helper([], _Item, _Index) -> nil;
-index_of_helper([Item | _T], Item, Index) -> Index;
-index_of_helper([_ | T], Item, Index) -> index_of_helper(T, Item, Index + 1).
-
-each_with_index_helper([], _Block, _Index) ->
-    ok;
-each_with_index_helper([H | T], Block, Index) ->
-    Block(H, Index),
-    each_with_index_helper(T, Block, Index + 1).

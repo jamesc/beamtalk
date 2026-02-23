@@ -252,7 +252,13 @@ sealed Collection subclass: List
   /// #(10, 20, 30) indexOf: 20        // => 2
   /// #(10, 20, 30) indexOf: 99        // => nil
   /// ```
-  indexOf: item -> Integer | Nil => @primitive "indexOf:"
+  indexOf: item -> Integer | Nil =>
+    self inject: 0 into: [:each :i |
+      newI := i + 1.
+      each =:= item ifTrue: [^newI].
+      newI
+    ].
+    nil
 
   /// Iterate with both element and 1-based index.
   ///
@@ -260,7 +266,13 @@ sealed Collection subclass: List
   /// ```beamtalk
   /// #("a", "b") eachWithIndex: [:item :i | Transcript show: i]
   /// ```
-  eachWithIndex: block: Block -> Nil => @primitive "eachWithIndex:"
+  eachWithIndex: block: Block -> Nil =>
+    self inject: 0 into: [:each :i |
+      newI := i + 1.
+      block value: each value: newI.
+      newI
+    ].
+    nil
 
   /// Combine two lists element-wise into a list of pairs.
   ///
