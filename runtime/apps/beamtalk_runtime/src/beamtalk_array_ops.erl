@@ -101,7 +101,11 @@ at_put(#{'$beamtalk_class' := 'Array', 'data' := Arr}, Index, Value) when
 at_put(#{'$beamtalk_class' := 'Array'}, Index, _Value) when is_integer(Index) ->
     Error0 = beamtalk_error:new(index_out_of_bounds, 'Array'),
     Error1 = beamtalk_error:with_selector(Error0, 'at:put:'),
-    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Index must be >= 1">>)).
+    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Index must be >= 1">>));
+at_put(#{'$beamtalk_class' := 'Array'}, _Index, _Value) ->
+    Error0 = beamtalk_error:new(type_error, 'Array'),
+    Error1 = beamtalk_error:with_selector(Error0, 'at:put:'),
+    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Index must be an Integer">>)).
 
 %%% ============================================================================
 %%% Iteration
@@ -173,7 +177,11 @@ inject_into(#{'$beamtalk_class' := 'Array', 'data' := Arr}, Initial, Block) when
         fun(_I, Elem, Acc) -> Block(Acc, Elem) end,
         Initial,
         Arr
-    ).
+    );
+inject_into(#{'$beamtalk_class' := 'Array'}, _Initial, _Block) ->
+    Error0 = beamtalk_error:new(type_error, 'Array'),
+    Error1 = beamtalk_error:with_selector(Error0, 'inject:into:'),
+    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Block must be a binary function">>)).
 
 %%% ============================================================================
 %%% String Representation

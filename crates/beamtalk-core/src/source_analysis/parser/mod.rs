@@ -188,7 +188,7 @@ pub fn parse(tokens: Vec<Token>) -> (Module, Vec<Diagnostic>) {
 /// current input buffer or show a continuation prompt for multi-line input.
 /// It returns `false` (incomplete) when:
 ///
-/// - Delimiters are unclosed: `[`, `(`, `{`, `#{`, `#(`
+/// - Delimiters are unclosed: `[`, `(`, `{`, `#{`, `#(`, `#[`
 /// - A string or block comment is unterminated
 /// - The last token is a keyword (`at:`), binary operator (`+`), assignment
 ///   (`:=`), cascade (`;`), or return (`^`) — all of which expect a following

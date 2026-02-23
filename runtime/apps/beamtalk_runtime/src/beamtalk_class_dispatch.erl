@@ -109,14 +109,16 @@ class_send(ClassPid, Selector, Args) ->
             unwrap_class_call(Other)
     end.
 
-%% @doc Send a message to a metaclass object (ADR 0036 Phase 1, BT-802).
+%% @doc Send a message to a metaclass object (ADR 0036, BT-822/BT-823).
 %%
 %% Routes messages on metaclass objects (tagged `class='Metaclass'`) through:
-%%   1. `{metaclass_method_call, Selector, Args}` to the class gen_server — returns
-%%      `{error, not_found}` for the Phase 1 stub (user-defined metaclass methods
-%%      are not yet supported).
+%%   1. `{class_method_call, Selector, Args}` to the class gen_server via
+%%      `gen_server:call/2` — resolves user-defined class methods (e.g. `withAll:`)
+%%      via the superclass chain (BT-822 workaround; proper metaclass_method_call
+%%      dispatch is tracked in BT-823).
 %%   2. Fallthrough to `beamtalk_dispatch:lookup/5` starting at 'Metaclass', which
-%%      walks the Metaclass → Class → Behaviour → Object → ProtoObject chain.
+%%      walks the Metaclass → Class → Behaviour → Object → ProtoObject chain for
+%%      built-in messages (`new`, `class`, etc.).
 %%
 %% The class pid is the same as the described class (virtual tag approach, ADR 0013).
 %% Self carries `class='Metaclass'` so method dispatch receives the correct receiver.

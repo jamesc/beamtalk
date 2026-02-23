@@ -47,6 +47,7 @@ const FRAGMENTS: &[&str] = &[
     "super foo",
     "#(1, 2, 3)",
     "#{a => 1}",
+    "#[1, 2, 3]",
     "#symbol",
     "$A",
     "x foo bar",
