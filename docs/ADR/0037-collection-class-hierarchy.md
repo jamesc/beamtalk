@@ -170,7 +170,7 @@ Each sealed type provides a class-side `withAll:` factory:
 ```beamtalk
 #(1, 2, 3) collect: [:x | x * 2]           // => #(2, 4, 6)      (List)
 ((Set new add: 1) add: 2) select: [:x | x > 1]   // => Set(2)     (Set)
-#[10, 20, 30] collect: [:x | x + 1]         // => #[11, 21, 31]   (Array)
+#[10, 20, 30] collect: [:x | x + 1]         // => #[11, 21, 31]   (Array — planned, BT-822)
 "hi" collect: [:g | g uppercase]             // => #("H", "I")     (List — String>>collect: returns List since grapheme-mapped results aren't necessarily valid String graphemes)
 ```
 
@@ -178,7 +178,7 @@ Each sealed type provides a class-side `withAll:` factory:
 
 ### Type annotation narrowing with species
 
-> **Note:** This table describes the target state after BT-822 (species pattern) is implemented. Until then, `collect:`, `select:`, and `reject:` on the abstract class all return `List`. The current `String.bt` has `select: -> List` as an interim; after species, it will return `-> String` via `String withAll:` (`list join`).
+> **Note:** This table describes the target state after BT-822 (species pattern) is implemented. Until then, `collect:`, `select:`, and `reject:` on the abstract class all return `List`. `String.bt` already implements `select: -> String` — filtered graphemes are always valid graphemes, so no species plumbing is needed for `select:`. The `-> String` column for `Array`, `Set`, `Tuple`, and `List` reflect the planned post-BT-822 state.
 
 The abstract `Collection` methods carry the widest safe return type. Concrete classes narrow the return type via covariant override:
 
@@ -260,8 +260,10 @@ r isEmpty          // => false
 r includes: 3      // => true
 r collect: [:x | x * x]  // => #(1, 4, 9, 16, 25)
 r select: [:x | x isOdd] // => #(1, 3, 5)
-r inject: 0 into: [:sum :x | sum + x]  // => 15
+r inject: 0 into: [:sum :x | sum + x]  // => 15  (works via to_list → do: dispatch)
 ```
+
+> **Note on `inject:into:` for user-defined subclasses:** The abstract `@primitive inject:into:` on `Collection` works generically for any subclass that implements `do:`. The runtime helper `beamtalk_collection_ops:inject_into/3` converts the receiver to a list by dispatching `do:` on the object, then folds over the result. User-defined subclasses only need to override `inject:into:` if they require custom accumulation semantics (e.g., Dictionary's key-preserving fold over values).
 
 ### Error examples
 
@@ -404,7 +406,7 @@ Pharo's `species` method returns the appropriate result class so `aSet collect: 
 ### Negative
 - Species pattern is planned (BT-822) but not yet implemented — until then, `collect:`, `select:`, `reject:` return `List` on all types
 - No `SequenceableCollection` — `at:`, `first`, `last` are not part of the shared abstract protocol; cannot be written generically over ordered collections
-- `inject:into:` on abstract `Collection` remains `@primitive` (compiler limitation for local-variable mutation in abstract methods) — user-defined subclasses must implement it if they need custom accumulation
+- `inject:into:` on abstract `Collection` remains `@primitive` (compiler limitation for local-variable mutation in abstract methods) — the runtime dispatches `do:` generically so user-defined subclasses inherit a working `inject:into:` for free; override only if custom accumulation semantics are needed (e.g., Dictionary's key-preserving fold)
 - String's `includes:` (substring containment) renamed to `includesSubstring:` — existing code must migrate; `each:` renamed to `do:`; `at:` return type changed from `Character` to `String`
 
 ### Neutral
@@ -434,13 +436,18 @@ All ADR-0034 implementation work is now complete:
 | Phase 3 | BT-818 | ✅ Done | Self-host `Dictionary keysAndValuesDo:` and `Association` formatting |
 | Phase 4 | BT-819 | ✅ Done | Self-host `TestCase` assertions |
 
+Resolved gaps addressed by this ADR:
+
+| Topic | Status | Resolution |
+|-------|--------|------------|
+| `String>>do:` primitive | ✅ Done | Renamed `each:` → `do:` |
+| `String>>select:` return type | ✅ Done | Remains `-> String`; `List>>join` / `join:` added for callers who need a List |
+| `String>>includes:` override | ✅ Done | Renamed to `includesSubstring:`; Collection default handles grapheme membership |
+
 Future design work deferred by this ADR:
 
 | Topic | When to revisit | Prerequisite |
 |-------|----------------|--------------|
-| `String>>do:` primitive | ✅ Done | Renamed `each:` → `do:` |
-| `String>>select:` return type | ✅ Done | Remains `-> String`; `List>>join` / `join:` added for callers who need a List |
-| `String>>includes:` override | ✅ Done | Renamed to `includesSubstring:`; Collection default handles grapheme membership |
 | Species pattern + `Array` type | Planned — see BT-822 | Requires `Array` implementation for `Array>>withAll:` |
 | `SequenceableCollection` | After `Array` is added | `Array` (O(log n) `at:`) + `Tuple` (O(1) `at:`) + `String` (O(n) `at:`) gives three meaningful subtypes; `at:` performance contracts still diverge so careful design needed |
 | `Enumerable` as typed protocol | After ADR-0025 (Gradual Typing) is implemented | ADR-0025 implementation |

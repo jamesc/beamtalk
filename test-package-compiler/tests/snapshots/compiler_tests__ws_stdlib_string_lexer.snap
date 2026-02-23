@@ -50,11 +50,11 @@ Token { kind: Identifier("isNotEmpty"), span: Span { start: 478, end: 488 }, lea
 Token { kind: Identifier("found"), span: Span { start: 510, end: 515 }, leading_trivia: [Whitespace("\n\n"), LineComment("// String searching"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Assign, span: Span { start: 516, end: 518 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Identifier("message"), span: Span { start: 519, end: 526 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("includes:"), span: Span { start: 527, end: 536 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: String("World"), span: Span { start: 537, end: 544 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("starts"), span: Span { start: 545, end: 551 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 552, end: 554 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("message"), span: Span { start: 555, end: 562 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("startsWith:"), span: Span { start: 563, end: 574 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: String("Hello"), span: Span { start: 575, end: 582 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Eof, span: Span { start: 583, end: 583 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
+Token { kind: Keyword("includesSubstring:"), span: Span { start: 527, end: 545 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("World"), span: Span { start: 546, end: 553 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("starts"), span: Span { start: 554, end: 560 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 561, end: 563 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("message"), span: Span { start: 564, end: 571 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("startsWith:"), span: Span { start: 572, end: 583 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("Hello"), span: Span { start: 584, end: 591 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 592, end: 592 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
