@@ -52,6 +52,16 @@ struct Args {
     /// Workspace ID for port discovery.
     #[arg(short, long)]
     workspace_id: Option<String>,
+
+    /// Auto-start the workspace if none is running.
+    ///
+    /// When set, if no running workspace is found for the current directory,
+    /// `beamtalk repl` is launched in the background to start one. The workspace
+    /// node continues running after `beamtalk repl` exits, preserving REPL state
+    /// between sessions. This is the behaviour used by `.mcp.json` entries created
+    /// by `beamtalk new`.
+    #[arg(long)]
+    start: bool,
 }
 
 /// Entry point: parse CLI args, connect to the REPL, and start the MCP server.
@@ -70,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     // Resolve REPL port and cookie
-    let (port, cookie) = resolve_port_and_cookie(&args)?;
+    let (port, cookie) = resolve_port_and_cookie(&args).await?;
     tracing::info!(port, "Connecting to beamtalk REPL");
 
     // Connect to REPL
@@ -100,7 +110,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Resolve the REPL port and cookie from CLI args or workspace discovery.
-fn resolve_port_and_cookie(args: &Args) -> Result<(u16, String), Box<dyn std::error::Error>> {
+async fn resolve_port_and_cookie(args: &Args) -> Result<(u16, String), Box<dyn std::error::Error>> {
     // Explicit port takes priority (cookie from env or default Erlang cookie)
     if let Some(port) = args.port {
         let cookie = std::env::var("BEAMTALK_COOKIE").unwrap_or_default();
@@ -112,7 +122,7 @@ fn resolve_port_and_cookie(args: &Args) -> Result<(u16, String), Box<dyn std::er
         return Ok((port, cookie));
     }
 
-    // Try workspace discovery
+    // Try project-specific workspace discovery
     if let Some((port, cookie)) = workspace::discover_port_and_cookie(args.workspace_id.as_deref())
     {
         if cookie.trim().is_empty() {
@@ -123,6 +133,12 @@ fn resolve_port_and_cookie(args: &Args) -> Result<(u16, String), Box<dyn std::er
             .into());
         }
         return Ok((port, cookie));
+    }
+
+    // If --start, auto-start the workspace for this directory rather than falling
+    // back to a workspace from a different project.
+    if args.start {
+        return start_workspace(args.workspace_id.as_deref()).await;
     }
 
     // Try finding any running workspace
@@ -137,8 +153,135 @@ fn resolve_port_and_cookie(args: &Args) -> Result<(u16, String), Box<dyn std::er
     }
 
     Err("Could not find a running beamtalk REPL. \
-         Start one with 'beamtalk repl' or specify --port."
+         Start one with 'beamtalk repl', use --start to auto-start, or specify --port."
         .into())
+}
+
+/// Start a beamtalk workspace for the current directory by running `beamtalk repl`.
+///
+/// Shells out to `beamtalk repl --port 0 --timeout N` with stdin closed so the
+/// process exits once the workspace node is up. The node continues running
+/// detached. Parses the assigned port from stdout and reads the cookie from
+/// workspace storage.
+async fn start_workspace(
+    workspace_id: Option<&str>,
+) -> Result<(u16, String), Box<dyn std::error::Error>> {
+    let idle_timeout = std::env::var("BEAMTALK_WORKSPACE_TIMEOUT")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(14400); // 4 hours
+
+    eprintln!("No running workspace found — starting beamtalk workspace...");
+
+    let output = std::process::Command::new("beamtalk")
+        .args([
+            "repl",
+            "--port",
+            "0",
+            "--timeout",
+            &idle_timeout.to_string(),
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .map_err(|e| -> Box<dyn std::error::Error> {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                "beamtalk not found on PATH — install beamtalk or start the workspace manually \
+                 with 'beamtalk repl'"
+                    .into()
+            } else {
+                format!("Failed to run beamtalk: {e}").into()
+            }
+        })?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Check exit status before parsing stdout
+    if !output.status.success() {
+        return Err(format!(
+            "beamtalk repl exited with {} — workspace failed to start.\n\
+             stdout: {stdout}\nstderr: {stderr}",
+            output.status
+        )
+        .into());
+    }
+
+    // Parse "Connected to REPL backend on port N." from stdout
+    let port = stdout
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("Connected to REPL backend on port ")
+                .and_then(|rest| rest.trim_end_matches('.').trim().parse::<u16>().ok())
+        })
+        .ok_or_else(|| {
+            format!(
+                "beamtalk repl succeeded but did not report a port.\n\
+                 stdout: {stdout}\nstderr: {stderr}"
+            )
+        })?;
+
+    // Determine workspace ID: use explicit ID, or parse from stdout, or derive from cwd
+    let ws_id = if let Some(id) = workspace_id {
+        id.to_string()
+    } else {
+        stdout
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix("  Workspace: ")
+                    .map(|rest| rest.split_whitespace().next().unwrap_or(rest).to_string())
+            })
+            .unwrap_or_else(|| {
+                std::env::current_dir()
+                    .map(|p| workspace::generate_workspace_id(&p))
+                    .unwrap_or_default()
+            })
+    };
+
+    // Read cookie from workspace storage
+    let cookie = workspace::read_cookie_file(&ws_id).ok_or_else(|| {
+        format!(
+            "Workspace started on port {port} but could not read cookie for workspace '{ws_id}' — \
+             try running 'beamtalk repl' manually"
+        )
+    })?;
+
+    // Wait for TCP readiness (up to 60s; configurable)
+    let tcp_timeout_secs: u64 = std::env::var("BEAMTALK_WORKSPACE_TCP_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(60);
+    wait_for_tcp_ready(port, std::time::Duration::from_secs(tcp_timeout_secs)).await?;
+
+    tracing::info!(port, workspace_id = ws_id, "beamtalk workspace ready");
+    eprintln!("Workspace ready on port {port}");
+
+    Ok((port, cookie))
+}
+
+/// Poll TCP until the server accepts connections or the timeout expires.
+async fn wait_for_tcp_ready(
+    port: u16,
+    timeout: std::time::Duration,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let addr = format!("127.0.0.1:{port}");
+    let deadline = tokio::time::Instant::now() + timeout;
+
+    loop {
+        if tokio::net::TcpStream::connect(&addr).await.is_ok() {
+            return Ok(());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(format!(
+                "Workspace port {port} not accepting connections after {}s — \
+                 check 'beamtalk workspace status'",
+                timeout.as_secs()
+            )
+            .into());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
 }
 
 fn directive_for_verbosity(v: u8) -> &'static str {
