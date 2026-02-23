@@ -392,32 +392,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_list_index_of() {
-        let result = doc_to_string(generate_primitive_bif(
-            "List",
-            "indexOf:",
-            &["Item".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_list_ops':'index_of'(Self, Item)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_list_each_with_index() {
-        let result = doc_to_string(generate_primitive_bif(
-            "List",
-            "eachWithIndex:",
-            &["Block".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_list_ops':'each_with_index'(Self, Block)".to_string())
-        );
-    }
-
     // Character primitive tests (BT-339)
 
     #[test]

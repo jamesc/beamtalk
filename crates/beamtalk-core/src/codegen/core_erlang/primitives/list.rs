@@ -239,22 +239,6 @@ fn generate_list_misc_bif(selector: &str, params: &[String]) -> Option<Document<
                 ")",
             ])
         }
-        "indexOf:" => {
-            let p0 = params.first().map_or("_Item", String::as_str);
-            Some(docvec![
-                "call 'beamtalk_list_ops':'index_of'(Self, ",
-                p0.to_string(),
-                ")"
-            ])
-        }
-        "eachWithIndex:" => {
-            let p0 = params.first().map_or("_Block", String::as_str);
-            Some(docvec![
-                "call 'beamtalk_list_ops':'each_with_index'(Self, ",
-                p0.to_string(),
-                ")",
-            ])
-        }
         "printString" => Some(Document::Str(
             "call 'beamtalk_primitive':'print_string'(Self)",
         )),

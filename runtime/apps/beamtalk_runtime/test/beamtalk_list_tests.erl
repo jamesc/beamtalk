@@ -361,15 +361,6 @@ partition_non_function_test() ->
         beamtalk_list_ops:partition([1, 2, 3], not_a_function)
     ).
 
-each_with_index_non_function_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'List', selector = 'eachWithIndex:'}
-        },
-        beamtalk_list_ops:each_with_index([1, 2, 3], not_a_function)
-    ).
-
 %%% ============================================================================
 %%% from_to/3 Error Path Tests (BT-622)
 %%% ============================================================================
@@ -408,55 +399,6 @@ from_to_negative_start_test() ->
         },
         beamtalk_list_ops:from_to([1, 2, 3], 0, 2)
     ).
-
-%%% ============================================================================
-%%% index_of/2 Tests (BT-622)
-%%% ============================================================================
-
-index_of_found_test() ->
-    ?assertEqual(2, beamtalk_list_ops:index_of([a, b, c], b)),
-    ?assertEqual(1, beamtalk_list_ops:index_of([a, b, c], a)),
-    ?assertEqual(3, beamtalk_list_ops:index_of([a, b, c], c)).
-
-index_of_not_found_test() ->
-    ?assertEqual(nil, beamtalk_list_ops:index_of([a, b, c], d)),
-    ?assertEqual(nil, beamtalk_list_ops:index_of([], a)).
-
-%%% ============================================================================
-%%% each_with_index/2 Tests (BT-622)
-%%% ============================================================================
-
-each_with_index_test() ->
-    Self = self(),
-    Ref = make_ref(),
-    beamtalk_list_ops:each_with_index([a, b, c], fun(Elem, Idx) -> Self ! {Ref, Elem, Idx} end),
-    ?assertEqual(
-        {a, 1},
-        receive
-            {Ref, Elem1, Idx1} -> {Elem1, Idx1}
-        after 100 -> timeout
-        end
-    ),
-    ?assertEqual(
-        {b, 2},
-        receive
-            {Ref, Elem2, Idx2} -> {Elem2, Idx2}
-        after 100 -> timeout
-        end
-    ),
-    ?assertEqual(
-        {c, 3},
-        receive
-            {Ref, Elem3, Idx3} -> {Elem3, Idx3}
-        after 100 -> timeout
-        end
-    ).
-
-each_with_index_returns_nil_test() ->
-    ?assertEqual(nil, beamtalk_list_ops:each_with_index([1, 2], fun(_, _) -> ok end)).
-
-each_with_index_empty_test() ->
-    ?assertEqual(nil, beamtalk_list_ops:each_with_index([], fun(_, _) -> ok end)).
 
 %%% ============================================================================
 %%% sort_with/2 non-list receiver test (BT-622)

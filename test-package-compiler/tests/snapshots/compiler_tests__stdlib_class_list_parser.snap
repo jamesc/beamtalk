@@ -1085,14 +1085,212 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "indexOf:",
-                            is_quoted: true,
+                        MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "self",
+                                    span: Span {
+                                        start: 1443,
+                                        end: 1447,
+                                    },
+                                },
+                            ),
+                            selector: Keyword(
+                                [
+                                    KeywordPart {
+                                        keyword: "inject:",
+                                        span: Span {
+                                            start: 1448,
+                                            end: 1455,
+                                        },
+                                    },
+                                    KeywordPart {
+                                        keyword: "into:",
+                                        span: Span {
+                                            start: 1458,
+                                            end: 1463,
+                                        },
+                                    },
+                                ],
+                            ),
+                            arguments: [
+                                Literal(
+                                    Integer(
+                                        0,
+                                    ),
+                                    Span {
+                                        start: 1456,
+                                        end: 1457,
+                                    },
+                                ),
+                                Block(
+                                    Block {
+                                        parameters: [
+                                            BlockParameter {
+                                                name: "each",
+                                                span: Span {
+                                                    start: 1466,
+                                                    end: 1470,
+                                                },
+                                            },
+                                            BlockParameter {
+                                                name: "i",
+                                                span: Span {
+                                                    start: 1472,
+                                                    end: 1473,
+                                                },
+                                            },
+                                        ],
+                                        body: [
+                                            Assignment {
+                                                target: Identifier(
+                                                    Identifier {
+                                                        name: "newI",
+                                                        span: Span {
+                                                            start: 1482,
+                                                            end: 1486,
+                                                        },
+                                                    },
+                                                ),
+                                                value: MessageSend {
+                                                    receiver: Identifier(
+                                                        Identifier {
+                                                            name: "i",
+                                                            span: Span {
+                                                                start: 1490,
+                                                                end: 1491,
+                                                            },
+                                                        },
+                                                    ),
+                                                    selector: Binary(
+                                                        "+",
+                                                    ),
+                                                    arguments: [
+                                                        Literal(
+                                                            Integer(
+                                                                1,
+                                                            ),
+                                                            Span {
+                                                                start: 1494,
+                                                                end: 1495,
+                                                            },
+                                                        ),
+                                                    ],
+                                                    span: Span {
+                                                        start: 1490,
+                                                        end: 1495,
+                                                    },
+                                                },
+                                                span: Span {
+                                                    start: 1482,
+                                                    end: 1495,
+                                                },
+                                            },
+                                            MessageSend {
+                                                receiver: MessageSend {
+                                                    receiver: Identifier(
+                                                        Identifier {
+                                                            name: "each",
+                                                            span: Span {
+                                                                start: 1503,
+                                                                end: 1507,
+                                                            },
+                                                        },
+                                                    ),
+                                                    selector: Binary(
+                                                        "=:=",
+                                                    ),
+                                                    arguments: [
+                                                        Identifier(
+                                                            Identifier {
+                                                                name: "item",
+                                                                span: Span {
+                                                                    start: 1512,
+                                                                    end: 1516,
+                                                                },
+                                                            },
+                                                        ),
+                                                    ],
+                                                    span: Span {
+                                                        start: 1503,
+                                                        end: 1516,
+                                                    },
+                                                },
+                                                selector: Keyword(
+                                                    [
+                                                        KeywordPart {
+                                                            keyword: "ifTrue:",
+                                                            span: Span {
+                                                                start: 1517,
+                                                                end: 1524,
+                                                            },
+                                                        },
+                                                    ],
+                                                ),
+                                                arguments: [
+                                                    Block(
+                                                        Block {
+                                                            parameters: [],
+                                                            body: [
+                                                                Return {
+                                                                    value: Identifier(
+                                                                        Identifier {
+                                                                            name: "newI",
+                                                                            span: Span {
+                                                                                start: 1527,
+                                                                                end: 1531,
+                                                                            },
+                                                                        },
+                                                                    ),
+                                                                    span: Span {
+                                                                        start: 1526,
+                                                                        end: 1531,
+                                                                    },
+                                                                },
+                                                            ],
+                                                            span: Span {
+                                                                start: 1525,
+                                                                end: 1532,
+                                                            },
+                                                        },
+                                                    ),
+                                                ],
+                                                span: Span {
+                                                    start: 1503,
+                                                    end: 1532,
+                                                },
+                                            },
+                                            Identifier(
+                                                Identifier {
+                                                    name: "newI",
+                                                    span: Span {
+                                                        start: 1540,
+                                                        end: 1544,
+                                                    },
+                                                },
+                                            ),
+                                        ],
+                                        span: Span {
+                                            start: 1464,
+                                            end: 1550,
+                                        },
+                                    },
+                                ),
+                            ],
                             span: Span {
-                                start: 1439,
-                                end: 1460,
+                                start: 1443,
+                                end: 1550,
                             },
                         },
+                        Identifier(
+                            Identifier {
+                                name: "nil",
+                                span: Span {
+                                    start: 1556,
+                                    end: 1559,
+                                },
+                            },
+                        ),
                     ],
                     return_type: None,
                     is_sealed: false,
@@ -1100,7 +1298,7 @@ Module {
                     doc_comment: None,
                     span: Span {
                         start: 1422,
-                        end: 1460,
+                        end: 1559,
                     },
                 },
                 MethodDefinition {
@@ -1109,8 +1307,8 @@ Module {
                             KeywordPart {
                                 keyword: "eachWithIndex:",
                                 span: Span {
-                                    start: 1490,
-                                    end: 1504,
+                                    start: 1589,
+                                    end: 1603,
                                 },
                             },
                         ],
@@ -1120,30 +1318,207 @@ Module {
                             name: Identifier {
                                 name: "block",
                                 span: Span {
-                                    start: 1505,
-                                    end: 1510,
+                                    start: 1604,
+                                    end: 1609,
                                 },
                             },
                             type_annotation: None,
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "eachWithIndex:",
-                            is_quoted: true,
+                        MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "self",
+                                    span: Span {
+                                        start: 1617,
+                                        end: 1621,
+                                    },
+                                },
+                            ),
+                            selector: Keyword(
+                                [
+                                    KeywordPart {
+                                        keyword: "inject:",
+                                        span: Span {
+                                            start: 1622,
+                                            end: 1629,
+                                        },
+                                    },
+                                    KeywordPart {
+                                        keyword: "into:",
+                                        span: Span {
+                                            start: 1632,
+                                            end: 1637,
+                                        },
+                                    },
+                                ],
+                            ),
+                            arguments: [
+                                Literal(
+                                    Integer(
+                                        0,
+                                    ),
+                                    Span {
+                                        start: 1630,
+                                        end: 1631,
+                                    },
+                                ),
+                                Block(
+                                    Block {
+                                        parameters: [
+                                            BlockParameter {
+                                                name: "each",
+                                                span: Span {
+                                                    start: 1640,
+                                                    end: 1644,
+                                                },
+                                            },
+                                            BlockParameter {
+                                                name: "i",
+                                                span: Span {
+                                                    start: 1646,
+                                                    end: 1647,
+                                                },
+                                            },
+                                        ],
+                                        body: [
+                                            Assignment {
+                                                target: Identifier(
+                                                    Identifier {
+                                                        name: "newI",
+                                                        span: Span {
+                                                            start: 1656,
+                                                            end: 1660,
+                                                        },
+                                                    },
+                                                ),
+                                                value: MessageSend {
+                                                    receiver: Identifier(
+                                                        Identifier {
+                                                            name: "i",
+                                                            span: Span {
+                                                                start: 1664,
+                                                                end: 1665,
+                                                            },
+                                                        },
+                                                    ),
+                                                    selector: Binary(
+                                                        "+",
+                                                    ),
+                                                    arguments: [
+                                                        Literal(
+                                                            Integer(
+                                                                1,
+                                                            ),
+                                                            Span {
+                                                                start: 1668,
+                                                                end: 1669,
+                                                            },
+                                                        ),
+                                                    ],
+                                                    span: Span {
+                                                        start: 1664,
+                                                        end: 1669,
+                                                    },
+                                                },
+                                                span: Span {
+                                                    start: 1656,
+                                                    end: 1669,
+                                                },
+                                            },
+                                            MessageSend {
+                                                receiver: Identifier(
+                                                    Identifier {
+                                                        name: "block",
+                                                        span: Span {
+                                                            start: 1677,
+                                                            end: 1682,
+                                                        },
+                                                    },
+                                                ),
+                                                selector: Keyword(
+                                                    [
+                                                        KeywordPart {
+                                                            keyword: "value:",
+                                                            span: Span {
+                                                                start: 1683,
+                                                                end: 1689,
+                                                            },
+                                                        },
+                                                        KeywordPart {
+                                                            keyword: "value:",
+                                                            span: Span {
+                                                                start: 1695,
+                                                                end: 1701,
+                                                            },
+                                                        },
+                                                    ],
+                                                ),
+                                                arguments: [
+                                                    Identifier(
+                                                        Identifier {
+                                                            name: "each",
+                                                            span: Span {
+                                                                start: 1690,
+                                                                end: 1694,
+                                                            },
+                                                        },
+                                                    ),
+                                                    Identifier(
+                                                        Identifier {
+                                                            name: "newI",
+                                                            span: Span {
+                                                                start: 1702,
+                                                                end: 1706,
+                                                            },
+                                                        },
+                                                    ),
+                                                ],
+                                                span: Span {
+                                                    start: 1677,
+                                                    end: 1706,
+                                                },
+                                            },
+                                            Identifier(
+                                                Identifier {
+                                                    name: "newI",
+                                                    span: Span {
+                                                        start: 1714,
+                                                        end: 1718,
+                                                    },
+                                                },
+                                            ),
+                                        ],
+                                        span: Span {
+                                            start: 1638,
+                                            end: 1724,
+                                        },
+                                    },
+                                ),
+                            ],
                             span: Span {
-                                start: 1514,
-                                end: 1541,
+                                start: 1617,
+                                end: 1724,
                             },
                         },
+                        Identifier(
+                            Identifier {
+                                name: "nil",
+                                span: Span {
+                                    start: 1730,
+                                    end: 1733,
+                                },
+                            },
+                        ),
                     ],
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
                     doc_comment: None,
                     span: Span {
-                        start: 1490,
-                        end: 1541,
+                        start: 1589,
+                        end: 1733,
                     },
                 },
                 MethodDefinition {
@@ -1152,8 +1527,8 @@ Module {
                             KeywordPart {
                                 keyword: "zip:",
                                 span: Span {
-                                    start: 1559,
-                                    end: 1563,
+                                    start: 1751,
+                                    end: 1755,
                                 },
                             },
                         ],
@@ -1163,8 +1538,8 @@ Module {
                             name: Identifier {
                                 name: "other",
                                 span: Span {
-                                    start: 1564,
-                                    end: 1569,
+                                    start: 1756,
+                                    end: 1761,
                                 },
                             },
                             type_annotation: None,
@@ -1175,8 +1550,8 @@ Module {
                             name: "zip:",
                             is_quoted: true,
                             span: Span {
-                                start: 1573,
-                                end: 1590,
+                                start: 1765,
+                                end: 1782,
                             },
                         },
                     ],
@@ -1185,8 +1560,8 @@ Module {
                     kind: Primary,
                     doc_comment: None,
                     span: Span {
-                        start: 1559,
-                        end: 1590,
+                        start: 1751,
+                        end: 1782,
                     },
                 },
                 MethodDefinition {
@@ -1195,8 +1570,8 @@ Module {
                             KeywordPart {
                                 keyword: "groupBy:",
                                 span: Span {
-                                    start: 1593,
-                                    end: 1601,
+                                    start: 1785,
+                                    end: 1793,
                                 },
                             },
                         ],
@@ -1206,8 +1581,8 @@ Module {
                             name: Identifier {
                                 name: "block",
                                 span: Span {
-                                    start: 1602,
-                                    end: 1607,
+                                    start: 1794,
+                                    end: 1799,
                                 },
                             },
                             type_annotation: None,
@@ -1218,8 +1593,8 @@ Module {
                             name: "groupBy:",
                             is_quoted: true,
                             span: Span {
-                                start: 1611,
-                                end: 1632,
+                                start: 1803,
+                                end: 1824,
                             },
                         },
                     ],
@@ -1228,8 +1603,8 @@ Module {
                     kind: Primary,
                     doc_comment: None,
                     span: Span {
-                        start: 1593,
-                        end: 1632,
+                        start: 1785,
+                        end: 1824,
                     },
                 },
                 MethodDefinition {
@@ -1238,8 +1613,8 @@ Module {
                             KeywordPart {
                                 keyword: "partition:",
                                 span: Span {
-                                    start: 1635,
-                                    end: 1645,
+                                    start: 1827,
+                                    end: 1837,
                                 },
                             },
                         ],
@@ -1249,8 +1624,8 @@ Module {
                             name: Identifier {
                                 name: "block",
                                 span: Span {
-                                    start: 1646,
-                                    end: 1651,
+                                    start: 1838,
+                                    end: 1843,
                                 },
                             },
                             type_annotation: None,
@@ -1261,8 +1636,8 @@ Module {
                             name: "partition:",
                             is_quoted: true,
                             span: Span {
-                                start: 1655,
-                                end: 1678,
+                                start: 1847,
+                                end: 1870,
                             },
                         },
                     ],
@@ -1271,8 +1646,8 @@ Module {
                     kind: Primary,
                     doc_comment: None,
                     span: Span {
-                        start: 1635,
-                        end: 1678,
+                        start: 1827,
+                        end: 1870,
                     },
                 },
                 MethodDefinition {
@@ -1281,8 +1656,8 @@ Module {
                             KeywordPart {
                                 keyword: "takeWhile:",
                                 span: Span {
-                                    start: 1681,
-                                    end: 1691,
+                                    start: 1873,
+                                    end: 1883,
                                 },
                             },
                         ],
@@ -1292,8 +1667,8 @@ Module {
                             name: Identifier {
                                 name: "block",
                                 span: Span {
-                                    start: 1692,
-                                    end: 1697,
+                                    start: 1884,
+                                    end: 1889,
                                 },
                             },
                             type_annotation: None,
@@ -1304,8 +1679,8 @@ Module {
                             name: "takeWhile:",
                             is_quoted: true,
                             span: Span {
-                                start: 1701,
-                                end: 1724,
+                                start: 1893,
+                                end: 1916,
                             },
                         },
                     ],
@@ -1314,8 +1689,8 @@ Module {
                     kind: Primary,
                     doc_comment: None,
                     span: Span {
-                        start: 1681,
-                        end: 1724,
+                        start: 1873,
+                        end: 1916,
                     },
                 },
                 MethodDefinition {
@@ -1324,8 +1699,8 @@ Module {
                             KeywordPart {
                                 keyword: "dropWhile:",
                                 span: Span {
-                                    start: 1727,
-                                    end: 1737,
+                                    start: 1919,
+                                    end: 1929,
                                 },
                             },
                         ],
@@ -1335,8 +1710,8 @@ Module {
                             name: Identifier {
                                 name: "block",
                                 span: Span {
-                                    start: 1738,
-                                    end: 1743,
+                                    start: 1930,
+                                    end: 1935,
                                 },
                             },
                             type_annotation: None,
@@ -1347,8 +1722,8 @@ Module {
                             name: "dropWhile:",
                             is_quoted: true,
                             span: Span {
-                                start: 1747,
-                                end: 1770,
+                                start: 1939,
+                                end: 1962,
                             },
                         },
                     ],
@@ -1357,8 +1732,8 @@ Module {
                     kind: Primary,
                     doc_comment: None,
                     span: Span {
-                        start: 1727,
-                        end: 1770,
+                        start: 1919,
+                        end: 1962,
                     },
                 },
                 MethodDefinition {
@@ -1367,8 +1742,8 @@ Module {
                             KeywordPart {
                                 keyword: "intersperse:",
                                 span: Span {
-                                    start: 1773,
-                                    end: 1785,
+                                    start: 1965,
+                                    end: 1977,
                                 },
                             },
                         ],
@@ -1378,8 +1753,8 @@ Module {
                             name: Identifier {
                                 name: "separator",
                                 span: Span {
-                                    start: 1786,
-                                    end: 1795,
+                                    start: 1978,
+                                    end: 1987,
                                 },
                             },
                             type_annotation: None,
@@ -1390,8 +1765,8 @@ Module {
                             name: "intersperse:",
                             is_quoted: true,
                             span: Span {
-                                start: 1799,
-                                end: 1824,
+                                start: 1991,
+                                end: 2016,
                             },
                         },
                     ],
@@ -1400,8 +1775,8 @@ Module {
                     kind: Primary,
                     doc_comment: None,
                     span: Span {
-                        start: 1773,
-                        end: 1824,
+                        start: 1965,
+                        end: 2016,
                     },
                 },
                 MethodDefinition {
@@ -1410,8 +1785,8 @@ Module {
                             KeywordPart {
                                 keyword: "add:",
                                 span: Span {
-                                    start: 1827,
-                                    end: 1831,
+                                    start: 2019,
+                                    end: 2023,
                                 },
                             },
                         ],
@@ -1421,8 +1796,8 @@ Module {
                             name: Identifier {
                                 name: "item",
                                 span: Span {
-                                    start: 1832,
-                                    end: 1836,
+                                    start: 2024,
+                                    end: 2028,
                                 },
                             },
                             type_annotation: None,
@@ -1433,8 +1808,8 @@ Module {
                             name: "add:",
                             is_quoted: true,
                             span: Span {
-                                start: 1840,
-                                end: 1857,
+                                start: 2032,
+                                end: 2049,
                             },
                         },
                     ],
@@ -1443,8 +1818,8 @@ Module {
                     kind: Primary,
                     doc_comment: None,
                     span: Span {
-                        start: 1827,
-                        end: 1857,
+                        start: 2019,
+                        end: 2049,
                     },
                 },
             ],
@@ -1453,7 +1828,7 @@ Module {
             doc_comment: None,
             span: Span {
                 start: 208,
-                end: 1857,
+                end: 2049,
             },
         },
     ],
@@ -1461,7 +1836,7 @@ Module {
     expressions: [],
     span: Span {
         start: 208,
-        end: 1857,
+        end: 2049,
     },
     leading_comments: [
         Comment {
