@@ -994,6 +994,12 @@ impl ReplClient {
     /// Load a file or directory and return a formatted string for test assertions.
     fn load_and_report(&mut self, path: &str) -> Result<String, String> {
         let root = workspace_root();
+        let path = path.trim();
+        let path = path
+            .strip_prefix('"')
+            .and_then(|p| p.strip_suffix('"'))
+            .or_else(|| path.strip_prefix('\'').and_then(|p| p.strip_suffix('\'')))
+            .unwrap_or(path);
         let full_path = root.join(path);
 
         if full_path.is_dir() {
@@ -1104,7 +1110,7 @@ impl ReplClient {
                 if classes.is_empty() {
                     Ok("Reloaded".to_string())
                 } else {
-                    Ok(format!("Reloaded {}", classes.join(", ")))
+                    Ok(format!("Reloaded: {}", classes.join(", ")))
                 }
             }
             None => Err("No file or directory has been loaded yet".to_string()),
