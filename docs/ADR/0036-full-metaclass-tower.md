@@ -1,4 +1,4 @@
-# ADR 0034: Full Metaclass Tower
+# ADR 0036: Full Metaclass Tower
 
 ## Status
 Proposed (2026-02-23)
@@ -174,7 +174,7 @@ Replace the sentinel atom return with a real `#beamtalk_object{}`:
 classClass(_Self) ->
     'Metaclass'.
 
-%% After (ADR 0034 real metaclass object):
+%% After (ADR 0036 real metaclass object):
 classClass(Self) ->
     %% Return same pid, but tagged with 'Metaclass' class for dispatch
     Pid = erlang:element(4, Self),
@@ -292,7 +292,7 @@ register_class() ->
     },
     case beamtalk_object_class:start('Metaclass', ClassInfo) of
         {ok, _Pid} ->
-            ?LOG_INFO("Registered Metaclass (ADR 0034 stub)", #{module => ?MODULE}),
+            ?LOG_INFO("Registered Metaclass (ADR 0036 stub)", #{module => ?MODULE}),
             ok;
         {error, {already_started, _}} ->
             beamtalk_object_class:update_class('Metaclass', ClassInfo),
