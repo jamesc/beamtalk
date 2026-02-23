@@ -26,5 +26,5 @@ isEmpty := "" isEmpty
 hasContent := message isNotEmpty
 
 // String searching
-found := message includes: "World"
+found := message includesSubstring: "World"
 starts := message startsWith: "Hello"

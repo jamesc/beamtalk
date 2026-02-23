@@ -80,33 +80,33 @@ Token { kind: Integer("3"), span: Span { start: 865, end: 866 }, leading_trivia:
 Token { kind: Identifier("found"), span: Span { start: 908, end: 913 }, leading_trivia: [Whitespace("\n\n"), LineComment("// ===== String Search Operations ====="), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Assign, span: Span { start: 914, end: 916 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Identifier("message"), span: Span { start: 917, end: 924 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("includes:"), span: Span { start: 925, end: 934 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: String("World"), span: Span { start: 935, end: 942 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("notFound"), span: Span { start: 943, end: 951 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 952, end: 954 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("message"), span: Span { start: 955, end: 962 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("includes:"), span: Span { start: 963, end: 972 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: String("xyz"), span: Span { start: 973, end: 978 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("starts"), span: Span { start: 1023, end: 1029 }, leading_trivia: [Whitespace("\n\n"), LineComment("// ===== String Prefix/Suffix Checks ====="), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 1030, end: 1032 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("message"), span: Span { start: 1033, end: 1040 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("startsWith:"), span: Span { start: 1041, end: 1052 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: String("Hello"), span: Span { start: 1053, end: 1060 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("ends"), span: Span { start: 1061, end: 1065 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 1066, end: 1068 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("message"), span: Span { start: 1069, end: 1076 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("endsWith:"), span: Span { start: 1077, end: 1086 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: String("!"), span: Span { start: 1087, end: 1090 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("csv"), span: Span { start: 1124, end: 1127 }, leading_trivia: [Whitespace("\n\n"), LineComment("// ===== String Splitting ====="), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 1128, end: 1130 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: String("a,b,c,d"), span: Span { start: 1131, end: 1140 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("parts"), span: Span { start: 1141, end: 1146 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 1147, end: 1149 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("csv"), span: Span { start: 1150, end: 1153 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("split:"), span: Span { start: 1154, end: 1160 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: String(","), span: Span { start: 1161, end: 1164 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("reversed"), span: Span { start: 1196, end: 1204 }, leading_trivia: [Whitespace("\n\n"), LineComment("// ===== String Reverse ====="), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 1205, end: 1207 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: String("hello"), span: Span { start: 1208, end: 1215 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("reverse"), span: Span { start: 1216, end: 1223 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Eof, span: Span { start: 1224, end: 1224 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
+Token { kind: Keyword("includesSubstring:"), span: Span { start: 925, end: 943 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("World"), span: Span { start: 944, end: 951 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("notFound"), span: Span { start: 952, end: 960 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 961, end: 963 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("message"), span: Span { start: 964, end: 971 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("includesSubstring:"), span: Span { start: 972, end: 990 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("xyz"), span: Span { start: 991, end: 996 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("starts"), span: Span { start: 1041, end: 1047 }, leading_trivia: [Whitespace("\n\n"), LineComment("// ===== String Prefix/Suffix Checks ====="), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 1048, end: 1050 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("message"), span: Span { start: 1051, end: 1058 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("startsWith:"), span: Span { start: 1059, end: 1070 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("Hello"), span: Span { start: 1071, end: 1078 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("ends"), span: Span { start: 1079, end: 1083 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 1084, end: 1086 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("message"), span: Span { start: 1087, end: 1094 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("endsWith:"), span: Span { start: 1095, end: 1104 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("!"), span: Span { start: 1105, end: 1108 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("csv"), span: Span { start: 1142, end: 1145 }, leading_trivia: [Whitespace("\n\n"), LineComment("// ===== String Splitting ====="), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 1146, end: 1148 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("a,b,c,d"), span: Span { start: 1149, end: 1158 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("parts"), span: Span { start: 1159, end: 1164 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 1165, end: 1167 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("csv"), span: Span { start: 1168, end: 1171 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("split:"), span: Span { start: 1172, end: 1178 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String(","), span: Span { start: 1179, end: 1182 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("reversed"), span: Span { start: 1214, end: 1222 }, leading_trivia: [Whitespace("\n\n"), LineComment("// ===== String Reverse ====="), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 1223, end: 1225 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("hello"), span: Span { start: 1226, end: 1233 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("reverse"), span: Span { start: 1234, end: 1241 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 1242, end: 1242 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

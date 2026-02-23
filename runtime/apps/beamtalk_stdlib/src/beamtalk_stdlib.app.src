@@ -46,7 +46,7 @@
             {'bt@stdlib@set', 'Set', 'Collection'},
             {'bt@stdlib@stack_frame', 'StackFrame', 'Object'},
             {'bt@stdlib@stream', 'Stream', 'Object'},
-            {'bt@stdlib@string', 'String', 'Object'},
+            {'bt@stdlib@string', 'String', 'Collection'},
             {'bt@stdlib@symbol', 'Symbol', 'Object'},
             {'bt@stdlib@system', 'System', 'Object'},
             {'bt@stdlib@system_dictionary', 'SystemDictionary', 'Actor'},

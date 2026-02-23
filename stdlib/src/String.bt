@@ -15,7 +15,7 @@
 /// "hello" length        // => 5
 /// "hello" ++ " world"   // => "hello world"
 /// ```
-sealed Object subclass: String
+sealed Collection subclass: String
   /// Test strict equality with another string.
   ///
   /// ## Examples
@@ -103,7 +103,7 @@ sealed Object subclass: String
   /// "hello" at: 1        // => "h"
   /// "hello" at: 5        // => "o"
   /// ```
-  at: index: Integer -> Character => @primitive "at:"
+  at: index: Integer -> String => @primitive "at:"
 
   /// Convert all characters to uppercase.
   ///
@@ -165,10 +165,10 @@ sealed Object subclass: String
   ///
   /// ## Examples
   /// ```beamtalk
-  /// "hello world" includes: "world"  // => true
-  /// "hello" includes: "xyz"          // => false
+  /// "hello world" includesSubstring: "world"  // => true
+  /// "hello" includesSubstring: "xyz"          // => false
   /// ```
-  includes: substring: String -> Boolean => @primitive "includes:"
+  includesSubstring: substring: String -> Boolean => @primitive "includes:"
 
   /// Test if the receiver starts with the given prefix.
   ///
@@ -382,9 +382,9 @@ sealed Object subclass: String
   ///
   /// ## Examples
   /// ```beamtalk
-  /// "abc" each: [:c | Transcript show: c]
+  /// "abc" do: [:c | Transcript show: c]
   /// ```
-  each: block: Block -> Nil => @primitive "each:"
+  do: block: Block -> Nil => @primitive "each:"
 
   /// Collect results of evaluating `block` on each grapheme cluster.
   ///
@@ -396,9 +396,12 @@ sealed Object subclass: String
 
   /// Select grapheme clusters for which `block` returns true.
   ///
+  /// Returns a String of the matching grapheme clusters (filtered graphemes
+  /// remain valid graphemes).
+  ///
   /// ## Examples
   /// ```beamtalk
-  /// "a1b2" select: [:c | c isAlpha]    // => #("a", "b")
+  /// "a1b2" select: [:c | c isAlpha]    // => "ab"
   /// ```
   select: block: Block -> String => @primitive "select:"
 
