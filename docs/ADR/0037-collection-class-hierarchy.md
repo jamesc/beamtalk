@@ -422,14 +422,17 @@ This ADR documents decisions that are **already implemented** as of 2026-02-23. 
 | Abstract Collection protocol | BT-815 | ✅ Implemented | 10 pure-BT methods on `Collection.bt` |
 | `Number.bt` precedent | BT-334 | ✅ Implemented | Abstract numeric superclass pattern |
 
-Remaining open work (from ADR-0034 implementation tracking):
+All ADR-0034 implementation work is now complete:
 
 | Phase | Issue | Status | Description |
 |-------|-------|--------|-------------|
-| Phase 3 | BT-816 | Open | Self-host `List` algorithmic ops (`indexOf:`, `eachWithIndex:`) |
-| Phase 3 | BT-817 | Open | Self-host `Tuple` unwrap ops |
-| Phase 3 | BT-818 | Open | Self-host `Dictionary keysAndValuesDo:` and `Association` formatting |
-| Phase 4 | BT-819 | Open | Self-host `TestCase` assertions |
+| Phase 1 | BT-813 | ✅ Done | `Future.bt` and `FileHandle.bt` as `@primitive` stubs |
+| Phase 2a | BT-814 | ✅ Done | `addFirst:` O(1) list cons primitive |
+| Phase 2b | BT-815 | ✅ Done | Abstract Collection protocol in pure Beamtalk |
+| Phase 3 | BT-816 | ✅ Done | Self-host `List` algorithmic ops (`indexOf:`, `eachWithIndex:`) |
+| Phase 3 | BT-817 | ✅ Done | Self-host `Tuple` unwrap ops |
+| Phase 3 | BT-818 | ✅ Done | Self-host `Dictionary keysAndValuesDo:` and `Association` formatting |
+| Phase 4 | BT-819 | ✅ Done | Self-host `TestCase` assertions |
 
 Future design work deferred by this ADR:
 
