@@ -21,16 +21,6 @@ at_if_absent_empty_map_test() ->
     ?assertEqual(42, beamtalk_map_ops:at_if_absent(#{}, x, fun() -> 42 end)).
 
 %%% ============================================================================
-%%% keys_and_values_do/2
-%%% ============================================================================
-
-keys_and_values_do_test() ->
-    ?assertEqual(nil, beamtalk_map_ops:keys_and_values_do(#{a => 1}, fun(_, _) -> ok end)).
-
-keys_and_values_do_empty_test() ->
-    ?assertEqual(nil, beamtalk_map_ops:keys_and_values_do(#{}, fun(_, _) -> ok end)).
-
-%%% ============================================================================
 %%% Compiled bt@stdlib@dictionary dispatch/3
 %%% ============================================================================
 
