@@ -43,7 +43,8 @@ ADR 0032 established the `Behaviour`/`Class` chain and removed the flattened tab
 
 - **No new process per metaclass**: Metaclasses are represented as `#beamtalk_object{}` structs backed by the same class gen_server as their associated class. One class process handles both class-side and metaclass-side dispatch (the virtual tag trick from ADR 0013 continues).
 - **Sealed at v0.1**: `Metaclass` is sealed — users cannot subclass it. Per-metaclass instance variables are not supported in this ADR.
-- **Bootstrap ordering**: `Metaclass` must be registered after `Class` in the bootstrap chain. Self-grounding (`Metaclass class class == Metaclass`) requires a two-phase back-patch.
+- **`sealed` allows stdlib-internal subclassing**: `Class.bt` is declared `sealed`, preventing user subclassing. However, `sealed` only restricts user code — stdlib-internal classes like `Metaclass` may subclass sealed classes. This is enforced by the compiler checking whether the subclass definition is in stdlib source (`stdlib/src/`). If the compiler does not yet support this distinction, `Class` must be unsealed as a prerequisite.
+- **Bootstrap ordering**: `Metaclass` must be registered after `Class` in the bootstrap chain. Self-grounding (`Metaclass class class == Metaclass`) requires correct dispatch routing (see Section 5).
 - **Breaking**: `metaclass_test.bt` sentinel assertions (`equals: #Metaclass`) must become class object assertions.
 
 ## Decision
@@ -67,7 +68,7 @@ sealed Class subclass: Metaclass
   sealed thisClass => @primitive "metaclassThisClass"
 
   // name: derived from thisClass (e.g., 'Counter class')
-  sealed name => self thisClass name, ' class'
+  sealed name => (self thisClass name asString) ++ " class"
 
   // printString: same as name
   sealed printString => self name asString
@@ -76,10 +77,10 @@ sealed Class subclass: Metaclass
   // i.e. Counter class superclass == Actor class (not Actor)
   sealed superclass => @primitive "metaclassSuperclass"
 
-  // Methods: returns class-side method selectors (not instance-side)
-  sealed methods => @primitive "metaclassClassMethods"
-  sealed localMethods => @primitive "metaclassLocalClassMethods"
-  sealed includesSelector: selector => @primitive "metaclassIncludesSelector"
+  // Class-side method queries: introspect the described class's class methods
+  sealed classMethods => @primitive "metaclassClassMethods"
+  sealed localClassMethods => @primitive "metaclassLocalClassMethods"
+  sealed classIncludesSelector: selector => @primitive "metaclassIncludesSelector"
 ```
 
 `Metaclass` subclasses `Class`, so it inherits the full `Behaviour` protocol:
@@ -127,9 +128,9 @@ sealed Class subclass: Metaclass
 >> Metaclass class name
 => 'Metaclass class'
 
-// Metaclass methods reflect class-side selectors
+// Metaclass protocol: methods returns Metaclass instance methods
 >> Counter class class methods
-=> [increment, getValue, ...]    (class-side selectors on Counter)
+=> [isMeta, isMetaclass, thisClass, name, superclass, methods, ...]    (Metaclass protocol)
 
 // Introspection use case: find all metaclasses
 >> Metaclass allSubclasses
@@ -170,16 +171,19 @@ Replace the sentinel atom return with a real `#beamtalk_object{}`:
 
 ```erlang
 %% Before (ADR 0013 sentinel):
-classClass(#beamtalk_object{pid = Pid}) ->
+classClass(_Self) ->
     'Metaclass'.
 
 %% After (ADR 0034 real metaclass object):
-classClass(#beamtalk_object{pid = Pid} = ClassObj) ->
-    %% Return same pid, but tagged as the metaclass class
-    ClassObj#beamtalk_object{class = 'Metaclass', class_mod = beamtalk_metaclass_bt}.
+classClass(Self) ->
+    %% Return same pid, but tagged with 'Metaclass' class for dispatch
+    Pid = erlang:element(4, Self),
+    #beamtalk_object{class = 'Metaclass', class_mod = beamtalk_metaclass_bt, pid = Pid}.
 ```
 
 The metaclass object wraps the *same* class pid but dispatches through the `'Metaclass'` class chain. No new gen_server process.
+
+**Self-grounding**: When `classClass/1` is called on an object already tagged with `class = 'Metaclass'` (i.e., `Metaclass class class`), the function returns a *new* `#beamtalk_object{}` with `class = 'Metaclass'` and the same pid. Meanwhile, `Metaclass` as a class reference evaluates to `#beamtalk_object{class = 'Metaclass class', pid = MetaclassPid}`. The self-grounding invariant `Metaclass class class == Metaclass` holds because Beamtalk's `==` on `#beamtalk_object{}` compares by **pid identity**, not by struct equality — two references to the same process are equal regardless of their class tags. This matches Smalltalk object identity semantics.
 
 #### New primitives backing `Metaclass.bt`
 
@@ -195,25 +199,40 @@ All in `beamtalk_behaviour_intrinsics.erl`, following the thin data-access patte
 
 #### `beamtalk_class_dispatch.erl` — `try_class_chain_fallthrough/3`
 
-When dispatch falls through from user-defined class methods, branch on whether the receiver is a metaclass object:
+The existing fallthrough dispatches all class objects through `'Class'`. After this ADR, metaclass objects (tagged `'Metaclass'`) must dispatch through `'Metaclass'` instead. The distinction:
+
+- **Class objects** have tags like `'Counter class'` (suffix `" class"` via `class_object_tag/1`) — dispatch through `'Class'` chain (existing behavior)
+- **Metaclass objects** have tag `'Metaclass'` (not a `" class"` suffix tag) — dispatch through `'Metaclass'` chain
+
+Since metaclass objects are NOT detected by `is_class_name/1` (their tag is `'Metaclass'`, not `'Metaclass class'`), they will not enter `class_send` at all. Instead, they dispatch through `beamtalk_primitive:send/3` → `gen_server:call(Pid, {Selector, Args})`. The gen_server (the class process) receives the message and dispatches it using its module's `dispatch/4` function, which for metaclass objects should route through the `Metaclass` class chain.
+
+The key change is in how the class gen_server handles messages for metaclass-tagged senders. This requires a **new message format** for metaclass dispatch: `{metaclass_method_call, Selector, Args}`, analogous to the existing `{class_method_call, Selector, Args}` format. The caller (`beamtalk_dispatch` or `beamtalk_primitive:send`) must detect the `'Metaclass'` tag and use this message format.
 
 ```erlang
-try_class_chain_fallthrough(#beamtalk_object{class = ClassName} = Obj, Selector, Args) ->
-    case is_metaclass_name(ClassName) of
-        true ->
-            %% Dispatch through Metaclass chain
-            beamtalk_dispatch:dispatch('Metaclass', Selector, Args, Obj);
-        false ->
-            %% Dispatch through Class chain (existing behavior)
-            beamtalk_dispatch:dispatch('Class', Selector, Args, Obj)
+%% In beamtalk_primitive:send or beamtalk_dispatch:
+%% When Self has class = 'Metaclass', route through metaclass dispatch
+send(#beamtalk_object{class = 'Metaclass', pid = Pid} = Self, Selector, Args) ->
+    case gen_server:call(Pid, {metaclass_method_call, Selector, Args}) of
+        {ok, Result} -> Result;
+        {error, not_found} ->
+            %% Fall through to Metaclass chain (Metaclass → Class → Behaviour → Object)
+            case beamtalk_dispatch:lookup(Selector, Args, Self, #{}, 'Metaclass') of
+                {reply, Result, _} -> Result;
+                {error, #beamtalk_error{kind = does_not_understand}} ->
+                    beamtalk_error:raise(beamtalk_error:new(does_not_understand, 'Metaclass', Selector))
+            end
     end.
-
-%% A name like 'Counter class' is a metaclass name
-is_metaclass_name(Name) ->
-    binary:match(atom_to_binary(Name), <<" class">>) =/= nomatch.
 ```
 
+Implementation detail: the `{metaclass_method_call, Selector, Args}` handler in `beamtalk_object_class.erl` returns `{error, not_found}` for the bootstrap stub, since metaclass methods are defined in `Metaclass.bt`, not as user-defined class methods. The fallthrough to `'Metaclass'` chain handles all protocol methods.
+
 #### `beamtalk_primitive.erl` — `class_of_object/1`
+
+Three changes required:
+
+1. **Remove the bare atom clause**: `class_of_object('Metaclass') -> 'Metaclass'` (line 61) — this handled the old sentinel atom. Remove it.
+
+2. **Update the `#beamtalk_object{}` clause** to return a real metaclass object:
 
 ```erlang
 %% Before: class of a class → sentinel atom
@@ -235,6 +254,12 @@ class_of_object(#beamtalk_object{class = ClassName, pid = Pid}) ->
             class_of_object_inner(ClassName)
     end.
 ```
+
+3. **Remove dead code**: `print_string('Metaclass') -> <<"Metaclass">>` (line 100) — the atom `'Metaclass'` is no longer returned by any code path. Remove this special case.
+
+#### `beamtalk_primitive.erl` — `responds_to/2`
+
+The `responds_to/2` function (line 227) checks `is_class_object(Obj)` and dispatches through `'Class'`. Metaclass objects have tag `'Metaclass'` which does NOT end with `" class"`, so `is_class_object` returns `false`. They fall through to `class_name_from_tag('Metaclass')` → resolves to atom `'Metaclass'` → dispatches through `beamtalk_dispatch:responds_to(Selector, 'Metaclass')`. This path works correctly IF `'Metaclass'` is registered in the class registry with its method chain — which it is (registered during bootstrap). No code change is needed, but this code path must be verified during testing.
 
 #### `beamtalk_metaclass_bt.erl` — Bootstrap stub
 
@@ -265,32 +290,39 @@ register_class() ->
             'name' => #{arity => 0}
         }
     },
-    beamtalk_object_class:start('Metaclass', ClassInfo).
+    case beamtalk_object_class:start('Metaclass', ClassInfo) of
+        {ok, _Pid} ->
+            ?LOG_INFO("Registered Metaclass (ADR 0034 stub)", #{module => ?MODULE}),
+            ok;
+        {error, {already_started, _}} ->
+            beamtalk_object_class:update_class('Metaclass', ClassInfo),
+            ok;
+        {error, Reason} ->
+            ?LOG_WARNING("Failed to register Metaclass", #{reason => Reason}),
+            ok
+    end.
 ```
 
-### 6. Bootstrap Circularity
+### 6. Self-Grounding Mechanism
 
-The self-grounding invariant (`Metaclass class class == Metaclass`) requires a circular reference: `Metaclass`'s metaclass is `Metaclass` itself. OTP bootstrap handles this via two-phase initialization:
+The self-grounding invariant (`Metaclass class class == Metaclass`) works automatically through the virtual tag approach — **no two-phase back-patch is required**. Here's the trace:
 
-**Phase 1 — Register with nil pointer:**
-```erlang
-%% During normal bootstrap sequence, register Metaclass with a placeholder
-beamtalk_object_class:start('Metaclass', ClassInfo#{metaclass_pid => undefined}).
-```
+1. `Metaclass` (class reference) → `#beamtalk_object{class = 'Metaclass class', pid = MetaclassPid}`
+2. `Metaclass class` → `classClass/1` returns `#beamtalk_object{class = 'Metaclass', pid = MetaclassPid}` (same pid, different tag)
+3. `Metaclass class class` → `classClass/1` is called again, returns `#beamtalk_object{class = 'Metaclass', pid = MetaclassPid}` (same pid again)
 
-**Phase 2 — Back-patch after all classes started:**
-```erlang
-%% After bootstrap completes, set Metaclass's metaclass to point to itself
-MetaclassPid = beamtalk_class_registry:whereis('Metaclass'),
-beamtalk_object_class:set_metaclass_pid(MetaclassPid, MetaclassPid).
-```
+`Metaclass class class == Metaclass` evaluates to `true` because Beamtalk's `==` on `#beamtalk_object{}` compares by **pid identity** — both sides reference the same `MetaclassPid`. The different class tags (`'Metaclass'` vs `'Metaclass class'`) do not affect equality.
 
-The class gen_server's `classClass/1` primitive reads the metaclass pid from its state. During the bootstrap window (between Phase 1 and Phase 2), `Metaclass class class` returns `undefined` — this is acceptable because no user code runs during bootstrap. A post-bootstrap assertion verifies self-grounding:
+**No bootstrap circularity**: Unlike Smalltalk-80 where metaclass objects are heap-allocated and require back-patching, Beamtalk's virtual metaclasses are just re-tagged references to the same gen_server. `classClass/1` is a pure function that stamps `class = 'Metaclass'` on any class object — no state to back-patch.
+
+**Post-bootstrap assertion** (validates the invariant is working):
 
 ```erlang
 %% post_bootstrap_assertions/0 in beamtalk_runtime_app.erl
 true = (beamtalk_eval("Metaclass class class == Metaclass") =:= true).
 ```
+
+**Note**: This assertion depends on `==` using pid-based identity for `#beamtalk_object{}`. If the `==` implementation changes to structural comparison, the self-grounding mechanism must be revisited.
 
 ### 7. Bootstrap Order Extension
 
@@ -341,7 +373,7 @@ Each metaclass is a unique object. Metaclass instance variables (defined on `Foo
 Pharo follows Smalltalk-80 closely. `Metaclass.class.st` defines:
 
 - `thisClass` — the class described by this metaclass
-- `name` — derived as `self thisClass name, ' class'`
+- `name` — derived as `self thisClass name , ' class'` (Smalltalk uses `,` for concatenation; Beamtalk uses `++`)
 - `printOn:` — `aStream nextPutAll: self name`
 - `subclassOf:` — delegates to `thisClass superclass class`
 - `addInstVarNamed:` — dynamically adds a class instance variable
@@ -490,6 +522,8 @@ Allow `Counter class addInstVarNamed: 'cache'` to add dynamic per-class state on
 - Class variables continue to serve the per-class state use case that per-metaclass instance variables would otherwise provide.
 - `Metaclass class name == 'Metaclass class'` — the metaclass of `Metaclass` has a name, consistent with the naming rule.
 - Performance: same dispatch path cost as any other class object message. No regression.
+- **`==` semantics dependency**: The self-grounding invariant (`Metaclass class class == Metaclass`) relies on `==` for `#beamtalk_object{}` comparing by **pid identity**, not structural equality. `Metaclass class class` produces `#beamtalk_object{class='Metaclass', pid=P}` while `Metaclass` produces `#beamtalk_object{class='Metaclass class', pid=P}` — same pid, different tags. If `==` ever changes to structural comparison, the self-grounding invariant would break.
+- **`Class allSubclasses`** now includes `Metaclass` — a minor behavioral change for code enumerating class subclasses.
 
 ## Implementation
 
@@ -498,12 +532,14 @@ Allow `Counter class addInstVarNamed: 'cache'` to add dynamic per-class state on
 **Files**: `beamtalk_metaclass_bt.erl` (new), `beamtalk_primitive.erl`, `beamtalk_behaviour_intrinsics.erl`, `beamtalk_class_dispatch.erl`, `beamtalk_runtime_app.erl`
 
 - Create `beamtalk_metaclass_bt.erl` following `beamtalk_class_bt.erl` pattern
+- Prerequisite: ensure `sealed` on `Class.bt` allows stdlib-internal subclassing, or unseal `Class`
 - Update `classClass/1` in `beamtalk_behaviour_intrinsics.erl`: return `#beamtalk_object{class='Metaclass', class_mod=beamtalk_metaclass_bt, pid=ClassPid}` instead of atom `'Metaclass'`
-- Update `class_of_object/1` in `beamtalk_primitive.erl`: return metaclass object instead of atom
-- Add `is_metaclass_name/1` check in `try_class_chain_fallthrough/3`
+- Update `class_of_object/1` in `beamtalk_primitive.erl`: return metaclass object instead of atom; remove bare atom clause; remove `print_string('Metaclass')` special case
+- Add `{metaclass_method_call, ...}` handler in `beamtalk_object_class.erl`
+- Add metaclass dispatch routing in `beamtalk_primitive:send/3` for `class = 'Metaclass'` tagged objects
 - Add `Metaclass` to bootstrap sequence after `Class`
-- Add two-phase back-patch for `Metaclass class class == Metaclass`
-- Add post-bootstrap assertion
+- Add post-bootstrap assertion for self-grounding invariant
+- Verify `responds_to/2` and `beamtalk_method_resolver.erl` work for metaclass-tagged objects
 
 **Test**: `Counter class class isMeta` returns `true`. `Metaclass class class == Metaclass` is `true`. No existing tests break.
 
@@ -533,11 +569,14 @@ All follow the thin data-access pattern from ADR 0032: raw data reads only, no l
 | Component | Phase | Change |
 |---|---|---|
 | `runtime/apps/beamtalk_runtime/src/beamtalk_metaclass_bt.erl` | 1 | New file (bootstrap stub) |
-| `runtime/apps/beamtalk_runtime/src/beamtalk_primitive.erl` | 1 | `class_of_object/1` returns object not atom |
+| `runtime/apps/beamtalk_runtime/src/beamtalk_primitive.erl` | 1 | `class_of_object/1` returns object not atom; remove `class_of_object('Metaclass')` clause; remove `print_string('Metaclass')` clause; verify `responds_to/2` code path for metaclass objects |
 | `runtime/apps/beamtalk_runtime/src/beamtalk_behaviour_intrinsics.erl` | 1+2 | `classClass/1` change + 5 new primitives |
-| `runtime/apps/beamtalk_runtime/src/beamtalk_class_dispatch.erl` | 1 | Metaclass branch in `try_class_chain_fallthrough/3` |
-| `runtime/apps/beamtalk_runtime/src/beamtalk_runtime_app.erl` | 1 | Bootstrap order + two-phase back-patch |
+| `runtime/apps/beamtalk_runtime/src/beamtalk_class_dispatch.erl` | 1 | Metaclass dispatch routing (new `{metaclass_method_call, ...}` message format) |
+| `runtime/apps/beamtalk_runtime/src/beamtalk_object_class.erl` | 1 | Handle `{metaclass_method_call, ...}` in `handle_call` |
+| `runtime/apps/beamtalk_runtime/src/beamtalk_runtime_app.erl` | 1 | Bootstrap order + post-bootstrap assertion |
+| `runtime/apps/beamtalk_runtime/src/beamtalk_method_resolver.erl` | 1 | Verify `is_class_name(ClassTag)` code path for metaclass tags |
 | `stdlib/src/Metaclass.bt` | 3 | New file |
+| `stdlib/src/Class.bt` | 1 | Prerequisite: ensure `sealed` allows stdlib-internal subclassing (or unseal Class) |
 | `stdlib/test/metaclass_test.bt` | 1 | Breaking: sentinel → class object assertions |
 
 ## Migration Path
