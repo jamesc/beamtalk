@@ -63,6 +63,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0034](0034-stdlib-self-hosting-in-beamtalk.md) | Stdlib Self-Hosting — Moving Logic from Erlang to Beamtalk | Accepted | 2026-02-22 |
 | [0035](0035-field-based-reflection-api.md) | Rename Instance Variable Reflection API from instVar to field | Proposed | 2026-02-23 |
 | [0037](0037-collection-class-hierarchy.md) | Collection Class Hierarchy — Shallow Abstract Layer with Minimal Primitive Surface | Accepted | 2026-02-23 |
+| [0038](0038-subclass-as-message-with-pre-pass.md) | `subclass:` as Real Message with Compiler Pre-Pass | Proposed | 2026-02-23 |
 
 ## Creating New ADRs
 
