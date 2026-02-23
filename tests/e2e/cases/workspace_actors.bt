@@ -125,6 +125,22 @@ freshActors := (Workspace actorsOf: Counter) await
 freshActors size > 0
 // => true
 
+// Also verify actorAt: can look up an actor by pid string and return a functional actor
+firstActor := freshActors first
+// => #Actor<Counter,_>
+
+firstPid := firstActor instVarAt: #pid
+// => #Pid<0._._>
+
+firstPidStr := firstPid asString
+// => "#Pid<0._._>"
+
+firstPidStrShort := firstPidStr drop: 4
+// => "<0._._>"
+
+(Workspace actorAt: firstPidStrShort) await respondsTo: #getValue
+// => true
+
 // ===========================================================================
 // WORKSPACE SESSIONS
 // ===========================================================================
