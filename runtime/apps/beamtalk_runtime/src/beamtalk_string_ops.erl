@@ -23,6 +23,7 @@
     split_on/2,
     repeat/2,
     as_list/1,
+    join/1,
     each/2,
     collect/2,
     select/2,
@@ -134,6 +135,14 @@ repeat(Str, N) when is_binary(Str), is_integer(N), N >= 0 ->
 -spec as_list(binary()) -> [binary()].
 as_list(Str) when is_binary(Str) ->
     [unicode:characters_to_binary([G]) || G <- string:to_graphemes(Str)].
+
+%% @doc Join a list of grapheme binaries into a single string.
+%%
+%% Used by `String class withAll:` to reconstruct a String from a
+%% list of grapheme elements (e.g., the result of `select:`).
+-spec join([binary()]) -> binary().
+join(List) when is_list(List) ->
+    iolist_to_binary(List).
 
 %% @doc Iterate over graphemes, applying block to each. Returns nil.
 -spec each(binary(), function()) -> nil.

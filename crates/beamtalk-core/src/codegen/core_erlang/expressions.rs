@@ -272,6 +272,28 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(parts))
     }
 
+    /// Generates code for an array literal: `#[1, 2, 3]`
+    ///
+    /// Compiles to a call to `beamtalk_array_ops:from_list/1`:
+    /// ```erlang
+    /// call 'beamtalk_array_ops':'from_list'([1, 2, 3])
+    /// ```
+    pub(super) fn generate_array_literal(
+        &mut self,
+        elements: &[Expression],
+    ) -> Result<Document<'static>> {
+        let mut parts: Vec<Document<'static>> =
+            vec![Document::Str("call 'beamtalk_array_ops':'from_list'([")];
+        for (i, elem) in elements.iter().enumerate() {
+            if i > 0 {
+                parts.push(Document::Str(", "));
+            }
+            parts.push(self.expression_doc(elem)?);
+        }
+        parts.push(Document::Str("])"));
+        Ok(Document::Vec(parts))
+    }
+
     /// Generates code for field access (e.g., `self.value`).
     ///
     /// Maps to Erlang `maps:get/2` call:

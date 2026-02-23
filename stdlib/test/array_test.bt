@@ -1,0 +1,92 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the Array collection type (BT-822).
+
+TestCase subclass: ArrayTest
+
+  testClassAndCreation =>
+    self assert: (#[1, 2, 3] class) equals: Array.
+    self assert: (#[] class) equals: Array
+
+  testSizeAndIsEmpty =>
+    self assert: (#[] size) equals: 0.
+    self assert: (#[1, 2, 3] size) equals: 3.
+    self assert: (#[] isEmpty).
+    self deny: (#[1] isEmpty).
+    self assert: (#[1] isNotEmpty)
+
+  testAtIndexedAccess =>
+    a := #[10, 20, 30].
+    self assert: (a at: 1) equals: 10.
+    self assert: (a at: 2) equals: 20.
+    self assert: (a at: 3) equals: 30
+
+  testAtPutFunctionalUpdate =>
+    a := #[1, 2, 3].
+    b := a at: 2 put: 99.
+    self assert: (b at: 2) equals: 99.
+    // Original is unchanged (immutable)
+    self assert: (a at: 2) equals: 2
+
+  testIncludes =>
+    a := #[1, 2, 3].
+    self assert: (a includes: 2).
+    self deny: (a includes: 9).
+    self deny: (#[] includes: 1)
+
+  testDo =>
+    // do: returns nil
+    self assert: (#[1, 2, 3] do: [:x | x + 1]) equals: nil.
+    // do: on empty array also returns nil
+    self assert: (#[] do: [:x | x]) equals: nil
+
+  testCollect =>
+    self assert: (#[1, 2, 3] collect: [:x | x * 2]) equals: #[2, 4, 6].
+    self assert: (#[] collect: [:x | x * 2]) equals: #[].
+    // collect: preserves order
+    self assert: (#[3, 1, 2] collect: [:x | x + 10]) equals: #[13, 11, 12]
+
+  testCollectReturnsArray =>
+    result := #[1, 2, 3] collect: [:x | x * 2].
+    self assert: (result class) equals: Array
+
+  testSelect =>
+    self assert: (#[1, 2, 3, 4] select: [:x | x > 2]) equals: #[3, 4].
+    self assert: (#[1, 2, 3] select: [:x | x > 10]) equals: #[].
+    self assert: (#[1, 2, 3] select: [:x | true]) equals: #[1, 2, 3]
+
+  testSelectReturnsArray =>
+    result := #[1, 2, 3, 4] select: [:x | x > 2].
+    self assert: (result class) equals: Array
+
+  testReject =>
+    self assert: (#[1, 2, 3, 4] reject: [:x | x > 2]) equals: #[1, 2].
+    self assert: (#[1, 2, 3] reject: [:x | false]) equals: #[1, 2, 3]
+
+  testInjectInto =>
+    self assert: (#[1, 2, 3] inject: 0 into: [:acc :x | acc + x]) equals: 6.
+    self assert: (#[1, 2, 3, 4] inject: 1 into: [:acc :x | acc * x]) equals: 24.
+    self assert: (#[] inject: 0 into: [:acc :x | acc + x]) equals: 0
+
+  testPrintString =>
+    self assert: (#[1, 2, 3] printString) equals: "#[1, 2, 3]".
+    self assert: (#[] printString) equals: "#[]".
+    self assert: (#["a", "b"] printString) equals: "#[a, b]"
+
+  testWithAll =>
+    a := Array withAll: #(1, 2, 3).
+    self assert: (a class) equals: Array.
+    self assert: (a size) equals: 3.
+    self assert: (a at: 1) equals: 1.
+    self assert: (a at: 3) equals: 3
+
+  testEmptyArray =>
+    self assert: (#[] size) equals: 0.
+    self assert: (#[] isEmpty).
+    self assert: (#[] printString) equals: "#[]"
+
+  testLiteralEquality =>
+    self assert: (#[1, 2, 3]) equals: #[1, 2, 3].
+    self deny: (#[1, 2, 3] =:= #[1, 2, 4]).
+    self deny: (#[1, 2] =:= #[1, 2, 3])

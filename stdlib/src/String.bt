@@ -476,3 +476,14 @@ sealed Object subclass: String
   /// "hello" printString         // => "hello"
   /// ```
   printString -> String => self
+
+  /// Create a String by joining a list of grapheme cluster strings.
+  ///
+  /// Useful for constructing a String from the result of `asList` or
+  /// `select:` operations. Each element should be a grapheme string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// String class withAll: #("h", "e", "l", "l", "o")  // => "hello"
+  /// ```
+  class withAll: list: List -> String => @primitive "withAll:"

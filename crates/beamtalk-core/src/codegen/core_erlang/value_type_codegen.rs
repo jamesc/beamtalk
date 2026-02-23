@@ -627,6 +627,9 @@ impl CoreErlangGenerator {
                         .as_ref()
                         .is_some_and(|t| Self::expr_has_block_nlr(t, inside_block))
             }
+            Expression::ArrayLiteral { elements, .. } => elements
+                .iter()
+                .any(|e| Self::expr_has_block_nlr(e, inside_block)),
             Expression::StringInterpolation { segments, .. } => segments.iter().any(|s| match s {
                 StringSegment::Literal(_) => false,
                 StringSegment::Interpolation(e) => Self::expr_has_block_nlr(e, inside_block),

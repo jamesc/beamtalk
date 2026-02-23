@@ -129,4 +129,15 @@ sealed Collection subclass: Set
   /// ```
   stream -> Stream => @primitive "stream"
 
+  /// Create a Set from a list, deduplicating elements.
+  ///
+  /// Used by the species pattern on Collection so that `collect:` and
+  /// `select:` on a Set return a Set.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Set class withAll: #(1, 2, 2, 3)  // => a Set with 1, 2, 3
+  /// ```
+  class withAll: list: List -> Set => @primitive "withAll:"
+
 

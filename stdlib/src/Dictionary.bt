@@ -107,6 +107,22 @@ sealed Collection subclass: Dictionary
   /// ```
   do: block: Block -> Nil => @primitive "do:"
 
+  /// Map `block` over each value, returning a new Dictionary with the
+  /// same keys and transformed values.
+  ///
+  /// Overrides `Collection>>collect:` — for a Dictionary, the result
+  /// preserves keys rather than collecting values into a list.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #{#a => 1, #b => 2} collect: [:v | v * 10]  // => #{#a => 10, #b => 20}
+  /// ```
+  collect: block: Block -> Dictionary =>
+    dict := self.
+    self keys inject: #{} into: [:k :acc |
+      acc at: k put: (block value: (dict at: k))
+    ]
+
   /// Iterate over each key-value pair, evaluating `block` with key and value.
   ///
   /// ## Examples

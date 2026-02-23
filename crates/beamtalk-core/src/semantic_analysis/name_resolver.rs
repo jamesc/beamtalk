@@ -263,6 +263,12 @@ impl NameResolver {
                 }
             }
 
+            ArrayLiteral { elements, .. } => {
+                for elem in elements {
+                    self.resolve_expression(elem);
+                }
+            }
+
             Super(span) => {
                 // super can only be used inside a method body (depth >= 2).
                 // Depth 0 = module, 1 = class, 2+ = method/block.

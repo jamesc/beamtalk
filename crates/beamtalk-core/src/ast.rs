@@ -819,6 +819,16 @@ pub enum Expression {
         span: Span,
     },
 
+    /// An array literal.
+    ///
+    /// Example: `#[1, 2, 3]`
+    ArrayLiteral {
+        /// The elements of the array.
+        elements: Vec<Expression>,
+        /// Source location of the entire array literal.
+        span: Span,
+    },
+
     /// A primitive pragma (`@primitive 'selector'` or `@primitive intrinsicName`).
     ///
     /// Declares that a method body delegates to a runtime primitive or
@@ -891,6 +901,7 @@ impl Expression {
             | Self::Match { span, .. }
             | Self::MapLiteral { span, .. }
             | Self::ListLiteral { span, .. }
+            | Self::ArrayLiteral { span, .. }
             | Self::Primitive { span, .. }
             | Self::StringInterpolation { span, .. }
             | Self::ExpectDirective { span, .. }

@@ -141,6 +141,8 @@ print_string_map(X) ->
         'Set' ->
             ElemStrs = [print_string(E) || E <- maps:get(elements, X, [])],
             iolist_to_binary([<<"Set(">>, lists:join(<<", ">>, ElemStrs), <<")">>]);
+        'Array' ->
+            beamtalk_array_ops:print_string(X);
         'Stream' ->
             beamtalk_stream:print_string(X);
         'CompiledMethod' ->

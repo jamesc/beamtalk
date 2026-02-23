@@ -355,4 +355,15 @@ sealed Collection subclass: List
   /// ```
   atRandom => @primitive "atRandom"
 
+  /// Create a List from a list (identity — a list is already a List).
+  ///
+  /// Used by the species pattern on Collection so that `collect:` and
+  /// `select:` on a List return a List.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// List class withAll: #(1, 2, 3)   // => #(1, 2, 3)
+  /// ```
+  class withAll: list: List -> List => @primitive "withAll:"
+
 

@@ -96,6 +96,9 @@ pub enum TokenKind {
     /// List open (list literal start): `#(`
     ListOpen,
 
+    /// Array open (array literal start): `#[`
+    ArrayOpen,
+
     // === Punctuation ===
     /// Assignment operator: `:=`
     Assign,
@@ -183,6 +186,7 @@ impl TokenKind {
                 | Self::RightBrace
                 | Self::MapOpen
                 | Self::ListOpen
+                | Self::ArrayOpen
         )
     }
 
@@ -222,6 +226,7 @@ impl TokenKind {
             | Self::RightBrace
             | Self::MapOpen
             | Self::ListOpen
+            | Self::ArrayOpen
             | Self::Assign
             | Self::Caret
             | Self::Semicolon
@@ -264,6 +269,7 @@ impl std::fmt::Display for TokenKind {
             Self::RightBrace => write!(f, "}}"),
             Self::MapOpen => write!(f, "#{{"),
             Self::ListOpen => write!(f, "#("),
+            Self::ArrayOpen => write!(f, "#["),
             Self::Assign => write!(f, ":="),
             Self::Caret => write!(f, "^"),
             Self::Semicolon => write!(f, ";"),

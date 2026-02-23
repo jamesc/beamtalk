@@ -255,6 +255,12 @@ impl Analyser {
                 }
             }
 
+            ArrayLiteral { elements, .. } => {
+                for elem in elements {
+                    self.collect_captures_and_mutations(elem, captures, mutations);
+                }
+            }
+
             Literal(..)
             | Super(..)
             | Error { .. }

@@ -122,7 +122,11 @@ class_send(ClassPid, Selector, Args) ->
 %% Self carries `class='Metaclass'` so method dispatch receives the correct receiver.
 -spec metaclass_send(pid(), atom(), list(), #beamtalk_object{}) -> term().
 metaclass_send(Pid, Selector, Args, Self) ->
-    case gen_server:call(Pid, {metaclass_method_call, Selector, Args}) of
+    %% BT-822: Try user-defined class methods first so that `self species withAll: x`
+    %% (and similar dynamic class-side sends) can find methods like `withAll:` that
+    %% are defined via `class withAll: ...` in Beamtalk stdlib modules.
+    %% Falls through to the Metaclass chain for built-in messages (`new`, `class`, etc.).
+    case gen_server:call(Pid, {class_method_call, Selector, Args}) of
         {ok, Result} ->
             Result;
         {error, not_found} ->
@@ -146,7 +150,9 @@ metaclass_send(Pid, Selector, Args, Self) ->
                     %% A real error from a method in the chain. Wrap idempotently.
                     Wrapped = beamtalk_exception_handler:ensure_wrapped(Error),
                     error(Wrapped)
-            end
+            end;
+        Other ->
+            unwrap_class_call(Other)
     end.
 
 %% @doc Unwrap a class gen_server call result for use in class_send.

@@ -242,6 +242,12 @@ fn analyze_expression(
                 analyze_expression(t, analysis, ctx);
             }
         }
+
+        Expression::ArrayLiteral { elements, .. } => {
+            for elem in elements {
+                analyze_expression(elem, analysis, ctx);
+            }
+        }
     }
 }
 
