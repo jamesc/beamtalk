@@ -57,12 +57,13 @@ Object
 
 ### Primitive surface
 
-`Collection` defines exactly two subclass-responsibility methods. All sealed concrete classes implement them as `@primitive`:
+`Collection` defines exactly three subclass-responsibility methods. All sealed concrete classes implement them as `@primitive`:
 
 | Method | Reason |
 |--------|--------|
 | `do: block: Block -> Nil` | Backed by `lists:foreach`, `maps:foreach`, etc. — BIF dispatch per type |
 | `size -> Integer` | Backed by `erlang:length`, `maps:size`, `ordsets:size`, `erlang:tuple_size` |
+| `printString -> String` | Type-specific formatting (`"List(…)"`, `"Set(…)"`, etc.) |
 
 Every other shared collection method is pure Beamtalk on `Collection`, built on `do:` and `size`. This is identical to Pharo's design, where `do:` is the primitive boundary and all higher-order operations compose on it.
 
