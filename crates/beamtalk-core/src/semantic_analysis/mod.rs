@@ -205,8 +205,10 @@ fn analyse_full(module: &Module, known_vars: &[&str], stdlib_mode: bool) -> Anal
     let mut result = AnalysisResult::new();
 
     // Phase 0: Build Class Hierarchy (ADR 0006 Phase 1a)
-    let (hierarchy, hierarchy_diags) = ClassHierarchy::build_with_options(module, stdlib_mode);
-    result.class_hierarchy = hierarchy;
+    let (hierarchy_result, hierarchy_diags) =
+        ClassHierarchy::build_with_options(module, stdlib_mode);
+    // build_with_options is infallible; propagate any diagnostics it produced
+    result.class_hierarchy = hierarchy_result.expect("ClassHierarchy::build is infallible");
     result.diagnostics.extend(hierarchy_diags);
 
     // Phase 1: Name Resolution

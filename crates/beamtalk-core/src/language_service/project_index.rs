@@ -19,8 +19,8 @@
 //! └── stdlib class names (pre-indexed from lib/*.bt)
 //! ```
 
-use crate::semantic_analysis::ClassHierarchy;
-use crate::source_analysis::{lex_with_eof, parse};
+use crate::semantic_analysis::{ClassHierarchy, SemanticError};
+use crate::source_analysis::{Diagnostic, lex_with_eof, parse};
 use camino::Utf8PathBuf;
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
@@ -63,13 +63,29 @@ impl ProjectIndex {
     ///
     /// Each `(path, source)` pair is parsed and its class definitions are
     /// merged into the project-wide hierarchy.
-    #[must_use]
-    pub fn with_stdlib(stdlib_sources: &[(Utf8PathBuf, String)]) -> Self {
+    ///
+    /// Returns `(Result<Self, SemanticError>, Vec<Diagnostic>)` following the
+    /// project convention for fallible operations, even though in practice
+    /// `ClassHierarchy::build` is infallible and will always return `Ok`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SemanticError`] if `ClassHierarchy::build` fails for any
+    /// stdlib source file (cannot happen in practice).
+    pub fn with_stdlib(
+        stdlib_sources: &[(Utf8PathBuf, String)],
+    ) -> (Result<Self, SemanticError>, Vec<Diagnostic>) {
         let mut index = Self::new();
+        let mut all_diagnostics = Vec::new();
         for (path, source) in stdlib_sources {
             let tokens = lex_with_eof(source);
-            let (module, _diagnostics) = parse(tokens);
-            let file_hierarchy = ClassHierarchy::build(&module).0;
+            let (module, _parse_diagnostics) = parse(tokens);
+            let (file_hierarchy_result, hierarchy_diags) = ClassHierarchy::build(&module);
+            all_diagnostics.extend(hierarchy_diags);
+            let file_hierarchy = match file_hierarchy_result {
+                Ok(h) => h,
+                Err(e) => return (Err(e), all_diagnostics),
+            };
 
             // Track which classes came from this stdlib file
             let class_names: Vec<EcoString> = file_hierarchy
@@ -85,7 +101,7 @@ impl ProjectIndex {
                 .insert(path.clone(), file_hierarchy.clone());
             index.merged_hierarchy.merge(&file_hierarchy);
         }
-        index
+        (Ok(index), all_diagnostics)
     }
 
     /// Returns the merged class hierarchy across all files.
@@ -202,7 +218,8 @@ mod tests {
             Utf8PathBuf::from("stdlib/src/Counter.bt"),
             "Object subclass: Counter\n  increment => 1".to_string(),
         )];
-        let index = ProjectIndex::with_stdlib(&stdlib);
+        let (index_result, _) = ProjectIndex::with_stdlib(&stdlib);
+        let index = index_result.unwrap();
         assert!(index.hierarchy().has_class("Counter"));
         assert!(
             index
@@ -218,7 +235,7 @@ mod tests {
 
         let tokens = lex_with_eof("Object subclass: Foo\n  bar => 1");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0;
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(file.clone(), &hierarchy);
 
         assert!(index.hierarchy().has_class("Foo"));
@@ -236,14 +253,14 @@ mod tests {
         // First version defines Foo
         let tokens = lex_with_eof("Object subclass: Foo\n  bar => 1");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0;
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(file.clone(), &hierarchy);
         assert!(index.hierarchy().has_class("Foo"));
 
         // Second version defines Bar instead
         let tokens = lex_with_eof("Object subclass: Bar\n  baz => 2");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0;
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(file.clone(), &hierarchy);
         assert!(index.hierarchy().has_class("Bar"));
         assert!(!index.hierarchy().has_class("Foo"));
@@ -256,7 +273,7 @@ mod tests {
 
         let tokens = lex_with_eof("Object subclass: Foo\n  bar => 1");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0;
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(file.clone(), &hierarchy);
         assert!(index.hierarchy().has_class("Foo"));
 
@@ -270,7 +287,7 @@ mod tests {
             Utf8PathBuf::from("stdlib/src/Counter.bt"),
             "Object subclass: Counter\n  increment => 1".to_string(),
         )];
-        let mut index = ProjectIndex::with_stdlib(&stdlib);
+        let mut index = ProjectIndex::with_stdlib(&stdlib).0.unwrap();
         assert!(index.hierarchy().has_class("Counter"));
 
         // Remove the stdlib file — Counter should persist because it's stdlib
@@ -289,12 +306,12 @@ mod tests {
 
         let tokens_a = lex_with_eof("Object subclass: ClassA\n  methodA => 1");
         let (module_a, _) = parse(tokens_a);
-        let hierarchy_a = ClassHierarchy::build(&module_a).0;
+        let hierarchy_a = ClassHierarchy::build(&module_a).0.unwrap();
         index.update_file(Utf8PathBuf::from("a.bt"), &hierarchy_a);
 
         let tokens_b = lex_with_eof("Object subclass: ClassB\n  methodB => 2");
         let (module_b, _) = parse(tokens_b);
-        let hierarchy_b = ClassHierarchy::build(&module_b).0;
+        let hierarchy_b = ClassHierarchy::build(&module_b).0.unwrap();
         index.update_file(Utf8PathBuf::from("b.bt"), &hierarchy_b);
 
         // Both classes visible in merged hierarchy
@@ -312,13 +329,13 @@ mod tests {
         // a.bt defines Dup with methodA
         let tokens_a = lex_with_eof("Object subclass: Dup\n  methodA => 1");
         let (module_a, _) = parse(tokens_a);
-        let hierarchy_a = ClassHierarchy::build(&module_a).0;
+        let hierarchy_a = ClassHierarchy::build(&module_a).0.unwrap();
         index.update_file(Utf8PathBuf::from("a.bt"), &hierarchy_a);
 
         // b.bt defines Dup with methodB
         let tokens_b = lex_with_eof("Object subclass: Dup\n  methodB => 2");
         let (module_b, _) = parse(tokens_b);
-        let hierarchy_b = ClassHierarchy::build(&module_b).0;
+        let hierarchy_b = ClassHierarchy::build(&module_b).0.unwrap();
         index.update_file(Utf8PathBuf::from("b.bt"), &hierarchy_b);
 
         // b.bt was last to merge, so Dup currently has methodB
@@ -341,14 +358,14 @@ mod tests {
             Utf8PathBuf::from("stdlib/src/Counter.bt"),
             "Object subclass: Counter\n  increment => 1".to_string(),
         )];
-        let mut index = ProjectIndex::with_stdlib(&stdlib);
+        let mut index = ProjectIndex::with_stdlib(&stdlib).0.unwrap();
         assert!(index.hierarchy().has_class("Counter"));
 
         // User file shadows stdlib Counter
         let user_file = Utf8PathBuf::from("user/counter.bt");
         let tokens = lex_with_eof("Object subclass: Counter\n  decrement => 1");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0;
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(user_file.clone(), &hierarchy);
 
         // User's Counter (with decrement) is now the active definition
