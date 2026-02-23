@@ -99,9 +99,9 @@ immutable_value_message_test() ->
     Error1 = beamtalk_error:new(immutable_value, 'Integer'),
     ?assertEqual(<<"Cannot mutate Integer (immutable value)">>, Error1#beamtalk_error.message),
 
-    Error2 = beamtalk_error:with_selector(Error1, 'instVarAt:put:'),
+    Error2 = beamtalk_error:with_selector(Error1, 'fieldAt:put:'),
     ?assertEqual(
-        <<"Cannot call 'instVarAt:put:' on Integer (immutable value)">>,
+        <<"Cannot call 'fieldAt:put:' on Integer (immutable value)">>,
         Error2#beamtalk_error.message
     ).
 
@@ -136,12 +136,12 @@ future_not_awaited_with_hint_test() ->
     Error2 = beamtalk_error:with_hint(
         Error1, <<"Use 'await' to get the value: (expr await) size">>
     ),
-    Error = beamtalk_error:with_details(Error2, #{original_selector => 'instVarNames'}),
+    Error = beamtalk_error:with_details(Error2, #{original_selector => 'fieldNames'}),
 
     Formatted = iolist_to_binary(beamtalk_error:format(Error)),
     Expected = <<"Sent 'size' to a Future\nHint: Use 'await' to get the value: (expr await) size">>,
     ?assertEqual(Expected, Formatted),
-    ?assertEqual(#{original_selector => 'instVarNames'}, Error#beamtalk_error.details).
+    ?assertEqual(#{original_selector => 'fieldNames'}, Error#beamtalk_error.details).
 
 %%% Test: future_not_awaited without selector (edge case)
 future_not_awaited_without_selector_test() ->

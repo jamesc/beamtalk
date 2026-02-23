@@ -566,11 +566,11 @@ value_type_responds_to_object_methods_test() ->
     end.
 
 %%% ============================================================================
-%%% BT-359: instVarAt: / instVarAt:put: on value types
+%%% BT-359: fieldAt: / fieldAt:put: on value types
 %%% ============================================================================
 
 value_type_inst_var_at_put_raises_immutable_value_test() ->
-    %% instVarAt:put: on a value type should raise immutable_value
+    %% fieldAt:put: on a value type should raise immutable_value
     Self = #{'$beamtalk_class' => 'MockVtIvar', x => 42},
     create_mock_value_type_module('bt@mock_vt_ivar', 'MockVtIvar', []),
     try
@@ -580,10 +580,10 @@ value_type_inst_var_at_put_raises_immutable_value_test() ->
                 error := #beamtalk_error{
                     kind = immutable_value,
                     class = 'MockVtIvar',
-                    selector = 'instVarAt:put:'
+                    selector = 'fieldAt:put:'
                 }
             },
-            beamtalk_primitive:send(Self, 'instVarAt:put:', [x, 99])
+            beamtalk_primitive:send(Self, 'fieldAt:put:', [x, 99])
         )
     after
         code:purge('bt@mock_vt_ivar'),
@@ -591,7 +591,7 @@ value_type_inst_var_at_put_raises_immutable_value_test() ->
     end.
 
 value_type_inst_var_at_raises_immutable_value_test() ->
-    %% instVarAt: on a value type should raise immutable_value
+    %% fieldAt: on a value type should raise immutable_value
     Self = #{'$beamtalk_class' => 'MockVtIvar2', x => 42},
     create_mock_value_type_module('bt@mock_vt_ivar2', 'MockVtIvar2', []),
     try
@@ -601,10 +601,10 @@ value_type_inst_var_at_raises_immutable_value_test() ->
                 error := #beamtalk_error{
                     kind = immutable_value,
                     class = 'MockVtIvar2',
-                    selector = 'instVarAt:'
+                    selector = 'fieldAt:'
                 }
             },
-            beamtalk_primitive:send(Self, 'instVarAt:', [x])
+            beamtalk_primitive:send(Self, 'fieldAt:', [x])
         )
     after
         code:purge('bt@mock_vt_ivar2'),

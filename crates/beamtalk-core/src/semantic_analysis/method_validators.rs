@@ -17,7 +17,7 @@
 //! ## Example
 //!
 //! The `ReflectionMethodValidator` checks that reflection methods like
-//! `respondsTo:`, `instVarAt:`, `instVarAt:put:`, and `classNamed:` receive
+//! `respondsTo:`, `fieldAt:`, `fieldAt:put:`, and `classNamed:` receive
 //! symbol literal arguments rather than bare identifiers.
 
 use crate::ast::{Expression, Literal, MessageSelector};
@@ -68,10 +68,10 @@ impl MethodValidatorRegistry {
         self.validators.insert("respondsTo:", reflection);
 
         let reflection = Box::new(ReflectionMethodValidator);
-        self.validators.insert("instVarAt:", reflection);
+        self.validators.insert("fieldAt:", reflection);
 
         let reflection = Box::new(ReflectionMethodValidator);
-        self.validators.insert("instVarAt:put:", reflection);
+        self.validators.insert("fieldAt:put:", reflection);
 
         let reflection = Box::new(ReflectionMethodValidator);
         self.validators.insert("classNamed:", reflection);
@@ -140,7 +140,7 @@ impl MethodValidatorRegistry {
 
 /// Validates that reflection methods receive symbol literal arguments.
 ///
-/// Methods like `respondsTo:`, `instVarAt:`, and `classNamed:` expect
+/// Methods like `respondsTo:`, `fieldAt:`, and `classNamed:` expect
 /// symbol literals (e.g., `#increment`). When users pass bare identifiers,
 /// this validator produces a helpful diagnostic suggesting `#symbol` syntax.
 struct ReflectionMethodValidator;
@@ -222,8 +222,8 @@ impl MethodValidator for ReflectionMethodValidator {
 fn method_description(selector: &str) -> &'static str {
     match selector {
         "respondsTo:" => "checks if an object understands a message",
-        "instVarAt:" => "accesses an instance variable by name",
-        "instVarAt:put:" => "sets an instance variable by name",
+        "fieldAt:" => "accesses an instance variable by name",
+        "fieldAt:put:" => "sets an instance variable by name",
         "classNamed:" => "looks up a class by name in the system dictionary",
         _ => "requires a symbol argument",
     }
@@ -290,15 +290,15 @@ pub(crate) fn validate_primitive_instantiation(
     })
 }
 
-/// Check if the receiver of `instVarAt:put:` is an immutable literal.
+/// Check if the receiver of `fieldAt:put:` is an immutable literal.
 ///
-/// Returns a diagnostic if `42 instVarAt: #x put: 99` is detected.
+/// Returns a diagnostic if `42 fieldAt: #x put: 99` is detected.
 pub(crate) fn validate_immutable_mutation(
     receiver: &Expression,
     selector_name: &str,
     span: Span,
 ) -> Option<Diagnostic> {
-    if selector_name != "instVarAt:put:" {
+    if selector_name != "fieldAt:put:" {
         return None;
     }
 
@@ -758,7 +758,7 @@ mod tests {
     #[test]
     fn test_registry_finds_inst_var_at() {
         let registry = MethodValidatorRegistry::new();
-        assert!(registry.get("instVarAt:").is_some());
+        assert!(registry.get("fieldAt:").is_some());
     }
 
     #[test]
@@ -806,7 +806,7 @@ mod tests {
     #[test]
     fn test_method_description_inst_var_at() {
         assert_eq!(
-            method_description("instVarAt:"),
+            method_description("fieldAt:"),
             "accesses an instance variable by name"
         );
     }
@@ -814,7 +814,7 @@ mod tests {
     #[test]
     fn test_method_description_inst_var_at_put() {
         assert_eq!(
-            method_description("instVarAt:put:"),
+            method_description("fieldAt:put:"),
             "sets an instance variable by name"
         );
     }
@@ -822,14 +822,14 @@ mod tests {
     #[test]
     fn test_registry_finds_inst_var_at_put() {
         let registry = MethodValidatorRegistry::new();
-        assert!(registry.get("instVarAt:put:").is_some());
+        assert!(registry.get("fieldAt:put:").is_some());
     }
 
     #[test]
     fn test_inst_var_at_put_symbol_is_valid() {
         let validator = ReflectionMethodValidator;
         let selector = MessageSelector::Keyword(vec![
-            KeywordPart::new("instVarAt:", test_span()),
+            KeywordPart::new("fieldAt:", test_span()),
             KeywordPart::new("put:", test_span()),
         ]);
         let args = vec![
@@ -844,7 +844,7 @@ mod tests {
     fn test_inst_var_at_put_identifier_produces_error() {
         let validator = ReflectionMethodValidator;
         let selector = MessageSelector::Keyword(vec![
-            KeywordPart::new("instVarAt:", test_span()),
+            KeywordPart::new("fieldAt:", test_span()),
             KeywordPart::new("put:", test_span()),
         ]);
         let args = vec![
@@ -941,7 +941,7 @@ mod tests {
     #[test]
     fn test_immutable_mutation_integer_literal() {
         let receiver = Expression::Literal(Literal::Integer(42), test_span());
-        let diag = validate_immutable_mutation(&receiver, "instVarAt:put:", test_span());
+        let diag = validate_immutable_mutation(&receiver, "fieldAt:put:", test_span());
         assert!(diag.is_some());
         let diag = diag.unwrap();
         assert!(
@@ -954,7 +954,7 @@ mod tests {
     #[test]
     fn test_immutable_mutation_string_literal() {
         let receiver = Expression::Literal(Literal::String("hello".into()), test_span());
-        let diag = validate_immutable_mutation(&receiver, "instVarAt:put:", test_span());
+        let diag = validate_immutable_mutation(&receiver, "fieldAt:put:", test_span());
         assert!(diag.is_some());
         assert!(diag.unwrap().message.contains("String literal"));
     }
@@ -962,7 +962,7 @@ mod tests {
     #[test]
     fn test_immutable_mutation_float_literal() {
         let receiver = Expression::Literal(Literal::Float(1.5), test_span());
-        let diag = validate_immutable_mutation(&receiver, "instVarAt:put:", test_span());
+        let diag = validate_immutable_mutation(&receiver, "fieldAt:put:", test_span());
         assert!(diag.is_some());
         assert!(diag.unwrap().message.contains("Float literal"));
     }
@@ -970,7 +970,7 @@ mod tests {
     #[test]
     fn test_immutable_mutation_symbol_literal() {
         let receiver = Expression::Literal(Literal::Symbol("x".into()), test_span());
-        let diag = validate_immutable_mutation(&receiver, "instVarAt:put:", test_span());
+        let diag = validate_immutable_mutation(&receiver, "fieldAt:put:", test_span());
         assert!(diag.is_some());
         assert!(diag.unwrap().message.contains("Symbol literal"));
     }
@@ -978,7 +978,7 @@ mod tests {
     #[test]
     fn test_immutable_mutation_character_literal() {
         let receiver = Expression::Literal(Literal::Character('a'), test_span());
-        let diag = validate_immutable_mutation(&receiver, "instVarAt:put:", test_span());
+        let diag = validate_immutable_mutation(&receiver, "fieldAt:put:", test_span());
         assert!(diag.is_some());
         assert!(diag.unwrap().message.contains("Character literal"));
     }
@@ -986,7 +986,7 @@ mod tests {
     #[test]
     fn test_immutable_mutation_true_identifier() {
         let receiver = Expression::Identifier(Identifier::new("true", test_span()));
-        let diag = validate_immutable_mutation(&receiver, "instVarAt:put:", test_span());
+        let diag = validate_immutable_mutation(&receiver, "fieldAt:put:", test_span());
         assert!(diag.is_some());
         assert!(diag.unwrap().message.contains("Boolean literal"));
     }
@@ -994,7 +994,7 @@ mod tests {
     #[test]
     fn test_immutable_mutation_false_identifier() {
         let receiver = Expression::Identifier(Identifier::new("false", test_span()));
-        let diag = validate_immutable_mutation(&receiver, "instVarAt:put:", test_span());
+        let diag = validate_immutable_mutation(&receiver, "fieldAt:put:", test_span());
         assert!(diag.is_some());
         assert!(diag.unwrap().message.contains("Boolean literal"));
     }
@@ -1002,7 +1002,7 @@ mod tests {
     #[test]
     fn test_immutable_mutation_nil_identifier() {
         let receiver = Expression::Identifier(Identifier::new("nil", test_span()));
-        let diag = validate_immutable_mutation(&receiver, "instVarAt:put:", test_span());
+        let diag = validate_immutable_mutation(&receiver, "fieldAt:put:", test_span());
         assert!(diag.is_some());
         assert!(diag.unwrap().message.contains("nil"));
     }
@@ -1010,7 +1010,7 @@ mod tests {
     #[test]
     fn test_immutable_mutation_variable_is_ok() {
         let receiver = Expression::Identifier(Identifier::new("obj", test_span()));
-        let diag = validate_immutable_mutation(&receiver, "instVarAt:put:", test_span());
+        let diag = validate_immutable_mutation(&receiver, "fieldAt:put:", test_span());
         assert!(diag.is_none());
     }
 
@@ -1024,7 +1024,7 @@ mod tests {
     #[test]
     fn test_immutable_mutation_list_literal() {
         let receiver = Expression::Literal(Literal::List(vec![Literal::Integer(1)]), test_span());
-        let diag = validate_immutable_mutation(&receiver, "instVarAt:put:", test_span());
+        let diag = validate_immutable_mutation(&receiver, "fieldAt:put:", test_span());
         assert!(diag.is_some());
         assert!(diag.unwrap().message.contains("List literal"));
     }
@@ -1036,7 +1036,7 @@ mod tests {
             tail: None,
             span: test_span(),
         };
-        let diag = validate_immutable_mutation(&receiver, "instVarAt:put:", test_span());
+        let diag = validate_immutable_mutation(&receiver, "fieldAt:put:", test_span());
         assert!(diag.is_some());
         assert!(diag.unwrap().message.contains("List literal"));
     }

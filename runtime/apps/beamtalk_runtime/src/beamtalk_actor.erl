@@ -512,7 +512,7 @@ dispatch(Selector, Args, Self, State) ->
     %% - isAlive: checks process liveness
     %% - perform:/perform:withArguments:: re-dispatches through actor's own dispatch
     %% - respondsTo:: must check __methods__ map AND hierarchy
-    %% All other Object methods (describe, inspect, instVarNames, hash, etc.)
+    %% All other Object methods (describe, inspect, fieldNames, hash, etc.)
     %% are discovered via hierarchy walk to Object.
     case Selector of
         isAlive when Args =:= [] ->

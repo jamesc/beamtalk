@@ -16,9 +16,9 @@
 %%% |-------------------|---------------|---------------------------------------|
 %%% | `class`           | []            | Returns the object's class name       |
 %%% | `respondsTo:`     | [Selector]    | Checks if object understands message  |
-%%% | `instVarNames`    | []            | Returns list of instance variable names|
-%%% | `instVarAt:`      | [Name]        | Returns instance variable value       |
-%%% | `instVarAt:put:`  | [Name, Value] | Sets instance variable value          |
+%%% | `fieldNames`      | []            | Returns list of instance variable names|
+%%% | `fieldAt:`        | [Name]        | Returns instance variable value       |
+%%% | `fieldAt:put:`    | [Name, Value] | Sets instance variable value          |
 %%%
 %%% ## Display Methods
 %%%
@@ -79,11 +79,11 @@ dispatch('respondsTo:', [Selector], Self, State) when is_atom(Selector) ->
     ClassName = class_name_for_responds_to(Self, State),
     Result = beamtalk_dispatch:responds_to(Selector, ClassName),
     {reply, Result, State};
-dispatch('instVarNames', [], _Self, State) ->
+dispatch('fieldNames', [], _Self, State) ->
     {reply, beamtalk_reflection:field_names(State), State};
-dispatch('instVarAt:', [FieldName], _Self, State) ->
+dispatch('fieldAt:', [FieldName], _Self, State) ->
     {reply, beamtalk_reflection:read_field(FieldName, State), State};
-dispatch('instVarAt:put:', [FieldName, Value], _Self, State) ->
+dispatch('fieldAt:put:', [FieldName, Value], _Self, State) ->
     {WrittenValue, NewState} = beamtalk_reflection:write_field(FieldName, Value, State),
     {reply, WrittenValue, NewState};
 %% --- Display methods ---
@@ -159,9 +159,9 @@ dispatch(Selector, _Args, Self, State) ->
 -spec has_method(atom()) -> boolean().
 has_method(class) -> true;
 has_method('respondsTo:') -> true;
-has_method('instVarNames') -> true;
-has_method('instVarAt:') -> true;
-has_method('instVarAt:put:') -> true;
+has_method('fieldNames') -> true;
+has_method('fieldAt:') -> true;
+has_method('fieldAt:put:') -> true;
 has_method('perform:') -> true;
 has_method('perform:withArguments:') -> true;
 has_method('printString') -> true;
