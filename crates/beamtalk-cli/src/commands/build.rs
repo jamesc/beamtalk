@@ -8,7 +8,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::collections::HashMap;
 use std::fs;
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, error, info, instrument, warn};
 
 use super::app_file;
 use super::manifest;
@@ -303,11 +303,26 @@ pub fn build_class_module_index(
         let relative_module = compute_relative_module(file, source_root)?;
         let module_name = format!("bt@{pkg_name}@{relative_module}");
 
-        let Ok(source) = fs::read_to_string(file) else {
-            continue;
+        let source = match fs::read_to_string(file) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(
+                    file = %file,
+                    error = %e,
+                    "Cannot read source file during index pass; class resolution from this file will be skipped"
+                );
+                continue;
+            }
         };
         let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
-        let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+        let (module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+        if !diagnostics.is_empty() {
+            warn!(
+                file = %file,
+                diagnostic_count = diagnostics.len(),
+                "Source file has parse errors during index pass; class resolution from this file may be incomplete"
+            );
+        }
 
         for class in &module.classes {
             let class_name = class.name.name.to_string();
@@ -791,5 +806,28 @@ mod tests {
         assert!(content.contains("{description, \"Test app\"}"));
         assert!(content.contains("{vsn, \"0.1.0\"}"));
         assert!(content.contains("'bt@my_app@counter'"));
+    }
+
+    #[test]
+    fn test_build_class_module_index_skips_unreadable_file() {
+        // A path that does not exist on disk — simulates an unreadable file.
+        // The function should succeed (not error) and return an empty index.
+        let nonexistent = Utf8PathBuf::from("/nonexistent/no_such_file.bt");
+        let result = build_class_module_index(&[nonexistent], None, "my_app");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_build_class_module_index_handles_parse_errors_gracefully() {
+        let temp = TempDir::new().unwrap();
+        let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let bad_file = project_path.join("bad.bt");
+        // Write a file with a syntax error — parse diagnostics should be non-empty.
+        write_test_file(&bad_file, "class Foo { @@@@invalid syntax }");
+
+        // Should succeed and return whatever classes (if any) were parsed before the error.
+        let result = build_class_module_index(&[bad_file], None, "my_app");
+        assert!(result.is_ok());
     }
 }
