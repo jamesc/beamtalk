@@ -135,7 +135,7 @@ firstPid := firstActor instVarAt: #pid
 firstPidStr := firstPid asString
 // => "#Pid<0._._>"
 
-firstPidStrShort := firstPidStr drop: 4
+firstPidStrShort := (firstPidStr startsWith: "#Pid") ifTrue: [ firstPidStr drop: 4 ] ifFalse: [ firstPidStr ]
 // => "<0._._>"
 
 (Workspace actorAt: firstPidStrShort) await respondsTo: #getValue
