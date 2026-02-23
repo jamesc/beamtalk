@@ -488,7 +488,11 @@ Described in Steelman Analysis Option C. Rejected because it breaks `thisClass` 
 
 Give each class its own metaclass gen_server process (like Smalltalk-80's memory-allocated metaclass objects). This would support per-metaclass instance variables (`addInstVarNamed:`), a feature Pharo supports.
 
-**Rejected because**: One more process per class doubles the process count for all user classes. Bootstrap ordering becomes significantly more complex (class process must start its metaclass process before registering). The benefit — per-metaclass instance variables — is served by class variables in nearly all practical cases. Class variables are per-class (not inherited), which is what frameworks actually need.
+**Rejected because**: Bootstrap ordering becomes significantly more complex — each class process must start its metaclass process before it can register, which creates a sequencing problem during startup. This is the primary concern.
+
+The process-count argument ("doubles the process count") is acknowledged as weak: a typical application has tens to low hundreds of classes, so going from ~200 to ~400 BEAM processes is negligible. This alternative remains viable and is the right long-term answer once bootstrap sequencing is cleanly solved.
+
+The "class variables serve the same purpose" argument also does not fully hold: class variables are inherited by subclasses, whereas per-metaclass instance variables are per-class and non-inherited. They are not equivalent. Deferred to a future ADR when bootstrap sequencing is better understood.
 
 ### Alternative: Pharo-Style `addInstVarNamed:` (Per-Metaclass Variables)
 
