@@ -30,8 +30,8 @@
 %%% | classInheritsFrom/2         | Predicate over the superclass chain (classAllSuperclasses/1) |
 %%% | classIncludesBehaviour/2    | Behaviour / interface membership via superclass chain     |
 %%% | classWhichIncludesSelector/2| First class in hierarchy whose local methods include selector |
-%%% | classInstVarNames/1         | Instance variable names from class gen_server state       |
-%%% | classAllInstVarNames/1      | Combined instance variable names via superclass chain     |
+%%% | classFieldNames/1           | Field names from class gen_server state                   |
+%%% | classAllFieldNames/1        | Combined field names via superclass chain                 |
 %%% | className/1                 | Class name from class gen_server state                    |
 %%% | classClass/1                | Real metaclass object (ADR 0036)                          |
 %%% | classDoc/1                  | Class doc string from class gen_server state (ADR 0033)   |
@@ -57,8 +57,8 @@
     classInheritsFrom/2,
     classIncludesBehaviour/2,
     classWhichIncludesSelector/2,
-    classInstVarNames/1,
-    classAllInstVarNames/1,
+    classFieldNames/1,
+    classAllFieldNames/1,
     className/1,
     classClass/1,
     %% ADR 0036: Metaclass primitives
@@ -270,9 +270,9 @@ classWhichIncludesSelector(Self, Selector) ->
         nil
     ).
 
-%% @doc Return all instance variable names including inherited, in slot order.
--spec classAllInstVarNames(#beamtalk_object{}) -> [atom()].
-classAllInstVarNames(Self) ->
+%% @doc Return all field names including inherited, in slot order.
+-spec classAllFieldNames(#beamtalk_object{}) -> [atom()].
+classAllFieldNames(Self) ->
     ClassPid = erlang:element(4, Self),
     ClassName = gen_server:call(ClassPid, class_name),
     walk_hierarchy(
@@ -294,9 +294,9 @@ classIncludesSelector(Self, Selector) ->
     LocalMethods = gen_server:call(ClassPid, methods),
     lists:member(Selector, LocalMethods).
 
-%% @doc Return the names of instance variables declared in this class (not inherited).
--spec classInstVarNames(#beamtalk_object{}) -> [atom()].
-classInstVarNames(Self) ->
+%% @doc Return the names of fields declared in this class (not inherited).
+-spec classFieldNames(#beamtalk_object{}) -> [atom()].
+classFieldNames(Self) ->
     ClassPid = erlang:element(4, Self),
     gen_server:call(ClassPid, instance_variables).
 

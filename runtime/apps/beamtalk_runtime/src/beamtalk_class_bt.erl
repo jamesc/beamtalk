@@ -86,7 +86,7 @@ register_class() ->
         name => 'Class',
         superclass => 'Object',
         module => beamtalk_class_bt,
-        instance_variables => [],
+        fields => [],
         class_methods => #{
             'superclass' => #{arity => 0}
         },
