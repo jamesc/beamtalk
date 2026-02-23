@@ -660,19 +660,27 @@ impl ClassHierarchy {
                 diagnostics.push(diag);
             }
 
-            // Check sealed method override enforcement
-            if let Some(ref superclass) = class.superclass {
-                for method in &class.methods {
-                    let selector = method.selector.name();
-                    if let Some((sealed_class, _)) =
-                        self.find_sealed_method_in_ancestors(superclass.name.as_str(), &selector)
-                    {
-                        diagnostics.push(Diagnostic::error(
-                            format!(
-                                "Cannot override sealed method `{selector}` from class `{sealed_class}`"
-                            ),
-                            method.span,
-                        ));
+            // Check sealed method override enforcement.
+            // BT-807: Abstract stdlib classes (e.g. Behaviour) provide class-side
+            // dispatch methods that share selector names with instance-side methods
+            // in Object (e.g. `fieldNames` on class objects vs. instances). These
+            // operate in separate dispatch namespaces at runtime so the sealed
+            // constraint from the instance side does not apply.
+            let skip_sealed_method_check = stdlib_mode && class.is_abstract;
+            if !skip_sealed_method_check {
+                if let Some(ref superclass) = class.superclass {
+                    for method in &class.methods {
+                        let selector = method.selector.name();
+                        if let Some((sealed_class, _)) = self
+                            .find_sealed_method_in_ancestors(superclass.name.as_str(), &selector)
+                        {
+                            diagnostics.push(Diagnostic::error(
+                                format!(
+                                    "Cannot override sealed method `{selector}` from class `{sealed_class}`"
+                                ),
+                                method.span,
+                            ));
+                        }
                     }
                 }
             }

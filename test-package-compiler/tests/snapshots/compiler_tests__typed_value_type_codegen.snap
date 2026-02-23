@@ -108,13 +108,13 @@ call 'bt@stdlib@typed_point':'dispatch'('printString', [], Self)
             'is_sealed' => 'false',
             'is_abstract' => 'false',
             'instance_methods' => ~{'getX' => ~{'arity' => 0, 'is_sealed' => 'false'}~, 'getY' => ~{'arity' => 0, 'is_sealed' => 'false'}~, 'distanceTo:' => ~{'arity' => 1, 'is_sealed' => 'false'}~, 'printString' => ~{'arity' => 0, 'is_sealed' => 'false'}~}~,
-            'instance_variables' => ['x', 'y'],
+            'fields' => ['x', 'y'],
             'class_methods' => ~{
                 'new' => ~{'arity' => 0}~,
                 'new:' => ~{'arity' => 1}~
             }~,
             'method_source' => ~{'getX' => #{#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<88>(8,1,'integer',['unsigned'|['big']])}#, 'getY' => #{#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<89>(8,1,'integer',['unsigned'|['big']])}#, 'distanceTo:' => #{#<100>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<84>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']])}#, 'printString' => #{#<112>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<83>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']])}#}~,
-            'class_variables' => ~{}~,
+            'class_state' => ~{}~,
             'doc' => 'none',
             'method_docs' => ~{}~
         }~
