@@ -110,9 +110,6 @@ sealed Object subclass: DateTime
   /// Human-readable representation.
   printString -> String => @primitive "printString"
 
-  /// Describe protocol (same as asString).
-  describe -> String => @primitive "describe"
-
   // ===== Instance Methods — Arithmetic =====
 
   /// Add seconds, return new DateTime.

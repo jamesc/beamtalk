@@ -244,14 +244,6 @@ sealed Number subclass: Integer
   /// ```
   printString -> String => @primitive "printString"
 
-  /// Human-readable description of the receiver.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// 42 describe   // => "42"
-  /// ```
-  describe -> String => self asString
-
   /// Bitwise AND with another integer.
   ///
   /// ## Examples

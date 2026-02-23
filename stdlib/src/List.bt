@@ -334,10 +334,4 @@ sealed Collection subclass: List
   /// ```
   atRandom => @primitive "atRandom"
 
-  /// Human-readable description of the receiver.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// #(1, 2, 3) describe              // => "a List"
-  /// ```
-  describe -> String => "a List"
+

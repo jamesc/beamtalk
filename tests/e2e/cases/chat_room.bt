@@ -37,7 +37,7 @@ msg getText
 msg getSender
 // => Alice
 
-msg describe
+msg printString
 // => Alice: Hello!
 
 msg class

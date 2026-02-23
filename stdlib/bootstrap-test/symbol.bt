@@ -27,8 +27,8 @@
 #hello printString
 // => #hello
 
-// describe — same as printString
-#world describe
+// printString for symbol
+#world printString
 // => #world
 
 // asAtom — identity (symbols are atoms)

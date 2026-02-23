@@ -169,8 +169,6 @@ dispatch('file', [], #{file := File}) ->
     File;
 dispatch('printString', [], Frame) ->
     format_frame(Frame);
-dispatch('describe', [], Frame) ->
-    format_frame(Frame);
 dispatch(Selector, _Args, _Frame) ->
     Error0 = beamtalk_error:new(does_not_understand, 'StackFrame'),
     Error1 = beamtalk_error:with_selector(Error0, Selector),
@@ -187,7 +185,6 @@ has_method('moduleName') -> true;
 has_method('line') -> true;
 has_method('file') -> true;
 has_method('printString') -> true;
-has_method('describe') -> true;
 has_method(_) -> false.
 
 %% @private

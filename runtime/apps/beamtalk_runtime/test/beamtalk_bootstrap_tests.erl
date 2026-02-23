@@ -210,7 +210,7 @@ object_methods_test_() ->
                 ?assert(lists:member('ifNil:', Methods)),
                 ?assert(lists:member('ifNotNil:', Methods)),
                 ?assert(lists:member(inspect, Methods)),
-                ?assert(lists:member(describe, Methods))
+                ?assert(lists:member('printString', Methods))
             end)
         ]
     end}.
@@ -225,7 +225,7 @@ actor_methods_test_() ->
                 ActorClassPid = beamtalk_class_registry:whereis_class('Actor'),
                 Methods = beamtalk_object_class:methods(ActorClassPid),
 
-                ?assert(lists:member(describe, Methods))
+                ?assert(lists:member('spawn', Methods))
             end)
         ]
     end}.

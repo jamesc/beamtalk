@@ -135,5 +135,4 @@ sealed Object subclass: Stream
   /// ```
   printString -> String => @primitive "printString"
 
-  /// Human-readable description of the receiver.
-  describe -> String => "a Stream"
+

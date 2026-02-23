@@ -379,12 +379,6 @@ dispatch_print_string_test() ->
     Result = beamtalk_exception_handler:dispatch('printString', [], Ex),
     ?assert(is_binary(Result) orelse is_list(Result)).
 
-dispatch_describe_same_as_print_string_test() ->
-    Ex = make_test_exception(),
-    PS = beamtalk_exception_handler:dispatch('printString', [], Ex),
-    Desc = beamtalk_exception_handler:dispatch('describe', [], Ex),
-    ?assertEqual(PS, Desc).
-
 dispatch_stack_trace_with_frames_test() ->
     Ex = (make_test_exception())#{stacktrace => [frame1, frame2]},
     ?assertEqual(
@@ -450,7 +444,6 @@ has_method_kind_test() -> ?assert(beamtalk_exception_handler:has_method('kind'))
 has_method_selector_test() -> ?assert(beamtalk_exception_handler:has_method('selector')).
 has_method_error_class_test() -> ?assert(beamtalk_exception_handler:has_method('errorClass')).
 has_method_print_string_test() -> ?assert(beamtalk_exception_handler:has_method('printString')).
-has_method_describe_test() -> ?assert(beamtalk_exception_handler:has_method('describe')).
 has_method_stack_trace_test() -> ?assert(beamtalk_exception_handler:has_method('stackTrace')).
 has_method_class_test() -> ?assert(beamtalk_exception_handler:has_method('class')).
 has_method_signal_test() -> ?assert(beamtalk_exception_handler:has_method('signal')).

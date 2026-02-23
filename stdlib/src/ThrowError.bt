@@ -13,10 +13,4 @@
 /// [Erlang erlang throw: #oops] on: ThrowError do: [:e | e message]
 /// ```
 BEAMError subclass: ThrowError
-  /// Human-readable description of the receiver.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// ThrowError describe   // => "a ThrowError"
-  /// ```
-  describe -> String => "a ThrowError"
+

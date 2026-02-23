@@ -12,10 +12,4 @@
 /// [42 unknownMsg] on: RuntimeError do: [:e | e message]
 /// ```
 Error subclass: RuntimeError
-  /// Human-readable description of the receiver.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// RuntimeError describe   // => "a RuntimeError"
-  /// ```
-  describe -> String => "a RuntimeError"
+

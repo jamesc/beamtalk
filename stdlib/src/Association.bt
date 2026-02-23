@@ -44,10 +44,4 @@ sealed Object subclass: Association
   /// ```
   printString -> String => self asString
 
-  /// Human-readable description of the receiver.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// (#name -> "James") describe
-  /// ```
-  describe -> String => self asString
+

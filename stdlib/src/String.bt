@@ -402,14 +402,6 @@ sealed Object subclass: String
   /// ```
   select: block: Block -> String => @primitive "select:"
 
-  /// Return the string itself.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// "hello" describe            // => "hello"
-  /// ```
-  describe -> String => self
-
   /// Return a lazy Stream over the characters (grapheme clusters).
   ///
   /// ## Examples

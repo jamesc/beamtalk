@@ -71,14 +71,6 @@ Object subclass: Exception
   /// ```
   stackTrace -> List => @primitive "stackTrace"
 
-  /// Human-readable description of the receiver.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// [42 unknownMsg] on: Exception do: [:e | e describe]
-  /// ```
-  describe -> String => self printString
-
   /// Raise this exception.
   ///
   /// ## Examples

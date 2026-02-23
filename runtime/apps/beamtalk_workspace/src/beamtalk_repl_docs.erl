@@ -163,7 +163,6 @@ format_metaclass_docs() ->
         <<"  new              Create a new instance\n">>,
         <<"  spawn            Create a new actor instance\n">>,
         <<"  spawnWith:       Create a new actor with initial state\n">>,
-        <<"  describe         Return a description of the class\n">>,
         <<"\nUse :help ClassName for docs on a specific class.">>
     ]).
 
@@ -193,8 +192,6 @@ metaclass_method_doc(<<"spawn">>) ->
     {ok, <<"Create a new actor instance. Returns an actor reference.">>};
 metaclass_method_doc(<<"spawnWith:">>) ->
     {ok, <<"Create a new actor with initial state from a Dictionary.">>};
-metaclass_method_doc(<<"describe">>) ->
-    {ok, <<"Return a description of the class.">>};
 metaclass_method_doc(_) ->
     not_found.
 

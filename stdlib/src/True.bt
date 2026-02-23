@@ -62,14 +62,6 @@ sealed Boolean subclass: True
   /// ```
   isFalse -> Boolean => false
 
-  /// Human-readable description of the receiver.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// true describe              // => "true"
-  /// ```
-  describe -> String => "true"
-
   /// Return a developer-readable string representation.
   ///
   /// ## Examples

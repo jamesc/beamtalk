@@ -1447,38 +1447,13 @@ Module {
                         end: 1857,
                     },
                 },
-                MethodDefinition {
-                    selector: Unary(
-                        "describe",
-                    ),
-                    parameters: [],
-                    body: [
-                        Literal(
-                            String(
-                                "a List",
-                            ),
-                            Span {
-                                start: 1889,
-                                end: 1897,
-                            },
-                        ),
-                    ],
-                    return_type: None,
-                    is_sealed: false,
-                    kind: Primary,
-                    doc_comment: None,
-                    span: Span {
-                        start: 1877,
-                        end: 1897,
-                    },
-                },
             ],
             class_methods: [],
             class_variables: [],
             doc_comment: None,
             span: Span {
                 start: 208,
-                end: 1897,
+                end: 1857,
             },
         },
     ],
@@ -1486,7 +1461,7 @@ Module {
     expressions: [],
     span: Span {
         start: 208,
-        end: 1897,
+        end: 1857,
     },
     leading_comments: [
         Comment {

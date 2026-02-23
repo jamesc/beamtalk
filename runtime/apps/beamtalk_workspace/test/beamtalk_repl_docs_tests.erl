@@ -286,8 +286,7 @@ format_metaclass_docs_test() ->
     ?assert(binary:match(Result, <<"terminal sentinel">>) =/= nomatch),
     ?assert(binary:match(Result, <<"new">>) =/= nomatch),
     ?assert(binary:match(Result, <<"spawn">>) =/= nomatch),
-    ?assert(binary:match(Result, <<"spawnWith:">>) =/= nomatch),
-    ?assert(binary:match(Result, <<"describe">>) =/= nomatch).
+    ?assert(binary:match(Result, <<"spawnWith:">>) =/= nomatch).
 
 format_class_docs_metaclass_test() ->
     ?assertMatch({ok, _}, beamtalk_repl_docs:format_class_docs('Metaclass')),

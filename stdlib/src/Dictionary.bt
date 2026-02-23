@@ -131,10 +131,4 @@ sealed Collection subclass: Dictionary
   /// ```
   stream -> Stream => @primitive "stream"
 
-  /// Human-readable description of the receiver.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// #{#a => 1} describe                        // => "a Dictionary"
-  /// ```
-  describe -> String => "a Dictionary"
+

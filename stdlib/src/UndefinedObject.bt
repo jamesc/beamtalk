@@ -85,14 +85,6 @@ sealed Object subclass: UndefinedObject
   /// ```
   shallowCopy -> Nil => self
 
-  /// Human-readable description of the receiver.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// nil describe                // => "nil"
-  /// ```
-  describe -> String => "nil"
-
   /// Return a developer-readable string representation.
   ///
   /// ## Examples

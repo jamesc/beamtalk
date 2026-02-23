@@ -984,12 +984,12 @@ perform_recursive_dispatch_test() ->
 %%% BT-427: Object method delegation tests
 %%% Actors inherit Object base methods via hierarchy walk
 
-object_describe_test() ->
-    %% Test describe on actor (inherited from Object via hierarchy walk)
+object_printstring_test() ->
+    %% Test printString on actor (inherited from Object via hierarchy walk)
     application:ensure_all_started(beamtalk_runtime),
     {ok, Counter} = test_counter:start_link(42),
 
-    Result = gen_server:call(Counter, {describe, []}),
+    Result = gen_server:call(Counter, {'printString', []}),
     ?assert(is_binary(Result)),
 
     gen_server:stop(Counter).
@@ -1058,7 +1058,7 @@ respondsTo_inherited_methods_test() ->
     {ok, Counter} = test_counter:start_link(0),
 
     %% Inherited methods from Object should be reported
-    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [describe]})),
+    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', ['printString']})),
     ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [inspect]})),
     ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [isNil]})),
     ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [hash]})),

@@ -23,5 +23,3 @@ sealed Object subclass: Dictionary
   // Iteration
   keysAndValuesDo: block => @primitive "keysAndValuesDo:"
 
-  // Reflection
-  describe => "a Dictionary"

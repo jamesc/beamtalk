@@ -101,21 +101,13 @@ ProtoObject subclass: Object
   /// ```
   printString -> String => "a " ++ self class printString
 
-  /// Inspect the receiver (alias for `describe`).
+  /// Inspect the receiver.
   ///
   /// ## Examples
   /// ```beamtalk
   /// 42 inspect             // => "42"
   /// ```
-  inspect -> String => self describe
-
-  /// Human-readable description of the receiver.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// Object new describe    // => "an Object"
-  /// ```
-  describe -> String => "an Object"
+  inspect -> String => self printString
 
   /// Return the receiver itself. Useful for cascading side effects.
   ///

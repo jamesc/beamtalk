@@ -104,8 +104,7 @@ test_inst_var_at_put_state() ->
 object_display_test_() ->
     {"Object display methods", [
         {"printString returns readable string", fun test_print_string/0},
-        {"inspect includes fields", fun test_inspect/0},
-        {"describe returns description", fun test_describe/0}
+        {"inspect includes fields", fun test_inspect/0}
     ]}.
 
 test_print_string() ->
@@ -119,11 +118,6 @@ test_inspect() ->
     %% Should start with "a Counter" and include the value field
     ?assert(binary:match(Str, <<"a Counter">>) =/= nomatch),
     ?assert(binary:match(Str, <<"value">>) =/= nomatch).
-
-test_describe() ->
-    State = counter_state(),
-    {reply, Str, _} = beamtalk_object_ops:dispatch(describe, [], self_ref(), State),
-    ?assertEqual(<<"an instance of Counter">>, Str).
 
 %%% ============================================================================
 %%% Utility Method Tests
@@ -186,9 +180,6 @@ has_method_test_() ->
             ?assert(beamtalk_object_ops:has_method('printString'))
         end},
         {"inspect is a known method", fun() -> ?assert(beamtalk_object_ops:has_method(inspect)) end},
-        {"describe is a known method", fun() ->
-            ?assert(beamtalk_object_ops:has_method(describe))
-        end},
         {"yourself is a known method", fun() ->
             ?assert(beamtalk_object_ops:has_method(yourself))
         end},

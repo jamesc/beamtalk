@@ -55,10 +55,4 @@ sealed Object subclass: Regex
   /// ```
   printString -> String => @primitive "printString"
 
-  /// Describe this regex (same as printString).
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// (Regex from: "[0-9]+") describe            // => "Regex([0-9]+)"
-  /// ```
-  describe -> String => @primitive "describe"
+
