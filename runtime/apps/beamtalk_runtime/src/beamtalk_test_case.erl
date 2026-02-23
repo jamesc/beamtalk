@@ -487,13 +487,12 @@ run_test_method(ClassName, Module, MethodName, FlatMethods) ->
                     {fail, MethodName, AssertMsg};
                 error:#beamtalk_error{message = ErrMsg} ->
                     {fail, MethodName, ErrMsg};
+                error:undef:TestST ->
+                    Wrapped = beamtalk_exception_handler:ensure_wrapped(error, undef, TestST),
+                    #{error := #beamtalk_error{message = FailMsg}} = Wrapped,
+                    {fail, MethodName, FailMsg};
                 error:TestReason ->
-                    FailMsg = case TestReason of
-                        {undef, {Mod, Fun, Arity}} ->
-                            iolist_to_binary(io_lib:format("Undefined function: ~p:~p/~p", [Mod, Fun, Arity]));
-                        _ ->
-                            iolist_to_binary(io_lib:format("~p", [TestReason]))
-                    end,
+                    FailMsg = iolist_to_binary(io_lib:format("~p", [TestReason])),
                     {fail, MethodName, FailMsg};
                 TestClass:TestReason:TestST ->
                     FailMsg = iolist_to_binary(

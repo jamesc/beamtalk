@@ -245,6 +245,15 @@ pub struct CodegenOptions {
     bindings: Option<PrimitiveBindingTable>,
     /// Whether workspace bindings are available (REPL/workspace context).
     workspace_mode: bool,
+    /// Class name → compiled module name index for resolving cross-file class
+    /// references in package mode (BT-794 follow-up).
+    ///
+    /// When populated, `compiled_module_name` checks this map first before
+    /// falling back to the heuristic prefix approach. This allows classes in
+    /// package subdirectories (e.g. `bt@pkg@sub@dir@class`) to be resolved
+    /// correctly by all files in the package, regardless of where the caller
+    /// lives in the directory tree.
+    class_module_index: std::collections::HashMap<String, String>,
 }
 
 impl CodegenOptions {
@@ -255,6 +264,7 @@ impl CodegenOptions {
             source_text: None,
             bindings: None,
             workspace_mode: false,
+            class_module_index: std::collections::HashMap::new(),
         }
     }
 
@@ -283,6 +293,21 @@ impl CodegenOptions {
     #[must_use]
     pub fn with_workspace_mode(mut self, enabled: bool) -> Self {
         self.workspace_mode = enabled;
+        self
+    }
+
+    /// Sets the class module index for resolving cross-file class references.
+    ///
+    /// Maps Beamtalk class names (e.g. `"SchemeEnv"`) to their compiled Erlang
+    /// module names (e.g. `"bt@sicp_example@scheme@env"`). When set, these
+    /// mappings take precedence over the heuristic prefix approach in
+    /// `compiled_module_name`, fixing subdirectory class dispatch.
+    #[must_use]
+    pub fn with_class_module_index(
+        mut self,
+        index: std::collections::HashMap<String, String>,
+    ) -> Self {
+        self.class_module_index = index;
         self
     }
 }
@@ -325,6 +350,7 @@ pub fn generate_module(module: &Module, options: CodegenOptions) -> Result<Strin
     };
     generator.source_text = options.source_text;
     generator.workspace_mode = options.workspace_mode;
+    generator.class_module_index = options.class_module_index;
 
     // Build hierarchy once for the entire generation (ADR 0006)
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
@@ -627,6 +653,11 @@ pub(super) struct CoreErlangGenerator {
     /// When set, `generate_expression` for `Expression::Return` generates a throw instead
     /// of a plain value, causing the return to escape from the enclosing block closure.
     current_nlr_token: Option<String>,
+    /// Class name → compiled module name index for resolving cross-file class references.
+    ///
+    /// Populated from `CodegenOptions::class_module_index` before generation begins.
+    /// Used by `compiled_module_name` to resolve subdirectory classes correctly.
+    class_module_index: std::collections::HashMap<String, String>,
 }
 
 impl CoreErlangGenerator {
@@ -654,6 +685,7 @@ impl CoreErlangGenerator {
             repl_loop_mutated: false,
             last_dispatch_var: None,
             current_nlr_token: None,
+            class_module_index: std::collections::HashMap::new(),
         }
     }
 
@@ -681,6 +713,7 @@ impl CoreErlangGenerator {
             repl_loop_mutated: false,
             last_dispatch_var: None,
             current_nlr_token: None,
+            class_module_index: std::collections::HashMap::new(),
         }
     }
 

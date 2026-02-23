@@ -240,8 +240,16 @@ handle(<<"test-all">>, _Params, Msg, _SessionPid) ->
                 },
                 beamtalk_repl_protocol:encode_test_results(MergedResults, Msg)
             catch
-                error:Reason ->
-                    WrappedReason = beamtalk_repl_server:ensure_structured_error(Reason),
+                error:Reason:Stack ->
+                    WrappedReason =
+                        case Reason of
+                            undef ->
+                                beamtalk_exception_handler:ensure_wrapped(
+                                    error, undef, Stack
+                                );
+                            _ ->
+                                beamtalk_repl_server:ensure_structured_error(Reason)
+                        end,
                     beamtalk_repl_protocol:encode_error(
                         WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1
                     )

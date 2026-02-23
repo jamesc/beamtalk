@@ -518,6 +518,22 @@ ensure_wrapped_3_exit_preserves_message_test() ->
     #{error := Inner} = Result,
     ?assert(is_binary(Inner#beamtalk_error.message)).
 
+ensure_wrapped_3_undef_shows_mfa_test() ->
+    ST = [{some_mod, some_fun, 2, [{file, "test.erl"}, {line, 10}]}],
+    Result = beamtalk_exception_handler:ensure_wrapped(error, undef, ST),
+    ?assertMatch(#{'$beamtalk_class' := 'RuntimeError', error := _}, Result),
+    #{error := Inner} = Result,
+    ?assertEqual(runtime_error, Inner#beamtalk_error.kind),
+    ?assertEqual(
+        <<"Undefined function: some_mod:some_fun/2">>,
+        Inner#beamtalk_error.message
+    ).
+
+ensure_wrapped_3_undef_empty_stacktrace_test() ->
+    Result = beamtalk_exception_handler:ensure_wrapped(error, undef, []),
+    #{error := Inner} = Result,
+    ?assertEqual(<<"Undefined function">>, Inner#beamtalk_error.message).
+
 %%% ===================================================================
 %%% wrap_raw/1 — badarity wrapping
 %%% ===================================================================

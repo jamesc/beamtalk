@@ -310,7 +310,14 @@ fn compile_stdlib_file(
     options: &beamtalk_core::CompilerOptions,
     bindings: &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable,
 ) -> Result<()> {
-    compile_source_with_bindings(path, module_name, core_file, options, bindings)
+    compile_source_with_bindings(
+        path,
+        module_name,
+        core_file,
+        options,
+        bindings,
+        &std::collections::HashMap::new(),
+    )
 }
 
 /// Metadata for a single stdlib class, used to generate the load-order file

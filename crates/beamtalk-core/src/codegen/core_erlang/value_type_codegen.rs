@@ -688,11 +688,18 @@ impl CoreErlangGenerator {
 
     /// Computes the compiled module name for a class (ADR 0016 / ADR 0026 / BT-794).
     ///
-    /// - Stdlib classes → `bt@stdlib@{snake_case}`
-    /// - User-defined classes in package mode → `bt@{package}@{snake_case}`
-    ///   (package prefix extracted from `self.module_name`)
-    /// - User-defined classes without package context → `bt@{snake_case}` (legacy)
+    /// Resolution order:
+    /// 1. `class_module_index` — explicit mapping built during two-pass compilation.
+    ///    This correctly handles classes in package subdirectories (e.g. `SchemeEnv`
+    ///    → `bt@sicp_example@scheme@env`).
+    /// 2. Stdlib classes → `bt@stdlib@{snake_case}`
+    /// 3. User-defined classes in package mode → `bt@{package}@{snake_case}`
+    ///    (package prefix extracted from `self.module_name`)
+    /// 4. User-defined classes without package context → `bt@{snake_case}` (legacy)
     pub fn compiled_module_name(&self, class_name: &str) -> String {
+        if let Some(module) = self.class_module_index.get(class_name) {
+            return module.clone();
+        }
         let snake = super::util::to_module_name(class_name);
         if Self::is_known_stdlib_type(class_name) {
             format!("bt@stdlib@{snake}")
