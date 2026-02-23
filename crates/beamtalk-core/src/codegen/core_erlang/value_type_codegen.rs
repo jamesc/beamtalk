@@ -654,14 +654,18 @@ impl CoreErlangGenerator {
         STDLIB_CLASS_NAMES.contains(&class_name)
     }
 
-    /// Computes the compiled module name for a class (ADR 0016).
+    /// Computes the compiled module name for a class (ADR 0016 / ADR 0026 / BT-794).
     ///
     /// - Stdlib classes → `bt@stdlib@{snake_case}`
-    /// - User-defined classes → `bt@{snake_case}`
-    pub fn compiled_module_name(class_name: &str) -> String {
+    /// - User-defined classes in package mode → `bt@{package}@{snake_case}`
+    ///   (package prefix extracted from `self.module_name`)
+    /// - User-defined classes without package context → `bt@{snake_case}` (legacy)
+    pub fn compiled_module_name(&self, class_name: &str) -> String {
         let snake = super::util::to_module_name(class_name);
         if Self::is_known_stdlib_type(class_name) {
             format!("bt@stdlib@{snake}")
+        } else if let Some(prefix) = super::util::user_package_prefix(&self.module_name) {
+            format!("{prefix}{snake}")
         } else {
             format!("bt@{snake}")
         }
@@ -673,12 +677,13 @@ impl CoreErlangGenerator {
     /// delegate to). For stdlib classes, applies the ADR 0016 naming convention:
     /// all stdlib types → `bt@stdlib@{snake_case}`.
     ///
-    /// For user-defined classes, uses `bt@{snake_case}` prefix.
-    fn superclass_module_name(superclass: &str) -> Option<String> {
+    /// For user-defined classes in package mode, uses `bt@{package}@{snake_case}`
+    /// prefix (BT-794).
+    fn superclass_module_name(&self, superclass: &str) -> Option<String> {
         if superclass == "ProtoObject" {
             return None;
         }
-        Some(Self::compiled_module_name(superclass))
+        Some(self.compiled_module_name(superclass))
     }
 
     /// Encode a string as a Core Erlang binary literal.
@@ -705,7 +710,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let class_name = self.class_name().clone();
         let mod_name = self.module_name.clone();
-        let superclass_mod = Self::superclass_module_name(class.superclass_name());
+        let superclass_mod = self.superclass_module_name(class.superclass_name());
 
         // BT-447: Class-methods-only classes skip protocol boilerplate
         if class.methods.is_empty() && superclass_mod.is_some() {
@@ -1097,7 +1102,7 @@ impl CoreErlangGenerator {
         class: &ClassDefinition,
     ) -> Result<Document<'static>> {
         let class_name = self.class_name().clone();
-        let superclass_mod = Self::superclass_module_name(class.superclass_name());
+        let superclass_mod = self.superclass_module_name(class.superclass_name());
 
         // BT-447: Class-methods-only classes delegate directly to superclass
         if class.methods.is_empty() && superclass_mod.is_some() {
@@ -1174,7 +1179,8 @@ impl CoreErlangGenerator {
     fn generate_minimal_dispatch(&mut self, class: &ClassDefinition) -> Result<Document<'static>> {
         let class_name = self.class_name().clone();
         let mod_name = self.module_name.clone();
-        let super_mod = Self::superclass_module_name(class.superclass_name())
+        let super_mod = self
+            .superclass_module_name(class.superclass_name())
             .expect("minimal dispatch requires superclass");
 
         let doc = docvec![
@@ -1227,7 +1233,8 @@ impl CoreErlangGenerator {
         class: &ClassDefinition,
     ) -> Result<Document<'static>> {
         let class_name = self.class_name().clone();
-        let super_mod = Self::superclass_module_name(class.superclass_name())
+        let super_mod = self
+            .superclass_module_name(class.superclass_name())
             .expect("minimal has_method requires superclass");
 
         let doc = docvec![

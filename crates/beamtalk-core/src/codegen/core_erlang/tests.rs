@@ -464,7 +464,8 @@ fn test_generate_nested_message_sends_use_unique_variables() {
 
 #[test]
 fn test_generate_spawn_message_send() {
-    let mut generator = CoreErlangGenerator::new("test_module");
+    // BT-794: Use workspace-qualified module name to test package-mode spawn
+    let mut generator = CoreErlangGenerator::new("bt@my_pkg@test_module");
 
     // Create AST for: Counter spawn
     let receiver = Expression::ClassReference {
@@ -478,12 +479,16 @@ fn test_generate_spawn_message_send() {
         .generate_message_send(&receiver, &selector, &arguments)
         .unwrap();
     let output = doc.to_pretty_string();
-    assert!(output.contains("call 'bt@counter':'spawn'()"));
+    assert!(
+        output.contains("call 'bt@my_pkg@counter':'spawn'()"),
+        "spawn should use workspace-qualified module name. Got: {output}",
+    );
 }
 
 #[test]
 fn test_generate_spawn_with_message_send() {
-    let mut generator = CoreErlangGenerator::new("test_module");
+    // BT-794: Use workspace-qualified module name to test package-mode spawn
+    let mut generator = CoreErlangGenerator::new("bt@my_pkg@test_module");
 
     // Create AST for: Counter spawnWith: #{value => 10}
     // For simplicity, we'll use an integer literal as the init arg
@@ -499,10 +504,10 @@ fn test_generate_spawn_with_message_send() {
         .generate_message_send(&receiver, &selector, &arguments)
         .unwrap();
     let output = doc.to_pretty_string();
-    // Should call spawn/1 with the argument
+    // Should call spawn/1 with the argument using workspace-qualified name
     assert!(
-        output.contains("call 'bt@counter':'spawn'(42)"),
-        "spawnWith: should generate spawn/1 call. Got: {output}",
+        output.contains("call 'bt@my_pkg@counter':'spawn'(42)"),
+        "spawnWith: should generate spawn/1 call with package prefix. Got: {output}",
     );
     // Should NOT create a future (spawn is synchronous)
     assert!(

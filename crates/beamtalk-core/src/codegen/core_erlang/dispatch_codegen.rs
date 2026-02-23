@@ -1058,36 +1058,40 @@ impl CoreErlangGenerator {
     /// `spawn/0` or `spawn/1` is called (which handles initialize protocol).
     /// In non-REPL contexts (regular code, tests), fall back to normal `module:spawn`.
     ///
+    /// The emitted module atom is computed dynamically via `compiled_module_name`:
+    /// - Package mode: `bt@{package}@{class}` (e.g. `bt@my_pkg@counter`)
+    /// - Workspace/legacy mode: `bt@{class}` (e.g. `bt@counter`)
+    ///
     /// # Arguments
     ///
     /// * `class_name` - The Beamtalk class name (e.g., "Counter")
     /// * `init_args` - Optional initialization arguments for spawnWith:
     ///
-    /// # Generated Code (REPL context)
+    /// # Generated Code (REPL context, package mode with package `my_pkg`)
     ///
     /// ```erlang
     /// case call 'maps':'get'('__repl_actor_registry__', Bindings, 'undefined') of
     ///   <'undefined'> when 'true' ->
-    ///     call 'bt@counter':'spawn'()
+    ///     call 'bt@my_pkg@counter':'spawn'()
     ///   <RegistryPid> when 'true' ->
-    ///     let SpawnResult = call 'bt@counter':'spawn'() in
+    ///     let SpawnResult = call 'bt@my_pkg@counter':'spawn'() in
     ///     let {'beamtalk_object', _, _, SpawnPid} = SpawnResult in
-    ///     let _RegResult = call 'beamtalk_actor':'register_spawned'(RegistryPid, SpawnPid, 'Counter', 'bt@counter') in
+    ///     let _RegResult = call 'beamtalk_actor':'register_spawned'(RegistryPid, SpawnPid, 'Counter', 'bt@my_pkg@counter') in
     ///     SpawnResult
     /// end
     /// ```
     ///
-    /// # Generated Code (non-REPL context)
+    /// # Generated Code (non-REPL context, package mode with package `my_pkg`)
     ///
     /// ```erlang
-    /// call 'bt@counter':'spawn'()
+    /// call 'bt@my_pkg@counter':'spawn'()
     /// ```
     pub(super) fn generate_actor_spawn(
         &mut self,
         class_name: &str,
         init_args: Option<&Expression>,
     ) -> Result<Document<'static>> {
-        let module_name = Self::compiled_module_name(class_name);
+        let module_name = self.compiled_module_name(class_name);
         let in_repl_context = self.lookup_var("__bindings__").is_some();
 
         let args_doc = match init_args {
