@@ -287,8 +287,6 @@ dispatch('errorClass', [], #{error := Error}) ->
     Error#beamtalk_error.class;
 dispatch('printString', [], #{error := Error}) ->
     beamtalk_error:format(Error);
-dispatch('describe', [], Self) ->
-    dispatch('printString', [], Self);
 dispatch('stackTrace', [], #{stacktrace := Frames}) ->
     Frames;
 dispatch('stackTrace', [], _) ->
@@ -317,7 +315,6 @@ has_method('kind') -> true;
 has_method('selector') -> true;
 has_method('errorClass') -> true;
 has_method('printString') -> true;
-has_method('describe') -> true;
 has_method('stackTrace') -> true;
 has_method('class') -> true;
 has_method('signal') -> true;

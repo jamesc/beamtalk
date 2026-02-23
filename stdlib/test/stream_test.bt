@@ -67,10 +67,14 @@ TestCase subclass: StreamTest
     // inject on finite stream
     self assert: ((Stream on: #(1, 2, 3, 4, 5)) inject: 0 into: [:sum :n | sum + n]) equals: 15.
     (Stream from: 1) printString.
+    // => _
     (Stream on: #(1, 2, 3)) printString.
+    // => _
     // Pipeline description
     ((Stream from: 1) select: [:n | n isEven]) printString.
-    (Stream from: 1) describe.
+    // => _
+    (Stream from: 1) printString.
+    // => _
     self assert: ((Stream from: 1) class) equals: Stream.
     self assert: ((Stream on: #()) take: 5) equals: #().
     self assert: ((Stream on: #()) asList) equals: #().

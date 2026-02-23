@@ -735,7 +735,7 @@ pub(crate) fn generate_json_bif(selector: &str, params: &[String]) -> Option<Doc
 /// Regex primitive implementations (BT-709).
 ///
 /// Regex class methods delegate to `beamtalk_regex` runtime module.
-/// Instance methods (source, printString, describe) operate on Self.
+/// Instance methods (source, printString) operate on Self.
 pub(crate) fn generate_regex_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     let p0 = params.first().map_or("_Arg0", String::as_str);
     match selector {
@@ -756,7 +756,6 @@ pub(crate) fn generate_regex_bif(selector: &str, params: &[String]) -> Option<Do
         }
         "source" => Some(Document::Str("call 'beamtalk_regex':'source'(Self)")),
         "printString" => Some(Document::Str("call 'beamtalk_regex':'printString'(Self)")),
-        "describe" => Some(Document::Str("call 'beamtalk_regex':'describe'(Self)")),
         _ => None,
     }
 }
@@ -859,7 +858,6 @@ fn generate_datetime_instance_bif(selector: &str, p0: &str) -> Option<Document<'
         "printString" => Some(Document::Str(
             "call 'beamtalk_datetime':'printString'(Self)",
         )),
-        "describe" => Some(Document::Str("call 'beamtalk_datetime':'describe'(Self)")),
         // Arithmetic
         "addSeconds:" => Some(docvec![
             "call 'beamtalk_datetime':'addSeconds:'(Self, ",

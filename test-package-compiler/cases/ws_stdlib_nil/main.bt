@@ -36,8 +36,8 @@ result7 := nil copy
 result8 := nil deepCopy
 result9 := nil shallowCopy
 
-// Test describe
-result10 := nil describe   // => "nil"
+// Test printString
+result10 := nil printString   // => "nil"
 
 // ═══════════════════════════════════════════════════════════════════════
 // Edge Cases: Chaining and Composition

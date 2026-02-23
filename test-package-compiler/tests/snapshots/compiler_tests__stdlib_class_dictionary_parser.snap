@@ -434,38 +434,13 @@ Module {
                         end: 756,
                     },
                 },
-                MethodDefinition {
-                    selector: Unary(
-                        "describe",
-                    ),
-                    parameters: [],
-                    body: [
-                        Literal(
-                            String(
-                                "a Dictionary",
-                            ),
-                            Span {
-                                start: 788,
-                                end: 802,
-                            },
-                        ),
-                    ],
-                    return_type: None,
-                    is_sealed: false,
-                    kind: Primary,
-                    doc_comment: None,
-                    span: Span {
-                        start: 776,
-                        end: 802,
-                    },
-                },
             ],
             class_methods: [],
             class_variables: [],
             doc_comment: None,
             span: Span {
                 start: 247,
-                end: 802,
+                end: 756,
             },
         },
     ],
@@ -473,7 +448,7 @@ Module {
     expressions: [],
     span: Span {
         start: 247,
-        end: 802,
+        end: 756,
     },
     leading_comments: [
         Comment {

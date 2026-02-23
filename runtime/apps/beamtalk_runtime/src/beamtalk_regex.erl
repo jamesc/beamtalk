@@ -22,7 +22,7 @@
 -module(beamtalk_regex).
 
 -export(['from:'/1, 'from:options:'/2]).
--export([source/1, 'printString'/1, describe/1]).
+-export([source/1, 'printString'/1]).
 -export([has_method/1]).
 -export([
     matches_regex/2,
@@ -101,15 +101,10 @@ source(#{source := Src}) -> Src.
 'printString'(#{source := Src}) ->
     iolist_to_binary([<<"Regex(">>, Src, <<")">>]).
 
-%% @doc Same as printString for describe protocol.
--spec describe(map()) -> binary().
-describe(Self) -> 'printString'(Self).
-
 %% @doc Check if Regex responds to the given selector (instance methods).
 -spec has_method(atom()) -> boolean().
 has_method('source') -> true;
 has_method('printString') -> true;
-has_method('describe') -> true;
 has_method(_) -> false.
 
 %%% ============================================================================

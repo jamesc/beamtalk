@@ -81,10 +81,4 @@ Object subclass: Actor
   /// ```
   sealed isAlive -> Boolean => @primitive "actorIsAlive"
 
-  /// Human-readable description of the receiver.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// Actor describe   // => "an Actor"
-  /// ```
-  describe -> String => "an Actor"
+

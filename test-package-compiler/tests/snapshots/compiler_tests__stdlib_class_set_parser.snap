@@ -511,38 +511,13 @@ Module {
                         end: 905,
                     },
                 },
-                MethodDefinition {
-                    selector: Unary(
-                        "describe",
-                    ),
-                    parameters: [],
-                    body: [
-                        Literal(
-                            String(
-                                "a Set",
-                            ),
-                            Span {
-                                start: 937,
-                                end: 944,
-                            },
-                        ),
-                    ],
-                    return_type: None,
-                    is_sealed: false,
-                    kind: Primary,
-                    doc_comment: None,
-                    span: Span {
-                        start: 925,
-                        end: 944,
-                    },
-                },
             ],
             class_methods: [],
             class_variables: [],
             doc_comment: None,
             span: Span {
                 start: 221,
-                end: 944,
+                end: 905,
             },
         },
     ],
@@ -550,7 +525,7 @@ Module {
     expressions: [],
     span: Span {
         start: 221,
-        end: 944,
+        end: 905,
     },
     leading_comments: [
         Comment {

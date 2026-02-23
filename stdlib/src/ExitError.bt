@@ -13,10 +13,4 @@
 /// [Erlang erlang exit: #killed] on: ExitError do: [:e | e message]
 /// ```
 BEAMError subclass: ExitError
-  /// Human-readable description of the receiver.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// ExitError describe   // => "an ExitError"
-  /// ```
-  describe -> String => "an ExitError"
+

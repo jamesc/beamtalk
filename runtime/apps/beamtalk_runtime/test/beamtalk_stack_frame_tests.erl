@@ -139,12 +139,6 @@ dispatch_print_string_test() ->
     ?assert(is_binary(Result)),
     ?assertNotEqual(<<>>, Result).
 
-dispatch_describe_same_as_print_string_test() ->
-    Frame = make_test_frame(),
-    PS = beamtalk_stack_frame:dispatch('printString', [], Frame),
-    Desc = beamtalk_stack_frame:dispatch('describe', [], Frame),
-    ?assertEqual(PS, Desc).
-
 dispatch_unknown_selector_raises_test() ->
     Frame = make_test_frame(),
     try
@@ -170,7 +164,6 @@ has_method_module_name_test() -> ?assert(beamtalk_stack_frame:has_method('module
 has_method_line_test() -> ?assert(beamtalk_stack_frame:has_method('line')).
 has_method_file_test() -> ?assert(beamtalk_stack_frame:has_method('file')).
 has_method_print_string_test() -> ?assert(beamtalk_stack_frame:has_method('printString')).
-has_method_describe_test() -> ?assert(beamtalk_stack_frame:has_method('describe')).
 has_method_unknown_test() -> ?assertNot(beamtalk_stack_frame:has_method('nonExistent')).
 
 %%% ===================================================================

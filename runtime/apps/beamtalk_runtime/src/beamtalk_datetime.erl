@@ -30,7 +30,7 @@
 
 %% Instance methods
 -export([year/1, month/1, day/1, hour/1, minute/1, second/1]).
--export(['asTimestamp'/1, 'asString'/1, 'printString'/1, describe/1]).
+-export(['asTimestamp'/1, 'asString'/1, 'printString'/1]).
 -export(['addSeconds:'/2, 'addDays:'/2, 'diffSeconds:'/2]).
 -export(['<'/2, '>'/2, '=<'/2, '>='/2, '=:='/2, '/='/2]).
 
@@ -175,10 +175,6 @@ second(#{second := V}) -> V.
 'printString'(Self) ->
     iolist_to_binary([<<"a DateTime(">>, 'asString'(Self), <<")">>]).
 
-%% @doc Describe protocol — returns ISO 8601 string.
--spec describe(map()) -> binary().
-describe(Self) -> 'asString'(Self).
-
 %%% ============================================================================
 %%% Instance Methods — Arithmetic
 %%% ============================================================================
@@ -259,7 +255,6 @@ has_method('second') -> true;
 has_method('asTimestamp') -> true;
 has_method('asString') -> true;
 has_method('printString') -> true;
-has_method('describe') -> true;
 has_method('addSeconds:') -> true;
 has_method('addDays:') -> true;
 has_method('diffSeconds:') -> true;

@@ -68,7 +68,4 @@ Token { kind: Identifier("block"), span: Span { start: 880, end: 885 }, leading_
 Token { kind: FatArrow, span: Span { start: 886, end: 888 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: AtPrimitive, span: Span { start: 889, end: 899 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: String("do:"), span: Span { start: 900, end: 905 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("describe"), span: Span { start: 925, end: 933 }, leading_trivia: [Whitespace("\n\n  "), LineComment("// Reflection"), Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: FatArrow, span: Span { start: 934, end: 936 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: String("a Set"), span: Span { start: 937, end: 944 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Eof, span: Span { start: 945, end: 945 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 907, end: 907 }, leading_trivia: [Whitespace("\n\n")], trailing_trivia: [] }

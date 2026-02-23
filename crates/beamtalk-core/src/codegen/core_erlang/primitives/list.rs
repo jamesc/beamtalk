@@ -251,10 +251,6 @@ fn generate_list_misc_bif(selector: &str, params: &[String]) -> Option<Document<
                 ")",
             ])
         }
-        "describe" => {
-            let s = core_erlang_binary_string("a List");
-            Some(s)
-        }
         "printString" => Some(Document::Str(
             "call 'beamtalk_primitive':'print_string'(Self)",
         )),

@@ -4,4 +4,3 @@
 // Custom error class for testing user-defined exception subclasses (BT-480)
 
 Error subclass: MyCustomError
-  describe => "a custom error"

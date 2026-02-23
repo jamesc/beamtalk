@@ -218,14 +218,6 @@ sealed Number subclass: Float
   /// ```
   printString -> String => @primitive "printString"
 
-  /// Human-readable description of the receiver.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// 3.14 describe    // => "3.14"
-  /// ```
-  describe -> String => self asString
-
   // === Trigonometric methods ===
 
   /// Sine of the receiver (in radians).

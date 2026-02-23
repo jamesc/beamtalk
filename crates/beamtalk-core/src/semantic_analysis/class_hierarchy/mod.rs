@@ -779,17 +779,17 @@ mod tests {
 
     #[test]
     fn method_info_can_override_non_sealed() {
-        let child = builtin_method("describe", 0, "Counter");
-        let ancestor = builtin_method("describe", 0, "Object");
+        let child = builtin_method("printString", 0, "Counter");
+        let ancestor = builtin_method("printString", 0, "Object");
         assert!(child.can_override(&ancestor));
     }
 
     #[test]
     fn method_info_cannot_override_sealed() {
-        let child = builtin_method("describe", 0, "Counter");
+        let child = builtin_method("printString", 0, "Counter");
         let ancestor = MethodInfo {
             is_sealed: true,
-            ..builtin_method("describe", 0, "Actor")
+            ..builtin_method("printString", 0, "Actor")
         };
         assert!(!child.can_override(&ancestor));
     }
@@ -799,7 +799,7 @@ mod tests {
         let child = builtin_method("increment", 0, "Counter");
         let sealed_ancestor = MethodInfo {
             is_sealed: true,
-            ..builtin_method("describe", 0, "Actor")
+            ..builtin_method("printString", 0, "Actor")
         };
         // Different selectors → not an override (regardless of sealed status)
         assert!(!child.can_override(&sealed_ancestor));
@@ -920,7 +920,6 @@ mod tests {
 
         // Actor's own methods
         assert!(selectors.contains(&"spawn"));
-        assert!(selectors.contains(&"describe"));
 
         // Inherited from Object
         assert!(selectors.contains(&"isNil"));
@@ -936,14 +935,14 @@ mod tests {
         let h = ClassHierarchy::with_builtins();
         let methods = h.all_methods("Actor");
 
-        // Actor defines 'describe', Object also defines 'describe'
-        // Only Actor's version should appear
-        let describe_methods: Vec<&MethodInfo> = methods
+        // Object defines 'printString', Actor inherits it
+        // Only the most-specific (Object's) version should appear once
+        let print_methods: Vec<&MethodInfo> = methods
             .iter()
-            .filter(|m| m.selector == "describe")
+            .filter(|m| m.selector == "printString")
             .collect();
-        assert_eq!(describe_methods.len(), 1);
-        assert_eq!(describe_methods[0].defined_in.as_str(), "Actor");
+        assert_eq!(print_methods.len(), 1);
+        assert_eq!(print_methods[0].defined_in.as_str(), "Object");
     }
 
     #[test]
@@ -1272,9 +1271,9 @@ mod tests {
 
     #[test]
     fn sealed_method_override_rejected() {
-        // Parent defines sealed method "describe", child tries to override it
-        let parent = make_class_with_sealed_method("Parent", "Actor", "describe", true);
-        let child = make_class_with_sealed_method("Child", "Parent", "describe", false);
+        // Parent defines sealed method "doCustomWork", child tries to override it
+        let parent = make_class_with_sealed_method("Parent", "Actor", "doCustomWork", true);
+        let child = make_class_with_sealed_method("Child", "Parent", "doCustomWork", false);
 
         let module = Module {
             classes: vec![parent, child],
@@ -1287,7 +1286,7 @@ mod tests {
 
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("sealed method"));
-        assert!(diags[0].message.contains("`describe`"));
+        assert!(diags[0].message.contains("`doCustomWork`"));
         assert!(diags[0].message.contains("`Parent`"));
         // Child class is still added despite the error
         assert!(h.has_class("Child"));

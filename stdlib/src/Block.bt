@@ -105,10 +105,4 @@ sealed Object subclass: Block
   /// ```
   valueWithArguments: args: List => @primitive "valueWithArguments:"
 
-  /// Human-readable description of the receiver.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// [42] describe              // => "a Block"
-  /// ```
-  describe -> String => "a Block"
+

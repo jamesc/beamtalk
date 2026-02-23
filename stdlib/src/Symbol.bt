@@ -42,14 +42,6 @@ sealed Object subclass: Symbol
   /// ```
   printString -> String => @primitive "printString"
 
-  /// Human-readable description of the receiver.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// #hello describe        // => "#hello"
-  /// ```
-  describe -> String => @primitive "printString"
-
   /// Test strict equality with another symbol.
   ///
   /// ## Examples

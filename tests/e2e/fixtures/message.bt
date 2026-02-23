@@ -10,4 +10,4 @@ Object subclass: Message
 
   getText => self.text
   getSender => self.sender
-  describe => self.sender ++ ": " ++ self.text
+  printString => self.sender ++ ": " ++ self.text

@@ -1677,10 +1677,10 @@ mod tests {
 
     #[test]
     fn test_inherited_method_no_warning() {
-        // 42 describe  ← Integer inherits describe from Object
+        // 42 printString  ← Integer inherits printString from Object
         let module = make_module(vec![msg_send(
             int_lit(42),
-            MessageSelector::Unary("describe".into()),
+            MessageSelector::Unary("printString".into()),
             vec![],
         )]);
         let hierarchy = ClassHierarchy::with_builtins();

@@ -89,14 +89,6 @@ sealed Integer subclass: Character
   /// ```
   printString -> String => @primitive "printString"
 
-  /// Human-readable description of the receiver.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// $A describe              // => "$A"
-  /// ```
-  describe -> String => self printString
-
   /// Return a hash value for the character.
   ///
   /// ## Examples

@@ -26,7 +26,6 @@
 %%% |---------------|------|------------------------------------------|
 %%% | `printString` | []   | Human-readable string representation     |
 %%% | `inspect`     | []   | Detailed inspection string               |
-%%% | `describe`    | []   | Description of the object                |
 %%%
 %%% ## Utility Methods
 %%%
@@ -105,10 +104,6 @@ dispatch(inspect, [], Self, State) ->
             Str = beamtalk_reflection:inspect_string(State),
             {reply, Str, State}
     end;
-dispatch(describe, [], Self, State) ->
-    DisplayName = class_display_name(Self, State),
-    Str = iolist_to_binary([<<"an instance of ">>, DisplayName]),
-    {reply, Str, State};
 %% --- Utility methods ---
 
 dispatch(yourself, [], Self, State) ->
@@ -171,7 +166,6 @@ has_method('perform:') -> true;
 has_method('perform:withArguments:') -> true;
 has_method('printString') -> true;
 has_method(inspect) -> true;
-has_method(describe) -> true;
 has_method(yourself) -> true;
 has_method(hash) -> true;
 has_method(isNil) -> true;

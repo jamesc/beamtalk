@@ -30,8 +30,7 @@ TestCase subclass: RandomTest
     self assert: ((Random new) class) equals: Random.
     // Random new printString
     (Random new) printString.
-    // Random new describe
-    (Random new) describe.
+    // => _
     // Instance next returns a Float
     rng := Random new.
     self assert: ((rng next) class) equals: Float.

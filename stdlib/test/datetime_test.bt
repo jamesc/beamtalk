@@ -69,9 +69,6 @@ TestCase subclass: DateTimeTest
   testConversionPrintstring =>
     (DateTime year: 2026 month: 2 day: 18) printString
 
-  testConversionDescribe =>
-    self assert: ((DateTime year: 2026 month: 2 day: 18) describe) equals: "2026-02-18T00:00:00Z"
-
   testArithmeticAddseconds =>
     // Add one hour
     (DateTime year: 2026 month: 1 day: 1) addSeconds: 3600.

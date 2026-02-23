@@ -33,5 +33,3 @@ sealed Object subclass: Set
   // Iteration
   do: block => @primitive "do:"
 
-  // Reflection
-  describe => "a Set"

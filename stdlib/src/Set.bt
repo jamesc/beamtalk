@@ -129,10 +129,4 @@ sealed Collection subclass: Set
   /// ```
   stream -> Stream => @primitive "stream"
 
-  /// Human-readable description of the receiver.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// Set new describe               // => "a Set"
-  /// ```
-  describe -> String => "a Set"
+

@@ -18,10 +18,4 @@
 /// [Erlang erlang exit: 1] on: BEAMError do: [:e | e message]
 /// ```
 Error subclass: BEAMError
-  /// Human-readable description of the receiver.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// BEAMError describe   // => "a BEAMError"
-  /// ```
-  describe -> String => "a BEAMError"
+

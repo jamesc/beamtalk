@@ -22,16 +22,12 @@ TestCase subclass: ClassObjectDispatchTest
     self deny: (Counter isNil).
     self assert: (Counter notNil)
 
-  testClassObjectDescribe =>
-    desc := Counter describe.
-    // Default Object.describe returns "an Object" — class-specific output
-    // requires making describe dynamic (follow-up to BT-753).
-    self deny: (desc isEmpty)
+  testClassObjectPrintString =>
+    ps := Counter printString.
+    self deny: (ps isEmpty)
 
   testClassObjectInspect =>
     i := Counter inspect.
-    // Default Object.inspect delegates to describe — class-specific output
-    // requires making inspect dynamic (follow-up to BT-753).
     self deny: (i isEmpty)
 
   testClassObjectPerform =>

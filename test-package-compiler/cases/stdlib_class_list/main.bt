@@ -59,5 +59,3 @@ sealed Object subclass: List
   intersperse: separator => @primitive "intersperse:"
   add: item => @primitive "add:"
 
-  // Reflection
-  describe => "a List"

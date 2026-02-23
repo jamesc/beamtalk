@@ -183,7 +183,4 @@ Token { kind: Identifier("item"), span: Span { start: 1832, end: 1836 }, leading
 Token { kind: FatArrow, span: Span { start: 1837, end: 1839 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: AtPrimitive, span: Span { start: 1840, end: 1850 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: String("add:"), span: Span { start: 1851, end: 1857 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("describe"), span: Span { start: 1877, end: 1885 }, leading_trivia: [Whitespace("\n\n  "), LineComment("// Reflection"), Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: FatArrow, span: Span { start: 1886, end: 1888 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: String("a List"), span: Span { start: 1889, end: 1897 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Eof, span: Span { start: 1898, end: 1898 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 1859, end: 1859 }, leading_trivia: [Whitespace("\n\n")], trailing_trivia: [] }

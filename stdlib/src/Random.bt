@@ -109,5 +109,4 @@ sealed Object subclass: Random
   /// ```
   printString -> String => @primitive "printString"
 
-  /// Human-readable description of the receiver.
-  describe -> String => "a Random"
+
