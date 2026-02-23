@@ -159,9 +159,8 @@ impl CoreErlangGenerator {
 
     /// Generates the `safe_dispatch/3` function with error isolation.
     ///
-    /// Per BT-29 design doc (following LFE Flavors pattern), errors in method
-    /// dispatch are caught and returned to the caller rather than crashing
-    /// the actor instance.
+    /// Per BT-29 design doc, errors in method dispatch are caught and returned
+    /// to the caller rather than crashing the actor instance.
     ///
     /// Note: Core Erlang try expression uses simple variable patterns (not case-style).
     /// Stacktrace is captured but not returned to caller to prevent information leakage.
