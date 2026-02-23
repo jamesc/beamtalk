@@ -143,7 +143,7 @@ For now, `fieldAt:put:` remains unrestricted (matching current `instVarAt:put:` 
 
 ### REPL session
 
-```
+```beamtalk
 > c := Counter spawn
 => a Counter
 > c fieldNames await
@@ -210,7 +210,7 @@ No runtime behavior change — only method names in the dispatch tables change. 
 - **Newcomer**: "I can Google `instVarAt` and find decades of Smalltalk documentation explaining what it does."
 
 ### For `slot` (Self/Dylan/CLOS tradition)
-- **Language designer**: "Slot is the correct term in dynamic OO language theory. Self invented it, Dylan adopted it, CLOS uses it. It carries exactly the right connotations — a named, dynamic container."
+- **Language designer**: "Slot is the correct term in dynamic OO language-theory. Self invented it, Dylan adopted it, CLOS uses it. It carries exactly the right connotations — a named, dynamic container."
 - **Smalltalk purist**: "Self and Newspeak are respected successors to Smalltalk. Using their terminology is a principled evolution, not a departure."
 
 ### For `state` (BEAM-native)
