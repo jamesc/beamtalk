@@ -129,16 +129,7 @@ freshActors size > 0
 firstActor := freshActors first
 // => #Actor<Counter,_>
 
-firstPid := firstActor instVarAt: #pid
-// => #Pid<0._._>
-
-firstPidStr := firstPid asString
-// => "#Pid<0._._>"
-
-firstPidStrShort := (firstPidStr startsWith: "#Pid") ifTrue: [ firstPidStr drop: 4 ] ifFalse: [ firstPidStr ]
-// => "<0._._>"
-
-(Workspace actorAt: firstPidStrShort) await respondsTo: #getValue
+firstActor respondsTo: #getValue
 // => true
 
 // ===========================================================================

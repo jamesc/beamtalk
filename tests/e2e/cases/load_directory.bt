@@ -57,7 +57,7 @@ p getX
 
 // :reload now reloads the single file (not the directory)
 :reload
-// => Reloaded Point
+// => Reloaded: Point
 
 // ===========================================================================
 // :l <directory> — SHORTHAND ALSO WORKS
