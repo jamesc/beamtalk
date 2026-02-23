@@ -33,3 +33,19 @@ x := 100
 // Use updated value
 x + y
 // => 110
+
+// ===========================================================================
+// BT-800: LOOP MUTATIONS PERSIST ACROSS SEPARATE REPL INPUTS
+// ===========================================================================
+
+// Assign counter variable
+count := 0
+// => 0
+
+// Run loop as a standalone REPL input - mutations must accumulate and persist
+5 timesRepeat: [count := count + 1]
+// => _
+
+// Counter must reflect accumulated loop mutations
+count
+// => 5
