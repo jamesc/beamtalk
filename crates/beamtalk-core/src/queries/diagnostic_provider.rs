@@ -101,6 +101,9 @@ pub fn apply_expect_directives(module: &Module, diagnostics: &mut Vec<Diagnostic
             collect_directives_from_exprs(&method.body, &mut directives);
         }
     }
+    for standalone in &module.method_definitions {
+        collect_directives_from_exprs(&standalone.method.body, &mut directives);
+    }
 
     if directives.is_empty() {
         return;
@@ -168,9 +171,12 @@ fn collect_directives_from_exprs(
         if let Expression::ExpectDirective { category, span } = expr {
             if let Some(next) = exprs.get(i + 1) {
                 directives.push((*category, *span, next.span()));
+            } else {
+                // Trailing @expect with no following expression — treat as stale.
+                // Use the directive's own span as the target span so it will
+                // never match any real diagnostic and will always be reported stale.
+                directives.push((*category, *span, *span));
             }
-            // If there's no following expression, the directive is implicitly stale
-            // (handled by the "no matched diagnostic" path in apply_expect_directives).
         }
     }
 }

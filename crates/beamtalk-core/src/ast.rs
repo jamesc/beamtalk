@@ -656,7 +656,7 @@ pub enum ExpectCategory {
     Type,
     /// Suppress unused-variable warnings.
     Unused,
-    /// Suppress empty-method-body warnings.
+    /// Suppress empty-method-body warnings (`empty-method`; `emptyBody` accepted as alias).
     EmptyBody,
     /// Suppress any diagnostic on the following expression.
     All,
@@ -670,7 +670,7 @@ impl ExpectCategory {
             "dnu" => Some(Self::Dnu),
             "type" => Some(Self::Type),
             "unused" => Some(Self::Unused),
-            "emptyBody" => Some(Self::EmptyBody),
+            "empty-method" | "emptyBody" => Some(Self::EmptyBody),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -683,7 +683,7 @@ impl ExpectCategory {
             Self::Dnu => "dnu",
             Self::Type => "type",
             Self::Unused => "unused",
-            Self::EmptyBody => "emptyBody",
+            Self::EmptyBody => "empty-method",
             Self::All => "all",
         }
     }

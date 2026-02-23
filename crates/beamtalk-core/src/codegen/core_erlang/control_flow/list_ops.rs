@@ -562,10 +562,16 @@ impl CoreErlangGenerator {
             )));
         }
 
-        // Generate the body expression(s), threading state through assignments
+        // Generate the body expression(s), threading state through assignments.
+        // Filter out @expect directives — they are compile-time only and generate no code.
+        let filtered_body: Vec<&Expression> = body
+            .body
+            .iter()
+            .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
+            .collect();
         let mut has_mutations = false;
-        for (i, expr) in body.body.iter().enumerate() {
-            let is_last = i == body.body.len() - 1;
+        for (i, expr) in filtered_body.iter().enumerate() {
+            let is_last = i == filtered_body.len() - 1;
 
             if Self::is_field_assignment(expr) {
                 has_mutations = true;

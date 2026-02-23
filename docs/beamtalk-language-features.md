@@ -962,7 +962,7 @@ anything                    // any diagnostic suppressed
 | `dnu` | Does-not-understand hints |
 | `type` | Type mismatch warnings |
 | `unused` | Unused variable warnings |
-| `emptyBody` | Empty method body warnings |
+| `empty-method` | Empty method body warnings |
 | `all` | Any diagnostic on the following expression |
 
 **Stale directives:** If `@expect` does not suppress any diagnostic (because no matching diagnostic exists on the following expression), the compiler emits an error to prevent directives from silently becoming out of date.
