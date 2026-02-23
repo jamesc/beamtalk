@@ -60,7 +60,14 @@ TestCase subclass: DictionaryTest
     self assert: ((#{#a => 1} merge: #{#a => 99}) at: #a) equals: 99
 
   testKeysandvaluesdo =>
-    self assert: (#{#a => 1} keysAndValuesDo: [:k :v | nil]) equals: nil
+    // Returns nil
+    self assert: (#{#a => 1} keysAndValuesDo: [:k :v | nil]) equals: nil.
+    // Works for empty dictionary
+    self assert: (#{} keysAndValuesDo: [:k :v | nil]) equals: nil.
+    // Works for multi-entry dictionary
+    self assert: (#{#a => 1, #b => 2} keysAndValuesDo: [:k :v | nil]) equals: nil.
+    // Block is called with correct key and value types (no errors)
+    self assert: (#{#x => 10} keysAndValuesDo: [:k :v | k class]) equals: nil
 
   testNestedDictionaries =>
     // Nested dictionaries display correctly

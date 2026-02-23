@@ -113,7 +113,8 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1} keysAndValuesDo: [:k :v | Transcript show: k]
   /// ```
-  keysAndValuesDo: block: Block -> Nil => @primitive "keysAndValuesDo:"
+  keysAndValuesDo: block: Block -> Nil =>
+    self stream do: [:assoc | block value: assoc key value: assoc value]
 
   /// Return a string representation using Beamtalk syntax.
   ///

@@ -34,7 +34,7 @@ sealed Object subclass: Association
   /// ```beamtalk
   /// (#name -> "James") asString // => "#name -> James"
   /// ```
-  asString -> String => @primitive "asString"
+  asString -> String => "{self key} -> {self value}"
 
   /// Return a developer-readable string representation.
   ///
