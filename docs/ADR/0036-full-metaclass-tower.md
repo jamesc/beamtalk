@@ -601,6 +601,12 @@ self assert: (Metaclass class class == Metaclass class) equals: true.
 
 **Erlang code** using `class_of_object/1` return value: Check for `#beamtalk_object{class='Metaclass'}` pattern instead of the atom `'Metaclass'`.
 
+## Implementation Tracking
+
+**Epic:** BT-801
+**Issues:** BT-802 (Phase 1: Bootstrap stub, runtime wiring + primitives), BT-803 (Phase 2: Metaclass.bt stdlib class + tests)
+**Status:** Planned
+
 ## References
 
 - Related issues: BT-792 (this ADR), BT-234 (Done: original metaclass design research), BT-162 (Epic: Self-as-Object and Reflection API)

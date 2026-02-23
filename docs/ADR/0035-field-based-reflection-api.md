@@ -290,6 +290,17 @@ This is a breaking change to the reflection API and declaration syntax. Since Be
 
 All `classVar:` declarations must be changed to `classState:`. This is a simple find-and-replace across `.bt` files.
 
+## Implementation Tracking
+
+**Epic:** BT-804
+**Issues:**
+- BT-805 — Rename instance-side reflection API (runtime + codegen + stdlib) — Phase 1
+- BT-806 — Parser: rename `classVar:` to `classState:` — Phase 1
+- BT-807 — Rename class-side reflection API across runtime, codegen, stdlib — Phase 2 (blocked by BT-806)
+- BT-808 — Update tests and docs — Phase 3 (blocked by BT-805, BT-807)
+
+**Status:** Planned
+
 ## References
 - Related issues: BT-796 (remove Flavors before/after infrastructure)
 - Related ADRs: ADR 0005 (BEAM Object Model), ADR 0006 (Unified Method Dispatch), ADR 0032 (Early Class Protocol)

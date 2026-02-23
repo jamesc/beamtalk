@@ -4,7 +4,7 @@
 // Test class method codegen (class-side methods, class variables)
 
 Actor subclass: ClassVarCounter
-  classVar: instanceCount = 0
+  classState: instanceCount = 0
   state: count = 0
 
   class create =>

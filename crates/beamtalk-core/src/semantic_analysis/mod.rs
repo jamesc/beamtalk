@@ -1872,11 +1872,11 @@ mod tests {
 
     #[test]
     fn test_inst_var_at_with_integer_emits_error() {
-        // obj instVarAt: 42 — should error
+        // obj fieldAt: 42 — should error
         let expr = Expression::MessageSend {
             receiver: Box::new(Expression::Identifier(Identifier::new("obj", test_span()))),
             selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
-                "instVarAt:",
+                "fieldAt:",
                 test_span(),
             )]),
             arguments: vec![Expression::Literal(Literal::Integer(42), Span::new(15, 17))],
@@ -1901,7 +1901,7 @@ mod tests {
         assert!(
             symbol_errors[0]
                 .message
-                .contains("accesses an instance variable by name")
+                .contains("accesses a field by name")
         );
     }
 

@@ -1276,6 +1276,163 @@ fn test_generate_repl_multi_stmt_loop_does_not_corrupt_final_expr() {
 }
 
 // ========================================================================
+// BT-800: REPL Loop Mutation Accumulation Tests
+// ========================================================================
+
+#[test]
+fn test_repl_loop_mutations_accumulate_plain_key() {
+    // BT-800: In REPL mode, loop writes must use plain key so reads accumulate.
+    // Expression: 5 timesRepeat: [x := x + 1]
+    // Write path must use 'x' not '__local__x' so that each iteration reads the
+    // value written by the previous iteration from StateAcc.
+
+    let span = Span::new(0, 1);
+
+    let x_id = Expression::Identifier(Identifier::new("x", span));
+    let one = Expression::Literal(Literal::Integer(1), span);
+    let add = Expression::MessageSend {
+        receiver: Box::new(x_id.clone()),
+        selector: MessageSelector::Binary("+".into()),
+        arguments: vec![one],
+        span,
+    };
+    let assignment = Expression::Assignment {
+        target: Box::new(x_id),
+        value: Box::new(add),
+        span,
+    };
+    let body = Expression::Block(Block {
+        parameters: vec![],
+        body: vec![assignment],
+        span,
+    });
+    let five = Expression::Literal(Literal::Integer(5), span);
+    let times_repeat = Expression::MessageSend {
+        receiver: Box::new(five),
+        selector: MessageSelector::Keyword(vec![KeywordPart {
+            keyword: "timesRepeat:".into(),
+            span,
+        }]),
+        arguments: vec![body],
+        span,
+    };
+
+    let code = generate_repl_expression(&times_repeat, "bt800_test").expect("codegen should work");
+
+    eprintln!("BT-800: Generated code for 5 timesRepeat: [x := x + 1]:");
+    eprintln!("{code}");
+
+    // BT-800: REPL mode must use plain key 'x' (not '__local__x') so reads match writes.
+    assert!(
+        code.contains("maps':'put'('x'"),
+        "BT-800: REPL write must use plain key 'x', not '__local__x'. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("__local__x"),
+        "BT-800: REPL mode must never use __local__ prefix for x. Got:\n{code}"
+    );
+
+    // BT-800: Reads inside loop body must use StateAcc (not State) so they get
+    // the accumulated value from the previous iteration.
+    assert!(
+        code.contains("maps':'get'('x', StateAcc)"),
+        "BT-800: Read inside loop must use StateAcc to get accumulated value. Got:\n{code}"
+    );
+
+    // BT-800: Loop must thread state correctly (arity-2 letrec, returns {nil, StateAcc}).
+    assert!(
+        code.contains("letrec 'repeat'/2"),
+        "BT-800: Must use arity-2 repeat for state threading. Got:\n{code}"
+    );
+    assert!(
+        code.contains("{'nil', StateAcc}"),
+        "BT-800: Loop must return {{nil, StateAcc}} so caller can extract updated state. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_repl_multi_stmt_loop_accumulates_from_zero() {
+    // BT-800: x := 0. 5 timesRepeat: [x := x + 1]. x
+    // Acceptance criteria: starting from zero, result must be 5.
+    // Validates that the multi-statement path threads state correctly through the loop.
+
+    let span = Span::new(0, 1);
+
+    // x := 0
+    let x_id = Expression::Identifier(Identifier::new("x", span));
+    let zero = Expression::Literal(Literal::Integer(0), span);
+    let assign_x = Expression::Assignment {
+        target: Box::new(x_id),
+        value: Box::new(zero),
+        span,
+    };
+
+    // 5 timesRepeat: [x := x + 1]
+    let x_id2 = Expression::Identifier(Identifier::new("x", span));
+    let one = Expression::Literal(Literal::Integer(1), span);
+    let add = Expression::MessageSend {
+        receiver: Box::new(x_id2.clone()),
+        selector: MessageSelector::Binary("+".into()),
+        arguments: vec![one],
+        span,
+    };
+    let loop_assign = Expression::Assignment {
+        target: Box::new(x_id2),
+        value: Box::new(add),
+        span,
+    };
+    let loop_body = Expression::Block(Block {
+        parameters: vec![],
+        body: vec![loop_assign],
+        span,
+    });
+    let five = Expression::Literal(Literal::Integer(5), span);
+    let times_repeat = Expression::MessageSend {
+        receiver: Box::new(five),
+        selector: MessageSelector::Keyword(vec![KeywordPart {
+            keyword: "timesRepeat:".into(),
+            span,
+        }]),
+        arguments: vec![loop_body],
+        span,
+    };
+
+    // x (final read)
+    let x_read = Expression::Identifier(Identifier::new("x", span));
+
+    let expressions = vec![assign_x, times_repeat, x_read];
+    let code =
+        generate_repl_expressions(&expressions, "bt800_zero_test").expect("codegen should work");
+
+    eprintln!("BT-800: Generated code for x := 0. 5 timesRepeat: [x := x + 1]. x:");
+    eprintln!("{code}");
+
+    // BT-800: Loop write must use plain key (no __local__ prefix in REPL mode)
+    assert!(
+        !code.contains("__local__"),
+        "BT-800: REPL mode must never use __local__ prefix. Got:\n{code}"
+    );
+
+    // BT-800: The loop must be applied with the state containing x=0
+    assert!(
+        code.contains("apply 'repeat'/2 (1, State1)"),
+        "BT-800: Loop must start with State1 (after x := 0 binding). Got:\n{code}"
+    );
+
+    // BT-800: The intermediate loop result must be unpacked to thread state forward
+    assert!(
+        code.contains("call 'erlang':'element'(2,"),
+        "BT-800: Must extract updated StateAcc from loop result. Got:\n{code}"
+    );
+
+    // BT-800: Final read of x must use the state produced by the loop (State2+)
+    assert!(
+        code.contains("maps':'get'('x', State2)"),
+        "BT-800: Final x read must use loop-updated state (State2). Got:\n{code}"
+    );
+}
+
+// ========================================================================
 // Block Evaluation Message Tests (BT-32)
 // ========================================================================
 

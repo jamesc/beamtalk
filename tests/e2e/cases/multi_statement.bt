@@ -89,6 +89,13 @@ x := 1. 5 timesRepeat: [x := x + 1]. x
 :clear
 // => ok
 
+// BT-800: starting from zero, mutations must accumulate (not repeat initial read)
+x := 0. 5 timesRepeat: [x := x + 1]. x
+// => 5
+
+:clear
+// => ok
+
 // whileTrue: in intermediate position threads state to final read
 x := 0. [x < 5] whileTrue: [x := x + 1]. x
 // => 5
