@@ -55,6 +55,11 @@ TestCase subclass: CollectionsTest
     self assert: (#(1, 2, 3) allSatisfy: [:x | x > 0]).
     self deny: (#(1, 2, 3) allSatisfy: [:x | x > 1])
 
+  testAddFirst =>
+    // --- addFirst: (O(1) cons prepend) ---
+    self assert: (#(2, 3) addFirst: 1) equals: #(1, 2, 3).
+    self assert: (#() addFirst: "x") equals: #("x")
+
   testTier3AdvancedMethods =>
     // --- unique ---
     self assert: (#(3, 1, 2, 1, 3) unique) equals: #(1, 2, 3).

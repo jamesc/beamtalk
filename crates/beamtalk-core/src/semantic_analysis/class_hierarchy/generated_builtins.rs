@@ -804,6 +804,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "takeWhile:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![Some("Block".into())] },
                 MethodInfo { selector: "dropWhile:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![Some("Block".into())] },
                 MethodInfo { selector: "intersperse:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![None] },
+                MethodInfo { selector: "addFirst:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![None] },
                 MethodInfo { selector: "add:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![None] },
                 MethodInfo { selector: "stream".into(), arity: 0, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, return_type: Some("Stream".into()), param_types: vec![] },
                 MethodInfo { selector: "atRandom".into(), arity: 0, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, return_type: None, param_types: vec![] },
