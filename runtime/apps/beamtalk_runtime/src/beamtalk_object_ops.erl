@@ -16,9 +16,9 @@
 %%% |-------------------|---------------|---------------------------------------|
 %%% | `class`           | []            | Returns the object's class name       |
 %%% | `respondsTo:`     | [Selector]    | Checks if object understands message  |
-%%% | `fieldNames`      | []            | Returns list of instance variable names|
-%%% | `fieldAt:`        | [Name]        | Returns instance variable value       |
-%%% | `fieldAt:put:`    | [Name, Value] | Sets instance variable value          |
+%%% | `fieldNames`      | []            | Returns list of field names           |
+%%% | `fieldAt:`        | [Name]        | Returns field value                   |
+%%% | `fieldAt:put:`    | [Name, Value] | Sets field value                      |
 %%%
 %%% ## Display Methods
 %%%

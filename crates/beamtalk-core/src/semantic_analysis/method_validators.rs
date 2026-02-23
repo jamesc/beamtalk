@@ -222,8 +222,8 @@ impl MethodValidator for ReflectionMethodValidator {
 fn method_description(selector: &str) -> &'static str {
     match selector {
         "respondsTo:" => "checks if an object understands a message",
-        "fieldAt:" => "accesses an instance variable by name",
-        "fieldAt:put:" => "sets an instance variable by name",
+        "fieldAt:" => "accesses a field by name",
+        "fieldAt:put:" => "sets a field by name",
         "classNamed:" => "looks up a class by name in the system dictionary",
         _ => "requires a symbol argument",
     }
@@ -805,18 +805,12 @@ mod tests {
 
     #[test]
     fn test_method_description_inst_var_at() {
-        assert_eq!(
-            method_description("fieldAt:"),
-            "accesses an instance variable by name"
-        );
+        assert_eq!(method_description("fieldAt:"), "accesses a field by name");
     }
 
     #[test]
     fn test_method_description_inst_var_at_put() {
-        assert_eq!(
-            method_description("fieldAt:put:"),
-            "sets an instance variable by name"
-        );
+        assert_eq!(method_description("fieldAt:put:"), "sets a field by name");
     }
 
     #[test]

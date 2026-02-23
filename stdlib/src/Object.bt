@@ -133,7 +133,7 @@ ProtoObject subclass: Object
   /// ```
   sealed respondsTo: selector: Symbol -> Boolean => @intrinsic respondsTo
 
-  /// Return the names of instance variables.
+  /// Return the names of fields.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -141,7 +141,7 @@ ProtoObject subclass: Object
   /// ```
   sealed fieldNames -> List => @intrinsic fieldNames
 
-  /// Return the value of the named instance variable.
+  /// Return the value of the named field.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -149,7 +149,7 @@ ProtoObject subclass: Object
   /// ```
   sealed fieldAt: name: Symbol => @intrinsic fieldAt
 
-  /// Set the value of the named instance variable (returns new state).
+  /// Set the value of the named field (returns new state).
   ///
   /// ## Examples
   /// ```beamtalk

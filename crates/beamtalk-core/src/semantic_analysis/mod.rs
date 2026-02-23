@@ -1899,7 +1899,7 @@ mod tests {
         assert!(
             symbol_errors[0]
                 .message
-                .contains("accesses an instance variable by name")
+                .contains("accesses a field by name")
         );
     }
 

@@ -776,9 +776,8 @@ impl CoreErlangGenerator {
         };
 
         // fieldAt: error
-        let iva_hint = Self::core_erlang_binary(&format!(
-            "{class_name}s are immutable and have no instance variables."
-        ));
+        let iva_hint =
+            Self::core_erlang_binary(&format!("{class_name}s are immutable and have no fields."));
 
         // fieldAt:put: error
         let immutable_hint = Self::core_erlang_binary(&format!(

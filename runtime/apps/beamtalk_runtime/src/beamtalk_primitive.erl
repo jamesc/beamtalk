@@ -397,7 +397,7 @@ value_type_send(Self, Class, Selector, Args) ->
 is_ivar_method('fieldAt:put:') ->
     {true, <<"Value types are immutable. Use a method that returns a new instance instead.">>};
 is_ivar_method('fieldAt:') ->
-    {true, <<"Value types have no instance variables">>};
+    {true, <<"Value types have no fields">>};
 is_ivar_method(_) ->
     false.
 
