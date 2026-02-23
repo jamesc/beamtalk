@@ -397,6 +397,7 @@ impl CoreErlangGenerator {
     ///
     /// Value type methods are pure functions that take Self as first parameter
     /// and return a new instance (immutable semantics).
+    #[allow(clippy::too_many_lines)]
     fn generate_value_type_method(
         &mut self,
         method: &MethodDefinition,
@@ -447,6 +448,30 @@ impl CoreErlangGenerator {
             .iter()
             .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
             .collect();
+
+        // If filtering leaves no executable expressions, emit a safe fallback to
+        // avoid generating an empty Core Erlang function body which would be
+        // syntactically invalid (e.g., `fun (...) ->\n\n`).
+        if body.is_empty() {
+            self.pop_scope();
+            self.current_nlr_token = None;
+            if let Some(token_var) = nlr_token_var {
+                let catch_vars = self.wrap_value_type_body_with_nlr_catch(&token_var);
+                let body_doc = docvec!["    nil\n"];
+                return Ok(docvec![
+                    format!("'{}'/{} = fun ({}) ->\n", mangled, arity, params.join(", ")),
+                    catch_vars.format_try_prefix(),
+                    body_doc,
+                    catch_vars.format_catch_suffix(),
+                ]);
+            }
+            return Ok(docvec![
+                format!("'{}'/{} = fun ({}) ->\n", mangled, arity, params.join(", ")),
+                docvec!["    nil\n"],
+                "\n",
+            ]);
+        }
+
         for (i, expr) in body.iter().enumerate() {
             let is_last = i == body.len() - 1;
 
