@@ -52,7 +52,7 @@ Object subclass: File
   /// ## Examples
   /// ```beamtalk
   /// (File lines: "data.csv") take: 5
-  /// (File lines: "log.txt") select: [:l | l includes: "ERROR"]
+  /// (File lines: "log.txt") select: [:l | l includesSubstring: "ERROR"]
   /// ```
   class sealed lines: path: String -> Stream => @primitive "lines:"
 

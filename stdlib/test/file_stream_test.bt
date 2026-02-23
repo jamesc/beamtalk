@@ -23,7 +23,7 @@ TestCase subclass: FileStreamTest
 
   testStreamPipelineComposition =>
     // Select lines matching a pattern
-    self assert: (((File lines: "test/fixtures/stream_test.txt") select: [:l | l includes: "two"]) asList) equals: #("line two").
+    self assert: (((File lines: "test/fixtures/stream_test.txt") select: [:l | l includesSubstring:"two"]) asList) equals: #("line two").
     // Collect (transform) lines
     self assert: (((File lines: "test/fixtures/stream_test.txt") collect: [:l | l size]) asList) equals: #(8, 8, 10).
     // Drop first line
@@ -31,15 +31,15 @@ TestCase subclass: FileStreamTest
     // Inject (fold) - count lines
     self assert: ((File lines: "test/fixtures/stream_test.txt") inject: 0 into: [:count :line | count + 1]) equals: 3.
     // Detect first matching line
-    self assert: ((File lines: "test/fixtures/stream_test.txt") detect: [:l | l includes: "three"]) equals: "line three".
+    self assert: ((File lines: "test/fixtures/stream_test.txt") detect: [:l | l includesSubstring:"three"]) equals: "line three".
     // Detect returns nil when no match
-    self assert: ((File lines: "test/fixtures/stream_test.txt") detect: [:l | l includes: "four"]) equals: nil.
+    self assert: ((File lines: "test/fixtures/stream_test.txt") detect: [:l | l includesSubstring:"four"]) equals: nil.
     // anySatisfy
-    self assert: ((File lines: "test/fixtures/stream_test.txt") anySatisfy: [:l | l includes: "one"]).
-    self deny: ((File lines: "test/fixtures/stream_test.txt") anySatisfy: [:l | l includes: "four"]).
+    self assert: ((File lines: "test/fixtures/stream_test.txt") anySatisfy: [:l | l includesSubstring:"one"]).
+    self deny: ((File lines: "test/fixtures/stream_test.txt") anySatisfy: [:l | l includesSubstring:"four"]).
     // allSatisfy
-    self assert: ((File lines: "test/fixtures/stream_test.txt") allSatisfy: [:l | l includes: "line"]).
-    self deny: ((File lines: "test/fixtures/stream_test.txt") allSatisfy: [:l | l includes: "one"])
+    self assert: ((File lines: "test/fixtures/stream_test.txt") allSatisfy: [:l | l includesSubstring:"line"]).
+    self deny: ((File lines: "test/fixtures/stream_test.txt") allSatisfy: [:l | l includesSubstring:"one"])
 
   testFileOpenDoBlockScopedHandle =>
     // Read lines through handle
@@ -47,7 +47,7 @@ TestCase subclass: FileStreamTest
     // Take lines through handle
     self assert: (File open: "test/fixtures/stream_test.txt" do: [:handle | handle lines take: 1]) equals: #("line one").
     // Pipeline through handle
-    self assert: (File open: "test/fixtures/stream_test.txt" do: [:handle | (handle lines select: [:l | l includes: "two"]) asList]) equals: #("line two").
+    self assert: (File open: "test/fixtures/stream_test.txt" do: [:handle | (handle lines select: [:l | l includesSubstring:"two"]) asList]) equals: #("line two").
     // Block returns result
     self assert: (File open: "test/fixtures/stream_test.txt" do: [:handle | handle lines inject: 0 into: [:count :line | count + 1]]) equals: 3.
     // Empty file through handle
@@ -72,19 +72,19 @@ TestCase subclass: FileStreamTest
     // take: on file stream closes handle via finalizer
     self assert: ((File lines: "test/fixtures/stream_test.txt") take: 1) equals: #("line one").
     // detect: on file stream closes handle via finalizer
-    self assert: ((File lines: "test/fixtures/stream_test.txt") detect: [:l | l includes: "two"]) equals: "line two".
+    self assert: ((File lines: "test/fixtures/stream_test.txt") detect: [:l | l includesSubstring:"two"]) equals: "line two".
     // anySatisfy: on file stream closes handle via finalizer
-    self assert: ((File lines: "test/fixtures/stream_test.txt") anySatisfy: [:l | l includes: "one"]).
+    self assert: ((File lines: "test/fixtures/stream_test.txt") anySatisfy: [:l | l includesSubstring:"one"]).
     // allSatisfy: on file stream with early exit closes handle via finalizer
     self deny: ((File lines: "test/fixtures/stream_large.txt") allSatisfy: [:l | l =:= "a"]).
     // Pipeline with finalizer propagation: select + take
-    self assert: (((File lines: "test/fixtures/stream_test.txt") select: [:l | l includes: "line"]) take: 2) equals: #("line one", "line two").
+    self assert: (((File lines: "test/fixtures/stream_test.txt") select: [:l | l includesSubstring:"line"]) take: 2) equals: #("line one", "line two").
     // Pipeline with finalizer propagation: collect + take
     self assert: (((File lines: "test/fixtures/stream_large.txt") collect: [:l | l size]) take: 3) equals: #(1, 1, 1).
     // Pipeline with finalizer propagation: drop + take
     self assert: (((File lines: "test/fixtures/stream_large.txt") drop: 2) take: 2) equals: #("c", "d").
     // Pipeline with finalizer propagation: reject + detect
-    self assert: (((File lines: "test/fixtures/stream_test.txt") reject: [:l | l includes: "one"]) detect: [:l | l includes: "two"]) equals: "line two"
+    self assert: (((File lines: "test/fixtures/stream_test.txt") reject: [:l | l includesSubstring:"one"]) detect: [:l | l includesSubstring:"two"]) equals: "line two"
 
   testErrorPaths =>
     // File not found

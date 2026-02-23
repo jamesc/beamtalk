@@ -131,7 +131,7 @@ stringClass := (Beamtalk classNamed: #String) await
 // => String
 
 stringClass superclass
-// => Object
+// => Collection
 
 // ---------------------------------------------------------------------------
 // Counter superclass is Actor
