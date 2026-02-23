@@ -479,3 +479,18 @@ Testing strategy:
 - Pharo Collection hierarchy: `Collection>>collect:` defined in terms of `do:` + `species`
 - Gleam stdlib: `@external` only for `length`/`reverse`/`flatten`; all HOFs are pure Gleam
 - Ruby YJIT: C→Ruby migration for `Array#each`, `Array#map` in Ruby 3.4
+
+## Implementation Tracking
+
+**Epic:** [BT-812](https://linear.app/beamtalk/issue/BT-812)
+**Status:** Planned
+
+| Issue | Phase | Title | Size | Deps |
+|-------|-------|-------|------|------|
+| [BT-813](https://linear.app/beamtalk/issue/BT-813) | 1 | Add Future.bt and FileHandle.bt as @primitive stubs | S | — |
+| [BT-814](https://linear.app/beamtalk/issue/BT-814) | 2a | Add addFirst: O(1) list cons primitive to List.bt | S | — |
+| [BT-815](https://linear.app/beamtalk/issue/BT-815) | 2b | Self-host abstract Collection protocol in pure Beamtalk | M | BT-814 |
+| [BT-816](https://linear.app/beamtalk/issue/BT-816) | 3 | Self-host List algorithmic operations (indexOf:, eachWithIndex:) | S | BT-815 |
+| [BT-817](https://linear.app/beamtalk/issue/BT-817) | 3 | Self-host Tuple unwrap operations (unwrap, unwrapOr:, unwrapOrElse:) | S | BT-815 |
+| [BT-818](https://linear.app/beamtalk/issue/BT-818) | 3 | Self-host Dictionary keysAndValuesDo: and Association formatting | S | BT-815 |
+| [BT-819](https://linear.app/beamtalk/issue/BT-819) | 4 | Self-host TestCase assertions (assert:, deny:, assert:equals:) | S | — |

@@ -143,21 +143,21 @@ abstract Object subclass: Behaviour
 
   // --- Instance variable queries ---
 
-  /// Return the names of instance variables declared in this class (not inherited).
+  /// Return the names of fields declared in this class (not inherited).
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Counter instanceVariableNames   // => [value]
+  /// Counter fieldNames   // => [value]
   /// ```
-  sealed instanceVariableNames => @primitive "classInstVarNames"
+  sealed fieldNames => @primitive "classFieldNames"
 
-  /// Return all instance variable names including inherited, in slot order.
+  /// Return all field names including inherited, in slot order.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Counter allInstanceVariableNames   // => [value]
+  /// Counter allFieldNames   // => [value]
   /// ```
-  sealed allInstanceVariableNames => @primitive "classAllInstVarNames"
+  sealed allFieldNames => @primitive "classAllFieldNames"
 
   // --- Documentation (ADR 0033) ---
 

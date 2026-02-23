@@ -667,25 +667,31 @@ impl ClassHierarchy {
                 diagnostics.push(diag);
             }
 
-            // Check sealed method override enforcement
-            // BT-803: Stdlib-mode exemption mirrors the sealed superclass exemption —
-            // built-in stdlib classes (e.g. Metaclass overriding isMeta from Behaviour)
-            // are allowed to override sealed methods when compiling in stdlib mode.
-            let is_stdlib_builtin = stdlib_mode && Self::is_builtin_class(class.name.name.as_str());
-            if !is_stdlib_builtin {
-                if let Some(ref superclass) = class.superclass {
-                    for method in &class.methods {
-                        let selector = method.selector.name();
-                        if let Some((sealed_class, _)) = self
-                            .find_sealed_method_in_ancestors(superclass.name.as_str(), &selector)
-                        {
-                            diagnostics.push(Diagnostic::error(
-                                format!(
-                                    "Cannot override sealed method `{selector}` from class `{sealed_class}`"
-                                ),
-                                method.span,
-                            ));
-                        }
+            // Check sealed method override enforcement.
+            // BT-803: Built-in stdlib classes (e.g. Metaclass) are allowed to override
+            // sealed methods when compiling in stdlib mode.
+            // BT-807: Abstract stdlib classes (e.g. Behaviour) are also allowed to override
+            // sealed methods, as they provide class-side dispatch methods whose
+            // selectors coincide with sealed instance-side methods on Object, but are
+            // dispatched through a separate runtime namespace.
+            if let Some(ref superclass) = class.superclass {
+                for method in &class.methods {
+                    let selector = method.selector.name();
+                    let is_stdlib_builtin =
+                        stdlib_mode && Self::is_builtin_class(class.name.name.as_str());
+                    let is_abstract_stdlib = stdlib_mode && class.is_abstract;
+                    if is_stdlib_builtin || is_abstract_stdlib {
+                        continue;
+                    }
+                    if let Some((sealed_class, _)) =
+                        self.find_sealed_method_in_ancestors(superclass.name.as_str(), &selector)
+                    {
+                        diagnostics.push(Diagnostic::error(
+                            format!(
+                                "Cannot override sealed method `{selector}` from class `{sealed_class}`"
+                            ),
+                            method.span,
+                        ));
                     }
                 }
             }
