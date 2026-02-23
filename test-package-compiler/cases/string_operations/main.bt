@@ -35,8 +35,8 @@ firstChar := "hello" at: 1
 thirdChar := "hello" at: 3
 
 // ===== String Search Operations =====
-found := message includes: "World"
-notFound := message includes: "xyz"
+found := message includesSubstring: "World"
+notFound := message includesSubstring: "xyz"
 
 // ===== String Prefix/Suffix Checks =====
 starts := message startsWith: "Hello"

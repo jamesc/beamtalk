@@ -18,11 +18,11 @@
 "hello" reverse
 // => olleh
 
-// includes:
-"hello world" includes: "world"
+// includesSubstring:
+"hello world" includesSubstring: "world"
 // => true
 
-"hello" includes: "xyz"
+"hello" includesSubstring: "xyz"
 // => false
 
 // startsWith:
@@ -58,8 +58,8 @@
 "hi" asList
 // => ["h","i"]
 
-// each: returns nil
-"hi" each: [:ch | nil]
+// do: returns nil
+"hi" do: [:ch | nil]
 // => nil
 
 // BT-416: collect: - map over graphemes (returns list)

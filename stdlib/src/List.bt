@@ -343,4 +343,22 @@ sealed Collection subclass: List
   /// ```
   atRandom => @primitive "atRandom"
 
+  /// Join a list of strings into a single string (no separator).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #("a", "b", "c") join            // => "abc"
+  /// #() join                         // => ""
+  /// ```
+  join -> String => @primitive "join"
+
+  /// Join a list of strings into a single string with a separator.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #("a", "b", "c") join: ", "      // => "a, b, c"
+  /// #("hello", "world") join: " "    // => "hello world"
+  /// ```
+  join: separator: String -> String => @primitive "join:"
+
 

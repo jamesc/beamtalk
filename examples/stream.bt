@@ -88,7 +88,7 @@ s := ((Set new add: 3) add: 1) add: 2
 // (File lines: "data.csv") take: 5
 
 // Filter lines matching a pattern
-// (File lines: "app.log") select: [:l | l includes: "ERROR"]
+// (File lines: "app.log") select: [:l | l includesSubstring: "ERROR"]
 
 // Count lines in a file
 // (File lines: "data.csv") inject: 0 into: [:count :line | count + 1]

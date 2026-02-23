@@ -4,7 +4,7 @@
 /// Collection — Abstract superclass for all collections.
 ///
 /// Provides the shared iteration and query protocol for List, Set,
-/// Dictionary, and Tuple. Cannot be instantiated directly.
+/// Dictionary, Tuple, and String. Cannot be instantiated directly.
 ///
 /// Subclasses must implement `size` and `do:` at minimum.
 /// All other iteration methods have default implementations built

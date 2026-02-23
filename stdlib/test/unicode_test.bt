@@ -23,5 +23,5 @@ TestCase subclass: UnicodeTest
     self assert: ("Hello 世界" at: 7) equals: "世".
     self assert: ("Hello 世界" at: 8) equals: "界".
     self assert: ("世界" reverse) equals: "界世".
-    self assert: ("Hello 世界" includes: "世").
-    self deny: ("Hello 世界" includes: "🌍")
+    self assert: ("Hello 世界" includesSubstring: "世").
+    self deny: ("Hello 世界" includesSubstring: "🌍")
