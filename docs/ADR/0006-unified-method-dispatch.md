@@ -63,7 +63,7 @@ dispatch(Selector, Args, Self, State) ->
 
 **Problem 3: Code duplication**
 
-Common reflection methods (`class`, `respondsTo:`, `instVarNames`) are **code-generated into every class's dispatch function**. This bloats generated code and makes changes difficult.
+Common reflection methods (`class`, `respondsTo:`, `instVarNames`) are **code-generated into every class's dispatch function**. (Note: `instVarNames`/`instVarAt:`/`instVarAt:put:` were later renamed to `fieldNames`/`fieldAt:`/`fieldAt:put:` — see [ADR 0035](0035-field-based-reflection-api.md).) This bloats generated code and makes changes difficult.
 
 **Problem 4: Cannot add methods to Object at runtime**
 
@@ -125,7 +125,7 @@ Object and Actor classes must be registered in `beamtalk_bootstrap` **before** a
 
 ### Reflection Method Implementations
 
-Core reflection methods (`class`, `respondsTo:`, `instVarNames`, `perform:`, `instVarAt:`, `instVarAt:put:`) are implemented **once** in the Object class's compiled module (e.g., `beamtalk_object.erl`). They are found via normal hierarchy walking — no need to duplicate them in every class's codegen.
+Core reflection methods (`class`, `respondsTo:`, `instVarNames`, `perform:`, `instVarAt:`, `instVarAt:put:`) are implemented **once** in the Object class's compiled module (e.g., `beamtalk_object.erl`). They are found via normal hierarchy walking — no need to duplicate them in every class's codegen. (Note: `instVarNames`/`instVarAt:`/`instVarAt:put:` were later renamed to `fieldNames`/`fieldAt:`/`fieldAt:put:` — see [ADR 0035](0035-field-based-reflection-api.md).)
 
 ### Domain Service: `beamtalk_dispatch`
 
@@ -415,7 +415,7 @@ handle_call(methods, _From, #class_state{flattened_methods = Flattened} = State)
 ### Phase 1b: Runtime Dispatch Service
 
 1. Create `beamtalk_dispatch` module (hierarchy walking, method invocation, method combinations)
-2. Bootstrap Object with hand-written `beamtalk_object.erl` runtime module (reflection methods: `class`, `respondsTo:`, `instVarNames`, `perform:`, `instVarAt:`, `instVarAt:put:`)
+2. Bootstrap Object with hand-written `beamtalk_object.erl` runtime module (reflection methods: `class`, `respondsTo:`, `instVarNames`, `perform:`, `instVarAt:`, `instVarAt:put:`) — note: `instVarNames`/`instVarAt:`/`instVarAt:put:` renamed to `fieldNames`/`fieldAt:`/`fieldAt:put:` in [ADR 0035](0035-field-based-reflection-api.md)
 3. Modify codegen: local fast path + `beamtalk_dispatch:lookup/5` fallback before DNU
 4. Update `beamtalk_object_class:methods/1` to walk hierarchy
 5. Remove duplicated reflection methods from per-class codegen
