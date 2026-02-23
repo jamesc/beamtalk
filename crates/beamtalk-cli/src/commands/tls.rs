@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use clap::Subcommand;
 use miette::{IntoDiagnostic, Result};
 use rcgen::{
-    BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair,
+    BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
     KeyUsagePurpose,
 };
 
@@ -89,7 +89,7 @@ fn init_tls(workspace_name: Option<&str>) -> Result<()> {
     println!("  ✓ CA certificate:  {}", tls_dir.join("ca.pem").display());
 
     // Generate node certificate signed by CA
-    let (node_cert_pem, node_key_pem) = generate_node_cert(&ca_cert_pem, &ca_key_pair)?;
+    let (node_cert_pem, node_key_pem) = generate_node_cert(&ca_cert_pem, ca_key_pair)?;
     write_pem(&tls_dir.join("node.pem"), &node_cert_pem)?;
     write_key(&tls_dir.join("node-key.pem"), &node_key_pem)?;
     println!(
@@ -138,12 +138,11 @@ fn generate_ca() -> Result<(String, KeyPair)> {
 /// The certificate is valid for the `localhost` hostname and includes
 /// extended key usage for both TLS server and client authentication
 /// (required for mutual TLS).
-fn generate_node_cert(ca_cert_pem: &str, ca_key_pair: &KeyPair) -> Result<(String, String)> {
+fn generate_node_cert(ca_cert_pem: &str, ca_key_pair: KeyPair) -> Result<(String, String)> {
     let node_key_pair = KeyPair::generate().into_diagnostic()?;
 
-    // Reconstruct the CA certificate from PEM for signing
-    let ca_params = CertificateParams::from_ca_cert_pem(ca_cert_pem).into_diagnostic()?;
-    let ca_cert = ca_params.self_signed(ca_key_pair).into_diagnostic()?;
+    // Create an Issuer from the CA certificate PEM and key pair
+    let ca_issuer = Issuer::from_ca_cert_pem(ca_cert_pem, ca_key_pair).into_diagnostic()?;
 
     let mut params = CertificateParams::new(vec!["localhost".to_string()]).into_diagnostic()?;
     params
@@ -158,7 +157,7 @@ fn generate_node_cert(ca_cert_pem: &str, ca_key_pair: &KeyPair) -> Result<(Strin
     ];
 
     let cert = params
-        .signed_by(&node_key_pair, &ca_cert, ca_key_pair)
+        .signed_by(&node_key_pair, &ca_issuer)
         .into_diagnostic()?;
 
     Ok((cert.pem(), node_key_pair.serialize_pem()))
@@ -276,7 +275,7 @@ mod tests {
     #[test]
     fn generate_node_cert_produces_valid_pem() {
         let (ca_pem, ca_key) = generate_ca().unwrap();
-        let (cert_pem, key_pem) = generate_node_cert(&ca_pem, &ca_key).unwrap();
+        let (cert_pem, key_pem) = generate_node_cert(&ca_pem, ca_key).unwrap();
         assert!(cert_pem.contains("BEGIN CERTIFICATE"));
         assert!(key_pem.contains("BEGIN PRIVATE KEY"));
     }
