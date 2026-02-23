@@ -321,12 +321,22 @@ invoke_method(_ClassName, ClassPid, Selector, Args, Self, State, Depth) ->
                     ?LOG_DEBUG("Invoking ~p:dispatch(~p, ...)", [ModuleName, Selector]),
                     %% Normalize the return value: dispatch/4 returns either
                     %% {reply, Result, NewState} or {error, Error, State} (3-tuple).
-                    %% We normalize {error, Error, State} to {error, Error} to match
-                    %% the dispatch_result() type and the codegen pattern matching.
-                    case ModuleName:dispatch(Selector, Args, Self, State) of
-                        {reply, _, _} = Reply -> Reply;
-                        {error, Error, _State} -> {error, Error};
-                        Other -> Other
+                    %% We call it inside a try/catch to translate raw Erlang exceptions
+                    %% into structured beamtalk errors instead of letting them escape.
+                    try
+                        case ModuleName:dispatch(Selector, Args, Self, State) of
+                            {reply, _, _} = Reply -> Reply;
+                            {error, Error, _State} -> {error, Error};
+                            Other -> Other
+                        end
+                    catch
+                        Type:Reason:Stack ->
+                            ?LOG_ERROR("Erlang error in ~p:dispatch: ~p", [ModuleName, Reason]),
+                            Wrapped = beamtalk_exception_handler:ensure_wrapped(
+                                Type, Reason, Stack
+                            ),
+                            #{error := BtError} = Wrapped,
+                            {error, BtError}
                     end
             end
     end.

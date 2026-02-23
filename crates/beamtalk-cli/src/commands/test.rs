@@ -14,7 +14,7 @@
 //!
 //! Part of ADR 0014 (Beamtalk Test Framework), Phase 2.
 
-use crate::beam_compiler::BeamCompiler;
+use crate::beam_compiler::{BeamCompiler, compile_source_with_bindings};
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::collections::{HashMap, HashSet};
@@ -201,6 +201,7 @@ fn generate_eunit_wrapper(test_class: &TestCaseClass, source_file: &str) -> Stri
 fn compile_fixtures_directory(
     fixtures_dir: &Utf8Path,
     output_dir: &Utf8Path,
+    class_module_index: &HashMap<String, String>,
 ) -> Result<Vec<String>> {
     if !fixtures_dir.is_dir() {
         return Ok(Vec::new());
@@ -232,7 +233,7 @@ fn compile_fixtures_directory(
         }
         fixtures_by_module.insert(module_name.clone(), fixture_path.clone());
 
-        let module_name = compile_fixture(fixture_path, output_dir)?;
+        let module_name = compile_fixture(fixture_path, output_dir, class_module_index)?;
         module_names.push(module_name);
     }
 
@@ -240,7 +241,11 @@ fn compile_fixtures_directory(
 }
 
 /// Compile a fixture file referenced by `@load` directive.
-fn compile_fixture(fixture_path: &Utf8Path, output_dir: &Utf8Path) -> Result<String> {
+fn compile_fixture(
+    fixture_path: &Utf8Path,
+    output_dir: &Utf8Path,
+    class_module_index: &HashMap<String, String>,
+) -> Result<String> {
     let module_name = fixture_module_name(fixture_path)?;
 
     let core_file = output_dir.join(format!("{module_name}.core"));
@@ -252,8 +257,15 @@ fn compile_fixture(fixture_path: &Utf8Path, output_dir: &Utf8Path) -> Result<Str
         ..Default::default()
     };
 
-    crate::beam_compiler::compile_source(fixture_path, &module_name, &core_file, &options)
-        .wrap_err_with(|| format!("Failed to compile fixture '{fixture_path}'"))?;
+    compile_source_with_bindings(
+        fixture_path,
+        &module_name,
+        &core_file,
+        &options,
+        &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+        class_module_index,
+    )
+    .wrap_err_with(|| format!("Failed to compile fixture '{fixture_path}'"))?;
 
     let compiler = BeamCompiler::new(output_dir.to_owned());
     compiler
@@ -284,6 +296,7 @@ fn compile_test_file(
     source_path: &Utf8Path,
     module_name: &str,
     output_dir: &Utf8Path,
+    class_module_index: &HashMap<String, String>,
 ) -> Result<()> {
     let core_file = output_dir.join(format!("{module_name}.core"));
 
@@ -294,8 +307,15 @@ fn compile_test_file(
         ..Default::default()
     };
 
-    crate::beam_compiler::compile_source(source_path, module_name, &core_file, &options)
-        .wrap_err_with(|| format!("Failed to compile test file '{source_path}'"))?;
+    compile_source_with_bindings(
+        source_path,
+        module_name,
+        &core_file,
+        &options,
+        &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+        class_module_index,
+    )
+    .wrap_err_with(|| format!("Failed to compile test file '{source_path}'"))?;
 
     let compiler = BeamCompiler::new(output_dir.to_owned());
     compiler
@@ -574,6 +594,7 @@ fn find_test_files_recursive(dir: &Utf8Path, files: &mut Vec<Utf8PathBuf>) -> Re
 fn discover_and_compile_doc_tests(
     source_path: &Utf8Path,
     build_dir: &Utf8Path,
+    class_module_index: &HashMap<String, String>,
 ) -> Result<Vec<CompiledDocTestResult>> {
     let content = fs::read_to_string(source_path)
         .into_diagnostic()
@@ -588,7 +609,7 @@ fn discover_and_compile_doc_tests(
     }
 
     // Compile the containing source file so its classes are available to doc tests
-    compile_fixture(source_path, build_dir)
+    compile_fixture(source_path, build_dir, class_module_index)
         .wrap_err_with(|| format!("Failed to compile source file for doc tests '{source_path}'"))?;
 
     let mut results = Vec::new();
@@ -823,6 +844,27 @@ pub fn run_tests(path: &str) -> Result<()> {
     let build_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf())
         .map_err(|_| miette::miette!("Non-UTF-8 temp directory path"))?;
 
+    // Build class module index from src/ so test files can resolve cross-file
+    // references to package classes in subdirectories.
+    let project_root_for_index = Utf8PathBuf::from(".");
+    let pkg_for_index = manifest::find_manifest(&project_root_for_index)?;
+    let class_module_index: HashMap<String, String> = if let Some(ref pkg) = pkg_for_index {
+        let src_dir = project_root_for_index.join("src");
+        let source_root = if src_dir.exists() {
+            Some(src_dir.clone())
+        } else {
+            None
+        };
+        if let Ok(src_files) = super::build::collect_source_files_from_dir(&src_dir) {
+            super::build::build_class_module_index(&src_files, source_root.as_deref(), &pkg.name)
+                .unwrap_or_default()
+        } else {
+            HashMap::new()
+        }
+    } else {
+        HashMap::new()
+    };
+
     // Phase 0: Pre-compile all fixtures in the fixtures/ subdirectory.
     // This makes all fixture classes available during test execution — like
     // a Smalltalk image where all classes exist in the running environment.
@@ -841,7 +883,7 @@ pub fn run_tests(path: &str) -> Result<()> {
             .unwrap_or_default()
     };
 
-    let precompiled = compile_fixtures_directory(&fixtures_dir, &build_dir)?;
+    let precompiled = compile_fixtures_directory(&fixtures_dir, &build_dir, &class_module_index)?;
     for module_name in &precompiled {
         precompiled_modules.insert(module_name.clone());
     }
@@ -904,14 +946,19 @@ pub fn run_tests(path: &str) -> Result<()> {
                     test_file
                 );
             }
-            let module_name = compile_fixture(&fixture_path, &build_dir)?;
+            let module_name = compile_fixture(&fixture_path, &build_dir, &class_module_index)?;
             all_fixture_modules.push(module_name);
         }
 
         // Compile TestCase subclasses
         for test_class in test_classes {
             // Compile the test .bt file through normal pipeline
-            compile_test_file(test_file, &test_class.module_name, &build_dir)?;
+            compile_test_file(
+                test_file,
+                &test_class.module_name,
+                &build_dir,
+                &class_module_index,
+            )?;
 
             // Generate EUnit wrapper
             let eunit_module = format!("{}_tests", test_class.module_name);
@@ -931,7 +978,8 @@ pub fn run_tests(path: &str) -> Result<()> {
         }
 
         // Discover doc tests in the same file
-        let doc_results = discover_and_compile_doc_tests(test_file, &build_dir)?;
+        let doc_results =
+            discover_and_compile_doc_tests(test_file, &build_dir, &class_module_index)?;
         for dr in doc_results {
             all_erl_files.push(dr.erl_file);
             compiled_doc_tests.push(CompiledDocTest {
@@ -955,8 +1003,8 @@ pub fn run_tests(path: &str) -> Result<()> {
     // Phase 1b: Build package modules if a beamtalk.toml manifest exists.
     // This ensures package-defined classes are compiled and their on_load
     // hooks will register them in the class registry when loaded.
-    let project_root = Utf8PathBuf::from(".");
-    let pkg_manifest = manifest::find_manifest(&project_root)?;
+    let project_root = project_root_for_index;
+    let pkg_manifest = pkg_for_index;
     let (package_modules, package_ebin_dir) = if let Some(ref pkg) = pkg_manifest {
         let ebin_dir = project_root.join("_build").join("dev").join("ebin");
 

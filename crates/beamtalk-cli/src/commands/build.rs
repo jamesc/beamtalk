@@ -3,9 +3,10 @@
 
 //! Build beamtalk projects.
 
-use crate::beam_compiler::{BeamCompiler, compile_source};
+use crate::beam_compiler::{BeamCompiler, compile_source_with_bindings};
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
+use std::collections::HashMap;
 use std::fs;
 use tracing::{debug, error, info, instrument};
 
@@ -62,9 +63,6 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
         .into_diagnostic()
         .wrap_err("Failed to create build directory")?;
 
-    // Compile each file to Core Erlang
-    let mut core_files = Vec::new();
-    let mut module_names = Vec::new();
     // Determine the source root for computing relative module paths
     let src_dir = project_root.join("src");
     let source_root = if src_dir.exists() {
@@ -72,6 +70,17 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
     } else {
         None
     };
+
+    // Pass 1: compute module names and build the class → module index.
+    // This allows later files to resolve cross-file class references (including
+    // classes in package subdirectories) during code generation.
+    let mut file_module_pairs: Vec<(Utf8PathBuf, String, Utf8PathBuf)> = Vec::new();
+    let class_module_index = if let Some(ref pkg) = pkg_manifest {
+        build_class_module_index(&source_files, source_root.as_deref(), &pkg.name)?
+    } else {
+        HashMap::new()
+    };
+
     for file in &source_files {
         let stem = file
             .file_stem()
@@ -97,10 +106,16 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
             )
         };
         let core_file = build_dir.join(format!("{module_name}.core"));
+        file_module_pairs.push((file.clone(), module_name, core_file));
+    }
 
-        compile_file(file, &module_name, &core_file, options)?;
-        core_files.push(core_file);
-        module_names.push(module_name);
+    // Pass 2: compile each file with the full class → module index.
+    let mut core_files = Vec::new();
+    let mut module_names = Vec::new();
+    for (file, module_name, core_file) in &file_module_pairs {
+        compile_file(file, module_name, core_file, options, &class_module_index)?;
+        core_files.push(core_file.clone());
+        module_names.push(module_name.clone());
     }
 
     // Batch compile Core Erlang to BEAM
@@ -168,6 +183,15 @@ fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
         miette::bail!("Path '{}' does not exist", path);
     }
 
+    Ok(files)
+}
+
+/// Collect all `.bt` source files from a directory tree.
+///
+/// Returns an error if the directory does not exist or cannot be read.
+pub fn collect_source_files_from_dir(dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
+    let mut files = Vec::new();
+    collect_bt_files_recursive(dir, &mut files)?;
     Ok(files)
 }
 
@@ -242,15 +266,64 @@ fn compile_file(
     module_name: &str,
     core_file: &Utf8Path,
     options: &beamtalk_core::CompilerOptions,
+    class_module_index: &HashMap<String, String>,
 ) -> Result<()> {
     println!("  Compiling {path}...");
 
-    compile_source(path, module_name, core_file, options)?;
+    compile_source_with_bindings(
+        path,
+        module_name,
+        core_file,
+        options,
+        &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+        class_module_index,
+    )?;
 
     println!("    ✓ Parsed successfully");
     println!("    ✓ Generated Core Erlang: {core_file}");
 
     Ok(())
+}
+
+/// Build a class → compiled module name index from a set of source files.
+///
+/// Parses each file to extract class names, then maps each class name to its
+/// package-qualified module name (e.g. `"SchemeEnv"` → `"bt@sicp_example@scheme@env"`).
+///
+/// This index is used during code generation so that cross-file references to
+/// classes in package subdirectories produce the correct Erlang module call.
+pub fn build_class_module_index(
+    source_files: &[Utf8PathBuf],
+    source_root: Option<&Utf8Path>,
+    pkg_name: &str,
+) -> Result<HashMap<String, String>> {
+    let mut index = HashMap::new();
+
+    for file in source_files {
+        let relative_module = compute_relative_module(file, source_root)?;
+        let module_name = format!("bt@{pkg_name}@{relative_module}");
+
+        let Ok(source) = fs::read_to_string(file) else {
+            continue;
+        };
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
+        let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+
+        for class in &module.classes {
+            let class_name = class.name.name.to_string();
+            if let Some(existing) = index.get(&class_name) {
+                if existing != &module_name {
+                    eprintln!(
+                        "Warning: class '{class_name}' is defined in both '{existing}' and \
+                         '{module_name}'; using '{module_name}' for cross-file dispatch"
+                    );
+                }
+            }
+            index.insert(class_name, module_name.clone());
+        }
+    }
+
+    Ok(index)
 }
 
 #[cfg(test)]
@@ -339,7 +412,13 @@ mod tests {
         let core_file = project_path.join("test.core");
         write_test_file(&test_file, "test := [1 + 2].");
 
-        let result = compile_file(&test_file, "test", &core_file, &default_options());
+        let result = compile_file(
+            &test_file,
+            "test",
+            &core_file,
+            &default_options(),
+            &HashMap::new(),
+        );
         assert!(result.is_ok());
         assert!(core_file.exists());
     }
@@ -352,7 +431,13 @@ mod tests {
         let core_file = project_path.join("test.core");
         write_test_file(&test_file, "test := [1 + ]."); // Syntax error
 
-        let result = compile_file(&test_file, "test", &core_file, &default_options());
+        let result = compile_file(
+            &test_file,
+            "test",
+            &core_file,
+            &default_options(),
+            &HashMap::new(),
+        );
         assert!(result.is_err());
     }
 

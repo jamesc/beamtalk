@@ -614,6 +614,7 @@ pub fn write_core_erlang_with_source(
 ///
 /// Returns an error if the module name is invalid, code generation fails,
 /// or the output file cannot be written.
+#[allow(clippy::implicit_hasher)]
 pub fn write_core_erlang_with_bindings(
     module: &beamtalk_core::ast::Module,
     module_name: &str,
@@ -621,6 +622,7 @@ pub fn write_core_erlang_with_bindings(
     bindings: &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable,
     source_text: Option<&str>,
     workspace_mode: bool,
+    class_module_index: &std::collections::HashMap<String, String>,
 ) -> Result<()> {
     if !is_valid_module_name(module_name) {
         miette::bail!(
@@ -634,7 +636,8 @@ pub fn write_core_erlang_with_bindings(
         beamtalk_core::erlang::CodegenOptions::new(module_name)
             .with_bindings(bindings.clone())
             .with_source_opt(source_text)
-            .with_workspace_mode(workspace_mode),
+            .with_workspace_mode(workspace_mode)
+            .with_class_module_index(class_module_index.clone()),
     )
     .into_diagnostic()
     .wrap_err("Failed to generate Core Erlang")?;
@@ -676,6 +679,7 @@ pub fn compile_source(
         core_output,
         options,
         &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+        &std::collections::HashMap::new(),
     )
 }
 
@@ -688,6 +692,7 @@ pub fn compile_source(
 ///
 /// Returns an error if reading, parsing, or code generation fails,
 /// or if any diagnostic has error severity.
+#[allow(clippy::implicit_hasher)]
 #[instrument(skip_all, fields(path = %source_path, module = module_name))]
 pub fn compile_source_with_bindings(
     source_path: &Utf8Path,
@@ -695,6 +700,7 @@ pub fn compile_source_with_bindings(
     core_output: &Utf8Path,
     options: &beamtalk_core::CompilerOptions,
     bindings: &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable,
+    class_module_index: &std::collections::HashMap<String, String>,
 ) -> Result<()> {
     use crate::diagnostic::CompileDiagnostic;
 
@@ -779,6 +785,7 @@ pub fn compile_source_with_bindings(
         bindings,
         Some(&source),
         options.workspace_mode,
+        class_module_index,
     )
     .wrap_err_with(|| format!("Failed to generate Core Erlang for '{source_path}'"))?;
 

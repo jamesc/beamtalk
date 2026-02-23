@@ -88,6 +88,29 @@ fn map_get<'a>(map: &'a Map, key: &str) -> Option<&'a Term> {
     map.map.get(&atom(key))
 }
 
+/// Extract a string→string map from a Term (for `class_module_index`).
+/// Returns `Err` if the term is present but contains non-string keys or values,
+/// so callers can surface the problem rather than silently falling back.
+fn term_to_string_map(term: &Term) -> Result<std::collections::HashMap<String, String>, String> {
+    match term {
+        Term::Map(m) => {
+            let mut result = std::collections::HashMap::new();
+            for (k, v) in &m.map {
+                let key = term_to_string(k)
+                    .ok_or_else(|| format!("class_module_index key is not a string: {k:?}"))?;
+                let val = term_to_string(v).ok_or_else(|| {
+                    format!("class_module_index value for '{key}' is not a string: {v:?}")
+                })?;
+                result.insert(key, val);
+            }
+            Ok(result)
+        }
+        _ => Err(format!(
+            "class_module_index must be a map of string→string, got: {term:?}"
+        )),
+    }
+}
+
 /// Extract a boolean value from a Term.
 fn term_to_bool(term: &Term) -> Option<bool> {
     match term {
@@ -442,6 +465,7 @@ fn handle_inline_class_definition(
 }
 
 /// Handle a `compile` request (file/class compilation).
+#[allow(clippy::too_many_lines)]
 fn handle_compile(request: &Map) -> Term {
     let Some(source) = map_get(request, "source").and_then(term_to_string) else {
         return error_response(&["Missing or invalid 'source' field".to_string()]);
@@ -558,13 +582,23 @@ fn handle_compile(request: &Map) -> Term {
         .map(|c| (c.name.name.to_string(), c.superclass_name().to_string()))
         .collect();
 
+    // Extract optional class module index for resolving subdirectory class references.
+    let class_module_index = match map_get(request, "class_module_index") {
+        None => std::collections::HashMap::new(),
+        Some(term) => match term_to_string_map(term) {
+            Ok(map) => map,
+            Err(e) => return error_response(&[e]),
+        },
+    };
+
     // Generate Core Erlang
     let warning_msgs: Vec<String> = warnings.iter().map(|w| w.message.clone()).collect();
     match beamtalk_core::erlang::generate_module(
         &module,
         beamtalk_core::erlang::CodegenOptions::new(&module_name)
             .with_workspace_mode(workspace_mode)
-            .with_source(&source),
+            .with_source(&source)
+            .with_class_module_index(class_module_index),
     ) {
         Ok(code) => compile_ok_response(&code, &module_name, &classes, &warning_msgs),
         Err(e) => error_response(&[format!("Code generation failed: {e}")]),

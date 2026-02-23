@@ -238,6 +238,32 @@ ensure_wrapped(_Type, #{'$beamtalk_class' := _} = Already, Stacktrace) ->
 ensure_wrapped(_Type, #beamtalk_error{} = Error, Stacktrace) ->
     Wrapped = wrap(Error),
     Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)};
+ensure_wrapped(error, undef, Stacktrace) ->
+    Message =
+        case Stacktrace of
+            [{Mod, Fun, ArgsOrArity, _} | _] ->
+                Arity =
+                    if
+                        is_list(ArgsOrArity) -> length(ArgsOrArity);
+                        is_integer(ArgsOrArity) -> ArgsOrArity;
+                        true -> 0
+                    end,
+                iolist_to_binary(
+                    io_lib:format("Undefined function: ~p:~p/~p", [Mod, Fun, Arity])
+                );
+            _ ->
+                <<"Undefined function">>
+        end,
+    GenError = #beamtalk_error{
+        kind = runtime_error,
+        class = undefined,
+        selector = undefined,
+        message = Message,
+        hint = <<"Check that the module is loaded and the function exists">>,
+        details = #{reason => undef}
+    },
+    Wrapped = #{'$beamtalk_class' => kind_to_class(runtime_error), error => GenError},
+    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)};
 ensure_wrapped(exit, Reason, Stacktrace) ->
     Error = #beamtalk_error{
         kind = erlang_exit,
