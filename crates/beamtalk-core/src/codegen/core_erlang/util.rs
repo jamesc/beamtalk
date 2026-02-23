@@ -183,10 +183,24 @@ pub fn to_module_name(class_name: &str) -> String {
 /// Returns `None` for stdlib modules (`bt@stdlib@...`), unprefixed names, or
 /// names without a package segment.
 ///
+/// # Limitations
+///
+/// This function intentionally returns only the top-level package segment
+/// (`bt@{package}@`), discarding any subdirectory path components. For example,
+/// `bt@sicp@scheme@eval` returns `bt@sicp@` rather than `bt@sicp@scheme@`.
+///
+/// Callers such as `compiled_module_name` use this prefix to construct module
+/// names for referenced classes. This means cross-module references within a
+/// package only produce correct names when the referenced class lives at the
+/// package root (e.g. `bt@{package}@{class}`). Classes nested in subdirectories
+/// (e.g. `bt@{package}@{subdir}@{class}`) cannot be resolved by class name alone
+/// and are not currently supported for inter-class dispatch.
+///
 /// # Examples
 ///
 /// ```ignore
 /// assert_eq!(user_package_prefix("bt@bank@account"), Some("bt@bank@".into()));
+/// // Subdirectory segments are stripped — `scheme@` is not preserved:
 /// assert_eq!(user_package_prefix("bt@sicp@scheme@eval"), Some("bt@sicp@".into()));
 /// assert_eq!(user_package_prefix("bt@stdlib@integer"), None);
 /// assert_eq!(user_package_prefix("counter"), None);
