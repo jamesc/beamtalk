@@ -44,7 +44,8 @@
     create_subclass/3,
     class_send/3,
     set_class_var/3,
-    update_class/2
+    update_class/2,
+    local_class_methods/1
 ]).
 
 %% gen_server callbacks
@@ -140,6 +141,12 @@ new(ClassPid, Args) ->
 -spec methods(pid()) -> [selector()].
 methods(ClassPid) ->
     gen_server:call(ClassPid, methods).
+
+%% @doc Get local class-side method selectors (not inherited).
+-spec local_class_methods(pid()) -> [selector()].
+local_class_methods(ClassPid) ->
+    ClassMethods = gen_server:call(ClassPid, get_local_class_methods),
+    maps:keys(ClassMethods).
 
 %% @doc Get the superclass name.
 -spec superclass(pid()) -> class_name() | none.

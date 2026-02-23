@@ -2218,6 +2218,101 @@ context_completions_unknown_receiver_returns_empty_test() ->
     Result = beamtalk_repl_ops_dev:get_context_completions(<<"NoSuchClass123 s">>),
     ?assertEqual([], Result).
 
+context_completions_binding_actor_no_registry_test() ->
+    %% Binding with #beamtalk_object{} but no class registry → empty (no crash)
+    Binding = #beamtalk_object{class = 'NoSuchClass123', class_mod = undefined, pid = self()},
+    Bindings = #{c => Binding},
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"c in">>, Bindings),
+    ?assertEqual([], Result).
+
+context_completions_binding_non_actor_no_completions_test() ->
+    %% Binding with a non-actor value (e.g., integer) returns no method completions
+    Bindings = #{x => 42},
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"x ">>, Bindings),
+    ?assertEqual([], Result).
+
+context_completions_with_bindings_empty_line_test() ->
+    %% Empty line with bindings returns empty
+    ?assertEqual([], beamtalk_repl_ops_dev:get_context_completions(<<>>, #{a => 1})).
+
+%% BT: Core behavior — class receiver returns class-side methods, not instance methods
+context_completions_class_receiver_returns_class_methods_test() ->
+    Pid = spawn_mock_class('TestCompletionClassA', #{spawn => ok, 'spawnWith:' => ok}, [
+        increment, decrement
+    ]),
+    try
+        Result = beamtalk_repl_ops_dev:get_context_completions(
+            <<"TestCompletionClassA sp">>, #{}
+        ),
+        %% Class-side methods and builtin class methods matching "sp" should appear
+        ?assert(lists:member(<<"spawn">>, Result)),
+        ?assert(lists:member(<<"spawnWith:">>, Result)),
+        %% Instance methods must NOT appear
+        ?assertNot(lists:member(<<"increment">>, Result)),
+        ?assertNot(lists:member(<<"decrement">>, Result))
+    after
+        cleanup_mock_class('TestCompletionClassA', Pid)
+    end.
+
+%% BT: Core behavior — instance binding returns instance methods, not class-side methods
+context_completions_instance_binding_returns_instance_methods_test() ->
+    Pid = spawn_mock_class('TestCompletionClassB', #{spawn => ok, 'spawnWith:' => ok}, [
+        increment, inspect, decrement
+    ]),
+    try
+        Binding = #beamtalk_object{
+            class = 'TestCompletionClassB', class_mod = undefined, pid = self()
+        },
+        Bindings = #{c => Binding},
+        Result = beamtalk_repl_ops_dev:get_context_completions(<<"c in">>, Bindings),
+        %% Instance methods matching "in" should appear
+        ?assert(lists:member(<<"increment">>, Result)),
+        ?assert(lists:member(<<"inspect">>, Result)),
+        %% Class-side methods must NOT appear (none match "in")
+        ?assertNot(lists:member(<<"spawn">>, Result)),
+        ?assertNot(lists:member(<<"spawnWith:">>, Result))
+    after
+        cleanup_mock_class('TestCompletionClassB', Pid)
+    end.
+
+%% Helper: spawn a mock class gen_server process and register it in the class registry.
+spawn_mock_class(Name, ClassMethods, InstanceMethods) ->
+    RegName = beamtalk_class_registry:registry_name(Name),
+    Self = self(),
+    Pid = spawn(fun() ->
+        erlang:register(RegName, self()),
+        Self ! registered,
+        mock_class_loop(InstanceMethods, ClassMethods)
+    end),
+    receive
+        registered -> ok
+    after 1000 ->
+        error({mock_class_register_timeout, Name})
+    end,
+    Pid.
+
+mock_class_loop(InstanceMethods, ClassMethods) ->
+    receive
+        {'$gen_call', From, methods} ->
+            gen_server:reply(From, InstanceMethods),
+            mock_class_loop(InstanceMethods, ClassMethods);
+        {'$gen_call', From, superclass} ->
+            gen_server:reply(From, none),
+            mock_class_loop(InstanceMethods, ClassMethods);
+        {'$gen_call', From, get_local_class_methods} ->
+            gen_server:reply(From, ClassMethods),
+            mock_class_loop(InstanceMethods, ClassMethods);
+        stop ->
+            ok;
+        _ ->
+            mock_class_loop(InstanceMethods, ClassMethods)
+    end.
+
+cleanup_mock_class(Name, Pid) ->
+    RegName = beamtalk_class_registry:registry_name(Name),
+    catch erlang:unregister(RegName),
+    Pid ! stop.
+
 %%% get_symbol_info/1 tests
 
 get_symbol_info_unknown_atom_test() ->
