@@ -106,7 +106,7 @@ test_new_dynamic_no_args() ->
         getValue => fun(_Self, [], State) -> {reply, maps:get(value, State, 0), State} end
     },
     Result = beamtalk_class_instantiation:handle_new(
-        [], 'DynTest', beamtalk_dynamic_object, Methods, [value], undefined, self()
+        [], 'DynTest', beamtalk_dynamic_object, Methods, [value], #{}, undefined, self()
     ),
     ?assertMatch(
         {ok, #beamtalk_object{class = 'DynTest', class_mod = beamtalk_dynamic_object}, _}, Result
@@ -118,7 +118,7 @@ test_new_dynamic_with_fields() ->
     Methods = #{},
     FieldMap = #{value => 42},
     Result = beamtalk_class_instantiation:handle_new(
-        [FieldMap], 'DynTest', beamtalk_dynamic_object, Methods, [value], undefined, self()
+        [FieldMap], 'DynTest', beamtalk_dynamic_object, Methods, [value], #{}, undefined, self()
     ),
     ?assertMatch({ok, #beamtalk_object{class = 'DynTest'}, _}, Result),
     {ok, Obj, _} = Result,
@@ -127,7 +127,7 @@ test_new_dynamic_with_fields() ->
 test_new_dynamic_wrong_args() ->
     Methods = #{},
     Result = beamtalk_class_instantiation:handle_new(
-        [arg1, arg2], 'DynTest', beamtalk_dynamic_object, Methods, [], undefined, self()
+        [arg1, arg2], 'DynTest', beamtalk_dynamic_object, Methods, [], #{}, undefined, self()
     ),
     ?assertMatch({error, #beamtalk_error{kind = type_error, class = 'DynTest'}, _}, Result).
 
@@ -139,7 +139,7 @@ test_new_compiled() ->
     %% Use Dictionary which has new/0
     code:ensure_loaded('bt@stdlib@dictionary'),
     Result = beamtalk_class_instantiation:handle_new(
-        [], 'Dictionary', 'bt@stdlib@dictionary', #{}, [], undefined, self()
+        [], 'Dictionary', 'bt@stdlib@dictionary', #{}, [], #{}, undefined, self()
     ),
     ?assertMatch({ok, _, _}, Result),
     {ok, Obj, _} = Result,
@@ -149,7 +149,7 @@ test_new_compiled_non_constructible() ->
     %% Integer's new/0 raises instantiation_error
     code:ensure_loaded(beamtalk_integer),
     Result = beamtalk_class_instantiation:handle_new(
-        [], 'Integer', beamtalk_integer, #{}, [], undefined, self()
+        [], 'Integer', beamtalk_integer, #{}, [], #{}, undefined, self()
     ),
     ?assertMatch({error, _, _}, Result).
 
@@ -157,7 +157,7 @@ test_new_compiled_with_map() ->
     %% Dictionary supports new/1 with a map
     code:ensure_loaded('bt@stdlib@dictionary'),
     Result = beamtalk_class_instantiation:handle_new(
-        [#{}], 'Dictionary', 'bt@stdlib@dictionary', #{}, [], undefined, self()
+        [#{}], 'Dictionary', 'bt@stdlib@dictionary', #{}, [], #{}, undefined, self()
     ),
     ?assertMatch({ok, _, _}, Result),
     {ok, Obj, _} = Result,
@@ -168,7 +168,7 @@ test_new_compiled_multi_args_constructible() ->
     %% Use Dictionary (constructible) with multiple args
     code:ensure_loaded('bt@stdlib@dictionary'),
     Result = beamtalk_class_instantiation:handle_new(
-        [arg1, arg2], 'Dictionary', 'bt@stdlib@dictionary', #{}, [], true, self()
+        [arg1, arg2], 'Dictionary', 'bt@stdlib@dictionary', #{}, [], #{}, true, self()
     ),
     %% beamtalk_error:raise wraps the error
     ?assertMatch(

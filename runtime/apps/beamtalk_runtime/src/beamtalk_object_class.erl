@@ -76,6 +76,7 @@
     instance_methods = #{} :: #{selector() => method_info()},
     class_methods = #{} :: #{selector() => method_info()},
     fields = [] :: [atom()],
+    field_defaults = #{} :: #{atom() => term()},
     class_state = #{} :: map(),
     method_source = #{} :: #{selector() => binary()},
     dynamic_methods = #{} :: #{selector() => fun()},
@@ -269,6 +270,7 @@ init({ClassName, ClassInfo}) ->
         instance_methods = InstanceMethods,
         class_methods = ClassMethods,
         fields = maps:get(fields, ClassInfo, []),
+        field_defaults = maps:get(field_defaults, ClassInfo, #{}),
         class_state = maps:get(class_state, ClassInfo, #{}),
         method_source = maps:get(method_source, ClassInfo, #{}),
         dynamic_methods = maps:get(dynamic_methods, ClassInfo, #{}),
@@ -303,6 +305,7 @@ handle_call(
         module = Module,
         dynamic_methods = DynamicMethods,
         fields = InstanceVars,
+        field_defaults = FieldDefaults,
         is_constructible = IsConstructible0
     } = State
 ) ->
@@ -313,6 +316,7 @@ handle_call(
             Module,
             DynamicMethods,
             InstanceVars,
+            FieldDefaults,
             IsConstructible0,
             self()
         )

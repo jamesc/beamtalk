@@ -1,0 +1,44 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-838: Dynamic class creation via ClassBuilder (ADR 0038 Phase 4)
+//
+// Tests closure-based dynamic class creation through the ClassBuilder protocol.
+// Note: ClassBuilder and dynamic objects are Actors, so results must be awaited.
+
+TestCase subclass: ClassBuilderTest
+
+  testDynamicClassCreateAndSend =>
+    _cls := (Object classBuilder name: #CBTestGreeter; addMethod: #greet body: ["Hello!"]; register) await.
+    obj := CBTestGreeter new.
+    self assert: (obj greet await) equals: "Hello!".
+    CBTestGreeter removeFromSystem
+
+  testDynamicFieldDefault =>
+    _cls := (Object classBuilder name: #CBTestFieldDog; addField: #name default: "Rex"; register) await.
+    obj := CBTestFieldDog new.
+    self assert: (obj name await) equals: "Rex".
+    CBTestFieldDog removeFromSystem
+
+  testDynamicMethodReceivesSelf =>
+    speakBody := [:s | (s at: #name) ++ " says Woof!"].
+    _cls := (Object classBuilder name: #CBTestSpeaker; addField: #name default: "Rex"; addMethod: #speak body: speakBody; register) await.
+    obj := CBTestSpeaker new.
+    self assert: (obj speak await) equals: "Rex says Woof!".
+    CBTestSpeaker removeFromSystem
+
+  testDynamicSuperclass =>
+    _cls := (Object classBuilder name: #CBTestSuperCheck; register) await.
+    self assert: (CBTestSuperCheck superclass) equals: Object.
+    CBTestSuperCheck removeFromSystem
+
+  testDynamicCanUnderstand =>
+    _cls := (Object classBuilder name: #CBTestCanUnder; addMethod: #speak body: ["Hi"]; register) await.
+    self assert: (CBTestCanUnder canUnderstand: #speak) equals: true.
+    CBTestCanUnder removeFromSystem
+
+  testSealedClassRejected =>
+    self should: [(Object classBuilder name: #CBBadSeal; superclass: Float; register) await] raise: #instantiation_error
+
+  testMissingSuperclassRejected =>
+    self should: [(Object classBuilder register) await] raise: #missing_parameter
