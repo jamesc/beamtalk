@@ -48,7 +48,7 @@ mod tests {
     use crate::source_analysis::{Severity, lex_with_eof, parse};
 
     #[test]
-    fn single_class_passes() {
+    fn test_single_class_passes() {
         let source = "Object subclass: Foo";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
@@ -57,7 +57,7 @@ mod tests {
     }
 
     #[test]
-    fn multiple_classes_errors() {
+    fn test_multiple_classes_errors() {
         let source = "Object subclass: Foo\n\nObject subclass: Bar";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
@@ -73,7 +73,7 @@ mod tests {
     }
 
     #[test]
-    fn three_classes_emits_single_error() {
+    fn test_three_classes_emits_single_error() {
         let source = "Object subclass: A\n\nObject subclass: B\n\nObject subclass: C";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
@@ -85,7 +85,7 @@ mod tests {
     }
 
     #[test]
-    fn no_classes_passes() {
+    fn test_no_classes_passes() {
         let source = "42 + 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);

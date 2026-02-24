@@ -663,13 +663,11 @@ impl MethodValidator for TypeAwareStringArgValidator {
 
 #[cfg(test)]
 mod tests {
+    //! Tests for method-specific semantic validators (responds-to, inst-var-at, primitives, mutations).
     use super::*;
     use crate::ast::{Block, BlockParameter, Identifier, KeywordPart};
+    use crate::semantic_analysis::test_helpers::test_span;
     use crate::source_analysis::Span;
-
-    fn test_span() -> Span {
-        Span::new(0, 10)
-    }
 
     fn responds_to_selector() -> MessageSelector {
         MessageSelector::Keyword(vec![KeywordPart::new("respondsTo:", test_span())])

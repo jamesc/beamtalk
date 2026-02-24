@@ -36,6 +36,8 @@ pub(crate) mod validators;
 // Property-based tests for semantic analysis (ADR 0011 Phase 2)
 #[cfg(test)]
 mod property_tests;
+#[cfg(test)]
+pub mod test_helpers;
 
 pub use class_hierarchy::ClassHierarchy;
 pub use error::{SemanticError, SemanticErrorKind};
@@ -585,16 +587,14 @@ enum ExprContext {
 
 #[cfg(test)]
 mod tests {
+    //! Tests for semantic analysis: analysis pipeline, block info, and error construction.
+    use super::test_helpers::test_span;
     use super::*;
     use crate::ast::{
         Block, BlockParameter, ClassDefinition, Expression, Identifier, Literal, MatchArm,
         MessageSelector, MethodDefinition, Pattern, StateDeclaration, StringSegment,
     };
     use crate::source_analysis::{Severity, Span};
-
-    fn test_span() -> Span {
-        Span::new(0, 0)
-    }
 
     #[test]
     fn test_analyse_empty_module() {

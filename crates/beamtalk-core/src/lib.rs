@@ -22,6 +22,7 @@ pub mod project;
 pub mod queries;
 pub mod semantic_analysis;
 pub mod source_analysis;
+pub mod test_helpers;
 
 /// Re-export commonly used types.
 pub mod prelude {

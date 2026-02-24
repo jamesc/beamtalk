@@ -85,17 +85,8 @@ pub fn discover_project_root(start_dir: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_helpers::unique_temp_dir;
     use std::fs;
-    use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn unique_temp_dir(prefix: &str) -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time")
-            .as_nanos();
-        std::env::temp_dir().join(format!("{prefix}_{}_{}", std::process::id(), nanos))
-    }
 
     #[test]
     fn discover_with_beamtalk_toml_marker() {
