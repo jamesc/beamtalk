@@ -89,8 +89,7 @@ register(BuilderState) when is_map(BuilderState) ->
         ok ->
             Error0 = beamtalk_error:new(type_error, 'ClassBuilder'),
             Error1 = beamtalk_error:with_selector(Error0, register),
-            {error,
-                beamtalk_error:with_hint(Error1, <<"fieldSpecs and methodSpecs must be maps">>)}
+            {error, beamtalk_error:with_hint(Error1, <<"fieldSpecs and methodSpecs must be maps">>)}
     end.
 
 %%% ============================================================================
