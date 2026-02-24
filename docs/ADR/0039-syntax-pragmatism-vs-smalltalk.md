@@ -50,7 +50,7 @@ count := 0  // inline comment
 
 **Rationale:**
 - `"comment"` is unique to Smalltalk; every other mainstream language uses `//` or `#`
-- Strings also use quotes, creating visual confusion when reading code
+- Beamtalk uses double-quoted strings (ADR 0023), which would collide with `"..."` comment delimiters — `//` avoids the conflict entirely
 - `//` is universal and matches muscle memory for virtually all developers
 - Block comments (`/* */`) provide multi-line support that Smalltalk lacks
 
@@ -79,7 +79,7 @@ count := 0  // inline comment
 4. `<`, `>`, `<=`, `>=` (comparison)
 5. `=:=`, `==`, `/=`, `=/=` (equality — strict and loose)
 
-**Note:** `&&`, `||`, `and`, `or` are **not** binary operators — they are keyword messages taking blocks for short-circuit evaluation: `condition and: [expensiveCheck()]`.
+**Note:** `&&`, `||`, `and`, `or` are **not** binary operators — they are keyword messages taking blocks for short-circuit evaluation: `condition and: [expensiveCheck]`.
 
 ### 3. Statement Terminator: Required `.` → Optional (Newlines)
 
@@ -233,7 +233,7 @@ The following departures have dedicated ADRs and are summarised here for complet
 | Equality semantics | [ADR 0002](0002-use-erlang-comparison-operators.md) | Use Erlang's `==`, `/=`, `=:=`, `=/=` directly — structural equality, not identity-based |
 | Class definition syntax | [ADR 0038](0038-subclass-classbuilder-protocol.md) | `Object subclass: Counter` is parsed as **syntax** (not a message send), compiled to `ClassBuilder` protocol |
 | No compound assignment | [ADR 0001](0001-no-compound-assignment.md) | No `+=`, `-=` — use explicit `x := x + 1` to preserve message-passing purity |
-| Control-flow block mutations | [ADR 0041](0041-universal-state-threading-block-protocol.md) | Universal state-threading block protocol — mutations now work in user-defined higher-order methods, not just whitelisted stdlib selectors |
+| Control-flow block mutations | [ADR 0041](0041-universal-state-threading-block-protocol.md) | Universal state-threading block protocol — mutations will work in user-defined higher-order methods, not just whitelisted stdlib selectors (Tier 2, planned) |
 
 ## Prior Art
 
