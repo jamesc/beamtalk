@@ -70,7 +70,6 @@ TestCase subclass: SetTest
     self deny: (big isSubsetOf: small)
 
   testAslist =>
-    (Set new) fromList: #(3, 1, 2).
     self assert: (((Set new) fromList: #(3, 1, 2)) asList) equals: #(1, 2, 3)
 
   testIteration =>
@@ -83,5 +82,5 @@ TestCase subclass: SetTest
     self deny: (s4 respondsTo: #nonExistent)
 
   testPrintstring =>
-    ((Set new) fromList: #(1, 2, 3)) printString.
-    (Set new) printString
+    self assert: (((Set new) fromList: #(1, 2, 3)) printString) notNil.
+    self assert: ((Set new) printString) notNil

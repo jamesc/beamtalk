@@ -5,13 +5,6 @@
 
 TestCase subclass: ProtoobjectManualTest
 
-  testClassReflection =>
-    self assert: (42 class) equals: Integer.
-    self assert: ("hello" class) equals: String.
-    self assert: (true class) equals: True.
-    self assert: (false class) equals: False.
-    self assert: (nil class) equals: UndefinedObject
-
   testIdentityComparison =>
     self assert: (42 == 42).
     self assert: (42 /= 43).

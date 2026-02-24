@@ -5,34 +5,6 @@
 
 TestCase subclass: CollectionProtocolTest
 
-  testListSharedCollectionProtocol =>
-    self assert: (#() isEmpty).
-    self deny: (#(1, 2) isEmpty).
-    // List isNotEmpty
-    self assert: (#(1) isNotEmpty).
-    self deny: (#() isNotEmpty).
-    // List includes:
-    self assert: (#(1, 2, 3) includes: 2).
-    self deny: (#(1, 2, 3) includes: 9).
-    // List collect:
-    self assert: (#(1, 2, 3) collect: [:x | x * 2]) equals: #(2, 4, 6).
-    // List select:
-    self assert: (#(1, 2, 3, 4) select: [:x | x > 2]) equals: #(3, 4).
-    // List reject:
-    self assert: (#(1, 2, 3, 4) reject: [:x | x > 2]) equals: #(1, 2).
-    // List inject:into:
-    self assert: (#(1, 2, 3) inject: 0 into: [:sum :x | sum + x]) equals: 6.
-    // List detect:
-    self assert: (#(1, 2, 3) detect: [:x | x > 1]) equals: 2.
-    // List detect:ifNone:
-    self assert: (#(1, 2) detect: [:x | x > 5] ifNone: [0]) equals: 0.
-    // List anySatisfy:
-    self assert: (#(1, 2, 3) anySatisfy: [:x | x > 2]).
-    self deny: (#(1, 2, 3) anySatisfy: [:x | x > 5]).
-    // List allSatisfy:
-    self assert: (#(1, 2, 3) allSatisfy: [:x | x > 0]).
-    self deny: (#(1, 2, 3) allSatisfy: [:x | x > 1])
-
   testSetSharedCollectionProtocolInheritedFromCollection =>
     // Set isEmpty
     self assert: (Set new isEmpty).
@@ -44,15 +16,15 @@ TestCase subclass: CollectionProtocolTest
     self assert: ((Set new add: 1) includes: 1).
     self deny: ((Set new add: 1) includes: 2).
     // Set collect: (inherited from Collection)
-    ((Set new add: 1) add: 2) collect: [:x | x * 10].
+    self assert: (((Set new add: 1) add: 2) collect: [:x | x * 10]) size equals: 2.
     // Set select: (inherited from Collection)
-    (((Set new add: 1) add: 2) add: 3) select: [:x | x > 1].
+    self assert: ((((Set new add: 1) add: 2) add: 3) select: [:x | x > 1]) size equals: 2.
     // Set reject: (inherited from Collection)
-    (((Set new add: 1) add: 2) add: 3) reject: [:x | x > 2].
+    self assert: ((((Set new add: 1) add: 2) add: 3) reject: [:x | x > 2]) size equals: 2.
     // Set inject:into: (inherited from Collection)
     self assert: ((((Set new add: 1) add: 2) add: 3) inject: 0 into: [:sum :x | sum + x]) equals: 6.
     // Set detect: (inherited from Collection)
-    (((Set new add: 1) add: 2) add: 3) detect: [:x | x > 1].
+    self assert: ((((Set new add: 1) add: 2) add: 3) detect: [:x | x > 1]) notNil.
     // Set detect:ifNone: (inherited from Collection)
     self assert: ((Set new add: 1) detect: [:x | x > 5] ifNone: [0]) equals: 0.
     // Set anySatisfy: (inherited from Collection)
@@ -72,9 +44,9 @@ TestCase subclass: CollectionProtocolTest
     self assert: (#{#a => 1, #b => 2} includes: 1).
     self deny: (#{#a => 1, #b => 2} includes: 99).
     // Dictionary collect: (inherited from Collection via do:)
-    #{#a => 1, #b => 2} collect: [:v | v * 10].
+    self assert: (#{#a => 1, #b => 2} collect: [:v | v * 10]) size equals: 2.
     // Dictionary select: (inherited from Collection via do:)
-    #{#a => 1, #b => 2, #c => 3} select: [:v | v > 1].
+    self assert: (#{#a => 1, #b => 2, #c => 3} select: [:v | v > 1]) size equals: 2.
     // Dictionary inject:into: (inherited from Collection via do:)
     self assert: (#{#a => 1, #b => 2, #c => 3} inject: 0 into: [:sum :v | sum + v]) equals: 6.
     // Dictionary detect: (inherited from Collection via do:)

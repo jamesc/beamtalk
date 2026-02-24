@@ -86,9 +86,9 @@ TestCase subclass: LanguageFeaturesDocTest
     self assert: (((Stream from: 1) select: [:n | n isEven]) take: 5) equals: #(2, 4, 6, 8, 10).
     self assert: ((Stream on: #(1, 2, 3, 4)) inject: 0 into: [:sum :n | sum + n]) equals: 10.
     // Stream printString — pipeline inspection
-    (Stream from: 1) printString.
-    (Stream on: #(1, 2, 3)) printString.
-    ((Stream from: 1) select: [:n | n isEven]) printString.
+    self assert: ((Stream from: 1) printString) notNil.
+    self assert: ((Stream on: #(1, 2, 3)) printString) notNil.
+    self assert: (((Stream from: 1) select: [:n | n isEven]) printString) notNil.
     // Eager vs Lazy boundary
     self assert: (#(1, 2, 3, 4, 5) select: [:n | n > 2]) equals: #(3, 4, 5)
 

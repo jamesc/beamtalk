@@ -9,9 +9,9 @@ TestCase subclass: AssociationTest
     a := #name -> "James".
     self assert: (a class) equals: Association.
     // Integer key with Integer value
-    42 -> "answer".
+    self assert: ((42 -> "answer") class) equals: Association.
     // String key
-    "city" -> "London"
+    self assert: (("city" -> "London") class) equals: Association
 
   testAccessorsKeyAndValue =>
     a := #name -> "James".

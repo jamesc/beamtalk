@@ -1,9 +1,0 @@
-// Copyright 2026 James Casey
-// SPDX-License-Identifier: Apache-2.0
-
-// Port - BEAM port identifier (BT-681)
-
-TestCase subclass: PortTest
-
-  testSection1 =>
-    self assert: Port equals: Port

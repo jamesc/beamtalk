@@ -29,8 +29,7 @@ TestCase subclass: RandomTest
     // Random new returns a Random instance
     self assert: ((Random new) class) equals: Random.
     // Random new printString
-    (Random new) printString.
-    // => _
+    self assert: ((Random new) printString) notNil.
     // Instance next returns a Float
     rng := Random new.
     self assert: ((rng next) class) equals: Float.
@@ -98,7 +97,3 @@ TestCase subclass: RandomTest
     // Instance nextInteger: with negative raises type_error
     rng6 := Random new.
     self should: [rng6 nextInteger: -1] raise: #type_error
-
-  testClassIdentity =>
-    // BT-802 (ADR 0036): class on class returns a real metaclass object
-    self assert: (Random class) isMeta equals: true

@@ -67,11 +67,10 @@ TestCase subclass: DateTimeTest
     self assert: ((DateTime year: 2026 month: 2 day: 18 hour: 10 minute: 30 second: 0) asString) equals: "2026-02-18T10:30:00Z"
 
   testConversionPrintstring =>
-    (DateTime year: 2026 month: 2 day: 18) printString
+    self assert: ((DateTime year: 2026 month: 2 day: 18) printString) notNil
 
   testArithmeticAddseconds =>
     // Add one hour
-    (DateTime year: 2026 month: 1 day: 1) addSeconds: 3600.
     self assert: (((DateTime year: 2026 month: 1 day: 1) addSeconds: 3600) hour) equals: 1.
     // Add negative seconds (subtract)
     self assert: (((DateTime year: 2026 month: 1 day: 1 hour: 1 minute: 0 second: 0) addSeconds: -3600) hour) equals: 0

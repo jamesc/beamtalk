@@ -81,3 +81,10 @@ TestCase subclass: MetaclassTest
   // BT-803: Metaclass new raises error
   testNewRaisesError =>
     self should: [Metaclass new] raise: #user_error
+
+  // Class identity tests for domain classes
+  testClassIdentityForDomainClasses =>
+    // Random class isMeta returns true (BT-802 / ADR 0036)
+    self assert: (Random class) isMeta equals: true.
+    // Regex class isMeta returns true (BT-802 / ADR 0036)
+    self assert: (Regex class) isMeta equals: true
