@@ -86,7 +86,7 @@ wrap_frame(_Other) ->
 %%   - 'bt@integer' → 'Integer' (stdlib alt format)
 %%   - 'beamtalk_integer' → 'Integer' (runtime primitives)
 %%   - Other modules → nil (not a Beamtalk class)
--spec module_to_class(atom()) -> atom() | nil.
+-spec module_to_class(atom()) -> atom() | 'nil'.
 module_to_class(Module) when is_atom(Module) ->
     ModStr = atom_to_list(Module),
     case ModStr of
@@ -118,7 +118,7 @@ module_to_class(_) ->
 %% @doc Convert snake_case module name to CamelCase class name atom.
 %%
 %% Uses list_to_existing_atom to avoid atom table growth from arbitrary module names.
--spec snake_to_class(string()) -> atom() | nil.
+-spec snake_to_class(string()) -> atom() | 'nil'.
 snake_to_class(Snake) ->
     Words = string:split(Snake, "_", all),
     Capitalized = [capitalize(W) || W <- Words],

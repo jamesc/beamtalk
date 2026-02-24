@@ -42,7 +42,7 @@
 %%   should_raise(Block, my_error)  % => passes
 %%
 %% Note: Block is a zero-argument Erlang fun in Core Erlang codegen.
--spec should_raise(fun(() -> term()), atom()) -> nil.
+-spec should_raise(fun(() -> term()), atom()) -> 'nil'.
 should_raise(Block, ExpectedKind) when is_function(Block, 0), is_atom(ExpectedKind) ->
     try Block() of
         _ ->

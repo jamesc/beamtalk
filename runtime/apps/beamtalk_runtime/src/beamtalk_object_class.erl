@@ -172,7 +172,7 @@ class_send(ClassPid, Selector, Args) ->
 
 %% @doc Get a compiled method object.
 %% Delegates to beamtalk_method_resolver.
--spec method(pid() | class_name() | tuple(), selector()) -> compiled_method() | nil.
+-spec method(pid() | class_name() | tuple(), selector()) -> compiled_method() | 'nil'.
 method(ClassRef, Selector) ->
     beamtalk_method_resolver:resolve(ClassRef, Selector).
 

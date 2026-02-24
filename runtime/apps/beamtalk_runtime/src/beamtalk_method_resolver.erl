@@ -33,7 +33,7 @@
 %%
 %% Returns a CompiledMethod map or nil if the method is not found.
 %% Raises beamtalk_error for invalid class references.
--spec resolve(ClassRef, selector()) -> compiled_method() | nil when
+-spec resolve(ClassRef, selector()) -> compiled_method() | 'nil' when
     ClassRef :: pid() | atom() | tuple().
 resolve(ClassPid, Selector) when is_pid(ClassPid) ->
     resolve_with_hierarchy(ClassPid, Selector);
@@ -78,7 +78,7 @@ resolve(Other, _Selector) ->
 
 %% @private
 %% @doc Resolve a method, walking the superclass chain if not found locally.
--spec resolve_with_hierarchy(pid(), selector()) -> compiled_method() | nil.
+-spec resolve_with_hierarchy(pid(), selector()) -> compiled_method() | 'nil'.
 resolve_with_hierarchy(ClassPid, Selector) ->
     case gen_server:call(ClassPid, {method, Selector}) of
         nil ->
@@ -94,7 +94,7 @@ resolve_with_hierarchy(ClassPid, Selector) ->
 %% and checks for the method. Recurses until the method is found or
 %% the chain is exhausted (superclass = none). Guarded by
 %% MAX_HIERARCHY_DEPTH to prevent infinite recursion on corrupted hierarchies.
--spec walk_superclass_chain(pid(), selector(), non_neg_integer()) -> compiled_method() | nil.
+-spec walk_superclass_chain(pid(), selector(), non_neg_integer()) -> compiled_method() | 'nil'.
 walk_superclass_chain(_ClassPid, _Selector, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
     ?LOG_WARNING(">> hierarchy walk exceeded ~p levels", [?MAX_HIERARCHY_DEPTH]),
     nil;
