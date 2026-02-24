@@ -479,6 +479,171 @@ impl CoreErlangGenerator {
         Ok(docvec![header, body_doc])
     }
 
+    /// BT-851: Generates a Tier 2 stateful block (ADR 0041 Phase 0).
+    ///
+    /// Emits a block with the stateful calling convention:
+    /// `fun(Param1, ..., ParamN, StateAcc) -> {Result, NewStateAcc}`
+    ///
+    /// Captured-mutated variables are unpacked from `StateAcc` at the start,
+    /// assignments thread through `StateAcc` via `maps:put`, and the final
+    /// expression is wrapped in a `{Result, StateAccN}` tuple.
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// fun (X, StateAcc) ->
+    ///     let Count = call 'maps':'get'('__local__count', StateAcc) in
+    ///     let _Sum = call 'erlang':'+'(Count, X) in
+    ///     let StateAcc1 = call 'maps':'put'('__local__count', _Sum, StateAcc) in
+    ///     {_Sum, StateAcc1}
+    /// end
+    /// ```
+    pub(super) fn generate_block_stateful(
+        &mut self,
+        block: &Block,
+        captured_vars: &[String],
+    ) -> Result<Document<'static>> {
+        self.push_scope();
+
+        // Bind block parameters
+        let mut param_parts: Vec<Document<'static>> = Vec::new();
+        for (i, param) in block.parameters.iter().enumerate() {
+            if i > 0 {
+                param_parts.push(Document::Str(", "));
+            }
+            let var_name = self.fresh_var(&param.name);
+            param_parts.push(Document::String(var_name));
+        }
+
+        // Add StateAcc parameter
+        if !block.parameters.is_empty() {
+            param_parts.push(Document::Str(", "));
+        }
+        param_parts.push(Document::Str("StateAcc"));
+
+        let header = docvec!["fun (", Document::Vec(param_parts), ") -> "];
+
+        // Set up loop body context for StateAcc-based threading
+        let saved_state_version = self.state_version();
+        self.set_state_version(0);
+        let previous_in_loop_body = self.in_loop_body;
+        self.in_loop_body = true;
+
+        let mut docs: Vec<Document<'static>> = Vec::new();
+
+        // Unpack captured-mutated vars from StateAcc
+        for var_name in captured_vars {
+            let core_var = Self::to_core_erlang_var(var_name);
+            let key = Self::local_state_key(var_name);
+            self.bind_var(var_name, &core_var);
+            docs.push(docvec![
+                "let ",
+                Document::String(core_var),
+                " = call 'maps':'get'('",
+                Document::String(key),
+                "', StateAcc) in "
+            ]);
+        }
+
+        // Generate body expressions with state threading
+        self.generate_block_stateful_body(block, &mut docs)?;
+
+        // Restore state
+        self.set_state_version(saved_state_version);
+        self.in_loop_body = previous_in_loop_body;
+        self.pop_scope();
+
+        Ok(docvec![header, Document::Vec(docs)])
+    }
+
+    /// BT-851: Generates the body of a Tier 2 stateful block with state threading.
+    fn generate_block_stateful_body(
+        &mut self,
+        block: &Block,
+        docs: &mut Vec<Document<'static>>,
+    ) -> Result<()> {
+        let filtered_body: Vec<&Expression> = block
+            .body
+            .iter()
+            .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
+            .collect();
+
+        for (i, expr) in filtered_body.iter().enumerate() {
+            let is_last = i == filtered_body.len() - 1;
+
+            if Self::is_field_assignment(expr) {
+                let doc = self.generate_field_assignment_open(expr)?;
+                docs.push(doc);
+                if is_last {
+                    // Return the assigned value and updated state.
+                    // Extract the field name from the assignment target.
+                    let state = self.current_state_var();
+                    if let Expression::Assignment { target, .. } = expr {
+                        if let Expression::FieldAccess { field, .. } = target.as_ref() {
+                            docs.push(docvec![
+                                "{call 'maps':'get'('",
+                                Document::String(field.name.to_string()),
+                                "', ",
+                                Document::String(state.clone()),
+                                "), ",
+                                Document::String(state),
+                                "}"
+                            ]);
+                        }
+                    }
+                }
+            } else if Self::is_local_var_assignment(expr) {
+                let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
+                docs.push(assign_doc);
+                if is_last {
+                    // Last expression is an assignment — result is the assigned value.
+                    // Read it from the updated state map (the _Val was put there).
+                    if let Expression::Assignment { target, .. } = expr {
+                        if let Expression::Identifier(id) = target.as_ref() {
+                            let state = self.current_state_var();
+                            let key = Self::local_state_key(&id.name);
+                            docs.push(docvec![
+                                "{call 'maps':'get'('",
+                                Document::String(key),
+                                "', ",
+                                Document::String(state.clone()),
+                                "), ",
+                                Document::String(state),
+                                "}"
+                            ]);
+                        }
+                    }
+                }
+            } else {
+                // Non-assignment expression
+                if !is_last {
+                    docs.push(Document::Str("let _ = "));
+                }
+                let doc = self.generate_expression(expr)?;
+                if is_last {
+                    // Wrap result in {Result, StateAcc} tuple
+                    let result_var = self.fresh_temp_var("T2Res");
+                    let state = self.current_state_var();
+                    docs.push(docvec![
+                        "let ",
+                        Document::String(result_var.clone()),
+                        " = ",
+                        doc,
+                        " in {",
+                        Document::String(result_var),
+                        ", ",
+                        Document::String(state),
+                        "}"
+                    ]);
+                } else {
+                    docs.push(doc);
+                    docs.push(Document::Str(" in "));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Generates await expression.
     ///
     /// Delegates to `beamtalk_future:await/1` which blocks until the future

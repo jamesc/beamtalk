@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-851: Tier 2 block round-trip test (ADR 0041 Phase 0).
+// Verifies the stateful block calling convention works end-to-end:
+// a block with captured mutations is passed via self-send to a HOM,
+// the HOM calls `value:` with the Tier 2 protocol, and the mutation
+// propagates back to the caller.
+
+TestCase subclass: Tier2BlockRoundTripTest
+
+  testStatefulBlockViaHOM =>
+    actor := Tier2BlockTestActor spawn.
+    self assert: ((actor testRoundTrip) await) equals: 5
