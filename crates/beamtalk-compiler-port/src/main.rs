@@ -590,6 +590,7 @@ fn expr_has_field_mutation(expr: &beamtalk_core::ast::Expression) -> bool {
                 StringSegment::Literal(_) => false,
             })
         }
+        Expression::FieldAccess { receiver, .. } => expr_has_field_mutation(receiver),
         _ => false,
     }
 }
@@ -979,7 +980,12 @@ fn handle_inline_class_definition(
     // BT-839: Generate a dynamic ClassBuilder expression for Path 2 evaluation.
     // This is returned alongside the compiled Core Erlang so the REPL can choose
     // to evaluate via ClassBuilder (no module compilation) instead of loading the binary.
-    let dynamic_class_expr = generate_dynamic_class_expr(&module.classes[0]);
+    // Only attempt Path 2 for single-class modules; multi-class input falls back to Path 1.
+    let dynamic_class_expr = if module.classes.len() == 1 {
+        generate_dynamic_class_expr(&module.classes[0])
+    } else {
+        String::new()
+    };
 
     match beamtalk_core::erlang::generate_module(
         &module,
