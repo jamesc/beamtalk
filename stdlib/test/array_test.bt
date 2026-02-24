@@ -88,5 +88,7 @@ TestCase subclass: ArrayTest
 
   testLiteralEquality =>
     self assert: (#[1, 2, 3]) equals: #[1, 2, 3].
+    @expect dnu
     self deny: (#[1, 2, 3] =:= #[1, 2, 4]).
+    @expect dnu
     self deny: (#[1, 2] =:= #[1, 2, 3])

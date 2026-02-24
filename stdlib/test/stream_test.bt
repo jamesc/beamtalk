@@ -88,7 +88,10 @@ TestCase subclass: StreamTest
 
   testInstanceMethodTypeErrors =>
     // Instance method type errors (constructor errors cannot be tested due to gen_server limitation)
+    @expect type
     self should: [(Stream from: 1) select: "not a block"] raise: #type_error.
+    @expect type
     self should: [(Stream from: 1) collect: 42] raise: #type_error.
     // BT-765: take: with non-integer argument raises type_error
+    @expect all
     self should: [(Stream from: 1) take: "five"] raise: #type_error

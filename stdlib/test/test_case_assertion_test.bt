@@ -53,6 +53,7 @@ TestCase subclass: TestCaseAssertionTest
     // Test should:raise: with matching error kind
     self assert: (TestCase new should: [1 / 0] raise: #badarith) equals: nil.
     // Test should:raise: with does_not_understand error
+    @expect dnu
     self assert: (TestCase new should: [42 nonExistentMethod] raise: #does_not_understand) equals: nil.
     // Test should:raise: block completes normally (no error raised)
     self should: [TestCase new should: [42] raise: #does_not_understand] raise: #assertion_failed.

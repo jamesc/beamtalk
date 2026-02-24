@@ -78,6 +78,7 @@ TestCase subclass: JsonTest
     // Parse invalid JSON produces a parse_error
     self should: [JSON parse: "not json"] raise: #parse_error.
     // Parse with non-string argument produces type_error
+    @expect type
     self should: [JSON parse: 42] raise: #type_error
 
   testClassIdentity =>
