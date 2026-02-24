@@ -342,9 +342,11 @@ impl CoreErlangGenerator {
                         }
                     }
                 }
-            } else if self.is_tier2_value_call(expr) {
+            } else if self.expr_contains_tier2_value_call(expr) {
                 // BT-851: Tier 2 value: calls in non-last positions silently lose
                 // state updates. Reject at compile time until Phase 1 adds chaining.
+                // Checks both top-level value: calls and value: calls nested in
+                // assignment RHS (e.g., `result := aBlock value: x`).
                 return Err(CodeGenError::UnsupportedFeature {
                     feature: "Tier 2 stateful block value: call in non-last position \
                               (state updates would be lost)"
@@ -666,7 +668,7 @@ impl CoreErlangGenerator {
                     " in let {new_state} = call 'erlang':'element'(3, {super_result_var}) in "
                 ));
                 docs.push(doc);
-            } else if self.is_tier2_value_call(expr) {
+            } else if self.expr_contains_tier2_value_call(expr) {
                 // BT-851: Tier 2 value: calls in non-last positions silently lose
                 // state updates. Reject at compile time until Phase 1 adds chaining.
                 return Err(CodeGenError::UnsupportedFeature {
@@ -1290,6 +1292,21 @@ impl CoreErlangGenerator {
         }
         // Fallback: use selector name
         method.selector.name().to_string()
+    }
+
+    /// BT-851: Checks if an expression contains a Tier 2 `value:` call, either at
+    /// the top level or nested inside an assignment RHS.
+    ///
+    /// This catches both `aBlock value: x` and `result := aBlock value: x` where
+    /// the `{Result, NewState}` tuple would be silently mishandled.
+    fn expr_contains_tier2_value_call(&self, expr: &Expression) -> bool {
+        if self.is_tier2_value_call(expr) {
+            return true;
+        }
+        if let Expression::Assignment { value, .. } = expr {
+            return self.is_tier2_value_call(value);
+        }
+        false
     }
 
     /// BT-851: Checks if an expression is a `value:` call on a Tier 2 block parameter.
