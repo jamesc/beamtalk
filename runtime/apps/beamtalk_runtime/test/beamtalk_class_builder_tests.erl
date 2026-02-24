@@ -217,6 +217,22 @@ register_bad_name_non_atom_error_test_() ->
         ]
     end}.
 
+register_bad_superclass_ref_error_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                State = #{
+                    className => 'BT835BadSuperRef',
+                    superclassRef => <<"NotValidRef">>,
+                    fieldSpecs => #{},
+                    methodSpecs => #{}
+                },
+                Result = beamtalk_class_builder:register(State),
+                ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result)
+            end)
+        ]
+    end}.
+
 %%====================================================================
 %% Bootstrap Assertion: Class respondsTo: #classBuilder
 %%====================================================================

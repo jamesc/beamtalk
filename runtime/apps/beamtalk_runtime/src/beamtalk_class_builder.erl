@@ -27,8 +27,8 @@
 %%% ## Builder Lifecycle
 %%%
 %%% After successful registration, `register/1` stops the builder gen_server
-%%% (if `builderPid` is in the state map) via `gen_server:stop/1`. The builder
-%%% is single-use: create, configure, register, done.
+%%% (if `builderPid` is in the state map) via `gen_server:stop/3` with a 5-second
+%%% timeout. The builder is single-use: create, configure, register, done.
 %%%
 %%% ## References
 %%%
@@ -140,7 +140,8 @@ do_register(ClassName, ClassInfo) ->
 %% Checks:
 %%   1. className is an atom (Symbol in Beamtalk terms)
 %%   2. superclassRef is set (not nil)
-%%   3. superclass is not sealed (if it is already registered)
+%%   3. superclassRef is a valid type (atom | pid | #beamtalk_object{})
+%%   4. superclass is not sealed (if it is already registered)
 -spec validate(term(), term()) -> ok | {error, #beamtalk_error{}}.
 validate(nil, _) ->
     Error0 = beamtalk_error:new(missing_parameter, 'ClassBuilder'),
@@ -155,8 +156,23 @@ validate(_ClassName, nil) ->
     Error1 = beamtalk_error:with_selector(Error0, 'superclass:'),
     {error,
         beamtalk_error:with_hint(Error1, <<"superclassRef must be set before calling register">>)};
+validate(_ClassName, SuperclassRef) when
+    is_atom(SuperclassRef); is_pid(SuperclassRef); is_record(SuperclassRef, beamtalk_object)
+->
+    validate_superclass_not_sealed(SuperclassRef);
 validate(_ClassName, SuperclassRef) ->
-    validate_superclass_not_sealed(SuperclassRef).
+    Error0 = beamtalk_error:new(type_error, 'ClassBuilder'),
+    Error1 = beamtalk_error:with_selector(Error0, 'superclass:'),
+    {error,
+        beamtalk_error:with_hint(
+            Error1,
+            iolist_to_binary(
+                io_lib:format(
+                    "superclassRef must be an atom, pid, or class object, got: ~p",
+                    [SuperclassRef]
+                )
+            )
+        )}.
 
 %% @private
 -spec validate_superclass_not_sealed(term()) -> ok | {error, #beamtalk_error{}}.
@@ -241,16 +257,18 @@ build_method_map(MethodSpecs) when is_map(MethodSpecs) ->
 %% @doc Stop the builder gen_server process after successful registration.
 %%
 %% Only called if builderPid is present in the builder state map.
-%% Uses gen_server:stop/1 which waits for the process to terminate.
+%% Uses gen_server:stop/3 with a 5-second timeout. Catches exit signals for
+%% the case where the builder exits between the call and the stop (TOCTOU).
 %%
 %% Not called in error cases — the caller may wish to retry or inspect the builder.
 -spec maybe_stop_builder(pid() | undefined) -> ok.
 maybe_stop_builder(undefined) ->
     ok;
 maybe_stop_builder(Pid) when is_pid(Pid) ->
-    case is_process_alive(Pid) of
-        true ->
-            gen_server:stop(Pid, normal, 5000);
-        false ->
-            ok
+    try
+        gen_server:stop(Pid, normal, 5000)
+    catch
+        exit:noproc -> ok;
+        exit:normal -> ok;
+        exit:{noproc, _} -> ok
     end.
