@@ -78,7 +78,7 @@ register_with_methods_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                MethodFun = fun(Self, [], State) ->
+                MethodFun = fun(Self, _Args, State) ->
                     {reply, maps:get(val, State, 0), State, Self}
                 end,
                 State = #{

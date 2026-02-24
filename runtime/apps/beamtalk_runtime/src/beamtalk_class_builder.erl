@@ -114,7 +114,13 @@ do_register(ClassName, ClassInfo) ->
                     ?LOG_WARNING("ClassBuilder update_class failed", #{
                         class => ClassName, reason => Reason, module => ?MODULE
                     }),
-                    {error, Reason}
+                    Error0 = beamtalk_error:new(internal_error, 'ClassBuilder'),
+                    Error1 = beamtalk_error:with_selector(Error0, register),
+                    Error = beamtalk_error:with_hint(
+                        Error1,
+                        iolist_to_binary(io_lib:format("update_class failed: ~p", [Reason]))
+                    ),
+                    {error, Error}
             end;
         {error, Reason} ->
             Error0 = beamtalk_error:new(internal_error, 'ClassBuilder'),
@@ -244,7 +250,7 @@ maybe_stop_builder(undefined) ->
 maybe_stop_builder(Pid) when is_pid(Pid) ->
     case is_process_alive(Pid) of
         true ->
-            gen_server:stop(Pid);
+            gen_server:stop(Pid, normal, 5000);
         false ->
             ok
     end.

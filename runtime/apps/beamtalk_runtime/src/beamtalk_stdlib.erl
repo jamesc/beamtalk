@@ -176,12 +176,13 @@ ensure_class_registered(Mod, ClassName) ->
                 class => ClassName
             }),
             ok;
-        Class:Reason ->
+        Class:Reason:Stacktrace ->
             ?LOG_ERROR("Failed to register class", #{
                 module => Mod,
                 class => ClassName,
                 error_class => Class,
-                reason => Reason
+                reason => Reason,
+                stacktrace => Stacktrace
             }),
             ok
     end.
