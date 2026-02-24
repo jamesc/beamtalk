@@ -399,7 +399,7 @@ Warning: Assignment to 'count' inside stored closure has no effect on outer scop
   8 │ myBlock := [count := count + 1].
     │             ^^^^^^^^^^^^^^^^^
                   
-Closures capture variables by value. The outer 'count' won't change.
+Stored closures do not get state threading. The outer 'count' won't change.
 
 Fix: Use control flow directly:
 
