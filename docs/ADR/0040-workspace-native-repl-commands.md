@@ -31,7 +31,7 @@ Two singleton objects exist today:
 | Binding | Class | Current Scope |
 |---------|-------|---------------|
 | `Beamtalk` | SystemDictionary | VM reflection: `allClasses`, `classNamed:`, `globals`, `version` |
-| `Workspace` | WorkspaceEnvironment | Actor introspection: `actors`, `actorAt:`, `actorsOf:`, `sessions` |
+| `Workspace` | WorkspaceInterface | Actor introspection: `actors`, `actorAt:`, `actorsOf:`, `sessions` |
 
 Three problems with the current design:
 
@@ -55,7 +55,7 @@ Three problems with the current design:
 
 ### 1. Facade/Dictionary Split
 
-**Separate the typed facade from the namespace dictionary.** The facades (`BeamtalkInterface`, `WorkspaceEnvironment`) provide typed, discoverable methods. The `globals` accessor on each returns a plain `Dictionary` — the same class for both.
+**Separate the typed facade from the namespace dictionary.** The facades (`BeamtalkInterface`, `WorkspaceInterface`) provide typed, discoverable methods. The `globals` accessor on each returns a plain `Dictionary` — the same class for both.
 
 ```text
 Pharo:
@@ -66,7 +66,7 @@ Beamtalk:
   Beamtalk          → BeamtalkInterface      (facade: version, help:, allClasses)
   Beamtalk globals  → Dictionary             (dictionary: at:, keys, values)
 
-  Workspace         → WorkspaceEnvironment   (facade: classes, actors, load:, test)
+  Workspace         → WorkspaceInterface   (facade: classes, actors, load:, test)
   Workspace globals → Dictionary             (dictionary: at:, keys, values)
 ```
 
@@ -89,7 +89,7 @@ The system facade. Classes, version, documentation. Read-only for user code.
 
 `allClasses` and `classNamed:` are typed convenience methods that query the class registry directly (for liveness). `globals` returns an immutable snapshot of the system namespace for inspection. Both views contain the same classes, but `allClasses` is always up-to-date while `globals` is a point-in-time snapshot. (`Class >> isClass` already exists at `stdlib/src/Class.bt:44`.)
 
-**`Workspace`** (class: `WorkspaceEnvironment`) — *"What is my working context?"*
+**`Workspace`** (class: `WorkspaceInterface`) — *"What is my working context?"*
 
 The project facade. Loaded classes, actors, project operations. Mutable.
 
@@ -206,7 +206,7 @@ Reloaded: Counter (new code loaded)
 {#Transcript: #Actor<TranscriptStream,0.90.0>,
  #Counter: Counter,
  #Beamtalk: #Actor<BeamtalkInterface,0.89.0>,
- #Workspace: #Actor<WorkspaceEnvironment,0.91.0>}
+ #Workspace: #Actor<WorkspaceInterface,0.91.0>}
 
 >> Beamtalk globals at: #Counter
 Counter
@@ -317,7 +317,7 @@ Shell-internal commands (`f()`, `v()`, `b()`) manage shell state with no languag
 | Newspeak | `platform` (injected) | None — modules are classes | N/A | N/A (no globals) |
 | Elixir | `Code`, `System` modules | N/A | Module (`r/1`) | N/A (module functions) |
 | Erlang | `erlang`, `code` modules | N/A | Module (`c:c/1`) | N/A (module functions) |
-| **Beamtalk** | **`BeamtalkInterface`** facade + `Dictionary` globals | **`WorkspaceEnvironment`** facade + `Dictionary` globals | **Class** (`reload`) | **Plain `Dictionary` on both** |
+| **Beamtalk** | **`BeamtalkInterface`** facade + `Dictionary` globals | **`WorkspaceInterface`** facade + `Dictionary` globals | **Class** (`reload`) | **Plain `Dictionary` on both** |
 
 ## User Impact
 
@@ -465,7 +465,7 @@ Workspace reload: Counter            // reload the file Counter came from
 - LSP can provide completions and diagnostics for typed facade methods
 - Remote REPL clients use the same API without parsing `:` prefixes
 - `:` shortcuts remain as ergonomic aliases — no loss of REPL productivity
-- Establishes clear domain boundaries: `BeamtalkInterface` = system facade, `WorkspaceEnvironment` = project facade
+- Establishes clear domain boundaries: `BeamtalkInterface` = system facade, `WorkspaceInterface` = project facade
 
 ### Negative
 
@@ -512,14 +512,14 @@ Add `sourceFile` and `reload` methods to `Behaviour`. Implement backing primitiv
 - `runtime/apps/beamtalk_runtime/src/beamtalk_object_class.erl` — store source file in class metadata
 - `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_load.erl` — record source file on class after compilation
 
-### Phase 3: Expand WorkspaceEnvironment with project operations
+### Phase 3: Expand WorkspaceInterface with project operations
 
-Add `classes`, `globals`, `load:`, `clear`, `test`, `test:` to WorkspaceEnvironment. Remove `sessions`. The `globals` method returns a plain `Dictionary`.
+Rename `WorkspaceEnvironment` to `WorkspaceInterface` (matching `BeamtalkInterface` naming convention). Add `classes`, `globals`, `load:`, `clear`, `test`, `test:`. Remove `sessions`. The `globals` method returns a plain `Dictionary`.
 
-Implement backing primitives in `beamtalk_workspace_environment.erl`, extracting logic from existing `beamtalk_repl_ops_load.erl` and `beamtalk_repl_ops_eval.erl`.
+Implement backing primitives in `beamtalk_workspace_environment.erl` (rename to `beamtalk_workspace_interface.erl`), extracting logic from existing `beamtalk_repl_ops_load.erl` and `beamtalk_repl_ops_eval.erl`.
 
 **Affected files:**
-- `stdlib/src/WorkspaceEnvironment.bt` — add/remove method declarations
+- `stdlib/src/WorkspaceInterface.bt` — add/remove method declarations
 - `runtime/apps/beamtalk_workspace/src/beamtalk_workspace_environment.erl` — add primitive handlers
 - `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_load.erl` — extract shared logic
 - `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_eval.erl` — extract clear logic
@@ -561,7 +561,7 @@ Add BUnit tests for all new facade and Behaviour methods. Add e2e tests exercisi
 | Component | Change |
 |-----------|--------|
 | `stdlib/src/SystemDictionary.bt` | Rename to `BeamtalkInterface.bt` |
-| `stdlib/src/WorkspaceEnvironment.bt` | Add `classes`, `globals`, `load:`, `clear`, `test`, `test:`; remove `sessions` |
+| `stdlib/src/WorkspaceInterface.bt` | Add `classes`, `globals`, `load:`, `clear`, `test`, `test:`; remove `sessions` |
 | `stdlib/src/Behaviour.bt` | Add `sourceFile`, `reload` |
 | `beamtalk_system_dictionary.erl` | Rename to `beamtalk_interface.erl`; add `help:`, `help:selector:` |
 | `beamtalk_workspace_environment.erl` | New primitive handlers for project ops + `globals` |
