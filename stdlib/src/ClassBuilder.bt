@@ -1,0 +1,119 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ClassBuilder — Fluent builder for creating and registering Beamtalk classes.
+///
+/// Used by the compiler for all compiled class definitions (Path 1, ADR 0038)
+/// and directly for dynamic class creation at runtime (Path 2).
+///
+/// ClassBuilder is an Actor subclass — each builder instance is a short-lived
+/// gen_server process that accumulates configuration via cascaded messages.
+/// The `register` method is a terminal operation: it registers the class with
+/// the runtime, stops the builder process, and returns the new class object.
+///
+/// ## Compiled use (conceptual — codegen emits Core Erlang, not Beamtalk):
+/// ```beamtalk
+/// Object classBuilder
+///   name: #Counter;
+///   fields: #{ #count => 0 };
+///   methods: #{ #increment => [...], #value => [...] };
+///   register
+/// ```
+///
+/// ## Dynamic use (REPL, frameworks, metaprogramming):
+/// ```beamtalk
+/// cls := Object classBuilder
+///   name: #Greeter;
+///   addMethod: #greet body: [ 'Hello!' ];
+///   register.
+/// Greeter new greet   // => Hello!
+/// ```
+///
+/// ## References
+/// * ADR 0038: `docs/ADR/0038-subclass-classbuilder-protocol.md`
+/// * Pattern: `stdlib/src/Actor.bt` (ClassBuilder is Actor subclass)
+
+Actor subclass: ClassBuilder
+  state: className     = nil
+  state: superclassRef = nil
+  state: fieldSpecs    = #{}
+  state: methodSpecs   = #{}
+  state: modifiers     = #()
+
+  /// Set the class name (a Symbol).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder name: #Counter
+  /// ```
+  name: aSymbol =>
+    className := aSymbol
+
+  /// Set the superclass reference.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder superclass: Object
+  /// ```
+  superclass: aClass =>
+    superclassRef := aClass
+
+  /// Set all fields at once (used by codegen).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder fields: #{ #count => 0 }
+  /// ```
+  fields: aDict =>
+    fieldSpecs := aDict
+
+  /// Set all methods at once (used by codegen).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder methods: #{ #increment => fun }
+  /// ```
+  methods: aDict =>
+    methodSpecs := aDict
+
+  /// Add a single field with a default value (fluent API for dynamic use).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder addField: #name default: 'Rex'
+  /// ```
+  addField: aName default: aValue =>
+    fieldSpecs := fieldSpecs at: aName put: aValue
+
+  /// Add a single method as a block (fluent API for dynamic use).
+  /// The block receives self as first argument.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder addMethod: #greet body: [ 'Hello!' ]
+  /// ```
+  addMethod: aSelector body: aBlock =>
+    methodSpecs := methodSpecs at: aSelector put: aBlock
+
+  /// Apply a class modifier (#abstract, #sealed, #typed).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder modifier: #sealed
+  /// ```
+  modifier: aSymbol =>
+    modifiers := modifiers add: aSymbol
+
+  /// Register the class with the runtime and return the new class object.
+  /// Stops the builder process after registration — the builder is
+  /// single-use and should not be retained.
+  ///
+  /// For compiled classes (Path 1): called from module init, wires the
+  /// BEAM module's pre-compiled methods into the class gen_server.
+  /// If the class already exists (hot reload), updates the existing
+  /// gen_server state via `update_class/2` rather than failing.
+  ///
+  /// For dynamic classes (Path 2): creates a class gen_server with
+  /// closure-based methods, no BEAM module required.
+  register =>
+    @intrinsic classBuilderRegister

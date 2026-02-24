@@ -53,3 +53,14 @@ sealed Behaviour subclass: Class
   /// Counter class   // => Metaclass
   /// ```
   sealed class => @primitive "classClass"
+
+  /// Return a new ClassBuilder for creating a subclass of the receiver.
+  ///
+  /// The builder is a short-lived Actor that accumulates class configuration
+  /// via cascaded messages. Call `register` as the terminal message.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Object classBuilder name: #Foo; register
+  /// ```
+  sealed classBuilder => ClassBuilder spawnWith: #{#superclassRef => self}
