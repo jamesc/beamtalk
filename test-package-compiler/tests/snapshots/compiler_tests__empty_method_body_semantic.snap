@@ -2,4 +2,6 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: output
 ---
-No semantic errors
+Semantic errors (2):
+  - Method `doNothing` has an empty body
+  - Method `classEmpty` has an empty body

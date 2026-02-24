@@ -152,10 +152,6 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
             (ExpectCategory::Dnu, Some(DiagnosticCategory::Dnu))
                 | (ExpectCategory::Type, Some(DiagnosticCategory::Type))
                 | (ExpectCategory::Unused, Some(DiagnosticCategory::Unused))
-                | (
-                    ExpectCategory::EmptyBody,
-                    Some(DiagnosticCategory::EmptyBody)
-                )
         )
 }
 
@@ -588,38 +584,35 @@ mod tests {
     // ── BT-631: Empty method body warnings ──
 
     #[test]
-    fn warn_empty_instance_method_body() {
+    fn error_empty_instance_method_body() {
         let source = "Object subclass: Foo\n  doNothing =>";
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);
         let diagnostics = compute_diagnostics(&module, parse_diags);
 
-        let has_warning = diagnostics.iter().any(|d| {
+        let has_error = diagnostics.iter().any(|d| {
             d.message.contains("doNothing")
                 && d.message.contains("empty body")
-                && d.severity == crate::source_analysis::Severity::Warning
+                && d.severity == crate::source_analysis::Severity::Error
         });
-        assert!(
-            has_warning,
-            "Expected empty body warning, got: {diagnostics:?}"
-        );
+        assert!(has_error, "Expected empty body error, got: {diagnostics:?}");
     }
 
     #[test]
-    fn warn_empty_class_method_body() {
+    fn error_empty_class_method_body() {
         let source = "Object subclass: Foo\n  class reset =>";
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);
         let diagnostics = compute_diagnostics(&module, parse_diags);
 
-        let has_warning = diagnostics.iter().any(|d| {
+        let has_error = diagnostics.iter().any(|d| {
             d.message.contains("reset")
                 && d.message.contains("empty body")
-                && d.severity == crate::source_analysis::Severity::Warning
+                && d.severity == crate::source_analysis::Severity::Error
         });
         assert!(
-            has_warning,
-            "Expected empty body warning for class method, got: {diagnostics:?}"
+            has_error,
+            "Expected empty body error for class method, got: {diagnostics:?}"
         );
     }
 
@@ -638,20 +631,17 @@ mod tests {
     }
 
     #[test]
-    fn empty_body_warning_has_hint() {
+    fn empty_body_error_has_hint() {
         let source = "Object subclass: Foo\n  doNothing =>";
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);
         let diagnostics = compute_diagnostics(&module, parse_diags);
 
-        let warning = diagnostics
+        let error = diagnostics
             .iter()
             .find(|d| d.message.contains("empty body"));
-        assert!(warning.is_some(), "Expected warning, got: {diagnostics:?}");
-        assert!(
-            warning.unwrap().hint.is_some(),
-            "Warning should have a hint"
-        );
+        assert!(error.is_some(), "Expected error, got: {diagnostics:?}");
+        assert!(error.unwrap().hint.is_some(), "Error should have a hint");
     }
 
     // ── BT-782: @expect directive ──

@@ -484,22 +484,24 @@ pub fn check_stdlib_name_shadowing(module: &Module, diagnostics: &mut Vec<Diagno
     }
 }
 
-/// BT-631: Warn about empty method bodies.
+/// BT-859: Error on empty method bodies.
 ///
-/// Methods declared with `=>` but no body expressions are likely incomplete.
-/// The codegen returns `self` for these, but users should be aware.
+/// Methods declared with `=>` but no body expressions are a compile error.
+/// Use `self notImplemented` for work-in-progress stubs, or
+/// `self subclassResponsibility` for abstract interface contracts.
 pub(crate) fn check_empty_method_bodies(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
     for class in &module.classes {
         for method in class.methods.iter().chain(class.class_methods.iter()) {
             if method.body.is_empty() {
                 let selector = method.selector.name();
-                let mut diag = Diagnostic::warning(
-                    format!("Method `{selector}` has an empty body and will return `self`"),
+                let mut diag = Diagnostic::error(
+                    format!("Method `{selector}` has an empty body"),
                     method.span,
                 )
                 .with_category(DiagnosticCategory::EmptyBody);
-                diag.hint =
-                    Some("Add an expression after `=>`, or remove the method if unneeded".into());
+                diag.hint = Some(
+                    "Use `self notImplemented` for stubs, or `self subclassResponsibility` for abstract methods".into(),
+                );
                 diagnostics.push(diag);
             }
         }
@@ -507,13 +509,14 @@ pub(crate) fn check_empty_method_bodies(module: &Module, diagnostics: &mut Vec<D
     for standalone in &module.method_definitions {
         if standalone.method.body.is_empty() {
             let selector = standalone.method.selector.name();
-            let mut diag = Diagnostic::warning(
-                format!("Method `{selector}` has an empty body and will return `self`"),
+            let mut diag = Diagnostic::error(
+                format!("Method `{selector}` has an empty body"),
                 standalone.method.span,
             )
             .with_category(DiagnosticCategory::EmptyBody);
-            diag.hint =
-                Some("Add an expression after `=>`, or remove the method if unneeded".into());
+            diag.hint = Some(
+                "Use `self notImplemented` for stubs, or `self subclassResponsibility` for abstract methods".into(),
+            );
             diagnostics.push(diag);
         }
     }

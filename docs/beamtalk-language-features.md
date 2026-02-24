@@ -300,6 +300,25 @@ Object subclass: Validator
 
 `^` at the top level of a method body is an early return (the method exits immediately). `^` inside a block argument causes the *method* to exit with that value.
 
+### Abstract and Stub Methods
+
+Empty method bodies are a **compile-time error**. Use one of these two explicit forms instead:
+
+```beamtalk
+// Abstract interface contract — must be overridden by subclasses
+area => self subclassResponsibility
+
+// Work-in-progress stub — not yet implemented
+processPayment => self notImplemented
+```
+
+| Method | Purpose | Error message |
+|--------|---------|---------------|
+| `subclassResponsibility` | Abstract method; subclass must override | `"This method is abstract and must be overridden by a subclass"` |
+| `notImplemented` | Work-in-progress stub | `"Method not yet implemented"` |
+
+Both methods raise a runtime error with a clear message. The distinction is intent: `subclassResponsibility` signals an interface contract, while `notImplemented` marks incomplete work.
+
 ---
 
 ## Gradual Typing (ADR 0025)
@@ -963,7 +982,6 @@ anything                    // any diagnostic suppressed
 | `dnu` | Does-not-understand hints |
 | `type` | Type mismatch warnings |
 | `unused` | Unused variable warnings |
-| `empty-method` | Empty method body warnings |
 | `all` | Any diagnostic on the following expression |
 
 **Stale directives:** If `@expect` does not suppress any diagnostic (because no matching diagnostic exists on the following expression), the compiler emits an error to prevent directives from silently becoming out of date.

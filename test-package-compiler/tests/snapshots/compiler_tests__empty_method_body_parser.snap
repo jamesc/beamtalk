@@ -9,16 +9,16 @@ Module {
             name: Identifier {
                 name: "EmptyActor",
                 span: Span {
-                    start: 182,
-                    end: 192,
+                    start: 260,
+                    end: 270,
                 },
             },
             superclass: Some(
                 Identifier {
                     name: "Actor",
                     span: Span {
-                        start: 166,
-                        end: 171,
+                        start: 244,
+                        end: 249,
                     },
                 },
             ),
@@ -30,8 +30,8 @@ Module {
                     name: Identifier {
                         name: "value",
                         span: Span {
-                            start: 202,
-                            end: 207,
+                            start: 280,
+                            end: 285,
                         },
                     },
                     type_annotation: None,
@@ -41,14 +41,14 @@ Module {
                                 0,
                             ),
                             Span {
-                                start: 210,
-                                end: 211,
+                                start: 288,
+                                end: 289,
                             },
                         ),
                     ),
                     span: Span {
-                        start: 195,
-                        end: 211,
+                        start: 273,
+                        end: 289,
                     },
                 },
             ],
@@ -64,8 +64,8 @@ Module {
                     kind: Primary,
                     doc_comment: None,
                     span: Span {
-                        start: 215,
-                        end: 224,
+                        start: 293,
+                        end: 302,
                     },
                 },
                 MethodDefinition {
@@ -79,21 +79,21 @@ Module {
                                 Identifier {
                                     name: "self",
                                     span: Span {
-                                        start: 243,
-                                        end: 247,
+                                        start: 321,
+                                        end: 325,
                                     },
                                 },
                             ),
                             field: Identifier {
                                 name: "value",
                                 span: Span {
-                                    start: 248,
-                                    end: 253,
+                                    start: 326,
+                                    end: 331,
                                 },
                             },
                             span: Span {
-                                start: 243,
-                                end: 253,
+                                start: 321,
+                                end: 331,
                             },
                         },
                     ],
@@ -102,8 +102,8 @@ Module {
                     kind: Primary,
                     doc_comment: None,
                     span: Span {
-                        start: 231,
-                        end: 253,
+                        start: 309,
+                        end: 331,
                     },
                 },
             ],
@@ -119,55 +119,63 @@ Module {
                     kind: Primary,
                     doc_comment: None,
                     span: Span {
-                        start: 257,
-                        end: 262,
+                        start: 335,
+                        end: 340,
                     },
                 },
             ],
             class_variables: [],
             doc_comment: None,
             span: Span {
-                start: 166,
-                end: 262,
+                start: 244,
+                end: 340,
             },
         },
     ],
     method_definitions: [],
     expressions: [],
     span: Span {
-        start: 166,
-        end: 276,
+        start: 244,
+        end: 354,
     },
     leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {
-                start: 166,
-                end: 171,
+                start: 244,
+                end: 249,
             },
             kind: Line,
         },
         Comment {
             content: "// SPDX-License-Identifier: Apache-2.0",
             span: Span {
-                start: 166,
-                end: 171,
+                start: 244,
+                end: 249,
             },
             kind: Line,
         },
         Comment {
-            content: "// Test empty method body codegen (BT-631)",
+            content: "// Test empty method bodies (BT-859)",
             span: Span {
-                start: 166,
-                end: 171,
+                start: 244,
+                end: 249,
             },
             kind: Line,
         },
         Comment {
-            content: "// Empty methods should return self instead of nil.",
+            content: "// Empty method bodies are a compile-time error.",
             span: Span {
-                start: 166,
-                end: 171,
+                start: 244,
+                end: 249,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Developers must use `self notImplemented` or `self subclassResponsibility` instead.",
+            span: Span {
+                start: 244,
+                end: 249,
             },
             kind: Line,
         },
