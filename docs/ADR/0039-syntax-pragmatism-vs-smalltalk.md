@@ -96,15 +96,17 @@ count := 0
 count := count + 1
 self doSomething
 
-// Semicolons optional for multiple statements on one line
-count := 0; count := count + 1
+// Periods still work as explicit separators (useful inside blocks)
+[count := 0. count := count + 1]
 ```
 
 **Rationale:**
 - Period-as-terminator feels archaic to developers accustomed to Python, Ruby, Go, or Kotlin
 - Newlines naturally end statements in most modern languages
 - Reduces visual noise without sacrificing readability
-- Semicolons remain available for the (rare) case of multiple statements on one line
+- Periods remain available as explicit separators where newlines are impractical (e.g., single-line blocks)
+
+**Note:** Semicolons (`;`) are **not** statement separators — they are cascade operators (see "What We Keep" above).
 
 ### 4. Field Access: Add `self.field` Notation
 

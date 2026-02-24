@@ -147,14 +147,17 @@ count := 0
 count := count + 1
 self doSomething
 
-// Semicolons optional for multiple statements on one line
-count := 0; count := count + 1
+// Periods still work as explicit separators (useful inside blocks)
+[count := 0. count := count + 1]
 ```
 
 **Why change:**
 - Period-as-terminator feels archaic
 - Newlines naturally end statements in most modern languages
 - Less visual noise
+- Periods remain available as explicit separators where newlines are impractical (e.g., single-line blocks)
+
+**Note:** Semicolons (`;`) are **not** statement separators — they are cascade operators (see [Cascades](#cascades) above).
 
 ### Return: `^value` → `^value` (Keep, But Implicit at End)
 
@@ -360,7 +363,7 @@ In Beamtalk, `Object subclass: Counter` is **parsed as syntax**, not a message s
 | Symbol | `#name` | `#ok`, `#error` |
 | Tuple | `{a, b, c}` | `{1, "two", 3}` |
 | List | `#(a, b, c)` | `#(1, 2, 3)` |
-| Statement separator | newline or `;` | implicit |
+| Statement separator | newline or `.` | implicit |
 
 ---
 
