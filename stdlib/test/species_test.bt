@@ -1,0 +1,124 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the species pattern on Collection (BT-822).
+//
+// Verifies that collect:, select:, and reject: return the same
+// collection type as the receiver (not always a List).
+
+TestCase subclass: SpeciesTest
+
+  // ===========================================================================
+  // species method
+  // ===========================================================================
+
+  testListSpecies =>
+    self assert: (#(1, 2, 3) species) equals: List
+
+  testArraySpecies =>
+    self assert: (#[1, 2, 3] species) equals: Array
+
+  // ===========================================================================
+  // List species — collect:/select:/reject: return List
+  // ===========================================================================
+
+  testListCollectReturnsListType =>
+    result := #(1, 2, 3) collect: [:x | x * 2].
+    self assert: (result class) equals: List.
+    self assert: result equals: #(2, 4, 6)
+
+  testListSelectReturnsListType =>
+    result := #(1, 2, 3, 4) select: [:x | x > 2].
+    self assert: (result class) equals: List.
+    self assert: result equals: #(3, 4)
+
+  testListRejectReturnsListType =>
+    result := #(1, 2, 3, 4) reject: [:x | x > 2].
+    self assert: (result class) equals: List.
+    self assert: result equals: #(1, 2)
+
+  // ===========================================================================
+  // Array species — collect:/select:/reject: return Array
+  // ===========================================================================
+
+  testArrayCollectReturnsArrayType =>
+    result := #[1, 2, 3] collect: [:x | x * 2].
+    self assert: (result class) equals: Array.
+    self assert: result equals: #[2, 4, 6]
+
+  testArraySelectReturnsArrayType =>
+    result := #[1, 2, 3, 4] select: [:x | x > 2].
+    self assert: (result class) equals: Array.
+    self assert: result equals: #[3, 4]
+
+  testArrayRejectReturnsArrayType =>
+    result := #[1, 2, 3, 4] reject: [:x | x > 2].
+    self assert: (result class) equals: Array.
+    self assert: result equals: #[1, 2]
+
+  // ===========================================================================
+  // Set species — collect:/select: return Set
+  // ===========================================================================
+
+  testSetCollectReturnsSetType =>
+    s := (Set new fromList: #(1, 2, 3)).
+    result := s collect: [:x | x * 2].
+    self assert: (result class) equals: Set
+
+  testSetSelectReturnsSetType =>
+    s := (Set new fromList: #(1, 2, 3, 4)).
+    result := s select: [:x | x > 2].
+    self assert: (result class) equals: Set.
+    self assert: (result includes: 3).
+    self assert: (result includes: 4).
+    self deny: (result includes: 1)
+
+  // ===========================================================================
+  // withAll: factories
+  // ===========================================================================
+
+  testListWithAll =>
+    result := List withAll: #(1, 2, 3).
+    self assert: (result class) equals: List.
+    self assert: result equals: #(1, 2, 3)
+
+  testArrayWithAll =>
+    result := Array withAll: #(1, 2, 3).
+    self assert: (result class) equals: Array.
+    self assert: (result at: 1) equals: 1.
+    self assert: (result at: 3) equals: 3
+
+  testSetWithAll =>
+    result := Set withAll: #(1, 2, 2, 3).
+    self assert: (result class) equals: Set.
+    self assert: (result size) equals: 3.
+    self assert: (result includes: 1).
+    self assert: (result includes: 3)
+
+  testTupleWithAll =>
+    result := Tuple withAll: #(1, 2, 3).
+    self assert: (result class) equals: Tuple.
+    self assert: (result size) equals: 3
+
+  testStringWithAll =>
+    result := String withAll: #("h", "e", "l", "l", "o").
+    self assert: (result class) equals: String.
+    self assert: result equals: "hello"
+
+  // ===========================================================================
+  // Dictionary collect: maps values preserving keys
+  // ===========================================================================
+
+  testDictionaryCollectPreservesKeys =>
+    d := #{#a => 1, #b => 2, #c => 3}.
+    result := d collect: [:v | v * 10].
+    self assert: (result class) equals: Dictionary.
+    self assert: (result at: #a) equals: 10.
+    self assert: (result at: #b) equals: 20.
+    self assert: (result at: #c) equals: 30
+
+  testDictionaryCollectReturnsDictionary =>
+    d := #{#x => 5}.
+    result := d collect: [:v | v + 1].
+    self assert: (result class) equals: Dictionary.
+    self assert: (result at: #x) equals: 6

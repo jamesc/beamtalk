@@ -394,6 +394,14 @@ impl TypeChecker {
                 InferredType::Known("List".into())
             }
 
+            // Array literal → Array
+            Expression::ArrayLiteral { elements, .. } => {
+                for elem in elements {
+                    self.infer_expr(elem, hierarchy, env, in_abstract_method);
+                }
+                InferredType::Known("Array".into())
+            }
+
             // String interpolation → String
             Expression::StringInterpolation { segments, .. } => {
                 for seg in segments {

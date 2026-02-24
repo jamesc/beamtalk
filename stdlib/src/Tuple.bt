@@ -107,3 +107,14 @@ sealed Collection subclass: Tuple
   /// result atRandom            // => random element from result tuple
   /// ```
   atRandom => @primitive "atRandom"
+
+  /// Create a Tuple from a list of elements.
+  ///
+  /// Used by the species pattern on Collection so that `collect:` and
+  /// `select:` on a Tuple return a Tuple.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Tuple class withAll: #(1, 2, 3)   // => {1, 2, 3}
+  /// ```
+  class withAll: list: List -> Tuple => @primitive "withAll:"

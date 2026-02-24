@@ -244,6 +244,11 @@ fn generate_list_misc_bif(selector: &str, params: &[String]) -> Option<Document<
         )),
         "stream" => Some(Document::Str("call 'beamtalk_stream':'on'(Self)")),
         "atRandom" => Some(Document::Str("call 'beamtalk_random':'atRandom'(Self)")),
+        // Class-side factory: List class withAll: list is identity (list is already a List)
+        "withAll:" => {
+            let p0 = params.first().map_or("_List", String::as_str);
+            Some(Document::String(p0.to_string()))
+        }
         _ => None,
     }
 }

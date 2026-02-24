@@ -47,6 +47,7 @@ const FRAGMENTS: &[&str] = &[
     "super foo",
     "#(1, 2, 3)",
     "#{a => 1}",
+    "#[1, 2, 3]",
     "#symbol",
     "$A",
     "x foo bar",
@@ -178,6 +179,7 @@ fn has_error_node(expr: &Expression) -> bool {
         Expression::ListLiteral { elements, tail, .. } => {
             elements.iter().any(has_error_node) || tail.as_ref().is_some_and(|t| has_error_node(t))
         }
+        Expression::ArrayLiteral { elements, .. } => elements.iter().any(has_error_node),
         Expression::StringInterpolation { segments, .. } => segments.iter().any(|seg| {
             if let crate::ast::StringSegment::Interpolation(expr) = seg {
                 has_error_node(expr)

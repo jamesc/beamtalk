@@ -519,6 +519,12 @@ impl Analyser {
                 }
             }
 
+            ArrayLiteral { elements, .. } => {
+                for elem in elements {
+                    self.analyse_expression(elem, None);
+                }
+            }
+
             Literal(..)
             | Super(..)
             | Error { .. }

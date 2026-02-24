@@ -29,6 +29,33 @@ abstract Object subclass: Collection
   /// Return a developer-readable string representation.
   printString -> String => self subclassResponsibility
 
+  // === Species protocol ===
+
+  /// Return the class used to build results from collection operations.
+  ///
+  /// Used by `collect:`, `select:`, and `reject:` to return the same
+  /// collection type as the receiver. Sealed subclasses override this.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2) species         // => List
+  /// #[1, 2] species         // => Array
+  /// ```
+  species => self class
+
+  /// Factory method — create a collection of this type from a list.
+  ///
+  /// Default implementation returns the list as-is, giving `List` results
+  /// for custom user-defined Collection subclasses. Sealed built-in types
+  /// (List, Set, Array, Tuple, String) override this to produce their own type.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// List withAll: #(1, 2, 3)         // => #(1, 2, 3)
+  /// Array withAll: #(1, 2, 3)        // => #[1, 2, 3]
+  /// ```
+  class withAll: list: List => list
+
   // === Shared protocol (implemented in terms of abstract methods) ===
 
   /// Test if the collection has no elements.
@@ -83,27 +110,31 @@ abstract Object subclass: Collection
 
   /// Collect results of evaluating `block` on each element.
   ///
-  /// Builds the result in reverse using `addFirst:` then reverses once.
+  /// Returns a collection of the same type as the receiver (species pattern).
+  /// Builds the result in reverse using `addFirst:` then converts via `species withAll:`.
   ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2, 3) collect: [:x | x * 2]  // => #(2, 4, 6)
   /// ```
   collect: block: Block =>
-    (self inject: #() into: [:acc :each | acc addFirst: (block value: each)]) reversed
+    result := (self inject: #() into: [:acc :each | acc addFirst: (block value: each)]) reversed.
+    self species withAll: result
 
   /// Select elements for which `block` returns true.
   ///
-  /// Builds the result in reverse using `addFirst:` then reverses once.
+  /// Returns a collection of the same type as the receiver (species pattern).
+  /// Builds the result in reverse using `addFirst:` then converts via `species withAll:`.
   ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2, 3, 4) select: [:x | x > 2]  // => #(3, 4)
   /// ```
   select: block: Block =>
-    (self inject: #() into: [:acc :each |
+    result := (self inject: #() into: [:acc :each |
       (block value: each) ifTrue: [acc addFirst: each] ifFalse: [acc]
-    ]) reversed
+    ]) reversed.
+    self species withAll: result
 
   /// Reject elements for which `block` returns true.
   ///

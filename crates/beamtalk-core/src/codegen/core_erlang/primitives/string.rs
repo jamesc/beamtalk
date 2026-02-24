@@ -202,6 +202,12 @@ fn generate_string_misc_bif(selector: &str, params: &[String]) -> Option<Documen
             ")"
         ]),
         "stream" => Some(Document::Str("call 'beamtalk_stream':'on'(Self)")),
+        // Class-side factory: String class withAll: list joins grapheme list into a String
+        "withAll:" => Some(docvec![
+            "call 'beamtalk_string_ops':'join'(",
+            p0.to_string(),
+            ")"
+        ]),
         _ => None,
     }
 }

@@ -1,5 +1,6 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 51
 expression: output
 ---
 Token { kind: Identifier("count"), span: Span { start: 376, end: 381 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test control flow constructs with variable and field mutations"), Whitespace("\n"), LineComment("// Per BT-90 design: literal blocks in control flow positions can mutate"), Whitespace("\n\n"), LineComment("// ========================================"), Whitespace("\n"), LineComment("// Local Variable Mutations"), Whitespace("\n"), LineComment("// ========================================"), Whitespace("\n\n"), LineComment("// Simple whileTrue with local variable mutation"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
@@ -111,8 +112,7 @@ Token { kind: RightBracket, span: Span { start: 1115, end: 1116 }, leading_trivi
 Token { kind: Period, span: Span { start: 1116, end: 1117 }, leading_trivia: [], trailing_trivia: [] }
 Token { kind: Identifier("numbers"), span: Span { start: 1314, end: 1321 }, leading_trivia: [Whitespace("\n"), LineComment("// Expected: total = 55 (sum 1..10)"), Whitespace("\n\n"), LineComment("// ========================================"), Whitespace("\n"), LineComment("// Collection Iteration with Mutations"), Whitespace("\n"), LineComment("// ========================================"), Whitespace("\n\n"), LineComment("// Array do: with accumulation"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Assign, span: Span { start: 1322, end: 1324 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Hash, span: Span { start: 1325, end: 1326 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: LeftBracket, span: Span { start: 1326, end: 1327 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: ArrayOpen, span: Span { start: 1325, end: 1327 }, leading_trivia: [], trailing_trivia: [] }
 Token { kind: Integer("1"), span: Span { start: 1327, end: 1328 }, leading_trivia: [], trailing_trivia: [] }
 Token { kind: BinarySelector(","), span: Span { start: 1328, end: 1329 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Integer("2"), span: Span { start: 1330, end: 1331 }, leading_trivia: [], trailing_trivia: [] }

@@ -199,6 +199,14 @@ pub(crate) fn generate_tuple_bif(selector: &str, params: &[String]) -> Option<Do
             ])
         }
         "atRandom" => Some(Document::Str("call 'beamtalk_random':'atRandom'(Self)")),
+        "withAll:" => {
+            let p0 = params.first().map_or("_List", String::as_str);
+            Some(docvec![
+                "call 'erlang':'list_to_tuple'(",
+                p0.to_string(),
+                ")"
+            ])
+        }
         _ => None,
     }
 }
@@ -244,7 +252,7 @@ pub(crate) fn generate_association_bif(
 /// Operations delegate to `beamtalk_set_ops` helper module which wraps Erlang `ordsets`.
 pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     match selector {
-        "fromList:" => {
+        "fromList:" | "withAll:" => {
             let p0 = params.first().map_or("_List", String::as_str);
             Some(docvec![
                 "call 'beamtalk_set_ops':'from_list'(",

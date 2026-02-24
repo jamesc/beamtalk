@@ -196,6 +196,12 @@ fn validate_expr(
             }
         }
 
+        Expression::ArrayLiteral { elements, .. } => {
+            for elem in elements {
+                validate_expr(elem, is_stdlib, options, diagnostics);
+            }
+        }
+
         // Leaf expressions — no primitives to validate
         Expression::Literal(..)
         | Expression::Identifier(_)

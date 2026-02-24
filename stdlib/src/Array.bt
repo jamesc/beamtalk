@@ -1,0 +1,121 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Array — Fixed-size indexed collection with O(log n) random access.
+///
+/// Arrays are immutable sequences backed by Erlang's `array` module.
+/// Use Array when you need efficient random access by index and the
+/// size is known up front. Literal syntax: `#[elem, ...]`.
+///
+/// Unlike `List` (linked list, O(1) prepend) and `Tuple` (Erlang FFI
+/// interop), `Array` is the right choice for general-purpose indexed
+/// sequences in Beamtalk code.
+///
+/// ## BEAM Mapping
+/// Backed by an Erlang `array` record wrapped in a tagged map:
+/// `#{'$beamtalk_class' => 'Array', 'data' => ErlangArray}`.
+///
+/// ## Examples
+/// ```beamtalk
+/// #[1, 2, 3] class            // => Array
+/// #[1, 2, 3] size             // => 3
+/// #[10, 20, 30] at: 2         // => 20
+/// #[1, 2, 3] collect: [:x | x * 2]  // => #[2, 4, 6]
+/// ```
+sealed Collection subclass: Array
+
+  /// Number of elements in the array.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #[1, 2, 3] size              // => 3
+  /// #[] size                     // => 0
+  /// ```
+  size -> Integer => @primitive "size"
+
+  /// Test if the array has no elements.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #[] isEmpty                  // => true
+  /// #[1] isEmpty                 // => false
+  /// ```
+  isEmpty -> Boolean => @primitive "isEmpty"
+
+  /// Return the element at the given 1-based index.
+  ///
+  /// Raises `index_out_of_bounds` if the index is out of range.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #[10, 20, 30] at: 2          // => 20
+  /// #[10, 20, 30] at: 1          // => 10
+  /// ```
+  at: index: Integer => @primitive "at:"
+
+  /// Return a new array with the element at `index` replaced by `value`.
+  ///
+  /// Raises `index_out_of_bounds` if the index is out of range.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (#[1, 2, 3] at: 2 put: 99)  // => #[1, 99, 3]
+  /// ```
+  at: index: Integer put: value -> Array => @primitive "at:put:"
+
+  /// Test if the array contains the given element.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #[1, 2, 3] includes: 2       // => true
+  /// #[1, 2, 3] includes: 9       // => false
+  /// ```
+  includes: element -> Boolean => @primitive "includes:"
+
+  /// Iterate over each element, evaluating `block` with each one.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #[1, 2, 3] do: [:x | Transcript show: x]
+  /// ```
+  do: block: Block -> Nil => @primitive "do:"
+
+  /// Map a block over the array, returning a new Array.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #[1, 2, 3] collect: [:x | x * 2]   // => #[2, 4, 6]
+  /// ```
+  collect: block: Block -> Array => @primitive "collect:"
+
+  /// Select elements for which `block` returns true, returning a new Array.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #[1, 2, 3, 4] select: [:x | x > 2]  // => #[3, 4]
+  /// ```
+  select: block: Block -> Array => @primitive "select:"
+
+  /// Reduce the array with an accumulator.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #[1, 2, 3] inject: 0 into: [:acc :x | acc + x]   // => 6
+  /// ```
+  inject: initial into: block: Block => @primitive "inject:into:"
+
+  /// Return a developer-readable string representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #[1, 2, 3] printString       // => "#[1, 2, 3]"
+  /// ```
+  printString -> String => @primitive "printString"
+
+  /// Create an Array from a list of elements.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Array withAll: #(1, 2, 3)   // => #[1, 2, 3]
+  /// ```
+  class withAll: list: List -> Array => @primitive "withAll:"

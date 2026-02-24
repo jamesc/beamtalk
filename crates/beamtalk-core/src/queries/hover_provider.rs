@@ -707,6 +707,23 @@ fn find_hover_in_expr(
                 None
             }
         }
+        Expression::ArrayLiteral { elements, span } => {
+            if offset >= span.start() && offset < span.end() {
+                for elem in elements {
+                    if let Some(hover) =
+                        find_hover_in_expr(elem, offset, context, hierarchy, type_map)
+                    {
+                        return Some(hover);
+                    }
+                }
+                Some(HoverInfo::new(
+                    format!("Array literal with {} elements", elements.len()),
+                    *span,
+                ))
+            } else {
+                None
+            }
+        }
         Expression::Primitive {
             name,
             is_quoted,

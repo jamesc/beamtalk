@@ -13,6 +13,7 @@
 //! This is part of BT-340: making compiled stdlib modules self-sufficient
 //! so hand-written Erlang dispatch modules can be deleted.
 
+mod array;
 mod behaviour;
 mod block;
 mod character;
@@ -47,6 +48,7 @@ pub fn generate_primitive_bif(
     params: &[String],
 ) -> Option<Document<'static>> {
     match class_name {
+        "Array" => array::generate_array_bif(selector, params),
         "Integer" => integer::generate_integer_bif(selector, params),
         "Float" => float::generate_float_bif(selector, params),
         "String" => string::generate_string_bif(selector, params),

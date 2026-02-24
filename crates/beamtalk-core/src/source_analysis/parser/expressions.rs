@@ -371,12 +371,12 @@ impl Parser {
             TokenKind::StringStart(_) => self.parse_string_interpolation(),
 
             // Standalone '#' is not a valid primary expression.
-            // (#( is already lexed as ListOpen, #{ as MapOpen, #name as Symbol)
+            // (#( is already lexed as ListOpen, #{ as MapOpen, #[ as ArrayOpen, #name as Symbol)
             TokenKind::Hash => {
                 let bad_token = self.advance();
                 let span = bad_token.span();
                 let message: EcoString =
-                    "Unexpected '#': expected '#(' for a list, '#{' for a map, or '#name' / #'quoted' for a symbol"
+                    "Unexpected '#': expected '#(' for a list, '#[' for an array, '#{' for a map, or '#name' / #'quoted' for a symbol"
                         .into();
                 self.diagnostics
                     .push(Diagnostic::error(message.clone(), span));
@@ -397,6 +397,9 @@ impl Parser {
 
             // List literal
             TokenKind::ListOpen => self.parse_list_literal(),
+
+            // Array literal
+            TokenKind::ArrayOpen => self.parse_array_literal(),
 
             // Primitive pragma: @primitive/@intrinsic 'name' or @primitive/@intrinsic intrinsicName
             TokenKind::AtPrimitive | TokenKind::AtIntrinsic => self.parse_primitive(),
@@ -1177,6 +1180,64 @@ impl Parser {
             tail: None,
             span,
         }
+    }
+
+    /// Parses an array literal: `#[expr, expr, ...]`
+    ///
+    /// Array elements are parsed as binary expressions. Closed by `]`.
+    fn parse_array_literal(&mut self) -> Expression {
+        let start_token = self.expect(&TokenKind::ArrayOpen, "Expected '#['");
+        let start = start_token.map_or_else(|| self.current_token().span(), |t: Token| t.span());
+
+        let mut elements = Vec::new();
+
+        // Handle empty array: #[]
+        if self.check(&TokenKind::RightBracket) {
+            let end_token = self.advance();
+            let span = start.merge(end_token.span());
+            return Expression::ArrayLiteral { elements, span };
+        }
+
+        // Parse elements
+        loop {
+            let elem = self.parse_binary_message();
+            elements.push(elem);
+
+            // Check for comma (continue) or closing bracket (end)
+            if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == ",") {
+                self.advance(); // consume comma
+                // Allow trailing comma
+                if self.check(&TokenKind::RightBracket) {
+                    break;
+                }
+            } else if self.check(&TokenKind::RightBracket) {
+                break;
+            } else {
+                let bad_token = self.advance();
+                self.diagnostics.push(Diagnostic::error(
+                    format!(
+                        "Expected ',' or ']' in array literal, found {}",
+                        bad_token.kind()
+                    ),
+                    bad_token.span(),
+                ));
+                break;
+            }
+        }
+
+        // Expect closing bracket
+        let end_span = if self.check(&TokenKind::RightBracket) {
+            self.advance().span()
+        } else {
+            self.diagnostics.push(Diagnostic::error(
+                "Expected ']' to close array literal",
+                self.current_token().span(),
+            ));
+            self.current_token().span()
+        };
+
+        let span = start.merge(end_span);
+        Expression::ArrayLiteral { elements, span }
     }
 
     /// Parses a parenthesized expression.
