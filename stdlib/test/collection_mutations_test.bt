@@ -1,12 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Tests for is_list guard in mutation-threading codegen paths (BT-524)
+// BT-524: Tests that the is_list guard in mutation-threading codegen works
+// correctly when actor methods iterate over List, Set, and Dictionary arguments.
 
 
 TestCase subclass: CollectionMutationsTest
 
-  testSection1 =>
+  testActorMutatingCollections =>
     counter := CollectionMutationCounter spawn.
     self assert: (counter getTotal await) equals: 0.
     self assert: ((counter sumSet: #(1, 2, 3)) await) equals: 6.

@@ -1,12 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-741: Actor class methods must not reference actor State.
+// BT-741: Tests that Actor class methods can use local variables (arithmetic,
+// block literals, dictionaries) without referencing actor State fields.
 
 
 TestCase subclass: ActorClassLocalVarTest
 
-  testSection1 =>
+  testClassMethodsWithLocalVariables =>
     self assert: (ActorClassLocalVar buildDict) equals: #{#key => 42}.
     // BT-741: Class method with arithmetic on local variables
     self assert: (ActorClassLocalVar computeSum) equals: 30.

@@ -1,11 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Stream — constructors, lazy pipeline, terminals
+// Tests the Stream class — from:, from:by:, on: constructors; lazy pipeline
+// ops (select:, collect:, reject:, drop:); terminals (take:, asList, do:,
+// inject:into:, detect:, anySatisfy:, allSatisfy:); and empty-stream behaviour.
 
 TestCase subclass: StreamTest
 
-  testSection1 =>
+  testStreamConstructorsAndPipelines =>
     self assert: ((Stream from: 1) take: 5) equals: #(1, 2, 3, 4, 5).
     self assert: ((Stream from: 10) take: 3) equals: #(10, 11, 12).
     self assert: ((Stream from: 0) take: 1) equals: #(0).

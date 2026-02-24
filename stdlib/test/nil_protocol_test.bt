@@ -1,9 +1,10 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for Object reflection API
+// Tests the nil-testing protocol inherited from ProtoObject — isNil, notNil,
+// ifNil:, ifNotNil:, ifNil:ifNotNil:, ifNotNil:ifNil: — on nil and non-nil values.
 
-TestCase subclass: ObjectReflectionTest
+TestCase subclass: NilProtocolTest
 
   testNilTestingProtocol =>
     self deny: (42 isNil).

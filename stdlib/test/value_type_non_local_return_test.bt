@@ -1,12 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-754: Non-local return (^) inside block arguments in Object subclass methods.
+// BT-754: Tests non-local return (^) inside block arguments in Object subclass
+// (non-actor) methods — empty/non-empty arrays, classify, check, double, and
+// on:do: with NLR.
 
 
 TestCase subclass: ValueTypeNonLocalReturnTest
 
-  testSection1 =>
+  testNonLocalReturnInValueTypeMethods =>
     self assert: (NlrReturnTest new test: #()) equals: "empty".
     self assert: (NlrReturnTest new test: #(1)) equals: "not empty".
     self assert: (NlrFoo new classify: 5) equals: "positive".

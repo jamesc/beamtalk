@@ -1,11 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Stdlib tests for TestCase assertions (ADR 0014 Phase 2)
+// ADR 0014 Phase 2: Tests the TestCase framework itself — setUp/tearDown
+// lifecycle, assert:/deny:/assert:equals: pass cases, and that multiple
+// instances can be independently created and used.
 
 TestCase subclass: TestCaseAssertionTest
 
-  testSection1 =>
+  testLifecycleAndBasicAssertions =>
     testCase := TestCase new.
     self assert: (testCase setUp) equals: nil.
     self assert: (testCase tearDown) equals: nil.

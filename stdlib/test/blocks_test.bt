@@ -1,11 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for block (closure) operations
+// Tests for block (closure) evaluation — argument passing, arity, whileTrue/False,
+// valueWithArguments:, closure variable capture, and early return with ^.
 
 TestCase subclass: BlocksTest
 
-  testSection1 =>
+  testBlockEvaluation =>
     self assert: ([:x | x + 1] value: 5) equals: 6.
     // Block with two arguments
     self assert: ([:x :y | x + y] value: 3 value: 4) equals: 7.
@@ -38,7 +39,7 @@ TestCase subclass: BlocksTest
     // whileTrue: with false condition (returns immediately)
     self assert: ([false] whileTrue: [42]) equals: nil
 
-  testClosuresBasicExamplesSeeClosuresAdvancedBtForComprehensiveTests =>
+  testBasicClosureCapture =>
     // Simple closure capturing outer variable
     outerVar := 10.
     self assert: outerVar equals: 10.

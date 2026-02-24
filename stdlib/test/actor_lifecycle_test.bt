@@ -1,12 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Tests for actor lifecycle (BT-172, BT-397)
+// BT-172, BT-397: Tests actor lifecycle — isAlive, stop, idempotent stop,
+// and error behaviour when sending to a stopped actor.
 
 
 TestCase subclass: ActorLifecycleTest
 
-  testSection1 =>
+  testIsAliveAndStop =>
     counter := Counter spawn.
     // isAlive returns true for a running actor
     self assert: (counter isAlive await).

@@ -1,12 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Tests for variable scope and resolution
+// Tests variable scoping rules: block parameter isolation, cross-expression
+// variable persistence, reassignment, closure capture of outer variables,
+// and self reference within actor method bodies.
 
 
 TestCase subclass: SemanticScopeTest
 
-  testSection1 =>
+  testVariableScopeAndClosureCapture =>
     self assert: ([:x | x + 1] value: 5) equals: 6.
     // Nested block parameters work correctly
     self assert: ([:x | [:y | x + y] value: 3] value: 10) equals: 13.

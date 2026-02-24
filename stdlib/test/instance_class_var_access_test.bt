@@ -1,12 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-413: Instance-side class variable access tests (Actor)
+// BT-413: Tests that actor instances can read class variables via self class —
+// verifying that the class variable is shared across all instances and reflects
+// the total count of created objects.
 
 
 TestCase subclass: InstanceClassVarAccessTest
 
-  testSection1 =>
+  testInstanceAccessToClassVariable =>
     self assert: (InstanceAccessCounter instanceCount) equals: 0.
     // Create an instance via class method (increments instanceCount)
     c := InstanceAccessCounter create.

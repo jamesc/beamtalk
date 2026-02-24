@@ -1,12 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-761: Non-local return (^) inside block arguments in Actor subclass methods.
+// BT-761: Tests non-local return (^) inside block arguments in Actor subclass
+// methods — empty/non-empty, classify, local var storage, mutation, recursion,
+// on:do: with NLR, and NLR with persistent state.
 
 
 TestCase subclass: ActorNonLocalReturnTest
 
-  testSection1 =>
+  testNonLocalReturnInActorBlocks =>
     a := ActorNlrBasic spawn.
     self assert: ((a test: #()) await) equals: "empty".
     self assert: ((a test: #(1)) await) equals: "not empty".

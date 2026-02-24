@@ -1,12 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-410: State mutation threading in on:do: and ensure: handler blocks
+// BT-410: Tests that actor state mutations inside on:do: error handlers and
+// ensure: cleanup blocks are correctly threaded — mutations accumulate across
+// multiple calls and both try-body and cleanup mutations are preserved.
 
 
 TestCase subclass: ExceptionMutationsTest
 
-  testSection1 =>
+  testMutationsInOnDoAndEnsure =>
     c := ErrorCounter spawn.
     // Returns a future (bare PID) from async send
     c riskyIncrement.

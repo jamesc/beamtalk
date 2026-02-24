@@ -1,11 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-488: Singleton class variable tests (ADR 0019 Phase 1)
+// BT-488, ADR 0019 Phase 1: Tests that singleton classes (SystemDictionary,
+// TranscriptStream, WorkspaceEnvironment) expose a current accessor that
+// returns nil before initialization.
 
 TestCase subclass: ClassVariablesSingletonTest
 
-  testSection1 =>
+  testSingletonCurrentAccessors =>
     self assert: (SystemDictionary current) equals: nil.
     // TranscriptStream has current accessor
     self assert: (TranscriptStream current) equals: nil.
