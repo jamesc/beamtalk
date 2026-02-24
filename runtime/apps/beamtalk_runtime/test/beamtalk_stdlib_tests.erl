@@ -99,67 +99,56 @@ init_idempotent_test() ->
     ?assert(length(Classes) >= 15).
 
 integer_class_registered_test() ->
-    ok = beamtalk_stdlib:init(),
     Pid = beamtalk_class_registry:whereis_class('Integer'),
     ?assertNotEqual(undefined, Pid),
     ?assertEqual('Integer', beamtalk_object_class:class_name(Pid)).
 
 string_class_registered_test() ->
-    ok = beamtalk_stdlib:init(),
     Pid = beamtalk_class_registry:whereis_class('String'),
     ?assertNotEqual(undefined, Pid),
     ?assertEqual('String', beamtalk_object_class:class_name(Pid)).
 
 true_class_registered_test() ->
-    ok = beamtalk_stdlib:init(),
     Pid = beamtalk_class_registry:whereis_class('True'),
     ?assertNotEqual(undefined, Pid),
     ?assertEqual('True', beamtalk_object_class:class_name(Pid)).
 
 false_class_registered_test() ->
-    ok = beamtalk_stdlib:init(),
     Pid = beamtalk_class_registry:whereis_class('False'),
     ?assertNotEqual(undefined, Pid),
     ?assertEqual('False', beamtalk_object_class:class_name(Pid)).
 
 nil_class_registered_test() ->
-    ok = beamtalk_stdlib:init(),
     Pid = beamtalk_class_registry:whereis_class('UndefinedObject'),
     ?assertNotEqual(undefined, Pid),
     ?assertEqual('UndefinedObject', beamtalk_object_class:class_name(Pid)).
 
 block_class_registered_test() ->
-    ok = beamtalk_stdlib:init(),
     Pid = beamtalk_class_registry:whereis_class('Block'),
     ?assertNotEqual(undefined, Pid),
     ?assertEqual('Block', beamtalk_object_class:class_name(Pid)).
 
 tuple_class_registered_test() ->
-    ok = beamtalk_stdlib:init(),
     Pid = beamtalk_class_registry:whereis_class('Tuple'),
     ?assertNotEqual(undefined, Pid),
     ?assertEqual('Tuple', beamtalk_object_class:class_name(Pid)).
 
 system_dictionary_class_registered_test() ->
-    ok = beamtalk_stdlib:init(),
     Pid = beamtalk_class_registry:whereis_class('SystemDictionary'),
     ?assertNotEqual(undefined, Pid),
     ?assertEqual('SystemDictionary', beamtalk_object_class:class_name(Pid)).
 
 transcript_stream_class_registered_test() ->
-    ok = beamtalk_stdlib:init(),
     Pid = beamtalk_class_registry:whereis_class('TranscriptStream'),
     ?assertNotEqual(undefined, Pid),
     ?assertEqual('TranscriptStream', beamtalk_object_class:class_name(Pid)).
 
 integer_superclass_test() ->
-    ok = beamtalk_stdlib:init(),
     Pid = beamtalk_class_registry:whereis_class('Integer'),
     Superclass = beamtalk_object_class:superclass(Pid),
     ?assertEqual('Number', Superclass).
 
 integer_methods_test() ->
-    ok = beamtalk_stdlib:init(),
     Pid = beamtalk_class_registry:whereis_class('Integer'),
     %% ADR 0032 Phase 1: methods/1 returns local-only selectors.
     %% Inherited methods (e.g. 'class' from Object) are not included.
@@ -178,8 +167,6 @@ integer_methods_test() ->
 %%% ============================================================================
 
 beamtalk_all_classes_test() ->
-    ok = beamtalk_stdlib:init(),
-
     %% Call Beamtalk allClasses via dispatch
     Classes = beamtalk_stdlib:dispatch(allClasses, [], 'Beamtalk'),
 
@@ -201,8 +188,6 @@ beamtalk_all_classes_test() ->
     ?assert(lists:member('Actor', Classes)).
 
 beamtalk_class_named_found_test() ->
-    ok = beamtalk_stdlib:init(),
-
     %% Look up an existing class
     Result = beamtalk_stdlib:dispatch('classNamed:', ['Integer'], 'Beamtalk'),
 
@@ -215,8 +200,6 @@ beamtalk_class_named_found_test() ->
     ?assertEqual('Integer', beamtalk_object_class:class_name(Pid)).
 
 beamtalk_class_named_not_found_test() ->
-    ok = beamtalk_stdlib:init(),
-
     %% Look up a non-existent class
     Result = beamtalk_stdlib:dispatch('classNamed:', ['NonExistentClass'], 'Beamtalk'),
 
@@ -224,8 +207,6 @@ beamtalk_class_named_not_found_test() ->
     ?assertEqual(nil, Result).
 
 beamtalk_globals_test() ->
-    ok = beamtalk_stdlib:init(),
-
     %% Call Beamtalk globals
     Globals = beamtalk_stdlib:dispatch(globals, [], 'Beamtalk'),
 
@@ -233,8 +214,6 @@ beamtalk_globals_test() ->
     ?assert(is_map(Globals)).
 
 beamtalk_version_test() ->
-    ok = beamtalk_stdlib:init(),
-
     %% Call Beamtalk version
     Version = beamtalk_stdlib:dispatch(version, [], 'Beamtalk'),
 

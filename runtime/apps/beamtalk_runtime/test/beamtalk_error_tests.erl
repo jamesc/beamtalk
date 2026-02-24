@@ -1,6 +1,10 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
+%%% @doc EUnit tests for beamtalk_error module.
+%%%
+%%% Tests error construction, field access, and formatted message generation.
+
 -module(beamtalk_error_tests).
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").

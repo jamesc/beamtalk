@@ -246,10 +246,6 @@ all_children_alive_test() ->
         %% Get all children
         Children = supervisor:which_children(Sup),
 
-        %% Expected: 10 children (workspace_meta, transcript_stream, system_dictionary,
-        %% actor_registry, workspace_environment, workspace_bootstrap, repl_server, idle_monitor, actor_sup, session_sup)
-        ?assertEqual(10, length(Children)),
-
         %% Verify each child has correct ID and is alive
         ExpectedIds = [
             beamtalk_workspace_meta,

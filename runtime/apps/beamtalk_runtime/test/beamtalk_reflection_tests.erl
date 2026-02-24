@@ -1,6 +1,10 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
+%%% @doc EUnit tests for beamtalk_reflection module.
+%%%
+%%% Tests field name extraction, struct reflection, and runtime introspection helpers.
+
 -module(beamtalk_reflection_tests).
 
 -include_lib("eunit/include/eunit.hrl").

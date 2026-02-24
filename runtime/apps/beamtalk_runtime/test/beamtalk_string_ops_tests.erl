@@ -1,6 +1,10 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
+%%% @doc EUnit tests for beamtalk_string_ops module.
+%%%
+%%% Tests string operations: indexing, slicing, searching, casing, and trimming.
+
 -module(beamtalk_string_ops_tests).
 -include("beamtalk.hrl").
 -include_lib("eunit/include/eunit.hrl").

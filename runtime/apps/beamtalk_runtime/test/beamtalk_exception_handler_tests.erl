@@ -1,6 +1,10 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
+%%% @doc EUnit tests for beamtalk_exception_handler module.
+%%%
+%%% Tests exception wrapping, ensure_wrapped/1, and exception map patterns (ADR 0015).
+
 -module(beamtalk_exception_handler_tests).
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
