@@ -25,10 +25,16 @@ fi
 
 # Check whether the branch exists on origin (anchor match to avoid substring hits)
 if git ls-remote --heads origin "${BRANCH}" 2>/dev/null | grep -qF "refs/heads/${BRANCH}"; then
-  git fetch origin "${BRANCH}" 2>&1
+  if ! git fetch origin "${BRANCH}" 2>&1; then
+    echo "Warning: failed to fetch '${BRANCH}' from origin — continuing without pull."
+    exit 0
+  fi
   BEHIND=$(git rev-list HEAD..origin/"${BRANCH}" --count 2>/dev/null || echo 0)
-  git pull --ff-only origin "${BRANCH}" 2>&1
-  echo "Worktree branch '${BRANCH}' pulled from origin (was ${BEHIND} commit(s) behind)."
+  if git pull --ff-only origin "${BRANCH}" 2>&1; then
+    echo "Worktree branch '${BRANCH}' pulled from origin (was ${BEHIND} commit(s) behind)."
+  else
+    echo "Warning: branch '${BRANCH}' has diverged from origin (${BEHIND} commit(s) behind) — run 'git pull --rebase' to sync."
+  fi
 else
   echo "Worktree branch '${BRANCH}' has no remote counterpart on origin — nothing to pull."
 fi
