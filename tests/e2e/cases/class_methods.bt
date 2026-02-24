@@ -3,6 +3,11 @@
 
 // E2E tests for class-side methods (BT-411 / ADR 0013 Phase 2)
 //
+// These tests require E2E because they use the Beamtalk workspace binding
+// (an async actor) via `Beamtalk classNamed:` with `await` and workspace
+// variable persistence across REPL turns. BUnit tests cannot drive async
+// workspace binding dispatch with cross-turn variable persistence.
+//
 // Tests defining and calling class methods using the `class` prefix.
 // Class methods run on the class process, not instances.
 

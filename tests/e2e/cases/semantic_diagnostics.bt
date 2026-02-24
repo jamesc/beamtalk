@@ -3,6 +3,12 @@
 
 // E2E tests for semantic analysis diagnostics
 //
+// These tests require E2E because @load-error directives (which compile a
+// file and assert a compilation error) are a REPL testing feature. BUnit
+// tests execute already-compiled code and cannot trigger compile-time errors
+// on new source files. The REPL's error output format matching (e.g.,
+// `// => ERROR: ...`) is also REPL-protocol-specific.
+//
 // Tests that the compiler's semantic analysis produces correct errors
 // for invalid code patterns detected at compile time.
 //

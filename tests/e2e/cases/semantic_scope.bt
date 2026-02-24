@@ -7,7 +7,7 @@
 // compile-time errors that the stdlib test framework can't catch.
 //
 // Block scoping, closures, and variable persistence tests are in
-// tests/stdlib/semantic_scope.bt.
+// stdlib/test/semantic_scope_test.bt.
 
 // --- Undefined variables produce semantic errors ---
 

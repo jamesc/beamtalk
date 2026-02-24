@@ -3,6 +3,12 @@
 
 // E2E tests for BUnit REPL integration (BT-440)
 //
+// These tests require E2E because BUnit's runAll/run: methods produce
+// formatted output that is captured and matched against expected REPL
+// output strings. BUnit test results include timing information and
+// multi-line output that can only be verified through the REPL protocol.
+// The fixtures are also loaded via @load directives (REPL-specific).
+//
 // Tests TestCase class-side methods:
 //   - runAll: discover and run all test* methods
 //   - run:   run a single test method by name
