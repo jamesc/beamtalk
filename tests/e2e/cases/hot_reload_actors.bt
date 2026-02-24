@@ -7,6 +7,9 @@
 // immediately on EXISTING running actor instances, not just newly
 // spawned ones. This works because BEAM's hot code loading updates
 // function references (funs) in the __methods__ map automatically.
+//
+// Related: load_method_patch.bt — tests that patched methods update
+// the source reflection on file-loaded classes (distinct focus).
 
 // @load tests/e2e/fixtures/counter.bt
 
