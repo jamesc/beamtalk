@@ -462,11 +462,36 @@ handle_call({set_doc, DocBinary}, _From, State) ->
 handle_call({set_method_doc, Selector, DocBinary}, _From, State) ->
     NewMethodDocs = maps:put(Selector, DocBinary, State#class_state.method_docs),
     {reply, ok, State#class_state{method_docs = NewMethodDocs}};
-%% ADR 0036: Metaclass method dispatch stub.
-%% Returns {error, not_found} — the fallthrough to the 'Metaclass' chain is
-%% handled by beamtalk_class_dispatch:metaclass_send/4 in the caller.
-handle_call({metaclass_method_call, _Selector, _Args}, _From, State) ->
-    {reply, {error, not_found}, State};
+%% ADR 0036 Phase 2 (BT-823): Metaclass method dispatch.
+%% Dispatches to user-defined class-side methods via handle_class_method_call,
+%% exactly like {class_method_call, ...}, so that metaclass_send/4 can use
+%% this handler instead of falling back to the BT-822 workaround.
+handle_call(
+    {metaclass_method_call, Selector, Args},
+    From,
+    #class_state{
+        class_methods = ClassMethods,
+        instance_methods = InstanceMethods,
+        name = ClassName,
+        module = Module,
+        class_state = ClassVars
+    } = State
+) ->
+    case
+        beamtalk_class_dispatch:handle_class_method_call(
+            Selector, Args, ClassName, Module, ClassMethods, ClassVars
+        )
+    of
+        {reply, Result, NewClassVars} ->
+            {reply, Result, State#class_state{class_state = NewClassVars}};
+        test_spawn ->
+            beamtalk_test_case:spawn_test_execution(
+                Selector, Args, ClassName, Module, InstanceMethods, From
+            ),
+            {noreply, State};
+        {error, not_found} ->
+            {reply, {error, not_found}, State}
+    end;
 %% BT-411/BT-412/BT-440: Class method dispatch.
 %% Delegates to beamtalk_class_dispatch (BT-704).
 %% ADR 0032 Phase 1: Passes local class_methods (no flattened table).

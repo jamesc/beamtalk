@@ -109,13 +109,12 @@ class_send(ClassPid, Selector, Args) ->
             unwrap_class_call(Other)
     end.
 
-%% @doc Send a message to a metaclass object (ADR 0036, BT-822/BT-823).
+%% @doc Send a message to a metaclass object (ADR 0036, BT-823).
 %%
 %% Routes messages on metaclass objects (tagged `class='Metaclass'`) through:
-%%   1. `{class_method_call, Selector, Args}` to the class gen_server via
+%%   1. `{metaclass_method_call, Selector, Args}` to the class gen_server via
 %%      `gen_server:call/2` — resolves user-defined class methods (e.g. `withAll:`)
-%%      via the superclass chain (BT-822 workaround; proper metaclass_method_call
-%%      dispatch is tracked in BT-823).
+%%      via the superclass chain (ADR-0036 Phase 2).
 %%   2. Fallthrough to `beamtalk_dispatch:lookup/5` starting at 'Metaclass', which
 %%      walks the Metaclass → Class → Behaviour → Object → ProtoObject chain for
 %%      built-in messages (`new`, `class`, etc.).
@@ -124,11 +123,11 @@ class_send(ClassPid, Selector, Args) ->
 %% Self carries `class='Metaclass'` so method dispatch receives the correct receiver.
 -spec metaclass_send(pid(), atom(), list(), #beamtalk_object{}) -> term().
 metaclass_send(Pid, Selector, Args, Self) ->
-    %% BT-822: Try user-defined class methods first so that `self species withAll: x`
-    %% (and similar dynamic class-side sends) can find methods like `withAll:` that
-    %% are defined via `class withAll: ...` in Beamtalk stdlib modules.
+    %% ADR-0036 Phase 2 (BT-823): Use metaclass_method_call so that
+    %% `self species withAll: x` and similar dynamic class-side sends find
+    %% user-defined class methods (e.g. `withAll:`) via the proper handler.
     %% Falls through to the Metaclass chain for built-in messages (`new`, `class`, etc.).
-    case gen_server:call(Pid, {class_method_call, Selector, Args}) of
+    case gen_server:call(Pid, {metaclass_method_call, Selector, Args}) of
         {ok, Result} ->
             Result;
         {error, not_found} ->
