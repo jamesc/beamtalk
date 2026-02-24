@@ -266,6 +266,11 @@ Error: Dyn has no source file — dynamic classes cannot be reloaded from source
 
 >> Beamtalk help: #NoSuchClass
 Error: Class 'NoSuchClass' not found. Use Beamtalk allClasses for available classes.
+
+>> Beamtalk globals at: #Integer put: nil
+{#Integer: nil, #String: <class>, ...}   // returns a NEW Dictionary — system unchanged
+>> Beamtalk classNamed: #Integer
+Integer                                   // still there — globals is a read-only snapshot
 ```
 
 ## Prior Art
