@@ -1,0 +1,72 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for REPL class definition desugaring to ClassBuilder Path 2 (BT-839 / ADR 0038 Phase 5).
+//
+// When the REPL evaluates an `Object subclass:` definition it generates a ClassBuilder
+// cascade instead of loading a compiled BEAM module. The class is immediately available.
+
+// ===========================================================================
+// BASIC CLASS DEFINITION — no fields
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Define a class with a constant method; it should be usable immediately
+// ---------------------------------------------------------------------------
+
+Object subclass: Greeter
+  greet => "Hello, world!"
+// => _
+
+Greeter new greet await
+// => Hello, world!
+
+// ---------------------------------------------------------------------------
+// Class with a field and a method that reads the field
+// ---------------------------------------------------------------------------
+
+Object subclass: DynCounter
+  state: count = 0
+  getCount => self.count
+// => _
+
+DynCounter new getCount await
+// => 0
+
+// ===========================================================================
+// REFLECTION
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Defined class appears in Object allSubclasses
+// ---------------------------------------------------------------------------
+
+(Object allSubclasses includes: Greeter)
+// => true
+
+// ---------------------------------------------------------------------------
+// canUnderstand: reports correct method membership
+// ---------------------------------------------------------------------------
+
+Greeter canUnderstand: #greet
+// => true
+
+Greeter canUnderstand: #unknownMsg
+// => false
+
+// ---------------------------------------------------------------------------
+// superclass is Object
+// ---------------------------------------------------------------------------
+
+Greeter superclass
+// => Object
+
+// ===========================================================================
+// CLEANUP
+// ===========================================================================
+
+Greeter removeFromSystem
+// => nil
+
+DynCounter removeFromSystem
+// => nil

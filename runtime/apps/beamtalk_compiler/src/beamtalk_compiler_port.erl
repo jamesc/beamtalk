@@ -99,21 +99,31 @@ close(Port) ->
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
     | {error, [binary()]}.
-handle_response(#{
-    status := ok,
-    kind := class_definition,
-    core_erlang := CoreErlang,
-    module_name := ModuleName,
-    classes := Classes,
-    warnings := Warnings
-}) ->
+handle_response(
+    #{
+        status := ok,
+        kind := class_definition,
+        core_erlang := CoreErlang,
+        module_name := ModuleName,
+        classes := Classes,
+        warnings := Warnings
+    } = Response
+) ->
     PrettyCore = maybe_pretty_core(CoreErlang),
-    {ok, class_definition, #{
+    %% BT-839: Include dynamic_class_expr if present (Path 2 ClassBuilder evaluation)
+    DynExpr = maps:get(dynamic_class_expr, Response, undefined),
+    Base = #{
         core_erlang => PrettyCore,
         module_name => ModuleName,
         classes => Classes,
         warnings => Warnings
-    }};
+    },
+    Info =
+        case DynExpr of
+            undefined -> Base;
+            _ -> Base#{dynamic_class_expr => DynExpr}
+        end,
+    {ok, class_definition, Info};
 handle_response(#{
     status := ok,
     kind := method_definition,

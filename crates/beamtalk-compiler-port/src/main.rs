@@ -150,11 +150,13 @@ fn ok_response(core_erlang: &str, warnings: &[String]) -> Term {
 }
 
 /// Build a response map for a successful inline class definition in REPL.
+/// BT-839: includes `dynamic_class_expr` for Path 2 (`ClassBuilder`) evaluation.
 fn class_definition_ok_response(
     core_erlang: &str,
     module_name: &str,
     classes: &[(String, String)],
     warnings: &[String],
+    dynamic_class_expr: &str,
 ) -> Term {
     let warning_terms: Vec<Term> = warnings.iter().map(|w| binary(w)).collect();
     let class_terms: Vec<Term> = classes
@@ -173,6 +175,7 @@ fn class_definition_ok_response(
         (atom("module_name"), binary(module_name)),
         (atom("classes"), Term::from(List::from(class_terms))),
         (atom("warnings"), Term::from(List::from(warning_terms))),
+        (atom("dynamic_class_expr"), binary(dynamic_class_expr)),
     ]))
 }
 
@@ -411,6 +414,526 @@ fn handle_compile_expression(request: &Map) -> Term {
     }
 }
 
+// ============================================================================
+// BT-839: Dynamic ClassBuilder expression generation (Path 2)
+// ============================================================================
+
+/// Generate a Beamtalk `ClassBuilder` cascade expression for Path 2 dynamic class creation.
+///
+/// Transforms a `ClassDefinition` AST into an expression such as:
+/// ```text
+/// (Object classBuilder
+///   name: #Foo;
+///   addField: #x default: 0;
+///   addMethod: #myMethod body: [:btSelf | (btSelf at: #x)];
+///   register) await
+/// ```
+///
+/// The REPL evaluates this expression instead of loading a compiled BEAM module,
+/// creating the class via the `ClassBuilder` protocol (ADR 0038 Path 2).
+///
+/// Returns an empty string if the class cannot be safely expressed as Path 2
+/// (e.g., it has field mutations in methods, which require the compiled protocol).
+fn generate_dynamic_class_expr(class: &beamtalk_core::ast::ClassDefinition) -> String {
+    // Fall back to Path 1 (compiled module) when the class uses features that
+    // the ClassBuilder dynamic protocol doesn't support:
+    // - Field mutations: dynamic closures cannot update gen_server state
+    // - Class methods: `addMethod:body:` only handles instance methods
+    // - Class variables: ClassBuilder has no `addClassState:` API
+    // - Unsupported expressions: `super`, `@primitive`, `match:` in method bodies
+    if class_has_field_mutations(class)
+        || !class.class_methods.is_empty()
+        || !class.class_variables.is_empty()
+        || class
+            .methods
+            .iter()
+            .any(|m| m.body.iter().any(expr_has_unsupported_for_path2))
+    {
+        return String::new();
+    }
+
+    let class_name = &class.name.name;
+    let superclass = class.superclass_name();
+
+    // Note: `classBuilder name:` must NOT be separated by `;` — `name:` is a keyword
+    // message sent to the ClassBuilder (returned by `classBuilder`), not a cascade to
+    // the superclass. The subsequent `;` cascades target the ClassBuilder.
+    let mut parts: Vec<String> = vec![format!("({superclass} classBuilder name: #{class_name}")];
+
+    for field in &class.state {
+        let field_name = &field.name.name;
+        let default = field
+            .default_value
+            .as_ref()
+            .map_or_else(|| "nil".to_string(), print_expr_dynamic);
+        parts.push(format!("addField: #{field_name} default: {default}"));
+    }
+
+    for method in &class.methods {
+        let selector_str = format_selector_as_symbol(&method.selector);
+        let block = generate_method_block(&method.parameters, &method.body);
+        parts.push(format!("addMethod: {selector_str} body: {block}"));
+    }
+
+    parts.push("register) await".to_string());
+    parts.join("; ")
+}
+
+/// Format a method selector as a Beamtalk symbol literal for `addMethod:body:`.
+///
+/// Unary `size` → `#size`, Binary `+` → `#'+'`, Keyword `at:put:` → `#'at:put:'`
+fn format_selector_as_symbol(selector: &beamtalk_core::ast::MessageSelector) -> String {
+    use beamtalk_core::ast::MessageSelector;
+    let name = selector.name();
+    match selector {
+        MessageSelector::Unary(_) => format!("#{name}"),
+        MessageSelector::Binary(_) | MessageSelector::Keyword(_) => format!("#'{name}'"),
+    }
+}
+
+/// Generate a block expression `[:btSelf :p1 ... | body]` for a method body.
+///
+/// `btSelf` receives the instance state map in the dynamic dispatch protocol.
+/// Additional block params correspond to the method's declared parameters.
+fn generate_method_block(
+    parameters: &[beamtalk_core::ast::ParameterDefinition],
+    body: &[beamtalk_core::ast::Expression],
+) -> String {
+    let body_str = if body.is_empty() {
+        "nil".to_string()
+    } else if body.len() == 1 {
+        print_expr_dynamic(&body[0])
+    } else {
+        body.iter()
+            .map(print_expr_dynamic)
+            .collect::<Vec<_>>()
+            .join(". ")
+    };
+
+    let references_self = body.iter().any(expr_references_self);
+    let has_params = !parameters.is_empty();
+
+    if !references_self && !has_params {
+        // Arity-0 constant block — no self or params needed
+        format!("[{body_str}]")
+    } else {
+        let mut param_parts = vec!["btSelf".to_string()];
+        for p in parameters {
+            param_parts.push(p.name.name.to_string());
+        }
+        let param_str = param_parts
+            .iter()
+            .map(|p| format!(":{p}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!("[{param_str} | {body_str}]")
+    }
+}
+
+/// Returns `true` if the class has any field mutations (`self.field := value`) in its methods.
+///
+/// Classes with field mutations require the compiled `gen_server` dispatch protocol (Path 1)
+/// because dynamic method closures cannot update instance state.
+fn class_has_field_mutations(class: &beamtalk_core::ast::ClassDefinition) -> bool {
+    class
+        .methods
+        .iter()
+        .any(|m| m.body.iter().any(expr_has_field_mutation))
+}
+
+/// Returns `true` if the expression contains a field mutation (`self.field := value`).
+fn expr_has_field_mutation(expr: &beamtalk_core::ast::Expression) -> bool {
+    use beamtalk_core::ast::Expression;
+    match expr {
+        Expression::Assignment { target, value, .. } => {
+            // Check if the target is a FieldAccess on self
+            matches!(
+                target.as_ref(),
+                Expression::FieldAccess {
+                    receiver,
+                    ..
+                } if matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
+            ) || expr_has_field_mutation(value)
+        }
+        Expression::MessageSend {
+            receiver,
+            arguments,
+            ..
+        } => expr_has_field_mutation(receiver) || arguments.iter().any(expr_has_field_mutation),
+        Expression::Block(block) => block.body.iter().any(expr_has_field_mutation),
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            expr_has_field_mutation(receiver)
+                || messages
+                    .iter()
+                    .any(|m| m.arguments.iter().any(expr_has_field_mutation))
+        }
+        Expression::Parenthesized { expression, .. } => expr_has_field_mutation(expression),
+        Expression::Return { value, .. } => expr_has_field_mutation(value),
+        Expression::Match { value, arms, .. } => {
+            expr_has_field_mutation(value)
+                || arms.iter().any(|arm| expr_has_field_mutation(&arm.body))
+        }
+        Expression::ListLiteral { elements, tail, .. } => {
+            elements.iter().any(expr_has_field_mutation)
+                || tail.as_deref().is_some_and(expr_has_field_mutation)
+        }
+        Expression::ArrayLiteral { elements, .. } => elements.iter().any(expr_has_field_mutation),
+        Expression::MapLiteral { pairs, .. } => pairs
+            .iter()
+            .any(|p| expr_has_field_mutation(&p.key) || expr_has_field_mutation(&p.value)),
+        Expression::StringInterpolation { segments, .. } => {
+            use beamtalk_core::ast::StringSegment;
+            segments.iter().any(|seg| match seg {
+                StringSegment::Interpolation(e) => expr_has_field_mutation(e),
+                StringSegment::Literal(_) => false,
+            })
+        }
+        _ => false,
+    }
+}
+
+/// Returns `true` if an expression references `self` anywhere.
+fn expr_references_self(expr: &beamtalk_core::ast::Expression) -> bool {
+    use beamtalk_core::ast::Expression;
+    match expr {
+        Expression::Identifier(id) => id.name == "self",
+        Expression::FieldAccess { receiver, .. } => expr_references_self(receiver),
+        Expression::MessageSend {
+            receiver,
+            arguments,
+            ..
+        } => expr_references_self(receiver) || arguments.iter().any(expr_references_self),
+        Expression::Assignment { target, value, .. } => {
+            expr_references_self(target) || expr_references_self(value)
+        }
+        Expression::Return { value, .. } => expr_references_self(value),
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            expr_references_self(receiver)
+                || messages
+                    .iter()
+                    .any(|m| m.arguments.iter().any(expr_references_self))
+        }
+        Expression::Parenthesized { expression, .. } => expr_references_self(expression),
+        Expression::Block(block) => block.body.iter().any(expr_references_self),
+        Expression::Match { value, arms, .. } => {
+            expr_references_self(value) || arms.iter().any(|arm| expr_references_self(&arm.body))
+        }
+        Expression::ListLiteral { elements, tail, .. } => {
+            elements.iter().any(expr_references_self)
+                || tail.as_deref().is_some_and(expr_references_self)
+        }
+        Expression::ArrayLiteral { elements, .. } => elements.iter().any(expr_references_self),
+        Expression::MapLiteral { pairs, .. } => pairs
+            .iter()
+            .any(|p| expr_references_self(&p.key) || expr_references_self(&p.value)),
+        Expression::StringInterpolation { segments, .. } => {
+            use beamtalk_core::ast::StringSegment;
+            segments.iter().any(|seg| match seg {
+                StringSegment::Interpolation(e) => expr_references_self(e),
+                StringSegment::Literal(_) => false,
+            })
+        }
+        _ => false,
+    }
+}
+
+/// Returns `true` if the expression contains constructs that Path 2 (`ClassBuilder`)
+/// cannot handle: `super` sends, `@primitive` annotations, and `match:` expressions.
+fn expr_has_unsupported_for_path2(expr: &beamtalk_core::ast::Expression) -> bool {
+    use beamtalk_core::ast::Expression;
+    match expr {
+        Expression::Super(_) | Expression::Primitive { .. } | Expression::Match { .. } => true,
+        Expression::MessageSend {
+            receiver,
+            arguments,
+            ..
+        } => {
+            expr_has_unsupported_for_path2(receiver)
+                || arguments.iter().any(expr_has_unsupported_for_path2)
+        }
+        Expression::Assignment { target, value, .. } => {
+            expr_has_unsupported_for_path2(target) || expr_has_unsupported_for_path2(value)
+        }
+        Expression::Return { value, .. } => expr_has_unsupported_for_path2(value),
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            expr_has_unsupported_for_path2(receiver)
+                || messages
+                    .iter()
+                    .any(|m| m.arguments.iter().any(expr_has_unsupported_for_path2))
+        }
+        Expression::Parenthesized { expression, .. } => expr_has_unsupported_for_path2(expression),
+        Expression::Block(block) => block.body.iter().any(expr_has_unsupported_for_path2),
+        Expression::FieldAccess { receiver, .. } => expr_has_unsupported_for_path2(receiver),
+        Expression::ListLiteral { elements, tail, .. } => {
+            elements.iter().any(expr_has_unsupported_for_path2)
+                || tail.as_deref().is_some_and(expr_has_unsupported_for_path2)
+        }
+        Expression::ArrayLiteral { elements, .. } => {
+            elements.iter().any(expr_has_unsupported_for_path2)
+        }
+        Expression::MapLiteral { pairs, .. } => pairs.iter().any(|p| {
+            expr_has_unsupported_for_path2(&p.key) || expr_has_unsupported_for_path2(&p.value)
+        }),
+        Expression::StringInterpolation { segments, .. } => {
+            use beamtalk_core::ast::StringSegment;
+            segments.iter().any(|seg| match seg {
+                StringSegment::Interpolation(e) => expr_has_unsupported_for_path2(e),
+                StringSegment::Literal(_) => false,
+            })
+        }
+        _ => false,
+    }
+}
+
+/// Print a Beamtalk expression for use in a dynamic class method body.
+///
+/// Key transformations:
+/// - `self` (bare identifier) → `btSelf`
+/// - `self.field` (field access on self) → `(btSelf at: #field)`
+/// - `receiver.field` → `(receiver at: #field)` for any other receiver
+#[allow(clippy::too_many_lines)]
+fn print_expr_dynamic(expr: &beamtalk_core::ast::Expression) -> String {
+    use beamtalk_core::ast::{Expression, MessageSelector, StringSegment};
+    match expr {
+        Expression::Literal(lit, _) => print_literal_dynamic(lit),
+
+        Expression::Identifier(id) => {
+            if id.name == "self" {
+                "btSelf".to_string()
+            } else {
+                id.name.to_string()
+            }
+        }
+
+        Expression::ClassReference { name, .. } => name.name.to_string(),
+
+        Expression::Super(_) => "super".to_string(),
+
+        Expression::FieldAccess {
+            receiver, field, ..
+        } => {
+            let recv = print_expr_dynamic(receiver);
+            format!("({recv} at: #{})", field.name)
+        }
+
+        Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            ..
+        } => match selector {
+            MessageSelector::Unary(name) => {
+                format!("({} {name})", print_expr_dynamic(receiver))
+            }
+            MessageSelector::Binary(op) => {
+                format!(
+                    "({} {op} {})",
+                    print_expr_dynamic(receiver),
+                    print_expr_dynamic(&arguments[0])
+                )
+            }
+            MessageSelector::Keyword(parts) => {
+                let mut result = format!("({}", print_expr_dynamic(receiver));
+                for (part, arg) in parts.iter().zip(arguments.iter()) {
+                    result.push(' ');
+                    result.push_str(&part.keyword);
+                    result.push(' ');
+                    result.push_str(&print_expr_dynamic(arg));
+                }
+                result.push(')');
+                result
+            }
+        },
+
+        Expression::Block(block) => {
+            let params = block
+                .parameters
+                .iter()
+                .map(|p| format!(":{}", p.name))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let body = block
+                .body
+                .iter()
+                .map(print_expr_dynamic)
+                .collect::<Vec<_>>()
+                .join(". ");
+            if block.parameters.is_empty() {
+                format!("[{body}]")
+            } else {
+                format!("[{params} | {body}]")
+            }
+        }
+
+        Expression::Assignment { target, value, .. } => {
+            format!(
+                "{} := {}",
+                print_expr_dynamic(target),
+                print_expr_dynamic(value)
+            )
+        }
+
+        Expression::Return { value, .. } => {
+            format!("^{}", print_expr_dynamic(value))
+        }
+
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            let recv = print_expr_dynamic(receiver);
+            let msg_strs: Vec<String> = messages
+                .iter()
+                .map(|m| match &m.selector {
+                    MessageSelector::Unary(name) => name.to_string(),
+                    MessageSelector::Binary(op) => {
+                        format!("{op} {}", print_expr_dynamic(&m.arguments[0]))
+                    }
+                    MessageSelector::Keyword(parts) => {
+                        let mut s = String::new();
+                        for (part, arg) in parts.iter().zip(m.arguments.iter()) {
+                            if !s.is_empty() {
+                                s.push(' ');
+                            }
+                            s.push_str(&part.keyword);
+                            s.push(' ');
+                            s.push_str(&print_expr_dynamic(arg));
+                        }
+                        s
+                    }
+                })
+                .collect();
+            format!("({recv} {})", msg_strs.join("; "))
+        }
+
+        Expression::Parenthesized { expression, .. } => {
+            format!("({})", print_expr_dynamic(expression))
+        }
+
+        Expression::MapLiteral { pairs, .. } => {
+            if pairs.is_empty() {
+                "#{}".to_string()
+            } else {
+                let inner = pairs
+                    .iter()
+                    .map(|p| {
+                        format!(
+                            "{} => {}",
+                            print_expr_dynamic(&p.key),
+                            print_expr_dynamic(&p.value)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("#{{{inner}}}")
+            }
+        }
+
+        Expression::ListLiteral { elements, tail, .. } => {
+            let elems = elements
+                .iter()
+                .map(print_expr_dynamic)
+                .collect::<Vec<_>>()
+                .join(", ");
+            if let Some(t) = tail {
+                format!("#({elems} | {})", print_expr_dynamic(t))
+            } else {
+                format!("#({elems})")
+            }
+        }
+
+        Expression::ArrayLiteral { elements, .. } => {
+            let elems = elements
+                .iter()
+                .map(print_expr_dynamic)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("#[{elems}]")
+        }
+
+        Expression::StringInterpolation { segments, .. } => {
+            let inner = segments
+                .iter()
+                .map(|seg| match seg {
+                    StringSegment::Literal(s) => s.to_string(),
+                    StringSegment::Interpolation(e) => {
+                        format!("{{{}}}", print_expr_dynamic(e))
+                    }
+                })
+                .collect::<String>();
+            format!("\"{}\"", inner.replace('"', "\"\""))
+        }
+
+        Expression::Match { value, arms, .. } => {
+            // Emit a simplified match — just preserve the structure
+            let val = print_expr_dynamic(value);
+            let arms_str = arms
+                .iter()
+                .map(|arm| format!("... -> {}", print_expr_dynamic(&arm.body)))
+                .collect::<Vec<_>>()
+                .join("; ");
+            format!("({val} match: [{arms_str}])")
+        }
+
+        Expression::Primitive {
+            name, is_quoted, ..
+        } => {
+            if *is_quoted {
+                format!("@primitive '{name}'")
+            } else {
+                format!("@primitive {name}")
+            }
+        }
+
+        Expression::ExpectDirective { .. } => String::new(),
+
+        Expression::Error { message, .. } => {
+            format!("/* error: {message} */")
+        }
+    }
+}
+
+/// Print a literal value as Beamtalk source.
+fn print_literal_dynamic(lit: &beamtalk_core::ast::Literal) -> String {
+    use beamtalk_core::ast::Literal;
+    match lit {
+        Literal::Integer(n) => n.to_string(),
+        Literal::Float(f) => format!("{f}"),
+        Literal::String(s) => {
+            // Beamtalk strings use double quotes; escape embedded double quotes as ""
+            format!("\"{}\"", s.replace("\"", "\"\""))
+        }
+        Literal::Symbol(sym) => {
+            if sym
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == ':')
+            {
+                if sym.contains(':') {
+                    format!("#'{sym}'")
+                } else {
+                    format!("#{sym}")
+                }
+            } else {
+                format!("#'{sym}'")
+            }
+        }
+        Literal::List(elems) => {
+            let inner = elems
+                .iter()
+                .map(print_literal_dynamic)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("#({inner})")
+        }
+        Literal::Character(c) => format!("${c}"),
+    }
+}
+
 /// BT-571: Handle inline class definition in REPL expression context.
 /// Merges any standalone method definitions into the class, generates code,
 /// and returns a `class_definition` response.
@@ -453,13 +976,24 @@ fn handle_inline_class_definition(
         .map(|c| (c.name.name.to_string(), c.superclass_name().to_string()))
         .collect();
 
+    // BT-839: Generate a dynamic ClassBuilder expression for Path 2 evaluation.
+    // This is returned alongside the compiled Core Erlang so the REPL can choose
+    // to evaluate via ClassBuilder (no module compilation) instead of loading the binary.
+    let dynamic_class_expr = generate_dynamic_class_expr(&module.classes[0]);
+
     match beamtalk_core::erlang::generate_module(
         &module,
         beamtalk_core::erlang::CodegenOptions::new(&class_module_name)
             .with_workspace_mode(true)
             .with_source(source),
     ) {
-        Ok(code) => class_definition_ok_response(&code, &class_module_name, &classes, &warnings),
+        Ok(code) => class_definition_ok_response(
+            &code,
+            &class_module_name,
+            &classes,
+            &warnings,
+            &dynamic_class_expr,
+        ),
         Err(e) => error_response(&[format!("Code generation failed: {e}")]),
     }
 }

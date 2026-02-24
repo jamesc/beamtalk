@@ -591,29 +591,42 @@ compile_expression_via_port(Expression, ModuleName, Bindings) ->
     wrap_compiler_errors(
         fun() ->
             case beamtalk_compiler:compile_expression(SourceBin, ModNameBin, KnownVars) of
-                %% BT-571: Inline class definition
+                %% BT-839: Inline class definition — prefer Path 2 (ClassBuilder cascade)
+                %% when `dynamic_class_expr` is available, otherwise fall back to Path 1.
                 {ok, class_definition, ClassInfo} ->
-                    #{
-                        core_erlang := CoreErlang,
-                        module_name := ClassModNameBin,
-                        classes := Classes,
-                        warnings := Warnings
-                    } = ClassInfo,
-                    ClassModName = binary_to_atom(ClassModNameBin, utf8),
-                    case beamtalk_compiler:compile_core_erlang(CoreErlang) of
-                        {ok, _CompiledMod, Binary} ->
-                            {ok, class_definition,
-                                #{
-                                    binary => Binary,
-                                    module_name => ClassModName,
-                                    classes => Classes
-                                },
-                                Warnings};
-                        {error, Reason} ->
-                            {error,
-                                iolist_to_binary(
-                                    io_lib:format("Core Erlang compile error: ~p", [Reason])
-                                )}
+                    case maps:get(dynamic_class_expr, ClassInfo, undefined) of
+                        DynExpr when is_binary(DynExpr), DynExpr =/= <<>> ->
+                            %% Path 2: evaluate the pre-generated ClassBuilder cascade.
+                            %% Re-enter compile_expression_via_port as a normal expression.
+                            compile_expression_via_port(
+                                binary_to_list(DynExpr), ModuleName, Bindings
+                            );
+                        _ ->
+                            %% Path 1 fallback: compile Core Erlang and load binary.
+                            #{
+                                core_erlang := CoreErlang,
+                                module_name := ClassModNameBin,
+                                classes := Classes,
+                                warnings := Warnings
+                            } = ClassInfo,
+                            ClassModName = binary_to_atom(ClassModNameBin, utf8),
+                            case beamtalk_compiler:compile_core_erlang(CoreErlang) of
+                                {ok, _CompiledMod, Binary} ->
+                                    {ok, class_definition,
+                                        #{
+                                            binary => Binary,
+                                            module_name => ClassModName,
+                                            classes => Classes
+                                        },
+                                        Warnings};
+                                {error, Reason} ->
+                                    {error,
+                                        iolist_to_binary(
+                                            io_lib:format(
+                                                "Core Erlang compile error: ~p", [Reason]
+                                            )
+                                        )}
+                            end
                     end;
                 %% BT-571: Standalone method definition
                 {ok, method_definition, MethodInfo} ->
