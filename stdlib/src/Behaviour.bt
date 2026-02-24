@@ -20,7 +20,7 @@
 /// Counter superclass             // => Actor
 /// Counter subclasses             // => []
 /// Counter canUnderstand: #class  // => true
-/// Counter localMethods           // => [increment, getValue]
+/// Counter methods                // => [increment, getValue]
 /// ```
 abstract Object subclass: Behaviour
 
@@ -86,23 +86,23 @@ abstract Object subclass: Behaviour
 
   // --- Method dictionary ---
 
-  /// Return all selectors understood by instances (includes inherited).
-  ///
-  /// Walks the class chain collecting local methods at each level.
+  /// Return selectors defined on this class (not inherited).
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Counter methods   // => [increment, getValue, class, respondsTo:, ...]
+  /// Counter methods   // => [increment, getValue]
   /// ```
-  sealed methods => @primitive "classMethods"
+  sealed methods => @primitive "classLocalMethods"
 
-  /// Return only selectors defined locally in this class (not inherited).
+  /// Return all selectors understood by instances, including inherited ones.
+  ///
+  /// Walks the class chain collecting methods at each level.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Counter localMethods   // => [increment, getValue]
+  /// Counter allMethods   // => [increment, getValue, class, respondsTo:, ...]
   /// ```
-  sealed localMethods => @primitive "classLocalMethods"
+  sealed allMethods => @primitive "classMethods"
 
   /// Test whether instances of the receiver understand the given selector
   /// (checks full inheritance chain).
@@ -116,7 +116,7 @@ abstract Object subclass: Behaviour
   /// Counter canUnderstand: #bogus      // => false
   /// ```
   sealed canUnderstand: selector =>
-    self methods includes: selector
+    self allMethods includes: selector
 
   /// Test whether the selector is defined locally in this class
   /// (does not check superclasses).

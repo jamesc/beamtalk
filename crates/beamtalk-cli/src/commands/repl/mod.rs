@@ -314,7 +314,7 @@ fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
                 pkg_manifest.name,
                 pkg_manifest.version,
                 beam_count,
-                if beam_count == 1 { "module" } else { "modules" }
+                if beam_count == 1 { "class" } else { "classes" }
             );
             vec![ebin_path.into_std_path_buf()]
         }
@@ -536,7 +536,7 @@ pub fn run(
         let actual_port = node_info.port;
 
         if is_new {
-            println!("Started new workspace node: {}", node_info.node_name);
+            tracing::debug!("Started new workspace node: {}", node_info.node_name);
             if workspace_name.is_some() {
                 println!("  Workspace: {workspace_id}");
             } else {

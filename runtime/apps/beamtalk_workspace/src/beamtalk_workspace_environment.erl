@@ -138,7 +138,7 @@ handle_call({UnknownSelector, _Args}, _From, State) ->
     Error0 = beamtalk_error:new(does_not_understand, 'Workspace'),
     Error1 = beamtalk_error:with_selector(Error0, UnknownSelector),
     Error2 = beamtalk_error:with_hint(
-        Error1, <<"Supported methods: actors, actorAt:, actorsOf:, sessions">>
+        Error1, <<"To list available selectors, use: Workspace methods">>
     ),
     {reply, {error, Error2}, State};
 handle_call(Request, _From, State) ->
@@ -175,7 +175,7 @@ handle_cast({UnknownSelector, _Args, FuturePid}, State) when
     Error0 = beamtalk_error:new(does_not_understand, 'Workspace'),
     Error1 = beamtalk_error:with_selector(Error0, UnknownSelector),
     Error2 = beamtalk_error:with_hint(
-        Error1, <<"Supported methods: actors, actorAt:, actorsOf:, sessions">>
+        Error1, <<"To list available selectors, use: Workspace methods">>
     ),
     beamtalk_future:reject(FuturePid, Error2),
     {noreply, State};
