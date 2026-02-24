@@ -353,20 +353,20 @@ impl CoreErlangGenerator {
 
     /// Generates code for a field assignment (`self.field := value`).
     ///
-    /// Uses state threading to simulate mutation in Core Erlang:
+    /// Uses threading to simulate mutation in Core Erlang. The generated pattern varies
+    /// by context:
+    ///
+    /// - **Actor context**: `State{n}` threading via `maps:put`
+    /// - **`ValueType` context** (BT-833): `Self{n}` threading — each assignment produces
+    ///   a new immutable snapshot; `self` in subsequent expressions resolves to `Self{n}`
+    ///
     /// ```erlang
     /// let _Val = <value> in
     /// let State{n} = call 'maps':'put'('fieldName', _Val, State{n-1}) in
     /// _Val
     /// ```
     ///
-    /// The assignment returns the assigned value (Smalltalk semantics).
-    ///
-    /// # BT-213: Value Type Restriction
-    ///
-    /// Field assignments are not supported in value type methods because value types
-    /// are immutable. This function will return an error if called in `ValueType` context.
-    /// Use semantic analysis to prevent field assignments in value types at compile time.
+    /// The assignment expression evaluates to the assigned value (Smalltalk semantics).
     pub(super) fn generate_field_assignment(
         &mut self,
         field_name: &str,
