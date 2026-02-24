@@ -21,6 +21,10 @@
 %%% ADR 0036 Phase 1 (BT-802): Bootstrap also registers the 'Metaclass' stub
 %%% (beamtalk_metaclass_bt) immediately after 'Class', completing the bootstrap
 %%% order: ProtoObject → Object → Behaviour → Class → Metaclass → Actor → user modules.
+%%%
+%%% ADR 0038 Phase 1 (BT-835): Bootstrap also registers the 'ClassBuilder' stub
+%%% (beamtalk_class_builder_bt) immediately after 'Metaclass', before Actor.
+%%% New sequence: ProtoObject → Object → Behaviour → Class → Metaclass → ClassBuilder → Actor.
 -module(beamtalk_bootstrap).
 
 -export([start_link/0, init/1]).
@@ -43,7 +47,10 @@ start_link() ->
 %%
 %% ADR 0036 Phase 1 (BT-802): Also registers the 'Metaclass' stub so that
 %% metaclass objects dispatch through the Metaclass → Class chain.
-%% Bootstrap order: ProtoObject → Object → Behaviour → Class → Metaclass → Actor → user modules.
+%%
+%% ADR 0038 Phase 1 (BT-835): Also registers the 'ClassBuilder' stub so that
+%% compiled class on_load hooks can call ClassBuilder before user modules load.
+%% Bootstrap order: ProtoObject → Object → Behaviour → Class → Metaclass → ClassBuilder → Actor.
 -spec init(pid()) -> no_return().
 init(Parent) ->
     %% Ensure pg is started (required by beamtalk_object_class for class registry)
@@ -63,6 +70,12 @@ init(Parent) ->
     %% ADR 0036 Phase 1 (BT-802): Register the 'Metaclass' stub after 'Class'.
     %% Metaclass has superclass 'Class', so Class must be registered first.
     beamtalk_metaclass_bt:register_class(),
+
+    %% ADR 0038 Phase 1 (BT-835): Register the 'ClassBuilder' stub after 'Metaclass'.
+    %% ClassBuilder has superclass 'Actor' (which may not yet be registered — safe
+    %% because class references are resolved lazily). ClassBuilder must be wired
+    %% before any user module loads so that on_load hooks can call ClassBuilder.
+    beamtalk_class_builder_bt:register_class(),
 
     proc_lib:init_ack(Parent, {ok, self()}),
     bootstrap_loop().

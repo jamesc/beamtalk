@@ -148,43 +148,42 @@ find_stdlib_ebin() ->
     end.
 
 %% @private
-%% @doc Ensure a class is registered after module loading.
+%% @doc Ensure a class is registered (or updated) after module loading.
 %%
-%% If on_load already ran but the class process was killed (e.g., during
-%% test teardown), call register_class/0 again to recreate it.
+%% Always calls register_class/0, even if the class process is already alive.
+%% This handles the case where a bootstrap stub re-registered the class with
+%% incomplete methods (e.g., after a test teardown killed all class processes
+%% and a subsequent test re-created the class via the hand-written stub rather
+%% than the compiled module). The compiled register_class/0 handles already_started
+%% via update_class/2, which is idempotent and restores the correct method set.
 -spec ensure_class_registered(module(), atom()) -> ok.
 ensure_class_registered(Mod, ClassName) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined ->
-            %% Class process doesn't exist — re-register
-            try Mod:register_class() of
-                ok ->
-                    ok;
-                Other ->
-                    ?LOG_WARNING("Unexpected return from register_class", #{
-                        module => Mod,
-                        class => ClassName,
-                        result => Other
-                    }),
-                    ok
-            catch
-                error:undef ->
-                    %% Module doesn't export register_class/0
-                    ?LOG_WARNING("Module missing register_class/0", #{
-                        module => Mod,
-                        class => ClassName
-                    }),
-                    ok;
-                Class:Reason ->
-                    ?LOG_ERROR("Failed to register class", #{
-                        module => Mod,
-                        class => ClassName,
-                        error_class => Class,
-                        reason => Reason
-                    }),
-                    ok
-            end;
-        _Pid ->
+    try Mod:register_class() of
+        ok ->
+            ok;
+        Other ->
+            ?LOG_WARNING("Unexpected return from register_class", #{
+                module => Mod,
+                class => ClassName,
+                result => Other
+            }),
+            ok
+    catch
+        error:undef ->
+            %% Module doesn't export register_class/0
+            ?LOG_WARNING("Module missing register_class/0", #{
+                module => Mod,
+                class => ClassName
+            }),
+            ok;
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR("Failed to register class", #{
+                module => Mod,
+                class => ClassName,
+                error_class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
             ok
     end.
 
