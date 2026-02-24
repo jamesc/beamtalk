@@ -1,11 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// System class tests — environment variables, platform, process info.
+// Tests the System class — getEnv:, getEnv:default:, osPlatform, osFamily,
+// architecture, hostname, erlangVersion, pid, and type-error validation.
 
 TestCase subclass: SystemTest
 
-  testSection1 =>
+  testSystemEnvironmentAndPlatform =>
     self assert: ((System getEnv: "PATH") class =:= String).
     // Reading a non-existent env var returns nil
     self assert: (System getEnv: "BEAMTALK_TEST_NONEXISTENT_VAR_XYZ") equals: nil.

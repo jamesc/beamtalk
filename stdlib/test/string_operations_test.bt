@@ -1,0 +1,63 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// String operations tests - migrated from bootstrap/string_ops.bt (BT-827)
+
+TestCase subclass: StringOperationsTest
+
+  testAt =>
+    // 1-based grapheme access
+    self assert: ("hello" at: 1) equals: "h".
+    self assert: ("hello" at: 5) equals: "o"
+
+  testCapitalize =>
+    self assert: ("hello" capitalize) equals: "Hello".
+    self assert: ("HELLO" capitalize) equals: "HELLO"
+
+  testReverse =>
+    self assert: ("hello" reverse) equals: "olleh"
+
+  testIncludesSubstring =>
+    self assert: ("hello world" includesSubstring: "world").
+    self deny: ("hello" includesSubstring: "xyz")
+
+  testStartsWith =>
+    self assert: ("hello" startsWith: "hel").
+    self deny: ("hello" startsWith: "xyz")
+
+  testEndsWith =>
+    self assert: ("hello" endsWith: "llo").
+    self deny: ("hello" endsWith: "xyz")
+
+  testIndexOf =>
+    self assert: ("hello" indexOf: "ell") equals: 2.
+    self assert: ("hello" indexOf: "xyz") equals: nil
+
+  testSplitOn =>
+    self assert: ("a,b,c" splitOn: ",") equals: #("a", "b", "c")
+
+  testRepeat =>
+    self assert: ("ab" repeat: 3) equals: "ababab"
+
+  testAsList =>
+    self assert: ("hi" asList) equals: #("h", "i")
+
+  testDo =>
+    // do: returns nil
+    self assert: ("hi" do: [:ch | nil]) equals: nil
+
+  testCollect =>
+    // collect: - map over graphemes (returns list)
+    self assert: ("hi" collect: [:ch | ch uppercase]) equals: #("H", "I").
+    self assert: ("abc" collect: [:ch | ch uppercase]) equals: #("A", "B", "C").
+    // on string variables (not just literals)
+    s := "hello".
+    self assert: (s collect: [:ch | ch uppercase]) equals: #("H", "E", "L", "L", "O")
+
+  testSelect =>
+    // select: - filter graphemes (returns string)
+    self assert: ("hello" select: [:ch | ch /= "l"]) equals: "heo".
+    self assert: ("abcd" select: [:ch | ch < "c"]) equals: "ab".
+    // on string variables
+    s := "hello".
+    self assert: (s select: [:ch | ch > "h"]) equals: "llo"

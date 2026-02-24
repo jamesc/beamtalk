@@ -1,7 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Tests for Tonel-style file format with separate class + method definitions (BT-571)
+// E2E tests for Tonel-style file format with separate class + method definitions (BT-571)
+//
+// These tests require E2E because Tonel-format files are loaded into the live
+// REPL class registry via the @load directive. The REPL handles file loading,
+// class registration, and workspace variable persistence. BUnit cannot invoke
+// file-loading directives or test the REPL's class registry integration.
 //
 // Tests that .bt files can use the Tonel format where the class declaration
 // and method definitions are separate top-level constructs.

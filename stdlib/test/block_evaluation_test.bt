@@ -1,9 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for control flow constructs
+// Tests block evaluation — basic value/value:/value:value: dispatch, nested
+// blocks, blocks used as conditionals, and variable persistence across
+// expressions in a test method.
 
-TestCase subclass: ControlFlowTest
+TestCase subclass: BlockEvaluationTest
 
   testBlockEvaluationBasic =>
     self assert: ([5 + 3] value) equals: 8.
@@ -25,7 +27,7 @@ TestCase subclass: ControlFlowTest
     // Block with arithmetic comparison
     self assert: ([:x :y | x + y > 10] value: 5 value: 10)
 
-  testVariablePersistenceInRepl =>
+  testVariablePersistenceAcrossExpressions =>
     // Set up a value
     baseValue := 100.
     self assert: baseValue equals: 100.

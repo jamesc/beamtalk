@@ -3,11 +3,20 @@
 
 // E2E test for method patching on file-loaded classes (BT-588)
 //
+// These tests require E2E because method patching involves the REPL's
+// file-loading pipeline (:load via @load directive) and live class mutation
+// (>> method definition) in the running REPL process. BUnit tests execute
+// compiled code and cannot drive the :load + patch + verify sequence with
+// workspace variable persistence across turns.
+//
 // Tests that standalone method definitions (>>) work on classes
 // loaded from files via :load, not just inline-defined classes.
 // This was broken because handle_load stored class sources with
 // string keys but handle_method_definition looked them up with
 // binary keys.
+//
+// Related: hot_reload_actors.bt — tests that existing running actor
+// instances pick up patches immediately (distinct focus).
 
 // @load tests/e2e/fixtures/counter.bt
 

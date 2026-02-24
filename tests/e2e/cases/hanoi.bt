@@ -2,6 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // E2E tests for Towers of Hanoi example
+//
+// This test requires E2E because the solve: method prints each move to
+// Transcript (an async workspace binding actor). The REPL context provides
+// both the Transcript workspace binding and workspace variable persistence
+// needed to hold the Hanoi instance across expressions.
+//
+// The solve: method returns nil because the last expression is a Transcript
+// show: or cr send, which is an async fire-and-forget message (returns self
+// on the actor but the solve: method returns nil after the recursive work).
+//
 // Tests the classic recursive algorithm that moves n disks between three pegs.
 // Hanoi is an Object subclass (not Actor), so use `new` not `spawn`.
 // BT-374: Transcript show:/cr are async sends, return self (BT-540).
@@ -21,6 +31,7 @@ h := Hanoi new
 // ===========================================================================
 
 // Solve with 1 disk — single move from A to C
+// Returns nil: the solve: method's last expression is a Transcript send (async, fire-and-forget)
 h solve: 1 from: "A" to: "C" via: "B"
 // => nil
 
@@ -29,5 +40,6 @@ h solve: 1 from: "A" to: "C" via: "B"
 // ===========================================================================
 
 // Solve with 3 disks — 7 moves (2^3 - 1)
+// Returns nil: the solve: method's last expression is a Transcript send (async, fire-and-forget)
 h solve: 3 from: "A" to: "C" via: "B"
 // => nil

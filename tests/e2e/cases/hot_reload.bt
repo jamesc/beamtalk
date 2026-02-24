@@ -3,6 +3,11 @@
 
 // E2E tests for hot reload of existing actors (BT-572)
 //
+// These tests require E2E because hot reload uses the :load REPL command and
+// inline class redefinition, both REPL-specific features. Workspace variable
+// persistence is needed to hold actor references across the reload boundary
+// and verify that existing actors pick up the new code.
+//
 // When a class is redefined (via :load), existing actor instances should
 // use the new code on their next message. State is preserved across reload.
 

@@ -3,10 +3,18 @@
 
 // E2E test for hot code reloading on existing actors
 //
+// This test requires E2E because standalone method definitions (>>) are a
+// REPL-specific interactive feature. Workspace variable persistence across
+// turns is needed to hold actor references before and after patching, and
+// to verify that existing running actors pick up the new code.
+//
 // Verifies that patching a method via >> on a class takes effect
 // immediately on EXISTING running actor instances, not just newly
 // spawned ones. This works because BEAM's hot code loading updates
 // function references (funs) in the __methods__ map automatically.
+//
+// Related: load_method_patch.bt — tests that patched methods update
+// the source reflection on file-loaded classes (distinct focus).
 
 // @load tests/e2e/fixtures/counter.bt
 

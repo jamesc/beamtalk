@@ -1,17 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for Class reflection API
+// E2E tests for Class reflection in the REPL context
 //
-// Tests Beamtalk class introspection capabilities:
-// - Beamtalk classNamed: - Look up class by name
-// - Class methods - Get list of instance methods
-// - Class name - Get the class name
-// - Class superclass - Get the superclass name
-// - Class name - Get the class name (ADR 0032: replaces class_name)
-//
-// Class objects are returned by `Beamtalk classNamed:` and support
-// reflection messages to introspect the class definition.
+// This file covers REPL-specific behavior only.
+// Class reflection semantics are tested exhaustively in
+// stdlib/test/class_reflection_test.bt (BUnit).
 //
 // BT-374: Beamtalk is a workspace binding (actor) dispatched via
 // persistent_term. Sends are async and return Futures, so we must
@@ -20,173 +14,39 @@
 // @load tests/e2e/fixtures/counter.bt
 
 // ===========================================================================
-// CLASS LOOKUP WITH classNamed:
+// ASYNC classNamed: LOOKUP (REPL-specific: async dispatch via workspace binding)
 // ===========================================================================
 
-// ---------------------------------------------------------------------------
-// Look up existing primitive class
-// ---------------------------------------------------------------------------
-
+// Async lookup of existing class — must await the Future
 stringClass := (Beamtalk classNamed: #String) await
 // => String
 
+// Workspace variable persists — name is accessible in next turn
 stringClass name
 // => String
 
-// ---------------------------------------------------------------------------
-// Look up existing actor class
-// ---------------------------------------------------------------------------
-
+// Async lookup of a loaded actor class
 counterClass := (Beamtalk classNamed: #Counter) await
 // => Counter
 
 counterClass name
 // => Counter
 
-// ---------------------------------------------------------------------------
-// Look up non-existent class returns nil (await the Future)
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// NIL RETURN FOR UNKNOWN CLASS (async lookup)
+// ===========================================================================
 
+// Look up a non-existent class — await resolves to nil
 (Beamtalk classNamed: #NonExistentClass) await
 // => nil
 
 // ===========================================================================
-// CLASS METHODS INTROSPECTION
+// WORKSPACE VARIABLE PERSISTENCE ACROSS TURNS
 // ===========================================================================
 
-// ---------------------------------------------------------------------------
-// Get methods list from String class
-// ---------------------------------------------------------------------------
-
-stringClass := (Beamtalk classNamed: #String) await
-// => String
-
-// Method lists are fragile (change when methods are added), keep wildcard
-methods := stringClass methods
-// => _
-
-// String has many methods (++, size, at:, etc.)
-// Just verify we get a non-empty list by checking length
-methods isEmpty
-// => false
-
-// ---------------------------------------------------------------------------
-// Get methods list from Counter class
-// ---------------------------------------------------------------------------
-
-counterClass := (Beamtalk classNamed: #Counter) await
-// => Counter
-
-counterMethods := counterClass methods
-// => _
-
-counterMethods isEmpty
-// => false
-
-// Counter should have its local methods
-counterMethods includes: #increment
-// => true
-
-counterMethods includes: #decrement
-// => true
-
-counterMethods includes: #getValue
-// => true
-
-// ADR 0032 Phase 2: methods returns full hierarchy (local + inherited).
-// Inherited Object methods ARE included via Behaviour.methods chain walk.
-counterMethods includes: #isNil
-// => true
-
-counterMethods includes: #printString
-// => true
-
-counterMethods includes: #respondsTo:
-// => true
-
-// ---------------------------------------------------------------------------
-// Get methods list from Integer class
-// ---------------------------------------------------------------------------
-
+// Class object stored in workspace variable is accessible in later turns
 intClass := (Beamtalk classNamed: #Integer) await
 // => Integer
 
-// Method list fragile (changes when methods are added), keep wildcard
-intMethods := intClass methods
-// => _
-
-// Integer has arithmetic operators
-intMethods isEmpty
-// => false
-
-// ===========================================================================
-// SUPERCLASS INTROSPECTION
-// ===========================================================================
-
-// ---------------------------------------------------------------------------
-// String superclass is Object
-// ---------------------------------------------------------------------------
-
-stringClass := (Beamtalk classNamed: #String) await
-// => String
-
-stringClass superclass
-// => Collection
-
-// ---------------------------------------------------------------------------
-// Counter superclass is Actor
-// ---------------------------------------------------------------------------
-
-counterClass := (Beamtalk classNamed: #Counter) await
-// => Counter
-
-counterClass superclass
-// => Actor
-
-// ---------------------------------------------------------------------------
-// Actor superclass is Object
-// ---------------------------------------------------------------------------
-
-actorClass := (Beamtalk classNamed: #Actor) await
-// => Actor
-
-actorClass superclass
-// => Object
-
-// ===========================================================================
-// CLASS NAME CONSISTENCY
-// ===========================================================================
-
-// ---------------------------------------------------------------------------
-// Class name matches the lookup name
-// ---------------------------------------------------------------------------
-
-stringClass := (Beamtalk classNamed: #String) await
-// => String
-
-stringClass name
-// => String
-
-integerClass := (Beamtalk classNamed: #Integer) await
+intClass name
 // => Integer
-
-integerClass name
-// => Integer
-
-trueClass := (Beamtalk classNamed: #True) await
-// => True
-
-trueClass name
-// => True
-
-// ===========================================================================
-// IMPLEMENTATION STATUS
-// ===========================================================================
-//
-// ✅ Beamtalk classNamed: - Returns wrapped class object (async, needs await)
-// ✅ Class methods - Returns list of instance methods
-// ✅ Class name - Returns class name atom
-// ✅ Class superclass - Returns superclass name atom
-// ✅ Class name - Returns class name atom (ADR 0032: replaces class_name/module_name)
-// ✅ Async dispatch support in handle_cast - Classes handle Future protocol
-// ✅ E2E test coverage - This file

@@ -1,7 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for unary message sends
+// Tests unary message sends on blocks (value), integers (negated, abs, isZero,
+// isEven, isOdd), strings (length, isEmpty), and booleans (not).
 
 TestCase subclass: UnaryMessagesTest
 

@@ -1,44 +1,20 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for File streaming (BT-513)
-// Tests File lines: and File open:do: in the REPL environment.
+// E2E tests for File streaming in the REPL context (BT-513)
 //
-// Uses stdlib fixture files in stdlib/test/fixtures/ (relative to project
-// root). The BEAM process cwd is set to the project root.
+// This file covers REPL-specific behavior only.
+// File streaming semantics are tested exhaustively in
+// stdlib/test/file_stream_test.bt (BUnit).
 
 // ===========================================================================
-// FILE LINES: IN REPL
+// CROSS-EXPRESSION VARIABLE PERSISTENCE
 // ===========================================================================
 
-// Read lines and persist stream result across expressions
+// Stream result assigned in one REPL turn is accessible in the next
 lines := (File lines: "stdlib/test/fixtures/stream_test.txt") asList
 // => ["line one","line two","line three"]
 
-// Variable binding persists
+// Workspace variable persists across turns
 lines size
 // => 3
-
-// Pipeline composition in REPL
-(File lines: "stdlib/test/fixtures/stream_test.txt") take: 2
-// => ["line one","line two"]
-
-// ===========================================================================
-// FILE OPEN:DO: IN REPL
-// ===========================================================================
-
-// Block-scoped handle with auto-close
-File open: "stdlib/test/fixtures/stream_test.txt" do: [:handle | handle lines take: 1]
-// => ["line one"]
-
-// Block return value is available
-result := File open: "stdlib/test/fixtures/stream_test.txt" do: [:handle | handle lines inject: 0 into: [:c :l | c + 1]]
-// => 3
-
-// ===========================================================================
-// ERROR HANDLING IN REPL
-// ===========================================================================
-
-// File not found produces structured error
-File lines: "stdlib/test/fixtures/does_not_exist.txt"
-// => ERROR: file not found

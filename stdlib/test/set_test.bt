@@ -33,7 +33,7 @@ TestCase subclass: SetTest
     self assert: (s3 includes: 2).
     self assert: (s3 size) equals: 1
 
-  testFromlistInstanceMethodCreatingNewSetFromList =>
+  testFromList =>
     colors := (Set new) fromList: #(#red, #green, #blue).
     self assert: (colors size) equals: 3.
     self assert: (colors includes: #red).

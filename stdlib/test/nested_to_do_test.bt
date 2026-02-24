@@ -1,12 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-478: Nested to:do: with field mutations
+// BT-478: Tests that nested to:do: loops correctly thread actor field mutations
+// through multiple loop iterations (outer × inner increments persist in state).
 
 
 TestCase subclass: NestedToDoTest
 
-  testSection1 =>
+  testNestedLoopWithFieldMutation =>
     nested := FieldMutationNested spawn.
     // Test nested to:do: — 3 outer × 2 inner = 6 increments
     self assert: ((nested nestedIncrement: 3 inner: 2) await) equals: 6.

@@ -1,11 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Stream — collection stream methods
+// Tests Stream on all collection types — List, String, Set, and Dictionary —
+// verifying that stream, select:, collect:, reject:, drop:, take:, do:,
+// inject:into:, detect:, anySatisfy:, allSatisfy:, and Stream on: all work.
 
 TestCase subclass: StreamCollectionsTest
 
-  testSection1 =>
+  testStreamOnAllCollectionTypes =>
     self assert: ((#(1, 2, 3) stream) asList) equals: #(1, 2, 3).
     // Empty list stream
     self assert: ((#() stream) asList) equals: #().

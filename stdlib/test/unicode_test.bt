@@ -1,11 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Unicode string operations (BT-388)
+// BT-388: Tests that string operations are Unicode-aware (grapheme clusters) —
+// equality with CJK and emoji, size in graphemes, at: indexing, reverse, and
+// includesSubstring: for multi-byte characters.
 
 TestCase subclass: UnicodeTest
 
-  testSection1 =>
+  testUnicodeStringOperations =>
     self assert: "世界" equals: "世界".
     // Emoji (4-byte UTF-8)
     self assert: "🌍" equals: "🌍".

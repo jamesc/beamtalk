@@ -3,6 +3,13 @@
 
 // E2E tests for multi-statement method bodies (BT-360) and
 // top-level REPL multi-statement input (BT-780).
+//
+// These tests require E2E because BT-780 top-level multi-statement input
+// (e.g., `x := 1. y := 2.`) is a REPL-specific evaluation feature: the REPL
+// evaluates a period-separated sequence and binds all variables to the
+// workspace. BUnit evaluates single expressions and cannot test workspace
+// binding of multiple variables from a single multi-statement input.
+// Cross-turn variable persistence is also required for mutation tests.
 
 // @load tests/e2e/fixtures/multi_statement.bt
 

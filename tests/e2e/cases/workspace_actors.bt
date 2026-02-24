@@ -3,6 +3,13 @@
 
 // E2E tests for Workspace actor introspection API (BT-423).
 //
+// These tests require E2E because the Workspace introspection API queries
+// live actor state in the running REPL process. The Workspace binding is a
+// singleton actor that only exists in the live REPL (via persistent_term).
+// Workspace variable persistence across turns is needed to hold actor
+// references and compare counts before/after spawning. BUnit tests run in
+// compiled code without access to the REPL workspace or its live actors.
+//
 // Workspace is a singleton actor that provides introspection
 // of live actors in the workspace via persistent_term binding.
 

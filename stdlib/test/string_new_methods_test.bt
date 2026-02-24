@@ -11,7 +11,7 @@ TestCase subclass: StringNewMethodsTest
     // replaceFirst:with:
     self assert: ("hello world" replaceFirst: "o" with: "0") equals: "hell0 world"
 
-  testLinesAndWords =>
+  testWords =>
     // words
     self assert: ("hello world foo" words) equals: #("hello", "world", "foo").
     // words with extra spaces
@@ -37,7 +37,7 @@ TestCase subclass: StringNewMethodsTest
     // padRight:with: - pad with specific character
     self assert: ("42" padRight: 5 with: "0") equals: "42000"
 
-  testTesting =>
+  testStringPredicates =>
     // isBlank
     self assert: ("" isBlank).
     self assert: ("   " isBlank).

@@ -3,6 +3,11 @@
 
 // E2E tests for actor initialize protocol (BT-411 / ADR 0013 Phase 2)
 //
+// These tests require E2E because actor spawn and the automatic initialize
+// callback are part of the live REPL actor lifecycle. BUnit tests execute
+// compiled expressions but cannot drive the full spawn-then-initialize
+// sequence with workspace variable persistence across REPL turns.
+//
 // Tests that actor classes with an `initialize` method have it
 // automatically called after spawn.
 

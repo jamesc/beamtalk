@@ -1,12 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-744: Local variable bindings in Object subclass method bodies
+// BT-744: Tests that Object subclass (non-actor) method bodies can use local
+// variables — single local, multiple locals in sequence, local as message
+// receiver, and local from a conditional branch.
 
 
 TestCase subclass: ValueTypeLocalVarsTest
 
-  testSection1 =>
+  testLocalVariablesInValueTypeMethods =>
     c := Calculator new.
     // Single local variable: assign and read back
     self assert: (c double: 7) equals: 14.

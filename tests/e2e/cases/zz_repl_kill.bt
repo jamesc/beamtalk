@@ -3,8 +3,11 @@
 
 // E2E test for :kill command (BT-529).
 //
-// This file sorts last alphabetically to avoid affecting other tests,
-// because killing an actor currently terminates the REPL session.
+// This test requires E2E because :kill is a REPL command processed by the
+// REPL session handler. BUnit tests execute compiled Beamtalk code and
+// cannot invoke REPL commands. This file sorts last alphabetically to avoid
+// affecting other tests, because killing an actor currently terminates the
+// REPL session.
 
 // @load tests/e2e/fixtures/counter.bt
 

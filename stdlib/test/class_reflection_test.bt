@@ -1,12 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Stdlib tests for class methods reflection (BT-510 / ADR 0032 Phase 2)
+// BT-510, BT-776, ADR 0032 Phase 2: Tests class method reflection — localMethods
+// returns only methods defined directly on the class, methods returns the full
+// inheritance chain, and respondsTo: works on class objects.
 
 
 TestCase subclass: ClassReflectionTest
 
-  testSection1 =>
+  testLocalAndFullMethodLists =>
     counterLocal := Counter localMethods.
     self deny: (counterLocal isEmpty).
     // Counter defines increment, decrement, getValue locally

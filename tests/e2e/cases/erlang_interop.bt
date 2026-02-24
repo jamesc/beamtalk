@@ -1,53 +1,30 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for Erlang interop in REPL (ADR 0028, BT-677)
+// E2E tests for Erlang interop in the REPL context (ADR 0028, BT-677)
 //
-// Tests that Erlang module proxy construction and function dispatch
-// work correctly through the REPL session, including variable bindings.
+// This file covers REPL-specific behavior only.
+// Proxy construction and function call semantics are tested exhaustively in
+// stdlib/test/erlang_interop_test.bt (BUnit).
 
 // ===========================================================================
-// PROXY CONSTRUCTION
+// CACHED PROXY VIA WORKSPACE BINDING (cross-turn persistence)
 // ===========================================================================
 
-// Construct proxy via ClassReference
-Erlang lists
-// => #ErlangModule<lists>
-
-// Proxy class
-(Erlang lists) class
-// => ErlangModule
-
-// ===========================================================================
-// FUNCTION CALLS
-// ===========================================================================
-
-// Single keyword message
-Erlang lists reverse: #(3, 2, 1)
-// => [1,2,3]
-
-// Multi-keyword message
-Erlang maps merge: #{#a => 1} with: #{#b => 2}
-// => #{#a => 1, #b => 2}
-
-// ===========================================================================
-// CACHED PROXY VIA WORKSPACE BINDING
-// ===========================================================================
-
-// Store proxy in workspace variable
+// Store proxy in workspace variable across turns
 proxy := Erlang lists
 // => #ErlangModule<lists>
 
-// Reuse stored proxy
+// Reuse stored proxy in the next turn
 proxy reverse: #(10, 20, 30)
 // => [30,20,10]
 
-// Proxy identity
+// Proxy class survives across turns
 proxy class
 // => ErlangModule
 
 // ===========================================================================
-// ERLANG INTEROP INSIDE ACTOR METHODS
+// ERLANG INTEROP INSIDE ACTOR METHODS (REPL workspace binding)
 // ===========================================================================
 
 // @load tests/e2e/fixtures/erlang_user.bt
@@ -55,8 +32,10 @@ proxy class
 eu := ErlangUser spawn
 // => _
 
+// Actor method calls Erlang internally and stores the result in state
+// callErlang assigns self.result := Erlang lists reverse: #(1,2,3), returning [3,2,1]
 eu callErlang await
-// => _
+// => [3,2,1]
 
 eu getResult await
 // => [3,2,1]

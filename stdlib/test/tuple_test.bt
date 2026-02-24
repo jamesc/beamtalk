@@ -1,12 +1,10 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Tuple primitive tests (BT-417)
+// BT-417: Tests the Tuple primitive — creation, display, size, unwrap/unwrapOr:/
+// unwrapOrElse: on ok/error/other tuples, and that unsupported constructors raise.
 
 TestCase subclass: TupleTest
-
-  testSection1 =>
-    self assert: (1 + 1) equals: 2
 
   testCreation =>
     // Tuple new returns an empty tuple

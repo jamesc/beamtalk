@@ -3,6 +3,12 @@
 
 // E2E tests for :load <directory> (BT-784).
 //
+// These tests require E2E because :load and :reload are REPL commands
+// processed by the REPL session handler before any Beamtalk expression is
+// evaluated. BUnit tests execute compiled Beamtalk code and cannot invoke
+// REPL commands. Workspace variable persistence across turns is also needed
+// to verify that loaded classes are usable after the :load command.
+//
 // Tests loading all .bt files from a directory recursively,
 // summary output, and :reload after directory load.
 
