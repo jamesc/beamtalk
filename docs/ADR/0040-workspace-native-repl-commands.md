@@ -109,7 +109,7 @@ Removed from current API:
 
 ### 3. Class-Based Reload on Behaviour
 
-**Reload is a class operation, not a workspace operation.** When `Workspace load: 'examples/counter.bt'` compiles a class, the runtime records the source file association on the class metadata (alongside doc comments per ADR 0033). The class then knows how to reload itself.
+**Reload is a class operation, not a workspace operation.** When `Workspace load: "examples/counter.bt"` compiles a class, the runtime records the source file association on the class metadata (alongside doc comments per ADR 0033). The class then knows how to reload itself.
 
 New methods on **`Behaviour`** (`stdlib/src/Behaviour.bt`):
 
@@ -119,7 +119,7 @@ New methods on **`Behaviour`** (`stdlib/src/Behaviour.bt`):
 | `reload` | `self` | Recompile from `sourceFile`, load new BEAM module; live actors pick up new code on next dispatch |
 
 ```beamtalk
-Counter sourceFile          // => 'examples/counter.bt'
+Counter sourceFile          // => "examples/counter.bt"
 Counter reload              // recompile + hot-swap
 
 Integer sourceFile          // => nil (stdlib built-in)
@@ -169,7 +169,7 @@ Following Anders Hejlsberg's principle — design for IntelliSense — the **pri
 Beamtalk allClasses
 Beamtalk help: Counter
 Beamtalk version
-Workspace load: 'examples/counter.bt'
+Workspace load: "examples/counter.bt"
 Workspace classes
 Workspace actors
 Counter reload
@@ -187,7 +187,7 @@ Both layers follow the same pattern: typed convenience methods for daily use, `g
 ### REPL Session Examples
 
 ```beamtalk
->> Workspace load: 'examples/counter.bt'
+>> Workspace load: "examples/counter.bt"
 Loaded: Counter (examples/counter.bt)
 
 >> Workspace classes
@@ -197,7 +197,7 @@ Counter    examples/counter.bt
 #Actor<Counter,0.234.0>
 
 >> Counter sourceFile
-'examples/counter.bt'
+"examples/counter.bt"
 
 >> Counter reload
 Reloaded: Counter (new code loaded)
@@ -418,7 +418,7 @@ Beamtalk globals classNamed: #Counter // instead of at: + isClass filter
 Define a `ReplHelper` class whose methods are auto-imported into REPL scope:
 
 ```beamtalk
-load: 'examples/counter.bt'    // bare call, auto-imported from ReplHelper
+load: "examples/counter.bt"    // bare call, auto-imported from ReplHelper
 help: Counter                   // bare call
 ```
 
@@ -537,7 +537,7 @@ Add `help:` and `help:selector:` to `BeamtalkInterface`.
 
 Change the Rust CLI to translate `:load path` into `Workspace load: 'path'` and send it as a normal eval request. `:reload Counter` becomes `Counter reload`. `:modules` becomes `Workspace classes`.
 
-**Implementation note — string escaping:** The alias translation must properly escape path arguments. A simple `path.replace("'", "\\'")` suffices since paths are the only string arguments.
+**Implementation note — string escaping:** The alias translation must properly escape path arguments. For double-quoted strings, escape backslashes and quotes (e.g., `path.replace("\\", "\\\\").replace("\"", "\\\"")`).
 
 **Affected files:**
 - `crates/beamtalk-cli/src/commands/repl/mod.rs` — rewrite command handlers as eval translations
@@ -581,7 +581,7 @@ Add BUnit tests for all new facade and Behaviour methods. Add e2e tests exercisi
 
 | Before | After (also works) | Shortcut still works? |
 |--------|--------------------|-----------------------|
-| `:load examples/counter.bt` | `Workspace load: 'examples/counter.bt'` | Yes |
+| `:load examples/counter.bt` | `Workspace load: "examples/counter.bt"` | Yes |
 | `:reload` | `Counter reload` (class-based) | Yes (desugars to last-loaded class) |
 | `:reload Counter` | `Counter reload` | Yes |
 | `:modules` | `Workspace classes` | Yes |
