@@ -1,7 +1,7 @@
 # ADR 0032: Early Class Protocol — Behaviour and Class in Beamtalk Stdlib
 
 ## Status
-Accepted (2026-02-20)
+Implemented (2026-02-24)
 
 ## Context
 

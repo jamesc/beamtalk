@@ -1,7 +1,7 @@
 # ADR 0037: Collection Class Hierarchy — Shallow Abstract Layer with Minimal Primitive Surface
 
 ## Status
-Accepted (2026-02-23)
+Implemented (2026-02-24)
 
 ## Context
 
