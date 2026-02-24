@@ -215,6 +215,35 @@ abstract Object subclass: Behaviour
   /// ```
   sealed isMetaclass => false
 
+  // --- Source file and reload (ADR 0040 Phase 2) ---
+
+  /// Return the path of the source file this class was compiled from, or nil.
+  ///
+  /// Returns nil for stdlib classes, bootstrap classes, and classes created
+  /// via ClassBuilder (dynamic classes with no backing file).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter sourceFile   // => "examples/counter.bt"
+  /// Integer sourceFile   // => nil (stdlib built-in)
+  /// ```
+  sealed sourceFile => @primitive "classSourceFile"
+
+  /// Recompile this class from its source file and hot-swap the BEAM module.
+  ///
+  /// Live actors pick up new code on next message dispatch (BEAM two-version
+  /// code loading — no state migration needed for method changes).
+  ///
+  /// Raises an error if `sourceFile` is nil — stdlib and dynamic classes
+  /// (created via ClassBuilder) cannot be reloaded from source.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter reload              // recompile + hot-swap Counter
+  /// Integer reload              // => Error: Integer has no source file — stdlib classes cannot be reloaded
+  /// ```
+  sealed reload => @primitive "classReload"
+
   // --- Class removal ---
 
   /// Remove this class from the system, cleaning up all associated state.
