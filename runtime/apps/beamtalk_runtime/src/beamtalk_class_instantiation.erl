@@ -26,7 +26,7 @@
 
 -export([
     handle_spawn/4,
-    handle_new/7,
+    handle_new/8,
     ensure_is_constructible/3,
     compute_is_constructible/2,
     abstract_class_error/2,
@@ -98,7 +98,18 @@ handle_spawn(Args, ClassName, Module, false) ->
 %% BT-246 / ADR 0013: Value types support new/new:. Actor classes should use
 %% {spawn, Args} protocol via class_send. Dynamic classes use
 %% beamtalk_dynamic_object.
--spec handle_new(list(), class_name(), atom(), map(), [atom()], boolean() | undefined, pid()) ->
+%%
+%% BT-838: Added FieldDefaults parameter for dynamic class field defaults.
+-spec handle_new(
+    list(),
+    class_name(),
+    atom(),
+    map(),
+    [atom()],
+    map(),
+    boolean() | undefined,
+    pid()
+) ->
     {ok, term(), boolean() | undefined} | {error, term(), boolean() | undefined}.
 handle_new(
     Args,
@@ -106,33 +117,65 @@ handle_new(
     beamtalk_dynamic_object,
     DynamicMethods,
     InstanceVars,
+    FieldDefaults,
     IsConstructible,
     ClassPid
 ) ->
-    handle_new_dynamic(Args, ClassName, DynamicMethods, InstanceVars, IsConstructible, ClassPid);
-handle_new(Args, ClassName, Module, _DynamicMethods, _InstanceVars, IsConstructible0, _ClassPid) ->
+    handle_new_dynamic(
+        Args,
+        ClassName,
+        DynamicMethods,
+        InstanceVars,
+        FieldDefaults,
+        IsConstructible,
+        ClassPid
+    );
+handle_new(
+    Args,
+    ClassName,
+    Module,
+    _DynamicMethods,
+    _InstanceVars,
+    _FieldDefaults,
+    IsConstructible0,
+    _ClassPid
+) ->
     handle_new_compiled(Args, ClassName, Module, IsConstructible0).
 
 %% @private
-handle_new_dynamic(Args, ClassName, DynamicMethods, InstanceVars, IsConstructible, ClassPid) ->
+%% BT-838: Added FieldDefaults parameter for field default values.
+handle_new_dynamic(
+    Args,
+    ClassName,
+    DynamicMethods,
+    InstanceVars,
+    FieldDefaults,
+    IsConstructible,
+    ClassPid
+) ->
     try
         InitState = #{
             '$beamtalk_class' => ClassName,
             '__class_pid__' => ClassPid,
             '__methods__' => DynamicMethods
         },
+        %% BT-838: Apply field defaults first, then overlay user-provided fields.
+        %% This ensures partial initialization (new: #{x => 5}) still gets
+        %% defaults for unspecified fields.
+        InitStateWithDefaults = lists:foldl(
+            fun(Var, Acc) ->
+                Default = maps:get(Var, FieldDefaults, nil),
+                maps:put(Var, Default, Acc)
+            end,
+            InitState,
+            InstanceVars
+        ),
         InitStateWithFields =
             case Args of
                 [FieldMap] when is_map(FieldMap) ->
-                    maps:merge(InitState, FieldMap);
+                    maps:merge(InitStateWithDefaults, FieldMap);
                 [] ->
-                    lists:foldl(
-                        fun(Var, Acc) ->
-                            maps:put(Var, nil, Acc)
-                        end,
-                        InitState,
-                        InstanceVars
-                    );
+                    InitStateWithDefaults;
                 _ ->
                     DynErr0 = beamtalk_error:new(type_error, ClassName),
                     DynErr1 = beamtalk_error:with_selector(DynErr0, 'new:'),

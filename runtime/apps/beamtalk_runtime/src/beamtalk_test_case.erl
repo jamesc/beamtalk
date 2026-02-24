@@ -266,6 +266,14 @@ find_test_classes() ->
 %% Handles #beamtalk_error{} records, wrapped Exception objects (ADR 0015),
 %% and raw Erlang atom errors (e.g., badarith, badarg).
 -spec extract_error_kind(term()) -> atom().
+extract_error_kind({future_rejected, Reason}) ->
+    %% BT-838: Futures rejected by actor errors wrap the error.
+    %% Recursively extract so both #beamtalk_error{} and {error, Map} wrappers
+    %% are handled consistently.
+    extract_error_kind(Reason);
+extract_error_kind({error, Wrapped}) when is_map(Wrapped) ->
+    %% BT-838: Actor gen_server exits wrap errors as {error, #{error => ...}}.
+    extract_error_kind(Wrapped);
 extract_error_kind(#beamtalk_error{kind = Kind}) ->
     Kind;
 extract_error_kind(#{class := 'Exception', error := #beamtalk_error{kind = Kind}}) ->

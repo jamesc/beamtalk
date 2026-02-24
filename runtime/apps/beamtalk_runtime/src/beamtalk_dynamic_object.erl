@@ -159,7 +159,10 @@ code_change(OldVsn, State, Extra) ->
 %%====================================================================
 
 %% @doc Dispatch a message to a dynamic method.
-%% Looks up the method closure and invokes it with Self, Args, and State.
+%%
+%% Looks up the method closure in __methods__ and invokes it. If the method
+%% is not found locally, falls back to the class hierarchy walk via
+%% beamtalk_dispatch:super/5 to find inherited methods (BT-838).
 -spec dispatch(atom(), list(), term(), map()) ->
     {reply, term(), map()} | {noreply, map()} | {error, term()}.
 dispatch(Selector, Args, Self, State) ->
@@ -173,7 +176,6 @@ dispatch(Selector, Args, Self, State) ->
                 apply(MethodFun, [Self, Args, State])
             catch
                 Class:Reason:_Stacktrace ->
-                    %% Method threw an exception - log without stack trace to avoid leaking sensitive data
                     ?LOG_ERROR("Error in method", #{
                         selector => Selector,
                         class => Class,
@@ -185,35 +187,46 @@ dispatch(Selector, Args, Self, State) ->
                     {error, Error}
             end;
         error ->
-            %% Method not found - check for doesNotUnderstand
-            case maps:find('doesNotUnderstand:args:', Methods) of
-                {ok, DNUFun} ->
-                    %% Call doesNotUnderstand handler with correct format: [Selector, Args]
-                    try
-                        apply(DNUFun, [Self, [Selector, Args], State])
-                    catch
-                        Class:Reason:_Stacktrace ->
-                            %% DNU handler threw an exception - log without stack trace to avoid leaking sensitive data
-                            ?LOG_ERROR("Error in doesNotUnderstand handler", #{
-                                selector => Selector,
-                                class => Class,
-                                reason => Reason
-                            }),
-                            ClassName = beamtalk_tagged_map:class_of(State, unknown),
-                            Error0 = beamtalk_error:new(type_error, ClassName),
-                            Error = beamtalk_error:with_selector(Error0, 'doesNotUnderstand:args:'),
-                            {error, Error}
-                    end;
-                error ->
-                    %% No doesNotUnderstand - method not found is an error
-                    ClassName = beamtalk_tagged_map:class_of(State, unknown),
-                    Error0 = beamtalk_error:new(does_not_understand, ClassName),
-                    Error1 = beamtalk_error:with_selector(Error0, Selector),
-                    Error = beamtalk_error:with_hint(
-                        Error1, <<"Check spelling or use 'respondsTo:' to verify method exists">>
-                    ),
-                    {error, Error}
+            %% BT-838: Method not found locally — try inherited methods via
+            %% hierarchy walk. This enables dynamic classes to use methods
+            %% inherited from Object (class, respondsTo:, printString, etc.)
+            ClassName = beamtalk_tagged_map:class_of(State, unknown),
+            case beamtalk_dispatch:super(Selector, Args, Self, State, ClassName) of
+                {reply, _Result, _NewState} = Reply ->
+                    Reply;
+                {error, _} ->
+                    %% Fall back to doesNotUnderstand before giving up
+                    dispatch_dnu(Selector, Args, Self, State, Methods, ClassName)
             end
+    end.
+
+%% @private
+%% @doc Handle doesNotUnderstand fallback.
+-spec dispatch_dnu(atom(), list(), term(), map(), map(), atom()) ->
+    {reply, term(), map()} | {noreply, map()} | {error, term()}.
+dispatch_dnu(Selector, Args, Self, State, Methods, ClassName) ->
+    case maps:find('doesNotUnderstand:args:', Methods) of
+        {ok, DNUFun} ->
+            try
+                apply(DNUFun, [Self, [Selector, Args], State])
+            catch
+                Class:Reason:_Stacktrace ->
+                    ?LOG_ERROR("Error in doesNotUnderstand handler", #{
+                        selector => Selector,
+                        class => Class,
+                        reason => Reason
+                    }),
+                    Error0 = beamtalk_error:new(type_error, ClassName),
+                    Error = beamtalk_error:with_selector(Error0, 'doesNotUnderstand:args:'),
+                    {error, Error}
+            end;
+        error ->
+            Error0 = beamtalk_error:new(does_not_understand, ClassName),
+            Error1 = beamtalk_error:with_selector(Error0, Selector),
+            Error = beamtalk_error:with_hint(
+                Error1, <<"Check spelling or use 'respondsTo:' to verify method exists">>
+            ),
+            {error, Error}
     end.
 
 %% @doc Create a Self reference for this dynamic object.

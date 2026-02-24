@@ -1,0 +1,89 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E test for dynamic class creation via ClassBuilder (BT-838 / ADR 0038 Phase 4)
+//
+// Verifies Path 2: closure-based dynamic class creation at runtime
+// without a compiler round-trip. Tests the REPL session from the ADR.
+// Note: ClassBuilder and dynamic objects are Actors; cascade results and
+// method calls must be awaited.
+
+// ===========================================================================
+// DYNAMIC CLASS CREATION — BASIC
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Create a dynamic class with a field and a method
+// ---------------------------------------------------------------------------
+
+_dog := (Object classBuilder name: #Dog; addField: #name default: "Rex"; addMethod: #speak body: [:s | (s at: #name) ++ " says Woof!"]; register) await
+// => _
+
+// ---------------------------------------------------------------------------
+// Instantiate and use the dynamic class
+// ---------------------------------------------------------------------------
+
+d := Dog new
+// => _
+
+d speak await
+// => Rex says Woof!
+
+// ---------------------------------------------------------------------------
+// Field accessor returns the default value
+// ---------------------------------------------------------------------------
+
+d name await
+// => Rex
+
+// ===========================================================================
+// CLASS REFLECTION
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Verify class metadata is available
+// ---------------------------------------------------------------------------
+
+Dog superclass
+// => Object
+
+Dog canUnderstand: #speak
+// => true
+
+Dog canUnderstand: #name
+// => true
+
+// ===========================================================================
+// SIMPLE CONSTANT METHOD
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// A zero-arg block method that returns a constant
+// ---------------------------------------------------------------------------
+
+_cat := (Object classBuilder name: #Cat; addMethod: #greet body: ["Meow!"]; register) await
+// => _
+
+Cat new greet await
+// => Meow!
+
+// ===========================================================================
+// SEALED CLASS REJECTION
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Attempting to subclass a sealed class raises an error
+// ---------------------------------------------------------------------------
+
+[(Object classBuilder name: #BadFloat; superclass: Float; register) await] on: Error do: [:e | "sealed rejected"]
+// => sealed rejected
+
+// ===========================================================================
+// CLEANUP
+// ===========================================================================
+
+Dog removeFromSystem
+// => _
+
+Cat removeFromSystem
+// => _
