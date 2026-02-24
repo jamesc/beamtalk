@@ -119,7 +119,7 @@ sealed Collection subclass: Dictionary
   /// ```
   collect: block: Block -> Dictionary =>
     dict := self.
-    self keys inject: #{} into: [:k :acc |
+    self keys inject: #{} into: [:acc :k |
       acc at: k put: (block value: (dict at: k))
     ]
 

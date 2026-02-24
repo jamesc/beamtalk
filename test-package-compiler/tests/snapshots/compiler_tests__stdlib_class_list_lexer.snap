@@ -147,9 +147,9 @@ Token { kind: Integer("0"), span: Span { start: 1456, end: 1457 }, leading_trivi
 Token { kind: Keyword("into:"), span: Span { start: 1458, end: 1463 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: LeftBracket, span: Span { start: 1464, end: 1465 }, leading_trivia: [], trailing_trivia: [] }
 Token { kind: Colon, span: Span { start: 1465, end: 1466 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("each"), span: Span { start: 1466, end: 1470 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Colon, span: Span { start: 1471, end: 1472 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("i"), span: Span { start: 1472, end: 1473 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("i"), span: Span { start: 1466, end: 1467 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Colon, span: Span { start: 1468, end: 1469 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("each"), span: Span { start: 1469, end: 1473 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Pipe, span: Span { start: 1474, end: 1475 }, leading_trivia: [], trailing_trivia: [] }
 Token { kind: Identifier("newI"), span: Span { start: 1482, end: 1486 }, leading_trivia: [Whitespace("\n      ")], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Assign, span: Span { start: 1487, end: 1489 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
@@ -179,9 +179,9 @@ Token { kind: Integer("0"), span: Span { start: 1630, end: 1631 }, leading_trivi
 Token { kind: Keyword("into:"), span: Span { start: 1632, end: 1637 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: LeftBracket, span: Span { start: 1638, end: 1639 }, leading_trivia: [], trailing_trivia: [] }
 Token { kind: Colon, span: Span { start: 1639, end: 1640 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("each"), span: Span { start: 1640, end: 1644 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Colon, span: Span { start: 1645, end: 1646 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("i"), span: Span { start: 1646, end: 1647 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("i"), span: Span { start: 1640, end: 1641 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Colon, span: Span { start: 1642, end: 1643 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("each"), span: Span { start: 1643, end: 1647 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Pipe, span: Span { start: 1648, end: 1649 }, leading_trivia: [], trailing_trivia: [] }
 Token { kind: Identifier("newI"), span: Span { start: 1656, end: 1660 }, leading_trivia: [Whitespace("\n      ")], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Assign, span: Span { start: 1661, end: 1663 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }

@@ -46,7 +46,7 @@ sealed Object subclass: List
   // Subsequence / Search
   from: start to: end => @primitive "from:to:"
   indexOf: item =>
-    self inject: 0 into: [:each :i |
+    self inject: 0 into: [:i :each |
       newI := i + 1.
       each =:= item ifTrue: [^newI].
       newI
@@ -55,7 +55,7 @@ sealed Object subclass: List
 
   // Iteration with index
   eachWithIndex: block =>
-    self inject: 0 into: [:each :i |
+    self inject: 0 into: [:i :each |
       newI := i + 1.
       block value: each value: newI.
       newI

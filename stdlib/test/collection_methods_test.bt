@@ -30,7 +30,11 @@ TestCase subclass: CollectionMethodsTest
     // inject:into: product
     self assert: (#(1, 2, 3, 4) inject: 1 into: [:product :x | product * x]) equals: 24.
     // inject:into: on single element
-    self assert: (#(42) inject: 0 into: [:acc :x | acc + x]) equals: 42
+    self assert: (#(42) inject: 0 into: [:acc :x | acc + x]) equals: 42.
+    // inject:into: non-commutative — verifies (acc, elem) argument order
+    self assert: (#("b", "c") inject: "a" into: [:acc :x | acc ++ x]) equals: "abc".
+    // inject:into: non-commutative — list prepend reverses
+    self assert: (#(1, 2, 3) inject: #() into: [:acc :x | acc addFirst: x]) equals: #(3, 2, 1)
 
   testDoIteration =>
     // do: returns ok (side-effect only)

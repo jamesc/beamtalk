@@ -225,7 +225,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `collect:` | @primitive BIF (`lists:map`) | ✅ | 🧪 | `Collection>>collect:` |
 | `select:` | @primitive BIF (`lists:filter`) | ✅ | 🧪 | `Collection>>select:` |
 | `reject:` | @primitive → `beamtalk_list_ops:reject/2` | ✅ | 🧪 | `Collection>>reject:` |
-| `inject:into:` | @primitive BIF (`lists:foldl`) | ✅ | 🧪 | `Collection>>inject:into:` |
+| `inject:into:` | @primitive → `beamtalk_collection_ops:inject_into/3` | ✅ | 🧪 | `Collection>>inject:into:` |
 | `detect:` | @primitive → `beamtalk_list_ops:detect/2` | ✅ | 🧪 | `Collection>>detect:` |
 | `detect:ifNone:` | @primitive → `beamtalk_list_ops:detect_if_none/3` | ✅ | | `Collection>>detect:ifNone:` |
 | `flatMap:` | @primitive BIF (`lists:flatmap`) | ✅ | 🧪 | `Collection>>flatCollect:` |

@@ -128,11 +128,11 @@ fn generate_list_iteration_bif(selector: &str, params: &[String]) -> Option<Docu
         "inject:into:" => {
             let p1 = params.get(1).map_or("_Block", String::as_str);
             Some(docvec![
-                "call 'lists':'foldl'(",
-                p1.to_string(),
-                ", ",
+                "call 'beamtalk_collection_ops':'inject_into'(Self, ",
                 p0.to_string(),
-                ", Self)"
+                ", ",
+                p1.to_string(),
+                ")"
             ])
         }
         "take:" => Some(docvec![

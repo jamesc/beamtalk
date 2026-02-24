@@ -253,7 +253,7 @@ sealed Collection subclass: List
   /// #(10, 20, 30) indexOf: 99        // => nil
   /// ```
   indexOf: item -> Integer | Nil =>
-    self inject: 0 into: [:each :i |
+    self inject: 0 into: [:i :each |
       newI := i + 1.
       each =:= item ifTrue: [^newI].
       newI
@@ -267,7 +267,7 @@ sealed Collection subclass: List
   /// #("a", "b") eachWithIndex: [:item :i | Transcript show: i]
   /// ```
   eachWithIndex: block: Block -> Nil =>
-    self inject: 0 into: [:each :i |
+    self inject: 0 into: [:i :each |
       newI := i + 1.
       block value: each value: newI.
       newI

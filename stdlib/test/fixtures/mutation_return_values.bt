@@ -12,10 +12,9 @@ Actor subclass: MutationReturnValues
   setValue: v => self.value := v
 
   // inject:into: should return the accumulator result
-  // Note: foldl calls fun(Elem, Acc), so first block param is list element,
-  // second is accumulator
+  // Block receives (accumulator, element) matching Beamtalk convention (BT-820)
   sumViaInject: items =>
-    items inject: 0 into: [:elem :acc |
+    items inject: 0 into: [:acc :elem |
       self.value := self.value + elem.
       acc + elem
     ]

@@ -19,7 +19,7 @@ Actor subclass: CollectionMutationCounter
   // inject:into: with field mutation on a Dictionary receiver
   // The block mutates self.total as a side effect while accumulating
   sumDictValues: aDict =>
-    aDict inject: 0 into: [:val :acc |
+    aDict inject: 0 into: [:acc :val |
       self.total := self.total + val
       acc + val
     ]
