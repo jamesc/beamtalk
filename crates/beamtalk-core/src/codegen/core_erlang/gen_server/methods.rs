@@ -1298,16 +1298,13 @@ impl CoreErlangGenerator {
     /// `generate_block_value_call_stateful()` and must be unpacked by the caller.
     pub(in crate::codegen::core_erlang) fn is_tier2_value_call(&self, expr: &Expression) -> bool {
         if let Expression::MessageSend {
-            receiver,
-            selector,
-            ..
+            receiver, selector, ..
         } = expr
         {
             let is_value_selector = match selector {
                 crate::ast::MessageSelector::Unary(name) => name == "value",
                 crate::ast::MessageSelector::Keyword(parts) => {
-                    let selector_name: String =
-                        parts.iter().map(|p| p.keyword.as_str()).collect();
+                    let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
                     matches!(
                         selector_name.as_str(),
                         "value:" | "value:value:" | "value:value:value:"

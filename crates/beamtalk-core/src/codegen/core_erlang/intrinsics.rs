@@ -168,8 +168,7 @@ impl CoreErlangGenerator {
                 // BT-851: Check if receiver is a Tier 2 block parameter (zero-arg value)
                 if let Expression::Identifier(id) = receiver {
                     if self.tier2_block_params.contains(id.name.as_str()) {
-                        let doc =
-                            self.generate_block_value_call_stateful(receiver, arguments)?;
+                        let doc = self.generate_block_value_call_stateful(receiver, arguments)?;
                         return Ok(Some(doc));
                     }
                 }
