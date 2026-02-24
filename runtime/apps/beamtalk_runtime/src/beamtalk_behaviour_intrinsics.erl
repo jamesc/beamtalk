@@ -85,7 +85,7 @@
 %% ADR 0032: Returns a proper #beamtalk_object{} instead of a bare atom,
 %% fixing the inconsistency where `Counter class` returned an object but
 %% `Counter superclass` returned an atom.
--spec classSuperclass(#beamtalk_object{}) -> #beamtalk_object{} | nil.
+-spec classSuperclass(#beamtalk_object{}) -> #beamtalk_object{} | 'nil'.
 classSuperclass(Self) ->
     ClassPid = erlang:element(4, Self),
     case gen_server:call(ClassPid, superclass) of
@@ -252,7 +252,7 @@ classIncludesBehaviour(Self, TargetClassObj) ->
     end.
 
 %% @doc Walk the hierarchy and return the class object that defines the selector, or nil.
--spec classWhichIncludesSelector(#beamtalk_object{}, atom()) -> #beamtalk_object{} | nil.
+-spec classWhichIncludesSelector(#beamtalk_object{}, atom()) -> #beamtalk_object{} | 'nil'.
 classWhichIncludesSelector(Self, Selector) ->
     ClassPid = erlang:element(4, Self),
     ClassName = gen_server:call(ClassPid, class_name),
@@ -326,7 +326,7 @@ classClass(Self) ->
 %%
 %% ADR 0033: Runtime-embedded documentation.
 %% The class gen_server stores `none` internally; we return `nil` for Beamtalk.
--spec classDoc(#beamtalk_object{}) -> binary() | nil.
+-spec classDoc(#beamtalk_object{}) -> binary() | 'nil'.
 classDoc(Self) ->
     ClassPid = erlang:element(4, Self),
     case gen_server:call(ClassPid, get_doc) of
@@ -364,7 +364,7 @@ classSetMethodDoc(Self, Selector, DocBinary) ->
 %%   1. Stop all live actors of this class (via beamtalk_actor_registry)
 %%   2. Stop the class gen_server (terminate/2 removes ETS entry and pg group)
 %%   3. Purge the BEAM module (code:soft_purge + code:delete)
--spec classRemoveFromSystem(#beamtalk_object{}) -> nil.
+-spec classRemoveFromSystem(#beamtalk_object{}) -> 'nil'.
 classRemoveFromSystem(Self) ->
     ClassPid = erlang:element(4, Self),
     ClassName = gen_server:call(ClassPid, class_name),
@@ -428,7 +428,7 @@ classRemoveFromSystem(Self) ->
 %% ADR 0036: Backs `@primitive "metaclassThisClass"` in Metaclass.bt.
 %% A metaclass object carries the class pid; we retrieve its name and return
 %% the class object. Example: `Counter class class thisClass == Counter`.
--spec metaclassThisClass(#beamtalk_object{}) -> #beamtalk_object{} | nil.
+-spec metaclassThisClass(#beamtalk_object{}) -> #beamtalk_object{} | 'nil'.
 metaclassThisClass(Self) ->
     Pid = erlang:element(4, Self),
     ClassName = gen_server:call(Pid, class_name),
@@ -439,7 +439,7 @@ metaclassThisClass(Self) ->
 %% ADR 0036: Backs `@primitive "metaclassSuperclass"` in Metaclass.bt.
 %% The superclass of Counter's metaclass is the metaclass of Counter's superclass.
 %% Example: `Counter class superclass == Actor class`.
--spec metaclassSuperclass(#beamtalk_object{}) -> #beamtalk_object{} | nil.
+-spec metaclassSuperclass(#beamtalk_object{}) -> #beamtalk_object{} | 'nil'.
 metaclassSuperclass(Self) ->
     Pid = erlang:element(4, Self),
     case gen_server:call(Pid, superclass) of
@@ -555,7 +555,7 @@ walk_hierarchy(ClassName, Fun, Acc, Depth) ->
 %% Looks up the class process, gets its module name, and constructs
 %% the class object tuple. Returns nil if the class is not registered
 %% (safe during bootstrap window).
--spec atom_to_class_object(atom()) -> #beamtalk_object{} | nil.
+-spec atom_to_class_object(atom()) -> #beamtalk_object{} | 'nil'.
 atom_to_class_object(ClassName) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->

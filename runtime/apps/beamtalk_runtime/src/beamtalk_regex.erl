@@ -149,7 +149,7 @@ matches_regex_options(_, _, _) ->
     beamtalk_error:raise(Error2).
 
 %% @doc Find first match in string, return String or nil.
--spec first_match(binary(), binary() | map()) -> binary() | nil.
+-spec first_match(binary(), binary() | map()) -> binary() | 'nil'.
 first_match(Str, #{'$beamtalk_class' := 'Regex', compiled := MP}) when is_binary(Str) ->
     case re:run(Str, MP, [{capture, first, binary}]) of
         {match, [Match]} -> Match;

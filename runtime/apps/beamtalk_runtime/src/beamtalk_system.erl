@@ -36,7 +36,7 @@
 %%% ============================================================================
 
 %% @doc Read an environment variable. Returns nil if not set.
--spec 'getEnv:'(binary()) -> binary() | nil.
+-spec 'getEnv:'(binary()) -> binary() | 'nil'.
 'getEnv:'(Name) when is_binary(Name) ->
     case os:getenv(binary_to_list(Name)) of
         false -> nil;

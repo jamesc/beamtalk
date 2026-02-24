@@ -112,7 +112,7 @@ at_put(#{'$beamtalk_class' := 'Array'}, _Index, _Value) ->
 %%% ============================================================================
 
 %% @doc Apply a block to each element of the Array. Returns nil.
--spec do(map(), fun((term()) -> term())) -> nil.
+-spec do(map(), fun((term()) -> term())) -> 'nil'.
 do(#{'$beamtalk_class' := 'Array', 'data' := Arr}, Block) when is_function(Block, 1) ->
     array:foldl(fun(_I, Elem, _Acc) -> Block(Elem) end, nil, Arr),
     nil;

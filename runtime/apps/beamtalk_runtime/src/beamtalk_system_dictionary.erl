@@ -283,7 +283,7 @@ handle_all_classes() ->
 %% Returns the class as a beamtalk_object record (for dispatch), or nil if not found.
 %% BT-246: Wraps result in {beamtalk_object, ClassTag, ModuleName, Pid} tuple
 %% where ClassTag is 'ClassName class' (e.g., 'Point class') for is_class_object detection.
--spec handle_class_named(binary() | atom()) -> tuple() | nil | {error, #beamtalk_error{}}.
+-spec handle_class_named(binary() | atom()) -> tuple() | 'nil' | {error, #beamtalk_error{}}.
 handle_class_named(ClassName) when is_binary(ClassName) ->
     %% Use binary_to_existing_atom to avoid creating atoms at runtime
     try

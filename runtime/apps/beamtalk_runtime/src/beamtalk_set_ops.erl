@@ -154,7 +154,7 @@ as_list(#{'$beamtalk_class' := 'Set', elements := Elements}) ->
 %%% ============================================================================
 
 %% @doc Apply a block to each element of the Set.
--spec do(map(), fun((term()) -> term())) -> nil.
+-spec do(map(), fun((term()) -> term())) -> 'nil'.
 do(#{'$beamtalk_class' := 'Set', elements := Elements}, Block) when is_function(Block, 1) ->
     lists:foreach(Block, Elements),
     nil;

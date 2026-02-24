@@ -108,7 +108,7 @@ detect_if_none(List, Block, _Default) when is_list(List) ->
     beamtalk_error:raise(Error2).
 
 %% @doc Iterate over elements with side effects.
--spec do(list(), function()) -> nil.
+-spec do(list(), function()) -> 'nil'.
 do(List, Block) when is_list(List), is_function(Block, 1) ->
     lists:foreach(Block, List),
     nil;

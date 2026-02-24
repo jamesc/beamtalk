@@ -195,7 +195,7 @@ take(_, _) ->
     raise_type_error('take:', <<"Expected a non-negative Integer">>).
 
 %% @doc Iterate with side effects, return nil.
--spec do(map(), fun((term()) -> term())) -> nil.
+-spec do(map(), fun((term()) -> term())) -> 'nil'.
 do(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Block) when is_function(Block, 1) ->
     try
         do_loop(Gen, Block)

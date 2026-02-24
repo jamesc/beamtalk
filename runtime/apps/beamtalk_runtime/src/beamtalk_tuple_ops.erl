@@ -60,7 +60,7 @@ as_string(X) ->
     iolist_to_binary([<<"{">>, Joined, <<"}">>]).
 
 %% @doc Iterate over each element of the tuple.
--spec do(tuple(), fun((term()) -> term())) -> nil.
+-spec do(tuple(), fun((term()) -> term())) -> 'nil'.
 do(Tuple, Block) when is_function(Block, 1) ->
     lists:foreach(Block, tuple_to_list(Tuple)),
     nil.

@@ -112,7 +112,7 @@ ends_with(Str, Suffix) when is_binary(Str), is_binary(Suffix) ->
     end.
 
 %% @doc Find first occurrence of substring, return 1-based grapheme index or nil.
--spec index_of(binary(), binary()) -> integer() | nil.
+-spec index_of(binary(), binary()) -> integer() | 'nil'.
 index_of(_Str, <<>>) ->
     nil;
 index_of(Str, Sub) when is_binary(Str), is_binary(Sub) ->
@@ -145,7 +145,7 @@ join(List) when is_list(List) ->
     iolist_to_binary(List).
 
 %% @doc Iterate over graphemes, applying block to each. Returns nil.
--spec each(binary(), function()) -> nil.
+-spec each(binary(), function()) -> 'nil'.
 each(Str, Block) when is_binary(Str), is_function(Block, 1) ->
     lists:foreach(Block, as_list(Str)),
     nil.
@@ -232,7 +232,7 @@ is_alpha(Str) when is_binary(Str) ->
 %% @private
 %% @doc Grapheme-aware substring search.
 -spec index_of_graphemes([string:grapheme_cluster()], [string:grapheme_cluster()], integer()) ->
-    integer() | nil.
+    integer() | 'nil'.
 index_of_graphemes([], _SubGs, _Idx) ->
     nil;
 index_of_graphemes(StrGs, SubGs, Idx) ->

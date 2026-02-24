@@ -23,7 +23,7 @@ at_if_absent(Map, Key, Block) when is_function(Block, 0) ->
     end.
 
 %% @doc Iterate over all values in the dictionary.
--spec do(map(), fun((term()) -> term())) -> nil.
+-spec do(map(), fun((term()) -> term())) -> 'nil'.
 do(Map, Block) when is_function(Block, 1) ->
     maps:foreach(fun(_K, V) -> Block(V) end, Map),
     nil.

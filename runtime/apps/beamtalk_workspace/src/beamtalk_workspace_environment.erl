@@ -218,7 +218,7 @@ handle_actors() ->
 
 %% @doc Look up a specific actor by pid string.
 %% Returns beamtalk_object or nil if not found.
--spec handle_actor_at(binary() | list()) -> tuple() | nil.
+-spec handle_actor_at(binary() | list()) -> tuple() | 'nil'.
 handle_actor_at(PidStr) when is_binary(PidStr) ->
     handle_actor_at(binary_to_list(PidStr));
 handle_actor_at(PidStr) when is_list(PidStr) ->
