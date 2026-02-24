@@ -33,9 +33,9 @@ config := #{#host => "localhost", #port => 8080}
 |---------|---------|
 | **Interactive-first** | REPL and live workspace, not batch compilation |
 | **Hot code reload** | Edit and reload modules in running systems |
-| **Actors everywhere** | Every object is a BEAM process with fault isolation |
-| **Async by default** | Message sends return futures; no blocking |
-| **Full reflection** | Inspect any actor's state, mailbox, and methods at runtime |
+| **Actor model** | Actors are BEAM processes with independent fault isolation |
+| **Async by default** | Actor message sends return futures; blocking only via await |
+| **Reflection** | Inspect any actor's state and methods at runtime |
 | **Runs on BEAM** | Compiles to Core Erlang; deploy to existing OTP infrastructure |
 | **Testing built-in** | SUnit-style `TestCase` framework with `beamtalk test` |
 
@@ -45,7 +45,7 @@ config := #{#host => "localhost", #port => 8080}
 
 ### Actors as Objects
 
-Every Beamtalk object is a BEAM process with its own state and mailbox:
+Every Beamtalk actor is a BEAM process with its own state and mailbox:
 
 ```beamtalk
 Actor subclass: Counter
@@ -114,10 +114,10 @@ c increment  // now adds 10 instead of 1
 Beamtalk is purpose-built for multi-agent AI systems:
 
 - **Every actor is a BEAM process** — millions of concurrent isolated agents
-- **Live inspection** — query actor state, methods, and capabilities at runtime
+- **Live inspection** — query actor class, methods, and capabilities at runtime
 - **Hot-reload** — edit agent behavior while they run, no restart needed
 - **Fault tolerance** — actors crash independently; isolation via BEAM processes
-- **Distributed** — spread actors across BEAM clusters transparently
+- **BEAM foundation** — inherits BEAM's distributed runtime; Beamtalk-level distribution API planned
 
 ```beamtalk
 // Each agent is its own BEAM process — isolated, supervised, inspectable

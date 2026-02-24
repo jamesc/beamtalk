@@ -33,7 +33,7 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
 cargo test --all-targets
 just test-stdlib         # Bootstrap expression tests (fast, ~14s)
-just test-bunit          # BUnit TestCase tests (~77s)
+just test-bunit          # BUnit TestCase tests (~85 files)
 just test-e2e            # REPL integration tests (slower, ~50s)
 ```
 
@@ -68,7 +68,7 @@ cargo llvm-cov --all-targets --workspace --cobertura --output-path coverage.cobe
 **Erlang coverage:**
 ```bash
 cd runtime
-rebar3 eunit --module=beamtalk_actor_tests,beamtalk_future_tests,beamtalk_repl_tests,beamtalk_codegen_simulation_tests --cover
+rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace --cover
 rebar3 cover --verbose
 # Generate Cobertura XML for CI
 rebar3 covertool generate
@@ -235,7 +235,7 @@ Expression tests for bootstrap-critical primitives that TestCase transitively de
 
 **Location:** `stdlib/bootstrap-test/*.bt`
 
-**Count:** ~16 test files, ~394 assertions
+**Count:** ~11 test files
 
 **Command:** `just test-stdlib`
 
@@ -294,7 +294,7 @@ SUnit-style test classes that subclass `TestCase`. The primary home for language
 
 **Location:** `stdlib/test/*.bt` (project test directory)
 
-**Count:** ~77 test files, ~1293 assertions
+**Count:** ~85 test files
 
 **Command:** `just test-bunit` or `beamtalk test`
 
@@ -370,7 +370,8 @@ EUnit tests for the Erlang runtime modules.
 |-----------|-------|
 | `beamtalk_actor_tests.erl` | Actor lifecycle, message dispatch, doesNotUnderstand |
 | `beamtalk_future_tests.erl` | Future creation, resolution, rejection, await |
-| `beamtalk_repl_tests.erl` | REPL command parsing, expression evaluation |
+| `beamtalk_hot_reload_tests.erl` | Hot code reload, state migration |
+| `beamtalk_codegen_simulation_tests.erl` | Codegen round-trip via EUnit simulation |
 
 **Running:**
 ```bash
@@ -542,7 +543,7 @@ just ci
 #   just lint            # Clippy + fmt-check + dialyzer
 #   just test            # Rust unit tests + runtime EUnit
 #   just test-stdlib     # Bootstrap expression tests (~14s)
-#   just test-bunit      # BUnit TestCase tests (~77s)
+#   just test-bunit      # BUnit TestCase tests (~85 files)
 #   just test-e2e        # REPL integration tests (~50s)
 ```
 
@@ -552,13 +553,13 @@ The test suite follows a proper testing pyramid after [ADR 0014](../ADR/0014-bea
 
 ```
             ╱╲
-           ╱  ╲        E2E Tests (~18 files)
+           ╱  ╲        E2E Tests (~36 files)
           ╱    ╲       REPL/workspace integration — slow (~50s)
          ╱──────╲
-        ╱        ╲     BUnit Tests (~77 files, ~1293 assertions)
+        ╱        ╲     BUnit Tests (~85 files)
        ╱          ╲    Language feature tests — fast (`just test-bunit`)
       ╱────────────╲
-     ╱              ╲  Stdlib Tests (~16 files, ~394 assertions)
+     ╱              ╲  Stdlib Tests (~11 files)
     ╱                ╲ Bootstrap expression tests — fast (~14s)
    ╱──────────────────╲
   ╱                    ╲ Rust + Erlang Unit Tests (~600+ tests)
@@ -571,9 +572,9 @@ The test suite follows a proper testing pyramid after [ADR 0014](../ADR/0014-bea
 | Rust unit tests | ~600 tests | ~5s | Parser, AST, codegen |
 | Erlang unit tests | ~100 tests | ~3s | Runtime, primitives, object system |
 | Compiler snapshots | ~51 cases | ~2s | Codegen output stability |
-| **Stdlib tests** | **~16 files** | **~14s** | **Bootstrap primitives (expression tests)** |
-| **BUnit tests** | **~77 files** | **~77s** | **Language features (TestCase classes)** |
-| E2E tests | ~18 files | ~50s | REPL/workspace integration |
+| **Stdlib tests** | **~11 files** | **~14s** | **Bootstrap primitives (expression tests)** |
+| **BUnit tests** | **~85 files** | **—** | **Language features (TestCase classes)** |
+| E2E tests | ~36 files | ~50s | REPL/workspace integration |
 
 ---
 

@@ -90,16 +90,19 @@ The foundational classes implementing Smalltalk's "everything is a message" phil
 
 | Class | Description |
 |-------|-------------|
-| [Object](../stdlib/src/Object.bt) | Base class for all user-defined classes (actors/BEAM processes) |
+| [Object](../stdlib/src/Object.bt) | Base class for value types; [Actor](../stdlib/src/Actor.bt) for BEAM processes |
 | [Block](../stdlib/src/Block.bt) | First-class closures |
 | [True](../stdlib/src/True.bt) / [False](../stdlib/src/False.bt) | Boolean control flow via messages |
-| [Nil](../stdlib/src/Nil.bt) | Null object pattern |
+| [UndefinedObject](../stdlib/src/UndefinedObject.bt) | Null object pattern (`nil` singleton) |
 | [Integer](../stdlib/src/Integer.bt) | Arbitrary precision arithmetic |
 | [String](../stdlib/src/String.bt) | UTF-8 text with grapheme operations |
 | [Array](../stdlib/src/Array.bt) | Fixed-size indexed collection (tuple) |
 | [List](../stdlib/src/List.bt) | Linked list with fast prepend |
 | [Set](../stdlib/src/Set.bt) | Unordered unique elements |
 | [Dictionary](../stdlib/src/Dictionary.bt) | Key-value map |
+| [Regex](../stdlib/src/Regex.bt) | Regular expression matching (PCRE2) |
+| [DateTime](../stdlib/src/DateTime.bt) | Date and time operations |
+| [JSON](../stdlib/src/JSON.bt) | JSON parsing and encoding |
 | [Collection](../stdlib/src/Collection.bt) | Abstract collection protocol |
 
 See [stdlib/src/README.md](../stdlib/src/README.md) for detailed documentation.

@@ -763,7 +763,8 @@ globally unique. See [known-limitations.md](known-limitations.md) and
 
 | Smalltalk/Newspeak Concept | Beamtalk/BEAM Mapping |
 |----------------------------|----------------------|
-| Object | Process with state (actor) |
+| Object (value type) | Plain Erlang map (no process) |
+| Actor | BEAM process (gen_server) with state map |
 | Class | Module + constructor function |
 | Instance variable | Process state map field |
 | Field access (`self.x`) | `maps:get('x', State)` |

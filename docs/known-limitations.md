@@ -83,16 +83,13 @@ This is by design — types are documentation-first in Beamtalk.
 
 ## Standard Library Gaps
 
-The following common utilities are not yet in the stdlib. All have clean workarounds via the `Erlang` FFI:
+The following common utilities are not yet in the stdlib:
 
-| Missing | Erlang FFI Workaround | Tracking |
-|---------|----------------------|----------|
-| Regular expressions | `Erlang re run: 'hello123' with: '[0-9]+'` | [BT-709](https://linear.app/beamtalk/issue/BT-709) |
-| Date/Time | `Erlang os system_time: #second` | [BT-710](https://linear.app/beamtalk/issue/BT-710) |
-| JSON | `Erlang json encode: #{#name => 'Ada'}` (OTP 27+) | [BT-711](https://linear.app/beamtalk/issue/BT-711) |
-| Math functions | `Erlang math sqrt: 16` | [BT-712](https://linear.app/beamtalk/issue/BT-712) |
-| Environment variables | `Erlang os getenv: 'HOME'` | [BT-713](https://linear.app/beamtalk/issue/BT-713) |
-| HTTP client | `Erlang httpc` | — |
+| Missing | Erlang FFI Workaround |
+|---------|----------------------|
+| HTTP client | `Erlang httpc` |
+
+The following are now implemented in the stdlib: `Regex`, `DateTime`, `JSON`, `Integer`/`Float` math (sqrt, trig, log), `System` (environment variables).
 
 ## Pattern Matching
 
