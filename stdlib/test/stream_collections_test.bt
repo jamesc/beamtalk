@@ -91,7 +91,7 @@ TestCase subclass: StreamCollectionsTest
     self assert: ((((Set new add: 1) add: 2) stream) allSatisfy: [:n | n > 0]).
     // Dictionary stream produces Associations
     d := #{#a => 1}.
-    (d stream) asList.
+    self assert: ((d stream) asList) size equals: 1.
     // Single-entry dictionary stream — verify Association
     a := ((#{#x => 42} stream) asList) first.
     self assert: (a class) equals: Association.
@@ -102,17 +102,17 @@ TestCase subclass: StreamCollectionsTest
     // Dictionary stream returns Stream
     self assert: ((#{#a => 1} stream) class) equals: Stream.
     // Select on dictionary stream
-    ((#{#a => 1, #b => 2, #c => 3} stream) select: [:assoc | assoc value > 1]) asList.
+    self assert: ((((#{#a => 1, #b => 2, #c => 3} stream) select: [:assoc | assoc value > 1]) asList) size) equals: 2.
     // Collect on dictionary stream — transform associations
-    ((#{#a => 1, #b => 2} stream) collect: [:assoc | assoc value]) asList.
+    self assert: ((((#{#a => 1, #b => 2} stream) collect: [:assoc | assoc value]) asList) size) equals: 2.
     // Detect on dictionary stream
     self assert: (((#{#a => 1, #b => 2, #c => 3} stream) detect: [:assoc | assoc value > 2]) value) equals: 3.
     // reject on dictionary stream
-    ((#{#a => 1, #b => 2, #c => 3} stream) reject: [:assoc | assoc value =:= 2]) asList.
+    self assert: ((((#{#a => 1, #b => 2, #c => 3} stream) reject: [:assoc | assoc value =:= 2]) asList) size) equals: 2.
     // drop on dictionary stream
-    ((#{#a => 1, #b => 2} stream) drop: 1) asList.
+    self assert: ((((#{#a => 1, #b => 2} stream) drop: 1) asList) size) equals: 1.
     // take on dictionary stream
-    ((#{#a => 1, #b => 2, #c => 3} stream) take: 1).
+    self assert: ((((#{#a => 1, #b => 2, #c => 3} stream) take: 1) asList) size) equals: 1.
     // do: on dictionary stream (returns nil)
     self assert: ((#{#a => 1} stream) do: [:assoc | assoc]) equals: nil.
     // inject:into: on dictionary stream — sum values

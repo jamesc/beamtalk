@@ -7,13 +7,13 @@
 TestCase subclass: CompiledMethodTest
 
   testMethodLookup =>
-    Counter >> #getValue.
+    self assert: (Counter >> #getValue) notNil.
     self assert: (Counter >> #nonExistent) equals: nil
 
   testMethodLookupOnVariableReceivers =>
     cls := Counter.
     self assert: cls equals: Counter.
-    cls >> #getValue.
+    self assert: (cls >> #getValue) notNil.
     self assert: ((cls >> #getValue) selector) equals: #getValue.
     self assert: (cls >> #nonExistent) equals: nil
 

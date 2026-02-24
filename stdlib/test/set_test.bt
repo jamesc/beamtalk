@@ -83,5 +83,5 @@ TestCase subclass: SetTest
     self deny: (s4 respondsTo: #nonExistent)
 
   testPrintstring =>
-    ((Set new) fromList: #(1, 2, 3)) printString.
-    (Set new) printString
+    self assert: (((Set new) fromList: #(1, 2, 3)) printString) notNil.
+    self assert: ((Set new) printString) notNil

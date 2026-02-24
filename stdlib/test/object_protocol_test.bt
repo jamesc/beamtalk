@@ -24,7 +24,7 @@ TestCase subclass: ObjectProtocolTest
     self assert: (#(1, 2, 3) printString) equals: "#(1, 2, 3)".
     self assert: (#() printString) equals: "#()".
     // --- Blocks ---
-    [42] printString.
+    self assert: ([42] printString) notNil.
     // --- Dictionaries ---
     self assert: (#{} printString size) equals: 3.
     // --- Class objects (BT-477: class_send printString) ---
@@ -44,12 +44,12 @@ TestCase subclass: ObjectProtocolTest
 
   testHashHashValueInteger =>
     // hash returns an integer (non-deterministic, keep wildcard)
-    42 hash.
+    self assert: (42 hash) isInteger.
     // Same value should produce same hash
     self assert: (42 hash =:= 42 hash).
     self assert: ("hello" hash =:= "hello" hash).
     // Hash values are non-deterministic, keep wildcard
-    "hello" hash
+    self assert: ("hello" hash) isInteger
 
   testRespondstoMethodExistenceCheck =>
     // Integers respond to +
@@ -65,4 +65,11 @@ TestCase subclass: ObjectProtocolTest
     // nil responds to isNil
     self assert: (nil respondsTo: #isNil).
     // Booleans respond to ifTrue:ifFalse:
-    self assert: (true respondsTo: #'ifTrue:ifFalse:')
+    self assert: (true respondsTo: #'ifTrue:ifFalse:').
+    // Float responds to arithmetic operations
+    self assert: (3.14 respondsTo: #+).
+    self assert: (3.14 respondsTo: #'-').
+    self assert: (3.14 respondsTo: #class).
+    self assert: (3.14 respondsTo: #asString).
+    self assert: (3.14 respondsTo: #abs).
+    self deny: (3.14 respondsTo: #nonExistent)

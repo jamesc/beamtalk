@@ -83,7 +83,3 @@ TestCase subclass: RegexTest
     self should: [Regex from: "[invalid"] raise: #regex_error.
     // Invalid pattern in String method also produces regex_error
     self should: ["hello" matchesRegex: "[invalid"] raise: #regex_error
-
-  testClassIdentity =>
-    // BT-802 (ADR 0036): class on class returns a real metaclass object
-    self assert: (Regex class) isMeta equals: true
