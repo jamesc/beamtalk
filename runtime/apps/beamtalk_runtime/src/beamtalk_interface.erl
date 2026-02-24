@@ -1,14 +1,14 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc SystemDictionary actor - Beamtalk system introspection singleton.
+%%% @doc BeamtalkInterface actor - Beamtalk system introspection singleton.
 %%%
 %%% **DDD Context:** Runtime
 %%%
-%%% This gen_server implements the SystemDictionary actor that backs the
+%%% This gen_server implements the BeamtalkInterface actor that backs the
 %%% `Beamtalk` global object. It provides system-wide introspection:
 %%% - Class registry access (allClasses, classNamed:)
-%%% - Workspace globals (globals)
+%%% - Workspace globals (globals) — immutable snapshot of the class registry
 %%% - Version information (version)
 %%%
 %%% This is Phase 1 of ADR 0010: Global Objects and Singleton Dispatch.
@@ -17,10 +17,10 @@
 %%%
 %%% ## Message Protocol
 %%%
-%%% SystemDictionary responds to these selectors:
+%%% BeamtalkInterface responds to these selectors:
 %%% - `allClasses` - Returns list of all class names
 %%% - `classNamed:` - Returns class info or error for given name
-%%% - `globals` - Returns workspace bindings map
+%%% - `globals` - Returns class registry snapshot as a Dictionary
 %%% - `version` - Returns Beamtalk version string
 %%%
 %%% All methods are synchronous (gen_server:call) as they return values
@@ -29,8 +29,8 @@
 %%% ## Example Usage
 %%%
 %%% ```erlang
-%%% %% Start the SystemDictionary actor
-%%% {ok, Pid} = beamtalk_system_dictionary:start_link(),
+%%% %% Start the BeamtalkInterface actor
+%%% {ok, Pid} = beamtalk_interface:start_link(),
 %%%
 %%% %% Query all classes
 %%% Classes = gen_server:call(Pid, {allClasses, []}),
@@ -44,7 +44,7 @@
 %%% %% Get version
 %%% Version = gen_server:call(Pid, {version, []}).
 %%% ```
--module(beamtalk_system_dictionary).
+-module(beamtalk_interface).
 -behaviour(gen_server).
 
 -include("beamtalk.hrl").
@@ -71,7 +71,7 @@
 
 -type selector() :: atom().
 
--record(system_dict_state, {
+-record(beamtalk_interface_state, {
     version :: binary(),
     % Workspace name for future phases
     workspace :: atom() | undefined
@@ -81,12 +81,12 @@
 %% API
 %%====================================================================
 
-%% @doc Start the SystemDictionary actor with default options.
+%% @doc Start the BeamtalkInterface actor with default options.
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
     start_link([]).
 
-%% @doc Start the SystemDictionary actor with options.
+%% @doc Start the BeamtalkInterface actor with options.
 %%
 %% Options:
 %%   {workspace, atom()} - Workspace name (for future phases)
@@ -95,13 +95,13 @@ start_link() ->
 start_link(Opts) ->
     gen_server:start_link(?MODULE, Opts, []).
 
-%% @doc Start a named SystemDictionary for workspace use.
+%% @doc Start a named BeamtalkInterface for workspace use.
 %% Registers with the given name via gen_server name registration.
 -spec start_link({local, atom()}, proplists:proplist()) -> {ok, pid()} | {error, term()}.
 start_link(ServerName, Opts) ->
     gen_server:start_link(ServerName, ?MODULE, Opts, []).
 
-%% @doc Check if SystemDictionary supports a given method selector.
+%% @doc Check if BeamtalkInterface supports a given method selector.
 %%
 %% Used by dispatch compatibility layer. Returns true if the selector
 %% corresponds to one of the supported methods.
@@ -112,14 +112,14 @@ has_method(globals) -> true;
 has_method(version) -> true;
 has_method(_) -> false.
 
-%% @doc Return class registration metadata for SystemDictionary.
+%% @doc Return class registration metadata for BeamtalkInterface.
 %%
 %% Used by beamtalk_stdlib to register this singleton's class.
 %% Single source of truth for class name, superclass, and method table.
 -spec class_info() -> map().
 class_info() ->
     #{
-        name => 'SystemDictionary',
+        name => 'BeamtalkInterface',
         module => ?MODULE,
         superclass => 'Actor',
         instance_methods => #{
@@ -136,8 +136,8 @@ class_info() ->
 %% gen_server callbacks
 %%====================================================================
 
-%% @doc Initialize the SystemDictionary actor state.
--spec init(proplists:proplist()) -> {ok, #system_dict_state{}}.
+%% @doc Initialize the BeamtalkInterface actor state.
+-spec init(proplists:proplist()) -> {ok, #beamtalk_interface_state{}}.
 init(Opts) ->
     VersionDefault =
         case application:get_key(beamtalk_runtime, vsn) of
@@ -147,7 +147,7 @@ init(Opts) ->
     Version = proplists:get_value(version, Opts, VersionDefault),
     Workspace = proplists:get_value(workspace, Opts, undefined),
 
-    State = #system_dict_state{
+    State = #beamtalk_interface_state{
         version = Version,
         workspace = Workspace
     },
@@ -156,8 +156,8 @@ init(Opts) ->
 %% @doc Handle synchronous method calls.
 %%
 %% Dispatches to the appropriate method implementation based on selector.
--spec handle_call(term(), {pid(), term()}, #system_dict_state{}) ->
-    {reply, term(), #system_dict_state{}}.
+-spec handle_call(term(), {pid(), term()}, #beamtalk_interface_state{}) ->
+    {reply, term(), #beamtalk_interface_state{}}.
 
 %% allClasses - Returns list of all class names
 handle_call({allClasses, []}, _From, State) ->
@@ -167,25 +167,25 @@ handle_call({allClasses, []}, _From, State) ->
 handle_call({'classNamed:', [ClassName]}, _From, State) ->
     Result = handle_class_named(ClassName),
     {reply, Result, State};
-%% globals - Returns workspace bindings map
+%% globals - Returns class registry snapshot as a Dictionary
 handle_call({globals, []}, _From, State) ->
     Globals = handle_globals(),
     {reply, Globals, State};
 %% version - Returns Beamtalk version string
 handle_call({version, []}, _From, State) ->
-    Version = State#system_dict_state.version,
+    Version = State#beamtalk_interface_state.version,
     {reply, Version, State};
 %% Unknown selector - return structured error
 handle_call({UnknownSelector, _Args}, _From, State) ->
-    Error0 = beamtalk_error:new(does_not_understand, 'SystemDictionary'),
+    Error0 = beamtalk_error:new(does_not_understand, 'BeamtalkInterface'),
     Error1 = beamtalk_error:with_selector(Error0, UnknownSelector),
     Error2 = beamtalk_error:with_hint(
-        Error1, <<"To list available selectors, use: SystemDictionary methods">>
+        Error1, <<"To list available selectors, use: Beamtalk methods">>
     ),
     {reply, {error, Error2}, State};
 %% Unknown call format
 handle_call(Request, _From, State) ->
-    Error0 = beamtalk_error:new(does_not_understand, 'SystemDictionary'),
+    Error0 = beamtalk_error:new(does_not_understand, 'BeamtalkInterface'),
     Error1 = beamtalk_error:with_hint(Error0, <<"Expected {Selector, Args} format">>),
     Error2 = beamtalk_error:with_details(Error1, #{request => Request}),
     {reply, {error, Error2}, State}.
@@ -195,7 +195,7 @@ handle_call(Request, _From, State) ->
 %% BT-374: Workspace binding dispatch uses beamtalk_actor:async_send/4 which
 %% sends {Selector, Args, FuturePid} as a cast. We dispatch to the same
 %% method implementations as handle_call and resolve the Future with the result.
--spec handle_cast(term(), #system_dict_state{}) -> {noreply, #system_dict_state{}}.
+-spec handle_cast(term(), #beamtalk_interface_state{}) -> {noreply, #beamtalk_interface_state{}}.
 %% Actor protocol: {Selector, Args, FuturePid} from beamtalk_actor:async_send/4
 handle_cast({allClasses, [], FuturePid}, State) when is_pid(FuturePid) ->
     Result = handle_all_classes(),
@@ -214,36 +214,37 @@ handle_cast({globals, [], FuturePid}, State) when is_pid(FuturePid) ->
     beamtalk_future:resolve(FuturePid, Result),
     {noreply, State};
 handle_cast({version, [], FuturePid}, State) when is_pid(FuturePid) ->
-    Result = State#system_dict_state.version,
+    Result = State#beamtalk_interface_state.version,
     beamtalk_future:resolve(FuturePid, Result),
     {noreply, State};
 handle_cast({UnknownSelector, _Args, FuturePid}, State) when
     is_pid(FuturePid), is_atom(UnknownSelector)
 ->
-    Error0 = beamtalk_error:new(does_not_understand, 'SystemDictionary'),
+    Error0 = beamtalk_error:new(does_not_understand, 'BeamtalkInterface'),
     Error1 = beamtalk_error:with_selector(Error0, UnknownSelector),
     Error2 = beamtalk_error:with_hint(
-        Error1, <<"To list available selectors, use: SystemDictionary methods">>
+        Error1, <<"To list available selectors, use: Beamtalk methods">>
     ),
     beamtalk_future:reject(FuturePid, Error2),
     {noreply, State};
 handle_cast(Msg, State) ->
-    ?LOG_WARNING("SystemDictionary received unexpected cast", #{message => Msg}),
+    ?LOG_WARNING("BeamtalkInterface received unexpected cast", #{message => Msg}),
     {noreply, State}.
 
 %% @doc Handle info messages.
--spec handle_info(term(), #system_dict_state{}) -> {noreply, #system_dict_state{}}.
+-spec handle_info(term(), #beamtalk_interface_state{}) -> {noreply, #beamtalk_interface_state{}}.
 handle_info(Info, State) ->
-    ?LOG_DEBUG("SystemDictionary received info", #{info => Info}),
+    ?LOG_DEBUG("BeamtalkInterface received info", #{info => Info}),
     {noreply, State}.
 
 %% @doc Handle process termination.
--spec terminate(term(), #system_dict_state{}) -> ok.
+-spec terminate(term(), #beamtalk_interface_state{}) -> ok.
 terminate(_Reason, _State) ->
     ok.
 
 %% @doc Handle code change during hot reload.
--spec code_change(term(), #system_dict_state{}, term()) -> {ok, #system_dict_state{}}.
+-spec code_change(term(), #beamtalk_interface_state{}, term()) ->
+    {ok, #beamtalk_interface_state{}}.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
@@ -304,19 +305,40 @@ handle_class_named(ClassName) when is_atom(ClassName) ->
             {beamtalk_object, ClassTag, ModuleName, Pid}
     end;
 handle_class_named(_ClassName) ->
-    Error0 = beamtalk_error:new(type_error, 'SystemDictionary'),
+    Error0 = beamtalk_error:new(type_error, 'BeamtalkInterface'),
     Error1 = beamtalk_error:with_selector(Error0, 'classNamed:'),
     Error2 = beamtalk_error:with_hint(
         Error1, <<"classNamed: expects an atom or binary class name">>
     ),
     {error, Error2}.
 
-%% @doc Get workspace global bindings.
+%% @doc Get workspace global bindings as an immutable snapshot of the class registry.
 %%
-%% Phase 1: Returns empty map as workspace bindings are not yet implemented.
-%% Phase 2 (ADR 0010): Will query workspace state for injected bindings.
+%% Returns a map from binary class names to class object references.
+%% This provides read-only access to the class namespace at the moment of the call.
 -spec handle_globals() -> map().
 handle_globals() ->
-    %% Phase 1: No workspace bindings yet
-    %% Phase 2: Will query workspace state for bindings
-    #{}.
+    try
+        ClassPids = beamtalk_class_registry:all_classes(),
+        lists:foldl(
+            fun(Pid, Acc) ->
+                try
+                    Name = beamtalk_object_class:class_name(Pid),
+                    BinName = atom_to_binary(Name, utf8),
+                    ModuleName = beamtalk_object_class:module_name(Pid),
+                    ClassTag = beamtalk_class_registry:class_object_tag(Name),
+                    ClassObj = {beamtalk_object, ClassTag, ModuleName, Pid},
+                    maps:put(BinName, ClassObj, Acc)
+                catch
+                    exit:{noproc, _} -> Acc;
+                    exit:{timeout, _} -> Acc
+                end
+            end,
+            #{},
+            ClassPids
+        )
+    catch
+        exit:{noproc, _} ->
+            ?LOG_WARNING("pg not started when building globals snapshot", #{module => ?MODULE}),
+            #{}
+    end.

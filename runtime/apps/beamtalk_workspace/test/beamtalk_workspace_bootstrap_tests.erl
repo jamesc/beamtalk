@@ -58,24 +58,24 @@ bootstrap_sets_transcript_class_var_test_() ->
         ]
     end}.
 
-%% Test that bootstrap wires system dictionary singleton
+%% Test that bootstrap wires BeamtalkInterface singleton
 bootstrap_sets_beamtalk_class_var_test_() ->
     {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
         [
             ?_test(begin
-                {ok, BPid} = beamtalk_system_dictionary:start_link({local, 'Beamtalk'}, []),
+                {ok, BPid} = beamtalk_interface:start_link({local, 'Beamtalk'}, []),
                 {ok, _} = beamtalk_workspace_bootstrap:start_link(),
                 ?assertEqual(BPid, whereis('Beamtalk'))
             end)
         ]
     end}.
 
-%% Test that bootstrap wires workspace actor singleton
+%% Test that bootstrap wires WorkspaceInterface singleton
 bootstrap_sets_workspace_class_var_test_() ->
     {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
         [
             ?_test(begin
-                {ok, WPid} = beamtalk_workspace_environment:start_link({local, 'Workspace'}),
+                {ok, WPid} = beamtalk_workspace_interface:start_link({local, 'Workspace'}),
                 {ok, _} = beamtalk_workspace_bootstrap:start_link(),
                 ?assertEqual(WPid, whereis('Workspace'))
             end)

@@ -1,11 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// SystemDictionary — Workspace-level reflection and class registry.
+/// BeamtalkInterface — Workspace-level reflection and class registry.
 ///
 /// Provides access to the class registry, global namespace, and
 /// introspection within a workspace. The global binding `Beamtalk` is an
-/// instance of SystemDictionary scoped to the current workspace,
+/// instance of BeamtalkInterface scoped to the current workspace,
 /// analogous to Smalltalk's `Smalltalk` global.
 ///
 /// ## Examples
@@ -14,14 +14,14 @@
 /// Beamtalk allClasses
 /// Beamtalk classNamed: #Integer
 /// ```
-Actor subclass: SystemDictionary
+Actor subclass: BeamtalkInterface
   classState: current = nil
 
   /// Return the current singleton instance (nil before workspace bootstrap).
-  class current -> SystemDictionary => self.current
+  class current -> BeamtalkInterface => self.current
 
   /// Set the current singleton instance.
-  class current: instance: SystemDictionary -> Nil => self.current := instance
+  class current: instance: BeamtalkInterface -> Nil => self.current := instance
 
   /// Return a list of all registered class names.
   ///
@@ -39,7 +39,7 @@ Actor subclass: SystemDictionary
   /// ```
   classNamed: className: Symbol -> Object => @primitive "classNamed:"
 
-  /// Return the global namespace as a dictionary.
+  /// Return the global namespace as a Dictionary populated from the class registry.
   ///
   /// ## Examples
   /// ```beamtalk
