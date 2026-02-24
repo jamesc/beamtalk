@@ -5,37 +5,39 @@
 //
 // Tests closure-based dynamic class creation through the ClassBuilder protocol.
 // Note: ClassBuilder and dynamic objects are Actors, so results must be awaited.
+//
+// tearDown removes any dynamically registered class, ensuring cleanup runs even
+// when assertions fail mid-test.
 
 TestCase subclass: ClassBuilderTest
+  state: cls = nil
+
+  tearDown =>
+    self.cls isNil ifFalse: [self.cls removeFromSystem]
 
   testDynamicClassCreateAndSend =>
-    _cls := (Object classBuilder name: #CBTestGreeter; addMethod: #greet body: ["Hello!"]; register) await.
+    self.cls := (Object classBuilder name: #CBTestGreeter; addMethod: #greet body: ["Hello!"]; register) await.
     obj := CBTestGreeter new.
-    self assert: (obj greet await) equals: "Hello!".
-    CBTestGreeter removeFromSystem
+    self assert: (obj greet await) equals: "Hello!"
 
   testDynamicFieldDefault =>
-    _cls := (Object classBuilder name: #CBTestFieldDog; addField: #name default: "Rex"; register) await.
+    self.cls := (Object classBuilder name: #CBTestFieldDog; addField: #name default: "Rex"; register) await.
     obj := CBTestFieldDog new.
-    self assert: (obj name await) equals: "Rex".
-    CBTestFieldDog removeFromSystem
+    self assert: (obj name await) equals: "Rex"
 
   testDynamicMethodReceivesSelf =>
     speakBody := [:s | (s at: #name) ++ " says Woof!"].
-    _cls := (Object classBuilder name: #CBTestSpeaker; addField: #name default: "Rex"; addMethod: #speak body: speakBody; register) await.
+    self.cls := (Object classBuilder name: #CBTestSpeaker; addField: #name default: "Rex"; addMethod: #speak body: speakBody; register) await.
     obj := CBTestSpeaker new.
-    self assert: (obj speak await) equals: "Rex says Woof!".
-    CBTestSpeaker removeFromSystem
+    self assert: (obj speak await) equals: "Rex says Woof!"
 
   testDynamicSuperclass =>
-    _cls := (Object classBuilder name: #CBTestSuperCheck; register) await.
-    self assert: (CBTestSuperCheck superclass) equals: Object.
-    CBTestSuperCheck removeFromSystem
+    self.cls := (Object classBuilder name: #CBTestSuperCheck; register) await.
+    self assert: (CBTestSuperCheck superclass) equals: Object
 
   testDynamicCanUnderstand =>
-    _cls := (Object classBuilder name: #CBTestCanUnder; addMethod: #speak body: ["Hi"]; register) await.
-    self assert: (CBTestCanUnder canUnderstand: #speak) equals: true.
-    CBTestCanUnder removeFromSystem
+    self.cls := (Object classBuilder name: #CBTestCanUnder; addMethod: #speak body: ["Hi"]; register) await.
+    self assert: (CBTestCanUnder canUnderstand: #speak) equals: true
 
   testSealedClassRejected =>
     self should: [(Object classBuilder name: #CBBadSeal; superclass: Float; register) await] raise: #instantiation_error
