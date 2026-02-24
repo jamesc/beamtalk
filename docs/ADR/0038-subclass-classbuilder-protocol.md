@@ -503,11 +503,11 @@ Keep compiled class `on_load` calling `beamtalk_object_class:start/2` directly (
 
 | Issue | Phase | Description |
 |-------|-------|-------------|
-| BT-835 | 1 — Runtime foundation | `beamtalk_class_builder.erl` + bootstrap stub + sequence update |
-| BT-836 | 2 — Stdlib + intrinsic | `ClassBuilder.bt`, `Class#classBuilder`, `classBuilderRegister` intrinsic |
-| BT-837 | 3 — Codegen | `generate_register_class` emits ClassBuilder cascade; snapshot updates |
-| BT-838 | 4 — Dynamic dispatch | Path 2 closure-based dynamic class creation + tests |
-| BT-839 | 5 — REPL integration | REPL evaluator desugaring + E2E tests |
+| BT-835 | Phase 1 — Runtime foundation | `beamtalk_class_builder.erl` + bootstrap stub + sequence update |
+| BT-836 | Phase 1 — Stdlib + intrinsic | `ClassBuilder.bt`, `Class#classBuilder`, `classBuilderRegister` intrinsic |
+| BT-837 | Phase 1 — Codegen | `generate_register_class` emits ClassBuilder cascade; snapshot updates |
+| BT-838 | Phase 2 — Dynamic dispatch | Path 2 closure-based dynamic class creation + tests |
+| BT-839 | Phase 3 — REPL integration | REPL evaluator desugaring + E2E tests |
 
 ## References
 - Related ADRs: [ADR 0005](0005-beam-object-model-pragmatic-hybrid.md) (Object Model), [ADR 0006](0006-unified-method-dispatch.md) (Unified Dispatch), [ADR 0013](0013-class-variables-class-methods-instantiation.md) (Instantiation Protocol), [ADR 0022](0022-embedded-compiler-via-otp-port.md) (Compiler Port), [ADR 0024](0024-static-first-live-augmented-ide-tooling.md) (Static-First Tooling), [ADR 0032](0032-early-class-protocol.md) (Early Class Protocol), [ADR 0034](0034-stdlib-self-hosting-in-beamtalk.md) (Stdlib Self-Hosting), [ADR 0036](0036-full-metaclass-tower.md) (Full Metaclass Tower)
