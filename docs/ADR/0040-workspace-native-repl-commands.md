@@ -1,7 +1,7 @@
 # ADR 0040: Workspace-Native REPL Commands, Facade/Dictionary Split, and Class-Based Reload
 
 ## Status
-Proposed (2026-02-24)
+Accepted (2026-02-24)
 
 ## Context
 
