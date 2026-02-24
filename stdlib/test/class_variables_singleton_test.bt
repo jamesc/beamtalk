@@ -16,8 +16,9 @@ TestCase subclass: ClassVariablesSingletonTest
 
   testSetAndGetCurrent =>
     // Set a SystemDictionary instance as current and verify retrieval
+    prev := SystemDictionary current.
     sd := SystemDictionary spawn.
     SystemDictionary current: sd.
     self assert: (SystemDictionary current) equals: sd.
-    // Reset to nil to avoid affecting other tests
-    SystemDictionary current: nil
+    // Restore previous value to avoid affecting other tests
+    SystemDictionary current: prev
