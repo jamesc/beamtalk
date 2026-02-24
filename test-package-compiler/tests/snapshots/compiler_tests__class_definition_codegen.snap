@@ -173,31 +173,25 @@ module 'class_definition' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_ca
 
 'register_class'/0 = fun () ->
     try
-        let ClassInfo0 = ~{
-            'name' => 'Counter',
-            'module' => 'class_definition',
-            'superclass' => 'Actor',
-            'is_sealed' => 'false',
-            'is_abstract' => 'false',
-            'instance_methods' => ~{'increment' => ~{'arity' => 0, 'is_sealed' => 'false'}~, 'getValue' => ~{'arity' => 0, 'is_sealed' => 'false'}~}~,
-            'fields' => ['value'],
-            'class_methods' => ~{
+        let _BuilderState0 = ~{
+            'className' => 'Counter',
+            'superclassRef' => 'Actor',
+            'fieldSpecs' => ~{'value' => 0}~,
+            'methodSpecs' => ~{'increment' => ~{'arity' => 0, 'is_sealed' => 'false'}~, 'getValue' => ~{'arity' => 0, 'is_sealed' => 'false'}~}~,
+            'modifiers' => [],
+            'moduleName' => 'class_definition',
+            'classMethods' => ~{
                 'spawn' => ~{'arity' => 0}~,
                 'spawnWith:' => ~{'arity' => 1}~
             }~,
-            'method_source' => ~{'increment' => #{#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}#, 'getValue' => #{#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<86>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']])}#}~,
-            'class_state' => ~{}~,
-            'doc' => 'none',
-            'method_docs' => ~{}~
+            'methodSource' => ~{'increment' => #{#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}#, 'getValue' => #{#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<86>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']])}#}~,
+            'classState' => ~{}~,
+            'classDoc' => 'none',
+            'methodDocs' => ~{}~
         }~
-        in let _Reg0 = case call 'beamtalk_object_class':'start'('Counter', ClassInfo0) of
+        in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
             <{'ok', _Pid0}> when 'true' -> 'ok'
-            <{'error', {'already_started', _Existing0}}> when 'true' ->
-                let _UpdRes0 = call 'beamtalk_object_class':'update_class'('Counter', ClassInfo0) in case _UpdRes0 of
-                    <{'ok', _}> when 'true' -> 'ok'
-                    <{'error', _UpdErr0}> when 'true' -> {'error', _UpdErr0}
-                end
-            <{'error', _Reason0}> when 'true' -> 'ok'
+            <{'error', _Err0}> when 'true' -> {'error', _Err0}
         end
 
         in _Reg0

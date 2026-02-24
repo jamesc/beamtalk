@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// V2 fixture for ClassBuilder compiled registration E2E test (BT-837)
+// add now increments by 10 instead of 1
+
+Actor subclass: CBCounter
+  state: total = 0
+
+  add => self.total := self.total + 10
+  getTotal => ^self.total
