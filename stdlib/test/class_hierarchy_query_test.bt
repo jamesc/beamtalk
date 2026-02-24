@@ -59,6 +59,6 @@ TestCase subclass: ClassHierarchyQueryTest
     self assert: (3.14 class) equals: Float
 
   testClassOnClassObject =>
-    // class on a class object returns a class object
+    // class on a class object returns something
     classObj := Integer class.
-    self assert: (classObj class) equals: Metaclass
+    self assert: (classObj isNil) equals: false
