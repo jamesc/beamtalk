@@ -133,7 +133,7 @@ This follows the Erlang/Elixir pattern:
 
 **Hot code swap semantics follow BEAM conventions:** `reload` compiles the source file and loads the new BEAM module. Live actors running old code continue their current message handler; the next message dispatch uses the new code. This is standard BEAM two-version code loading — no custom state migration. (If state migration is needed in the future, it would use OTP's `code_change/3` convention, but that is out of scope for this ADR.)
 
-**Multi-class files:** A `.bt` file may define multiple classes. `Counter reload` recompiles `Counter sourceFile`, which reloads *all* classes defined in that file. This is documented, expected behavior — the file is the compilation unit. `Workspace classes` shows all classes with their source files, making the relationship visible.
+**One class per file:** Each `.bt` file defines exactly one class. `Counter reload` recompiles `Counter sourceFile` and loads the resulting BEAM module. This one-to-one mapping keeps file-system-backed images simple — the file *is* the class.
 
 For **dynamic classes** created via ClassBuilder (ADR 0038): `sourceFile => nil`, `reload` returns an error. Dynamic classes exist as runtime objects with method closures — they have no source file. Structural reflection (`help:`, `methods`, `allFieldNames`) still works because it queries the live class object, not source text.
 
@@ -493,7 +493,7 @@ Workspace reload: Counter            // reload the file Counter came from
 - Session locals remain implicit — the REPL's `beamtalk_repl_shell` continues to manage per-session bindings as today
 - Dynamic classes (ClassBuilder) have `sourceFile => nil` and `reload` returns an error — this is expected and consistent
 - `globals` returns an immutable snapshot, not a live namespace — `Beamtalk globals at: #Integer put: nil` creates a new Dictionary without mutating the system
-- `Counter reload` recompiles the entire source file, reloading all classes defined in it — the file is the compilation unit
+- One `.bt` file = one class — `Counter reload` recompiles exactly one class
 
 ## Implementation
 
