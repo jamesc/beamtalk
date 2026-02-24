@@ -1,11 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Stdlib tests for pattern matching (BT-406)
+// BT-406: Tests the match: expression — literal arms (integer, symbol, string),
+// wildcard arms, variable capture, guards (when:), and multi-arm dispatch.
 
 TestCase subclass: PatternMatchingTest
 
-  testSection1 =>
+  testPatternMatchingWithGuards =>
     self assert: (42 match: [_ -> "matched"]) equals: "matched".
     // Match integer literal — first arm
     self assert: (1 match: [1 -> "one"; 2 -> "two"; _ -> "other"]) equals: "one".

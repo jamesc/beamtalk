@@ -1,12 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for sealed class codegen optimization (BT-403)
+// BT-403: Tests sealed class codegen — sealed actor methods are compiled to
+// direct __sealed_* calls instead of dynamic dispatch, verified by exercising
+// external calls, internal self-sends, and state persistence.
 
 
 TestCase subclass: SealedClassTest
 
-  testSection1 =>
+  testSealedClassOperations =>
     c := SealedCounter spawn.
     // Basic read: getValue (uses __sealed_getValue direct call internally)
     self assert: (c getValue await) equals: 0.

@@ -1,12 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-598: Test local variable mutation in actor method blocks
+// BT-598: Tests that local variables inside actor method blocks are correctly
+// mutated and scoped — covering do:, inject:into:, to:do:, and whileFalse:.
 
 
 TestCase subclass: ActorLocalMutationsTest
 
-  testSection1 =>
+  testLocalMutationsInActorBlocks =>
     a := LocalMutationActor spawn.
     self assert: ((a sumWithDo: #(1, 2, 3, 4, 5)) await) equals: 15.
     b := LocalMutationActor spawn.

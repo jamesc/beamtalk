@@ -1,12 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-483: Mutation-threaded control flow returns {Result, State} tuples
+// BT-483: Tests that mutation-threaded control flow correctly returns the
+// computed value (not nil) from inject:into:, on:do:, and ensure: when
+// combined with actor field mutations.
 
 
 TestCase subclass: MutationReturnValuesTest
 
-  testSection1 =>
+  testMutationReturnValues =>
     actor := MutationReturnValues spawn.
     self assert: ((actor setValue: 0) await) equals: 0.
     // Block receives (acc, elem) — accumulator first, element second (BT-820)

@@ -1,12 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Tests for field mutations (BT-98)
+// BT-98: Tests that actor field mutations inside do: loops and inject:into: blocks
+// are correctly threaded through the state monad — setValue, sumArray via do:,
+// sumWithInject:, and multi-field accumulation (sum, count, product).
 
 
 TestCase subclass: FieldMutationsDoTest
 
-  testSection1 =>
+  testFieldMutationsWithSetAndDo =>
     counter := FieldMutationCounter spawn.
     self assert: (counter getValue await) equals: 0.
     self assert: ((counter setValue: 5) await) equals: 5.

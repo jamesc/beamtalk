@@ -1,11 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Stdlib tests for Character class (BT-339)
+// BT-339: Tests for the Character class — integer codes, equality, comparison,
+// predicates (isLetter, isDigit, isUppercase, isLowercase, isWhitespace),
+// arithmetic on char codes, and conversions (asString, asFloat).
 
 TestCase subclass: CharacterTest
 
-  testSection1 =>
+  testCharacterOperations =>
     self assert: ($A) equals: 65.
     self assert: ($a) equals: 97.
     self assert: ($0) equals: 48.

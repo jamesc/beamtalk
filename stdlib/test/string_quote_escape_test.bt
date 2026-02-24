@@ -1,11 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// String doubled-delimiter escape tests (BT-743)
+// BT-743: Tests that string literals correctly parse doubled double-quote
+// characters as a single embedded quote — single, middle, multiple, and
+// adjacent embedded quotes.
 
 TestCase subclass: StringQuoteEscapeTest
 
-  testSection1 =>
+  testDoubleQuoteEscaping =>
     self assert: """" equals: """".
     // Size of a 1-char string containing `"`
     self assert: ("""" size) equals: 1.

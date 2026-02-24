@@ -34,7 +34,7 @@ TestCase subclass: CollectionProtocolTest
     self assert: ((((Set new add: 1) add: 2) add: 3) allSatisfy: [:x | x > 0]).
     self deny: ((((Set new add: 1) add: 2) add: 3) allSatisfy: [:x | x > 2])
 
-  testDictionarySharedCollectionProtocolInheritedFromCollection =>
+  testDictionaryCollectionProtocol =>
     // Dictionary isEmpty (inherited from Collection via size)
     self assert: (#{} isEmpty).
     self deny: (#{#a => 1} isEmpty).
@@ -60,7 +60,7 @@ TestCase subclass: CollectionProtocolTest
     self assert: (#{#a => 2, #b => 4} allSatisfy: [:v | v isEven]).
     self deny: (#{#a => 1, #b => 2} allSatisfy: [:v | v isEven])
 
-  testTupleTupleHasNoLiteralSyntaxYetCollectionProtocolIsInherited =>
+  testTupleCollectionProtocol =>
     // Tuple empty creation
     self assert: (Tuple new class) equals: Tuple
 

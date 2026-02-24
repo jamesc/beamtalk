@@ -1,11 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-412 / BT-803: Metaclass tower tests (ADR 0036 Phase 2)
+// BT-412, BT-803, ADR 0036 Phase 2: Tests the metaclass tower — primitive class
+// identity (42 class == Integer), isMeta/isClass predicates, metaclass name,
+// thisClass, superclass hierarchy, self-grounding fixed point, and sealed Metaclass.
 
 TestCase subclass: MetaclassTest
 
-  testSection1 =>
+  testPrimitiveClassIdentityAndTower =>
     self assert: (42 class) equals: Integer.
     self assert: (3.14 class) equals: Float.
     self assert: ("hello" class) equals: String.

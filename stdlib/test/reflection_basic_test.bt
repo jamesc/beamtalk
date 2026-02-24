@@ -1,12 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Test basic reflection API (BT-97)
+// BT-97, BT-359, BT-765: Tests the basic reflection API on actor objects —
+// class, respondsTo:, fieldNames, fieldAt:, fieldAt:put:, perform:; and that
+// fieldAt: and fieldAt:put: raise immutable_value errors on value types.
 
 
 TestCase subclass: ReflectionBasicTest
 
-  testSection1 =>
+  testActorReflectionApi =>
     c := Counter spawn.
     // Test class reflection
     self assert: (c class) equals: Counter.
