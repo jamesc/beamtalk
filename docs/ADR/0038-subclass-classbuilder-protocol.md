@@ -1,7 +1,7 @@
 # ADR 0038: `subclass:` Grammar Desugaring to ClassBuilder Protocol
 
 ## Status
-Proposed (2026-02-23)
+Accepted (2026-02-24)
 
 ## Context
 
