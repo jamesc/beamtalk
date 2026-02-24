@@ -1,0 +1,65 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Advanced arithmetic operations tests - migrated from bootstrap/arithmetic.bt (BT-827)
+
+TestCase subclass: ArithmeticOperationsTest
+
+  testModulo =>
+    // Basic modulo
+    self assert: (10 % 3) equals: 1.
+    // Modulo with no remainder
+    self assert: (9 % 3) equals: 0.
+    // Modulo with zero dividend
+    self assert: (0 % 5) equals: 0
+
+  testExponentiation =>
+    // Basic exponentiation
+    self assert: (2 ** 10) equals: 1024.
+    // Exponent of zero
+    self assert: (5 ** 0) equals: 1.
+    // Exponent of one
+    self assert: (7 ** 1) equals: 7.
+    // Small exponentiation
+    self assert: (3 ** 3) equals: 27.
+    // Exponentiation has higher precedence than multiplication
+    self assert: (3 * 2 ** 3) equals: 24.
+    // Zero to the power of zero (mathematical convention: 1)
+    self assert: (0 ** 0) equals: 1.
+    // Negative base
+    self assert: (-2 ** 2) equals: 4
+
+  testGreaterThan =>
+    self assert: (5 > 3).
+    self deny: (3 > 5)
+
+  testLessThan =>
+    self assert: (5 < 10).
+    self deny: (10 < 5)
+
+  testEqual =>
+    self assert: (5 == 5).
+    self deny: (5 == 6)
+
+  testLessOrEqual =>
+    // Less than or equal (true - equal)
+    self assert: (5 <= 5).
+    // Less than or equal (true - less)
+    self assert: (3 <= 5).
+    // Less than or equal (false)
+    self deny: (7 <= 5)
+
+  testGreaterOrEqual =>
+    // Greater than or equal (true - equal)
+    self assert: (5 >= 5).
+    // Greater than or equal (true - greater)
+    self assert: (7 >= 5).
+    // Greater than or equal (false)
+    self deny: (3 >= 5)
+
+  testAsString =>
+    self assert: (42 asString) equals: "42"
+
+  testAsFloat =>
+    self assert: (42 asFloat) equals: 42.0.
+    self assert: (-5 asFloat) equals: -5.0
