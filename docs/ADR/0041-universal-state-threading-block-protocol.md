@@ -621,6 +621,20 @@ This is a **compiler-internal change** with no syntax changes. Existing Beamtalk
 
 No user migration is required.
 
+## Implementation Tracking
+
+**Epic:** [BT-850](https://linear.app/beamtalk/issue/BT-850) — Epic: Universal State-Threading Block Protocol (ADR 0041)
+**Issues:**
+- [BT-851](https://linear.app/beamtalk/issue/BT-851) — PoC: Tier 2 block round-trip (Phase 0, S)
+- [BT-852](https://linear.app/beamtalk/issue/BT-852) — Emit stateful fun signature for Tier 2 blocks (Phase 1, M)
+- [BT-853](https://linear.app/beamtalk/issue/BT-853) — Caller-side protocol for HOM call sites (Phase 1, M)
+- [BT-854](https://linear.app/beamtalk/issue/BT-854) — NLR state threading: 3-tuple → 4-tuple (Phase 2, M)
+- [BT-855](https://linear.app/beamtalk/issue/BT-855) — Erlang interop wrapper funs (Phase 2, M)
+- [BT-856](https://linear.app/beamtalk/issue/BT-856) — Reclassify whitelist as optimization hint (Phase 3, S)
+- [BT-857](https://linear.app/beamtalk/issue/BT-857) — Tests: HOM composability, NLR, interop (Phase 4, M)
+
+**Status:** Planned
+
 ## References
 
 - Related issues: [BT-842](https://linear.app/beamtalk/issue/BT-842/adr-universal-state-threading-block-protocol)
