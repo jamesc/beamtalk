@@ -1,5 +1,10 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
+%% **DDD Context:** Runtime
+
+%%% @doc EUnit tests for beamtalk_reflection module.
+%%%
+%%% Tests field name extraction, struct reflection, and runtime introspection helpers.
 
 -module(beamtalk_reflection_tests).
 

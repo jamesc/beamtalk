@@ -30,7 +30,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
     }
 
     info!(count = source_files.len(), "Found source files");
-    println!("Building {} file(s)...", source_files.len());
+    debug!("Building {} file(s)", source_files.len());
 
     // Determine project root (for directory input, use the path; for file input, use parent)
     let project_root = if source_path.is_dir() {
@@ -120,7 +120,6 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
 
     // Batch compile Core Erlang to BEAM
     info!("Compiling Core Erlang to BEAM");
-    println!("  Compiling to BEAM bytecode...");
     let compiler = BeamCompiler::new(build_dir.clone());
     let beam_files = compiler
         .compile_batch(&core_files)
@@ -138,19 +137,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
         let class_metadata: Vec<app_file::ClassMetadata> = Vec::new();
         app_file::generate_app_file(&build_dir, pkg, &module_names, &class_metadata)?;
         info!(name = %pkg.name, "Generated .app file");
-        println!("  Generated {}.app", pkg.name);
     }
-
-    let output_label = if pkg_manifest.is_some() {
-        "_build/dev/ebin/"
-    } else {
-        "build/"
-    };
-    println!("Build complete");
-    println!(
-        "  Generated {} BEAM file(s) in {output_label}",
-        beam_files.len()
-    );
 
     Ok(())
 }
@@ -268,7 +255,7 @@ fn compile_file(
     options: &beamtalk_core::CompilerOptions,
     class_module_index: &HashMap<String, String>,
 ) -> Result<()> {
-    println!("  Compiling {path}...");
+    debug!("Compiling {path}");
 
     compile_source_with_bindings(
         path,
@@ -279,8 +266,7 @@ fn compile_file(
         class_module_index,
     )?;
 
-    println!("    ✓ Parsed successfully");
-    println!("    ✓ Generated Core Erlang: {core_file}");
+    debug!("Generated Core Erlang: {core_file}");
 
     Ok(())
 }

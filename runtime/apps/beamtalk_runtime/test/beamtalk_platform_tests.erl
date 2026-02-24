@@ -1,5 +1,10 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
+%% **DDD Context:** Runtime
+
+%%% @doc EUnit tests for beamtalk_platform module.
+%%%
+%%% Tests platform-specific helpers: home directory, OS detection, and path utilities.
 
 -module(beamtalk_platform_tests).
 

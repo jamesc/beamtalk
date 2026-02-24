@@ -810,7 +810,7 @@ mod tests {
     }
 
     #[test]
-    fn build_command_clears_env_and_restores_path() {
+    fn test_build_command_clears_env_and_restores_path() {
         // After env_clear(), PATH should be restored from current process
         let cmd = build_test_command();
         let envs: Vec<_> = cmd.get_envs().collect();
@@ -820,7 +820,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn build_command_restores_windows_env_vars() {
+    fn test_build_command_restores_windows_env_vars() {
         let cmd = build_test_command();
         let env_keys: Vec<_> = cmd
             .get_envs()
@@ -838,7 +838,7 @@ mod tests {
     }
 
     #[test]
-    fn build_command_includes_eval_arg() {
+    fn test_build_command_includes_eval_arg() {
         let cmd = build_test_command();
         let args: Vec<_> = cmd.get_args().collect();
         assert!(
@@ -852,7 +852,7 @@ mod tests {
     }
 
     #[test]
-    fn read_port_file_nonce_from_plain_text() {
+    fn test_read_port_file_nonce_from_plain_text() {
         // Set up a temp workspace dir with a plain-text port file
         let home = dirs::home_dir().expect("HOME must be set");
         let ws_id = format!("test_nonce_{}", std::process::id());
@@ -870,7 +870,7 @@ mod tests {
     }
 
     #[test]
-    fn read_port_file_nonce_wrong_port() {
+    fn test_read_port_file_nonce_wrong_port() {
         let home = dirs::home_dir().expect("HOME must be set");
         let ws_id = format!("test_nonce_wrong_{}", std::process::id());
         let ws_dir = home.join(".beamtalk").join("workspaces").join(&ws_id);
@@ -891,7 +891,7 @@ mod tests {
     }
 
     #[test]
-    fn read_port_file_nonce_no_nonce_line() {
+    fn test_read_port_file_nonce_no_nonce_line() {
         let home = dirs::home_dir().expect("HOME must be set");
         let ws_id = format!("test_nonce_none_{}", std::process::id());
         let ws_dir = home.join(".beamtalk").join("workspaces").join(&ws_id);

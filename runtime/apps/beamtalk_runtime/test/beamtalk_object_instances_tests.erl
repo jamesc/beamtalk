@@ -403,22 +403,17 @@ monitor_cleanup_test_() ->
 
                 ok = beamtalk_object_instances:register('Counter', Instance),
 
-                %% Get the state to verify monitor is registered
-                State1 = sys:get_state(Pid),
-                % #state.monitors
-                Monitors1 = element(2, State1),
-                ?assertEqual(1, maps:size(Monitors1)),
-                ?assert(maps:is_key({'Counter', Instance}, Monitors1)),
+                %% Verify instance is tracked via public API
+                ?assertEqual(1, beamtalk_object_instances:count('Counter')),
+                ?assert(lists:member(Instance, beamtalk_object_instances:all('Counter'))),
 
                 %% Kill the instance
                 Instance ! stop,
                 timer:sleep(50),
 
-                %% Verify monitor is cleaned up from state
-                State2 = sys:get_state(Pid),
-                Monitors2 = element(2, State2),
-                ?assertEqual(0, maps:size(Monitors2)),
-                ?assertNot(maps:is_key({'Counter', Instance}, Monitors2))
+                %% Verify instance is removed from registry after death
+                ?assertEqual(0, beamtalk_object_instances:count('Counter')),
+                ?assertEqual([], beamtalk_object_instances:all('Counter'))
             end)
         ]
     end}.

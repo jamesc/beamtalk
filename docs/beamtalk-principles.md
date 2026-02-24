@@ -111,7 +111,7 @@ Inter-actor message sends are **asynchronous**, returning futures. Primitive ope
 
 **Full runtime introspection** is a language feature, not a library.
 
-- Inspect any actor's state, mailbox, and behavior at runtime
+- Inspect any actor's state and behavior at runtime
 - Query and modify methods dynamically
 - The system is self-describing: code is data, data is code
 
@@ -130,7 +130,7 @@ Interop is not an afterthought — it's essential for adoption. The BEAM ecosyst
 - **Be callable by any BEAM language** — Beamtalk actors are standard `gen_server` modules
 - **Share supervision trees** — Mix Beamtalk actors with Erlang/Elixir processes under one supervisor
 - **Use Hex.pm** — Standard package manager, no separate ecosystem
-- **OTP-native** — Actors implement OTP behaviors; appear in Observer; support distributed Erlang
+- **OTP-native** — Actors implement OTP behaviors; appear in Observer
 
 **Why this matters:**
 - Zero libraries means zero adoption
@@ -142,16 +142,17 @@ Interop is not an afterthought — it's essential for adoption. The BEAM ecosyst
 
 ---
 
-## 10. Supervision is Language-Level
+## 10. Fault Tolerance via OTP
 
-Fault tolerance via **declarative supervision trees**, not library patterns.
+Embrace BEAM's "let it crash" philosophy — actors crash independently, the supervisor restarts them.
 
-- Supervisors are actors that spawn and monitor child actors
-- Restart strategies are part of actor definitions
-- Embrace BEAM's "let it crash" philosophy
-- No defensive programming - let the runtime handle failures
+- Actors are automatically supervised by OTP on spawn
+- No defensive programming — let the runtime handle failures
+- Default restart behavior applies automatically
 
-**Implication:** Actor definitions include supervision strategies; failures are expected.
+**Current state:** Actors restart on crash via OTP defaults. A declarative supervision tree DSL (custom restart strategies, supervision hierarchies) is planned but not yet available from Beamtalk syntax (tracked [BT-448](https://linear.app/beamtalk/issue/BT-448)).
+
+**Implication:** Fault isolation is guaranteed; supervision configuration requires Erlang FFI for now.
 
 ---
 

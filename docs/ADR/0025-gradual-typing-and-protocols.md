@@ -1,7 +1,7 @@
 # ADR 0025: Gradual Typing and Protocols
 
 ## Status
-Accepted (2026-02-15)
+Accepted (2026-02-15) — Phases 1 and 2 complete; Phase 3 (Protocols) planned
 
 ## Context
 
@@ -566,8 +566,8 @@ Union types, generic types, singleton types, type narrowing. Deferred to future 
 
 | Phase | Issue | Description | Size | Status |
 |-------|-------|-------------|------|--------|
-| 1 | BT-587, BT-671, BT-672 | Type inference from class definitions; argument/return/state checks | M-L | In Progress |
-| 2 | BT-673 | Optional type annotations syntax + user-facing coverage (stdlib/docs/examples); Dialyzer spec generation pending | M | In Progress |
+| 1 | BT-587, BT-671, BT-672 | Type inference from class definitions; argument/return/state checks | M-L | Done |
+| 2 | BT-673 | Optional type annotations syntax + user-facing coverage (stdlib/docs/examples); Dialyzer spec generation pending | M | Done |
 | 3 | TBD | Protocol definitions and structural conformance | L | Planned |
 | 4 | TBD | Advanced types (union, generic, singleton, narrowing) | XL | Future |
 

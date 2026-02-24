@@ -50,7 +50,7 @@ Step-by-step guides for common tasks in the Beamtalk codebase.
 
 6. **Run E2E tests after EVERY change**
    ```bash
-   cargo test e2e_language_tests
+   just test-e2e
    # Must show: "X/X tests passed" (all pass)
    ```
 
@@ -82,7 +82,7 @@ Step-by-step guides for common tasks in the Beamtalk codebase.
 1. **Create a runnable example** in `examples/` showing the feature in use
 2. **Create test fixtures** in `tests/e2e/fixtures/` if testing classes/actors
 3. **Write E2E tests** in `tests/e2e/cases/` that load and use the fixtures
-4. **Run E2E tests** to verify end-to-end functionality: `cargo test e2e_language_tests`
+4. **Run E2E tests** to verify end-to-end functionality: `just test-e2e`
 5. **Iterate** until all tests pass
 
 **Why this matters:**

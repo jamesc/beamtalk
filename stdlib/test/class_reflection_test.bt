@@ -1,37 +1,37 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-510, BT-776, ADR 0032 Phase 2: Tests class method reflection — localMethods
-// returns only methods defined directly on the class, methods returns the full
+// BT-510, BT-776, ADR 0032 Phase 2: Tests class method reflection — methods
+// returns only methods defined directly on the class, allMethods returns the full
 // inheritance chain, and respondsTo: works on class objects.
 
 
 TestCase subclass: ClassReflectionTest
 
   testLocalAndFullMethodLists =>
-    counterLocal := Counter localMethods.
+    counterLocal := Counter methods.
     self deny: (counterLocal isEmpty).
     // Counter defines increment, decrement, getValue locally
     self assert: (counterLocal includes: #increment).
     self assert: (counterLocal includes: #decrement).
     self assert: (counterLocal includes: #getValue).
-    // Inherited methods are NOT in localMethods
+    // Inherited methods are NOT in methods
     self deny: (counterLocal includes: #isNil).
     self deny: (counterLocal includes: #respondsTo:).
     // ---------------------------------------------------------------------------
-    counterMethods := Counter methods.
-    // Counter methods — full inheritance chain (Phase 2)
+    counterMethods := Counter allMethods.
+    // Counter allMethods — full inheritance chain
     self deny: (counterMethods isEmpty).
     // Local methods are present
     self assert: (counterMethods includes: #increment).
     // ---------------------------------------------------------------------------
     self assert: (counterMethods includes: #getValue).
-    // Inherited methods ARE in methods (full chain)
+    // Inherited methods ARE in allMethods (full chain)
     self assert: (counterMethods includes: #isNil).
     self assert: (counterMethods includes: #respondsTo:).
     // ---------------------------------------------------------------------------
-    intMethods := Integer methods.
-    // Primitive class methods still work
+    intMethods := Integer allMethods.
+    // Primitive class — full chain still works
     self deny: (intMethods isEmpty).
     // isNil is inherited from Object/ProtoObject — included in full chain
     self assert: (intMethods includes: #isNil).

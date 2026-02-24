@@ -1,5 +1,10 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
+%% **DDD Context:** Runtime
+
+%%% @doc EUnit tests for beamtalk_hot_reload module.
+%%%
+%%% Tests hot code reloading, actor migration, and module replacement.
 
 -module(beamtalk_hot_reload_tests).
 -include_lib("eunit/include/eunit.hrl").

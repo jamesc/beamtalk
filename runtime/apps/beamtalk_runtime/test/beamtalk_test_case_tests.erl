@@ -209,6 +209,6 @@ run_all_with_real_module_test() ->
     try beamtalk_test_case:run_all('NonExistentTestClass') of
         Result when is_binary(Result) -> ok
     catch
-        % Expected — module doesn't exist
-        _:_ -> ok
+        % Expected — module doesn't exist (undef error)
+        error:_ -> ok
     end.

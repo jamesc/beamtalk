@@ -77,35 +77,39 @@ pub fn paint(color: &str, text: &str) -> String {
     }
 }
 
+/// RAII guard that saves and restores `COLOR_ENABLED` on drop.
+/// Defined here (not in `mod tests`) so `mod.rs` tests can import it via `super::color::ColorGuard`.
+#[cfg(test)]
+pub(super) struct ColorGuard {
+    prev: bool,
+}
+
+#[cfg(test)]
+impl ColorGuard {
+    pub(super) fn disabled() -> Self {
+        let prev = COLOR_ENABLED.load(Ordering::Relaxed);
+        COLOR_ENABLED.store(false, Ordering::Relaxed);
+        Self { prev }
+    }
+
+    pub(super) fn enabled() -> Self {
+        let prev = COLOR_ENABLED.load(Ordering::Relaxed);
+        COLOR_ENABLED.store(true, Ordering::Relaxed);
+        Self { prev }
+    }
+}
+
+#[cfg(test)]
+impl Drop for ColorGuard {
+    fn drop(&mut self) {
+        COLOR_ENABLED.store(self.prev, Ordering::Relaxed);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serial_test::serial;
-
-    /// RAII guard that saves and restores `COLOR_ENABLED` on drop.
-    struct ColorGuard {
-        prev: bool,
-    }
-
-    impl ColorGuard {
-        fn disabled() -> Self {
-            let prev = COLOR_ENABLED.load(Ordering::Relaxed);
-            COLOR_ENABLED.store(false, Ordering::Relaxed);
-            Self { prev }
-        }
-
-        fn enabled() -> Self {
-            let prev = COLOR_ENABLED.load(Ordering::Relaxed);
-            COLOR_ENABLED.store(true, Ordering::Relaxed);
-            Self { prev }
-        }
-    }
-
-    impl Drop for ColorGuard {
-        fn drop(&mut self) {
-            COLOR_ENABLED.store(self.prev, Ordering::Relaxed);
-        }
-    }
 
     #[test]
     #[serial(color)]

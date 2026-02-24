@@ -1100,6 +1100,7 @@ impl TypeEnv {
 
 #[cfg(test)]
 mod tests {
+    //! Tests for zero-syntax type inference across all expression forms.
     use super::*;
     use crate::ast::{
         Block, CascadeMessage, ClassDefinition, Identifier, KeywordPart, MethodDefinition,

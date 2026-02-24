@@ -924,18 +924,9 @@ fn to_lsp_symbol(
 mod tests {
     use super::*;
     use beamtalk_core::language_service::HoverInfo;
+    use beamtalk_core::test_helpers::unique_temp_dir;
     use camino::Utf8PathBuf;
     use std::fs;
-    use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn unique_temp_dir(prefix: &str) -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time")
-            .as_nanos();
-        std::env::temp_dir().join(format!("{prefix}_{}_{}", std::process::id(), nanos))
-    }
 
     #[test]
     fn configured_stdlib_source_dirs_rejects_relative_traversal_outside_root() {

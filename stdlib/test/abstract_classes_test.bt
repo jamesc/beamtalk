@@ -10,3 +10,7 @@ TestCase subclass: AbstractClassesTest
     c := Circle spawn.
     self assert: ((c setRadius: 5) await) equals: 5.
     self assert: (c area await) equals: 25
+
+  testAbstractMethodRaisesSubclassResponsibility =>
+    // Calling subclassResponsibility raises a user_error
+    self should: [self subclassResponsibility] raise: #user_error

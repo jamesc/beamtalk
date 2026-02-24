@@ -117,11 +117,7 @@ fn extract_pattern_bindings_impl(
 mod tests {
     use super::*;
     use crate::ast::{BinarySegment, Literal};
-    use crate::source_analysis::Span;
-
-    fn test_span() -> Span {
-        Span::new(0, 0)
-    }
+    use crate::semantic_analysis::test_helpers::test_span;
 
     #[test]
     fn test_extract_pattern_bindings_variable() {

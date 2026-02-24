@@ -782,17 +782,15 @@ impl Default for ClassHierarchy {
 
 #[cfg(test)]
 mod tests {
+    //! Tests for class hierarchy construction, method resolution, and inheritance rules.
     use super::builtins::builtin_method;
     use super::*;
     use crate::ast::{
         ClassDefinition, Identifier, MethodDefinition, ParameterDefinition, StateDeclaration,
         TypeAnnotation,
     };
+    use crate::semantic_analysis::test_helpers::test_span;
     use crate::source_analysis::Span;
-
-    fn test_span() -> Span {
-        Span::new(0, 0)
-    }
 
     // --- Value object method tests ---
 
