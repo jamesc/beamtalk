@@ -34,7 +34,7 @@ config := #{#host => "localhost", #port => 8080}
 | **Interactive-first** | REPL and live workspace, not batch compilation |
 | **Hot code reload** | Edit and reload modules in running systems |
 | **Actor model** | Actors are BEAM processes with independent fault isolation |
-| **Async by default** | Actor message sends return futures; no blocking |
+| **Async by default** | Actor message sends return futures; blocking only via await |
 | **Reflection** | Inspect any actor's state and methods at runtime |
 | **Runs on BEAM** | Compiles to Core Erlang; deploy to existing OTP infrastructure |
 | **Testing built-in** | SUnit-style `TestCase` framework with `beamtalk test` |
