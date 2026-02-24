@@ -126,8 +126,6 @@ pub(crate) struct ReplResponse {
     pub(crate) warnings: Option<Vec<String>>,
     /// Documentation text (BT-500: :help command)
     pub(crate) docs: Option<String>,
-    /// Test results (BT-724: :test command)
-    pub(crate) results: Option<serde_json::Value>,
     /// Generated Core Erlang source (BT-724: :show-codegen command)
     pub(crate) core_erlang: Option<String>,
     /// Number of actors affected by reload (BT-266)
@@ -897,10 +895,6 @@ pub(crate) fn repl_loop(
                             }
                             continue;
                         }
-                        ":actors" | ":a" => {
-                            eprintln!(":actors is removed. Use: Workspace actors");
-                            continue;
-                        }
                         ":modules" | ":m" => {
                             match client.list_modules() {
                                 Ok(response) => {
@@ -933,49 +927,6 @@ pub(crate) fn repl_loop(
                                     }
                                 }
                                 Err(e) => eprintln!("Error: {e}"),
-                            }
-                            continue;
-                        }
-                        _ if line.starts_with(":unload ") => {
-                            let class_name = extract_command_arg(line, ":unload ", None);
-                            if class_name.is_empty() {
-                                eprintln!(
-                                    "':unload' has been removed. Use `ClassName removeFromSystem` to remove a class."
-                                );
-                            } else {
-                                eprintln!(
-                                    "':unload' has been removed. Use `{class_name} removeFromSystem` instead."
-                                );
-                            }
-                            continue;
-                        }
-                        _ if line == ":kill" || line.starts_with(":kill ") => {
-                            let pid_str = extract_command_arg(line, ":kill ", None);
-                            if pid_str.is_empty() {
-                                eprintln!(
-                                    ":kill is removed. Use: actor kill  (or: (Workspace actorAt: \"<pid>\") kill)"
-                                );
-                            } else {
-                                eprintln!(
-                                    ":kill is removed. Use: (Workspace actorAt: \"{pid_str}\") kill"
-                                );
-                            }
-                            continue;
-                        }
-                        ":sessions" => {
-                            eprintln!(":sessions is removed. Use: Workspace sessions");
-                            continue;
-                        }
-                        _ if line.starts_with(":inspect ") || line == ":inspect" => {
-                            let pid_str = extract_command_arg(line, ":inspect ", None);
-                            if pid_str.is_empty() {
-                                eprintln!(
-                                    ":inspect is removed. Use: actor inspect  (or: (Workspace actorAt: \"<pid>\") inspect)"
-                                );
-                            } else {
-                                eprintln!(
-                                    ":inspect is removed. Use: (Workspace actorAt: \"{pid_str}\") inspect"
-                                );
                             }
                             continue;
                         }
@@ -1021,60 +972,6 @@ pub(crate) fn repl_loop(
                             }
                             continue;
                         }
-                        // BT-724: :test / :t command
-                        ":test" | ":t" => {
-                            match client.test_all() {
-                                Ok(response) => {
-                                    if response.is_error() {
-                                        if let Some(msg) = response.error_message() {
-                                            eprintln!("{}", display::format_error(msg));
-                                        }
-                                    } else if let Some(ref results) = response.results {
-                                        display::display_test_results(results);
-                                    } else {
-                                        println!("No test classes found.");
-                                    }
-                                }
-                                Err(e) => eprintln!("Error: {e}"),
-                            }
-                            continue;
-                        }
-                        _ if line.starts_with(":test ") || line.starts_with(":t ") => {
-                            let class_name = extract_command_arg(line, ":test ", Some(":t "));
-                            if class_name.is_empty() {
-                                eprintln!("Usage: :test <ClassName>");
-                                continue;
-                            }
-                            match client.test_class(class_name) {
-                                Ok(response) => {
-                                    if response.is_error() {
-                                        if let Some(msg) = response.error_message() {
-                                            eprintln!("{}", display::format_error(msg));
-                                        }
-                                    } else if let Some(ref results) = response.results {
-                                        display::display_test_results(results);
-                                    } else {
-                                        println!("No tests found for class {class_name}.");
-                                    }
-                                }
-                                Err(e) => eprintln!("Error: {e}"),
-                            }
-                            continue;
-                        }
-                        // :info / :i replaced by :help
-                        ":info" | ":i" => {
-                            eprintln!(":info is removed. Use: :help <symbol>  (or :h <symbol>)");
-                            continue;
-                        }
-                        _ if line.starts_with(":info ") || line.starts_with(":i ") => {
-                            let symbol = extract_command_arg(line, ":info ", Some(":i "));
-                            if symbol.is_empty() {
-                                eprintln!(":info is removed. Use: :help <symbol>");
-                            } else {
-                                eprintln!(":info is removed. Use: :help {symbol}");
-                            }
-                            continue;
-                        }
                         _ => {}
                     }
 
@@ -1090,10 +987,6 @@ pub(crate) fn repl_loop(
                         "clear" => Some(":clear"),
                         "bindings" => Some(":bindings"),
                         "modules" => Some(":modules"),
-                        "kill" => Some(":kill"),
-                        "inspect" => Some(":inspect"),
-                        "sessions" => Some(":sessions"),
-                        "test" => Some(":test"),
                         "show-codegen" => Some(":show-codegen"),
                         _ => None,
                     } {

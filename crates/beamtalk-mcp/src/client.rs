@@ -334,16 +334,6 @@ impl ReplClient {
         self.send(&request).await
     }
 
-    /// Send an info operation to get enriched symbol information.
-    pub async fn info(&self, symbol: &str) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "info",
-            "id": next_msg_id(),
-            "symbol": symbol
-        });
-        self.send(&request).await
-    }
-
     /// Send a describe operation for capability discovery.
     pub async fn describe(&self) -> Result<ReplResponse, String> {
         let request = serde_json::json!({
@@ -726,7 +716,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_eval_arithmetic() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -737,7 +726,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_eval_string() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -748,7 +736,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_eval_error() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -759,7 +746,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_bindings() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -780,7 +766,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_actors_list() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -791,7 +776,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_modules_list() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -802,7 +786,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_complete() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -813,7 +796,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_load_file_and_spawn_actor() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -857,7 +839,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_docs() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -880,7 +861,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_value_string_formats_correctly() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -900,7 +880,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_connection_failure() {
         // Port 1 should never have a REPL running
         let result = ReplClient::connect(1, "dummy").await;
@@ -908,7 +887,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_clear_bindings() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -931,7 +909,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_show_codegen() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -949,18 +926,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "integration test — auto-starts REPL workspace"]
-    async fn test_info() -> Result<(), Box<dyn std::error::Error>> {
-        let (port, cookie) = test_port_and_cookie()?;
-        let client = ReplClient::connect(port, &cookie).await?;
-        let resp = client.info("Integer").await.unwrap();
-        assert!(!resp.is_error(), "info should succeed: {:?}", resp.error);
-        assert!(resp.info.is_some(), "should return info");
-        Ok(())
-    }
-
-    #[tokio::test]
-    #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_describe() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -975,7 +940,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_unload_module() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -993,7 +957,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_interrupt() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -1005,7 +968,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_test_all() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -1018,7 +980,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_test_class() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -1049,7 +1010,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "integration test — auto-starts REPL workspace"]
     async fn test_reconnect_resumes_session() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;

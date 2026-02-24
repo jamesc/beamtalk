@@ -3,13 +3,13 @@
 
 // E2E tests for REPL commands (BT-527).
 //
-// These tests require E2E because :bindings, :clear, :actors, :modules, and
+// These tests require E2E because :bindings, :clear, :modules, and
 // :reload are REPL commands processed by the REPL session handler. BUnit
 // tests execute compiled Beamtalk code and cannot invoke REPL commands.
 // Workspace variable persistence across turns is also needed to verify that
-// bindings and actors survive between expressions.
+// bindings survive between expressions.
 //
-// Tests :bindings, :clear, :actors, :modules, and :reload commands
+// Tests :bindings, :clear, :modules, and :reload commands
 // routed through their proper protocol operations.
 
 // @load tests/e2e/fixtures/counter.bt
@@ -69,18 +69,6 @@ b := 2
 // => ok
 
 // ===========================================================================
-// :actors — AFTER SPAWNING
-// ===========================================================================
-
-// Spawn a counter actor
-c := Counter spawn
-// => #Actor<Counter,_>
-
-// Actors list should include our Counter (other actors may exist from prior tests)
-:actors
-// => _
-
-// ===========================================================================
 // :load — LOAD A VALUE TYPE
 // ===========================================================================
 
@@ -111,6 +99,10 @@ Calculator add: 3 to: 7
 // => 10
 
 // ===========================================================================
+// Spawn a counter actor for metaclass operations
+c := Counter spawn
+// => #Actor<Counter,_>
+
 // :load — METACLASS OPERATIONS ON LOADED CLASSES
 // ===========================================================================
 

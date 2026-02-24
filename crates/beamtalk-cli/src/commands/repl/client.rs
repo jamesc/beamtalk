@@ -385,21 +385,4 @@ impl ReplClient {
             "code": code
         }))
     }
-
-    /// Run tests for a specific class (BT-724).
-    pub(crate) fn test_class(&mut self, class: &str) -> Result<ReplResponse> {
-        self.send_request(&serde_json::json!({
-            "op": "test",
-            "id": protocol::next_msg_id(),
-            "class": class
-        }))
-    }
-
-    /// Run all tests for all loaded `TestCase` classes (BT-724).
-    pub(crate) fn test_all(&mut self) -> Result<ReplResponse> {
-        self.send_request(&serde_json::json!({
-            "op": "test-all",
-            "id": protocol::next_msg_id()
-        }))
-    }
 }

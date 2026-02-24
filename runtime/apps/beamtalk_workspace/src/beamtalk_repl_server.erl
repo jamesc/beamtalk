@@ -15,7 +15,7 @@
 %%% - beamtalk_repl_ops_load: load-file, load-source, reload, modules
 %%% - beamtalk_repl_ops_actors: actors, inspect, kill, interrupt
 %%% - beamtalk_repl_ops_session: sessions, clone, close, health, shutdown
-%%% - beamtalk_repl_ops_dev: complete, info, docs, describe, test, test-all, show-codegen
+%%% - beamtalk_repl_ops_dev: complete, docs, describe, show-codegen
 
 -module(beamtalk_repl_server).
 -behaviour(gen_server).
@@ -40,7 +40,6 @@
     validate_actor_pid/1,
     is_known_actor/1,
     get_completions/1,
-    get_symbol_info/1,
     resolve_class_to_module/1,
     ensure_structured_error/2,
     make_class_not_found_error/1,
@@ -350,14 +349,9 @@ handle_op(Op, Params, Msg, SessionPid) when
     beamtalk_repl_ops_session:handle(Op, Params, Msg, SessionPid);
 handle_op(Op, Params, Msg, SessionPid) when
     Op =:= <<"complete">>;
-    Op =:= <<"info">>;
     Op =:= <<"docs">>;
     Op =:= <<"describe">>;
     Op =:= <<"show-codegen">>
-->
-    beamtalk_repl_ops_dev:handle(Op, Params, Msg, SessionPid);
-handle_op(Op, Params, Msg, SessionPid) when
-    Op =:= <<"test">>; Op =:= <<"test-all">>
 ->
     beamtalk_repl_ops_dev:handle(Op, Params, Msg, SessionPid);
 handle_op(Op, Params, Msg, _SessionPid) when Op =:= <<"unload">> ->
@@ -514,7 +508,6 @@ resolve_module_atoms(ModuleAtom, Classes) ->
 
 %% @private Delegate to beamtalk_repl_ops_dev.
 get_completions(Prefix) -> beamtalk_repl_ops_dev:get_completions(Prefix).
-get_symbol_info(Symbol) -> beamtalk_repl_ops_dev:get_symbol_info(Symbol).
 make_class_not_found_error(ClassName) ->
     beamtalk_repl_ops_dev:make_class_not_found_error(ClassName).
 -endif.
