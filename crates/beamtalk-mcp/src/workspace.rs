@@ -102,7 +102,8 @@ pub fn parse_repl_port(stdout: &str) -> Option<u16> {
 pub fn parse_workspace_id(stdout: &str) -> Option<String> {
     stdout.lines().find_map(|line| {
         line.strip_prefix("  Workspace: ")
-            .map(|rest| rest.split_whitespace().next().unwrap_or(rest).to_string())
+            .and_then(|rest| rest.split_whitespace().next())
+            .map(std::string::ToString::to_string)
     })
 }
 
@@ -334,5 +335,12 @@ mod tests {
             parse_workspace_id("  Workspace: deadbeef1234\n"),
             Some("deadbeef1234".to_string())
         );
+    }
+
+    #[test]
+    fn test_parse_workspace_id_empty_prefix() {
+        // "  Workspace: " present but no ID — must return None, not Some("")
+        assert_eq!(parse_workspace_id("  Workspace: \n"), None);
+        assert_eq!(parse_workspace_id("  Workspace: "), None);
     }
 }
