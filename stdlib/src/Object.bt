@@ -189,6 +189,17 @@ ProtoObject subclass: Object
   /// ```
   subclassResponsibility => self error: "This method is abstract and must be overridden by a subclass"
 
+  /// Raise an error indicating this method has not yet been implemented.
+  ///
+  /// Use this for work-in-progress stubs. Distinct from `subclassResponsibility`,
+  /// which signals an interface contract violation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// self notImplemented
+  /// ```
+  notImplemented => self error: "Method not yet implemented"
+
   /// Raise an error with the given message.
   ///
   /// ## Examples

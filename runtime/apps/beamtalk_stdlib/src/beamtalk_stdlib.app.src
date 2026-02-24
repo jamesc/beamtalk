@@ -10,6 +10,7 @@
             {'bt@stdlib@array', 'Array', 'Collection'},
             {'bt@stdlib@association', 'Association', 'Object'},
             {'bt@stdlib@beamerror', 'BEAMError', 'Error'},
+            {'bt@stdlib@beamtalk_interface', 'BeamtalkInterface', 'Actor'},
             {'bt@stdlib@behaviour', 'Behaviour', 'Object'},
             {'bt@stdlib@block', 'Block', 'Object'},
             {'bt@stdlib@boolean', 'Boolean', 'Object'},
@@ -50,7 +51,6 @@
             {'bt@stdlib@string', 'String', 'Collection'},
             {'bt@stdlib@symbol', 'Symbol', 'Object'},
             {'bt@stdlib@system', 'System', 'Object'},
-            {'bt@stdlib@system_dictionary', 'SystemDictionary', 'Actor'},
             {'bt@stdlib@test_case', 'TestCase', 'Object'},
             {'bt@stdlib@test_result', 'TestResult', 'Object'},
             {'bt@stdlib@test_runner', 'TestRunner', 'Object'},
@@ -60,7 +60,7 @@
             {'bt@stdlib@tuple', 'Tuple', 'Collection'},
             {'bt@stdlib@type_error', 'TypeError', 'Error'},
             {'bt@stdlib@undefined_object', 'UndefinedObject', 'Object'},
-            {'bt@stdlib@workspace_environment', 'WorkspaceEnvironment', 'Actor'}
+            {'bt@stdlib@workspace_interface', 'WorkspaceInterface', 'Actor'}
         ]}
     ]}
 ]}.

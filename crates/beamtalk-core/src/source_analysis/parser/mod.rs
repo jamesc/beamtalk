@@ -334,7 +334,7 @@ pub enum DiagnosticCategory {
     Type,
     /// Unused-variable warning.
     Unused,
-    /// Empty-method-body warning.
+    /// Empty-method-body error (BT-859).
     EmptyBody,
 }
 

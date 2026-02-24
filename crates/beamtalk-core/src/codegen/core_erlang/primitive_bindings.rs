@@ -455,8 +455,8 @@ mod tests {
             "bt@stdlib@transcript_stream"
         );
         assert_eq!(
-            PrimitiveBindingTable::runtime_module_for_class("SystemDictionary"),
-            "bt@stdlib@system_dictionary"
+            PrimitiveBindingTable::runtime_module_for_class("BeamtalkInterface"),
+            "bt@stdlib@beamtalk_interface"
         );
     }
 

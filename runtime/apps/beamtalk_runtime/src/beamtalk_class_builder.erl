@@ -1,7 +1,7 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc ClassBuilder runtime backing for ADR 0038 (ClassBuilder Protocol Phase 1).
+%%% @doc ClassBuilder runtime backing for ADR 0038 (ClassBuilder Protocol).
 %%%
 %% **DDD Context:** Object System
 %%%
@@ -11,11 +11,15 @@
 %%% delegates to `beamtalk_object_class:start/2` for first registration or
 %%% `beamtalk_object_class:update_class/2` for hot reload.
 %%%
-%%% ## Phase 1 (BT-835): Runtime Backing and Bootstrap
+%%% ## Two Paths (ADR 0038)
 %%%
-%%% Provides the `register/1` function used by the ClassBuilder protocol. The
-%%% ClassBuilder gen_server itself (Phase 2) will call this function as the
-%%% terminal operation of the fluent builder pattern.
+%%% **Path 1 — Compiled (BT-837):** `moduleName` present in BuilderState,
+%%% methods are function references. The BEAM module provides dispatch/4.
+%%%
+%%% **Path 2 — Dynamic (BT-838):** No `moduleName`, methods are closures
+%%% (Erlang funs). Module is set to `beamtalk_dynamic_object`, closures are
+%%% wrapped to the arity-3 dispatch protocol, and field accessors are
+%%% auto-generated.
 %%%
 %%% ## Hot Reload
 %%%
@@ -32,7 +36,7 @@
 %%%
 %%% ## References
 %%%
-%%% * ADR 0038: `docs/ADR/0038-subclass-classbuilder-protocol.md` (Phase 1)
+%%% * ADR 0038: `docs/ADR/0038-subclass-classbuilder-protocol.md`
 %%% * Pattern: `beamtalk_class_bt.erl`, `beamtalk_metaclass_bt.erl`
 %%% * Existing registration: `beamtalk_object_class:start/2`, `update_class/2`
 
@@ -226,8 +230,8 @@ resolve_superclass_name(Name) when is_atom(Name) ->
     Name;
 resolve_superclass_name(Pid) when is_pid(Pid) ->
     beamtalk_object_class:class_name(Pid);
-resolve_superclass_name(#beamtalk_object{class = ClassName}) ->
-    ClassName.
+resolve_superclass_name(#beamtalk_object{pid = Pid}) when is_pid(Pid) ->
+    beamtalk_object_class:class_name(Pid).
 
 %% @private
 %% @doc Build a ClassInfo map for beamtalk_object_class:start/2.
@@ -235,13 +239,66 @@ resolve_superclass_name(#beamtalk_object{class = ClassName}) ->
 %% BT-837: Accepts the full builder state as the last argument to extract
 %% additional metadata for compiled classes (moduleName, classMethods,
 %% methodSource, classState, classDoc, methodDocs).
+%%
+%% BT-838: Detects closure-based methods (Path 2) and routes to the dynamic
+%% class path: module = beamtalk_dynamic_object, closures wrapped for the
+%% arity-3 dispatch protocol, field accessors auto-generated.
 -spec build_class_info(atom(), atom(), map(), map(), list(), map()) -> map().
 build_class_info(ClassName, SuperclassName, FieldSpecs, MethodSpecs, Modifiers, BuilderState) ->
     IsSealed = lists:member(sealed, Modifiers),
     IsAbstract = lists:member(abstract, Modifiers),
     Fields = maps:keys(FieldSpecs),
+    %% BT-838: Detect whether this is a dynamic class vs a compiled class.
+    %% If moduleName is explicitly set, this is a compiled class (Path 1).
+    %% Otherwise it's a dynamic class (Path 2), even with no methods.
+    IsDynamic = not maps:is_key(moduleName, BuilderState),
+    case IsDynamic of
+        true ->
+            build_dynamic_class_info(
+                ClassName,
+                SuperclassName,
+                Fields,
+                FieldSpecs,
+                MethodSpecs,
+                IsSealed,
+                IsAbstract
+            );
+        false ->
+            build_compiled_class_info(
+                ClassName,
+                SuperclassName,
+                Fields,
+                MethodSpecs,
+                Modifiers,
+                IsSealed,
+                IsAbstract,
+                BuilderState
+            )
+    end.
+
+%% @private
+%% @doc Build ClassInfo for a compiled class (Path 1).
+-spec build_compiled_class_info(
+    atom(),
+    atom(),
+    [atom()],
+    map(),
+    list(),
+    boolean(),
+    boolean(),
+    map()
+) -> map().
+build_compiled_class_info(
+    ClassName,
+    SuperclassName,
+    Fields,
+    MethodSpecs,
+    _Modifiers,
+    IsSealed,
+    IsAbstract,
+    BuilderState
+) ->
     InstanceMethods = build_method_map(MethodSpecs),
-    %% BT-837: Use explicit module name for compiled classes, fall back to ClassName
     Module = maps:get(moduleName, BuilderState, ClassName),
     ClassMethods = maps:get(classMethods, BuilderState, #{}),
     Base = #{
@@ -274,6 +331,67 @@ build_class_info(ClassName, SuperclassName, FieldSpecs, MethodSpecs, Modifiers, 
     ).
 
 %% @private
+%% @doc Build ClassInfo for a dynamic class (Path 2 — BT-838).
+%%
+%% Wraps user closures to the arity-3 dispatch protocol, auto-generates
+%% field accessor methods, and sets module to beamtalk_dynamic_object.
+-spec build_dynamic_class_info(
+    atom(),
+    atom(),
+    [atom()],
+    map(),
+    map(),
+    boolean(),
+    boolean()
+) -> map().
+build_dynamic_class_info(
+    ClassName,
+    SuperclassName,
+    Fields,
+    FieldSpecs,
+    MethodSpecs,
+    IsSealed,
+    IsAbstract
+) ->
+    %% Wrap user closures to the arity-3 dispatch protocol
+    WrappedMethods = maps:map(
+        fun
+            (_Selector, Fun) when is_function(Fun) ->
+                wrap_method_for_dispatch(Fun);
+            (_Selector, MethodInfo) ->
+                MethodInfo
+        end,
+        MethodSpecs
+    ),
+    %% Auto-generate field accessor methods (getters)
+    FieldAccessors = generate_field_accessors(Fields),
+    %% Merge: user methods take precedence over auto-generated accessors
+    AllMethods = maps:merge(FieldAccessors, WrappedMethods),
+    %% Build method_info format for instance_methods
+    InstanceMethods = maps:map(
+        fun
+            (_Selector, Fun) when is_function(Fun) ->
+                {arity, Arity} = erlang:fun_info(Fun, arity),
+                #{block => Fun, arity => Arity};
+            (_Selector, MethodInfo) when is_map(MethodInfo) ->
+                MethodInfo
+        end,
+        AllMethods
+    ),
+    #{
+        name => ClassName,
+        superclass => SuperclassName,
+        module => beamtalk_dynamic_object,
+        fields => Fields,
+        field_defaults => FieldSpecs,
+        instance_methods => InstanceMethods,
+        class_methods => #{},
+        dynamic_methods => AllMethods,
+        is_sealed => IsSealed,
+        is_abstract => IsAbstract
+    }.
+
+%% @private
 %% @doc Conditionally add a key to a map (skips undefined values).
 -spec maybe_put(atom(), term(), map()) -> map().
 maybe_put(_Key, undefined, Map) ->
@@ -304,6 +422,80 @@ build_method_map(MethodSpecs) when is_map(MethodSpecs) ->
     ).
 
 %% @private
+%% @doc Wrap a user closure to the arity-3 dynamic dispatch protocol.
+%%
+%% The dynamic dispatch protocol expects:
+%%   fun(Self :: #beamtalk_object{}, Args :: list(), State :: map()) ->
+%%       {reply, Result, NewState}
+%%   end
+%%
+%% User closures from addMethod:body: have varying arity:
+%%   - Arity 0: [42] → constant return
+%%   - Arity 1: [:self | self at: #name] → receives instance state map as self
+%%   - Arity 2+: [:self :x | ...] → receives state map + args
+%%   - Arity 3: already follows the protocol (from create_subclass)
+%%
+%% For arity 0 and 1, the state is passed through unchanged (read-only access).
+-spec wrap_method_for_dispatch(fun()) -> fun().
+wrap_method_for_dispatch(Fun) when is_function(Fun) ->
+    {arity, Arity} = erlang:fun_info(Fun, arity),
+    case Arity of
+        0 ->
+            fun(_Self, _Args, State) ->
+                Result = Fun(),
+                {reply, Result, State}
+            end;
+        1 ->
+            fun(_Self, _Args, State) ->
+                %% Pass the clean state map as self so that Dictionary
+                %% protocol (at:) works for field access.
+                CleanState = maps:without(
+                    ['__methods__', '__class_pid__', '$beamtalk_class'], State
+                ),
+                Result = Fun(CleanState),
+                {reply, Result, State}
+            end;
+        2 ->
+            fun(_Self, Args, State) ->
+                CleanState = maps:without(
+                    ['__methods__', '__class_pid__', '$beamtalk_class'], State
+                ),
+                Result = apply(Fun, [CleanState | Args]),
+                {reply, Result, State}
+            end;
+        3 ->
+            %% Already follows the arity-3 protocol
+            Fun;
+        _ ->
+            fun(_Self, Args, State) ->
+                CleanState = maps:without(
+                    ['__methods__', '__class_pid__', '$beamtalk_class'], State
+                ),
+                Result = apply(Fun, [CleanState | Args]),
+                {reply, Result, State}
+            end
+    end.
+
+%% @private
+%% @doc Auto-generate field accessor (getter) methods for dynamic classes.
+%%
+%% Each field gets an arity-3 closure that reads the field value from the
+%% instance state map. These are merged into the methods map — user-defined
+%% methods with the same selector take precedence.
+-spec generate_field_accessors([atom()]) -> #{atom() => fun()}.
+generate_field_accessors(Fields) ->
+    lists:foldl(
+        fun(FieldName, Acc) ->
+            Getter = fun(_Self, _Args, State) ->
+                {reply, maps:get(FieldName, State, nil), State}
+            end,
+            maps:put(FieldName, Getter, Acc)
+        end,
+        #{},
+        Fields
+    ).
+
+%% @private
 %% @doc Stop the builder gen_server process after successful registration.
 %%
 %% Only called if builderPid is present in the builder state map.
@@ -315,10 +507,19 @@ build_method_map(MethodSpecs) when is_map(MethodSpecs) ->
 maybe_stop_builder(undefined) ->
     ok;
 maybe_stop_builder(Pid) when is_pid(Pid) ->
-    try
-        gen_server:stop(Pid, normal, 5000)
-    catch
-        exit:noproc -> ok;
-        exit:normal -> ok;
-        exit:{noproc, _} -> ok
+    case Pid =:= self() of
+        true ->
+            %% BT-838: Builder calling register from its own gen_server handler.
+            %% Cannot stop self synchronously — the process will be cleaned up
+            %% when the caller drops the reference.
+            ok;
+        false ->
+            try
+                gen_server:stop(Pid, normal, 5000)
+            catch
+                exit:noproc -> ok;
+                exit:normal -> ok;
+                exit:timeout -> ok;
+                exit:{noproc, _} -> ok
+            end
     end.

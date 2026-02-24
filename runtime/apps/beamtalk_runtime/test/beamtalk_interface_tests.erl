@@ -1,9 +1,9 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_system_dictionary module
+%%% @doc EUnit tests for beamtalk_interface module
 %%%
-%%% Tests the SystemDictionary actor functionality:
+%%% Tests the BeamtalkInterface actor functionality:
 %%% - Basic lifecycle (start_link, init)
 %%% - allClasses method
 %%% - classNamed: method
@@ -12,7 +12,7 @@
 %%% - has_method/1 export
 %%% - Error cases
 
--module(beamtalk_system_dictionary_tests).
+-module(beamtalk_interface_tests).
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
@@ -137,7 +137,7 @@ start_link_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                {ok, Pid} = beamtalk_system_dictionary:start_link(),
+                {ok, Pid} = beamtalk_interface:start_link(),
                 ?assert(is_pid(Pid)),
                 ?assert(is_process_alive(Pid)),
                 gen_server:stop(Pid)
@@ -150,7 +150,7 @@ start_link_with_options_test_() ->
         [
             ?_test(begin
                 Opts = [{version, <<"1.2.3">>}, {workspace, test_workspace}],
-                {ok, Pid} = beamtalk_system_dictionary:start_link(Opts),
+                {ok, Pid} = beamtalk_interface:start_link(Opts),
                 ?assert(is_pid(Pid)),
                 ?assert(is_process_alive(Pid)),
 
@@ -169,16 +169,16 @@ start_link_with_options_test_() ->
 
 has_method_supported_test() ->
     %% Verify has_method returns true for supported selectors
-    ?assertEqual(true, beamtalk_system_dictionary:has_method(allClasses)),
-    ?assertEqual(true, beamtalk_system_dictionary:has_method('classNamed:')),
-    ?assertEqual(true, beamtalk_system_dictionary:has_method(globals)),
-    ?assertEqual(true, beamtalk_system_dictionary:has_method(version)).
+    ?assertEqual(true, beamtalk_interface:has_method(allClasses)),
+    ?assertEqual(true, beamtalk_interface:has_method('classNamed:')),
+    ?assertEqual(true, beamtalk_interface:has_method(globals)),
+    ?assertEqual(true, beamtalk_interface:has_method(version)).
 
 has_method_unsupported_test() ->
     %% Verify has_method returns false for unsupported selectors
-    ?assertEqual(false, beamtalk_system_dictionary:has_method(unknown)),
-    ?assertEqual(false, beamtalk_system_dictionary:has_method(spawn)),
-    ?assertEqual(false, beamtalk_system_dictionary:has_method('show:')).
+    ?assertEqual(false, beamtalk_interface:has_method(unknown)),
+    ?assertEqual(false, beamtalk_interface:has_method(spawn)),
+    ?assertEqual(false, beamtalk_interface:has_method('show:')).
 
 %%====================================================================
 %% allClasses Tests
@@ -188,7 +188,7 @@ all_classes_returns_list_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                {ok, Pid} = beamtalk_system_dictionary:start_link(),
+                {ok, Pid} = beamtalk_interface:start_link(),
                 Classes = gen_server:call(Pid, {allClasses, []}),
                 ?assert(is_list(Classes)),
                 ?assert(length(Classes) > 0),
@@ -201,7 +201,7 @@ all_classes_includes_core_classes_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                {ok, Pid} = beamtalk_system_dictionary:start_link(),
+                {ok, Pid} = beamtalk_interface:start_link(),
                 Classes = gen_server:call(Pid, {allClasses, []}),
 
                 %% Verify core classes are included
@@ -218,7 +218,7 @@ all_classes_returns_atoms_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                {ok, Pid} = beamtalk_system_dictionary:start_link(),
+                {ok, Pid} = beamtalk_interface:start_link(),
                 Classes = gen_server:call(Pid, {allClasses, []}),
 
                 %% Verify all elements are atoms
@@ -242,7 +242,7 @@ class_named_known_class_atom_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                {ok, Pid} = beamtalk_system_dictionary:start_link(),
+                {ok, Pid} = beamtalk_interface:start_link(),
                 Result = gen_server:call(Pid, {'classNamed:', ['Counter']}),
 
                 %% BT-374: Returns beamtalk_object tuple wrapping the class
@@ -264,7 +264,7 @@ class_named_known_class_binary_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                {ok, Pid} = beamtalk_system_dictionary:start_link(),
+                {ok, Pid} = beamtalk_interface:start_link(),
                 Result = gen_server:call(Pid, {'classNamed:', [<<"Counter">>]}),
 
                 %% BT-374: Returns beamtalk_object tuple wrapping the class
@@ -286,7 +286,7 @@ class_named_unknown_class_atom_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                {ok, Pid} = beamtalk_system_dictionary:start_link(),
+                {ok, Pid} = beamtalk_interface:start_link(),
                 Result = gen_server:call(Pid, {'classNamed:', ['UnknownClass']}),
 
                 %% BT-374: Returns nil for unknown classes
@@ -301,7 +301,7 @@ class_named_unknown_class_binary_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                {ok, Pid} = beamtalk_system_dictionary:start_link(),
+                {ok, Pid} = beamtalk_interface:start_link(),
                 Result = gen_server:call(Pid, {'classNamed:', [<<"UnknownClass">>]}),
 
                 %% BT-374: Returns nil for unknown classes (binary doesn't exist as atom)
@@ -316,7 +316,7 @@ class_named_invalid_type_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                {ok, Pid} = beamtalk_system_dictionary:start_link(),
+                {ok, Pid} = beamtalk_interface:start_link(),
                 Result = gen_server:call(Pid, {'classNamed:', [42]}),
 
                 %% Should return a type error for non-atom/binary input
@@ -335,11 +335,21 @@ globals_returns_map_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                {ok, Pid} = beamtalk_system_dictionary:start_link(),
+                {ok, Pid} = beamtalk_interface:start_link(),
                 Globals = gen_server:call(Pid, {globals, []}),
 
-                %% Should return a map (empty in Phase 1)
+                %% Should return a non-empty map (class registry snapshot)
                 ?assert(is_map(Globals)),
+                ?assert(map_size(Globals) > 0),
+
+                %% Values should be beamtalk_object tuples with binary keys
+                maps:foreach(
+                    fun(Key, Val) ->
+                        ?assert(is_binary(Key)),
+                        ?assertMatch({beamtalk_object, _, _, _}, Val)
+                    end,
+                    Globals
+                ),
 
                 gen_server:stop(Pid)
             end)
@@ -354,7 +364,7 @@ version_returns_binary_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                {ok, Pid} = beamtalk_system_dictionary:start_link(),
+                {ok, Pid} = beamtalk_interface:start_link(),
                 Version = gen_server:call(Pid, {version, []}),
 
                 %% Should return a binary string
@@ -370,7 +380,7 @@ version_default_value_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                {ok, Pid} = beamtalk_system_dictionary:start_link(),
+                {ok, Pid} = beamtalk_interface:start_link(),
                 Version = gen_server:call(Pid, {version, []}),
 
                 %% Default version should match app vsn (0.1.0)
@@ -385,7 +395,7 @@ version_custom_value_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                {ok, Pid} = beamtalk_system_dictionary:start_link([{version, <<"2.0.0">>}]),
+                {ok, Pid} = beamtalk_interface:start_link([{version, <<"2.0.0">>}]),
                 Version = gen_server:call(Pid, {version, []}),
 
                 %% Custom version should be returned
@@ -404,7 +414,7 @@ unknown_selector_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                {ok, Pid} = beamtalk_system_dictionary:start_link(),
+                {ok, Pid} = beamtalk_interface:start_link(),
                 Result = gen_server:call(Pid, {unknownMethod, []}),
 
                 %% Should return a structured error
@@ -422,7 +432,7 @@ malformed_call_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                {ok, Pid} = beamtalk_system_dictionary:start_link(),
+                {ok, Pid} = beamtalk_interface:start_link(),
                 Result = gen_server:call(Pid, malformed_message),
 
                 %% Should return a structured error
@@ -441,7 +451,7 @@ unexpected_cast_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                {ok, Pid} = beamtalk_system_dictionary:start_link(),
+                {ok, Pid} = beamtalk_interface:start_link(),
 
                 %% Send a cast (should be logged but not crash)
                 ok = gen_server:cast(Pid, unexpected_cast_message),
@@ -459,7 +469,7 @@ info_message_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                {ok, Pid} = beamtalk_system_dictionary:start_link(),
+                {ok, Pid} = beamtalk_interface:start_link(),
 
                 %% Send an info message (should be logged but not crash)
                 Pid ! unexpected_info_message,

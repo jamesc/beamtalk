@@ -1,11 +1,11 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Workspace environment - actor introspection singleton.
+%%% @doc Workspace interface - actor introspection singleton.
 %%%
 %%% **DDD Context:** Workspace
 %%%
-%%% This gen_server implements the WorkspaceEnvironment that provides
+%%% This gen_server implements the WorkspaceInterface that provides
 %%% actor introspection API for the live environment. It exposes
 %%% the actor registry as Beamtalk-level methods:
 %%% - `actors` - List all live actors as usable object references
@@ -36,7 +36,7 @@
 %%% // => [#Actor<Counter,0.132.0>]
 %%% ```
 
--module(beamtalk_workspace_environment).
+-module(beamtalk_workspace_interface).
 -behaviour(gen_server).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -62,18 +62,18 @@
 
 -type selector() :: atom().
 
--record(workspace_environment_state, {}).
+-record(workspace_interface_state, {}).
 
 %%====================================================================
 %% API
 %%====================================================================
 
-%% @doc Start the Workspace environment (non-singleton, for testing).
+%% @doc Start the Workspace interface (non-singleton, for testing).
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
     gen_server:start_link(?MODULE, [false], []).
 
-%% @doc Start a named Workspace environment for workspace use.
+%% @doc Start a named Workspace interface for workspace use.
 %% Registers with the given name via gen_server name registration.
 -spec start_link({local, atom()}) -> {ok, pid()} | {error, term()}.
 start_link(ServerName) ->
@@ -84,21 +84,19 @@ start_link(ServerName) ->
 has_method(actors) -> true;
 has_method('actorAt:') -> true;
 has_method('actorsOf:') -> true;
-has_method(sessions) -> true;
 has_method(_) -> false.
 
 %% @doc Return class registration metadata for Workspace.
 -spec class_info() -> map().
 class_info() ->
     #{
-        name => 'Workspace',
+        name => 'WorkspaceInterface',
         module => ?MODULE,
         superclass => 'Actor',
         instance_methods => #{
             actors => #{arity => 0},
             'actorAt:' => #{arity => 1},
-            'actorsOf:' => #{arity => 1},
-            sessions => #{arity => 0}
+            'actorsOf:' => #{arity => 1}
         },
         class_methods => #{},
         fields => []
@@ -108,19 +106,19 @@ class_info() ->
 %% gen_server callbacks
 %%====================================================================
 
-%% @doc Initialize the Workspace environment state.
--spec init([boolean()]) -> {ok, #workspace_environment_state{}}.
+%% @doc Initialize the Workspace interface state.
+-spec init([boolean()]) -> {ok, #workspace_interface_state{}}.
 init([true]) ->
     %% Named instances self-register class since we're in beamtalk_workspace app
     %% (beamtalk_stdlib in beamtalk_runtime can't reference us)
     register_class(),
-    {ok, #workspace_environment_state{}};
+    {ok, #workspace_interface_state{}};
 init([false]) ->
-    {ok, #workspace_environment_state{}}.
+    {ok, #workspace_interface_state{}}.
 
 %% @doc Handle synchronous method calls.
--spec handle_call(term(), {pid(), term()}, #workspace_environment_state{}) ->
-    {reply, term(), #workspace_environment_state{}}.
+-spec handle_call(term(), {pid(), term()}, #workspace_interface_state{}) ->
+    {reply, term(), #workspace_interface_state{}}.
 
 handle_call({actors, []}, _From, State) ->
     Result = handle_actors(),
@@ -131,18 +129,15 @@ handle_call({'actorAt:', [PidStr]}, _From, State) ->
 handle_call({'actorsOf:', [ClassName]}, _From, State) ->
     Result = handle_actors_of(ClassName),
     {reply, Result, State};
-handle_call({sessions, []}, _From, State) ->
-    Result = handle_sessions(),
-    {reply, Result, State};
 handle_call({UnknownSelector, _Args}, _From, State) ->
-    Error0 = beamtalk_error:new(does_not_understand, 'Workspace'),
+    Error0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
     Error1 = beamtalk_error:with_selector(Error0, UnknownSelector),
     Error2 = beamtalk_error:with_hint(
         Error1, <<"To list available selectors, use: Workspace methods">>
     ),
     {reply, {error, Error2}, State};
 handle_call(Request, _From, State) ->
-    Error0 = beamtalk_error:new(does_not_understand, 'Workspace'),
+    Error0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
     Error1 = beamtalk_error:with_hint(Error0, <<"Expected {Selector, Args} format">>),
     Error2 = beamtalk_error:with_details(Error1, #{request => Request}),
     {reply, {error, Error2}, State}.
@@ -150,8 +145,8 @@ handle_call(Request, _From, State) ->
 %% @doc Handle asynchronous messages.
 %% Workspace binding dispatch uses beamtalk_actor:async_send/4 which
 %% sends {Selector, Args, FuturePid} as a cast.
--spec handle_cast(term(), #workspace_environment_state{}) ->
-    {noreply, #workspace_environment_state{}}.
+-spec handle_cast(term(), #workspace_interface_state{}) ->
+    {noreply, #workspace_interface_state{}}.
 
 handle_cast({actors, [], FuturePid}, State) when is_pid(FuturePid) ->
     Result = handle_actors(),
@@ -165,14 +160,10 @@ handle_cast({'actorsOf:', [ClassName], FuturePid}, State) when is_pid(FuturePid)
     Result = handle_actors_of(ClassName),
     beamtalk_future:resolve(FuturePid, Result),
     {noreply, State};
-handle_cast({sessions, [], FuturePid}, State) when is_pid(FuturePid) ->
-    Result = handle_sessions(),
-    beamtalk_future:resolve(FuturePid, Result),
-    {noreply, State};
 handle_cast({UnknownSelector, _Args, FuturePid}, State) when
     is_pid(FuturePid), is_atom(UnknownSelector)
 ->
-    Error0 = beamtalk_error:new(does_not_understand, 'Workspace'),
+    Error0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
     Error1 = beamtalk_error:with_selector(Error0, UnknownSelector),
     Error2 = beamtalk_error:with_hint(
         Error1, <<"To list available selectors, use: Workspace methods">>
@@ -180,24 +171,24 @@ handle_cast({UnknownSelector, _Args, FuturePid}, State) when
     beamtalk_future:reject(FuturePid, Error2),
     {noreply, State};
 handle_cast(Msg, State) ->
-    ?LOG_WARNING("Workspace received unexpected cast", #{message => Msg}),
+    ?LOG_WARNING("WorkspaceInterface received unexpected cast", #{message => Msg}),
     {noreply, State}.
 
 %% @doc Handle info messages.
--spec handle_info(term(), #workspace_environment_state{}) ->
-    {noreply, #workspace_environment_state{}}.
+-spec handle_info(term(), #workspace_interface_state{}) ->
+    {noreply, #workspace_interface_state{}}.
 handle_info(Info, State) ->
-    ?LOG_DEBUG("Workspace received info", #{info => Info}),
+    ?LOG_DEBUG("WorkspaceInterface received info", #{info => Info}),
     {noreply, State}.
 
 %% @doc Handle process termination.
--spec terminate(term(), #workspace_environment_state{}) -> ok.
+-spec terminate(term(), #workspace_interface_state{}) -> ok.
 terminate(_Reason, _State) ->
     ok.
 
 %% @doc Handle code change during hot reload.
--spec code_change(term(), #workspace_environment_state{}, term()) ->
-    {ok, #workspace_environment_state{}}.
+-spec code_change(term(), #workspace_interface_state{}, term()) ->
+    {ok, #workspace_interface_state{}}.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
@@ -281,17 +272,6 @@ handle_actors_of(ClassName) when is_atom(ClassName) ->
 handle_actors_of(_) ->
     [].
 
-%% @doc Get all active REPL session IDs as a list of binaries.
--spec handle_sessions() -> [binary()].
-handle_sessions() ->
-    case ets:info(beamtalk_sessions) of
-        undefined ->
-            [];
-        _ ->
-            Sessions = ets:tab2list(beamtalk_sessions),
-            [SessionId || {SessionId, _Pid} <- Sessions]
-    end.
-
 %% @doc Wrap actor metadata into a #beamtalk_object{} tuple.
 %% Filters out dead actors.
 -spec wrap_actor(beamtalk_repl_actors:actor_metadata()) -> {true, tuple()} | false.
@@ -303,7 +283,7 @@ wrap_actor(#{pid := Pid, class := Class, module := Module}) ->
             false
     end.
 
-%% @doc Register the Workspace class with the class registry.
+%% @doc Register the WorkspaceInterface class with the class registry.
 %% Uses start_link which creates a link to the class process.
 %% Wrapped in try/catch to handle startup failures gracefully.
 %% Note: post-start crashes of the linked class process will propagate,
@@ -312,20 +292,22 @@ wrap_actor(#{pid := Pid, class := Class, module := Module}) ->
 register_class() ->
     try
         ClassInfo = class_info(),
-        case beamtalk_class_registry:whereis_class('Workspace') of
+        case beamtalk_class_registry:whereis_class('WorkspaceInterface') of
             undefined ->
-                case beamtalk_object_class:start_link('Workspace', ClassInfo) of
+                case beamtalk_object_class:start_link('WorkspaceInterface', ClassInfo) of
                     {ok, _Pid} ->
-                        ?LOG_DEBUG("Registered Workspace class", #{});
+                        ?LOG_DEBUG("Registered WorkspaceInterface class", #{});
                     {error, RegReason} ->
-                        ?LOG_WARNING("Failed to register Workspace class", #{reason => RegReason})
+                        ?LOG_WARNING("Failed to register WorkspaceInterface class", #{
+                            reason => RegReason
+                        })
                 end;
             _Pid ->
                 ok
         end
     catch
         Kind:CrashReason ->
-            ?LOG_WARNING("Workspace class registration failed", #{
+            ?LOG_WARNING("WorkspaceInterface class registration failed", #{
                 kind => Kind, reason => CrashReason
             })
     end,

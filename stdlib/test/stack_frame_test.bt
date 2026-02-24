@@ -17,6 +17,7 @@ TestCase subclass: StackFrameTest
 
   testStackTraceFromDoesNotUnderstand =>
     // stackTrace from does_not_understand has entries
+    @expect dnu
     result := [42 noSuchMethod] on: Exception do: [:e | e stackTrace size > 0].
     self assert: result
 
@@ -27,6 +28,7 @@ TestCase subclass: StackFrameTest
 
   testRuntimeErrorStackTrace =>
     // RuntimeError also has stackTrace
+    @expect dnu
     result := [42 noSuchMethod] on: RuntimeError do: [:e | e stackTrace class].
     self assert: result equals: List
 
