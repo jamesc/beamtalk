@@ -33,6 +33,7 @@ use std::sync::Arc;
 use clap::{ArgAction, Parser};
 use rmcp::{ServiceExt, transport::stdio};
 use tracing_subscriber::{self, EnvFilter};
+use workspace::{parse_repl_port, parse_workspace_id};
 
 /// Beamtalk MCP server — interact with live beamtalk objects.
 #[derive(Parser, Debug)]
@@ -281,26 +282,6 @@ async fn wait_for_tcp_ready(
     }
 }
 
-/// Parse the REPL port from `beamtalk repl` stdout.
-///
-/// Expects a line like: `Connected to REPL backend on port 12345.`
-fn parse_repl_port(stdout: &str) -> Option<u16> {
-    stdout.lines().find_map(|line| {
-        line.strip_prefix("Connected to REPL backend on port ")
-            .and_then(|rest| rest.trim_end_matches('.').trim().parse().ok())
-    })
-}
-
-/// Parse the workspace ID from `beamtalk repl` stdout.
-///
-/// Expects a line like: `  Workspace: abc123def456 (new)`
-fn parse_workspace_id(stdout: &str) -> Option<String> {
-    stdout.lines().find_map(|line| {
-        line.strip_prefix("  Workspace: ")
-            .map(|rest| rest.split_whitespace().next().unwrap_or(rest).to_string())
-    })
-}
-
 fn directive_for_verbosity(v: u8) -> &'static str {
     // Target must match the crate's Rust module path (`beamtalk_mcp`).
     // `beamtalk=…` only matches `beamtalk::*`, not `beamtalk_mcp`.
@@ -320,46 +301,5 @@ mod tests {
         assert_eq!(directive_for_verbosity(0), "beamtalk_mcp=info");
         assert_eq!(directive_for_verbosity(1), "beamtalk_mcp=debug");
         assert_eq!(directive_for_verbosity(2), "beamtalk_mcp=trace");
-    }
-
-    #[test]
-    fn parse_repl_port_from_typical_output() {
-        let stdout = "Welcome to beamtalk REPL\nConnected to REPL backend on port 9876.\n  Workspace: abc123def456 (new)\n";
-        assert_eq!(parse_repl_port(stdout), Some(9876));
-    }
-
-    #[test]
-    fn parse_repl_port_missing() {
-        assert_eq!(parse_repl_port("some other output\n"), None);
-        assert_eq!(parse_repl_port(""), None);
-    }
-
-    #[test]
-    fn parse_repl_port_malformed() {
-        assert_eq!(
-            parse_repl_port("Connected to REPL backend on port notanumber.\n"),
-            None
-        );
-    }
-
-    #[test]
-    fn parse_workspace_id_from_typical_output() {
-        let stdout = "Connected to REPL backend on port 9876.\n  Workspace: abc123def456 (new)\n";
-        assert_eq!(parse_workspace_id(stdout), Some("abc123def456".to_string()));
-    }
-
-    #[test]
-    fn parse_workspace_id_missing() {
-        assert_eq!(parse_workspace_id("no workspace line\n"), None);
-        assert_eq!(parse_workspace_id(""), None);
-    }
-
-    #[test]
-    fn parse_workspace_id_bare() {
-        // Workspace line without extra text after ID
-        assert_eq!(
-            parse_workspace_id("  Workspace: deadbeef1234\n"),
-            Some("deadbeef1234".to_string())
-        );
     }
 }

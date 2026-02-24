@@ -152,8 +152,8 @@ maybe_pretty_core(CoreErlang) when is_binary(CoreErlang) ->
                         {'EXIT', _} ->
                             CoreErlang;
                         Formatted ->
-                            %% Ensure we return a binary
-                            try iolist_to_binary(Formatted) of
+                            %% Halve indentation from 4-space to 2-space and return binary.
+                            try halve_indent(iolist_to_binary(Formatted)) of
                                 Bin -> Bin
                             catch
                                 _:_ -> CoreErlang
@@ -166,6 +166,23 @@ maybe_pretty_core(CoreErlang) when is_binary(CoreErlang) ->
             CoreErlang
     end;
 maybe_pretty_core(Other) when not is_binary(Other) -> erlang:error(badarg).
+
+%% @private Reduce Core Erlang indentation from 4 spaces per level to 2 spaces per level.
+-spec halve_indent(binary()) -> binary().
+halve_indent(Bin) ->
+    Lines = binary:split(Bin, <<"\n">>, [global]),
+    Normalized = [halve_leading_spaces(Line) || Line <- Lines],
+    iolist_to_binary(lists:join(<<"\n">>, Normalized)).
+
+-spec halve_leading_spaces(binary()) -> binary().
+halve_leading_spaces(Line) ->
+    {N, Rest} = count_leading_spaces(Line, 0),
+    Indent = binary:copy(<<" ">>, N div 2),
+    <<Indent/binary, Rest/binary>>.
+
+-spec count_leading_spaces(binary(), non_neg_integer()) -> {non_neg_integer(), binary()}.
+count_leading_spaces(<<" ", Rest/binary>>, N) -> count_leading_spaces(Rest, N + 1);
+count_leading_spaces(Rest, N) -> {N, Rest}.
 
 %% @private Find the compiler binary.
 %% Looks for the binary in the cargo target directory first (development),

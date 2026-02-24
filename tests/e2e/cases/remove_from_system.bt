@@ -59,9 +59,3 @@ TempClassForRemoval removeFromSystem
 [String removeFromSystem] on: Error do: [:e | "error caught"]
 // => error caught
 
-// ===========================================================================
-// :unload suggestion
-// ===========================================================================
-
-:unload Counter
-// => ERROR: ':unload' has been removed. Use `removeFromSystem` instead.

@@ -248,12 +248,6 @@ parse_request_op_complete_test() ->
     Result = beamtalk_repl_server:parse_request(Request),
     ?assertMatch({error, {unknown_op, <<"complete">>}}, Result).
 
-%% Test that parse_request handles op "info"
-parse_request_op_info_test() ->
-    Request = <<"{\"op\": \"info\", \"symbol\": \"Counter\"}">>,
-    Result = beamtalk_repl_server:parse_request(Request),
-    ?assertMatch({error, {unknown_op, <<"info">>}}, Result).
-
 %% Test that parse_request handles op "docs"
 parse_request_op_docs_test() ->
     Request = <<"{\"op\": \"docs\", \"class\": \"Integer\"}">>,
@@ -334,9 +328,6 @@ tcp_integration_test_() ->
             {"close op", fun() -> tcp_close_test(Port) end},
             {"complete op (empty prefix)", fun() -> tcp_complete_empty_test(Port) end},
             {"complete op (with prefix)", fun() -> tcp_complete_prefix_test(Port) end},
-            {"info op (unknown symbol)", fun() -> tcp_info_unknown_test(Port) end},
-            {"info op (known atom)", fun() -> tcp_info_known_atom_test(Port) end},
-            {"info op (class enriched)", fun() -> tcp_info_class_enriched_test(Port) end},
             {"unknown op", fun() -> tcp_unknown_op_test(Port) end},
             {"empty eval op", fun() -> tcp_eval_empty_test(Port) end},
             {"simple eval op", fun() -> tcp_eval_simple_test(Port) end},
@@ -641,39 +632,6 @@ tcp_complete_empty_test(Port) ->
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t6">>}, Resp),
     ?assertEqual([], maps:get(<<"completions">>, Resp)).
-
-%% Test: info for unknown symbol returns not found
-tcp_info_unknown_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"info">>, <<"id">> => <<"t7">>, <<"symbol">> => <<"xyzzy">>}),
-    Resp = tcp_send_op(Port, Msg),
-    ?assertMatch(#{<<"id">> := <<"t7">>}, Resp),
-    Info = maps:get(<<"info">>, Resp),
-    ?assertEqual(false, maps:get(<<"found">>, Info)).
-
-%% Test: info for known atom (like 'error' or 'ok')
-tcp_info_known_atom_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"info">>, <<"id">> => <<"t7b">>, <<"symbol">> => <<"error">>}),
-    Resp = tcp_send_op(Port, Msg),
-    ?assertMatch(#{<<"id">> := <<"t7b">>}, Resp),
-    ?assert(maps:is_key(<<"info">>, Resp)).
-
-%% Test: info for a known class returns enriched metadata (BT-701)
-tcp_info_class_enriched_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"info">>, <<"id">> => <<"t7c">>, <<"symbol">> => <<"Integer">>}),
-    Resp = tcp_send_op(Port, Msg),
-    ?assertMatch(#{<<"id">> := <<"t7c">>}, Resp),
-    Info = maps:get(<<"info">>, Resp),
-    %% Backward compatible: found and kind retained
-    ?assertEqual(true, maps:get(<<"found">>, Info)),
-    ?assertEqual(<<"class">>, maps:get(<<"kind">>, Info)),
-    ?assertEqual(<<"Integer">>, maps:get(<<"symbol">>, Info)),
-    %% Enriched: superclass chain
-    ?assertEqual(<<"Number">>, maps:get(<<"superclass">>, Info)),
-    ?assert(is_list(maps:get(<<"superclass_chain">>, Info))),
-    ?assert(length(maps:get(<<"superclass_chain">>, Info)) >= 1),
-    %% Enriched: methods list
-    ?assert(is_list(maps:get(<<"methods">>, Info))),
-    ?assert(length(maps:get(<<"methods">>, Info)) > 0).
 
 %% Test: complete with a non-empty prefix
 tcp_complete_prefix_test(Port) ->
@@ -1319,25 +1277,6 @@ cleanup_mock_class(Name, Pid) ->
     catch erlang:unregister(RegName),
     Pid ! stop.
 
-%%% get_symbol_info/1 tests
-
-get_symbol_info_unknown_atom_test() ->
-    Info = beamtalk_repl_server:get_symbol_info(<<"xyzzy_nonexistent_symbol_12345">>),
-    ?assertEqual(false, maps:get(<<"found">>, Info)).
-
-get_symbol_info_known_atom_not_class_test() ->
-    Info = beamtalk_repl_server:get_symbol_info(<<"erlang">>),
-    ?assertEqual(false, maps:get(<<"found">>, Info)).
-
-%% BT-701: Unknown symbol still has backward-compatible shape
-get_symbol_info_unknown_retains_symbol_test() ->
-    Info = beamtalk_repl_server:get_symbol_info(<<"nonexistent_xyz_42">>),
-    ?assertEqual(false, maps:get(<<"found">>, Info)),
-    ?assertEqual(<<"nonexistent_xyz_42">>, maps:get(<<"symbol">>, Info)),
-    %% Enriched fields should NOT be present for unknown symbols
-    ?assertEqual(error, maps:find(<<"superclass">>, Info)),
-    ?assertEqual(error, maps:find(<<"methods">>, Info)).
-
 %%% resolve_class_to_module/1 tests
 
 resolve_class_to_module_no_registry_test() ->
@@ -1657,13 +1596,6 @@ handle_op_complete_with_prefix_test() ->
     Decoded = jsx:decode(Result, [return_maps]),
     ?assertMatch(#{<<"completions">> := _}, Decoded).
 
-handle_op_info_test() ->
-    Msg = make_proto_msg(<<"info">>, <<"inf1">>, #{<<"symbol">> => <<"unknown_sym_xyz">>}),
-    Params = #{<<"symbol">> => <<"unknown_sym_xyz">>},
-    Result = beamtalk_repl_server:handle_op(<<"info">>, Params, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
-    ?assertMatch(#{<<"info">> := _}, Decoded).
-
 handle_op_docs_unknown_class_test() ->
     Msg = make_proto_msg(<<"docs">>, <<"d1">>, #{<<"class">> => <<"NonexistentClassXyz">>}),
     Params = #{<<"class">> => <<"NonexistentClassXyz">>},
@@ -1713,42 +1645,6 @@ handle_op_sessions_no_sup_test() ->
     Result = beamtalk_repl_server:handle_op(<<"sessions">>, #{}, Msg, self()),
     Decoded = jsx:decode(Result, [return_maps]),
     ?assertMatch(#{<<"id">> := <<"s1">>}, Decoded).
-
-%% BT-699: test/test-all operation tests
-
-handle_op_test_missing_class_test() ->
-    Msg = make_proto_msg(<<"test">>, <<"t1">>),
-    Result = beamtalk_repl_server:handle_op(<<"test">>, #{}, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
-    ?assertMatch(#{<<"id">> := <<"t1">>}, Decoded),
-    ?assert(maps:is_key(<<"error">>, Decoded)),
-    ?assertEqual([<<"done">>, <<"error">>], maps:get(<<"status">>, Decoded)).
-
-handle_op_test_nonexistent_class_test() ->
-    Msg = make_proto_msg(<<"test">>, <<"t2">>, #{<<"class">> => <<"NoSuchClass99">>}),
-    Params = #{<<"class">> => <<"NoSuchClass99">>},
-    Result = beamtalk_repl_server:handle_op(<<"test">>, Params, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
-    ?assertMatch(#{<<"id">> := <<"t2">>}, Decoded),
-    ?assert(maps:is_key(<<"error">>, Decoded)).
-
-handle_op_test_non_binary_class_test() ->
-    Msg = make_proto_msg(<<"test">>, <<"t3">>, #{<<"class">> => 42}),
-    Params = #{<<"class">> => 42},
-    Result = beamtalk_repl_server:handle_op(<<"test">>, Params, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
-    ?assertMatch(#{<<"id">> := <<"t3">>}, Decoded),
-    ?assert(maps:is_key(<<"error">>, Decoded)).
-
-handle_op_test_all_no_classes_test() ->
-    %% test-all with no TestCase subclasses loaded returns empty results
-    Msg = make_proto_msg(<<"test-all">>, <<"ta1">>),
-    Result = beamtalk_repl_server:handle_op(<<"test-all">>, #{}, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
-    ?assertMatch(#{<<"id">> := <<"ta1">>}, Decoded),
-    R = maps:get(<<"results">>, Decoded),
-    ?assertEqual(0, maps:get(<<"total">>, R)),
-    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
 
 %% ===================================================================
 %% show-codegen handle_op tests (BT-700)

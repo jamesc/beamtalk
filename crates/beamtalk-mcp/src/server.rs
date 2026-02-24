@@ -108,14 +108,6 @@ pub struct TestParams {
     pub class: Option<String>,
 }
 
-/// Parameters for the `info` MCP tool.
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct InfoParams {
-    /// Symbol name to look up (e.g. a class name like "Integer" or "Counter").
-    #[schemars(description = "Symbol name to get information about (e.g. class name)")]
-    pub symbol: String,
-}
-
 /// Parameters for the `unload` MCP tool.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct UnloadParams {
@@ -567,33 +559,6 @@ impl BeamtalkMcp {
         if has_failures {
             return Ok(error_result(format!("TEST FAILURES:\n{text}")));
         }
-
-        Ok(CallToolResult::success(vec![Content::text(text)]))
-    }
-
-    /// Get enriched information about a beamtalk symbol.
-    #[tool(
-        description = "Get enriched information about a beamtalk symbol (class, method, etc.). Returns kind, superclass chain, methods, source location, and documentation."
-    )]
-    async fn info(
-        &self,
-        Parameters(params): Parameters<InfoParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let response = self
-            .client
-            .info(&params.symbol)
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-
-        if response.is_error() {
-            let msg = response.error_message().unwrap_or("Symbol not found");
-            return Ok(error_result(format!("ERROR: {msg}")));
-        }
-
-        let text = match response.info {
-            Some(info) => serde_json::to_string_pretty(&info).unwrap_or_else(|_| info.to_string()),
-            None => "No information available".to_string(),
-        };
 
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }

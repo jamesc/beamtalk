@@ -76,15 +76,7 @@ pub(crate) fn print_help() {
     println!("  :bindings       Show current variable bindings");
     println!("  :load <path>    Load a .bt file or directory (recursive; paths may be quoted)");
     println!("  :reload         Reload the last loaded file or directory (supports quoted paths)");
-    println!("  :reload <name>  Reload a module by name");
-    println!("  :modules        List loaded modules");
-    println!("  :actors         List running actors");
-    println!("  :kill <pid>     Kill an actor by PID");
-    println!("  :inspect <pid>  Inspect an actor's state");
-    println!("  :sessions       List active REPL sessions");
-    println!("  :test, :t       Run all tests for loaded TestCase classes");
-    println!("  :test <Class>   Run tests for a specific TestCase class");
-    println!("  :info, :i <sym> Get information about a symbol");
+    println!("  :modules        List loaded classes");
     println!("  :show-codegen <expr>  Show generated Core Erlang for an expression");
     println!("  :sc <expr>      Short alias for :show-codegen");
     println!();
@@ -108,80 +100,6 @@ pub(crate) fn print_help() {
     println!("Actor message sends return Futures, which are automatically");
     println!("awaited for synchronous REPL experience. If you store a Future");
     println!("in a binding before it resolves, you'll see #Future<pending>.");
-}
-
-/// Display test results from the REPL backend (BT-724).
-pub(crate) fn display_test_results(results: &serde_json::Value) {
-    let total = results
-        .get("total")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
-    let passed = results
-        .get("passed")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
-    let failed = results
-        .get("failed")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
-    let class = results
-        .get("class")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("Tests");
-
-    if let Some(tests) = results.get("tests").and_then(serde_json::Value::as_array) {
-        for test in tests {
-            let name = test
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("?");
-            let status = test
-                .get("status")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("?");
-            // Include class name for test-all results
-            let test_class = test.get("class").and_then(serde_json::Value::as_str);
-            let display_name = if let Some(tc) = test_class {
-                format!("{tc} >> {name}")
-            } else {
-                name.to_string()
-            };
-
-            match status {
-                "pass" => {
-                    println!("  {} {display_name}", color::paint(color::GREEN, "✓"));
-                }
-                "fail" => {
-                    let error = test
-                        .get("error")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("");
-                    println!("  {} {display_name}", color::paint(color::RED, "✗"));
-                    if !error.is_empty() {
-                        println!("    {}", color::paint(color::DIM, &format!("→ {error}")));
-                    }
-                }
-                other => {
-                    println!("  ? {display_name} ({other})");
-                }
-            }
-        }
-    }
-
-    // Summary line
-    println!();
-    if failed == 0 {
-        println!(
-            "{class}: {} ({total} tests)",
-            color::paint(color::GREEN, "All tests passed")
-        );
-    } else {
-        println!(
-            "{class}: {}, {}",
-            color::paint(color::GREEN, &format!("{passed} passed")),
-            color::paint(color::RED, &format!("{failed} failed"))
-        );
-    }
 }
 
 /// Display generated Core Erlang source (BT-724).
