@@ -7,13 +7,13 @@ Actor subclass: ActorChainingFixture
   state: value = 0
 
   // Returns an integer (via future)
-  getValue => ^self.value
+  getValue => self.value
 
   // Returns a string (via future)
-  getName => ^"fixture"
+  getName => "fixture"
 
   // Increment and return new value
   increment => self.value := self.value + 1
 
   // Returns self (via future) — enables actor-to-actor chaining
-  getSelf => ^self
+  getSelf => self

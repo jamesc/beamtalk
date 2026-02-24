@@ -98,7 +98,9 @@ is_future({beamtalk_future, Pid}) when is_pid(Pid) -> true;
 is_future(_) -> false.
 
 %% @doc Extract the raw pid from a tagged future.
-%% Used by tests that need to inspect the underlying process directly.
+%% Used by the codegen layer to obtain the underlying process pid before
+%% passing it to beamtalk_actor:async_send/4, and by tests for direct
+%% process inspection.
 -spec pid(future()) -> pid().
 pid({beamtalk_future, Pid}) -> Pid.
 
@@ -197,6 +199,12 @@ await_pid(Pid, Timeout) ->
         {future_timeout, Pid} ->
             throw(make_timeout_error())
     after Timeout ->
+        %% Flush any stale {future_timeout, Pid} that may arrive just after
+        %% the `after` clause fires (the future process timer fires slightly later).
+        receive
+            {future_timeout, Pid} -> ok
+        after 0 -> ok
+        end,
         throw(make_timeout_error())
     end.
 

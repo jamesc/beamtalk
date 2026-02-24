@@ -801,6 +801,17 @@ term_to_json_future_timeout_test() ->
     ?assert(binary:match(Result, <<"#Future<timeout,">>) =/= nomatch),
     exit(Pid, kill).
 
+term_to_json_tagged_future_timeout_test() ->
+    %% BT-840: Tagged future variant of future_timeout
+    Pid = spawn(fun() ->
+        receive
+            _ -> ok
+        end
+    end),
+    Result = beamtalk_repl_json:term_to_json({future_timeout, {beamtalk_future, Pid}}),
+    ?assert(binary:match(Result, <<"#Future<timeout,">>) =/= nomatch),
+    exit(Pid, kill).
+
 term_to_json_future_rejected_test() ->
     Result = beamtalk_repl_json:term_to_json({future_rejected, some_reason}),
     ?assert(binary:match(Result, <<"#Future<rejected:">>) =/= nomatch).

@@ -856,7 +856,8 @@ trigger_hot_reload(ModuleName, Classes) ->
 
 %% @doc Auto-await a Future if the result is a tagged future tuple (BT-840).
 %% This provides a synchronous REPL experience for async message sends.
-%% Returns the awaited value, or the original value if not a Future.
+%% Returns the awaited value if resolved, `{future_timeout, Future}' on timeout,
+%% `{future_rejected, Reason}' on rejection, or the original value if not a future.
 -spec maybe_await_future(term()) -> term().
 maybe_await_future({beamtalk_future, _} = Future) ->
     %% Tagged future — await with a generous timeout for REPL use.

@@ -109,11 +109,17 @@ impl CoreErlangGenerator {
                     )]);
 
                     // Auto-await if the result is a tagged future (actor dispatch returns {beamtalk_future, Pid})
-                    let_bindings.push(docvec![format!(
-                        "let {str_var} = case call 'beamtalk_future':'is_future'({raw_str_var}) of \
-                         <'true'> when 'true' -> call 'beamtalk_future':'await'({raw_str_var}) \
-                         <'false'> when 'true' -> {raw_str_var} end in "
-                    )]);
+                    let_bindings.push(docvec![
+                        "let ",
+                        str_var.clone(),
+                        " = case call 'beamtalk_future':'is_future'(",
+                        raw_str_var.clone(),
+                        ") of <'true'> when 'true' -> call 'beamtalk_future':'await'(",
+                        raw_str_var.clone(),
+                        ") <'false'> when 'true' -> ",
+                        raw_str_var.clone(),
+                        " end in "
+                    ]);
 
                     // Add as binary segment: #<Var>('all',8,'binary',['unsigned'|['big']])
                     binary_parts.push(format!(
