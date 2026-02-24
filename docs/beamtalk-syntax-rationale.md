@@ -439,11 +439,11 @@ status match: [#ok -> "success"; #error -> "failure"; _ -> "unknown"]
 42 match: [n -> n + 1]  // => 43
 ```
 
-> **Planned:** Method-level tuple dispatch (`handle: {#ok, value} => ...`) and destructuring assignment (`{x, y, z} := expr`) are not yet implemented. See [known-limitations.md](../docs/known-limitations.md).
+> **Planned:** Method-level tuple dispatch (`handle: {#ok, value} => ...`) and destructuring assignment (`{x, y, z} := expr`) are not yet implemented. See [known-limitations.md](known-limitations.md).
 
 ### Supervision
 
-> **Planned:** A Beamtalk-level supervision DSL is not yet implemented. Actors are supervised internally via OTP defaults; custom supervision requires Erlang FFI. See [known-limitations.md](../docs/known-limitations.md).
+> **Planned:** A Beamtalk-level supervision DSL is not yet implemented. Actors are supervised internally via OTP defaults; custom supervision requires Erlang FFI. See [known-limitations.md](known-limitations.md).
 
 ---
 
