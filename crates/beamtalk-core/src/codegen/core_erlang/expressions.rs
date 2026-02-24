@@ -156,6 +156,10 @@ impl CoreErlangGenerator {
                 // BT-411: Check if self is explicitly bound (e.g., in class methods)
                 if let Some(var_name) = self.lookup_var("self").cloned() {
                     Ok(docvec![var_name])
+                } else if self.context == super::CodeGenContext::ValueType {
+                    // BT-833: In value type context, self resolves to the latest Self{N}
+                    // snapshot after any preceding field assignments.
+                    Ok(Document::String(self.current_self_var()))
                 } else {
                     Ok(Document::Str("Self")) // self → Self parameter (BT-161)
                 }
@@ -177,8 +181,8 @@ impl CoreErlangGenerator {
                     // BT-213: Context determines which variable to use
                     let state_var = match self.context {
                         super::CodeGenContext::ValueType => {
-                            // Value types use Self parameter
-                            "Self".to_string()
+                            // BT-833: Value types use the latest Self{N} snapshot
+                            self.current_self_var()
                         }
                         super::CodeGenContext::Actor => {
                             // Actors use State with threading
@@ -328,9 +332,9 @@ impl CoreErlangGenerator {
         // For now, assume receiver is 'self' and access from State/Self
         if let Expression::Identifier(recv_id) = receiver {
             if recv_id.name == "self" {
-                // BT-213: Use appropriate variable based on context
+                // BT-213/BT-833: Use appropriate variable based on context
                 let state_var = match self.context {
-                    super::CodeGenContext::ValueType => "Self".to_string(),
+                    super::CodeGenContext::ValueType => self.current_self_var(),
                     super::CodeGenContext::Actor => self.current_state_var(),
                     super::CodeGenContext::Repl => "State".to_string(),
                 };
@@ -349,20 +353,20 @@ impl CoreErlangGenerator {
 
     /// Generates code for a field assignment (`self.field := value`).
     ///
-    /// Uses state threading to simulate mutation in Core Erlang:
+    /// Uses threading to simulate mutation in Core Erlang. The generated pattern varies
+    /// by context:
+    ///
+    /// - **Actor context**: `State{n}` threading via `maps:put`
+    /// - **`ValueType` context** (BT-833): `Self{n}` threading — each assignment produces
+    ///   a new immutable snapshot; `self` in subsequent expressions resolves to `Self{n}`
+    ///
     /// ```erlang
     /// let _Val = <value> in
     /// let State{n} = call 'maps':'put'('fieldName', _Val, State{n-1}) in
     /// _Val
     /// ```
     ///
-    /// The assignment returns the assigned value (Smalltalk semantics).
-    ///
-    /// # BT-213: Value Type Restriction
-    ///
-    /// Field assignments are not supported in value type methods because value types
-    /// are immutable. This function will return an error if called in `ValueType` context.
-    /// Use semantic analysis to prevent field assignments in value types at compile time.
+    /// The assignment expression evaluates to the assigned value (Smalltalk semantics).
     pub(super) fn generate_field_assignment(
         &mut self,
         field_name: &str,
@@ -395,14 +399,27 @@ impl CoreErlangGenerator {
                 location: "class method body".to_string(),
             });
         }
-        // BT-213: Reject field assignments in value type context
+        // BT-833: Value type field assignment — Self-threading (immutable update).
+        //
+        // Mirrors the Actor state-threading pattern but uses Self{N} instead of State{N}.
+        // Each `:=` produces a new Self snapshot via `maps:put`, so `self` in subsequent
+        // expressions resolves to the latest Self{N} via `current_self_var()`.
         if matches!(self.context, super::CodeGenContext::ValueType) {
-            return Err(CodeGenError::UnsupportedFeature {
-                feature: format!(
-                    "field assignment 'self.{field_name} := ...' in value type method (value types are immutable)"
+            let val_var = self.fresh_temp_var("Val");
+            // Capture current Self BEFORE generating the value expression so that
+            // RHS field reads (e.g., `self.x := self.x + 1`) see the current snapshot.
+            let current_self = self.current_self_var();
+            let val_doc = self.expression_doc(value)?;
+            let new_self = self.next_self_var();
+            let doc = docvec![
+                format!("let {val_var} = "),
+                val_doc,
+                format!(
+                    " in let {new_self} = call 'maps':'put'('{field_name}', {val_var}, {current_self}) in "
                 ),
-                location: "value type method body".to_string(),
-            });
+                val_var
+            ];
+            return Ok(doc);
         }
 
         let val_var = self.fresh_temp_var("Val");

@@ -412,6 +412,9 @@ impl CoreErlangGenerator {
         let mangled = method.selector.to_erlang_atom();
         let arity = method.parameters.len() + 1; // +1 for Self
 
+        // BT-833: Reset Self-threading version so each method starts with Self (version 0).
+        self.reset_self_version();
+
         // Bind parameters via fresh_var (not to_core_var) so names go through
         // the counter and can't collide with sequencing temp vars — BT-369
         self.push_scope();
@@ -443,11 +446,10 @@ impl CoreErlangGenerator {
         // Build method body parts
         let mut body_parts: Vec<Document<'static>> = Vec::new();
 
-        // Generate method body expressions
-        // For value types, there's no state threading - they're immutable
-        // TODO(BT-213): Consider adding immutable update syntax (e.g., withX: newX) in future
-        // Currently, field assignments are rejected at codegen (see generate_field_assignment)
-        // Field reads work via CodeGenContext routing to Self parameter
+        // Generate method body expressions.
+        // BT-833: Value types now support Self-threading for field assignments.
+        // Each `:=` produces a new Self{N} snapshot via maps:put (see generate_field_assignment).
+        // Field reads use current_self_var() to reference the latest snapshot.
         // Filter out @expect directives — they are compile-time only and generate no code.
         let body: Vec<&Expression> = method
             .body
@@ -498,6 +500,11 @@ impl CoreErlangGenerator {
                     body_parts.push(Document::Str("    "));
                 }
                 body_parts.push(Document::String(expr_code));
+            } else if Self::is_field_assignment(expr) {
+                // BT-833: Value type field assignment (non-last) — generate an open
+                // Self-threading let chain so Self{N} stays in scope for subsequent exprs.
+                let doc = self.generate_vt_field_assignment_open(expr)?;
+                body_parts.push(doc);
             } else if Self::is_local_var_assignment(expr) {
                 // BT-744: Local variable assignment — create a proper Core Erlang
                 // let binding so the variable is accessible in subsequent expressions.
@@ -547,6 +554,46 @@ impl CoreErlangGenerator {
                 "\n",
             ])
         }
+    }
+
+    /// BT-833: Generates an open Self-threading let chain for a non-last field assignment.
+    ///
+    /// For `self.field := value`, produces:
+    /// ```erlang
+    ///     let _Val = <value> in let Self{N} = call 'maps':'put'('field', _Val, Self{N-1}) in
+    /// ```
+    ///
+    /// The trailing `in` leaves the let chain open so subsequent `body_parts` expressions
+    /// flow as the continuation, keeping `Self{N}` in scope.
+    fn generate_vt_field_assignment_open(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Document<'static>> {
+        if let Expression::Assignment { target, value, .. } = expr {
+            if let Expression::FieldAccess { field, .. } = target.as_ref() {
+                let val_var = self.fresh_temp_var("Val");
+                // Capture current Self BEFORE generating value so RHS field reads
+                // (e.g., `self.x := self.x + 1`) see the current snapshot.
+                let current_self = self.current_self_var();
+                let val_doc = self.expression_doc(value)?;
+                let new_self = self.next_self_var();
+                return Ok(docvec![
+                    "    ",
+                    format!("let {val_var} = "),
+                    val_doc,
+                    format!(
+                        " in let {new_self} = call 'maps':'put'('{}', {val_var}, {current_self}) in\n",
+                        field.name
+                    ),
+                ]);
+            }
+        }
+        // Fallback: sequence as a side-effecting expression
+        let tmp_var = self.fresh_temp_var("seq");
+        let expr_code = self.capture_expression(expr)?;
+        Ok(Document::String(format!(
+            "    let {tmp_var} = {expr_code} in\n"
+        )))
     }
 
     /// Returns `true` if `expr` contains a `^` (Return) that is nested inside

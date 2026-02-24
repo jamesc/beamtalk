@@ -656,6 +656,12 @@ pub(super) struct CoreErlangGenerator {
     /// When set, `generate_expression` for `Expression::Return` generates a throw instead
     /// of a plain value, causing the return to escape from the enclosing block closure.
     current_nlr_token: Option<String>,
+    /// BT-833: Self-threading version counter for value type field assignments.
+    ///
+    /// Mirrors `state_threading` for value types. Each field assignment increments
+    /// this counter: `Self` → `Self1` → `Self2` → ... so that `self` in expression
+    /// position always resolves to the latest immutable snapshot.
+    self_version: usize,
     /// Class name → compiled module name index for resolving cross-file class references.
     ///
     /// Populated from `CodegenOptions::class_module_index` before generation begins.
@@ -688,6 +694,7 @@ impl CoreErlangGenerator {
             repl_loop_mutated: false,
             last_dispatch_var: None,
             current_nlr_token: None,
+            self_version: 0,
             class_module_index: std::collections::HashMap::new(),
         }
     }
@@ -716,6 +723,7 @@ impl CoreErlangGenerator {
             repl_loop_mutated: false,
             last_dispatch_var: None,
             current_nlr_token: None,
+            self_version: 0,
             class_module_index: std::collections::HashMap::new(),
         }
     }
@@ -808,6 +816,29 @@ impl CoreErlangGenerator {
         self.class_var_version += 1;
         self.class_var_mutated = true;
         format!("ClassVars{}", self.class_var_version)
+    }
+
+    /// BT-833: Returns the current Self variable name for value type Self-threading.
+    ///
+    /// Version 0 → `"Self"` (the original method parameter).
+    /// Version N → `"Self{N}"` (after N field assignments have threaded a new snapshot).
+    pub(super) fn current_self_var(&self) -> String {
+        if self.self_version == 0 {
+            "Self".to_string()
+        } else {
+            format!("Self{}", self.self_version)
+        }
+    }
+
+    /// BT-833: Increments the Self version and returns the new variable name.
+    pub(super) fn next_self_var(&mut self) -> String {
+        self.self_version += 1;
+        format!("Self{}", self.self_version)
+    }
+
+    /// BT-833: Resets the Self version to 0 (call at the start of each value type method).
+    pub(super) fn reset_self_version(&mut self) {
+        self.self_version = 0;
     }
 
     /// BT-153/BT-245/BT-598: Check if mutation threading should be used for a block.
