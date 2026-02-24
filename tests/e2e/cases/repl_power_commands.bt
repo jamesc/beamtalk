@@ -3,8 +3,8 @@
 
 // E2E tests for REPL power-user commands (BT-529, BT-785).
 //
-// Tests :inspect command and removeFromSystem class method.
-// :unload was removed in BT-785 — tests verify the deprecation message.
+// Tests :inspect command.
+// removeFromSystem and :unload deprecation are tested in remove_from_system.bt.
 //
 // NOTE: :kill is tested separately in zz_repl_kill.bt because
 // killing an actor terminates the REPL session (known issue).
@@ -29,27 +29,3 @@ c increment
 
 :inspect Counter
 // => a Counter (value: _)
-
-// ===========================================================================
-// removeFromSystem — REMOVE A USER-DEFINED CLASS (BT-785)
-// ===========================================================================
-
-// Load a separate module for removal testing
-:load tests/e2e/fixtures/point.bt
-// => Loaded: Point
-
-// Verify it appears in modules list
-:modules
-// => _
-
-// Remove the Point class via removeFromSystem
-Point removeFromSystem
-// => nil
-
-// ===========================================================================
-// :unload — DEPRECATED (BT-785)
-// ===========================================================================
-
-// :unload now returns a deprecation error pointing to removeFromSystem
-:unload NonExistentModule
-// => ERROR: ':unload' has been removed. Use `removeFromSystem` instead.

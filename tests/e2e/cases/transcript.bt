@@ -6,21 +6,11 @@
 // show: prints a value, cr prints a newline.
 // BT-374: Workspace bindings dispatch via persistent_term + async send.
 // BT-540: Command methods return self (not nil) per Command-Query Separation.
+//
+// Related: workspace_bindings.bt — covers basic Transcript show: / cr dispatch.
 
 // ===========================================================================
-// BASIC OUTPUT
-// ===========================================================================
-
-// show: prints a string (async send, returns self per Command-Query Separation)
-Transcript show: "Hello"
-// => #Actor<TranscriptStream,_>
-
-// cr prints a newline (async send, returns self)
-Transcript cr
-// => #Actor<TranscriptStream,_>
-
-// ===========================================================================
-// SHOW: WITH DIFFERENT TYPES
+// SHOW: WITH DIFFERENT TYPES (type-variant behavior)
 // ===========================================================================
 
 // show: with an integer
@@ -36,19 +26,7 @@ Transcript show: nil
 // => #Actor<TranscriptStream,_>
 
 // ===========================================================================
-// CASCADE (SEMICOLON CHAINING)
-// ===========================================================================
-
-// Note: Cascading on class-level methods (Transcript show: "Hello"; cr)
-// requires metaclass dispatch which is not yet implemented.
-// Use separate statements instead:
-Transcript show: "Hello"
-// => #Actor<TranscriptStream,_>
-Transcript cr
-// => #Actor<TranscriptStream,_>
-
-// ===========================================================================
-// RETURN VALUE IS SELF (BT-540)
+// RETURN VALUE IS SELF (BT-540) — explicit await return-type checks
 // ===========================================================================
 
 // Command methods return self (the Transcript actor), not nil

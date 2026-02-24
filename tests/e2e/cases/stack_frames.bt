@@ -1,81 +1,21 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for StackFrame introspection (BT-107)
-// Tests that caught exceptions expose stack trace information via the REPL.
-// REPL context provides real stacktraces (unlike compiled code where BEAM
-// JIT may optimize them away).
+// E2E tests for StackFrame introspection in the REPL context (BT-107)
+//
+// This file covers REPL-specific behavior only.
+// StackFrame semantics are tested exhaustively in
+// stdlib/bootstrap-test/stack_frames.bt.
 
 // ===========================================================================
-// BASIC STACKTRACE ACCESS
+// TYPEOF WORKAROUND — COMPILE-TIME SYMBOL VALIDATOR
 // ===========================================================================
 
-// stackTrace returns a List
-[1 / 0] on: Exception do: [:e | e stackTrace class]
-// => List
-
-// stackTrace has at least one frame in REPL context
-[42 noSuchMethod] on: Exception do: [:e | e stackTrace size > 0]
-// => true
-
-// Handler without arg still works with stackTrace stored
-[1 / 0] on: Exception do: [42]
-// => 42
-
-// ===========================================================================
-// STACKFRAME CLASS AND METHODS
-// ===========================================================================
-
-// first element is a StackFrame
-[42 noSuchMethod] on: Exception do: [:e | e stackTrace first class]
-// => StackFrame
-
-// StackFrame printString returns a String
-[42 noSuchMethod] on: Exception do: [:e | e stackTrace first printString class]
-// => String
-
-// StackFrame method returns a Symbol
-[42 noSuchMethod] on: Exception do: [:e | e stackTrace first method class]
-// => Symbol
-
-// StackFrame arguments returns an Integer (arity)
-[42 noSuchMethod] on: Exception do: [:e | e stackTrace first arguments class]
-// => Integer
-
-// ===========================================================================
-// STACKFRAME FIELD ACCESS
-// ===========================================================================
-
-// StackFrame moduleName returns a String
-[42 noSuchMethod] on: Exception do: [:e | e stackTrace first moduleName class]
-// => String
-
-// StackFrame line returns Integer or nil
-[42 noSuchMethod] on: Exception do: [:e | (e stackTrace first line) class]
-// => _
-
-// StackFrame file returns String or nil
-[42 noSuchMethod] on: Exception do: [:e | (e stackTrace first file) class]
-// => _
-
-// StackFrame sourceLocation returns String or nil
-[42 noSuchMethod] on: Exception do: [:e | (e stackTrace first sourceLocation) class]
-// => _
-
-// StackFrame receiverClass returns a value (class name or nil)
-[42 noSuchMethod] on: Exception do: [:e | (e stackTrace first receiverClass) class]
-// => _
-
-// ===========================================================================
-// EXCEPTION SUBCLASSES
-// ===========================================================================
-
-// RuntimeError also has stackTrace
-[42 noSuchMethod] on: RuntimeError do: [:e | e stackTrace class]
-// => List
-
-// TypeError also has stackTrace (use variable to avoid compile-time validator)
+// TypeError also has stackTrace.
+// Use a workspace variable to pass the wrong-typed arg so the compile-time
+// symbol validator does not reject it before runtime.
 badIndex := "hello"
 // => _
+
 [#(1, 2, 3) at: badIndex] on: TypeError do: [:e | e stackTrace class]
 // => List

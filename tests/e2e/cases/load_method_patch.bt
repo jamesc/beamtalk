@@ -8,6 +8,9 @@
 // This was broken because handle_load stored class sources with
 // string keys but handle_method_definition looked them up with
 // binary keys.
+//
+// Related: hot_reload_actors.bt — tests that existing running actor
+// instances pick up patches immediately (distinct focus).
 
 // @load tests/e2e/fixtures/counter.bt
 
