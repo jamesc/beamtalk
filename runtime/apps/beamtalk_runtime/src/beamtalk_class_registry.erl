@@ -7,7 +7,7 @@
 %%%
 %%% Provides stateless lookup and hierarchy functions for the class system.
 %%% These functions don't require gen_server state and are used across many
-%%% runtime modules (dispatch, primitive, stdlib, system_dictionary, REPL).
+%%% runtime modules (dispatch, primitive, stdlib, beamtalk_interface, REPL).
 %%%
 %%% Extracted from `beamtalk_object_class` (BT-576) for single-responsibility.
 %%%

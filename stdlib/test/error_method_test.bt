@@ -30,7 +30,10 @@ TestCase subclass: ErrorMethodTest
 
   testErrorWithNonStringArgument =>
     // Integer error message is coerced — raises user_error not type_error
+    @expect type
     self should: [42 error: 99] raise: #user_error.
     // Verify kind and errorClass via on:do:
+    @expect type
     self assert: ([42 error: 99] on: Exception do: [:e | e kind]) equals: #user_error.
+    @expect type
     self assert: ([42 error: 99] on: Exception do: [:e | e errorClass]) equals: #Integer

@@ -37,5 +37,7 @@ TestCase subclass: ReflectionBasicTest
     // BT-359: fieldAt: on value types raises immutable_value error
     self should: [42 fieldAt: #x] raise: #immutable_value.
     // BT-765: fieldAt:put: on immutable literals raises immutable_value error
+    @expect type
     self should: [42 fieldAt: #x put: 99] raise: #immutable_value.
+    @expect type
     self should: ["hello" fieldAt: #x put: "world"] raise: #immutable_value

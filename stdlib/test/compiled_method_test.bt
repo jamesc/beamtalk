@@ -36,6 +36,7 @@ TestCase subclass: CompiledMethodTest
 
   testLookupOnNonClass =>
     // >> on non-class value produces type_error
+    @expect dnu
     self should: [42 >> #foo] raise: #type_error
 
   testAsString =>

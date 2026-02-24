@@ -52,6 +52,7 @@ TestCase subclass: CustomExceptionsTest
 
   testBuiltInDoesNotUnderstandStillWorks =>
     // Built-in does_not_understand still maps to RuntimeError
+    @expect dnu
     result := [42 noSuchMethod] on: RuntimeError do: [:e | e class].
     self assert: result equals: RuntimeError
 

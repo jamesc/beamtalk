@@ -39,8 +39,11 @@ TestCase subclass: SystemTest
     // --- pid ---
     self assert: (System pid > 0).
     // getEnv: requires String argument
+    @expect type
     self should: [System getEnv: 42] raise: #type_error.
     // getEnv:default: validates both arguments
+    @expect type
     self should: [System getEnv: 42 default: "fallback"] raise: #type_error.
     // --- error cases ---
+    @expect type
     self should: [System getEnv: "PATH" default: 42] raise: #type_error
