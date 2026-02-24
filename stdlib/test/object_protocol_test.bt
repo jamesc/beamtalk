@@ -44,12 +44,12 @@ TestCase subclass: ObjectProtocolTest
 
   testHashHashValueInteger =>
     // hash returns an integer (non-deterministic, keep wildcard)
-    self assert: (42 hash) isInteger.
+    self assert: ((42 hash) class) equals: Integer.
     // Same value should produce same hash
     self assert: (42 hash =:= 42 hash).
     self assert: ("hello" hash =:= "hello" hash).
     // Hash values are non-deterministic, keep wildcard
-    self assert: ("hello" hash) isInteger
+    self assert: (("hello" hash) class) equals: Integer
 
   testRespondstoMethodExistenceCheck =>
     // Integers respond to +

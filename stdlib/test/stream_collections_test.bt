@@ -112,7 +112,7 @@ TestCase subclass: StreamCollectionsTest
     // drop on dictionary stream
     self assert: ((((#{#a => 1, #b => 2} stream) drop: 1) asList) size) equals: 1.
     // take on dictionary stream
-    self assert: ((((#{#a => 1, #b => 2, #c => 3} stream) take: 1) asList) size) equals: 1.
+    self assert: (((#{#a => 1, #b => 2, #c => 3} stream) take: 1) size) equals: 1.
     // do: on dictionary stream (returns nil)
     self assert: ((#{#a => 1} stream) do: [:assoc | assoc]) equals: nil.
     // inject:into: on dictionary stream — sum values
