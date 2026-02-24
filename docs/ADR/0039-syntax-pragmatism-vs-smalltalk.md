@@ -157,10 +157,10 @@ max: other =>
 **BEAM constraint:** Smalltalk-80 blocks capture variables by reference (shared mutable cells), so `whileTrue:` with mutations works naturally in Pharo and Squeak. But BEAM enforces single-assignment variables — there are no heap-allocated mutable cells. Without compiler support, a naïve translation of `whileTrue:` to Erlang would fail to propagate mutations:
 
 ```erlang
-%% Naïve Erlang translation — Count never changes
+%% Naïve Erlang translation — crashes at runtime
 Count = 0,
 while_true(fun() -> Count < 10 end, fun() -> Count = Count + 1 end).
-%% Count is still 0 — Erlang variables are immutable
+%% Runtime error: {badmatch,1} — Count is already bound to 0; rebinding is not possible
 ```
 
 **Beamtalk solution:** The compiler detects literal blocks in control-flow positions and generates tail-recursive loops with explicit state threading, restoring the Smalltalk mutation semantics that developers expect:
@@ -218,7 +218,7 @@ The following departures have dedicated ADRs and are summarised here for complet
 The baseline. All departures are measured against Smalltalk-80 conventions. Pharo has made its own pragmatic changes over the years (e.g., array literals, fluid class definition API) while maintaining core syntax. Beamtalk goes further.
 
 ### Newspeak (Gilad Bracha)
-Also Smalltalk-inspired, also makes pragmatic departures. Newspeak keeps Smalltalk's `"..."` comments and left-to-right precedence. Beamtalk is more aggressive about modernising surface syntax while Newspeak focuses more on modularity and capability-based security.
+Also Smalltalk-inspired, Newspeak makes pragmatic departures of its own. It keeps Smalltalk's `"..."` comments and left-to-right precedence. Beamtalk is more aggressive about modernising surface syntax while Newspeak focuses more on modularity and capability-based security.
 
 ### Ruby
 Took Smalltalk's "everything is an object" philosophy and made it palatable to mainstream developers via familiar syntax (`def`, `end`, `#` comments). Ruby's success validates the approach of keeping the paradigm while modernising the syntax. Beamtalk goes further by keeping keyword messages and blocks.
