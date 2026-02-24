@@ -1,0 +1,63 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-840: Tests that intermediate futures are auto-awaited in chained
+// message sends. When `actor method1 method2` is written, method1 returns
+// a future; the dispatch layer must await it before dispatching method2.
+
+
+TestCase subclass: ActorMessageChainingTest
+
+  // Auto-await: actor method returning a primitive, chained with printString
+  testChainedPrimitiveMethodResult =>
+    a := ActorChainingFixture spawn.
+    // getValue returns a future wrapping 0; printString should dispatch on 0
+    self assert: (a getValue await printString) equals: "0"
+
+  // Auto-await: chained method on actor returning itself
+  testChainedSelfReturn =>
+    a := ActorChainingFixture spawn.
+    // getSelf returns a future wrapping the actor; getValue dispatches on the actor
+    self assert: (a getSelf await getValue await) equals: 0
+
+  // Auto-await in string interpolation with actor values
+  testStringInterpolationAutoAwait =>
+    a := ActorChainingFixture spawn.
+    a increment await.
+    // String interpolation auto-awaits the future from getValue
+    self assert: "val={a getValue await}" equals: "val=1"
+
+  // Multiple sequential sends with await
+  testSequentialSendsWithAwait =>
+    a := ActorChainingFixture spawn.
+    a increment await.
+    a increment await.
+    a increment await.
+    self assert: (a getValue await) equals: 3
+
+  // Test dispatch auto-awaits future when sending to a future receiver
+  testDispatchAutoAwaitsFutureReceiver =>
+    a := ActorChainingFixture spawnWith: #{value => 42}.
+    // getName returns a future; size is dispatched on the resolved string
+    self assert: (a getName await size) equals: 7
+
+  // BT-840 core: implicit chaining WITHOUT explicit await.
+  // getValue returns a future; printString is dispatched on the resolved value
+  // through the auto-await clause in beamtalk_message_dispatch:send/3.
+  testImplicitAutoAwaitChaining =>
+    a := ActorChainingFixture spawn.
+    self assert: (a getValue printString) equals: "0"
+
+  // BT-840: implicit chaining on string result
+  testImplicitAutoAwaitOnString =>
+    a := ActorChainingFixture spawn.
+    self assert: (a getName size) equals: 7
+
+  // BT-840: implicit multi-step chaining (actor → actor → primitive)
+  testImplicitMultiStepChaining =>
+    a := ActorChainingFixture spawn.
+    // getSelf returns a future wrapping the actor;
+    // getValue returns a future wrapping 0;
+    // printString dispatches on 0.
+    // Each intermediate future is auto-awaited by the dispatch layer.
+    self assert: (a getSelf getValue printString) equals: "0"

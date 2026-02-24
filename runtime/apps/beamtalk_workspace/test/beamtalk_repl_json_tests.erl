@@ -801,6 +801,17 @@ term_to_json_future_timeout_test() ->
     ?assert(binary:match(Result, <<"#Future<timeout,">>) =/= nomatch),
     exit(Pid, kill).
 
+term_to_json_tagged_future_timeout_test() ->
+    %% BT-840: Tagged future variant of future_timeout
+    Pid = spawn(fun() ->
+        receive
+            _ -> ok
+        end
+    end),
+    Result = beamtalk_repl_json:term_to_json({future_timeout, {beamtalk_future, Pid}}),
+    ?assert(binary:match(Result, <<"#Future<timeout,">>) =/= nomatch),
+    exit(Pid, kill).
+
 term_to_json_future_rejected_test() ->
     Result = beamtalk_repl_json:term_to_json({future_rejected, some_reason}),
     ?assert(binary:match(Result, <<"#Future<rejected:">>) =/= nomatch).
@@ -1212,13 +1223,12 @@ format_error_message_eval_error_wrapped_exception_test() ->
 %%% term_to_json additional tests
 
 term_to_json_future_pending_test() ->
-    %% Simulate a future by spawning a process in beamtalk_future:pending/1
-    Pid = beamtalk_future:new(),
+    %% BT-840: Futures are now tagged tuples {beamtalk_future, Pid}
+    Future = beamtalk_future:new(),
     timer:sleep(50),
-    Result = beamtalk_repl_json:term_to_json(Pid),
+    Result = beamtalk_repl_json:term_to_json(Future),
     ?assertEqual(<<"#Future<pending>">>, Result),
-    beamtalk_future:resolve(Pid, ok),
-    exit(Pid, kill).
+    beamtalk_future:resolve(Future, ok).
 
 term_to_json_nested_map_test() ->
     %% BT-535: Nested maps are pre-formatted as Beamtalk syntax

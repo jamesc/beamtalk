@@ -34,12 +34,19 @@
 %% Dialyzer can't resolve them if stdlib hasn't been built yet.
 -dialyzer({nowarn_function, [send/3]}).
 
-%% @doc Send a message to any receiver (actor, class object, or primitive).
+%% @doc Send a message to any receiver (actor, class object, primitive, or future).
 %%
+%% For futures, auto-awaits the value and re-dispatches (BT-840).
 %% For actors, creates a future and sends asynchronously.
 %% For class objects, dispatches synchronously via class_send.
 %% For primitives, dispatches synchronously via beamtalk_primitive:send/3.
 -spec send(term(), atom(), list()) -> term().
+send({beamtalk_future, _} = Future, Selector, Args) ->
+    %% BT-840: Auto-await futures in chained message sends.
+    %% This enables `actor method1 method2` to work — method1 returns a future,
+    %% which is awaited before method2 is dispatched on the resolved value.
+    Value = beamtalk_future:await(Future),
+    send(Value, Selector, Args);
 send(Receiver, Selector, Args) ->
     case is_actor(Receiver) of
         true ->
@@ -56,9 +63,9 @@ send(Receiver, Selector, Args) ->
                             beamtalk_object_class:class_send(ClassPid, Selector, Args);
                         false ->
                             Pid = element(4, Receiver),
-                            Future = beamtalk_future:new(),
-                            beamtalk_actor:async_send(Pid, Selector, Args, Future),
-                            Future
+                            {beamtalk_future, FuturePid} = beamtalk_future:new(),
+                            beamtalk_actor:async_send(Pid, Selector, Args, FuturePid),
+                            {beamtalk_future, FuturePid}
                     end
             end;
         false ->

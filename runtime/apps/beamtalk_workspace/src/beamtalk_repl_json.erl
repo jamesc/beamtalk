@@ -255,6 +255,9 @@ term_to_json(Value) when is_list(Value) ->
                     [term_to_json(E) || E <- Value]
             end
     end;
+term_to_json({beamtalk_future, Pid}) when is_pid(Pid) ->
+    %% BT-840: Tagged future — display based on the underlying process state.
+    term_to_json_future_pid(Pid);
 term_to_json(Value) when is_pid(Value) ->
     case is_process_alive(Value) of
         true ->
@@ -302,6 +305,10 @@ term_to_json(Value) when is_tuple(Value) ->
                     Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
                     iolist_to_binary([<<"#Actor<">>, ClassBin, <<",">>, Inner, <<">">>])
             end;
+        {future_timeout, {beamtalk_future, Pid}} when is_pid(Pid) ->
+            PidStr = pid_to_list(Pid),
+            Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
+            iolist_to_binary([<<"#Future<timeout,">>, Inner, <<">">>]);
         {future_timeout, Pid} when is_pid(Pid) ->
             PidStr = pid_to_list(Pid),
             Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
@@ -314,6 +321,25 @@ term_to_json(Value) when is_tuple(Value) ->
     end;
 term_to_json(Value) ->
     beamtalk_transcript_stream:ensure_utf8(iolist_to_binary(io_lib:format("~p", [Value]))).
+
+%% @private Format a tagged future's underlying pid for display.
+-spec term_to_json_future_pid(pid()) -> binary().
+term_to_json_future_pid(Pid) ->
+    case is_process_alive(Pid) of
+        true ->
+            case process_info(Pid, current_function) of
+                {current_function, {beamtalk_future, pending, _}} ->
+                    iolist_to_binary(<<"#Future<pending>">>);
+                {current_function, {beamtalk_future, resolved, _}} ->
+                    iolist_to_binary(<<"#Future<resolved>">>);
+                {current_function, {beamtalk_future, rejected, _}} ->
+                    iolist_to_binary(<<"#Future<rejected>">>);
+                _ ->
+                    iolist_to_binary(<<"#Future<unknown>">>)
+            end;
+        false ->
+            iolist_to_binary(<<"#Future<completed>">>)
+    end.
 
 %%% Error Formatting
 

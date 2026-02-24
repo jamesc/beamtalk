@@ -73,79 +73,140 @@
     await/1, await/2,
     await_forever/1,
     when_resolved/2,
-    when_rejected/2
+    when_rejected/2,
+    is_future/1,
+    pid/1
 ]).
 
+-export_type([future/0]).
+
+%% @doc Opaque tagged tuple wrapping a future process.
+%% This is an internal runtime detail — Beamtalk code never sees futures
+%% directly. They are always resolved before reaching the language layer.
+-type future() :: {beamtalk_future, pid()}.
+
 %% @doc Create a new future in the pending state.
-%% Returns the process ID of the future.
--spec new() -> pid().
+%% Returns a tagged tuple `{beamtalk_future, Pid}' that can be detected
+%% by the dispatch layer for auto-awaiting in chained message sends.
+-spec new() -> future().
 new() ->
-    spawn(fun() -> pending([]) end).
+    {beamtalk_future, spawn(fun() -> pending([]) end)}.
+
+%% @doc Check if a value is a future.
+-spec is_future(term()) -> boolean().
+is_future({beamtalk_future, Pid}) when is_pid(Pid) -> true;
+is_future(_) -> false.
+
+%% @doc Extract the raw pid from a tagged future.
+%% Used by the codegen layer to obtain the underlying process pid before
+%% passing it to beamtalk_actor:async_send/4, and by tests for direct
+%% process inspection.
+-spec pid(future()) -> pid().
+pid({beamtalk_future, Pid}) -> Pid.
 
 %% @doc Resolve a future with a value.
 %% If the future is already resolved or rejected, this is a no-op.
 %% Notifies all waiting processes and executes all resolved callbacks.
--spec resolve(pid(), term()) -> ok.
-resolve(Future, Value) ->
-    Future ! {resolve, Value},
+%% Accepts both tagged futures and raw pids (for internal actor use).
+-spec resolve(future() | pid(), term()) -> ok.
+resolve({beamtalk_future, Pid}, Value) ->
+    Pid ! {resolve, Value},
+    ok;
+resolve(Pid, Value) when is_pid(Pid) ->
+    Pid ! {resolve, Value},
     ok.
 
 %% @doc Reject a future with an error reason.
 %% If the future is already resolved or rejected, this is a no-op.
 %% Notifies all waiting processes and executes all rejected callbacks.
--spec reject(pid(), term()) -> ok.
-reject(Future, Reason) ->
-    Future ! {reject, Reason},
+%% Accepts both tagged futures and raw pids (for internal actor use).
+-spec reject(future() | pid(), term()) -> ok.
+reject({beamtalk_future, Pid}, Reason) ->
+    Pid ! {reject, Reason},
+    ok;
+reject(Pid, Reason) when is_pid(Pid) ->
+    Pid ! {reject, Reason},
     ok.
 
 %% @doc Block the calling process until the future is resolved or rejected.
 %% Uses a default timeout of 30 seconds to prevent indefinite blocking.
 %% Returns the value if resolved, or throws {future_rejected, Reason} if rejected.
 %% Throws #beamtalk_error{kind = timeout} if the future doesn't complete in time.
--spec await(pid()) -> term().
+-spec await(future() | pid()) -> term().
 await(Future) ->
     await(Future, 30000).
 
 %% @doc Block the calling process until the future is resolved, rejected, or times out.
 %% Returns the value if resolved, throws {future_rejected, Reason} if rejected,
 %% or throws #beamtalk_error{kind = timeout} if the timeout expires.
--spec await(pid(), timeout()) -> term().
-await(Future, Timeout) ->
-    Future ! {await, self(), Timeout},
-    receive
-        {future_resolved, Future, Value} ->
-            Value;
-        {future_rejected, Future, Reason} ->
-            throw({future_rejected, Reason});
-        {future_timeout, Future} ->
-            throw(make_timeout_error())
-    after Timeout ->
-        throw(make_timeout_error())
-    end.
+%% Accepts both tagged futures and raw pids (for internal actor use).
+-spec await(future() | pid(), timeout()) -> term().
+await({beamtalk_future, Pid}, Timeout) ->
+    await_pid(Pid, Timeout);
+await(Pid, Timeout) when is_pid(Pid) ->
+    await_pid(Pid, Timeout).
 
 %% @doc Block the calling process until the future is resolved or rejected.
 %% Waits indefinitely with no timeout. Use this for operations that may take
 %% an arbitrarily long time to complete.
 %% Returns the value if resolved, or throws {future_rejected, Reason} if rejected.
--spec await_forever(pid()) -> term().
+-spec await_forever(future() | pid()) -> term().
 await_forever(Future) ->
     await(Future, infinity).
 
 %% @doc Register a callback to be executed when the future is resolved.
 %% If the future is already resolved, the callback is executed immediately.
 %% If the future is rejected, the callback is never executed.
--spec when_resolved(pid(), fun((term()) -> term())) -> ok.
-when_resolved(Future, Callback) ->
-    Future ! {add_callback, resolved, Callback},
+-spec when_resolved(future() | pid(), fun((term()) -> term())) -> ok.
+when_resolved({beamtalk_future, Pid}, Callback) ->
+    Pid ! {add_callback, resolved, Callback},
+    ok;
+when_resolved(Pid, Callback) when is_pid(Pid) ->
+    Pid ! {add_callback, resolved, Callback},
     ok.
 
 %% @doc Register a callback to be executed when the future is rejected.
 %% If the future is already rejected, the callback is executed immediately.
 %% If the future is resolved, the callback is never executed.
--spec when_rejected(pid(), fun((term()) -> term())) -> ok.
-when_rejected(Future, Callback) ->
-    Future ! {add_callback, rejected, Callback},
+-spec when_rejected(future() | pid(), fun((term()) -> term())) -> ok.
+when_rejected({beamtalk_future, Pid}, Callback) ->
+    Pid ! {add_callback, rejected, Callback},
+    ok;
+when_rejected(Pid, Callback) when is_pid(Pid) ->
+    Pid ! {add_callback, rejected, Callback},
     ok.
+
+%%% Internal helpers
+
+%% @private
+%% Core await implementation operating on a raw pid.
+-spec await_pid(pid(), timeout()) -> term().
+await_pid(Pid, infinity) ->
+    Pid ! {await, self(), infinity},
+    receive
+        {future_resolved, Pid, Value} ->
+            Value;
+        {future_rejected, Pid, Reason} ->
+            throw({future_rejected, Reason})
+    end;
+await_pid(Pid, Timeout) ->
+    Pid ! {await, self(), Timeout},
+    receive
+        {future_resolved, Pid, Value} ->
+            Value;
+        {future_rejected, Pid, Reason} ->
+            throw({future_rejected, Reason});
+        {future_timeout, Pid} ->
+            throw(make_timeout_error())
+    after Timeout ->
+        %% Flush any stale {future_timeout, Pid} that may arrive just after
+        %% the `after` clause fires (the future process timer fires slightly later).
+        receive
+            {future_timeout, Pid} -> ok
+        after 0 -> ok
+        end,
+        throw(make_timeout_error())
+    end.
 
 %%% Internal state machine
 
