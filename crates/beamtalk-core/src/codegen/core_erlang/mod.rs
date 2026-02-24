@@ -1623,21 +1623,31 @@ impl CoreErlangGenerator {
         let current_state = self.current_state_var();
 
         docvec![
-            Document::String(format!("let {pid_var} = call 'erlang':'self'() in ")),
-            Document::String(format!(
-                "let {state_var} = call 'maps':'put'('builderPid', {pid_var}, {current_state}) in "
-            )),
-            Document::String(format!(
-                "case call 'beamtalk_class_builder':'register'({state_var}) of "
-            )),
-            Document::String(format!(
-                "<{{'ok', {class_pid_var}}}> when 'true' -> \
-                 {{'beamtalk_object', 'Class', 'beamtalk_class_bt', {class_pid_var}}} "
-            )),
-            Document::String(format!(
-                "<{{'error', {error_var}}}> when 'true' -> \
-                 call 'beamtalk_error':'raise'({error_var}) "
-            )),
+            "let ",
+            Document::String(pid_var.clone()),
+            " = call 'erlang':'self'() in ",
+            "let ",
+            Document::String(state_var.clone()),
+            " = call 'maps':'put'('builderPid', ",
+            Document::String(pid_var),
+            ", ",
+            Document::String(current_state),
+            ") in ",
+            "case call 'beamtalk_class_builder':'register'(",
+            Document::String(state_var),
+            ") of ",
+            "<{'ok', ",
+            Document::String(class_pid_var.clone()),
+            "}> when 'true' -> ",
+            "{'beamtalk_object', 'Class', 'beamtalk_class_bt', ",
+            Document::String(class_pid_var),
+            "} ",
+            "<{'error', ",
+            Document::String(error_var.clone()),
+            "}> when 'true' -> ",
+            "call 'beamtalk_error':'raise'(",
+            Document::String(error_var),
+            ") ",
             "end"
         ]
     }
