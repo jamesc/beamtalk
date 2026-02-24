@@ -590,7 +590,7 @@ pub fn run(
     // Connect to REPL backend
     let mut client = connect_with_retries(&connect_host, connect_port, &cookie)?;
 
-    tracing::debug!("Connected to REPL backend on port {connect_port}");
+    println!("Connected to REPL backend on port {connect_port}.");
 
     // BT-689: Print browser workspace URL when --web flag is used
     if web {
