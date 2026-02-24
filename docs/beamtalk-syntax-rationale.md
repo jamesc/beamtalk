@@ -434,26 +434,16 @@ agent analyze: data
 ### Pattern Matching
 
 ```
-// Match on message structure
-handle: {#ok, value} => self process: value
-handle: {#error, reason} => self logError: reason
-handle: _ => self handleUnknown
-
-// Destructuring assignment
-{x, y, z} := point coordinates
+// match: expression (implemented)
+status match: [#ok -> "success"; #error -> "failure"; _ -> "unknown"]
+42 match: [n -> n + 1]  // => 43
 ```
+
+> **Planned:** Method-level tuple dispatch (`handle: {#ok, value} => ...`) and destructuring assignment (`{x, y, z} := expr`) are not yet implemented. See [known-limitations.md](../docs/known-limitations.md).
 
 ### Supervision
 
-```
-Supervisor subclass: WebApp
-  children: [
-    {DatabasePool, scale: 10},
-    HTTPRouter spawn,
-    MetricsCollector spawn
-  ]
-  strategy: #oneForOne
-```
+> **Planned:** A Beamtalk-level supervision DSL is not yet implemented. Actors are supervised internally via OTP defaults; custom supervision requires Erlang FFI. See [known-limitations.md](../docs/known-limitations.md).
 
 ---
 
