@@ -495,6 +495,20 @@ Keep compiled class `on_load` calling `beamtalk_object_class:start/2` directly (
 - **ClassBuilder persistence**: Define how dynamic classes can be serialised (e.g., to `.bt` source) for persistence across restarts
 - **Alternative C (fully dynamic)**: Once ADR 0024's Live-Augmented layer matures, the grammar special case can be dropped and `Object subclass: Counter` in source becomes a genuine message send that the compiler happens to also pattern-match for static analysis
 
+## Implementation Tracking
+
+**Epic:** [BT-834](https://linear.app/beamtalk/issue/BT-834)
+**Issues:** [BT-835](https://linear.app/beamtalk/issue/BT-835), [BT-836](https://linear.app/beamtalk/issue/BT-836), [BT-837](https://linear.app/beamtalk/issue/BT-837), [BT-838](https://linear.app/beamtalk/issue/BT-838), [BT-839](https://linear.app/beamtalk/issue/BT-839)
+**Status:** Planned
+
+| Issue | Phase | Description |
+|-------|-------|-------------|
+| BT-835 | 1 — Runtime foundation | `beamtalk_class_builder.erl` + bootstrap stub + sequence update |
+| BT-836 | 2 — Stdlib + intrinsic | `ClassBuilder.bt`, `Class#classBuilder`, `classBuilderRegister` intrinsic |
+| BT-837 | 3 — Codegen | `generate_register_class` emits ClassBuilder cascade; snapshot updates |
+| BT-838 | 4 — Dynamic dispatch | Path 2 closure-based dynamic class creation + tests |
+| BT-839 | 5 — REPL integration | REPL evaluator desugaring + E2E tests |
+
 ## References
 - Related ADRs: [ADR 0005](0005-beam-object-model-pragmatic-hybrid.md) (Object Model), [ADR 0006](0006-unified-method-dispatch.md) (Unified Dispatch), [ADR 0013](0013-class-variables-class-methods-instantiation.md) (Instantiation Protocol), [ADR 0022](0022-embedded-compiler-via-otp-port.md) (Compiler Port), [ADR 0024](0024-static-first-live-augmented-ide-tooling.md) (Static-First Tooling), [ADR 0032](0032-early-class-protocol.md) (Early Class Protocol), [ADR 0034](0034-stdlib-self-hosting-in-beamtalk.md) (Stdlib Self-Hosting), [ADR 0036](0036-full-metaclass-tower.md) (Full Metaclass Tower)
 - Principle: [Principle 6 — Messages All The Way Down](../beamtalk-principles.md)
