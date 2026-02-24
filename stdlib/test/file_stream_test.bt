@@ -90,13 +90,16 @@ TestCase subclass: FileStreamTest
     // File not found
     self should: [File lines: "test/fixtures/nonexistent.txt"] raise: #file_not_found.
     // Type error: non-string path
+    @expect type
     self should: [File lines: 42] raise: #type_error.
     // File not found with open:do:
     self should: [File open: "test/fixtures/nonexistent.txt" do: [:h | h lines asList]] raise: #file_not_found
 
   testErrorPathsTypeErrors =>
     // Type errors that produce compile-time warnings but still run correctly
+    @expect type
     self should: [File open: 42 do: [:h | h lines asList]] raise: #type_error.
+    @expect type
     self should: [File open: "test/fixtures/stream_test.txt" do: "not a block"] raise: #type_error.
     // lines: with absolute path (security)
     self should: [File lines: "/etc/passwd"] raise: #invalid_path.
