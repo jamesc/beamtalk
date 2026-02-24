@@ -1,0 +1,99 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Number methods tests - rounding, predicates, comparisons (migrated from bootstrap/float.bt BT-827)
+
+TestCase subclass: NumberMethodsTest
+
+  testFloatRounded =>
+    // rounded — round to nearest integer
+    self assert: (3.14 rounded) equals: 3.
+    self assert: (3.75 rounded) equals: 4
+
+  testFloatCeiling =>
+    // ceiling — smallest integer >= value
+    self assert: (3.14 ceiling) equals: 4
+
+  testFloatFloor =>
+    // floor — largest integer <= value
+    self assert: (3.75 floor) equals: 3
+
+  testFloatTruncated =>
+    // truncated — toward zero
+    self assert: (3.75 truncated) equals: 3.
+    self assert: (-3.75 truncated) equals: -3
+
+  testNegativeRoundingEdgeCases =>
+    self assert: (-3.14 rounded) equals: -3.
+    self assert: (-3.75 rounded) equals: -4.
+    self assert: (-3.14 ceiling) equals: -3.
+    self assert: (-3.75 floor) equals: -4
+
+  testFloatIsZero =>
+    self assert: (0.0 isZero).
+    self deny: (3.14 isZero)
+
+  testFloatIsPositive =>
+    self assert: (3.14 isPositive).
+    self deny: (-2.5 isPositive)
+
+  testFloatIsNegative =>
+    self assert: (-2.5 isNegative).
+    self deny: (3.14 isNegative)
+
+  testIntegerIsZero =>
+    self assert: (0 isZero).
+    self deny: (5 isZero)
+
+  testIntegerIsPositive =>
+    self assert: (5 isPositive)
+
+  testIntegerIsNegative =>
+    self assert: (-3 isNegative)
+
+  testFloatNegated =>
+    self assert: (3.14 negated) equals: -3.14
+
+  testFloatAbs =>
+    self assert: (-3.14 abs) equals: 3.14
+
+  testFloatMinMax =>
+    self assert: (3.14 min: 2.71) equals: 2.71.
+    self assert: (3.14 max: 2.71) equals: 3.14
+
+  testFloatAsInteger =>
+    // asInteger (truncates)
+    self assert: (3.75 asInteger) equals: 3
+
+  testFloatAsString =>
+    self assert: (3.14 asString) equals: "3.14"
+
+  testFloatIsNaN =>
+    self deny: (3.14 isNaN)
+
+  testFloatIsInfinite =>
+    self deny: (3.14 isInfinite)
+
+  testIntegerSign =>
+    self assert: (5 sign) equals: 1.
+    self assert: (-3 sign) equals: -1.
+    self assert: (0 sign) equals: 0
+
+  testIntegerBetween =>
+    self assert: (5 between: 1 and: 10).
+    self deny: (15 between: 1 and: 10)
+
+  testFloatSign =>
+    self assert: (3.14 sign) equals: 1.
+    self assert: (-2.5 sign) equals: -1
+
+  testFloatBetween =>
+    self assert: (3.14 between: 1.0 and: 5.0)
+
+  testRespondsToSign =>
+    self assert: (42 respondsTo: #sign).
+    self assert: (3.14 respondsTo: #sign)
+
+  testRespondsToBetweenAnd =>
+    self assert: (42 respondsTo: #'between:and:').
+    self assert: (3.14 respondsTo: #'between:and:')

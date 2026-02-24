@@ -1,0 +1,58 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Advanced string operations tests - migrated from bootstrap/string_methods.bt (BT-827)
+
+TestCase subclass: StringAdvancedMethodsTest
+
+  testUppercase =>
+    self assert: ("hello" uppercase) equals: "HELLO"
+
+  testLowercase =>
+    self assert: ("HELLO" lowercase) equals: "hello"
+
+  testTrim =>
+    // trim both sides
+    self assert: ("  hello  " trim) equals: "hello".
+    // trim with no whitespace (no-op)
+    self assert: ("hello" trim) equals: "hello"
+
+  testTrimLeft =>
+    self assert: ("  hello" trimLeft) equals: "hello"
+
+  testTrimRight =>
+    self assert: ("hello  " trimRight) equals: "hello"
+
+  testStringEquality =>
+    self assert: ("hello" =:= "hello").
+    self deny: ("hello" =:= "world")
+
+  testStringInequality =>
+    self assert: ("hello" /= "world")
+
+  testStringLessThan =>
+    // String less than (lexicographic)
+    self assert: ("abc" < "def")
+
+  testStringGreaterThan =>
+    // String greater than
+    self assert: ("def" > "abc")
+
+  testStringLessOrEqual =>
+    // String less than or equal
+    self assert: ("abc" <= "abc").
+    self assert: ("abc" <= "def")
+
+  testStringGreaterOrEqual =>
+    // String greater than or equal
+    self assert: ("def" >= "abc").
+    self assert: ("abc" >= "abc")
+
+  testSplit =>
+    self assert: ("a,b,c" split: ",") equals: #("a", "b", "c")
+
+  testAsInteger =>
+    self assert: ("42" asInteger) equals: 42
+
+  testAsFloat =>
+    self assert: ("3.14" asFloat) equals: 3.14
