@@ -250,7 +250,7 @@ This avoids constructor explosion (one method with N positional arguments) — t
 >> Class respondsTo: #classBuilder
 => true
 
->> Class classBuilder class
+>> Object classBuilder class
 => ClassBuilder
 
 >> ClassBuilder localMethods
@@ -357,7 +357,7 @@ These aren't class creation systems, but they establish the right architectural 
 ### Tooling Developer
 
 - **Static analysis unchanged**: `ClassHierarchy::build` reads `ClassDefinition` AST nodes. No pre-pass, no AST restructuring, no changes to LSP indexing.
-- **ClassBuilder is the runtime seam**: When the live workspace is running, the LSP can query `Class classBuilder`'s registered classes to augment static results — this is ADR 0024's Live-Augmented path, now with a clean query point.
+- **ClassBuilder is the runtime seam**: When the live workspace is running, the LSP can query ClassBuilder-registered classes to augment static results — this is ADR 0024's Live-Augmented path, now with a clean query point.
 - **No two-tier problem**: There is one syntax (`Object subclass: Foo`) and one runtime protocol (`ClassBuilder`). Dynamic classes created via ClassBuilder directly are visible to tools via `beamtalk_class_registry`. No stub files or separate declaration formats needed.
 
 ## Steelman Analysis
@@ -442,7 +442,7 @@ Keep compiled class `on_load` calling `beamtalk_object_class:start/2` directly (
 - **Framework interceptability**: Custom root classes can override `classBuilder` to intercept all subclass creation — custom class builders, tracing, validation
 - **Single registration protocol for post-bootstrap classes**: `beamtalk_class_builder_register` becomes the canonical registration path for all user-defined classes. Bootstrap classes (`ProtoObject` through `Metaclass`) continue to use direct `beamtalk_object_class:start/2` as they must be wired before `ClassBuilder` itself exists — this is the same infrastructure bypass that `Behaviour` and `Class` already use (ADR 0032)
 - **No AST changes**: Grammar stays grammar, ClassDefinition AST node unchanged, LSP and semantic analysis untouched
-- **Inspectable**: `Class classBuilder`, `ClassBuilder localMethods`, `Object respondsTo: #classBuilder` all work
+- **Inspectable**: `Object classBuilder`, `ClassBuilder localMethods`, `Object respondsTo: #classBuilder` all work
 - **Clean upgrade path to Alternative C**: Once ADR 0024's Live-Augmented layer is mature, dropping the grammar special case in favour of full dynamism is an incremental change on top of this ADR
 
 ### Negative
