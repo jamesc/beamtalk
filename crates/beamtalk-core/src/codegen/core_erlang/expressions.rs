@@ -72,7 +72,7 @@ impl CoreErlangGenerator {
     /// let _interpExpr1 = Name in
     ///   let _interpRaw2 = call 'beamtalk_message_dispatch':'send'(_interpExpr1, 'printString', []) in
     ///     let _interpStr3 =
-    ///       case call 'erlang':'is_pid'(_interpRaw2) of
+    ///       case call 'beamtalk_future':'is_future'(_interpRaw2) of
     ///         <'true'>  when 'true' -> call 'beamtalk_future':'await'(_interpRaw2)
     ///         <'false'> when 'true' -> _interpRaw2
     ///       end
@@ -108,9 +108,9 @@ impl CoreErlangGenerator {
                         "let {raw_str_var} = call 'beamtalk_message_dispatch':'send'({interp_var}, 'printString', []) in "
                     )]);
 
-                    // Auto-await if the result is a future (actor dispatch returns pid)
+                    // Auto-await if the result is a tagged future (actor dispatch returns {beamtalk_future, Pid})
                     let_bindings.push(docvec![format!(
-                        "let {str_var} = case call 'erlang':'is_pid'({raw_str_var}) of \
+                        "let {str_var} = case call 'beamtalk_future':'is_future'({raw_str_var}) of \
                          <'true'> when 'true' -> call 'beamtalk_future':'await'({raw_str_var}) \
                          <'false'> when 'true' -> {raw_str_var} end in "
                     )]);

@@ -784,6 +784,7 @@ impl CoreErlangGenerator {
                     let receiver_var = self.fresh_var("Receiver");
                     let pid_var = self.fresh_var("Pid");
                     let future_var = self.fresh_var("Future");
+                    let future_pid_var = self.fresh_var("FuturePid");
 
                     let recv_code = self.expression_doc(receiver)?;
 
@@ -793,7 +794,8 @@ impl CoreErlangGenerator {
                         format!(
                             " in let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in \
                                  let {future_var} = call 'beamtalk_future':'new'() in \
-                                 let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'fieldNames', [], {future_var}) in \
+                                 let {future_pid_var} = call 'beamtalk_future':'pid'({future_var}) in \
+                                 let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'fieldNames', [], {future_pid_var}) in \
                                  {future_var}"
                         ),
                     ];
@@ -828,6 +830,7 @@ impl CoreErlangGenerator {
                         let name_var = self.fresh_var("Name");
                         let pid_var = self.fresh_var("Pid");
                         let future_var = self.fresh_var("Future");
+                        let future_pid_var = self.fresh_var("FuturePid");
                         let class_var = self.fresh_var("Class");
                         let error_base = self.fresh_var("Err");
                         let error_sel = self.fresh_var("Err");
@@ -856,7 +859,8 @@ impl CoreErlangGenerator {
                                 "<'true'> when 'true' -> \
                                  let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in \
                                  let {future_var} = call 'beamtalk_future':'new'() in \
-                                 let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'fieldAt:', [{name_var}], {future_var}) in \
+                                 let {future_pid_var} = call 'beamtalk_future':'pid'({future_var}) in \
+                                 let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'fieldAt:', [{name_var}], {future_pid_var}) in \
                                  {future_var} "
                             ),
                             format!(
@@ -877,6 +881,7 @@ impl CoreErlangGenerator {
                         let value_var = self.fresh_var("Value");
                         let pid_var = self.fresh_var("Pid");
                         let future_var = self.fresh_var("Future");
+                        let future_pid_var = self.fresh_var("FuturePid");
                         let class_var = self.fresh_var("Class");
                         let error_base = self.fresh_var("Err");
                         let error_sel = self.fresh_var("Err");
@@ -909,7 +914,8 @@ impl CoreErlangGenerator {
                                 "<'true'> when 'true' -> \
                                  let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in \
                                  let {future_var} = call 'beamtalk_future':'new'() in \
-                                 let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'fieldAt:put:', [{name_var}, {value_var}], {future_var}) in \
+                                 let {future_pid_var} = call 'beamtalk_future':'pid'({future_var}) in \
+                                 let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'fieldAt:put:', [{name_var}, {value_var}], {future_pid_var}) in \
                                  {future_var} "
                             ),
                             format!(

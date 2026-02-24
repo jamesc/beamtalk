@@ -249,6 +249,10 @@ format_result(V) when is_list(V) ->
                 _:_ -> iolist_to_binary(io_lib:format("~p", [V]))
             end
     end;
+format_result({beamtalk_future, _} = Future) ->
+    %% BT-840: Auto-await tagged futures before formatting.
+    Value = beamtalk_future:await(Future),
+    format_result(Value);
 format_result(V) ->
     iolist_to_binary(io_lib:format("~p", [V])).
 

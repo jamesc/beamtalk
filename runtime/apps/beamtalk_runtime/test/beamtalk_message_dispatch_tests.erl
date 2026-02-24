@@ -43,13 +43,13 @@ actor_returns_future() ->
         end
     end),
     Obj = #beamtalk_object{class = 'TestClass', class_mod = beamtalk_object, pid = Dummy},
-    %% Send returns a future (pid), not a direct value
+    %% Send returns a tagged future, not a direct value
     Result = beamtalk_message_dispatch:send(Obj, 'testMsg', []),
-    ?assert(is_pid(Result)),
+    ?assert(beamtalk_future:is_future(Result)),
     exit(Dummy, kill).
 
 actor_future_is_pid() ->
-    %% Future returned by actor dispatch should be a new pid (not the actor pid)
+    %% Future returned by actor dispatch should be a tagged future (not the actor pid)
     Dummy = spawn(fun() ->
         receive
             _ -> ok
@@ -57,7 +57,7 @@ actor_future_is_pid() ->
     end),
     Obj = #beamtalk_object{class = 'TestClass', class_mod = beamtalk_object, pid = Dummy},
     Future = beamtalk_message_dispatch:send(Obj, 'someMsg', []),
-    ?assert(is_pid(Future)),
+    ?assert(beamtalk_future:is_future(Future)),
     ?assertNotEqual(Dummy, Future),
     exit(Dummy, kill).
 

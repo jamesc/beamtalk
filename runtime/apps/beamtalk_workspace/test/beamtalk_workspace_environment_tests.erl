@@ -312,7 +312,7 @@ async_actors_resolves_future_test() ->
     ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor, 'Counter', test_counter),
 
     Future = beamtalk_future:new(),
-    gen_server:cast(Pid, {actors, [], Future}),
+    gen_server:cast(Pid, {actors, [], beamtalk_future:pid(Future)}),
     Result = beamtalk_future:await(Future, 1000),
     ?assertEqual(1, length(Result)),
 
@@ -328,7 +328,7 @@ async_actor_at_resolves_future_test() ->
 
     PidStr = list_to_binary(pid_to_list(Actor)),
     Future = beamtalk_future:new(),
-    gen_server:cast(Pid, {'actorAt:', [PidStr], Future}),
+    gen_server:cast(Pid, {'actorAt:', [PidStr], beamtalk_future:pid(Future)}),
     Result = beamtalk_future:await(Future, 1000),
     ?assertMatch({beamtalk_object, 'Counter', test_counter, _}, Result),
 
@@ -343,7 +343,7 @@ async_actors_of_resolves_future_test() ->
     ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor, 'Counter', test_counter),
 
     Future = beamtalk_future:new(),
-    gen_server:cast(Pid, {'actorsOf:', ['Counter'], Future}),
+    gen_server:cast(Pid, {'actorsOf:', ['Counter'], beamtalk_future:pid(Future)}),
     Result = beamtalk_future:await(Future, 1000),
     ?assertEqual(1, length(Result)),
 
@@ -355,7 +355,7 @@ async_unknown_selector_rejects_future_test() ->
     {ok, Pid} = beamtalk_workspace_environment:start_link(),
 
     Future = beamtalk_future:new(),
-    gen_server:cast(Pid, {badMethod, [], Future}),
+    gen_server:cast(Pid, {badMethod, [], beamtalk_future:pid(Future)}),
 
     %% Future should be rejected — await throws {future_rejected, Error}
     ?assertException(throw, {future_rejected, _}, beamtalk_future:await(Future, 1000)),

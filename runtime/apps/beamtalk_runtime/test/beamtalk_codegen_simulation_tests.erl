@@ -193,7 +193,7 @@ async_message_creates_future_test() ->
 
     %% Simulate: future := actor increment
     Future = beamtalk_future:new(),
-    ?assert(is_pid(Future)),
+    ?assert(beamtalk_future:is_future(Future)),
 
     %% Clean up: resolve the future so we don't leave a pending future process around
     beamtalk_future:resolve(Future, ok),

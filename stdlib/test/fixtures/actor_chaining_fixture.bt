@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-840: Fixture actor for message chaining tests.
+
+Actor subclass: ActorChainingFixture
+  state: value = 0
+
+  // Returns an integer (via future)
+  getValue => ^self.value
+
+  // Returns a string (via future)
+  getName => ^"fixture"
+
+  // Increment and return new value
+  increment => self.value := self.value + 1
+
+  // Returns self (via future) — enables actor-to-actor chaining
+  getSelf => ^self

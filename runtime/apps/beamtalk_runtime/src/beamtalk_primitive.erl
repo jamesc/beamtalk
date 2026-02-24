@@ -46,6 +46,9 @@ class_of(X) when is_atom(X) -> 'Symbol';
 class_of(X) when is_list(X) -> 'List';
 class_of(X) when is_map(X) ->
     beamtalk_tagged_map:class_of(X, 'Dictionary');
+class_of({beamtalk_future, _} = Future) ->
+    %% BT-840: Auto-await tagged futures before type inspection.
+    class_of(beamtalk_future:await(Future));
 class_of(X) when is_tuple(X), tuple_size(X) >= 2, element(1, X) =:= beamtalk_object ->
     % Extract class field from #beamtalk_object{}
     element(2, X);
@@ -63,6 +66,9 @@ class_of(_) ->
 %% objects (tagged with 'Metaclass'), returns the same struct (idempotent) to
 %% enable the self-grounding invariant: `Metaclass class class == Metaclass class`.
 -spec class_of_object(term()) -> #beamtalk_object{} | atom().
+class_of_object({beamtalk_future, _} = Future) ->
+    %% BT-840: Auto-await tagged futures before class object inspection.
+    class_of_object(beamtalk_future:await(Future));
 class_of_object(#beamtalk_object{class = 'Metaclass', class_mod = ClassMod, pid = Pid}) ->
     %% ADR 0036 self-grounding: class of a metaclass object is itself (idempotent).
     %% This ensures `Metaclass class class == Metaclass class` holds via structural
@@ -111,6 +117,9 @@ print_string(X) when is_atom(X) ->
     iolist_to_binary([<<"#">>, erlang:atom_to_binary(X, utf8)]);
 print_string(X) when is_list(X) ->
     iolist_to_binary([<<"#(">>, lists:join(<<", ">>, [print_string(E) || E <- X]), <<")">>]);
+print_string({beamtalk_future, _} = Future) ->
+    %% BT-840: Auto-await tagged futures before string conversion.
+    print_string(beamtalk_future:await(Future));
 print_string(#beamtalk_object{class = 'Metaclass', pid = Pid}) ->
     %% ADR 0036: Metaclass objects display as "ClassName class" (e.g. "Integer class").
     ClassName = beamtalk_object_class:class_name(Pid),
@@ -162,6 +171,9 @@ print_string_map(X) ->
 
 %% @doc Send a message to any value (actor or primitive).
 -spec send(term(), atom(), list()) -> term().
+send({beamtalk_future, _} = Future, Selector, Args) ->
+    %% BT-840: Auto-await tagged futures before dispatching.
+    send(beamtalk_future:await(Future), Selector, Args);
 send(#beamtalk_object{class = 'Metaclass', pid = Pid} = Self, Selector, Args) ->
     %% ADR 0036: Route metaclass objects through the Metaclass dispatch chain.
     %% Must be matched before the generic #beamtalk_object{} clause below.
@@ -274,6 +286,9 @@ send_tagged_map_fallback(X, Class, Selector, Args) ->
 %% The previous approach (Mod:has_method/1) only checked locally-defined methods,
 %% causing inherited methods (e.g. 'class' from ProtoObject) to return false.
 -spec responds_to(term(), atom()) -> boolean().
+responds_to({beamtalk_future, _} = Future, Selector) ->
+    %% BT-840: Auto-await tagged futures before protocol checking.
+    responds_to(beamtalk_future:await(Future), Selector);
 responds_to(#beamtalk_object{class = Tag} = Obj, Selector) ->
     %% BT-776: Class objects (e.g., Counter as a value) are instances of 'Class'.
     %% Walk the Class → Behaviour → Object hierarchy instead of checking class_mod.

@@ -353,13 +353,13 @@ reject_after_resolve_test() ->
 future_gc_test() ->
     %% Create a future and let it go out of scope
     Future = beamtalk_future:new(),
-    ?assert(is_process_alive(Future)),
+    ?assert(is_process_alive(beamtalk_future:pid(Future))),
 
     %% Resolve it
     beamtalk_future:resolve(Future, done),
 
     %% The process should still be alive (in resolved state)
-    ?assert(is_process_alive(Future)),
+    ?assert(is_process_alive(beamtalk_future:pid(Future))),
 
     %% When all references are dropped, the process will be GC'd by BEAM
     %% We can't directly test this, but we can verify the process exists
@@ -368,7 +368,7 @@ future_gc_test() ->
     %% Await should still work
     Result = beamtalk_future:await(Future),
     ?assertEqual(done, Result),
-    ?assert(is_process_alive(Future)).
+    ?assert(is_process_alive(beamtalk_future:pid(Future))).
 
 %%% Stress test
 
@@ -516,7 +516,7 @@ process_cleanup_when_future_abandoned_test() ->
     timer:sleep(50),
 
     %% Future process should still be alive
-    ?assert(is_process_alive(FutureRef)),
+    ?assert(is_process_alive(beamtalk_future:pid(FutureRef))),
 
     %% Should still be usable
     beamtalk_future:resolve(FutureRef, still_alive),
@@ -540,7 +540,7 @@ stray_timeout_in_resolved_state_test() ->
     beamtalk_future:resolve(Future, 42),
 
     %% Send a stray timeout message directly to the future process
-    Future ! {timeout, self()},
+    beamtalk_future:pid(Future) ! {timeout, self()},
 
     %% Future should still work normally
     timer:sleep(10),
@@ -552,7 +552,7 @@ stray_timeout_in_rejected_state_test() ->
     beamtalk_future:reject(Future, error),
 
     %% Send a stray timeout message
-    Future ! {timeout, self()},
+    beamtalk_future:pid(Future) ! {timeout, self()},
 
     timer:sleep(10),
     ?assertThrow({future_rejected, error}, beamtalk_future:await(Future)).
@@ -626,7 +626,7 @@ callback_exception_does_not_crash_future_test() ->
 
     %% Future process should still be alive
     timer:sleep(50),
-    ?assert(is_process_alive(Future)),
+    ?assert(is_process_alive(beamtalk_future:pid(Future))),
 
     %% Subsequent await should work
     ?assertEqual(42, beamtalk_future:await(Future)).
@@ -703,7 +703,7 @@ reject_without_await_no_crash_test() ->
     beamtalk_future:reject(Future, unhandled_error),
 
     %% Future process should still be alive
-    ?assert(is_process_alive(Future)),
+    ?assert(is_process_alive(beamtalk_future:pid(Future))),
 
     %% Later await should get the rejection
     ?assertThrow({future_rejected, unhandled_error}, beamtalk_future:await(Future, 100)).
