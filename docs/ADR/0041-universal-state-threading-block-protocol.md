@@ -355,6 +355,8 @@ The `is_control_flow_selector()` whitelist is **reclassified** from a correctnes
 | `BlockContext::ControlFlow` — **gates** state threading | **Optimization hint** — triggers Tier 1 inline codegen |
 | `BlockContext::Stored` — compiled as plain fun | Tier 2 — stored blocks get `fun(Args..., StateAcc) -> {Result, NewStateAcc}` |
 | `BlockContext::Passed` — compiled as plain fun | Tier 2 — passed blocks get stateful convention |
+| `BlockContext::Other` — compiled as plain fun | Tier 2 — same as `Stored`/`Passed`; no special handling |
+| `BlockContext::Unknown` — compiled as plain fun | Tier 2 — unknown sites default to stateful convention |
 | `is_control_flow_selector()` — correctness gate | **Optimization hint** — identifies Tier 1 fast path |
 | `classify_block()` function | Retained — routes between Tier 1 and Tier 2 codegen |
 
@@ -638,7 +640,7 @@ No user migration is required.
 ## References
 
 - Related issues: [BT-842](https://linear.app/beamtalk/issue/BT-842/adr-universal-state-threading-block-protocol)
-- Blocking: [BT-305](https://linear.app/beamtalk/issue/BT-305/adr-syntax-pragmatism-vs-smalltalk) (Syntax Pragmatism vs Smalltalk)
+- Blocks: [BT-305](https://linear.app/beamtalk/issue/BT-305/adr-syntax-pragmatism-vs-smalltalk) (Syntax Pragmatism vs Smalltalk) — BT-842 must merge before BT-305 can proceed
 - Related ADRs: ADR 0005 (BEAM Object Model), ADR 0018 (Document Tree Codegen), ADR 0025 (Gradual Typing — block arity implications), ADR 0028 (BEAM Interop — boundary wrapper design), ADR 0040 (Workspace-Native REPL Commands — session state interaction)
 - Current implementation: `block_context.rs` (whitelist), `block_analysis.rs` (mutation analysis), `control_flow/` (state threading codegen)
 - Appel, "Compiling with Continuations" (1992) — closure conversion and mutable variable boxing
