@@ -622,6 +622,7 @@ Actor subclass: BuildScript
 - Related: ADR 0017 (Browser Connectivity) — WebSocket clients affected by protocol deprecation
 - Related: ADR 0026 (Package Definition and Project Manifest) — `Workspace load:` must align with package loading semantics
 - Related: ADR 0038 (Subclass ClassBuilder Protocol) — ClassBuilder-created classes have `sourceFile => nil`
+- Related: BT-842 / ADR 0041 (Universal State-Threading Block Protocol) — the REPL eval function is the outermost "block" in BT-842's `fun(StateAcc) -> {Result, NewStateAcc}` protocol. Today the REPL's session `Bindings` map and codegen's `StateAcc` are already the same map (`let State = Bindings` in `repl_codegen.rs`). BT-842's universal protocol should preserve this: one map, not two. If Session ever becomes a first-class object (left open by this ADR), its bindings must be the same `StateAcc` that blocks thread.
 - Prior art: Pharo `SmalltalkImage` facade + `Smalltalk globals` (SystemDictionary) — facade/dictionary split
 - Prior art: GemStone/S SymbolList and multiple SymbolDictionaries — plain dictionaries, intelligence in resolution
 - Prior art: Elixir `Code` module + IEx helpers, `r/1` class-based reload
