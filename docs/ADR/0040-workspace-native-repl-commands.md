@@ -57,7 +57,7 @@ Three problems with the current design:
 
 **Separate the typed facade from the namespace dictionary.** The facades (`BeamtalkInterface`, `WorkspaceEnvironment`) provide typed, discoverable methods. The `globals` accessor on each returns a plain `Dictionary` — the same class for both.
 
-```
+```text
 Pharo:
   Smalltalk         → SmalltalkImage   (facade: version, allClasses, snapshot)
   Smalltalk globals → SystemDictionary (dictionary: at:, keys, values)
@@ -143,7 +143,7 @@ When modules/imports exist in the future, stdlib classes could track their `.bt`
 
 Beamtalk's name resolution can be understood as a scoped resolution order inspired by GemStone/S's SymbolList:
 
-```
+```text
 Session locals (implicit)  →  Workspace globals  →  Beamtalk globals
    x = 42                     Transcript = ...       Integer = <class>
    counter = #Actor<...>      Counter = <class>      String = <class>
@@ -186,7 +186,7 @@ Both layers follow the same pattern: typed convenience methods for daily use, `g
 
 ### REPL Session Examples
 
-```
+```beamtalk
 >> Workspace load: 'examples/counter.bt'
 Loaded: Counter (examples/counter.bt)
 
@@ -254,7 +254,7 @@ Note: `:reload` (no argument) and `:modules` are retained as REPL aliases for ba
 
 ### Error Examples
 
-```
+```beamtalk
 >> Workspace load: 42
 Error: Workspace>>load: expects a String path, got Integer
 
