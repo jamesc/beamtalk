@@ -310,10 +310,10 @@ zip_to_maps([H1 | T1], [H2 | T2]) -> [#{<<"key">> => H1, <<"value">> => H2} | zi
 %%
 %% For blocks, includes the arity so wrong-arity errors are clear.
 %% For other values, shows the Beamtalk class name.
--spec describe_value(term()) -> iolist().
+-spec describe_value(term()) -> binary().
 describe_value(V) when is_function(V) ->
     {arity, A} = erlang:fun_info(V, arity),
-    io_lib:format("a ~p-argument block", [A]);
+    iolist_to_binary(io_lib:format("a ~p-argument block", [A]));
 describe_value(V) ->
     ClassName = beamtalk_primitive:class_of(V),
-    io_lib:format("a ~s", [ClassName]).
+    <<"a ", (atom_to_binary(ClassName))/binary>>.
