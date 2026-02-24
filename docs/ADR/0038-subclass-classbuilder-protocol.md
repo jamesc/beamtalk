@@ -7,7 +7,7 @@ Proposed (2026-02-23)
 
 ### Problem Statement
 
-`Object subclass: Counter` is currently a grammar production. The parser emits a `ClassDefinition` AST node and the compiler handles class registration via hardcoded Erlang calls to `beamtalk_class_registry`. There is no Beamtalk-level protocol for class creation — it is an opaque compiler operation.
+`Object subclass: Counter` is currently a grammar production. The parser emits a `ClassDefinition` AST node and the compiler handles class registration via hardcoded Erlang calls to `beamtalk_object_class:start/2`. There is no Beamtalk-level protocol for class creation — it is an opaque compiler operation.
 
 This creates two related problems:
 
@@ -22,17 +22,17 @@ The compiler pipeline for class definitions is:
 ```text
 parse → ClassDefinition AST → ClassHierarchy::build → codegen → bt@counter.core → erlc → bt@counter.beam
                                                                       ↓
-                                              module load triggers beamtalk_class_registry:register/N
+                                              module load triggers beamtalk_object_class:start/2
                                               (hardcoded Erlang, not visible from Beamtalk)
 ```
 
-`beamtalk_class_registry:register/N` is called with raw atoms and maps extracted from the compiled module attributes. There is no `ClassBuilder` object, no `subclass:` method in any `.bt` file, and no way to intercept or customise class creation from Beamtalk code.
+`beamtalk_object_class:start/2` is called with raw atoms and maps extracted from the compiled module attributes. There is no `ClassBuilder` object, no `subclass:` method in any `.bt` file, and no way to intercept or customise class creation from Beamtalk code.
 
 ### Constraints
 
 - **Grammar must stay**: `Object subclass: Counter` is unambiguous, toolable, and learnable. The static LSP layer (ADR 0024 Phase 1) builds the class hierarchy from parsed source without a live workspace. This must continue to work. The syntax is not changing.
 - **Static analysis unchanged**: `ClassHierarchy::build` reads `ClassDefinition` AST nodes today. This pipeline is not changing — codegen is the integration point, not the parser or semantic analyser.
-- **Bootstrap ordering (ADR 0032)**: `ProtoObject → Object → Behaviour → Class → Actor` must be wired before user classes load. `ClassBuilder` joins this sequence.
+- **Bootstrap ordering (ADR 0032)**: `ProtoObject → Object → Behaviour → Class → Metaclass → Actor` must be wired before user classes load. `ClassBuilder` joins this sequence.
 - **No persistent image**: Beamtalk compiles to BEAM modules loaded from disk on cold start. The dynamic path must work without a persistent object graph.
 - **REPL self-hosting trajectory (ADR 0034)**: When the REPL is ported to pure Beamtalk, it must be able to evaluate `Object subclass: Foo ...` at runtime — defining and using a new class interactively without invoking the Rust compiler. This requires a dynamic class creation path that is first-class, not bolted on.
 
@@ -70,7 +70,7 @@ ClassBuilder called directly at runtime
 → no BEAM module, no compiler round-trip
 ```
 
-Dynamic classes work fully with the existing message dispatch system. Methods are closures rather than compiled BEAM functions, so performance is lower — this is the trade-off for interactive speed. Dynamic classes can be redefined freely and are garbage-collected when all references drop.
+Dynamic classes work fully with the existing message dispatch system. Methods are closures rather than compiled BEAM functions, so performance is lower — this is the trade-off for interactive speed. Dynamic classes can be redefined freely. Their gen_server processes are long-lived — they persist until explicitly stopped via `removeFromSystem` or node shutdown, consistent with compiled class lifecycle.
 
 ### ClassBuilder.bt
 
@@ -83,9 +83,8 @@ Dynamic classes work fully with the existing message dispatch system. Methods ar
 ///
 /// ## Compiled use (emitted by codegen, not written by users):
 /// ```beamtalk
-/// Class classBuilder
+/// Object classBuilder
 ///   name: #Counter
-///   superclass: Object
 ///   fields: #{ count => 0 }
 ///   methods: #{ increment => [...], value => [...] }
 ///   register
@@ -104,7 +103,7 @@ Object subclass: ClassBuilder
   state: superclassRef = nil
   state: fieldSpecs    = #{}
   state: methodSpecs   = #{}
-  state: modifiers     = #[]
+  state: modifiers     = #()
 
   /// Set the class name.
   name: aSymbol =>
@@ -128,24 +127,26 @@ Object subclass: ClassBuilder
 
   /// Add a single field with a default value (fluent API for dynamic use).
   addField: aName default: aValue =>
-    fieldSpecs := fieldSpecs copyWith: aName -> aValue.
+    fieldSpecs := fieldSpecs at: aName put: aValue.
     self
 
   /// Add a single method as a block (fluent API for dynamic use).
   /// The block receives self as first argument.
   addMethod: aSelector body: aBlock =>
-    methodSpecs := methodSpecs copyWith: aSelector -> aBlock.
+    methodSpecs := methodSpecs at: aSelector put: aBlock.
     self
 
   /// Apply a class modifier (:abstract, :sealed, :typed).
   modifier: aSymbol =>
-    modifiers := modifiers copyWith: aSymbol.
+    modifiers := modifiers add: aSymbol.
     self
 
   /// Register the class with the runtime and return the new class object.
   ///
   /// For compiled classes (Path 1): called from module init, wires the
   /// BEAM module's pre-compiled methods into the class gen_server.
+  /// If the class already exists (hot reload), updates the existing
+  /// gen_server state via `update_class/2` rather than failing.
   ///
   /// For dynamic classes (Path 2): creates a class gen_server with
   /// closure-based methods, no BEAM module required.
@@ -168,24 +169,28 @@ classBuilder => ClassBuilder new superclass: self
 
 ### Codegen Change
 
-For every `ClassDefinition` AST node, codegen emits a ClassBuilder call in the generated module's `-on_load` (or equivalent init hook) rather than a direct `beamtalk_class_registry:register/N` call:
+For every `ClassDefinition` AST node, codegen emits a ClassBuilder call in the generated module's `-on_load` (or equivalent init hook) rather than a direct `beamtalk_object_class:start/2` call:
 
 ```erlang
 %% Before (hardcoded registration):
--on_load(init/0).
-init() ->
-    beamtalk_class_registry:register('Counter', 'Actor', #{count => 0}, #{...}).
+-on_load(register_class/0).
+register_class() ->
+    beamtalk_object_class:start('Counter', #{
+        superclass => 'Actor',
+        fields => [count],
+        instance_methods => #{...}
+    }).
 
-%% After (ClassBuilder protocol):
--on_load(init/0).
-init() ->
-    'bt@class':'classBuilder'()
-        :'name:'(#{'$sym' => 'Counter'})
-        :'superclass:'('bt@actor':'module_class'())
-        :'fields:'(#{'count' => 0})
-        :'methods:'(#{'increment' => fun ?MODULE:'increment'/1,
-                      'value'     => fun ?MODULE:'value'/1})
-        :'register'().
+%% After (ClassBuilder protocol — shown with intermediate variables;
+%% actual Core Erlang uses let-bindings):
+-on_load(register_class/0).
+register_class() ->
+    CB0 = beamtalk_primitive:send('bt@object':'module_class'(), 'classBuilder', []),
+    CB1 = beamtalk_primitive:send(CB0, 'name:', [#{'$sym' => 'Counter'}]),
+    CB2 = beamtalk_primitive:send(CB1, 'fields:', [#{'count' => 0}]),
+    CB3 = beamtalk_primitive:send(CB2, 'methods:', [#{'increment' => fun ?MODULE:'increment'/1,
+                                                       'value'     => fun ?MODULE:'value'/1}]),
+    beamtalk_primitive:send(CB3, 'register', []).
 ```
 
 The BEAM module still provides the compiled method functions (`increment/1`, `value/1`). ClassBuilder wires them into the class gen_server. Dynamic classes pass closures instead of function references — the class gen_server stores and dispatches either form.
@@ -207,7 +212,7 @@ p := Point new
 // => a Point (x: 0, y: 0)
 ```
 
-The REPL desugars the class definition and calls `Class classBuilder ... register` directly. The class is live immediately. Methods are interpreted closures.
+The REPL desugars the class definition and calls `Object classBuilder ... register` directly — `classBuilder` is sent to the intended superclass, which pre-sets the builder's superclass reference. The class is live immediately. Methods are interpreted closures.
 
 **Compile and save** — Path 1 (compiled, via compiler port ADR 0022):
 
@@ -222,10 +227,17 @@ The REPL self-hosting story requires both paths but does not require them simult
 ### Bootstrap Sequence
 
 ```text
-ProtoObject → Object → Behaviour → Class → ClassBuilder → Actor → user modules
+ProtoObject → Object → Behaviour → Class → Metaclass → ClassBuilder → Actor → user modules
 ```
 
-`ClassBuilder` is a value type (no gen_server process). It can be pre-wired in the bootstrap sequence using the same mechanism as `Behaviour` and `Class` (ADR 0032) — a hand-wired Erlang struct populated before the normal class loading sequence begins. Post-bootstrap assertion: `Class respondsTo: #classBuilder` must return `true`.
+`ClassBuilder` is a value type (no gen_server process of its own). It can be pre-wired in the bootstrap sequence using the same mechanism as `Behaviour` and `Class` (ADR 0032) — a hand-wired Erlang struct populated before the normal class loading sequence begins. `ClassBuilder` is placed after `Metaclass` because it is a user-facing stdlib class, not part of the metaclass tower. Post-bootstrap assertion: `Class respondsTo: #classBuilder` must return `true`.
+
+**Implementation note — value type mutability**: Value types in Beamtalk are currently immutable (field assignments are rejected at codegen). The fluent builder API shown above uses `:=` mutation (`className := aSymbol`), which would not compile today. Two implementation options:
+
+1. **Make ClassBuilder an Actor subclass** — builder instances become gen_server processes, supporting mutable state. Heavier (one process per builder), but works with current semantics. The process is short-lived (created, configured, and consumed by `register`).
+2. **Implement immutable-update for value types (BT-833)** — each setter method returns a *new* ClassBuilder with the field updated, using Self-threading in codegen (parallel to Actor State-threading). The fluent API works because each chained call operates on the returned copy. This is the more principled approach and would benefit all value types.
+
+The recommended path is BT-833 first (small, standalone codegen change), then ClassBuilder.bt compiles as a real `.bt` file from day one. Alternatively, ClassBuilder can be hand-wired in Erlang (`beamtalk_class_builder_bt.erl`, consistent with `beamtalk_class_bt.erl` and `beamtalk_metaclass_bt.erl`) and replaced with a `.bt` file after BT-833 ships. The ClassBuilder protocol (message selectors, semantics, `register` behavior) is the same either way.
 
 ### REPL Session
 
@@ -260,7 +272,7 @@ ProtoObject → Object → Behaviour → Class → ClassBuilder → Actor → us
 ### Error Examples
 
 ```beamtalk
->> Class classBuilder name: #Dog register   // missing superclass (Class has no pre-set superclass)
+>> ClassBuilder new name: #Dog register   // bypasses factory, no superclass set
 => Error: ClassBuilder register requires superclass to be set
 
 >> Object classBuilder name: nil register
@@ -284,9 +296,9 @@ ProtoObject → Object → Behaviour → Class → ClassBuilder → Actor → us
 
 Class declarations are grammar that evaluates to class objects. Newspeak uses **exemplars** — live prototype instances — for IDE tooling. The IDE can query an exemplar to learn a class's methods and fields, bridging static syntax and live reflection.
 
-**What we adopt**: The idea that class definitions should produce first-class values. In Beamtalk, `Class classBuilder ... register` returns the new class object, which can be assigned, passed, and inspected.
+**What we adopt**: The idea that class definitions should produce first-class values. In Beamtalk, `Object classBuilder ... register` returns the new class object, which can be assigned, passed, and inspected.
 
-**What we adapt**: Newspeak's exemplars are replaced by our two-path model. The static LSP uses parsed grammar (Path 1 source); the live workspace uses class gen_server objects (Path 2 or loaded modules). ADR 0024's Live-Augmented layer bridges the two.
+**What we don't have yet**: Newspeak's exemplars — the reason Newspeak can go fully dynamic without a grammar anchor is that the IDE can query live prototype instances for class structure. We don't have that live tooling layer yet (ADR 0024 Phase 2). Our grammar is a scaffold that substitutes for exemplars until the Live-Augmented layer matures. This is an engineering prioritization for v0.1, not a permanent architectural commitment.
 
 ### GNU Smalltalk
 
@@ -317,7 +329,7 @@ These aren't class creation systems, but they establish the right architectural 
 ### Newcomer (from Python/JS/Ruby)
 
 - **Zero visible change**: Syntax is identical. The newcomer writes `Object subclass: Foo` and it works exactly as before.
-- **REPL surprise (good)**: Discovering that `Class classBuilder name: #Dog ... register` works interactively — defining a class without writing a file — is a delightful REPL moment. This is only possible with the dynamic path.
+- **REPL surprise (good)**: Discovering that `Object classBuilder name: #Dog ... register` works interactively — defining a class without writing a file — is a delightful REPL moment. This is only possible with the dynamic path.
 - **Discoverable protocol**: `Class respondsTo: #classBuilder` returns `true`. The class creation vocabulary is part of the message system they're already exploring.
 
 ### Smalltalk Developer
@@ -328,13 +340,12 @@ These aren't class creation systems, but they establish the right architectural 
 
 ### Erlang/BEAM Developer
 
-- **Observable class creation**: `dbg:tpl(beamtalk_class_builder, register, ...)` traces every class registration. Previously this was distributed across multiple Erlang modules.
-- **Single registration code path**: `beamtalk_class_registry:register_from_builder/1` is the only registration entry point. No more scattered `register/N` variants.
+- **Observable registration protocol**: `dbg:tpl(beamtalk_class_builder, register, ...)` traces every post-bootstrap class registration. The direct `beamtalk_object_class:start/2` path is retained only for bootstrap classes (`ProtoObject` through `Metaclass`), which is the same infrastructure bypass already present for `Behaviour` and `Class`.
 - **Dynamic classes are a new capability**: Closures stored in a class gen_server are inspectable via Observer. A new class defined at the REPL prompt appears in `beamtalk_class_registry:all_classes/0` immediately.
 
 ### Production Operator
 
-- **Compiled classes unchanged**: Path 1 produces identical BEAM bytecode. Performance characteristics are unaffected.
+- **Compiled classes semantically equivalent**: Path 1 produces semantically equivalent BEAM bytecode — method functions (`increment/1`, `value/1`, etc.) are unchanged; only the module init function changes to emit the ClassBuilder call instead of a direct `beamtalk_object_class:start/2` call. Observable class behaviour and performance characteristics are unaffected.
 - **Dynamic classes are opt-in**: Path 2 is only used when explicitly called. No compiled class degrades to interpreted closures without the operator knowing.
 - **Hot reload simplified**: Reloading a module triggers the ClassBuilder call in the module init, which updates the class gen_server state. One code path for initial load and reload.
 
@@ -351,7 +362,7 @@ These aren't class creation systems, but they establish the right architectural 
 | Cohort | Strongest argument |
 |--------|-------------------|
 | **Newcomer** | "The current behaviour is clear and learnable. Adding a ClassBuilder protocol that most users will never touch adds cognitive overhead to the mental model for zero visible benefit." |
-| **BEAM veteran** | "Every abstraction is a failure mode. The hardcoded registration Erlang is battle-tested and simple. ClassBuilder adds a new stdlib class, new bootstrap ordering, new codegen emission target, and new failure modes. For what practical gain in v0.1?" |
+| **BEAM veteran** | "Bootstrap ordering is the most fragile part of any OTP application. You're adding a new class (`ClassBuilder`) to a sequence that must complete correctly before any user module loads — and you're doing it to change what generated `on_load` functions call. If `ClassBuilder` isn't wired before a user module loads, you get `undef` at startup, not at test time. The current `beamtalk_object_class:start/2` call is two lines and has no ordering dependency beyond `pg` being started. Every new entry in the bootstrap sequence is a new way to brick the runtime." |
 | **Operator** | "If it ain't broke, don't fix it. Compiled class creation works. Don't touch the bootstrap sequence to satisfy a philosophical principle about message sends." |
 | **Smalltalk purist** | "Even this doesn't satisfy me fully — `subclass:` is still grammar. You've added ClassBuilder but the entry point is still a parser special form, not a true message." |
 | **Language designer** | "Grammar gives the compiler authoritative parse-time knowledge and richer error messages. If ClassBuilder is only ever called by codegen output and not meaningfully by user code, it's gold-plating." |
@@ -374,9 +385,9 @@ These aren't class creation systems, but they establish the right architectural 
 |--------|-------------------|
 | **Smalltalk purist** | "This is the only honest approach. The grammar form is still a special case in the compiler. A true 'messages all the way down' design would have no grammar production for class definitions at all." |
 | **REPL self-hosting** | "If we're going to have a self-hosted REPL anyway, the compiler becomes a library and the 'grammar' form is just a well-known pattern that the compiler library handles. At that point, 'grammar or message?' dissolves as a distinction." |
-| **Language designer** | "Newspeak's fully dynamic approach works. The compiler is not special; it's just the canonical ClassBuilder user." |
+| **Language designer** | "Newspeak's fully dynamic approach works, and it works *without* grammar because Newspeak uses exemplars — live prototype instances that the IDE can query to learn a class's structure. The reason Beamtalk needs grammar for the static layer is that we don't have exemplars. That's an engineering prioritization for v0.1, not a language design conclusion. Keeping grammar as the static anchor is admitting we haven't built the live tooling layer yet." |
 
-**Why we defer it**: ADR 0024's static LSP layer requires the class hierarchy to be known from source without a live workspace. A fully dynamic approach breaks this until the Live-Augmented layer is mature enough to substitute. This ADR establishes ClassBuilder as the dynamic protocol; Alternative C becomes viable once the LSP live layer matures.
+**Why we defer it**: This is an honest prioritization, not a principled objection. ADR 0024's static LSP layer requires the class hierarchy from source without a live workspace — because we haven't built the Live-Augmented layer that would make exemplars viable. Newspeak succeeds without grammar because its IDE operates on live objects; ours doesn't yet. This ADR establishes ClassBuilder as the dynamic protocol that makes Alternative C viable once the Live-Augmented layer (ADR 0024 Phase 2) matures. The grammar stay is a scaffold, not a commitment.
 
 ### Tension Points
 
@@ -410,13 +421,21 @@ Keep grammar for static, add `defineSubclass:` for dynamic use as a separate sel
 
 **Rejected because**: Two class creation paths to maintain and document. ClassBuilder unifies both paths under one protocol. Not steelmanned separately because the strongest argument for a second selector is subsumed by Alternative B's "ship small" pragmatism — if you're going to add a runtime API, a full ClassBuilder protocol (this ADR) is strictly more capable than a second selector with no builder pattern.
 
+### Alternative E: Hybrid — Direct Registration for Compiled, ClassBuilder for Dynamic Only
+
+Keep compiled class `on_load` calling `beamtalk_object_class:start/2` directly (current behaviour, unchanged). Add ClassBuilder as a new stdlib class used only for Path 2 (dynamic/REPL class creation). No codegen change.
+
+**Steelman**: This is the minimum change that delivers the REPL self-hosting unblocking goal. It avoids all codegen risk, bootstrap complexity for compiled classes, and the two-path reasoning required to explain why compiled `on_load` calls something different from what users see in REPL sessions. A pragmatic engineer would argue: if ClassBuilder is never called by codegen output, shipping it as compiled-class infrastructure is gold-plating. Ship Path 2 now; revisit unified registration when the REPL self-hosting work validates the design.
+
+**Rejected because**: Under Alternative E, compiled class creation remains an opaque Erlang operation indefinitely. `Object subclass: Counter` in a `.bt` file would still compile to a call that is invisible from Beamtalk — Principle 6 would be satisfied only for the interactive path, not the primary path. This creates a permanent two-tier model: classes created interactively go through the inspectable protocol; classes compiled from source bypass it. That inconsistency tends to calcify — "compiled classes use the old path" reliably stays "compiled classes always use the old path" because the motivation to close the gap disappears once the dynamic path ships. The codegen change (emitting ClassBuilder calls in module init instead of a direct `start/2` call) is contained and low-risk — it is the correct engineering choice to make the architecture consistent end-to-end.
+
 ## Consequences
 
 ### Positive
 - **Principle 6 satisfied**: Class creation is now a Beamtalk-visible protocol, not an opaque Erlang operation
 - **REPL self-hosting unblocked**: Path 2 (dynamic closures) enables the REPL to define and use classes interactively without a compiler round-trip
 - **Framework interceptability**: Custom root classes can override `classBuilder` to intercept all subclass creation — custom class builders, tracing, validation
-- **Single registration entry point**: `beamtalk_class_registry:register_from_builder/1` replaces multiple scattered `register/N` variants
+- **Single registration protocol for post-bootstrap classes**: `beamtalk_class_builder_register` becomes the canonical registration path for all user-defined classes. Bootstrap classes (`ProtoObject` through `Metaclass`) continue to use direct `beamtalk_object_class:start/2` as they must be wired before `ClassBuilder` itself exists — this is the same infrastructure bypass that `Behaviour` and `Class` already use (ADR 0032)
 - **No AST changes**: Grammar stays grammar, ClassDefinition AST node unchanged, LSP and semantic analysis untouched
 - **Inspectable**: `Class classBuilder`, `ClassBuilder localMethods`, `Object respondsTo: #classBuilder` all work
 - **Clean upgrade path to Alternative C**: Once ADR 0024's Live-Augmented layer is mature, dropping the grammar special case in favour of full dynamism is an incremental change on top of this ADR
@@ -425,6 +444,8 @@ Keep grammar for static, add `defineSubclass:` for dynamic use as a separate sel
 - **Bootstrap complexity**: ClassBuilder must be pre-wired in the bootstrap sequence before any user classes load — the same challenge as Behaviour and Class (ADR 0032), already solved
 - **Dynamic class performance**: Path 2 classes use closure dispatch rather than compiled BEAM functions. Suitable for interactive prototyping; not suitable for performance-critical production classes without compilation
 - **Two kinds of classes in the registry**: Compiled classes (with BEAM modules) and dynamic classes (closures only) coexist in `beamtalk_class_registry`. Tooling must handle both. Serialisation/persistence of dynamic classes is not defined in this ADR
+- **Sealed class check at runtime**: The compiler currently enforces sealed classes at parse/analysis time. The `classBuilder` factory unconditionally returns a builder. For the dynamic path, `register` must check whether the superclass is sealed and reject the registration — this moves a compile-time check to runtime for Path 2
+- **on_load ordering constraint**: The ClassBuilder call chain from generated module `on_load` functions requires `bt@class` and `ClassBuilder` to be loaded before any user module. This is guaranteed by the topo-sort bootstrap ordering — the same constraint that ensures superclasses are available already. No new failure mode is introduced, but the constraint is now implicit in ClassBuilder's position in the bootstrap sequence rather than explicit in a direct `start/2` call
 
 ### Neutral
 - **User syntax is unchanged**: `Object subclass: Counter` works identically before and after
@@ -437,23 +458,22 @@ Keep grammar for static, add `defineSubclass:` for dynamic use as a separate sel
 
 **Affected components:** `stdlib/src/ClassBuilder.bt`, `stdlib/src/Class.bt`, `beamtalk-core` (codegen), `beamtalk_runtime` (class gen_server, registry)
 
-1. Implement `beamtalk_class_builder.erl` — the Erlang backing for `@intrinsic classBuilderRegister`. Handles both Path 1 (compiled BEAM module, function references) and Path 2 (dynamic, closures).
-2. Update `beamtalk_class_registry.erl`: add `register_from_builder/1` entry point. All existing `register/N` variants delegate to it.
-3. Update bootstrap in `beamtalk_bootstrap.erl`: pre-wire ClassBuilder as a value type before user classes load. Bootstrap sequence: `ProtoObject → Object → Behaviour → Class → ClassBuilder → Actor`.
-4. Add `Class.bt` method: `classBuilder => ClassBuilder new superclass: self`
-5. Create `stdlib/src/ClassBuilder.bt` with fluent builder API
-6. Update codegen (`crates/beamtalk-core/src/codegen/core_erlang/`) to emit ClassBuilder calls in generated module init instead of `beamtalk_class_registry:register/N` calls
-7. Add post-bootstrap assertion: `Class respondsTo: #classBuilder` must return `true`
-8. Run full test suite — all existing class definition behaviour must be preserved
+1. Implement `beamtalk_class_builder.erl` — the Erlang backing for `@intrinsic classBuilderRegister`. Handles both Path 1 (compiled BEAM module, function references) and Path 2 (dynamic, closures). Delegates to `beamtalk_object_class:start/2` for first registration; detects `{error, {already_started, _}}` and falls back to `beamtalk_object_class:update_class/2` for hot reload. This preserves the existing hot reload semantics. Validate with a single hand-wired test class before proceeding.
+2. Update bootstrap in `beamtalk_bootstrap.erl`: pre-wire ClassBuilder as a value type before user classes load. Bootstrap sequence: `ProtoObject → Object → Behaviour → Class → Metaclass → ClassBuilder → Actor`.
+3. Add `Class.bt` method: `classBuilder => ClassBuilder new superclass: self`
+4. Create `stdlib/src/ClassBuilder.bt` with fluent builder API (requires BT-833 for value type field assignment; alternatively, hand-wire as `beamtalk_class_builder_bt.erl` for v0.1)
+5. Update codegen (`crates/beamtalk-core/src/codegen/core_erlang/`) to emit ClassBuilder calls in generated module init instead of direct `beamtalk_object_class:start/2` calls
+6. Add post-bootstrap assertion: `Class respondsTo: #classBuilder` must return `true`
+7. Run full test suite — all existing class definition behaviour must be preserved
 
 ### Phase 2: Dynamic Class Creation (Path 2)
 
 **Affected components:** `beamtalk_class_builder.erl`, `beamtalk_object_class.erl`, `stdlib/src/ClassBuilder.bt`
 
 1. Implement the closure-based class gen_server state: when methods are provided as blocks (not function references), the class gen_server stores and invokes them via closure dispatch
-2. Add `ClassBuilder >> addMethod:body:` and verify dynamic class creation in REPL tests
-3. Add `beamtalk_class_registry:all_classes/0` public API (if not already present) for tooling
-4. Verify dynamic classes are visible in Observer and via `Class allSubclasses`
+2. Implement dynamic dispatch mechanism: define how message sends to dynamic class instances resolve to closures in the class gen_server state when no BEAM module with `dispatch/3` exists
+3. Verify dynamic class creation in REPL tests — `ClassBuilder >> addMethod:body:` is already defined in the Decision section; this phase implements the runtime mechanism that makes it work
+4. Verify dynamic classes are visible in Observer and via `Class allSubclasses` (uses existing `beamtalk_class_registry:all_classes/0`)
 
 ### Phase 3: REPL Integration
 
