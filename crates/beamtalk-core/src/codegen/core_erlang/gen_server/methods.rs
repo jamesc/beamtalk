@@ -626,31 +626,37 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 
-    /// Generates the `register_class/0` function for class registration.
+    /// Generates the `register_class/0` on-load function using the `ClassBuilder`
+    /// protocol (ADR 0038 Phase 3 / BT-837).
     ///
     /// This function is called automatically via `-on_load` when the module loads.
-    /// It registers the class with `beamtalk_object_class:start/2` (unlinked), making
-    /// the class available as a first-class object for reflection and metaprogramming.
+    /// Instead of calling `beamtalk_object_class:start/2` directly, it builds a
+    /// `ClassBuilder` state map and calls `beamtalk_class_builder:register/1`.
+    /// This routes all compiled class registration through the `ClassBuilder`
+    /// protocol, which handles both first registration and hot reload.
     ///
-    /// Uses `start` (not `start_link`) so the class process survives after the
-    /// `on_load` caller exits. Class processes are long-lived singletons that must
-    /// persist independently of whoever loaded the module.
-    ///
-    /// The function is defensive - if `beamtalk_object_class` is not available (e.g.,
-    /// during early module loading), it returns `ok` to allow the module to load.
+    /// The function is defensive — if `beamtalk_class_builder` is not available
+    /// (e.g., during early module loading), the try/catch returns `ok` to allow
+    /// the module to load.
     ///
     /// # Generated Code
     ///
     /// ```erlang
     /// 'register_class'/0 = fun () ->
     ///     try
-    ///         let ClassInfo0 = ~{...}~
-    ///         in let _Reg0 = case call 'beamtalk_object_class':'start'('Counter', ClassInfo0) of
-    ///             <{'ok', _Pid}> when 'true' -> 'ok'
-    ///             <{'error', {'already_started', _}}> when 'true' ->
-    ///                 call 'beamtalk_object_class':'update_class'('Counter', ClassInfo0)
-    ///             <{'error', _Reason}> when 'true' -> 'ok'
+    ///         let _BuilderState0 = ~{
+    ///             'className' => 'Counter',
+    ///             'superclassRef' => 'Actor',
+    ///             'fieldSpecs' => ~{'value' => 0}~,
+    ///             'methodSpecs' => ~{...}~,
+    ///             'modifiers' => [],
+    ///             ...
+    ///         }~
+    ///         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
+    ///             <{'ok', _Pid0}> when 'true' -> 'ok'
+    ///             <{'error', _Err0}> when 'true' -> {'error', _Err0}
     ///         end
+    ///         in _Reg0
     ///     catch <_,_,_> -> 'ok'
     /// ```
     #[allow(clippy::too_many_lines)] // builds class metadata map with methods, fields, and source
@@ -666,43 +672,62 @@ impl CoreErlangGenerator {
         let mut class_docs = Vec::new();
 
         for (i, class) in module.classes.iter().enumerate() {
-            // Instance methods
+            // Instance methods — used for methodSpecs and methodSource
             let instance_methods: Vec<_> = class
                 .methods
                 .iter()
                 .filter(|m| m.kind == MethodKind::Primary)
                 .collect();
 
-            let mut instance_method_docs: Vec<Document<'static>> = Vec::new();
+            // methodSpecs: selector => #{arity => N, is_sealed => bool}
+            let mut method_spec_docs: Vec<Document<'static>> = Vec::new();
             for (m_idx, method) in instance_methods.iter().enumerate() {
                 if m_idx > 0 {
-                    instance_method_docs.push(Document::Str(", "));
+                    method_spec_docs.push(Document::Str(", "));
                 }
                 let is_sealed = if method.is_sealed || class.is_sealed {
                     "'true'"
                 } else {
                     "'false'"
                 };
-                instance_method_docs.push(Document::String(format!(
+                method_spec_docs.push(Document::String(format!(
                     "'{}' => ~{{'arity' => {}, 'is_sealed' => {}}}~",
                     method.selector.name(),
                     method.selector.arity(),
                     is_sealed
                 )));
             }
-            let instance_methods_doc = Document::Vec(instance_method_docs);
+            let method_specs_doc = Document::Vec(method_spec_docs);
 
-            // Instance variables
-            let mut inst_var_docs: Vec<Document<'static>> = Vec::new();
+            // fieldSpecs: field_name => default_value (map, not list)
+            let mut field_spec_docs: Vec<Document<'static>> = Vec::new();
             for (s_idx, s) in class.state.iter().enumerate() {
                 if s_idx > 0 {
-                    inst_var_docs.push(Document::Str(", "));
+                    field_spec_docs.push(Document::Str(", "));
                 }
-                inst_var_docs.push(Document::String(format!("'{}'", s.name.name)));
+                let default_val = if let Some(ref default_value) = s.default_value {
+                    self.expression_doc(default_value)?
+                } else {
+                    Document::Str("'nil'")
+                };
+                field_spec_docs.push(docvec![
+                    Document::String(format!("'{}' => ", s.name.name)),
+                    default_val,
+                ]);
             }
-            let inst_vars_doc = Document::Vec(inst_var_docs);
+            let field_specs_doc = Document::Vec(field_spec_docs);
 
-            // Class methods - depends on context
+            // modifiers list
+            let mut modifiers: Vec<&str> = Vec::new();
+            if class.is_sealed {
+                modifiers.push("'sealed'");
+            }
+            if class.is_abstract {
+                modifiers.push("'abstract'");
+            }
+            let modifiers_doc = Document::String(format!("[{}]", modifiers.join(", ")));
+
+            // classMethods: class method specs (spawn/new + user-defined)
             let mut class_method_entries: Vec<Document<'static>> = Vec::new();
             if self.context == CodeGenContext::Actor {
                 class_method_entries.push(Document::Str("'spawn' => ~{'arity' => 0}~"));
@@ -711,8 +736,6 @@ impl CoreErlangGenerator {
                 class_method_entries.push(Document::Str("'new' => ~{'arity' => 0}~"));
                 class_method_entries.push(Document::Str("'new:' => ~{'arity' => 1}~"));
             }
-            // ADR 0032 Phase 2 (BT-734): superclass is now handled by the
-            // Behaviour dispatch chain, not as a hardcoded class method.
             // BT-411: User-defined class methods
             for method in &class.class_methods {
                 if method.kind == MethodKind::Primary {
@@ -739,7 +762,7 @@ impl CoreErlangGenerator {
                 })
                 .collect();
             let class_methods_doc = docvec![
-                "'class_methods' => ~{",
+                "'classMethods' => ~{",
                 nest(INDENT, Document::Vec(class_methods_lines)),
                 line(),
                 "}~,",
@@ -798,51 +821,49 @@ impl CoreErlangGenerator {
             }
             let method_docs_doc = Document::Vec(method_docs_parts);
 
-            let is_sealed = if class.is_sealed { "true" } else { "false" };
-            let is_abstract = if class.is_abstract { "true" } else { "false" };
-
+            // BT-837: Build ClassBuilder state map and call register/1
             let class_doc = docvec![
                 line(),
-                "let ClassInfo",
+                "let _BuilderState",
                 i,
                 " = ~{",
                 nest(
                     INDENT,
                     docvec![
                         line(),
-                        format!("'name' => '{}',", class.name.name),
+                        format!("'className' => '{}',", class.name.name),
                         line(),
-                        format!("'module' => '{}',", self.module_name),
+                        format!("'superclassRef' => '{}',", class.superclass_name()),
                         line(),
-                        format!("'superclass' => '{}',", class.superclass_name()),
-                        line(),
-                        format!("'is_sealed' => '{is_sealed}',"),
-                        line(),
-                        format!("'is_abstract' => '{is_abstract}',"),
-                        line(),
-                        "'instance_methods' => ~{",
-                        instance_methods_doc,
+                        "'fieldSpecs' => ~{",
+                        field_specs_doc,
                         "}~,",
                         line(),
-                        "'fields' => [",
-                        inst_vars_doc,
-                        "],",
+                        "'methodSpecs' => ~{",
+                        method_specs_doc,
+                        "}~,",
+                        line(),
+                        "'modifiers' => ",
+                        modifiers_doc,
+                        ",",
+                        line(),
+                        format!("'moduleName' => '{}',", self.module_name),
                         line(),
                         class_methods_doc,
                         line(),
-                        "'method_source' => ~{",
+                        "'methodSource' => ~{",
                         method_source_doc,
                         "}~,",
                         line(),
-                        "'class_state' => ~{",
+                        "'classState' => ~{",
                         class_vars_doc,
                         "}~,",
                         line(),
-                        "'doc' => ",
+                        "'classDoc' => ",
                         class_doc_value,
                         ",",
                         line(),
-                        "'method_docs' => ~{",
+                        "'methodDocs' => ~{",
                         method_docs_doc,
                         "}~",
                     ]
@@ -852,9 +873,7 @@ impl CoreErlangGenerator {
                 line(),
                 "in let _Reg",
                 i,
-                " = case call 'beamtalk_object_class':'start'('",
-                class.name.name.to_string(),
-                "', ClassInfo",
+                " = case call 'beamtalk_class_builder':'register'(_BuilderState",
                 i,
                 ") of",
                 nest(
@@ -865,46 +884,11 @@ impl CoreErlangGenerator {
                         i,
                         "}> when 'true' -> 'ok'",
                         line(),
-                        // BT-572: On redefinition, update class metadata for hot reload.
-                        // BT-738: Normalize update_class result so errors propagate from on_load.
-                        "<{'error', {'already_started', _Existing",
+                        "<{'error', _Err",
                         i,
-                        "}}> when 'true' ->",
-                        nest(
-                            INDENT,
-                            docvec![
-                                line(),
-                                "let _UpdRes",
-                                i,
-                                " = call 'beamtalk_object_class':'update_class'('",
-                                class.name.name.to_string(),
-                                "', ClassInfo",
-                                i,
-                                ")",
-                                " in case _UpdRes",
-                                i,
-                                " of",
-                                nest(
-                                    INDENT,
-                                    docvec![
-                                        line(),
-                                        "<{'ok', _}> when 'true' -> 'ok'",
-                                        line(),
-                                        "<{'error', _UpdErr",
-                                        i,
-                                        "}> when 'true' -> {'error', _UpdErr",
-                                        i,
-                                        "}",
-                                    ]
-                                ),
-                                line(),
-                                "end",
-                            ]
-                        ),
-                        line(),
-                        "<{'error', _Reason",
+                        "}> when 'true' -> {'error', _Err",
                         i,
-                        "}> when 'true' -> 'ok'",
+                        "}",
                     ]
                 ),
                 line(),
@@ -914,20 +898,17 @@ impl CoreErlangGenerator {
         }
 
         // BT-738 / BT-749: Build a short-circuit chain so that the first
-        // {error, ...} from update_class propagates out of on_load, regardless
-        // of which class position caused it.  Note: non-already_started errors
-        // from start/2 are already normalized to 'ok' in the inner case arms
-        // above, so only update_class errors can produce {error, _} here.
+        // {error, ...} from register/1 propagates out of on_load, regardless
+        // of which class position caused it.
         //
         // For N classes, generates:
-        //   let ClassInfo0 = ... in let _Reg0 = case ... end
+        //   let _BuilderState0 = ... in let _Reg0 = case ... end
         //   in case _Reg0 of
         //     <{'error', _RegErr0}> when 'true' -> {'error', _RegErr0}
         //     <_> when 'true' ->
-        //       let ClassInfo1 = ... in let _Reg1 = case ... end
+        //       let _BuilderState1 = ... in let _Reg1 = case ... end
         //       in _Reg1   % (or nested case if more classes follow)
         //   end
-        // The early return above already handles the empty case, so class_docs is non-empty here.
         let last_i = class_docs.len() - 1;
         // Start from innermost: just last class + final result
         let mut try_body: Document<'static> =

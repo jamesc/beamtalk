@@ -1,0 +1,97 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E regression test for ClassBuilder compiled registration (BT-837 / ADR 0038 Phase 3)
+//
+// Verifies that compiled class definitions go through
+// beamtalk_class_builder:register/1 and behave identically to the
+// pre-ADR 0038 direct beamtalk_object_class:start/2 path.
+//
+// Tests: file-based :load, actor spawn, method dispatch, reflection,
+// and hot-reload via :load of a second version.
+
+// ===========================================================================
+// COMPILED CLASS LOADING AND BASIC USE
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Load a compiled class via :load and verify it registers
+// ---------------------------------------------------------------------------
+
+:load tests/e2e/fixtures/class_builder_counter.bt
+// => Loaded: CBCounter
+
+// ---------------------------------------------------------------------------
+// Spawn an instance and use it
+// ---------------------------------------------------------------------------
+
+c := CBCounter spawn
+// => #Actor<CBCounter,_>
+
+c add
+// => 1
+
+c add
+// => 2
+
+c add
+// => 3
+
+c getTotal await
+// => 3
+
+// ===========================================================================
+// CLASS REFLECTION
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Verify class metadata is preserved through ClassBuilder registration
+// ---------------------------------------------------------------------------
+
+CBCounter superclass
+// => Actor
+
+CBCounter name
+// => CBCounter
+
+CBCounter canUnderstand: #add
+// => true
+
+CBCounter canUnderstand: #getTotal
+// => true
+
+// ===========================================================================
+// HOT RELOAD VIA :LOAD
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Reload with v2 (add increments by 10) and verify existing actor updates
+// ---------------------------------------------------------------------------
+
+:load tests/e2e/fixtures/class_builder_counter_v2.bt
+// => Loaded: CBCounter
+
+// Existing actor should use new add method (adds 10)
+// Value preserved at 3 from before reload
+c add
+// => 13
+
+c getTotal await
+// => 13
+
+// ===========================================================================
+// FRESH SPAWN AFTER HOT RELOAD
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// New instances should use the reloaded v2 code
+// ---------------------------------------------------------------------------
+
+c2 := CBCounter spawn
+// => #Actor<CBCounter,_>
+
+c2 add
+// => 10
+
+c2 getTotal await
+// => 10

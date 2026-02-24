@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for ClassBuilder compiled registration E2E test (BT-837)
+
+Actor subclass: CBCounter
+  state: total = 0
+
+  add => self.total := self.total + 1
+  getTotal => self.total

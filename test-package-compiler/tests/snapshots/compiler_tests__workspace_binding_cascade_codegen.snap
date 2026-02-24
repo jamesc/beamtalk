@@ -170,31 +170,25 @@ module 'workspace_binding_cascade' ['start_link'/1, 'init'/1, 'handle_cast'/2, '
 
 'register_class'/0 = fun () ->
     try
-        let ClassInfo0 = ~{
-            'name' => 'Logger',
-            'module' => 'workspace_binding_cascade',
-            'superclass' => 'Actor',
-            'is_sealed' => 'false',
-            'is_abstract' => 'false',
-            'instance_methods' => ~{'run' => ~{'arity' => 0, 'is_sealed' => 'false'}~}~,
-            'fields' => [],
-            'class_methods' => ~{
+        let _BuilderState0 = ~{
+            'className' => 'Logger',
+            'superclassRef' => 'Actor',
+            'fieldSpecs' => ~{}~,
+            'methodSpecs' => ~{'run' => ~{'arity' => 0, 'is_sealed' => 'false'}~}~,
+            'modifiers' => [],
+            'moduleName' => 'workspace_binding_cascade',
+            'classMethods' => ~{
                 'spawn' => ~{'arity' => 0}~,
                 'spawnWith:' => ~{'arity' => 1}~
             }~,
-            'method_source' => ~{'run' => #{#<114>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']])}#}~,
-            'class_state' => ~{}~,
-            'doc' => 'none',
-            'method_docs' => ~{}~
+            'methodSource' => ~{'run' => #{#<114>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']])}#}~,
+            'classState' => ~{}~,
+            'classDoc' => 'none',
+            'methodDocs' => ~{}~
         }~
-        in let _Reg0 = case call 'beamtalk_object_class':'start'('Logger', ClassInfo0) of
+        in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
             <{'ok', _Pid0}> when 'true' -> 'ok'
-            <{'error', {'already_started', _Existing0}}> when 'true' ->
-                let _UpdRes0 = call 'beamtalk_object_class':'update_class'('Logger', ClassInfo0) in case _UpdRes0 of
-                    <{'ok', _}> when 'true' -> 'ok'
-                    <{'error', _UpdErr0}> when 'true' -> {'error', _UpdErr0}
-                end
-            <{'error', _Reason0}> when 'true' -> 'ok'
+            <{'error', _Err0}> when 'true' -> {'error', _Err0}
         end
 
         in _Reg0

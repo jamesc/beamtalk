@@ -58,6 +58,14 @@
 %%   - `modifiers`    — list (optional): [:abstract, :sealed, ...]
 %%   - `builderPid`   — pid (optional): builder process to stop after registration
 %%
+%% Additional keys for compiled classes (BT-837 / ADR 0038 Phase 3):
+%%   - `moduleName`   — atom: compiled Erlang module name (default: className)
+%%   - `classMethods` — map: class method specs (default: #{})
+%%   - `methodSource`  — map: selector => binary source text (default: #{})
+%%   - `classState`   — map: class variable defaults (default: #{})
+%%   - `classDoc`     — binary | none: class doc comment (default: none)
+%%   - `methodDocs`   — map: selector => binary doc text (default: #{})
+%%
 %% On success: registers the class with the runtime and returns `{ok, ClassPid}`.
 %% Hot reload: if the class already exists, updates it and returns `{ok, ClassPid}`.
 %% On failure: returns `{error, #beamtalk_error{}}` without stopping any process.
@@ -77,7 +85,12 @@ register(BuilderState) when is_map(BuilderState) ->
         ok when is_map(FieldSpecs), is_map(MethodSpecs) ->
             SuperclassName = resolve_superclass_name(SuperclassRef),
             ClassInfo = build_class_info(
-                ClassName, SuperclassName, FieldSpecs, MethodSpecs, Modifiers
+                ClassName,
+                SuperclassName,
+                FieldSpecs,
+                MethodSpecs,
+                Modifiers,
+                BuilderState
             ),
             case do_register(ClassName, ClassInfo) of
                 {ok, ClassPid} ->
@@ -218,22 +231,55 @@ resolve_superclass_name(#beamtalk_object{class = ClassName}) ->
 
 %% @private
 %% @doc Build a ClassInfo map for beamtalk_object_class:start/2.
--spec build_class_info(atom(), atom(), map(), map(), list()) -> map().
-build_class_info(ClassName, SuperclassName, FieldSpecs, MethodSpecs, Modifiers) ->
+%%
+%% BT-837: Accepts the full builder state as the last argument to extract
+%% additional metadata for compiled classes (moduleName, classMethods,
+%% methodSource, classState, classDoc, methodDocs).
+-spec build_class_info(atom(), atom(), map(), map(), list(), map()) -> map().
+build_class_info(ClassName, SuperclassName, FieldSpecs, MethodSpecs, Modifiers, BuilderState) ->
     IsSealed = lists:member(sealed, Modifiers),
     IsAbstract = lists:member(abstract, Modifiers),
     Fields = maps:keys(FieldSpecs),
     InstanceMethods = build_method_map(MethodSpecs),
-    #{
+    %% BT-837: Use explicit module name for compiled classes, fall back to ClassName
+    Module = maps:get(moduleName, BuilderState, ClassName),
+    ClassMethods = maps:get(classMethods, BuilderState, #{}),
+    Base = #{
         name => ClassName,
         superclass => SuperclassName,
-        module => ClassName,
+        module => Module,
         fields => Fields,
         instance_methods => InstanceMethods,
-        class_methods => #{},
+        class_methods => ClassMethods,
         is_sealed => IsSealed,
         is_abstract => IsAbstract
-    }.
+    },
+    %% BT-837: Pass through optional compiler metadata if present
+    maybe_put(
+        method_source,
+        maps:get(methodSource, BuilderState, undefined),
+        maybe_put(
+            class_state,
+            maps:get(classState, BuilderState, undefined),
+            maybe_put(
+                doc,
+                maps:get(classDoc, BuilderState, undefined),
+                maybe_put(
+                    method_docs,
+                    maps:get(methodDocs, BuilderState, undefined),
+                    Base
+                )
+            )
+        )
+    ).
+
+%% @private
+%% @doc Conditionally add a key to a map (skips undefined values).
+-spec maybe_put(atom(), term(), map()) -> map().
+maybe_put(_Key, undefined, Map) ->
+    Map;
+maybe_put(Key, Value, Map) ->
+    maps:put(Key, Value, Map).
 
 %% @private
 %% @doc Convert a methodSpecs map to the instance_methods format expected by the class gen_server.

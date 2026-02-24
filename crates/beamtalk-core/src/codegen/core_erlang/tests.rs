@@ -2645,34 +2645,24 @@ fn test_class_registration_generation() {
         "Should generate register_class function. Got:\n{code}"
     );
 
-    // Check that it calls beamtalk_object_class:start (unlinked)
+    // BT-837: Check that it calls beamtalk_class_builder:register
     assert!(
-        code.contains("call 'beamtalk_object_class':'start'('Counter',"),
-        "Should call beamtalk_object_class:start with class name. Got:\n{code}"
+        code.contains("call 'beamtalk_class_builder':'register'(_BuilderState0)"),
+        "Should call beamtalk_class_builder:register. Got:\n{code}"
     );
 
-    // Check metadata fields
+    // Check ClassBuilder state fields
     assert!(
-        code.contains("'name' => 'Counter'"),
-        "Should include class name in metadata. Got:\n{code}"
+        code.contains("'className' => 'Counter'"),
+        "Should include className in builder state. Got:\n{code}"
     );
     assert!(
-        code.contains("'module' => 'counter'"),
-        "Should include module name in metadata. Got:\n{code}"
+        code.contains("'moduleName' => 'counter'"),
+        "Should include moduleName in builder state. Got:\n{code}"
     );
     assert!(
-        code.contains("'superclass' => 'Actor'"),
-        "Should include superclass in metadata. Got:\n{code}"
-    );
-
-    // BT-105: Check sealing modifier flags
-    assert!(
-        code.contains("'is_sealed' => 'false'"),
-        "Should include is_sealed flag. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'is_abstract' => 'false'"),
-        "Should include is_abstract flag. Got:\n{code}"
+        code.contains("'superclassRef' => 'Actor'"),
+        "Should include superclassRef in builder state. Got:\n{code}"
     );
 
     // BT-745: Check beamtalk_class module attribute for dependency sorting
@@ -2680,9 +2670,11 @@ fn test_class_registration_generation() {
         code.contains("'beamtalk_class' = [{'Counter', 'Actor'}]"),
         "Should include beamtalk_class attribute with class and superclass. Got:\n{code}"
     );
+
+    // Check methodSpecs
     assert!(
-        code.contains("'instance_methods' => ~{"),
-        "Should include instance_methods map. Got:\n{code}"
+        code.contains("'methodSpecs' => ~{"),
+        "Should include methodSpecs map. Got:\n{code}"
     );
     assert!(
         code.contains("'increment' => ~{'arity' => 0, 'is_sealed' => 'false'}~"),
@@ -2693,16 +2685,16 @@ fn test_class_registration_generation() {
         "Should include getValue method with arity and sealed flag. Got:\n{code}"
     );
 
-    // Check fields list
+    // Check fieldSpecs (map with defaults, not list)
     assert!(
-        code.contains("'fields' => ['value']"),
-        "Should include fields list. Got:\n{code}"
+        code.contains("'fieldSpecs' => ~{'value' => 0}~"),
+        "Should include fieldSpecs map with defaults. Got:\n{code}"
     );
 
-    // Check class_methods map
+    // Check classMethods map
     assert!(
-        code.contains("'class_methods' => ~{"),
-        "Should include class_methods map. Got:\n{code}"
+        code.contains("'classMethods' => ~{"),
+        "Should include classMethods map. Got:\n{code}"
     );
     assert!(
         code.contains("'spawn' => ~{'arity' => 0}~"),
@@ -2713,18 +2705,14 @@ fn test_class_registration_generation() {
         "Should include spawnWith: class method. Got:\n{code}"
     );
 
+    // Check modifiers list
+    assert!(
+        code.contains("'modifiers' => []"),
+        "Should include empty modifiers list. Got:\n{code}"
+    );
+
     // Check function returns ok
     assert!(code.contains("'ok'"), "Should return 'ok'. Got:\n{code}");
-
-    // BT-403: Check sealed/abstract flags
-    assert!(
-        code.contains("'is_sealed' => 'false'"),
-        "Should include is_sealed flag. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'is_abstract' => 'false'"),
-        "Should include is_abstract flag. Got:\n{code}"
-    );
 }
 
 #[test]
@@ -2807,78 +2795,55 @@ fn test_multiple_classes_registration() {
         "Should have on_load attribute for multiple classes. Got:\n{code}"
     );
 
-    // Should register first class (Counter)
+    // BT-837: Should register both classes via ClassBuilder
     assert!(
-        code.contains("call 'beamtalk_object_class':'start'('Counter',"),
-        "Should register Counter class. Got:\n{code}"
+        code.contains("call 'beamtalk_class_builder':'register'(_BuilderState0)"),
+        "Should register Counter via ClassBuilder. Got:\n{code}"
     );
     assert!(
-        code.contains("'name' => 'Counter'"),
+        code.contains("'className' => 'Counter'"),
         "Should include Counter metadata. Got:\n{code}"
     );
     assert!(
-        code.contains("'fields' => ['value']"),
-        "Should include Counter fields. Got:\n{code}"
+        code.contains("'fieldSpecs' => ~{'value' => 0}~"),
+        "Should include Counter fieldSpecs. Got:\n{code}"
     );
 
-    // Should register second class (Logger)
     assert!(
-        code.contains("call 'beamtalk_object_class':'start'('Logger',"),
-        "Should register Logger class. Got:\n{code}"
+        code.contains("call 'beamtalk_class_builder':'register'(_BuilderState1)"),
+        "Should register Logger via ClassBuilder. Got:\n{code}"
     );
     assert!(
-        code.contains("'name' => 'Logger'"),
+        code.contains("'className' => 'Logger'"),
         "Should include Logger metadata. Got:\n{code}"
     );
     assert!(
-        code.contains("'fields' => ['messages']"),
-        "Should include Logger fields. Got:\n{code}"
+        code.contains("'fieldSpecs' => ~{'messages' => 0}~"),
+        "Should include Logger fieldSpecs. Got:\n{code}"
     );
 
     // Should use let-binding chain to sequence registrations
     assert!(
-        code.contains("let ClassInfo0 = ~{"),
-        "Should have first ClassInfo binding. Got:\n{code}"
+        code.contains("let _BuilderState0 = ~{"),
+        "Should have first BuilderState binding. Got:\n{code}"
     );
     assert!(
         code.contains("let _Reg0 = case"),
         "Should have first registration with _Reg0. Got:\n{code}"
     );
-    // BT-749: ClassInfo1 no longer has an `in ` prefix — it is inside a short-circuit case arm.
     assert!(
-        code.contains("let ClassInfo1 = ~{"),
-        "Should have second ClassInfo binding. Got:\n{code}"
+        code.contains("let _BuilderState1 = ~{"),
+        "Should have second BuilderState binding. Got:\n{code}"
     );
     assert!(
         code.contains("let _Reg1 = case"),
         "Should chain second registration with _Reg1. Got:\n{code}"
     );
 
-    // BT-589: Should call update_class on already_started
-    assert!(
-        code.contains("call 'beamtalk_object_class':'update_class'('Counter', ClassInfo0)"),
-        "Should call update_class for Counter on already_started. Got:\n{code}"
-    );
-    assert!(
-        code.contains("call 'beamtalk_object_class':'update_class'('Logger', ClassInfo1)"),
-        "Should call update_class for Logger on already_started. Got:\n{code}"
-    );
-
     // BT-738: Final result propagates last _Reg.
     assert!(
         code.contains("in _Reg1"),
         "Should propagate last _Reg result after all registrations. Got:\n{code}"
-    );
-    // The update_class result is normalized: {ok, _} -> ok, {error, E} -> {error, E}
-    assert!(
-        code.contains(
-            "let _UpdRes0 = call 'beamtalk_object_class':'update_class'('Counter', ClassInfo0)"
-        ),
-        "Should wrap update_class call in let binding. Got:\n{code}"
-    );
-    assert!(
-        code.contains("<{'ok', _}> when 'true' -> 'ok'"),
-        "Should normalize update_class success to ok. Got:\n{code}"
     );
 
     // BT-749: Short-circuit: earlier error must propagate before executing later classes.
