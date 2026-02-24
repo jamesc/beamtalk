@@ -747,7 +747,12 @@ term_to_json_map_with_integer_key_test() ->
 
 term_to_json_dead_pid_test() ->
     Pid = spawn(fun() -> ok end),
-    timer:sleep(50),
+    Ref = erlang:monitor(process, Pid),
+    receive
+        {'DOWN', Ref, process, Pid, _} -> ok
+    after 1000 ->
+        error(process_did_not_die)
+    end,
     ?assertNot(is_process_alive(Pid)),
     Result = beamtalk_repl_json:term_to_json(Pid),
     ?assert(binary:match(Result, <<"#Dead<">>) =/= nomatch).
