@@ -63,4 +63,6 @@ TestCase subclass: ArithmeticOperationsTest
   testAsFloat =>
     // Test integer to float conversion
     f := 42 asFloat.
-    self assert: (f class) equals: Float
+    self assert: (f class) equals: Float.
+    self assert: (f > 41.9).
+    self assert: (f < 42.1)

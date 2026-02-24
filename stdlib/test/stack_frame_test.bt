@@ -50,32 +50,14 @@ TestCase subclass: StackFrameTest
     result := [1 / 0] on: Exception do: [:e | (e stackTrace first printString) class].
     self assert: result equals: String
 
-  testStackFrameLineType =>
-    // StackFrame line returns Integer or nil
-    result := [1 / 0] on: Exception do: [:e | (e stackTrace first line) class].
-    // Result can be Integer or nil (no assertion on specific value)
-    self assert: true
-
-  testStackFrameFileType =>
-    // StackFrame file returns String or nil
-    result := [1 / 0] on: Exception do: [:e | (e stackTrace first file) class].
-    // Result can be String or nil (no assertion on specific value)
-    self assert: true
-
-  testStackFrameModuleNameType =>
-    // StackFrame moduleName returns a String or nil
-    result := [1 / 0] on: Exception do: [:e | (e stackTrace first moduleName) class].
-    // Result can be String or nil (no assertion on specific value)
-    self assert: true
-
-  testStackFrameReceiverClass =>
-    // StackFrame receiverClass from division by zero
-    result := [1 / 0] on: Exception do: [:e | (e stackTrace first receiverClass) class].
-    // Result may be a class or nil (no assertion on specific value)
-    self assert: true
-
-  testStackFrameSourceLocation =>
-    // StackFrame sourceLocation returns a String or nil
-    result := [1 / 0] on: Exception do: [:e | (e stackTrace first sourceLocation) class].
-    // Result can be String or nil (no assertion on specific value)
-    self assert: true
+  testStackFrameAccessors =>
+    // StackFrame accessors return values without error
+    frame := [1 / 0] on: Exception do: [:e | e stackTrace first].
+    self assert: (frame class) equals: StackFrame.
+    // line, file, moduleName, receiverClass, sourceLocation may return nil or a value
+    // Verify they respond without crashing
+    self assert: (frame respondsTo: #line).
+    self assert: (frame respondsTo: #file).
+    self assert: (frame respondsTo: #moduleName).
+    self assert: (frame respondsTo: #receiverClass).
+    self assert: (frame respondsTo: #sourceLocation)

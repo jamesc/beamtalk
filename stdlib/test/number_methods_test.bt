@@ -51,6 +51,12 @@ TestCase subclass: NumberMethodsTest
   testIntegerIsNegative =>
     self assert: (-3 isNegative)
 
+  testFloatNegated =>
+    self assert: (3.14 negated) equals: -3.14
+
+  testFloatAbs =>
+    self assert: (-3.14 abs) equals: 3.14
+
   testFloatMinMax =>
     self assert: (3.14 min: 2.71) equals: 2.71.
     self assert: (3.14 max: 2.71) equals: 3.14
