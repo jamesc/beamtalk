@@ -1127,16 +1127,16 @@ Module {
                                     Block {
                                         parameters: [
                                             BlockParameter {
-                                                name: "each",
+                                                name: "i",
                                                 span: Span {
                                                     start: 1466,
-                                                    end: 1470,
+                                                    end: 1467,
                                                 },
                                             },
                                             BlockParameter {
-                                                name: "i",
+                                                name: "each",
                                                 span: Span {
-                                                    start: 1472,
+                                                    start: 1469,
                                                     end: 1473,
                                                 },
                                             },
@@ -1368,16 +1368,16 @@ Module {
                                     Block {
                                         parameters: [
                                             BlockParameter {
-                                                name: "each",
+                                                name: "i",
                                                 span: Span {
                                                     start: 1640,
-                                                    end: 1644,
+                                                    end: 1641,
                                                 },
                                             },
                                             BlockParameter {
-                                                name: "i",
+                                                name: "each",
                                                 span: Span {
-                                                    start: 1646,
+                                                    start: 1643,
                                                     end: 1647,
                                                 },
                                             },

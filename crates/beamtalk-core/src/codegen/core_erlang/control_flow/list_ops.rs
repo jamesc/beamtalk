@@ -379,13 +379,13 @@ impl CoreErlangGenerator {
         initial: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
-        // BT-493: Validate body block arity (must be 2-arg: element and accumulator)
+        // BT-493: Validate body block arity (must be 2-arg: accumulator and element)
         validate_block_arity_exact(
             body,
             2,
             "inject:into:",
-            "Fix: The body block must take two arguments (element and accumulator):\n\
-             \x20 list inject: 0 into: [:each :sum | sum + each]",
+            "Fix: The body block must take two arguments (accumulator and element):\n\
+             \x20 list inject: 0 into: [:sum :each | sum + each]",
         )?;
 
         // Check if body is a literal block (enables mutation analysis)
@@ -397,29 +397,21 @@ impl CoreErlangGenerator {
             }
         }
 
-        // Simple case: no mutations, use standard lists:foldl
-        // BT-505/BT-511: Add is_list guard for non-list collection types (Stream, etc.)
-        let list_var = self.fresh_temp_var("temp");
+        // Simple case: no mutations, delegate to beamtalk_collection_ops:inject_into
+        // which wraps the block to call Block(Acc, Elem) matching Beamtalk convention.
+        // BT-820: lists:foldl calls Fun(Elem, Acc) but Beamtalk convention is Block(Acc, Elem).
         let recv_code = self.expression_doc(receiver)?;
-        let init_var = self.fresh_temp_var("temp");
         let init_code = self.expression_doc(initial)?;
-        let body_var = self.fresh_temp_var("temp");
         let body_code = self.expression_doc(body)?;
 
         Ok(docvec![
-            format!("let {list_var} = "),
+            "call 'beamtalk_collection_ops':'inject_into'(",
             recv_code,
-            format!(" in let {init_var} = "),
+            ", ",
             init_code,
-            format!(" in let {body_var} = "),
+            ", ",
             body_code,
-            format!(
-                " in case call 'erlang':'is_list'({list_var}) of \
-                 <'true'> when 'true' -> \
-                 call 'lists':'foldl'({body_var}, {init_var}, {list_var}) \
-                 <'false'> when 'true' -> \
-                 call 'beamtalk_primitive':'send'({list_var}, 'inject:into:', [{init_var}, {body_var}]) end"
-            ),
+            ")",
         ])
     }
 
@@ -531,14 +523,15 @@ impl CoreErlangGenerator {
         &mut self,
         body: &Block,
     ) -> Result<Document<'static>> {
-        // The block should have 2 parameters: item and accumulator
+        // The block should have 2 parameters: accumulator and element (BT-820)
+        // Beamtalk convention: inject: init into: [:acc :elem | ...]
         self.push_scope();
 
         if !body.parameters.is_empty() {
-            self.bind_var(&body.parameters[0].name, "Item");
+            self.bind_var(&body.parameters[0].name, "Acc");
         }
         if body.parameters.len() >= 2 {
-            self.bind_var(&body.parameters[1].name, "Acc");
+            self.bind_var(&body.parameters[1].name, "Item");
         }
 
         // Replace "State" with "StateAcc" for this nested context
