@@ -183,25 +183,33 @@ count := 0
 2. BEAM's single-assignment model requires compiler support to achieve this — compilation to tail-recursive loops with state threading bridges the semantic gap
 3. Better than alternatives: C-style loops lose message-passing elegance; immutable-only makes simple counters painful; mutable-everywhere loses reasoning guarantees
 
-**The rule:**
+**Current rule (Tier 1 — implemented):**
 
-> Literal blocks in control-flow positions can mutate. Stored/passed closures cannot.
+> Literal blocks in recognised control-flow positions can mutate local variables and fields. The compiler generates tail-recursive loops with explicit state threading.
 
 ```beamtalk
-// Literal block in control flow — OK
+// Literal block in control flow — works today
 [count < 10] whileTrue: [count := count + 1]
-
-// Stored closure cannot mutate — WARNING or ERROR
-myBlock := [count := count + 1]
-10 timesRepeat: myBlock          // count won't change
 ```
 
-**Detected control-flow constructs:** `whileTrue:`, `whileFalse:`, `timesRepeat:`, `to:do:`, `do:`, `collect:`, `select:`, `reject:`, `inject:into:`.
+**Recognised control-flow constructs:** `whileTrue:`, `whileFalse:`, `timesRepeat:`, `to:do:`, `do:`, `collect:`, `select:`, `reject:`, `inject:into:`.
+
+**Planned: Universal block protocol (Tier 2 — [ADR 0041](0041-universal-state-threading-block-protocol.md), accepted):**
+
+> All blocks that capture mutable variables will use a universal state-threading protocol: `fun(Args..., StateAcc) -> {Result, NewStateAcc}`. The recognised constructs above become Tier 1 optimization hints rather than a correctness gate.
+
+```beamtalk
+// Stored closure with mutation — planned (Tier 2: universal protocol)
+myBlock := [count := count + 1]
+10 timesRepeat: myBlock          // count will be 10
+
+// User-defined HOM — planned (Tier 2: universal protocol)
+items eachPair: [:a :b | count := count + a + b]   // mutations will propagate
+```
 
 **Known limitations:**
-- The set of recognised control-flow constructs is a **hardcoded whitelist** in the compiler. User-defined higher-order methods do not get state threading — mutations in blocks passed to custom methods will not propagate. This limits compositionality for library authors who want to write Smalltalk-style control-flow abstractions.
-- Non-local returns (`^` inside blocks) compile to throw/catch on BEAM, which has measurable allocation cost compared to Erlang's tail-recursive early termination. This affects collection methods like `detect:`, `anySatisfy:`, and `includes:` that use `^` for early exit.
-- Some abstract collection methods (e.g., `inject:into:`) require primitive implementations because a pure-Beamtalk implementation using nested control flow does not compose state threading correctly.
+- Non-local returns (`^` inside blocks) compile to throw/catch on BEAM, which has measurable allocation cost compared to Erlang's tail-recursive early termination. This affects collection methods like `detect:`, `anySatisfy:`, and `includes:` that use `^` for early exit. Under ADR 0041, NLR throws will carry the accumulated `StateAcc` so mutations are preserved across early returns.
+- Stateful blocks passed to Erlang/Elixir code will require wrapper funs that strip the state protocol; mutations made inside the block are silently dropped since Erlang cannot propagate the updated state. The compiler will emit a warning at these boundaries.
 
 ### Cross-Referenced Departures
 
@@ -213,6 +221,7 @@ The following departures have dedicated ADRs and are summarised here for complet
 | Equality semantics | [ADR 0002](0002-use-erlang-comparison-operators.md) | Use Erlang's `==`, `/=`, `=:=`, `=/=` directly — structural equality, not identity-based |
 | Class definition syntax | [ADR 0038](0038-subclass-classbuilder-protocol.md) | `Object subclass: Counter` is parsed as **syntax** (not a message send), compiled to `ClassBuilder` protocol |
 | No compound assignment | [ADR 0001](0001-no-compound-assignment.md) | No `+=`, `-=` — use explicit `x := x + 1` to preserve message-passing purity |
+| Control-flow block mutations | [ADR 0041](0041-universal-state-threading-block-protocol.md) | Universal state-threading block protocol — mutations now work in user-defined higher-order methods, not just whitelisted stdlib selectors |
 
 ## Prior Art
 
@@ -250,7 +259,7 @@ Both modernised their predecessors (Java, Objective-C) by removing ceremony. Imp
 ### For Smalltalk-80 Compatibility (Smalltalk cohort)
 "Every departure from Smalltalk-80 makes Beamtalk harder to learn for existing Smalltalkers and reduces the value of Smalltalk educational materials. Left-to-right precedence is *simpler* (one rule, no precedence table to memorise). `"..."` comments are fine once you know them. The departures optimise for first impressions at the cost of paradigm coherence. Worse, the 'literal vs stored' block distinction has no Smalltalk precedent — in Pharo, *all* blocks can mutate outer variables. Beamtalk claims to preserve Smalltalk idioms but introduces a restriction that breaks the fundamental assumption that blocks are composable."
 
-**Response:** Valid concerns on both counts. For surface syntax: Beamtalk's target audience is broader than the existing Smalltalk community. The departures remove barriers that prevent developers from *discovering* Smalltalk's actual innovations (message passing, live objects). A developer who bounces off `"comment"` syntax never reaches keyword messages. For block compositionality: this is a genuine limitation imposed by BEAM's single-assignment model. The hardcoded whitelist is an honest engineering tradeoff — it covers the common Smalltalk control-flow patterns at the cost of extensibility. Library authors writing custom higher-order methods will encounter this boundary. We accept this as a known limitation rather than hiding it.
+**Response:** Valid concerns on both counts. For surface syntax: Beamtalk's target audience is broader than the existing Smalltalk community. The departures remove barriers that prevent developers from *discovering* Smalltalk's actual innovations (message passing, live objects). A developer who bounces off `"comment"` syntax never reaches keyword messages. For block compositionality: this is a genuine limitation imposed by BEAM's single-assignment model. [ADR 0041](0041-universal-state-threading-block-protocol.md) (accepted) will resolve this by introducing a universal state-threading block protocol where all blocks that capture mutable state use `fun(Args..., StateAcc) -> {Result, NewStateAcc}`. Once implemented, user-defined higher-order methods will participate in state threading and the hardcoded whitelist will be reclassified from a correctness gate to a performance optimization hint.
 
 ### For Maximum Modernisation (Mainstream cohort)
 "If you're already departing from Smalltalk, go further. Use `def` instead of `=>`, use `fn` for blocks, use `class Counter < Object` instead of `Object subclass: Counter`. Half-measures satisfy nobody."
@@ -267,7 +276,7 @@ Both modernised their predecessors (Java, Objective-C) by removing ceremony. Imp
 ### Keep Full Smalltalk-80 Syntax
 Description: Use `"..."` comments, left-to-right precedence, required `.` terminators, no field access, no string interpolation.
 
-**Rejected because:** Creates unnecessary friction for 95% of potential users. Smalltalk-80 syntax is a barrier to adoption, not a feature. Developers who want full Smalltalk-80 can use Pharo.
+**Rejected because:** Creates unnecessary friction for the vast majority of potential users. Smalltalk-80 syntax is a barrier to adoption, not a feature. Developers who want full Smalltalk-80 can use Pharo.
 
 ### Adopt Ruby/Python Syntax Entirely
 Description: Use `def`/`end`, `#` comments, `class Counter(Object):`, standard function call syntax.
@@ -286,12 +295,12 @@ Description: Support both `"..."` and `//` comments, both left-to-right and PEMD
 - **Focus on innovations**: The learning curve centres on keyword messages and blocks (Smalltalk's actual contributions) rather than historical accidents
 - **Modern tooling**: `//` comments, standard precedence, and implicit returns enable straightforward integration with editors, linters, and formatters
 - **BEAM transparency**: Equality operators and compilation model map directly to Erlang — no hidden translation layer
+- **Control-flow mutation will be fully composable**: [ADR 0041](0041-universal-state-threading-block-protocol.md) (accepted) extends state threading to user-defined higher-order methods and stored closures, not just whitelisted stdlib selectors
 
 ### Negative
 - **Smalltalk community friction**: Experienced Smalltalkers may view the departures as abandoning the paradigm, reducing willingness to adopt or contribute
 - **Not a Smalltalk**: Educational materials, books, and courses for Smalltalk-80 do not apply directly — learners must mentally translate
 - **Precedent for further departures**: Each departure weakens the argument for keeping the next Smalltalk convention, creating a "slippery slope" pressure toward full modernisation
-- **Control-flow mutation is not composable**: The hardcoded whitelist of control-flow constructs means user-defined higher-order methods do not get state threading. This limits library authors and breaks the Smalltalk expectation that blocks are fully composable
 - **Debuggability**: State-threaded loops generate BEAM variables (`StateAcc`, `Packed_0`) that do not map obviously to Beamtalk source, making crash dumps harder to read for BEAM developers
 
 ### Neutral
