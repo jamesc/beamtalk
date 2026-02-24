@@ -165,6 +165,14 @@ impl CoreErlangGenerator {
             // For other receivers, generate a runtime type check to handle both
             // blocks (apply) and non-blocks (runtime dispatch via send).
             MessageSelector::Unary(name) if name == "value" => {
+                // BT-851: Check if receiver is a Tier 2 block parameter (zero-arg value)
+                if let Expression::Identifier(id) = receiver {
+                    if self.tier2_block_params.contains(id.name.as_str()) {
+                        let doc =
+                            self.generate_block_value_call_stateful(receiver, arguments)?;
+                        return Ok(Some(doc));
+                    }
+                }
                 let doc = if matches!(receiver, Expression::Block { .. }) {
                     self.generate_block_value_call(receiver, &[])?
                 } else {

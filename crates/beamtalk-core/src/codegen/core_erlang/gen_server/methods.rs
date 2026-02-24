@@ -9,7 +9,7 @@
 //! and reply tuples, and the `register_class/0` on-load function.
 
 use super::super::document::{Document, INDENT, line, nest};
-use super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
+use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, ClassDefinition, Expression, MethodDefinition, MethodKind, Module};
 use crate::docvec;
 
@@ -342,6 +342,15 @@ impl CoreErlangGenerator {
                         }
                     }
                 }
+            } else if self.is_tier2_value_call(expr) {
+                // BT-851: Tier 2 value: calls in non-last positions silently lose
+                // state updates. Reject at compile time until Phase 1 adds chaining.
+                return Err(CodeGenError::UnsupportedFeature {
+                    feature: "Tier 2 stateful block value: call in non-last position \
+                              (state updates would be lost)"
+                        .to_string(),
+                    location: "actor method body".to_string(),
+                });
             } else if let Some(tier2_args) = Self::detect_tier2_self_send(expr) {
                 // BT-851: Tier 2 self-send with stateful block arguments.
                 // Pack captured locals into State, send, extract locals from returned State.
@@ -657,6 +666,15 @@ impl CoreErlangGenerator {
                     " in let {new_state} = call 'erlang':'element'(3, {super_result_var}) in "
                 ));
                 docs.push(doc);
+            } else if self.is_tier2_value_call(expr) {
+                // BT-851: Tier 2 value: calls in non-last positions silently lose
+                // state updates. Reject at compile time until Phase 1 adds chaining.
+                return Err(CodeGenError::UnsupportedFeature {
+                    feature: "Tier 2 stateful block value: call in non-last position \
+                              (state updates would be lost)"
+                        .to_string(),
+                    location: "actor method body".to_string(),
+                });
             } else if let Some(tier2_args) = Self::detect_tier2_self_send(expr) {
                 // BT-851: Tier 2 self-send with stateful block arguments.
                 let doc = self.generate_tier2_self_send_open(expr, &tier2_args)?;
@@ -1281,15 +1299,23 @@ impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn is_tier2_value_call(&self, expr: &Expression) -> bool {
         if let Expression::MessageSend {
             receiver,
-            selector: crate::ast::MessageSelector::Keyword(parts),
+            selector,
             ..
         } = expr
         {
-            let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-            if matches!(
-                selector_name.as_str(),
-                "value:" | "value:value:" | "value:value:value:"
-            ) {
+            let is_value_selector = match selector {
+                crate::ast::MessageSelector::Unary(name) => name == "value",
+                crate::ast::MessageSelector::Keyword(parts) => {
+                    let selector_name: String =
+                        parts.iter().map(|p| p.keyword.as_str()).collect();
+                    matches!(
+                        selector_name.as_str(),
+                        "value:" | "value:value:" | "value:value:value:"
+                    )
+                }
+                crate::ast::MessageSelector::Binary(_) => false,
+            };
+            if is_value_selector {
                 if let Expression::Identifier(id) = receiver.as_ref() {
                     return self.tier2_block_params.contains(id.name.as_str());
                 }

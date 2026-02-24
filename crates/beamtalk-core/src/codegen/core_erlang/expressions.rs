@@ -616,7 +616,7 @@ impl CoreErlangGenerator {
                 }
             } else {
                 // Non-assignment expression
-                if i > 0 && !is_last {
+                if !is_last {
                     docs.push(Document::Str("let _ = "));
                 }
                 let doc = self.generate_expression(expr)?;

@@ -1384,6 +1384,31 @@ impl CoreErlangGenerator {
             Expression::Cascade {
                 receiver, messages, ..
             } => {
+                // Detect cascaded self-sends as Tier 2 call sites
+                if let Expression::Identifier(id) = receiver.as_ref() {
+                    if id.name == "self" {
+                        for msg in messages {
+                            let sel_name = msg.selector.name().to_string();
+                            for (i, arg) in msg.arguments.iter().enumerate() {
+                                if let Expression::Block(block) = arg {
+                                    let analysis = analyze(block);
+                                    let has_captured_mutations = analysis
+                                        .local_writes
+                                        .intersection(&analysis.captured_reads)
+                                        .next()
+                                        .is_some();
+                                    if has_captured_mutations {
+                                        self.tier2_method_info
+                                            .entry(sel_name.clone())
+                                            .or_default()
+                                            .push(i);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // Recurse into receiver and arguments
                 self.scan_expr_for_tier2(receiver, analyze);
                 for msg in messages {
                     for arg in &msg.arguments {
