@@ -37,7 +37,7 @@
 %% - start_args: extra arguments after the registration tuple for start_link
 %%
 %% Order matters: the supervisor starts children in list order, and
-%% WorkspaceEnvironment must start after the actor registry (interleaved
+%% WorkspaceInterface must start after the actor registry (interleaved
 %% by beamtalk_workspace_sup:singleton_child_specs/0).
 -spec singletons() -> [singleton_config()].
 singletons() ->

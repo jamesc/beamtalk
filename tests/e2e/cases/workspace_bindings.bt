@@ -88,7 +88,7 @@ Transcript show: "Hello"; cr; show: "World"
 // BEAMTALK BINDING — GLOBALS
 // ===========================================================================
 
-// Beamtalk globals returns a map (empty in Phase 1)
+// Beamtalk globals returns a map (class registry snapshot)
 globals := (Beamtalk globals) await
 // => _
 

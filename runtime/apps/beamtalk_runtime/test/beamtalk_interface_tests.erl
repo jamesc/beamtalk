@@ -338,8 +338,18 @@ globals_returns_map_test_() ->
                 {ok, Pid} = beamtalk_interface:start_link(),
                 Globals = gen_server:call(Pid, {globals, []}),
 
-                %% Should return a map (empty in Phase 1)
+                %% Should return a non-empty map (class registry snapshot)
                 ?assert(is_map(Globals)),
+                ?assert(map_size(Globals) > 0),
+
+                %% Values should be beamtalk_object tuples with binary keys
+                maps:foreach(
+                    fun(Key, Val) ->
+                        ?assert(is_binary(Key)),
+                        ?assertMatch({beamtalk_object, _, _, _}, Val)
+                    end,
+                    Globals
+                ),
 
                 gen_server:stop(Pid)
             end)

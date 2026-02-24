@@ -363,9 +363,9 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `readAll:` | @primitive selector | ✅ | 🧪 | `FileReference>>contents` |
 | `writeAll:contents:` | @primitive selector | ✅ | 🧪 | `FileReference>>writeStream` |
 
-### Beamtalk / SystemDictionary (`stdlib/src/SystemDictionary.bt`)
+### Beamtalk / BeamtalkInterface (`stdlib/src/BeamtalkInterface.bt`)
 
-**Class:** `SystemDictionary` — superclass: `Actor`
+**Class:** `BeamtalkInterface` — superclass: `Actor`
 **Methods:** 4/4 implemented (100%)
 
 | Selector | Mechanism | Status | E2E | Pharo Equivalent |
@@ -710,7 +710,7 @@ with no coverage in either test suite:
 | **Exception** | `describe`, `signal`, `signal:` |
 | **Error** | `describe` |
 | **TranscriptStream** | `subscribe`, `unsubscribe`, `recent`, `clear` |
-| **SystemDictionary** | `globals` |
+| **BeamtalkInterface** | `globals` |
 
 ---
 
