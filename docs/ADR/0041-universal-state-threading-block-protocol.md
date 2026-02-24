@@ -346,31 +346,33 @@ In practice, the majority of blocks are pure:
 
 For context, a process dictionary `get`/`put` pair costs 100-500ns, and an ETS read costs ~1μs. The tuple+map approach is the cheapest mutable-state mechanism available on BEAM, and the two-tier optimization ensures stdlib hot paths pay nothing.
 
-### Elimination of `BlockContext` Classification
+### Reclassification of `BlockContext` and Whitelist
 
-The `BlockContext` enum and `is_control_flow_selector()` whitelist become unnecessary:
+The `is_control_flow_selector()` whitelist is **reclassified** from a correctness gate to an optimization hint. It is not deleted — it continues to identify Tier 1 inline sites where the compiler can generate optimized pack/unpack codegen without the universal protocol overhead.
 
 | Current | Universal Protocol |
 |---------|-------------------|
-| `BlockContext::ControlFlow` — triggers state threading | Removed — `BlockMutationAnalysis` alone decides |
-| `BlockContext::Stored` — compiled as plain fun | Removed — stored blocks get state param if they mutate |
-| `BlockContext::Passed` — compiled as plain fun | Removed — passed blocks get state param if they mutate |
-| `is_control_flow_selector()` whitelist of ~20 selectors | Removed entirely |
-| `classify_block()` function | Removed — no longer needed |
+| `BlockContext::ControlFlow` — **gates** state threading | **Optimization hint** — triggers Tier 1 inline codegen |
+| `BlockContext::Stored` — compiled as plain fun | Tier 2 — stored blocks get `fun(Args..., StateAcc) -> {Result, NewStateAcc}` |
+| `BlockContext::Passed` — compiled as plain fun | Tier 2 — passed blocks get stateful convention |
+| `is_control_flow_selector()` — correctness gate | **Optimization hint** — identifies Tier 1 fast path |
+| `classify_block()` function | Retained — routes between Tier 1 and Tier 2 codegen |
 
-The decision of whether to thread state is based solely on `BlockMutationAnalysis.has_mutations()` and `needs_mutation_threading()`, which already exist and work correctly. The whitelist was an additional gate that prevented state threading for blocks outside known control flow — removing it is the entire point.
+The key change: blocks at `Stored`/`Passed`/`Unknown` sites now get state threading (previously they got nothing). The whitelist no longer prevents state threading — it identifies sites where the compiler can skip the universal protocol and use optimized inline codegen instead.
 
 ### Impact on Existing Codegen Modules
 
 | Module | Change |
 |--------|--------|
-| `block_context.rs` | **Deprecated.** `is_control_flow_selector()` and `classify_block()` no longer gate state threading. May retain for IDE hinting. |
+| `block_context.rs` | **Reclassified.** `is_control_flow_selector()` becomes optimization hint (Tier 1 routing), no longer a correctness gate. `classify_block()` retained to route between Tier 1 and Tier 2 codegen. |
 | `block_analysis.rs` | **Unchanged.** `BlockMutationAnalysis` remains the source of truth. |
-| `while_loops.rs` | **Simplified.** No longer needs separate pure/stateful code paths — the block itself carries the convention. The outer loop still manages `StateAcc` for its own iteration state. |
-| `counted_loops.rs` | **Simplified.** Same as `while_loops.rs`. |
-| `list_ops.rs` | **Simplified.** `do:`, `collect:`, `select:`, `reject:` use the same protocol. Can potentially unify with `lists:foldl` for all stateful variants. |
+| `while_loops.rs` | **Unchanged for Tier 1.** The existing dual paths (`_simple` / `_with_mutations`) remain — they are the Tier 1 optimized codegen for known inline sites. No code deleted here. |
+| `counted_loops.rs` | **Unchanged for Tier 1.** Same as `while_loops.rs` — existing `_simple` / `_with_mutations` paths stay. |
+| `list_ops.rs` | **Unchanged for Tier 1.** Existing `generate_list_do_with_mutations()` / `generate_list_inject_with_mutations()` paths stay. |
 | `value_type_codegen.rs` | **Modified.** NLR throws gain state parameter (3-tuple → 4-tuple for value types). Try/catch extracts state from the throw. |
-| `mod.rs` (main codegen) | **Modified.** Block compilation checks `BlockMutationAnalysis` to decide convention. No whitelist check. Expression::Return codegen always includes state when NLR token is active. |
+| `mod.rs` (main codegen) | **Modified.** New Tier 2 codegen: block compilation at unknown call sites emits `fun(Args..., StateAcc) -> {Result, NewStateAcc}`. Caller-side protocol for HOMs. Expression::Return codegen always includes state when NLR token is active. |
+
+**Net effect: code increases.** The Tier 1 inline codegen (~12 existing pure/stateful function pairs across `while_loops.rs`, `counted_loops.rs`, `list_ops.rs`) is retained unchanged. New Tier 2 universal protocol code is added. The win is **correctness** (HOMs work with mutating blocks), not code reduction.
 
 ## Prior Art
 
@@ -547,9 +549,9 @@ This is a tempting middle ground that preserves zero-overhead stdlib iteration w
 ### Positive
 
 - **Block composability restored.** User-defined HOMs work with mutating blocks, matching Smalltalk's fundamental promise.
-- **Whitelist eliminated.** No more maintaining a hardcoded list of ~20 selectors. New collection methods work automatically.
-- **`BlockContext` enum simplified.** The `ControlFlow`/`Stored`/`Passed`/`Other`/`Unknown` classification is no longer needed for codegen routing.
-- **One calling convention.** Simpler to maintain, test, debug, and extend. Future codegen features only need one path.
+- **Whitelist reclassified.** The hardcoded selector list becomes an optimization hint, not a correctness gate. New collection methods get state threading automatically without whitelist changes.
+- **`BlockContext` repurposed.** The classification is retained but now routes between Tier 1 (optimized inline) and Tier 2 (universal protocol) codegen, rather than gating correctness.
+- **One calling convention at unknown sites.** HOMs, stored blocks, and cross-module blocks all use the same protocol. Future codegen features for these sites only need one path.
 - **Stored blocks work.** `myBlock := [count := count + 1]` can be passed to any HOM and mutations propagate.
 - **NLR state preservation.** Non-local returns (`^`) now carry accumulated state, preventing silent mutation loss in `detect:`, `anySatisfy:`, etc.
 
