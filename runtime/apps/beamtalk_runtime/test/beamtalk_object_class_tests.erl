@@ -1,5 +1,10 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
+%% **DDD Context:** Runtime
+
+%%% @doc EUnit tests for beamtalk_object_class module.
+%%%
+%%% Tests class-side method dispatch, metaclass lookup, and class object behaviour.
 
 -module(beamtalk_object_class_tests).
 -include_lib("eunit/include/eunit.hrl").

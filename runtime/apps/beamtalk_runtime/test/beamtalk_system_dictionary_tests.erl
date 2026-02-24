@@ -36,8 +36,9 @@ setup() ->
 teardown(_) ->
     %% Trap exits to prevent linked class process kills from
     %% terminating the EUnit fixture process.
-    process_flag(trap_exit, true),
-    cleanup_test_classes().
+    OldTrapExit = process_flag(trap_exit, true),
+    cleanup_test_classes(),
+    process_flag(trap_exit, OldTrapExit).
 
 register_test_classes() ->
     %% Register Object class (base class)

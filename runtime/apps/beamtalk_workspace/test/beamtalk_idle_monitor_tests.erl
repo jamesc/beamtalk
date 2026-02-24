@@ -33,24 +33,6 @@ init_test() ->
     {ok, _State} = beamtalk_idle_monitor:init(test_config()),
     ok.
 
-%%% Idle threshold constant test
-
-idle_threshold_is_4_hours_test() ->
-    %% The module defines IDLE_THRESHOLD as 4 hours in milliseconds
-    %% 4 * 60 * 60 * 1000 = 14,400,000 ms
-    ExpectedThreshold = 4 * 60 * 60 * 1000,
-
-    %% We can't directly access the macro, but we can verify the logic
-    %% by checking that 4 hours in ms is the expected value
-    ?assertEqual(14400000, ExpectedThreshold).
-
-check_interval_is_10_minutes_test() ->
-    %% The module defines CHECK_INTERVAL as 10 minutes in milliseconds
-    %% 10 * 60 * 1000 = 600,000 ms
-    ExpectedInterval = 10 * 60 * 1000,
-
-    ?assertEqual(600000, ExpectedInterval).
-
 %%% Integration tests (require workspace_meta to be running)
 
 idle_monitor_starts_successfully_test() ->

@@ -405,6 +405,20 @@ sort_with_invalid_block_test() ->
         beamtalk_list_ops:sort_with([1, 2], not_a_function)
     ).
 
+sort_with_non_list_test() ->
+    ?assertException(
+        error,
+        #{
+            '$beamtalk_class' := 'TypeError',
+            error := #beamtalk_error{
+                kind = type_error,
+                class = 'List',
+                selector = 'sort:'
+            }
+        },
+        beamtalk_list_ops:sort_with(not_a_list, fun(A, B) -> A >= B end)
+    ).
+
 %%% ============================================================================
 %%% zip/2 tests
 %%% ============================================================================

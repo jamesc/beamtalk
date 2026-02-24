@@ -111,11 +111,6 @@ class_of_unknown_test() ->
 %%% send/3 tests
 %%% ============================================================================
 
-send_to_beamtalk_object_test() ->
-    %% This test requires a real actor, so we'll skip for now
-    %% (would need a test actor implementation)
-    ok.
-
 send_to_integer_test() ->
     %% Integer dispatch now implemented (BT-166)
     ?assertEqual(50, beamtalk_primitive:send(42, '+', [8])),

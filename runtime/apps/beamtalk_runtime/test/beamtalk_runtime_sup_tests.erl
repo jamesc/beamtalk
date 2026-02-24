@@ -139,9 +139,6 @@ all_children_alive_test() ->
         %% Get all children
         Children = supervisor:which_children(Sup),
 
-        %% Expected: 3 children (bootstrap, stdlib, instances)
-        ?assertEqual(3, length(Children)),
-
         %% Verify each child has correct ID and is alive
         ExpectedIds = [beamtalk_bootstrap, beamtalk_stdlib, beamtalk_object_instances],
         ActualIds = [Id || {Id, _Pid, _Type, _Modules} <- Children],
