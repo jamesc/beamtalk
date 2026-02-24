@@ -129,6 +129,18 @@ self getValue       // unary message
 
 **Compilation:** `self.value` compiles to `maps:get('value', State)` — a direct lookup, not a message send.
 
+**Future direction — Slots:** The current `self.field` syntax is intentionally forward-compatible with a slot-based extension, as seen in Pharo and Dylan. A slot is a class-side object that controls how a field is compiled — the default slot emits `maps:get` (same as today), but custom slot types could emit type checks, change notifications, or lazy initialisation with zero overhead for the common case. Access control would be enforced at compile time rather than runtime, which fits Beamtalk's actor model naturally: field access is already bounded by process scope externally, so compile-time enforcement within the class hierarchy is the right level.
+
+`state:` would remain the shorthand for the default slot — no existing code changes. Custom slots would be expressed as an extension of the existing `state:` declaration syntax (which already supports type annotations as `state: value: Integer = 0`):
+
+```beamtalk
+state: value = 0                           // unchanged — default slot, maps:get
+state: value: Integer = 0                  // already supported today
+state: value slot: ObservableSlot = 0      // future — custom slot type
+```
+
+`self.value` remains the access form regardless of slot type.
+
 ### 5. Return Semantics: Implicit Returns, `^` for Early Returns Only
 
 **Smalltalk-80:** `^` required for every return.
@@ -239,6 +251,9 @@ Beamtalk targets the same runtime. Elixir's success demonstrates that a modernis
 
 ### Kotlin / Swift
 Both modernised their predecessors (Java, Objective-C) by removing ceremony. Implicit returns, standard precedence, `//` comments — Beamtalk makes the same moves relative to Smalltalk.
+
+### Dylan
+Dylan (Apple/CMU, 1990s) was another Lisp/Smalltalk-inspired language with pragmatic syntax choices for mainstream developers. Relevant to Section 4: Dylan's slot system defines fields as class-side objects with `define class` specifying slot options (`sealed`, `open`, `constant`, `virtual`). The compiler dispatches to the appropriate accessor code at compile time based on the slot descriptor — zero runtime overhead for the common case, full extensibility for instrumented or virtual slots. This is the same compile-time polymorphism model that Pharo later adopted and that Beamtalk's `self.field` syntax is forward-compatible with.
 
 ## User Impact
 
