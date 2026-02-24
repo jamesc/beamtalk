@@ -57,13 +57,13 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0028](0028-beam-interop-strategy.md) | BEAM Interop Strategy | Implemented | 2026-02-17 |
 | [0029](0029-streaming-eval-output.md) | Streaming Eval Output | Implemented | 2026-02-18 |
 | [0030](0030-cargo-dist-evaluation.md) | cargo-dist Evaluation for Release Packaging | Rejected | 2026-02-18 |
-| [0031](0031-flat-namespace-for-v01.md) | Flat Namespace for v0.1 | Accepted | 2026-02-18 |
-| [0032](0032-early-class-protocol.md) | Early Class Protocol — Behaviour and Class in Beamtalk Stdlib | Accepted | 2026-02-20 |
-| [0033](0033-runtime-embedded-documentation.md) | Runtime-Embedded Documentation on Class and CompiledMethod | Accepted | 2026-02-21 |
-| [0034](0034-stdlib-self-hosting-in-beamtalk.md) | Stdlib Self-Hosting — Moving Logic from Erlang to Beamtalk | Accepted | 2026-02-22 |
-| [0035](0035-field-based-reflection-api.md) | Rename Instance Variable Reflection API from instVar to field | Proposed | 2026-02-23 |
-| [0036](0036-full-metaclass-tower.md) | Full Metaclass Tower | Accepted | 2026-02-23 |
-| [0037](0037-collection-class-hierarchy.md) | Collection Class Hierarchy — Shallow Abstract Layer with Minimal Primitive Surface | Accepted | 2026-02-23 |
+| [0031](0031-flat-namespace-for-v01.md) | Flat Namespace for v0.1 | Implemented | 2026-02-18 |
+| [0032](0032-early-class-protocol.md) | Early Class Protocol — Behaviour and Class in Beamtalk Stdlib | Implemented | 2026-02-24 |
+| [0033](0033-runtime-embedded-documentation.md) | Runtime-Embedded Documentation on Class and CompiledMethod | Implemented | 2026-02-24 |
+| [0034](0034-stdlib-self-hosting-in-beamtalk.md) | Stdlib Self-Hosting — Moving Logic from Erlang to Beamtalk | Implemented | 2026-02-24 |
+| [0035](0035-field-based-reflection-api.md) | Rename Instance Variable Reflection API from instVar to field | Implemented | 2026-02-24 |
+| [0036](0036-full-metaclass-tower.md) | Full Metaclass Tower | Implemented | 2026-02-24 |
+| [0037](0037-collection-class-hierarchy.md) | Collection Class Hierarchy — Shallow Abstract Layer with Minimal Primitive Surface | Implemented | 2026-02-24 |
 | [0038](0038-subclass-classbuilder-protocol.md) | `subclass:` Grammar Desugaring to ClassBuilder Protocol | Accepted | 2026-02-24 |
 
 ## Creating New ADRs

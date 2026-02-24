@@ -1,7 +1,7 @@
 # ADR 0034: Stdlib Self-Hosting — Moving Logic from Erlang to Beamtalk
 
 ## Status
-Accepted (2026-02-22)
+Implemented (2026-02-24)
 
 ## Context
 

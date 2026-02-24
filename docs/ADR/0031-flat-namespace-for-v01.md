@@ -1,7 +1,7 @@
 # ADR 0031: Flat Namespace for v0.1
 
 ## Status
-Accepted (2026-02-18)
+Implemented (2026-02-18)
 
 ## Context
 

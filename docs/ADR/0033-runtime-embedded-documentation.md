@@ -1,7 +1,7 @@
 # ADR 0033: Runtime-Embedded Documentation on Class and CompiledMethod
 
 ## Status
-Accepted (2026-02-21)
+Implemented (2026-02-24)
 
 ## Context
 
