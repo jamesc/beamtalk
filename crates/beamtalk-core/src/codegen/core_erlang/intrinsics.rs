@@ -197,6 +197,14 @@ impl CoreErlangGenerator {
                 match selector_name.as_str() {
                     // `value:`, `value:value:`, `value:value:value:` - evaluate block with args
                     "value:" | "value:value:" | "value:value:value:" => {
+                        // BT-851: Check if receiver is a Tier 2 block parameter
+                        if let Expression::Identifier(id) = receiver {
+                            if self.tier2_block_params.contains(id.name.as_str()) {
+                                let doc =
+                                    self.generate_block_value_call_stateful(receiver, arguments)?;
+                                return Ok(Some(doc));
+                            }
+                        }
                         let doc = self.generate_block_value_call(receiver, arguments)?;
                         Ok(Some(doc))
                     }
@@ -372,6 +380,59 @@ impl CoreErlangGenerator {
             format!("let {fun_var} = "),
             recv_code,
             format!(" in apply {fun_var} ("),
+            args_doc,
+            ")",
+        ];
+        Ok(doc)
+    }
+
+    /// BT-851: Generates a Tier 2 stateful block value call (ADR 0041 Phase 0).
+    ///
+    /// Calls a Tier 2 block using the stateful protocol:
+    /// `apply _Fun(Args..., State) → {Result, NewState}`
+    ///
+    /// Returns a `{Result, NewState}` tuple (like control flow with mutations).
+    /// The method body generator must unpack this tuple to extract the result
+    /// and thread the new state through to the reply tuple.
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// let _Fun = <receiver> in apply _Fun (Arg1, ..., ArgN, State)
+    /// ```
+    ///
+    /// Returns `{Result, NewState}` tuple from the block.
+    pub(in crate::codegen::core_erlang) fn generate_block_value_call_stateful(
+        &mut self,
+        receiver: &Expression,
+        arguments: &[Expression],
+    ) -> Result<Document<'static>> {
+        let fun_var = self.fresh_temp_var("Fun");
+        let recv_code = self.expression_doc(receiver)?;
+        let current_state = self.current_state_var();
+
+        let mut arg_parts: Vec<Document<'static>> = Vec::new();
+        for (i, arg) in arguments.iter().enumerate() {
+            if i > 0 {
+                arg_parts.push(Document::Str(", "));
+            }
+            arg_parts.push(self.expression_doc(arg)?);
+        }
+        // Append State as last argument
+        if !arguments.is_empty() {
+            arg_parts.push(Document::Str(", "));
+        }
+        arg_parts.push(Document::String(current_state));
+        let args_doc = Document::Vec(arg_parts);
+
+        let doc = docvec![
+            "let ",
+            Document::String(fun_var.clone()),
+            " = ",
+            recv_code,
+            " in apply ",
+            Document::String(fun_var),
+            " (",
             args_doc,
             ")",
         ];

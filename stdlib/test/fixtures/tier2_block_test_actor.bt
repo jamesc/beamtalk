@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-851: Tier 2 block round-trip test fixture (ADR 0041 Phase 0).
+// Tests that a block with captured mutations can be passed to a HOM via
+// self-send and the mutation propagates back to the caller through state threading.
+
+Actor subclass: Tier2BlockTestActor
+
+  // HOM that receives a block and calls it with the Tier 2 protocol.
+  // The block parameter `aBlock` is compiled with the stateful calling convention
+  // when the compiler detects it receives a Tier 2 (captured-mutation) block.
+  applyBlock: aBlock to: anItem =>
+    aBlock value: anItem
+
+  // Self-sends applyBlock:to: with a Tier 2 block.
+  // The block `[:x | count := count + x]` captures and mutates `count`.
+  // After the self-send, `count` should reflect the mutation.
+  testRoundTrip =>
+    count := 0.
+    self applyBlock: [:x | count := count + x] to: 5.
+    count
