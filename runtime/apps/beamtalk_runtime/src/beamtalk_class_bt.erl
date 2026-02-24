@@ -49,10 +49,23 @@
 %% used as a probe to verify the dispatch fallthrough mechanism works.
 %% The probe method has been removed; the dispatch mechanism remains.
 %%
+%% ADR 0038 Phase 1 (BT-835): Exposes `classBuilder` as an instance method so
+%% that `Class respondsTo: #classBuilder` returns true (post-bootstrap assertion).
+%% The full implementation (`ClassBuilder new superclass: self`) is in Phase 2
+%% (Class.bt stdlib source). This stub makes the method discoverable.
+%%
 %% Future (ADR 0032 Phase 2): This stub will be replaced by a compiled
 %% Class.bt stdlib module with the real Class protocol methods.
 -spec dispatch(atom(), list(), term(), map()) ->
     {reply, term(), map()} | {error, #beamtalk_error{}, map()}.
+dispatch('classBuilder', _Args, _Self, State) ->
+    %% ADR 0038 Phase 1: classBuilder is wired via has_method/1 (see below), so that
+    %% Class respondsTo: #classBuilder returns true after bootstrap. The dispatch here
+    %% returns does_not_understand because Phase 1 only makes it discoverable; the full
+    %% ClassBuilder protocol is implemented in Phase 2 (ClassBuilder.bt stdlib module).
+    Error0 = beamtalk_error:new(does_not_understand, 'Class'),
+    Error = beamtalk_error:with_selector(Error0, 'classBuilder'),
+    {error, Error, State};
 dispatch(Selector, _Args, _Self, State) ->
     Error0 = beamtalk_error:new(does_not_understand, 'Class'),
     Error = beamtalk_error:with_selector(Error0, Selector),
@@ -63,8 +76,12 @@ dispatch(Selector, _Args, _Self, State) ->
 %% Used by beamtalk_object_class:has_method/2 to detect methods before
 %% looking up in the flattened table.
 %%
+%% ADR 0038 Phase 1 (BT-835): Returns true for `classBuilder` so that
+%% `Class respondsTo: #classBuilder` returns true post-bootstrap.
+%%
 %% ADR 0032 Phase 2: Will be replaced by compiled Class.bt exports.
 -spec has_method(atom()) -> boolean().
+has_method('classBuilder') -> true;
 has_method(_) -> false.
 
 %%% ============================================================================
@@ -90,6 +107,10 @@ register_class() ->
         class_methods => #{
             'superclass' => #{arity => 0}
         },
+        %% instance_methods is intentionally empty here. The compiled stdlib module
+        %% (bt@stdlib@class) provides the real instance_methods (name, printString, etc.)
+        %% via update_class on its first on_load. classBuilder is discoverable via
+        %% has_method/1 below (ADR 0038 Phase 1), not via the instance_methods map.
         instance_methods => #{}
     },
     case beamtalk_object_class:start('Class', ClassInfo) of
@@ -97,9 +118,9 @@ register_class() ->
             ?LOG_INFO("Registered Class (ADR 0032 Phase 0 stub)", #{module => ?MODULE}),
             ok;
         {error, {already_started, _}} ->
-            %% Class was already registered (e.g., bootstrap ran twice or a prior
-            %% test registered it). Refresh the metadata to keep it consistent.
-            beamtalk_object_class:update_class('Class', ClassInfo),
+            %% Class was already registered (compiled stdlib loaded first, or bootstrap
+            %% ran twice). Do nothing — the compiled stdlib module manages instance_methods
+            %% via update_class. classBuilder remains discoverable via has_method/1 below.
             ok;
         {error, Reason} ->
             ?LOG_WARNING("Failed to register Class", #{reason => Reason}),

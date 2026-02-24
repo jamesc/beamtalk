@@ -27,6 +27,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Boolean"
             | "Character"
             | "Class"
+            | "ClassBuilder"
             | "Collection"
             | "CompiledMethod"
             | "DateTime"
@@ -314,6 +315,32 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Class".into(), is_sealed: true, return_type: None, param_types: vec![] },
                 MethodInfo { selector: "isClass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Class".into(), is_sealed: true, return_type: None, param_types: vec![] },
                 MethodInfo { selector: "class".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Class".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "classBuilder".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Class".into(), is_sealed: true, return_type: None, param_types: vec![] },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "ClassBuilder".into(),
+        ClassInfo {
+            name: "ClassBuilder".into(),
+            superclass: Some("Actor".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            state: vec!["className".into(), "superclassRef".into(), "fieldSpecs".into(), "methodSpecs".into(), "modifiers".into()],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "name:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ClassBuilder".into(), is_sealed: false, return_type: None, param_types: vec![None] },
+                MethodInfo { selector: "superclass:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ClassBuilder".into(), is_sealed: false, return_type: None, param_types: vec![None] },
+                MethodInfo { selector: "fields:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ClassBuilder".into(), is_sealed: false, return_type: None, param_types: vec![None] },
+                MethodInfo { selector: "methods:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ClassBuilder".into(), is_sealed: false, return_type: None, param_types: vec![None] },
+                MethodInfo { selector: "addField:default:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "ClassBuilder".into(), is_sealed: false, return_type: None, param_types: vec![None, None] },
+                MethodInfo { selector: "addMethod:body:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "ClassBuilder".into(), is_sealed: false, return_type: None, param_types: vec![None, None] },
+                MethodInfo { selector: "modifier:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ClassBuilder".into(), is_sealed: false, return_type: None, param_types: vec![None] },
+                MethodInfo { selector: "register".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ClassBuilder".into(), is_sealed: false, return_type: None, param_types: vec![] },
             ],
             class_methods: vec![],
             class_variables: vec![],

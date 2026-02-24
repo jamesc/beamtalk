@@ -72,6 +72,8 @@ const STRUCTURAL_INTRINSICS: &[&str] = &[
     // BEAM interop (ADR 0028)
     "erlangModuleLookup",
     "erlangApply",
+    // ClassBuilder (ADR 0038)
+    "classBuilderRegister",
 ];
 
 /// Validates all `@primitive` usages in a module.

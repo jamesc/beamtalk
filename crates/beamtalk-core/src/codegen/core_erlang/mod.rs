@@ -1562,6 +1562,12 @@ impl CoreErlangGenerator {
                 ))
             })?;
 
+        // ADR 0038: ClassBuilder register intrinsic — emits a call to
+        // beamtalk_class_builder:register/1 with the builder's gen_server state.
+        if !is_quoted && name == "classBuilderRegister" {
+            return Ok(self.generate_class_builder_register());
+        }
+
         // BT-340: For selector-based primitives, try to emit a direct BIF call
         // instead of delegating through a hand-written dispatch module.
         if is_quoted {
@@ -1587,6 +1593,63 @@ impl CoreErlangGenerator {
         Ok(Document::String(format!(
             "call '{runtime_module}':'dispatch'('{name}', [{params_str}], {self_var})"
         )))
+    }
+
+    /// ADR 0038: Generates code for the `classBuilderRegister` intrinsic.
+    ///
+    /// Emits a call to `beamtalk_class_builder:register/1` with the builder's
+    /// `gen_server` state augmented with the builder's own PID (for cleanup).
+    ///
+    /// On success: returns a `#beamtalk_object{class = 'Class', class_mod = beamtalk_class_bt, pid = Pid}`
+    /// On error: raises the structured error via `beamtalk_error:raise/1`
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// let _Pid = call 'erlang':'self'() in
+    /// let _BS = call 'maps':'put'('builderPid', _Pid, State) in
+    /// case call 'beamtalk_class_builder':'register'(_BS) of
+    ///   <{'ok', _CP}> when 'true' ->
+    ///     {'beamtalk_object', 'Class', 'beamtalk_class_bt', _CP}
+    ///   <{'error', _Err}> when 'true' ->
+    ///     call 'beamtalk_error':'raise'(_Err)
+    /// end
+    /// ```
+    fn generate_class_builder_register(&mut self) -> Document<'static> {
+        let pid_var = self.fresh_temp_var("BuilderPid");
+        let state_var = self.fresh_temp_var("BuilderState");
+        let class_pid_var = self.fresh_temp_var("ClassPid");
+        let error_var = self.fresh_temp_var("RegErr");
+        let current_state = self.current_state_var();
+
+        docvec![
+            "let ",
+            Document::String(pid_var.clone()),
+            " = call 'erlang':'self'() in ",
+            "let ",
+            Document::String(state_var.clone()),
+            " = call 'maps':'put'('builderPid', ",
+            Document::String(pid_var),
+            ", ",
+            Document::String(current_state),
+            ") in ",
+            "case call 'beamtalk_class_builder':'register'(",
+            Document::String(state_var),
+            ") of ",
+            "<{'ok', ",
+            Document::String(class_pid_var.clone()),
+            "}> when 'true' -> ",
+            "{'beamtalk_object', 'Class', 'beamtalk_class_bt', ",
+            Document::String(class_pid_var),
+            "} ",
+            "<{'error', ",
+            Document::String(error_var.clone()),
+            "}> when 'true' -> ",
+            "call 'beamtalk_error':'raise'(",
+            Document::String(error_var),
+            ") ",
+            "end"
+        ]
     }
 }
 

@@ -15,6 +15,7 @@
             {'bt@stdlib@boolean', 'Boolean', 'Object'},
             {'bt@stdlib@character', 'Character', 'Integer'},
             {'bt@stdlib@class', 'Class', 'Behaviour'},
+            {'bt@stdlib@class_builder', 'ClassBuilder', 'Actor'},
             {'bt@stdlib@collection', 'Collection', 'Object'},
             {'bt@stdlib@compiled_method', 'CompiledMethod', 'Object'},
             {'bt@stdlib@date_time', 'DateTime', 'Object'},
