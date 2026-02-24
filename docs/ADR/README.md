@@ -65,7 +65,9 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0036](0036-full-metaclass-tower.md) | Full Metaclass Tower | Implemented | 2026-02-24 |
 | [0037](0037-collection-class-hierarchy.md) | Collection Class Hierarchy — Shallow Abstract Layer with Minimal Primitive Surface | Implemented | 2026-02-24 |
 | [0038](0038-subclass-classbuilder-protocol.md) | `subclass:` Grammar Desugaring to ClassBuilder Protocol | Accepted | 2026-02-24 |
+| [0039](0039-syntax-pragmatism-vs-smalltalk.md) | Syntax Pragmatism vs Smalltalk | Implemented | 2026-02-24 |
 | [0040](0040-workspace-native-repl-commands.md) | Workspace-Native REPL Commands, Facade/Dictionary Split, and Class-Based Reload | Accepted | 2026-02-24 |
+| [0041](0041-universal-state-threading-block-protocol.md) | Universal State-Threading Block Protocol | Accepted | 2026-02-24 |
 
 ## Creating New ADRs
 
