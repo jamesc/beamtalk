@@ -73,7 +73,9 @@ TestCase subclass: SetTest
     self assert: (((Set new) fromList: #(3, 1, 2)) asList) equals: #(1, 2, 3)
 
   testIteration =>
-    self assert: (((Set new) fromList: #(1, 2, 3)) do: [:x | nil]) equals: nil
+    self assert: (((Set new) fromList: #(1, 2, 3)) do: [:x | nil]) equals: nil.
+    // Block receives each element — inject:into: verifies correct values are passed
+    self assert: (((Set new) fromList: #(1, 2, 3)) inject: 0 into: [:sum :x | sum + x]) equals: 6
 
   testRespondstoMethodReflection =>
     s4 := (Set new) add: 1.
