@@ -23,7 +23,7 @@ TestCase subclass: CustomExceptionsTest
 
   testSignalPreservesKind =>
     result := [MyCustomError new signal: "test"] on: Exception do: [:e | e kind].
-    self assert: result equals: "signal"
+    self assert: result equals: #signal
 
   testCatchByExactClass =>
     // on: MyCustomError do: catches MyCustomError

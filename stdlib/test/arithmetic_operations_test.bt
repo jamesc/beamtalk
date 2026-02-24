@@ -61,5 +61,5 @@ TestCase subclass: ArithmeticOperationsTest
     self assert: (42 asString) equals: "42"
 
   testAsFloat =>
-    self assert: (42 asFloat) equals: 42.0.
-    self assert: (-5 asFloat) equals: -5.0
+    self assert: (42 asFloat) =:= 42.0.
+    self assert: (-5 asFloat) =:= -5.0
