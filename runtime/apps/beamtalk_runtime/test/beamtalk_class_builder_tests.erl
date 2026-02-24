@@ -1,5 +1,6 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
+%% **DDD Context:** Object System
 
 %%% @doc EUnit tests for beamtalk_class_builder:register/1 (ADR 0038 Phase 1, BT-835).
 %%%
@@ -225,6 +226,22 @@ register_bad_superclass_ref_error_test_() ->
                     className => 'BT835BadSuperRef',
                     superclassRef => <<"NotValidRef">>,
                     fieldSpecs => #{},
+                    methodSpecs => #{}
+                },
+                Result = beamtalk_class_builder:register(State),
+                ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result)
+            end)
+        ]
+    end}.
+
+register_bad_specs_type_error_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                State = #{
+                    className => 'BT835BadSpecs',
+                    superclassRef => 'Object',
+                    fieldSpecs => not_a_map,
                     methodSpecs => #{}
                 },
                 Result = beamtalk_class_builder:register(State),

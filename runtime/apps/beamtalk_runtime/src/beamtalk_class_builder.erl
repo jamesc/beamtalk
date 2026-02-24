@@ -3,7 +3,7 @@
 
 %%% @doc ClassBuilder runtime backing for ADR 0038 (ClassBuilder Protocol Phase 1).
 %%%
-%%% **DDD Context:** Object System
+%% **DDD Context:** Object System
 %%%
 %%% This module implements the `register/1` function that is the Erlang backing
 %%% for the `@intrinsic classBuilderRegister` intrinsic. It accepts a builder
@@ -74,7 +74,7 @@ register(BuilderState) when is_map(BuilderState) ->
     case validate(ClassName, SuperclassRef) of
         {error, _} = Err ->
             Err;
-        ok ->
+        ok when is_map(FieldSpecs), is_map(MethodSpecs) ->
             SuperclassName = resolve_superclass_name(SuperclassRef),
             ClassInfo = build_class_info(
                 ClassName, SuperclassName, FieldSpecs, MethodSpecs, Modifiers
@@ -85,7 +85,12 @@ register(BuilderState) when is_map(BuilderState) ->
                     {ok, ClassPid};
                 {error, _} = Err ->
                     Err
-            end
+            end;
+        ok ->
+            Error0 = beamtalk_error:new(type_error, 'ClassBuilder'),
+            Error1 = beamtalk_error:with_selector(Error0, register),
+            {error,
+                beamtalk_error:with_hint(Error1, <<"fieldSpecs and methodSpecs must be maps">>)}
     end.
 
 %%% ============================================================================
