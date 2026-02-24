@@ -570,6 +570,7 @@ fn next_msg_id() -> String {
 mod tests {
     use super::*;
 
+    use crate::workspace;
     use std::net::TcpStream as StdTcpStream;
     use std::process::{Command, Stdio};
     use std::sync::LazyLock;
@@ -613,9 +614,17 @@ mod tests {
         }
     }
 
-    /// Port of the auto-started REPL workspace for integration tests.
-    /// Starts `beamtalk repl --port 0` once, discovers the ephemeral port.
-    /// The workspace is stopped when the test process exits.
+    /// Auto-started REPL workspace for integration tests.
+    ///
+    /// Uses the same startup path as `beamtalk-mcp --start`: runs
+    /// `beamtalk repl --port 0 --timeout 300` with stdin closed, parses the
+    /// port and workspace ID from stdout (via `workspace::parse_repl_port` /
+    /// `workspace::parse_workspace_id`), then reads the cookie from workspace
+    /// storage. The workspace is stopped on `Drop`.
+    ///
+    /// These tests are `#[ignore]` so they only run via `just test-mcp`
+    /// (single-threaded with `--test-threads=1`), not in the regular parallel
+    /// `just test` pass.
     static REPL: LazyLock<Result<ReplWorkspace, String>> = LazyLock::new(|| {
         let bin_name = format!("beamtalk{}", std::env::consts::EXE_SUFFIX);
         let bin = find_binary(&bin_name).ok_or_else(|| {
@@ -636,46 +645,21 @@ mod tests {
 
         let stdout = String::from_utf8_lossy(&output.stdout);
 
-        // Parse "Connected to REPL backend on port <N>." from stdout
-        let port = stdout
-            .lines()
-            .find_map(|line| {
-                line.strip_prefix("Connected to REPL backend on port ")
-                    .and_then(|rest| rest.trim_end_matches('.').trim().parse::<u16>().ok())
-            })
-            .ok_or_else(|| {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                format!(
-                    "REPL did not report port.\nstdout: {stdout}\nstderr: {stderr}\nexit: {:?}",
-                    output.status
-                )
-            })?;
+        let port = workspace::parse_repl_port(&stdout).ok_or_else(|| {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            format!(
+                "REPL did not report port.\nstdout: {stdout}\nstderr: {stderr}\nexit: {:?}",
+                output.status
+            )
+        })?;
 
-        // Extract workspace ID from stdout for cleanup
-        let workspace_id = stdout.lines().find_map(|line| {
-            line.strip_prefix("  Workspace: ")
-                .map(|rest| rest.split_whitespace().next().unwrap_or(rest).to_string())
-        });
+        let workspace_id = workspace::parse_workspace_id(&stdout);
 
         // Read cookie from workspace storage for WebSocket auth (ADR 0020)
-        let cookie = if let Some(ref ws_id) = workspace_id {
-            let home =
-                dirs::home_dir().ok_or_else(|| "Cannot determine home directory".to_string())?;
-            let cookie_path = home
-                .join(".beamtalk")
-                .join("workspaces")
-                .join(ws_id)
-                .join("cookie");
-            std::fs::read_to_string(&cookie_path)
-                .map(|s| s.trim().to_string())
-                .map_err(|e| format!("Failed to read cookie at {}: {e}", cookie_path.display()))?
-        } else {
-            // Fallback to default Erlang cookie
-            let home =
-                dirs::home_dir().ok_or_else(|| "Cannot determine home directory".to_string())?;
-            std::fs::read_to_string(home.join(".erlang.cookie"))
-                .map(|s| s.trim().to_string())
-                .unwrap_or_default()
+        let cookie = match workspace_id.as_deref() {
+            Some(ws_id) => workspace::read_cookie_file(ws_id)
+                .ok_or_else(|| format!("Failed to read cookie for workspace '{ws_id}'"))?,
+            None => return Err("REPL did not report workspace ID".to_string()),
         };
 
         // Wait for TCP readiness (15s default, configurable)
@@ -716,6 +700,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "integration test"]
     async fn test_eval_arithmetic() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -726,6 +711,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "integration test"]
     async fn test_eval_string() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -736,6 +722,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "integration test"]
     async fn test_eval_error() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -746,6 +733,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "integration test"]
     async fn test_bindings() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -766,6 +754,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "integration test"]
     async fn test_actors_list() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -776,6 +765,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "integration test"]
     async fn test_modules_list() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -786,6 +776,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "integration test"]
     async fn test_complete() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -796,6 +787,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "integration test"]
     async fn test_load_file_and_spawn_actor() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -839,6 +831,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "integration test"]
     async fn test_docs() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -861,6 +854,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "integration test"]
     async fn test_value_string_formats_correctly() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -887,6 +881,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "integration test"]
     async fn test_clear_bindings() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -909,6 +904,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "integration test"]
     async fn test_show_codegen() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -926,6 +922,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "integration test"]
     async fn test_describe() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -940,6 +937,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "integration test"]
     async fn test_unload_module() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -957,6 +955,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "integration test"]
     async fn test_interrupt() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -968,6 +967,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "integration test"]
     async fn test_test_all() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -980,6 +980,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "integration test"]
     async fn test_test_class() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
@@ -1010,6 +1011,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "integration test"]
     async fn test_reconnect_resumes_session() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
