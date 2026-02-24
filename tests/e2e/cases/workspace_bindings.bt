@@ -3,6 +3,13 @@
 
 // E2E tests for workspace bindings (BT-376 / ADR 0010 Phase 4).
 //
+// These tests require E2E because workspace bindings (Transcript, Beamtalk)
+// are singleton actors registered in the REPL process via persistent_term.
+// They are REPL-specific: BUnit tests run in compiled code without access to
+// workspace binding infrastructure. Async actor dispatch with `await`,
+// cross-turn variable persistence, and subscribe/unsubscribe lifecycle are
+// also tested here.
+//
 // Workspace bindings (Transcript, Beamtalk) are singleton actors
 // accessed via workspace convenience bindings. The explicit form
 // (e.g., TranscriptStream current) also works via class variables
@@ -134,7 +141,6 @@ recentAfterClear isEmpty
 
 // Transcript unsubscribe dispatches as unary method (BT-530)
 (Transcript unsubscribe) await
-// => #Actor<TranscriptStream,_>
 // => #Actor<TranscriptStream,_>
 
 // ===========================================================================

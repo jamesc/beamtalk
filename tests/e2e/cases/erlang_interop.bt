@@ -33,8 +33,9 @@ eu := ErlangUser spawn
 // => _
 
 // Actor method calls Erlang internally and stores the result in state
+// callErlang assigns self.result := Erlang lists reverse: #(1,2,3), returning [3,2,1]
 eu callErlang await
-// => _
+// => [3,2,1]
 
 eu getResult await
 // => [3,2,1]
