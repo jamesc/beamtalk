@@ -81,24 +81,24 @@ Dynamic classes work fully with the existing message dispatch system. Methods ar
 /// Used by the compiler for all compiled class definitions (Path 1)
 /// and directly for dynamic class creation at runtime (Path 2).
 ///
-/// ## Compiled use (emitted by codegen, not written by users):
-/// ```beamtalk
+/// ## Compiled use (conceptual — codegen emits Core Erlang, not Beamtalk):
+/// ```
 /// Object classBuilder
-///   name: #Counter
-///   fields: #{ count => 0 }
-///   methods: #{ increment => [...], value => [...] }
+///   name: #Counter;
+///   fields: #{ count => 0 };
+///   methods: #{ increment => [...], value => [...] };
 ///   register
 /// ```
 ///
 /// ## Dynamic use (REPL, frameworks, metaprogramming):
 /// ```beamtalk
 /// cls := Object classBuilder
-///   name: #Greeter
-///   addMethod: #greet body: [ 'Hello!' printNl ]
+///   name: #Greeter;
+///   addMethod: #greet body: [ 'Hello!' printNl ];
 ///   register.
 /// Greeter new greet   // => Hello!
 /// ```
-Object subclass: ClassBuilder
+Actor subclass: ClassBuilder
   state: className     = nil
   state: superclassRef = nil
   state: fieldSpecs    = #{}
@@ -107,41 +107,36 @@ Object subclass: ClassBuilder
 
   /// Set the class name.
   name: aSymbol =>
-    className := aSymbol.
-    self
+    className := aSymbol
 
   /// Set the superclass.
   superclass: aClass =>
-    superclassRef := aClass.
-    self
+    superclassRef := aClass
 
   /// Set all fields at once (used by codegen).
   fields: aDict =>
-    fieldSpecs := aDict.
-    self
+    fieldSpecs := aDict
 
   /// Set all methods at once (used by codegen).
   methods: aDict =>
-    methodSpecs := aDict.
-    self
+    methodSpecs := aDict
 
   /// Add a single field with a default value (fluent API for dynamic use).
   addField: aName default: aValue =>
-    fieldSpecs := fieldSpecs at: aName put: aValue.
-    self
+    fieldSpecs := fieldSpecs at: aName put: aValue
 
   /// Add a single method as a block (fluent API for dynamic use).
   /// The block receives self as first argument.
   addMethod: aSelector body: aBlock =>
-    methodSpecs := methodSpecs at: aSelector put: aBlock.
-    self
+    methodSpecs := methodSpecs at: aSelector put: aBlock
 
   /// Apply a class modifier (:abstract, :sealed, :typed).
   modifier: aSymbol =>
-    modifiers := modifiers add: aSymbol.
-    self
+    modifiers := modifiers add: aSymbol
 
   /// Register the class with the runtime and return the new class object.
+  /// Stops the builder process after registration — the builder is
+  /// single-use and should not be retained.
   ///
   /// For compiled classes (Path 1): called from module init, wires the
   /// BEAM module's pre-compiled methods into the class gen_server.
@@ -162,7 +157,7 @@ Object subclass: ClassBuilder
 ///
 /// ## Examples
 /// ```beamtalk
-/// Object classBuilder name: #Foo register
+/// Object classBuilder name: #Foo; register
 /// ```
 classBuilder => ClassBuilder new superclass: self
 ```
@@ -181,16 +176,15 @@ register_class() ->
         instance_methods => #{...}
     }).
 
-%% After (ClassBuilder protocol — shown with intermediate variables;
-%% actual Core Erlang uses let-bindings):
+%% After (ClassBuilder protocol — cascade sends all messages to same builder):
 -on_load(register_class/0).
 register_class() ->
-    CB0 = beamtalk_primitive:send('bt@object':'module_class'(), 'classBuilder', []),
-    CB1 = beamtalk_primitive:send(CB0, 'name:', [#{'$sym' => 'Counter'}]),
-    CB2 = beamtalk_primitive:send(CB1, 'fields:', [#{'count' => 0}]),
-    CB3 = beamtalk_primitive:send(CB2, 'methods:', [#{'increment' => fun ?MODULE:'increment'/1,
-                                                       'value'     => fun ?MODULE:'value'/1}]),
-    beamtalk_primitive:send(CB3, 'register', []).
+    CB = beamtalk_primitive:send('bt@object':'module_class'(), 'classBuilder', []),
+    _ = beamtalk_primitive:send(CB, 'name:', [#{'$sym' => 'Counter'}]),
+    _ = beamtalk_primitive:send(CB, 'fields:', [#{'count' => 0}]),
+    _ = beamtalk_primitive:send(CB, 'methods:', [#{'increment' => fun ?MODULE:'increment'/1,
+                                                    'value'     => fun ?MODULE:'value'/1}]),
+    beamtalk_primitive:send(CB, 'register', []).
 ```
 
 The BEAM module still provides the compiled method functions (`increment/1`, `value/1`). ClassBuilder wires them into the class gen_server. Dynamic classes pass closures instead of function references — the class gen_server stores and dispatches either form.
@@ -212,7 +206,7 @@ p := Point new
 // => a Point (x: 0, y: 0)
 ```
 
-The REPL desugars the class definition and calls `Object classBuilder ... register` directly — `classBuilder` is sent to the intended superclass, which pre-sets the builder's superclass reference. The class is live immediately. Methods are interpreted closures.
+The REPL desugars the class definition to a cascade on the ClassBuilder: `Object classBuilder name: ...; addField: ...; register`. The builder is an Actor — each cascaded message mutates its state. `register` creates the class and stops the builder process. The class is live immediately. Methods are interpreted closures.
 
 **Compile and save** — Path 1 (compiled, via compiler port ADR 0022):
 
@@ -230,14 +224,25 @@ The REPL self-hosting story requires both paths but does not require them simult
 ProtoObject → Object → Behaviour → Class → Metaclass → ClassBuilder → Actor → user modules
 ```
 
-`ClassBuilder` is a value type (no gen_server process of its own). It can be pre-wired in the bootstrap sequence using the same mechanism as `Behaviour` and `Class` (ADR 0032) — a hand-wired Erlang struct populated before the normal class loading sequence begins. `ClassBuilder` is placed after `Metaclass` because it is a user-facing stdlib class, not part of the metaclass tower. Post-bootstrap assertion: `Class respondsTo: #classBuilder` must return `true`.
+`ClassBuilder` is an Actor subclass — each builder instance is a short-lived gen_server process that accumulates configuration via cascaded messages. It can be pre-wired in the bootstrap sequence using the same mechanism as `Behaviour` and `Class` (ADR 0032) — a hand-wired Erlang module populated before the normal class loading sequence begins. `ClassBuilder` is placed after `Metaclass` because it is a user-facing stdlib class, not part of the metaclass tower. Post-bootstrap assertion: `Class respondsTo: #classBuilder` must return `true`.
 
-**Implementation note — value type mutability**: Value types in Beamtalk are currently immutable (field assignments are rejected at codegen). The fluent builder API shown above uses `:=` mutation (`className := aSymbol`), which would not compile today. Two implementation options:
+### Cascade Pattern and Builder Lifecycle
 
-1. **Make ClassBuilder an Actor subclass** — builder instances become gen_server processes, supporting mutable state. Heavier (one process per builder), but works with current semantics. The process is short-lived (created, configured, and consumed by `register`).
-2. **Implement immutable-update for value types (BT-833)** — each setter method returns a *new* ClassBuilder with the field updated, using Self-threading in codegen (parallel to Actor State-threading). The fluent API works because each chained call operates on the returned copy. This is the more principled approach and would benefit all value types.
+ClassBuilder uses the **cascade pattern**: all setter messages (`;`-separated) are sent to the same builder instance, which mutates its internal state. The final `register` message (no `;`) is the cascade's return value — the newly created class object.
 
-The recommended path is BT-833 first (small, standalone codegen change), then ClassBuilder.bt compiles as a real `.bt` file from day one. Alternatively, ClassBuilder can be hand-wired in Erlang (`beamtalk_class_builder_bt.erl`, consistent with `beamtalk_class_bt.erl` and `beamtalk_metaclass_bt.erl`) and replaced with a `.bt` file after BT-833 ships. The ClassBuilder protocol (message selectors, semantics, `register` behavior) is the same either way.
+```beamtalk
+Object classBuilder
+  name: #Counter;
+  fields: #{ count => 0 };
+  methods: #{ increment => [...], value => [...] };
+  register
+```
+
+This avoids constructor explosion (one method with N positional arguments) — the same motivation behind Pharo's `ClassBuilder`. Each aspect of the class definition is a separate, named message.
+
+**Cleanup**: `register` is a terminal operation. After creating the class and wiring it into the runtime, `register` stops the builder's gen_server process. The builder is single-use: created, configured via cascade, consumed by `register`, then gone. No builder process leaks. For compiled classes (Path 1), the builder is created and stopped within the `on_load` function. For dynamic classes (Path 2), the builder is created and stopped within the REPL expression evaluation.
+
+**Why Actor, not value type**: Cascades send all messages to the *same* receiver — they discard intermediate return values. This requires mutable state, which means Actor (gen_server). A value type with immutable-update semantics (BT-833) would require chained return values, which is incompatible with cascade syntax. Since cascades are the idiomatic Smalltalk pattern for builders, Actor is the natural choice. The process-per-builder cost is negligible: one short-lived process per class definition, created at module load time or REPL evaluation.
 
 ### REPL Session
 
@@ -253,9 +258,9 @@ The recommended path is BT-833 first (small, standalone codegen change), then Cl
 
 // Define a class dynamically — no file, no compiler:
 >> dog := Object classBuilder
-     name: #Dog
-     addField: #name default: 'Rex'
-     addMethod: #speak body: [ self.name , ' says Woof!' ]
+     name: #Dog;
+     addField: #name default: 'Rex';
+     addMethod: #speak body: [ self.name , ' says Woof!' ];
      register
 => Dog
 
@@ -272,13 +277,13 @@ The recommended path is BT-833 first (small, standalone codegen change), then Cl
 ### Error Examples
 
 ```beamtalk
->> ClassBuilder new name: #Dog register   // bypasses factory, no superclass set
+>> ClassBuilder new name: #Dog; register   // bypasses factory, no superclass set
 => Error: ClassBuilder register requires superclass to be set
 
->> Object classBuilder name: nil register
+>> Object classBuilder name: nil; register
 => Error: ClassBuilder name: requires a Symbol argument
 
->> Object classBuilder name: #Counter register
+>> Object classBuilder name: #Counter; register
 => Error: class Counter already exists — send reload: to update a live class
 ```
 
@@ -329,7 +334,7 @@ These aren't class creation systems, but they establish the right architectural 
 ### Newcomer (from Python/JS/Ruby)
 
 - **Zero visible change**: Syntax is identical. The newcomer writes `Object subclass: Foo` and it works exactly as before.
-- **REPL surprise (good)**: Discovering that `Object classBuilder name: #Dog ... register` works interactively — defining a class without writing a file — is a delightful REPL moment. This is only possible with the dynamic path.
+- **REPL surprise (good)**: Discovering that `Object classBuilder name: #Dog; ... ; register` works interactively — defining a class without writing a file — is a delightful REPL moment. This is only possible with the dynamic path.
 - **Discoverable protocol**: `Class respondsTo: #classBuilder` returns `true`. The class creation vocabulary is part of the message system they're already exploring.
 
 ### Smalltalk Developer
@@ -442,6 +447,7 @@ Keep compiled class `on_load` calling `beamtalk_object_class:start/2` directly (
 
 ### Negative
 - **Bootstrap complexity**: ClassBuilder must be pre-wired in the bootstrap sequence before any user classes load — the same challenge as Behaviour and Class (ADR 0032), already solved
+- **Process-per-builder at startup**: Each class definition spawns a short-lived ClassBuilder gen_server during module `on_load`. For a project with N classes, that is N process spawns + N `gen_server:stop` calls at startup. On BEAM, process spawn is ~3µs — a 100-class project adds ~0.3ms. Negligible, but measurable in profiling
 - **Dynamic class performance**: Path 2 classes use closure dispatch rather than compiled BEAM functions. Suitable for interactive prototyping; not suitable for performance-critical production classes without compilation
 - **Two kinds of classes in the registry**: Compiled classes (with BEAM modules) and dynamic classes (closures only) coexist in `beamtalk_class_registry`. Tooling must handle both. Serialisation/persistence of dynamic classes is not defined in this ADR
 - **Sealed class check at runtime**: The compiler currently enforces sealed classes at parse/analysis time. The `classBuilder` factory unconditionally returns a builder. For the dynamic path, `register` must check whether the superclass is sealed and reject the registration — this moves a compile-time check to runtime for Path 2
@@ -449,7 +455,7 @@ Keep compiled class `on_load` calling `beamtalk_object_class:start/2` directly (
 
 ### Neutral
 - **User syntax is unchanged**: `Object subclass: Counter` works identically before and after
-- **Codegen emission changes**: The generated Core Erlang for class module init changes (ClassBuilder call instead of direct registry call), but the BEAM modules are semantically equivalent
+- **Codegen emission changes**: The generated Core Erlang for class module init changes (ClassBuilder cascade instead of direct registry call), but the BEAM modules are semantically equivalent
 - **Dynamic classes are transient**: Dynamic classes defined at the REPL do not persist across restarts. This is expected behaviour, consistent with how process state works in Beamtalk
 
 ## Implementation
@@ -458,11 +464,11 @@ Keep compiled class `on_load` calling `beamtalk_object_class:start/2` directly (
 
 **Affected components:** `stdlib/src/ClassBuilder.bt`, `stdlib/src/Class.bt`, `beamtalk-core` (codegen), `beamtalk_runtime` (class gen_server, registry)
 
-1. Implement `beamtalk_class_builder.erl` — the Erlang backing for `@intrinsic classBuilderRegister`. Handles both Path 1 (compiled BEAM module, function references) and Path 2 (dynamic, closures). Delegates to `beamtalk_object_class:start/2` for first registration; detects `{error, {already_started, _}}` and falls back to `beamtalk_object_class:update_class/2` for hot reload. This preserves the existing hot reload semantics. Validate with a single hand-wired test class before proceeding.
-2. Update bootstrap in `beamtalk_bootstrap.erl`: pre-wire ClassBuilder as a value type before user classes load. Bootstrap sequence: `ProtoObject → Object → Behaviour → Class → Metaclass → ClassBuilder → Actor`.
+1. Implement `beamtalk_class_builder.erl` — the Erlang backing for `@intrinsic classBuilderRegister`. Handles both Path 1 (compiled BEAM module, function references) and Path 2 (dynamic, closures). Delegates to `beamtalk_object_class:start/2` for first registration; detects `{error, {already_started, _}}` and falls back to `beamtalk_object_class:update_class/2` for hot reload. After registration, stops the builder's gen_server process (`gen_server:stop/1`). Returns the newly created class object. Validate with a single hand-wired test class before proceeding.
+2. Update bootstrap in `beamtalk_bootstrap.erl`: pre-wire ClassBuilder as an Actor subclass before user classes load. Bootstrap sequence: `ProtoObject → Object → Behaviour → Class → Metaclass → ClassBuilder → Actor`.
 3. Add `Class.bt` method: `classBuilder => ClassBuilder new superclass: self`
-4. Create `stdlib/src/ClassBuilder.bt` with fluent builder API (requires BT-833 for value type field assignment; alternatively, hand-wire as `beamtalk_class_builder_bt.erl` for v0.1)
-5. Update codegen (`crates/beamtalk-core/src/codegen/core_erlang/`) to emit ClassBuilder calls in generated module init instead of direct `beamtalk_object_class:start/2` calls
+4. Create `stdlib/src/ClassBuilder.bt` with cascade-based builder API. ClassBuilder is an Actor — no BT-833 dependency needed. Alternatively, hand-wire as `beamtalk_class_builder_bt.erl` for v0.1 (consistent with `beamtalk_class_bt.erl` and `beamtalk_metaclass_bt.erl`).
+5. Update codegen (`crates/beamtalk-core/src/codegen/core_erlang/`) to emit ClassBuilder cascade in generated module init instead of direct `beamtalk_object_class:start/2` calls
 6. Add post-bootstrap assertion: `Class respondsTo: #classBuilder` must return `true`
 7. Run full test suite — all existing class definition behaviour must be preserved
 
