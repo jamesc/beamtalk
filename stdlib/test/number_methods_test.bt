@@ -94,6 +94,6 @@ TestCase subclass: NumberMethodsTest
     self assert: (42 respondsTo: #sign).
     self assert: (3.14 respondsTo: #sign)
 
-  testRespondsToBeforeAnd =>
+  testRespondsToBetweenAnd =>
     self assert: (42 respondsTo: #'between:and:').
     self assert: (3.14 respondsTo: #'between:and:')
