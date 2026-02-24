@@ -3,8 +3,6 @@
 
 // Tests for user-defined error subclasses - migrated from bootstrap/custom_exceptions.bt (BT-827)
 
-@load test/fixtures/custom_error.bt
-
 TestCase subclass: CustomExceptionsTest
 
   testSignalFromCustomErrorRaisesWithCorrectClass =>

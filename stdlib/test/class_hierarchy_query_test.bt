@@ -4,8 +4,6 @@
 // Class hierarchy query tests - migrated from bootstrap/class_hierarchy.bt (BT-827)
 // Tests subclasses, allSubclasses, and class identity queries
 
-@load test/fixtures/counter.bt
-
 TestCase subclass: ClassHierarchyQueryTest
 
   testNumberSubclasses =>
