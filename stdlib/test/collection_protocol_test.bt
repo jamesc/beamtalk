@@ -5,7 +5,6 @@
 
 TestCase subclass: CollectionProtocolTest
 
-
   testSetSharedCollectionProtocolInheritedFromCollection =>
     // Set isEmpty
     self assert: (Set new isEmpty).

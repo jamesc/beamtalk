@@ -66,6 +66,9 @@ TestCase subclass: ObjectProtocolTest
     self assert: (nil respondsTo: #isNil).
     // Booleans respond to ifTrue:ifFalse:
     self assert: (true respondsTo: #'ifTrue:ifFalse:').
+    // Blocks respond to value
+    self assert: ([1] respondsTo: #value).
+    self deny: ([1] respondsTo: #invalidMethod).
     // Float responds to arithmetic operations
     self assert: (3.14 respondsTo: #+).
     self assert: (3.14 respondsTo: #'-').
