@@ -86,14 +86,14 @@ system_dictionary_loaded_after_start_test() ->
     %% Start (or get already running) supervisor
     Result = start_runtime(),
 
-    %% The SystemDictionary module provides system reflection (allClasses, classNamed:, etc.)
-    %% via beamtalk_system_dictionary, replacing the legacy compiled beamtalk module.
+    %% The BeamtalkInterface module provides system reflection (allClasses, classNamed:, etc.)
+    %% via beamtalk_interface, replacing the legacy compiled beamtalk module.
     %% Use ensure_loaded to verify the module is available (not just loaded as side-effect).
     ?assertEqual(
-        {module, beamtalk_system_dictionary},
-        code:ensure_loaded(beamtalk_system_dictionary)
+        {module, beamtalk_interface},
+        code:ensure_loaded(beamtalk_interface)
     ),
-    ?assertEqual(true, beamtalk_system_dictionary:has_method(allClasses)),
+    ?assertEqual(true, beamtalk_interface:has_method(allClasses)),
 
     %% Clean up only if we started it
     stop_runtime(Result).

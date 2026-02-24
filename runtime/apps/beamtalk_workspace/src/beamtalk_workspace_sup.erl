@@ -18,9 +18,9 @@
 %%% beamtalk_workspace_sup
 %%%   ├─ beamtalk_workspace_meta      % Metadata (project path, created_at)
 %%%   ├─ beamtalk_transcript_stream   % Transcript singleton (ADR 0010)
-%%%   ├─ beamtalk_system_dictionary   % Beamtalk singleton (ADR 0010)
+%%%   ├─ beamtalk_interface           % Beamtalk singleton (ADR 0010)
 %%%   ├─ beamtalk_actor_registry      % Workspace-wide actor registry
-%%%   ├─ beamtalk_workspace_environment % Workspace singleton (BT-423)
+%%%   ├─ beamtalk_workspace_interface % Workspace singleton (BT-423)
 %%%   ├─ beamtalk_workspace_bootstrap % Class var bootstrap (ADR 0019)
 %%%   ├─ beamtalk_repl_server         % TCP server (session-per-connection)
 %%%   ├─ beamtalk_idle_monitor        % Tracks activity, self-terminates if idle
@@ -107,7 +107,7 @@ init(Config) ->
             %% Specs derived from beamtalk_workspace_config:singletons/0.
             %%
             %% Note: actor registry is interleaved between singletons because
-            %% WorkspaceEnvironment's methods query the registry.
+            %% WorkspaceInterface's methods query the registry.
         ] ++ singleton_child_specs() ++
             [
                 %% Bootstrap worker — sets singleton class variables (ADR 0019 Phase 2)
@@ -184,12 +184,12 @@ init(Config) ->
 %%% Singleton Child Specs
 
 %% @private Generate supervisor child specs for workspace singletons.
-%% Interleaves the actor registry before WorkspaceEnvironment, which
+%% Interleaves the actor registry before WorkspaceInterface, which
 %% depends on it.
 singleton_child_specs() ->
     Singletons = beamtalk_workspace_config:singletons(),
     {Before, After} = lists:partition(
-        fun(#{module := M}) -> M =/= beamtalk_workspace_environment end,
+        fun(#{module := M}) -> M =/= beamtalk_workspace_interface end,
         Singletons
     ),
     lists:map(fun singleton_to_child_spec/1, Before) ++

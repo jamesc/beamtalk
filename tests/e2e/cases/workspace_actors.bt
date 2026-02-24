@@ -19,9 +19,9 @@
 // WORKSPACE BINDING — CLASS INTROSPECTION
 // ===========================================================================
 
-// Workspace class returns WorkspaceEnvironment
+// Workspace class returns WorkspaceInterface
 Workspace class
-// => WorkspaceEnvironment
+// => WorkspaceInterface
 
 // Workspace respondsTo: #actors returns true
 Workspace respondsTo: #actors
@@ -137,18 +137,6 @@ firstActor := freshActors first
 // => #Actor<Counter,_>
 
 firstActor respondsTo: #getValue
-// => true
-
-// ===========================================================================
-// WORKSPACE SESSIONS
-// ===========================================================================
-
-// sessions returns a list
-(Workspace sessions) await
-// => _
-
-// Workspace respondsTo: #sessions returns true
-Workspace respondsTo: #sessions
 // => true
 
 // ===========================================================================

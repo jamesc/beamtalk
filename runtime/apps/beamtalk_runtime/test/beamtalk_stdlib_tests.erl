@@ -40,7 +40,7 @@ stdlib_test_() ->
         {"UndefinedObject class is registered", fun nil_class_registered_test/0},
         {"Block class is registered", fun block_class_registered_test/0},
         {"Tuple class is registered", fun tuple_class_registered_test/0},
-        {"SystemDictionary class is registered", fun system_dictionary_class_registered_test/0},
+        {"BeamtalkInterface class is registered", fun system_dictionary_class_registered_test/0},
         {"TranscriptStream class is registered", fun transcript_stream_class_registered_test/0},
         {"Integer class has correct superclass", fun integer_superclass_test/0},
         {"Integer class has expected methods", fun integer_methods_test/0},
@@ -83,7 +83,7 @@ init_registers_all_classes_test() ->
     ?assert(lists:member('Block', ClassesAfter)),
     ?assert(lists:member('Tuple', ClassesAfter)),
     ?assert(lists:member('Float', ClassesAfter)),
-    ?assert(lists:member('SystemDictionary', ClassesAfter)),
+    ?assert(lists:member('BeamtalkInterface', ClassesAfter)),
     ?assert(lists:member('TranscriptStream', ClassesAfter)).
 
 init_idempotent_test() ->
@@ -134,9 +134,9 @@ tuple_class_registered_test() ->
     ?assertEqual('Tuple', beamtalk_object_class:class_name(Pid)).
 
 system_dictionary_class_registered_test() ->
-    Pid = beamtalk_class_registry:whereis_class('SystemDictionary'),
+    Pid = beamtalk_class_registry:whereis_class('BeamtalkInterface'),
     ?assertNotEqual(undefined, Pid),
-    ?assertEqual('SystemDictionary', beamtalk_object_class:class_name(Pid)).
+    ?assertEqual('BeamtalkInterface', beamtalk_object_class:class_name(Pid)).
 
 transcript_stream_class_registered_test() ->
     Pid = beamtalk_class_registry:whereis_class('TranscriptStream'),
@@ -181,7 +181,7 @@ beamtalk_all_classes_test() ->
     ?assert(lists:member('True', Classes)),
     ?assert(lists:member('False', Classes)),
     ?assert(lists:member('Block', Classes)),
-    ?assert(lists:member('SystemDictionary', Classes)),
+    ?assert(lists:member('BeamtalkInterface', Classes)),
     ?assert(lists:member('TranscriptStream', Classes)),
     ?assert(lists:member('ProtoObject', Classes)),
     ?assert(lists:member('Object', Classes)),

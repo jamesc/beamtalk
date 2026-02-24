@@ -1,30 +1,30 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// WorkspaceEnvironment — Per-workspace actor introspection and binding container.
+/// WorkspaceInterface — Per-workspace actor introspection and binding container.
 ///
 /// Modeled on Squeak 5.2+'s `Environment` class: a scoped container for
 /// workspace-level bindings and actor introspection. Each workspace has its
-/// own WorkspaceEnvironment instance.
+/// own WorkspaceInterface instance.
 ///
-/// After workspace bootstrap (ADR 0019 Phase 2), `WorkspaceEnvironment current`
+/// After workspace bootstrap (ADR 0019 Phase 2), `WorkspaceInterface current`
 /// returns the singleton instance and the convenience binding `Workspace` will
 /// be available. Before bootstrap, `current` returns `nil`.
 ///
 /// ## Examples
 /// ```beamtalk
-/// WorkspaceEnvironment current actors
-/// WorkspaceEnvironment current actorAt: "<0.132.0>"
-/// WorkspaceEnvironment current actorsOf: Counter
+/// WorkspaceInterface current actors
+/// WorkspaceInterface current actorAt: "<0.132.0>"
+/// WorkspaceInterface current actorsOf: Counter
 /// ```
-Actor subclass: WorkspaceEnvironment
+Actor subclass: WorkspaceInterface
   classState: current = nil
 
   /// Return the current singleton instance (nil before workspace bootstrap).
-  class current -> WorkspaceEnvironment => self.current
+  class current -> WorkspaceInterface => self.current
 
   /// Set the current singleton instance.
-  class current: instance: WorkspaceEnvironment -> Nil => self.current := instance
+  class current: instance: WorkspaceInterface -> Nil => self.current := instance
 
   /// Return a list of all live actors as object references.
   ///
@@ -49,11 +49,3 @@ Actor subclass: WorkspaceEnvironment
   /// Workspace actorsOf: Counter
   /// ```
   actorsOf: className: Object -> List => @primitive "actorsOf:"
-
-  /// Return all active REPL session IDs.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// Workspace sessions
-  /// ```
-  sessions -> List => @primitive "sessions"

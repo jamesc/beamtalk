@@ -3,7 +3,7 @@
 
 %%% @doc Integration tests for workspace singleton registration (BT-491).
 %%%
-%%% Tests that TranscriptStream and SystemDictionary singletons
+%%% Tests that TranscriptStream and BeamtalkInterface singletons
 %%% register themselves via gen_server name registration when
 %%% started with a named server reference.
 
@@ -39,11 +39,11 @@ transcript_cleanup_on_stop_test() ->
     ?assertEqual(undefined, whereis('Transcript')).
 
 %%====================================================================
-%% Tests — SystemDictionary registration
+%% Tests — BeamtalkInterface registration
 %%====================================================================
 
 sysdict_registered_name_test() ->
-    {ok, Pid} = beamtalk_system_dictionary:start_link({local, 'Beamtalk'}, []),
+    {ok, Pid} = beamtalk_interface:start_link({local, 'Beamtalk'}, []),
     try
         ?assertEqual(Pid, whereis('Beamtalk'))
     after
@@ -52,7 +52,7 @@ sysdict_registered_name_test() ->
 
 sysdict_non_named_no_registration_test() ->
     %% Non-named start_link should NOT register a name
-    {ok, Pid} = beamtalk_system_dictionary:start_link(),
+    {ok, Pid} = beamtalk_interface:start_link(),
     try
         ?assertEqual(undefined, whereis('Beamtalk'))
     after
@@ -60,7 +60,7 @@ sysdict_non_named_no_registration_test() ->
     end.
 
 sysdict_cleanup_on_stop_test() ->
-    {ok, Pid} = beamtalk_system_dictionary:start_link({local, 'Beamtalk'}, []),
+    {ok, Pid} = beamtalk_interface:start_link({local, 'Beamtalk'}, []),
     ?assertEqual(Pid, whereis('Beamtalk')),
     gen_server:stop(Pid),
     ?assertEqual(undefined, whereis('Beamtalk')).

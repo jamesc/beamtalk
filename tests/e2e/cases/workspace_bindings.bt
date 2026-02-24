@@ -47,9 +47,9 @@ Transcript respondsTo: #nonExistentMethod
 // BEAMTALK BINDING — CLASS INTROSPECTION
 // ===========================================================================
 
-// Beamtalk class returns SystemDictionary
+// Beamtalk class returns BeamtalkInterface
 Beamtalk class
-// => SystemDictionary
+// => BeamtalkInterface
 
 // Beamtalk respondsTo: #allClasses returns true
 Beamtalk respondsTo: #allClasses
@@ -151,6 +151,6 @@ recentAfterClear isEmpty
 (TranscriptStream current show: "hello from explicit form") await
 // => #Actor<TranscriptStream,_>
 
-// SystemDictionary current works as explicit form of Beamtalk
-(SystemDictionary current version) await
+// BeamtalkInterface current works as explicit form of Beamtalk
+(BeamtalkInterface current version) await
 // => 0.1.0

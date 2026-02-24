@@ -4,7 +4,7 @@
 %%% @doc Single source of truth for workspace singleton configuration.
 %%%
 %%% Centralises the mapping between binding names (Transcript, Beamtalk, Workspace),
-%%% class names (TranscriptStream, SystemDictionary, WorkspaceEnvironment),
+%%% class names (TranscriptStream, BeamtalkInterface, WorkspaceInterface),
 %%% and Erlang modules (beamtalk_transcript_stream, etc.).
 %%%
 %%% Used by:
@@ -50,14 +50,14 @@ singletons() ->
         },
         #{
             binding_name => 'Beamtalk',
-            class_name => 'SystemDictionary',
-            module => beamtalk_system_dictionary,
+            class_name => 'BeamtalkInterface',
+            module => beamtalk_interface,
             start_args => [[]]
         },
         #{
             binding_name => 'Workspace',
-            class_name => 'WorkspaceEnvironment',
-            module => beamtalk_workspace_environment,
+            class_name => 'WorkspaceInterface',
+            module => beamtalk_workspace_interface,
             start_args => []
         }
     ].

@@ -853,10 +853,10 @@ mod tests {
 
     #[test]
     fn test_module_name_from_path_non_primitive() {
-        let path = Utf8PathBuf::from("lib/SystemDictionary.bt");
+        let path = Utf8PathBuf::from("lib/BeamtalkInterface.bt");
         assert_eq!(
             module_name_from_path(&path).unwrap(),
-            "bt@stdlib@system_dictionary"
+            "bt@stdlib@beamtalk_interface"
         );
     }
 

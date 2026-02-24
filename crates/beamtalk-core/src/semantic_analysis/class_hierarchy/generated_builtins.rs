@@ -22,6 +22,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Array"
             | "Association"
             | "BEAMError"
+            | "BeamtalkInterface"
             | "Behaviour"
             | "Block"
             | "Boolean"
@@ -62,7 +63,6 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "String"
             | "Symbol"
             | "System"
-            | "SystemDictionary"
             | "TestCase"
             | "TestResult"
             | "TestRunner"
@@ -72,7 +72,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Tuple"
             | "TypeError"
             | "UndefinedObject"
-            | "WorkspaceEnvironment"
+            | "WorkspaceInterface"
     )
 }
 
@@ -171,6 +171,30 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "BeamtalkInterface".into(),
+        ClassInfo {
+            name: "BeamtalkInterface".into(),
+            superclass: Some("Actor".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "allClasses".into(), arity: 0, kind: MethodKind::Primary, defined_in: "BeamtalkInterface".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![] },
+                MethodInfo { selector: "classNamed:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "BeamtalkInterface".into(), is_sealed: false, return_type: Some("Object".into()), param_types: vec![Some("Symbol".into())] },
+                MethodInfo { selector: "globals".into(), arity: 0, kind: MethodKind::Primary, defined_in: "BeamtalkInterface".into(), is_sealed: false, return_type: Some("Dictionary".into()), param_types: vec![] },
+                MethodInfo { selector: "version".into(), arity: 0, kind: MethodKind::Primary, defined_in: "BeamtalkInterface".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "BeamtalkInterface".into(), is_sealed: false, return_type: Some("BeamtalkInterface".into()), param_types: vec![] },
+                MethodInfo { selector: "current:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "BeamtalkInterface".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![Some("BeamtalkInterface".into())] },
+            ],
+            class_variables: vec!["current".into()],
         },
     );
 
@@ -1340,30 +1364,6 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     classes.insert(
-        "SystemDictionary".into(),
-        ClassInfo {
-            name: "SystemDictionary".into(),
-            superclass: Some("Actor".into()),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
-            state: vec![],
-            state_types: HashMap::new(),
-            methods: vec![
-                MethodInfo { selector: "allClasses".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SystemDictionary".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![] },
-                MethodInfo { selector: "classNamed:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SystemDictionary".into(), is_sealed: false, return_type: Some("Object".into()), param_types: vec![Some("Symbol".into())] },
-                MethodInfo { selector: "globals".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SystemDictionary".into(), is_sealed: false, return_type: Some("Dictionary".into()), param_types: vec![] },
-                MethodInfo { selector: "version".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SystemDictionary".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
-            ],
-            class_methods: vec![
-                MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SystemDictionary".into(), is_sealed: false, return_type: Some("SystemDictionary".into()), param_types: vec![] },
-                MethodInfo { selector: "current:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SystemDictionary".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![Some("SystemDictionary".into())] },
-            ],
-            class_variables: vec!["current".into()],
-        },
-    );
-
-    classes.insert(
         "TestCase".into(),
         ClassInfo {
             name: "TestCase".into(),
@@ -1575,9 +1575,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     classes.insert(
-        "WorkspaceEnvironment".into(),
+        "WorkspaceInterface".into(),
         ClassInfo {
-            name: "WorkspaceEnvironment".into(),
+            name: "WorkspaceInterface".into(),
             superclass: Some("Actor".into()),
             is_sealed: false,
             is_abstract: false,
@@ -1585,14 +1585,13 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
-                MethodInfo { selector: "actors".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceEnvironment".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![] },
-                MethodInfo { selector: "actorAt:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceEnvironment".into(), is_sealed: false, return_type: Some("Object".into()), param_types: vec![Some("String".into())] },
-                MethodInfo { selector: "actorsOf:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceEnvironment".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![Some("Object".into())] },
-                MethodInfo { selector: "sessions".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceEnvironment".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![] },
+                MethodInfo { selector: "actors".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![] },
+                MethodInfo { selector: "actorAt:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("Object".into()), param_types: vec![Some("String".into())] },
+                MethodInfo { selector: "actorsOf:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![Some("Object".into())] },
             ],
             class_methods: vec![
-                MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceEnvironment".into(), is_sealed: false, return_type: Some("WorkspaceEnvironment".into()), param_types: vec![] },
-                MethodInfo { selector: "current:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceEnvironment".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![Some("WorkspaceEnvironment".into())] },
+                MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("WorkspaceInterface".into()), param_types: vec![] },
+                MethodInfo { selector: "current:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![Some("WorkspaceInterface".into())] },
             ],
             class_variables: vec!["current".into()],
         },

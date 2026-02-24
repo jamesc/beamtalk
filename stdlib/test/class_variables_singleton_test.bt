@@ -1,24 +1,24 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-488, ADR 0019 Phase 1: Tests that singleton classes (SystemDictionary,
-// TranscriptStream, WorkspaceEnvironment) expose a current accessor that
+// BT-488, ADR 0019 Phase 1: Tests that singleton classes (BeamtalkInterface,
+// TranscriptStream, WorkspaceInterface) expose a current accessor that
 // returns nil before initialization.
 
 TestCase subclass: ClassVariablesSingletonTest
 
   testSingletonCurrentAccessors =>
-    self assert: (SystemDictionary current) equals: nil.
+    self assert: (BeamtalkInterface current) equals: nil.
     // TranscriptStream has current accessor
     self assert: (TranscriptStream current) equals: nil.
-    // WorkspaceEnvironment has current accessor
-    self assert: (WorkspaceEnvironment current) equals: nil
+    // WorkspaceInterface has current accessor
+    self assert: (WorkspaceInterface current) equals: nil
 
   testSetAndGetCurrent =>
-    // Set a SystemDictionary instance as current and verify retrieval
-    prev := SystemDictionary current.
-    sd := SystemDictionary spawn.
-    SystemDictionary current: sd.
-    self assert: (SystemDictionary current) equals: sd.
+    // Set a BeamtalkInterface instance as current and verify retrieval
+    prev := BeamtalkInterface current.
+    sd := BeamtalkInterface spawn.
+    BeamtalkInterface current: sd.
+    self assert: (BeamtalkInterface current) equals: sd.
     // Restore previous value to avoid affecting other tests
-    SystemDictionary current: prev
+    BeamtalkInterface current: prev
