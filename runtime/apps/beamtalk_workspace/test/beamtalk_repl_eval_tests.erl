@@ -372,25 +372,25 @@ maybe_await_future_beamtalk_object_test() ->
     ?assertEqual(Obj, beamtalk_repl_eval:maybe_await_future(Obj)).
 
 maybe_await_future_resolved_future_test() ->
-    %% Simulate a future that resolves
+    %% Simulate a future that resolves (tagged tuple)
     FuturePid = spawn(fun() ->
         receive
             {await, Caller, _Timeout} ->
                 Caller ! {future_resolved, self(), 42}
         end
     end),
-    Result = beamtalk_repl_eval:maybe_await_future(FuturePid),
+    Result = beamtalk_repl_eval:maybe_await_future({beamtalk_future, FuturePid}),
     ?assertEqual(42, Result).
 
 maybe_await_future_rejected_future_test() ->
-    %% Simulate a future that rejects
+    %% Simulate a future that rejects (tagged tuple)
     FuturePid = spawn(fun() ->
         receive
             {await, Caller, _Timeout} ->
                 Caller ! {future_rejected, self(), some_error}
         end
     end),
-    Result = beamtalk_repl_eval:maybe_await_future(FuturePid),
+    Result = beamtalk_repl_eval:maybe_await_future({beamtalk_future, FuturePid}),
     ?assertEqual({future_rejected, some_error}, Result).
 
 maybe_await_future_non_future_pid_test() ->
@@ -820,7 +820,7 @@ maybe_await_future_dead_pid_test() ->
     ?assertEqual(Pid, Result).
 
 maybe_await_future_resolved_test() ->
-    %% Test with a fake future that responds to the await protocol
+    %% Test with a fake future that responds to the await protocol (tagged tuple)
     %% Covers lines 498-500 (future_resolved path)
     Pid = spawn(fun() ->
         receive
@@ -833,12 +833,12 @@ maybe_await_future_resolved_test() ->
         after 1000 -> ok
         end
     end),
-    Result = beamtalk_repl_eval:maybe_await_future(Pid),
+    Result = beamtalk_repl_eval:maybe_await_future({beamtalk_future, Pid}),
     ?assertEqual(42, Result),
     Pid ! stop.
 
 maybe_await_future_rejected_test() ->
-    %% Test with a fake future that sends future_rejected
+    %% Test with a fake future that sends future_rejected (tagged tuple)
     %% Covers lines 501-505 (future_rejected path)
     Pid = spawn(fun() ->
         receive
@@ -850,7 +850,7 @@ maybe_await_future_rejected_test() ->
         after 1000 -> ok
         end
     end),
-    Result = beamtalk_repl_eval:maybe_await_future(Pid),
+    Result = beamtalk_repl_eval:maybe_await_future({beamtalk_future, Pid}),
     ?assertEqual({future_rejected, some_error}, Result),
     Pid ! stop.
 
