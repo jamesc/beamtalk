@@ -615,6 +615,7 @@ pub fn write_core_erlang_with_source(
 /// Returns an error if the module name is invalid, code generation fails,
 /// or the output file cannot be written.
 #[allow(clippy::implicit_hasher)]
+#[allow(clippy::too_many_arguments)]
 pub fn write_core_erlang_with_bindings(
     module: &beamtalk_core::ast::Module,
     module_name: &str,
@@ -623,6 +624,7 @@ pub fn write_core_erlang_with_bindings(
     source_text: Option<&str>,
     workspace_mode: bool,
     class_module_index: &std::collections::HashMap<String, String>,
+    source_path: Option<&str>,
 ) -> Result<()> {
     if !is_valid_module_name(module_name) {
         miette::bail!(
@@ -637,7 +639,8 @@ pub fn write_core_erlang_with_bindings(
             .with_bindings(bindings.clone())
             .with_source_opt(source_text)
             .with_workspace_mode(workspace_mode)
-            .with_class_module_index(class_module_index.clone()),
+            .with_class_module_index(class_module_index.clone())
+            .with_source_path_opt(source_path),
     )
     .into_diagnostic()
     .wrap_err("Failed to generate Core Erlang")?;
@@ -778,6 +781,13 @@ pub fn compile_source_with_bindings(
 
     // Generate Core Erlang (with source text for CompiledMethod introspection BT-101, and bindings BT-295)
     // BT-374: Pass workspace_mode for workspace binding dispatch
+    // BT-845/BT-860: Embed beamtalk_source attribute only for non-stdlib user files.
+    // Stdlib classes have no user-supplied source path — they return nil from sourceFile.
+    let embed_source_path = if options.stdlib_mode {
+        None
+    } else {
+        Some(source_path.as_str())
+    };
     write_core_erlang_with_bindings(
         &module,
         module_name,
@@ -786,6 +796,7 @@ pub fn compile_source_with_bindings(
         Some(&source),
         options.workspace_mode,
         class_module_index,
+        embed_source_path,
     )
     .wrap_err_with(|| format!("Failed to generate Core Erlang for '{source_path}'"))?;
 

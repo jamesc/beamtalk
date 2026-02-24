@@ -254,6 +254,13 @@ pub struct CodegenOptions {
     /// correctly by all files in the package, regardless of where the caller
     /// lives in the directory tree.
     class_module_index: std::collections::HashMap<String, String>,
+    /// Source file path to embed as `beamtalk_source` module attribute (BT-845/BT-860).
+    ///
+    /// When set, the generated Core Erlang module includes:
+    ///   `'beamtalk_source' = ["path/to/file.bt"]`
+    /// This survives workspace restarts and is the definitive source of truth
+    /// for `Behaviour >> sourceFile`. Absent for stdlib and `ClassBuilder` classes.
+    source_path: Option<String>,
 }
 
 impl CodegenOptions {
@@ -265,6 +272,7 @@ impl CodegenOptions {
             bindings: None,
             workspace_mode: false,
             class_module_index: std::collections::HashMap::new(),
+            source_path: None,
         }
     }
 
@@ -310,6 +318,20 @@ impl CodegenOptions {
         self.class_module_index = index;
         self
     }
+
+    /// Sets the source file path to embed as `beamtalk_source` module attribute (BT-845/BT-860).
+    #[must_use]
+    pub fn with_source_path(mut self, path: &str) -> Self {
+        self.source_path = Some(path.to_string());
+        self
+    }
+
+    /// Sets the source file path from an optional value (BT-845/BT-860).
+    #[must_use]
+    pub fn with_source_path_opt(mut self, path: Option<&str>) -> Self {
+        self.source_path = path.map(String::from);
+        self
+    }
 }
 
 /// Generates Core Erlang code from a Beamtalk module.
@@ -351,6 +373,7 @@ pub fn generate_module(module: &Module, options: CodegenOptions) -> Result<Strin
     generator.source_text = options.source_text;
     generator.workspace_mode = options.workspace_mode;
     generator.class_module_index = options.class_module_index;
+    generator.source_path = options.source_path;
 
     // Build hierarchy once for the entire generation (ADR 0006)
     let (hierarchy_result, _) =
@@ -667,6 +690,9 @@ pub(super) struct CoreErlangGenerator {
     /// Populated from `CodegenOptions::class_module_index` before generation begins.
     /// Used by `compiled_module_name` to resolve subdirectory classes correctly.
     class_module_index: std::collections::HashMap<String, String>,
+    /// BT-845/BT-860: Source file path to embed as `beamtalk_source` module attribute.
+    /// Set from `CodegenOptions::source_path` before generation begins.
+    source_path: Option<String>,
 }
 
 impl CoreErlangGenerator {
@@ -696,6 +722,7 @@ impl CoreErlangGenerator {
             current_nlr_token: None,
             self_version: 0,
             class_module_index: std::collections::HashMap::new(),
+            source_path: None,
         }
     }
 
@@ -725,6 +752,7 @@ impl CoreErlangGenerator {
             current_nlr_token: None,
             self_version: 0,
             class_module_index: std::collections::HashMap::new(),
+            source_path: None,
         }
     }
 

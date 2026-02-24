@@ -41,15 +41,17 @@ TestCase subclass: SourceFileReloadTest
     // => _
 
   testSourceFileMethodExists =>
-    // Every class responds to sourceFile (inherited from Behaviour)
-    self assert: (Integer canUnderstand: #sourceFile).
+    // sourceFile is a sealed method defined in Behaviour (class protocol)
+    self assert: (Behaviour includesSelector: #sourceFile).
     // => _
-    self assert: (Counter canUnderstand: #sourceFile)
+    // Sending sourceFile to any class object returns nil or a path (no DNU)
+    self assert: Integer sourceFile isNil
     // => _
 
   testReloadMethodExists =>
-    // Every class responds to reload (inherited from Behaviour)
-    self assert: (Integer canUnderstand: #reload).
+    // reload is a sealed method defined in Behaviour (class protocol)
+    self assert: (Behaviour includesSelector: #reload).
     // => _
-    self assert: (Counter canUnderstand: #reload)
+    // Sending sourceFile to Behaviour itself also returns nil (it's a stdlib class)
+    self assert: Behaviour sourceFile isNil
     // => _

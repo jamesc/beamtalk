@@ -166,6 +166,20 @@ impl CoreErlangGenerator {
             .as_ref()
             .is_some_and(ClassIdentity::is_sealed)
     }
+
+    /// Build the `beamtalk_source` Core Erlang attribute fragment (BT-845/BT-860).
+    ///
+    /// Returns `, 'beamtalk_source' = ["<path>"]` when `source_path` is set,
+    /// or `Document::Nil` for stdlib and ClassBuilder-created classes.
+    pub(super) fn source_path_attr(&self) -> Document<'static> {
+        match &self.source_path {
+            Some(path) => {
+                let escaped = path.replace('\\', "\\\\").replace('"', "\\\"");
+                Document::String(format!(", 'beamtalk_source' = [\"{escaped}\"]"))
+            }
+            None => Document::Nil,
+        }
+    }
 }
 
 /// Converts class name (`CamelCase`) to module name (`snake_case`).

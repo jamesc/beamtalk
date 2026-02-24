@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for source_file_reload E2E test (BT-845).
+// ReloadCounter v1: increment adds 1.
+
+Actor subclass: ReloadCounter
+  state: value = 0
+
+  increment => self.value := self.value + 1
+  getValue => ^self.value

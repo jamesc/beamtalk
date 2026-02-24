@@ -15,6 +15,8 @@
 -include_lib("kernel/include/logger.hrl").
 
 -export([do_eval/2, do_eval/3, do_show_codegen/2, handle_load/2, handle_load_source/3]).
+%% BT-845: ADR 0040 Phase 2 — stateless class reload (called via erlang:apply from beamtalk_runtime)
+-export([reload_class_file/1]).
 
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
@@ -657,14 +659,26 @@ compile_file(Source, Path, StdlibMode, ModuleNameOverride) ->
     compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride).
 
 %% Compile file via beamtalk_compiler OTP app (port backend).
-compile_file_via_port(Source, _Path, StdlibMode, ModuleNameOverride) ->
+compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride) ->
     SourceBin = list_to_binary(Source),
     Options0 = #{stdlib_mode => StdlibMode},
     %% BT-775: Pass module_name override when loading a package file
-    Options =
+    Options1 =
         case ModuleNameOverride of
             undefined -> Options0;
             _ -> Options0#{module_name => ModuleNameOverride}
+        end,
+    %% BT-845/BT-860: Pass source file path so compiler embeds beamtalk_source attribute.
+    %% BT-845 fix: Always pass the path if it's a list (don't check filelib:is_file,
+    %% since that can fail for relative paths depending on the REPL's working directory).
+    Options =
+        case Path of
+            undefined ->
+                Options1;
+            L when is_list(L) ->
+                Options1#{source_path => list_to_binary(L)};
+            _ ->
+                Options1
         end,
     wrap_compiler_errors(
         fun() ->
@@ -910,6 +924,37 @@ inject_output({ok, Result, State}, Output, Warnings) ->
     {ok, Result, Output, Warnings, State};
 inject_output({error, Reason, State}, Output, Warnings) ->
     {error, Reason, Output, Warnings, State}.
+
+%% @doc Compile and load a Beamtalk source file without REPL session state.
+%%
+%% BT-845: ADR 0040 Phase 2 — stateless reload for the `Counter reload` primitive.
+%% Called from `beamtalk_behaviour_intrinsics:classReload/1` via `erlang:apply/3`
+%% to avoid a compile-time dependency from beamtalk_runtime to beamtalk_workspace.
+-spec reload_class_file(string()) -> ok | {error, term()}.
+reload_class_file(Path) ->
+    case filelib:is_file(Path) of
+        false ->
+            {error, {file_not_found, Path}};
+        true ->
+            case file:read_file(Path) of
+                {error, Reason} ->
+                    {error, {read_error, Reason}};
+                {ok, SourceBin} ->
+                    Source = binary_to_list(SourceBin),
+                    case compile_file(Source, Path, false, undefined) of
+                        {ok, Binary, ClassNames, ModuleName} ->
+                            case code:load_binary(ModuleName, Path, Binary) of
+                                {module, ModuleName} ->
+                                    activate_module(ModuleName, ClassNames),
+                                    ok;
+                                {error, Reason} ->
+                                    {error, {load_error, Reason}}
+                            end;
+                        {error, Reason} ->
+                            {error, Reason}
+                    end
+            end
+    end.
 
 %% @private
 %% @doc Convert a list of class info maps to a list of existing atoms.
