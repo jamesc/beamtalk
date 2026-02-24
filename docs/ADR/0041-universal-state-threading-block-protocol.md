@@ -11,14 +11,14 @@ Beamtalk compiles to Core Erlang, which runs on the BEAM — a platform with no 
 
 Today, this state threading is gated by a **hardcoded whitelist** of ~20 control-flow selectors in `is_control_flow_selector()`:
 
-```
+```text
 whileTrue:  whileFalse:  timesRepeat:  do:  collect:
 select:     reject:      ensure:       to:do:  to:by:do:
 inject:into:  on:do:  ifTrue:  ifFalse:  ifNil:  ifNotNil:
 ifTrue:ifFalse:  ifNil:ifNotNil:
 ```
 
-Only literal blocks passed to these selectors receive state threading. User-defined higher-order methods do not participate — mutations in blocks passed to custom methods **silently fail to propagate**.
+Only literal blocks passed to these selectors receive state threading. User-defined higher-order methods (HOMs — methods that accept block arguments, such as custom iterators or visitors) do not participate — mutations in blocks passed to custom methods **silently fail to propagate**.
 
 ### Example of the Failure
 
@@ -66,7 +66,7 @@ This duality means:
 
 ## Decision
 
-Replace the hardcoded control-flow whitelist with a **universal block protocol** where all blocks that capture mutable state use `fun(StateAcc) -> {Result, NewStateAcc}`. This makes state threading a first-class part of the block calling convention rather than a special case for known selectors.
+Replace the hardcoded control-flow whitelist with a **universal block protocol** where all blocks that capture mutable state use `fun(Args..., StateAcc) -> {Result, NewStateAcc}`. This makes state threading a first-class part of the block calling convention rather than a special case for known selectors.
 
 ### The Universal Block Calling Convention
 
@@ -125,11 +125,15 @@ When a Beamtalk block is passed to Erlang/Elixir code (which doesn't know about 
 ```erlang
 %% Beamtalk block: fun(X, StateAcc) -> {X + 1, StateAcc}
 %% Wrapped for Erlang: fun(X) -> X + 1
+%% The wrapper captures CurrentStateAcc at creation time so reads succeed,
+%% but mutations are dropped (Erlang cannot propagate the updated state).
 let ErlangFun = fun (X) ->
-    let {Result, _State} = apply BeamtalkBlock (X, #{}) in
+    let {Result, _State} = apply BeamtalkBlock (X, CurrentStateAcc) in
     Result
 end
 ```
+
+The wrapper captures the enclosing `CurrentStateAcc` so that stateful blocks can read their captured variables. However, **mutations made inside the block are discarded** — the updated `_State` is not propagated back to the Beamtalk caller. The compiler should emit a warning when a stateful block is passed to an Erlang call site, since mutations will be silently dropped.
 
 Conversely, when Erlang funs are received by Beamtalk HOMs, they are wrapped to conform to the protocol. This marshalling happens at the language boundary, preserving ADR 0028's interop contract.
 
@@ -191,10 +195,9 @@ let Packed0 = call 'maps':'put'('__local__count', Count, State) in
 letrec 'while'/1 = fun (StateAcc) ->
     %% Unpack: read 'count' from StateAcc at each iteration
     let Count = call 'maps':'get'('__local__count', StateAcc) in
-    %% Condition block
-    let CondFun = fun (StateAcc) ->
-        call 'erlang':'<'(Count, 10)
-    in case apply CondFun (StateAcc) of
+    %% Condition (inline — known control-flow site, no fun wrapper)
+    let CondResult = call 'erlang':'<'(Count, 10) in
+    case CondResult of
       <'true'> when 'true' ->
         %% Body: mutate count, update StateAcc
         let NewCount = call 'erlang':'+'(Count, 1) in
@@ -297,7 +300,7 @@ MyCollection >> detect: aBlock
 
 ```erlang
 %% Universal protocol: ^ always carries state
-%% Value type: now 3-tuple WITH state (was 3-tuple without)
+%% Value type: now 4-tuple WITH state (was 3-tuple without)
 call 'erlang':'throw'({'$bt_nlr', Token, Value, CurrentStateAcc})
 
 %% Actor: unchanged (already carries state)
@@ -432,7 +435,7 @@ Pony uses compile-time reference capabilities to prevent data races. Closures co
 
 **Neutral:** The state map in crash dumps is readable and debuggable. Variable names are preserved as map keys (`'__local__count'`).
 
-**Concern:** Blocks passed across the Erlang boundary require wrapper funs (see Erlang Interop Boundary). Erlang code receiving a raw Beamtalk block would see an unexpected extra arity. The wrapper adds ~5ns overhead per call and means the Erlang side sees a different fun than Beamtalk compiled.
+**Concern:** Blocks passed across the Erlang boundary require wrapper funs (see Erlang Interop Boundary). Erlang code receiving a raw Beamtalk block would see an unexpected extra arity. The wrapper captures the enclosing `StateAcc` at creation time so reads succeed, but mutations made inside the block are silently dropped since Erlang cannot propagate the updated state. The compiler emits a warning when a stateful block is passed to an Erlang call site.
 
 ### Production Operator
 **Positive:** One calling convention is more predictable than two. Fewer special cases means fewer edge-case bugs in production.
@@ -557,7 +560,7 @@ This is a tempting middle ground that preserves zero-overhead stdlib iteration w
 - **Map overhead for state access.** `maps:get/2` and `maps:put/3` per variable per iteration. For blocks with many captured variables, this grows linearly. However, most blocks capture 1-3 variables.
 - **Debugging complexity.** State is threaded implicitly — when debugging generated Core Erlang, developers must trace `StateAcc` flow through nested constructs.
 - **`has_self_sends` over-approximation.** Currently, any block containing a self-send (even read-only like `self size`) triggers state threading. This is conservative but adds unnecessary StateAcc overhead for pure query blocks. Future optimization: distinguish read-only self-sends from mutating self-sends.
-- **Erlang interop wrapper overhead.** Blocks passed to Erlang/Elixir code require wrapper funs that strip the state protocol. This adds a layer of indirection (~5ns) at the language boundary.
+- **Erlang interop wrapper overhead and mutation loss.** Blocks passed to Erlang/Elixir code require wrapper funs that strip the state protocol. The wrapper captures the enclosing `StateAcc` at creation time (so reads succeed), but mutations made inside the block are dropped since Erlang cannot propagate the updated state. The compiler warns when a stateful block crosses the boundary.
 
 ### Neutral
 
