@@ -19,7 +19,7 @@ This creates two related problems:
 
 The compiler pipeline for class definitions is:
 
-```
+```text
 parse → ClassDefinition AST → ClassHierarchy::build → codegen → bt@counter.core → erlc → bt@counter.beam
                                                                       ↓
                                               module load triggers beamtalk_class_registry:register/N
@@ -50,7 +50,7 @@ What changes is what **codegen emits** for a class definition. Instead of hardco
 
 **Path 1 — Compiled (file-based, production)**
 
-```
+```text
 .bt source → Rust compiler (grammar → ClassDefinition AST → codegen)
            → bt@counter.core (methods as Core Erlang functions)
            → erlc → bt@counter.beam
@@ -62,7 +62,7 @@ The compiler generates the full BEAM module (method functions, dispatch tables, 
 
 **Path 2 — Dynamic (REPL / runtime, interpreted)**
 
-```
+```text
 ClassBuilder called directly at runtime
 → new class gen_server created with name, superclass, fields
 → methods stored as closures in gen_server state
@@ -93,9 +93,8 @@ Dynamic classes work fully with the existing message dispatch system. Methods ar
 ///
 /// ## Dynamic use (REPL, frameworks, metaprogramming):
 /// ```beamtalk
-/// cls := Class classBuilder
+/// cls := Object classBuilder
 ///   name: #Greeter
-///   superclass: Object
 ///   addMethod: #greet body: [ 'Hello!' printNl ]
 ///   register.
 /// Greeter new greet   // => Hello!
@@ -162,7 +161,7 @@ Object subclass: ClassBuilder
 ///
 /// ## Examples
 /// ```beamtalk
-/// Class classBuilder name: #Foo superclass: Object register
+/// Object classBuilder name: #Foo register
 /// ```
 classBuilder => ClassBuilder new superclass: self
 ```
@@ -222,7 +221,7 @@ The REPL self-hosting story requires both paths but does not require them simult
 
 ### Bootstrap Sequence
 
-```
+```text
 ProtoObject → Object → Behaviour → Class → ClassBuilder → Actor → user modules
 ```
 
@@ -241,9 +240,8 @@ ProtoObject → Object → Behaviour → Class → ClassBuilder → Actor → us
 => [name:, superclass:, fields:, methods:, addField:default:, addMethod:body:, modifier:, register]
 
 // Define a class dynamically — no file, no compiler:
->> dog := Class classBuilder
+>> dog := Object classBuilder
      name: #Dog
-     superclass: Object
      addField: #name default: 'Rex'
      addMethod: #speak body: [ self.name , ' says Woof!' ]
      register
@@ -262,13 +260,13 @@ ProtoObject → Object → Behaviour → Class → ClassBuilder → Actor → us
 ### Error Examples
 
 ```beamtalk
->> Class classBuilder name: #Dog register   // missing superclass
+>> Class classBuilder name: #Dog register   // missing superclass (Class has no pre-set superclass)
 => Error: ClassBuilder register requires superclass to be set
 
->> Class classBuilder name: nil superclass: Object register
+>> Object classBuilder name: nil register
 => Error: ClassBuilder name: requires a Symbol argument
 
->> Class classBuilder name: #Counter superclass: Object register
+>> Object classBuilder name: #Counter register
 => Error: class Counter already exists — send reload: to update a live class
 ```
 
@@ -406,11 +404,11 @@ Remove the grammar production. `subclass:` is a pure runtime message.
 
 **Rejected because**: Breaks the static LSP layer (ADR 0024 Phase 1) until the Live-Augmented layer matures. Deferred — this ADR is the stepping stone.
 
-### Alternative D (Former): Two Syntaxes
+### Alternative D: Two Syntaxes
 
 Keep grammar for static, add `defineSubclass:` for dynamic use as a separate selector.
 
-**Rejected because**: Two class creation paths to maintain and document. ClassBuilder unifies both paths under one protocol.
+**Rejected because**: Two class creation paths to maintain and document. ClassBuilder unifies both paths under one protocol. Not steelmanned separately because the strongest argument for a second selector is subsumed by Alternative B's "ship small" pragmatism — if you're going to add a runtime API, a full ClassBuilder protocol (this ADR) is strictly more capable than a second selector with no builder pattern.
 
 ## Consequences
 
