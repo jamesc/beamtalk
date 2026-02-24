@@ -66,8 +66,10 @@ TestCase subclass: DictionaryTest
     self assert: (#{} keysAndValuesDo: [:k :v | nil]) equals: nil.
     // Works for multi-entry dictionary
     self assert: (#{#a => 1, #b => 2} keysAndValuesDo: [:k :v | nil]) equals: nil.
-    // Block is called with correct key and value types (no errors)
-    self assert: (#{#x => 10} keysAndValuesDo: [:k :v | k class]) equals: nil
+    // Block receives correct key (#a) and value (99) — raises if wrong values passed
+    self assert: (#{#a => 99} keysAndValuesDo: [:k :v |
+      (k =:= #a) ifFalse: [k error: "unexpected key"].
+      (v =:= 99) ifFalse: [v error: "unexpected value"]]) equals: nil
 
   testNestedDictionaries =>
     // Nested dictionaries display correctly

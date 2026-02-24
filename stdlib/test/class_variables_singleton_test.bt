@@ -13,3 +13,11 @@ TestCase subclass: ClassVariablesSingletonTest
     self assert: (TranscriptStream current) equals: nil.
     // WorkspaceEnvironment has current accessor
     self assert: (WorkspaceEnvironment current) equals: nil
+
+  testSetAndGetCurrent =>
+    // Set a SystemDictionary instance as current and verify retrieval
+    sd := SystemDictionary spawn.
+    SystemDictionary current: sd.
+    self assert: (SystemDictionary current) equals: sd.
+    // Reset to nil to avoid affecting other tests
+    SystemDictionary current: nil
