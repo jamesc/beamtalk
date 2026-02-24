@@ -844,6 +844,7 @@ impl Parser {
 
 #[cfg(test)]
 mod tests {
+    //! Tests for the Beamtalk recursive descent parser.
     use super::*;
     use crate::source_analysis::lex_with_eof;
 

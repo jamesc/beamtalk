@@ -458,84 +458,84 @@ mod tests {
     }
 
     #[test]
-    fn repl_command_completion_matches_prefix() {
+    fn test_repl_command_completion_matches_prefix() {
         let candidates = command_completions(":hel");
         assert!(candidates.contains(&":help".to_string()));
         assert!(candidates.iter().all(|c| c.starts_with(":hel")));
     }
 
     #[test]
-    fn repl_command_completion_multiple_matches() {
+    fn test_repl_command_completion_multiple_matches() {
         let candidates = command_completions(":r");
         assert!(candidates.contains(&":reload".to_string()));
         assert!(candidates.contains(&":r".to_string()));
     }
 
     #[test]
-    fn repl_command_completion_unknown_prefix_is_empty() {
+    fn test_repl_command_completion_unknown_prefix_is_empty() {
         let candidates = command_completions(":unknown");
         assert!(candidates.is_empty());
     }
 
     #[test]
-    fn repl_command_completion_colon_only() {
+    fn test_repl_command_completion_colon_only() {
         let candidates = command_completions(":");
         assert_eq!(candidates.len(), REPL_COMMANDS.len());
     }
 
     #[test]
-    fn word_boundary_detects_last_identifier() {
+    fn test_word_boundary_detects_last_identifier() {
         let start = find_word_start("obj message");
         assert_eq!(&"obj message"[start..], "message");
     }
 
     #[test]
-    fn word_boundary_single_word() {
+    fn test_word_boundary_single_word() {
         let start = find_word_start("Counter");
         assert_eq!(&"Counter"[start..], "Counter");
     }
 
     #[test]
-    fn word_boundary_after_space() {
+    fn test_word_boundary_after_space() {
         let start = find_word_start("obj ");
         assert_eq!(&"obj "[start..], "");
     }
 
     #[test]
-    fn word_boundary_after_dot() {
+    fn test_word_boundary_after_dot() {
         let start = find_word_start("self.val");
         assert_eq!(&"self.val"[start..], "val");
     }
 
     #[test]
-    fn word_boundary_after_colon() {
+    fn test_word_boundary_after_colon() {
         // Colons are identifier chars so keyword selectors complete as a unit.
         let start = find_word_start("ifTrue:");
         assert_eq!(&"ifTrue:"[start..], "ifTrue:");
     }
 
     #[test]
-    fn word_boundary_keyword_selector_with_receiver() {
+    fn test_word_boundary_keyword_selector_with_receiver() {
         // "Integer ifT:" — word start is "ifT:"
         let start = find_word_start("Integer ifT:");
         assert_eq!(&"Integer ifT:"[start..], "ifT:");
     }
 
     #[test]
-    fn word_boundary_unicode_non_ascii_is_boundary() {
+    fn test_word_boundary_unicode_non_ascii_is_boundary() {
         // Unicode alpha chars are treated as boundaries (lexer only allows ASCII)
         let start = find_word_start("über foo");
         assert_eq!(&"über foo"[start..], "foo");
     }
 
     #[test]
-    fn word_boundary_empty_input() {
+    fn test_word_boundary_empty_input() {
         let start = find_word_start("");
         assert_eq!(start, 0);
     }
 
     #[test]
-    fn word_boundary_underscore_in_identifier() {
+    fn test_word_boundary_underscore_in_identifier() {
         let start = find_word_start("my_var");
         assert_eq!(&"my_var"[start..], "my_var");
     }
@@ -543,12 +543,12 @@ mod tests {
     // === Highlighting tests ===
 
     #[test]
-    fn highlight_empty_line() {
+    fn test_highlight_empty_line() {
         assert_eq!(highlight_line(""), "");
     }
 
     #[test]
-    fn highlight_integer_literal() {
+    fn test_highlight_integer_literal() {
         let result = highlight_line("42");
         assert!(result.contains(color::YELLOW));
         assert!(result.contains("42"));
@@ -556,54 +556,54 @@ mod tests {
     }
 
     #[test]
-    fn highlight_string_literal() {
+    fn test_highlight_string_literal() {
         let result = highlight_line("\"hello\"");
         assert!(result.contains(color::GREEN));
         assert!(result.contains("\"hello\""));
     }
 
     #[test]
-    fn highlight_keyword_self() {
+    fn test_highlight_keyword_self() {
         let result = highlight_line("self");
         assert!(result.contains(color::BOLD_BLUE));
         assert!(result.contains("self"));
     }
 
     #[test]
-    fn highlight_keyword_true() {
+    fn test_highlight_keyword_true() {
         let result = highlight_line("true");
         assert!(result.contains(color::BOLD_BLUE));
     }
 
     #[test]
-    fn highlight_class_name() {
+    fn test_highlight_class_name() {
         let result = highlight_line("Counter");
         assert!(result.contains(color::MAGENTA));
         assert!(result.contains("Counter"));
     }
 
     #[test]
-    fn highlight_symbol() {
+    fn test_highlight_symbol() {
         let result = highlight_line("#foo");
         assert!(result.contains(color::CYAN));
     }
 
     #[test]
-    fn highlight_comment() {
+    fn test_highlight_comment() {
         let result = highlight_line("x + 1 // note");
         assert!(result.contains(color::GRAY));
         assert!(result.contains("// note"));
     }
 
     #[test]
-    fn highlight_comment_only_line() {
+    fn test_highlight_comment_only_line() {
         let result = highlight_line("// just a comment");
         assert!(result.contains(color::GRAY));
         assert!(result.contains("// just a comment"));
     }
 
     #[test]
-    fn highlight_regular_identifier_no_color() {
+    fn test_highlight_regular_identifier_no_color() {
         let result = highlight_line("x");
         // Regular identifiers should not have color codes
         assert!(!result.contains(color::BOLD_BLUE));
@@ -611,14 +611,14 @@ mod tests {
     }
 
     #[test]
-    fn highlight_mixed_expression() {
+    fn test_highlight_mixed_expression() {
         let result = highlight_line("Counter spawn");
         assert!(result.contains(color::MAGENTA)); // Counter
         // "spawn" is a regular identifier - no special color
     }
 
     #[test]
-    fn highlight_preserves_whitespace() {
+    fn test_highlight_preserves_whitespace() {
         let result = highlight_line("x + 1");
         // Should contain spaces between tokens
         assert!(result.contains(" + ") || result.contains(' '));
@@ -627,56 +627,56 @@ mod tests {
     // === parse_load_prefix tests ===
 
     #[test]
-    fn parse_load_prefix_load_unquoted() {
+    fn test_parse_load_prefix_load_unquoted() {
         let result = parse_load_prefix(":load examples/");
         assert_eq!(result, Some((false, "examples/", 6)));
     }
 
     #[test]
-    fn parse_load_prefix_load_quoted() {
+    fn test_parse_load_prefix_load_quoted() {
         let result = parse_load_prefix(":load \"examples/");
         assert_eq!(result, Some((true, "examples/", 7)));
     }
 
     #[test]
-    fn parse_load_prefix_l_shorthand() {
+    fn test_parse_load_prefix_l_shorthand() {
         let result = parse_load_prefix(":l foo");
         assert_eq!(result, Some((false, "foo", 3)));
     }
 
     #[test]
-    fn parse_load_prefix_reload_quoted() {
+    fn test_parse_load_prefix_reload_quoted() {
         let result = parse_load_prefix(":reload \"stdlib/");
         assert_eq!(result, Some((true, "stdlib/", 9)));
     }
 
     #[test]
-    fn parse_load_prefix_r_shorthand_quoted() {
+    fn test_parse_load_prefix_r_shorthand_quoted() {
         let result = parse_load_prefix(":r \"foo");
         assert_eq!(result, Some((true, "foo", 4)));
     }
 
     #[test]
-    fn parse_load_prefix_non_load_command_is_none() {
+    fn test_parse_load_prefix_non_load_command_is_none() {
         assert_eq!(parse_load_prefix(":help"), None);
         assert_eq!(parse_load_prefix(":bindings"), None);
         assert_eq!(parse_load_prefix("Counter spawn"), None);
     }
 
     #[test]
-    fn parse_load_prefix_command_only_no_space_is_none() {
+    fn test_parse_load_prefix_command_only_no_space_is_none() {
         // ":load" without trailing space is command completion, not path
         assert_eq!(parse_load_prefix(":load"), None);
     }
 
     #[test]
-    fn parse_load_prefix_empty_path_after_space() {
+    fn test_parse_load_prefix_empty_path_after_space() {
         let result = parse_load_prefix(":load ");
         assert_eq!(result, Some((false, "", 6)));
     }
 
     #[test]
-    fn parse_load_prefix_empty_quoted_path() {
+    fn test_parse_load_prefix_empty_quoted_path() {
         let result = parse_load_prefix(":load \"");
         assert_eq!(result, Some((true, "", 7)));
     }
@@ -693,7 +693,7 @@ mod tests {
     }
 
     #[test]
-    fn complete_path_lists_bt_files_and_dirs() {
+    fn test_complete_path_lists_bt_files_and_dirs() {
         let dir = make_test_dir();
         let path_str = format!("{}/", dir.path().to_string_lossy());
         let candidates = complete_path(&path_str, false);
@@ -708,7 +708,7 @@ mod tests {
     }
 
     #[test]
-    fn complete_path_filters_by_prefix() {
+    fn test_complete_path_filters_by_prefix() {
         let dir = make_test_dir();
         let path_str = format!("{}/co", dir.path().to_string_lossy());
         let candidates = complete_path(&path_str, false);
@@ -718,7 +718,7 @@ mod tests {
     }
 
     #[test]
-    fn complete_path_quoted_appends_closing_quote() {
+    fn test_complete_path_quoted_appends_closing_quote() {
         let dir = make_test_dir();
         let path_str = format!("{}/counter.bt", dir.path().to_string_lossy());
         let candidates = complete_path(&path_str, true);
@@ -729,7 +729,7 @@ mod tests {
     }
 
     #[test]
-    fn complete_path_unquoted_no_closing_quote() {
+    fn test_complete_path_unquoted_no_closing_quote() {
         let dir = make_test_dir();
         let path_str = format!("{}/counter.bt", dir.path().to_string_lossy());
         let candidates = complete_path(&path_str, false);
@@ -739,7 +739,7 @@ mod tests {
     }
 
     #[test]
-    fn complete_path_dir_has_trailing_slash() {
+    fn test_complete_path_dir_has_trailing_slash() {
         let dir = make_test_dir();
         let path_str = format!("{}/ex", dir.path().to_string_lossy());
         let candidates = complete_path(&path_str, false);
@@ -749,7 +749,7 @@ mod tests {
     }
 
     #[test]
-    fn complete_path_dir_quoted_no_closing_quote() {
+    fn test_complete_path_dir_quoted_no_closing_quote() {
         let dir = make_test_dir();
         let path_str = format!("{}/ex", dir.path().to_string_lossy());
         let candidates = complete_path(&path_str, true);
@@ -760,13 +760,13 @@ mod tests {
     }
 
     #[test]
-    fn complete_path_nonexistent_dir_returns_empty() {
+    fn test_complete_path_nonexistent_dir_returns_empty() {
         let candidates = complete_path("/this/path/does/not/exist/", false);
         assert!(candidates.is_empty());
     }
 
     #[test]
-    fn complete_path_sorted_alphabetically() {
+    fn test_complete_path_sorted_alphabetically() {
         let dir = make_test_dir();
         let path_str = format!("{}/", dir.path().to_string_lossy());
         let candidates = complete_path(&path_str, false);

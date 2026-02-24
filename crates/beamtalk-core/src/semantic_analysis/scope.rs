@@ -238,19 +238,16 @@ impl Default for Scope {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn test_span() -> Span {
-        Span::new(0, 0)
-    }
+    use crate::semantic_analysis::test_helpers::test_span;
 
     #[test]
-    fn new_scope_starts_at_module_depth() {
+    fn test_new_scope_starts_at_module_depth() {
         let scope = Scope::new();
         assert_eq!(scope.current_depth(), 0);
     }
 
     #[test]
-    fn push_increments_depth() {
+    fn test_push_increments_depth() {
         let mut scope = Scope::new();
         assert_eq!(scope.current_depth(), 0);
 
@@ -265,7 +262,7 @@ mod tests {
     }
 
     #[test]
-    fn pop_decrements_depth() {
+    fn test_pop_decrements_depth() {
         let mut scope = Scope::new();
         scope.push();
         scope.push();
@@ -282,7 +279,7 @@ mod tests {
     }
 
     #[test]
-    fn pop_returns_false_at_module_level() {
+    fn test_pop_returns_false_at_module_level() {
         let mut scope = Scope::new();
         assert_eq!(scope.current_depth(), 0);
 
@@ -292,7 +289,7 @@ mod tests {
     }
 
     #[test]
-    fn define_adds_variable_to_current_scope() {
+    fn test_define_adds_variable_to_current_scope() {
         let mut scope = Scope::new();
         scope.define("x", test_span(), BindingKind::Local);
 
@@ -301,7 +298,7 @@ mod tests {
     }
 
     #[test]
-    fn lookup_finds_variable_in_current_scope() {
+    fn test_lookup_finds_variable_in_current_scope() {
         let mut scope = Scope::new();
         scope.define("x", test_span(), BindingKind::Local);
 
@@ -310,7 +307,7 @@ mod tests {
     }
 
     #[test]
-    fn lookup_searches_outer_scopes() {
+    fn test_lookup_searches_outer_scopes() {
         let mut scope = Scope::new();
         scope.define("outer", test_span(), BindingKind::Local);
 
@@ -323,7 +320,7 @@ mod tests {
     }
 
     #[test]
-    fn lookup_finds_innermost_shadowing_variable() {
+    fn test_lookup_finds_innermost_shadowing_variable() {
         let mut scope = Scope::new();
         scope.define("x", Span::new(0, 1), BindingKind::Local);
 
@@ -336,7 +333,7 @@ mod tests {
     }
 
     #[test]
-    fn is_captured_returns_false_for_local_variable() {
+    fn test_is_captured_returns_false_for_local_variable() {
         let mut scope = Scope::new();
         scope.push(); // method level
 
@@ -345,7 +342,7 @@ mod tests {
     }
 
     #[test]
-    fn is_captured_returns_true_for_outer_variable() {
+    fn test_is_captured_returns_true_for_outer_variable() {
         let mut scope = Scope::new();
         scope.define("outer", test_span(), BindingKind::Local);
 
@@ -356,13 +353,13 @@ mod tests {
     }
 
     #[test]
-    fn is_captured_returns_false_for_undefined_variable() {
+    fn test_is_captured_returns_false_for_undefined_variable() {
         let scope = Scope::new();
         assert!(!scope.is_captured("undefined"));
     }
 
     #[test]
-    fn redefine_variable_in_same_scope() {
+    fn test_redefine_variable_in_same_scope() {
         let mut scope = Scope::new();
         scope.define("x", Span::new(0, 1), BindingKind::Local);
 
@@ -375,7 +372,7 @@ mod tests {
     }
 
     #[test]
-    fn scope_levels_track_correct_depth() {
+    fn test_scope_levels_track_correct_depth() {
         let mut scope = Scope::new();
 
         // Module level (0)
@@ -411,7 +408,7 @@ mod tests {
     }
 
     #[test]
-    fn current_scope_vars_returns_only_current_level() {
+    fn test_current_scope_vars_returns_only_current_level() {
         let mut scope = Scope::new();
         scope.define("outer", test_span(), BindingKind::Local);
 
@@ -428,7 +425,7 @@ mod tests {
     }
 
     #[test]
-    fn handles_empty_variable_name() {
+    fn test_handles_empty_variable_name() {
         let mut scope = Scope::new();
         scope.define("", test_span(), BindingKind::Local);
         scope.define("valid", test_span(), BindingKind::Local);
@@ -440,7 +437,7 @@ mod tests {
     }
 
     #[test]
-    fn iterator_lifetime_is_correct() {
+    fn test_iterator_lifetime_is_correct() {
         let mut scope = Scope::new();
         scope.define("x", test_span(), BindingKind::Local);
         scope.define("y", test_span(), BindingKind::Local);
@@ -457,7 +454,7 @@ mod tests {
     }
 
     #[test]
-    fn binding_kind_is_preserved() {
+    fn test_binding_kind_is_preserved() {
         let mut scope = Scope::new();
         scope.define("param", test_span(), BindingKind::Parameter);
         scope.define("local", test_span(), BindingKind::Local);

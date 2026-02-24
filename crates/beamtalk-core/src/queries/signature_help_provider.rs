@@ -443,22 +443,20 @@ mod tests {
         // Line 2: "  run => self add: 1 to: 2"
         //                       ^-- col 19
         let result = compute_signature_help(&module, source, Position::new(2, 19), &hierarchy);
-        if let Some(help) = result {
-            assert_eq!(
-                help.active_parameter, 0,
-                "cursor after 'add:' should be param 0"
-            );
-        }
+        let help = result.expect("should get signature help at 'add:' position");
+        assert_eq!(
+            help.active_parameter, 0,
+            "cursor after 'add:' should be param 0"
+        );
 
         // Cursor right after `to:` — should be param 1
         // Line 2: "  run => self add: 1 to: 2"
         //                               ^-- col 24
         let result = compute_signature_help(&module, source, Position::new(2, 24), &hierarchy);
-        if let Some(help) = result {
-            assert_eq!(
-                help.active_parameter, 1,
-                "cursor after 'to:' should be param 1"
-            );
-        }
+        let help = result.expect("should get signature help at 'to:' position");
+        assert_eq!(
+            help.active_parameter, 1,
+            "cursor after 'to:' should be param 1"
+        );
     }
 }

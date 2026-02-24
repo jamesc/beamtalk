@@ -802,20 +802,6 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn test_check_escript_available() {
-        // This test will pass if escript is installed, skip otherwise
-        match check_escript_available() {
-            Ok(()) => {
-                // escript is available, test passes
-            }
-            Err(_) => {
-                // escript not available, skip test
-                println!("Skipping test - escript not installed");
-            }
-        }
-    }
-
-    #[test]
     fn test_write_core_erlang() {
         let temp = TempDir::new().unwrap();
         let output_path = Utf8PathBuf::from_path_buf(temp.path().join("test_module.core")).unwrap();
@@ -1004,12 +990,9 @@ end
 
         let result = compiler.compile_batch(&[core_file]);
 
-        // Check that output directory was created
+        // Check that output directory was created and compilation succeeded
         assert!(output_dir.exists());
-
-        if let Err(e) = result {
-            println!("Compilation failed (expected in CI): {e:?}");
-        }
+        result.expect("compile_batch should succeed when escript is available");
     }
 
     // Tests for escape_erlang_string

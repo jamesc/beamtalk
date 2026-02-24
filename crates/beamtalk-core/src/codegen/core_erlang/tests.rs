@@ -1,6 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
+//! Tests for Core Erlang code generation.
+
 use super::*;
 use crate::ast::*;
 use crate::source_analysis::Span;

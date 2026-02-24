@@ -1323,36 +1323,12 @@ fn load_directory(client: &mut ReplClient, dir_path: &str, verb: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    //! Tests for REPL command logic: value formatting, node name resolution, and process management.
     use super::*;
+    use color::ColorGuard;
     use process::DEFAULT_REPL_PORT;
     use serial_test::serial;
-    use std::sync::atomic::Ordering;
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
-
-    /// RAII guard that restores `COLOR_ENABLED` on drop (even if test panics).
-    struct ColorGuard {
-        prev: bool,
-    }
-
-    impl ColorGuard {
-        fn disabled() -> Self {
-            let prev = color::COLOR_ENABLED.load(Ordering::Relaxed);
-            color::COLOR_ENABLED.store(false, Ordering::Relaxed);
-            Self { prev }
-        }
-
-        fn enabled() -> Self {
-            let prev = color::COLOR_ENABLED.load(Ordering::Relaxed);
-            color::COLOR_ENABLED.store(true, Ordering::Relaxed);
-            Self { prev }
-        }
-    }
-
-    impl Drop for ColorGuard {
-        fn drop(&mut self) {
-            color::COLOR_ENABLED.store(self.prev, Ordering::Relaxed);
-        }
-    }
 
     #[test]
     #[serial(color)]
@@ -1701,13 +1677,13 @@ mod tests {
     }
 
     #[test]
+    #[serial(env_var)]
     fn resolve_node_name_none_without_env() {
         // When no CLI flag and no env var, should return None
+        // SAFETY: This test runs single-threaded via #[serial], restoring env var after
+        unsafe { std::env::remove_var("BEAMTALK_NODE_NAME") };
         let result = resolve_node_name(None);
-        // If env var is set, it will return that; if not, None
-        // The test verifies the function handles None correctly
-        // We can't assume env var state without serial test
-        assert!(result.is_none() || result.is_some());
+        assert!(result.is_none());
     }
 
     #[test]
