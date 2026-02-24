@@ -426,6 +426,10 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
                 instance_methods = NewInstanceMethods,
                 class_methods = NewClassMethods,
                 fields = NewIVars,
+                %% BT-838: Refresh field_defaults so hot-reload picks up new defaults.
+                field_defaults = maps:get(
+                    field_defaults, ClassInfo, State#class_state.field_defaults
+                ),
                 method_source = maps:get(method_source, ClassInfo, State#class_state.method_source),
                 is_constructible = undefined,
                 doc = maps:get(doc, ClassInfo, State#class_state.doc),
