@@ -96,7 +96,7 @@ The project facade. Loaded classes, actors, project operations. Mutable.
 | Category | Methods |
 |----------|---------|
 | Code loading | `load: aPath` |
-| Classes | `classes` |
+| Classes | `classes`, `testClasses` |
 | Actors | `actors`, `actorAt:`, `actorsOf:` |
 | Testing | `test`, `test: aTestClass` |
 | Session | `clear` |
@@ -519,7 +519,7 @@ Add `sourceFile` and `reload` methods to `Behaviour`. Implement backing primitiv
 
 ### Phase 3: Expand WorkspaceInterface with project operations
 
-Rename `WorkspaceEnvironment` to `WorkspaceInterface` (matching `BeamtalkInterface` naming convention). Add `classes`, `globals`, `load:`, `clear`, `test`, `test:`. Remove `sessions`. The `globals` method returns a plain `Dictionary`.
+Rename `WorkspaceEnvironment` to `WorkspaceInterface` (matching `BeamtalkInterface` naming convention). Add `classes`, `testClasses`, `globals`, `load:`, `clear`, `test`, `test:`. Remove `sessions`. `testClasses` filters `classes` to `TestCase` subclasses; `test` runs all `testClasses` internally. The `globals` method returns a plain `Dictionary`.
 
 Implement backing primitives in `beamtalk_workspace_environment.erl` (rename to `beamtalk_workspace_interface.erl`), extracting logic from existing `beamtalk_repl_ops_load.erl` and `beamtalk_repl_ops_eval.erl`.
 
@@ -566,7 +566,7 @@ Add BUnit tests for all new facade and Behaviour methods. Add e2e tests exercisi
 | Component | Change |
 |-----------|--------|
 | `stdlib/src/SystemDictionary.bt` | Rename to `BeamtalkInterface.bt` |
-| `stdlib/src/WorkspaceInterface.bt` | Add `classes`, `globals`, `load:`, `clear`, `test`, `test:`; remove `sessions` |
+| `stdlib/src/WorkspaceInterface.bt` | Add `classes`, `testClasses`, `globals`, `load:`, `clear`, `test`, `test:`; remove `sessions` |
 | `stdlib/src/Behaviour.bt` | Add `sourceFile`, `reload` |
 | `beamtalk_system_dictionary.erl` | Rename to `beamtalk_interface.erl`; add `help:`, `help:selector:` |
 | `beamtalk_workspace_environment.erl` | New primitive handlers for project ops + `globals` |
