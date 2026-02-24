@@ -70,7 +70,6 @@ TestCase subclass: SetTest
     self deny: (big isSubsetOf: small)
 
   testAslist =>
-    (Set new) fromList: #(3, 1, 2).
     self assert: (((Set new) fromList: #(3, 1, 2)) asList) equals: #(1, 2, 3)
 
   testIteration =>
