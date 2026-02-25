@@ -11,11 +11,7 @@
 %%% delegates to `beamtalk_object_class:start/2` for first registration or
 %%% `beamtalk_object_class:update_class/2` for hot reload.
 %%%
-%%% ## Single Path (BT-873)
-%%%
-%%% All class creation goes through the compiled path (Path 1). The dynamic
-%%% closure-based path (BT-838 / ADR 0038 Path 2) has been removed. Every
-%%% class registration requires a `moduleName` key (or defaults to className)
+%%% All class registration requires a `moduleName` key (or defaults to className)
 %%% and uses compiled BEAM module dispatch.
 %%%
 %%% ## Hot Reload
@@ -256,7 +252,7 @@ build_class_info(ClassName, SuperclassName, FieldSpecs, MethodSpecs, Modifiers, 
     ).
 
 %% @private
-%% @doc Build ClassInfo for a compiled class (Path 1).
+%% @doc Build ClassInfo for a compiled class.
 -spec build_compiled_class_info(
     atom(),
     atom(),

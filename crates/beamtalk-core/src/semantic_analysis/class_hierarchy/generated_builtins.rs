@@ -364,7 +364,6 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "fields:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ClassBuilder".into(), is_sealed: false, return_type: None, param_types: vec![None] },
                 MethodInfo { selector: "methods:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ClassBuilder".into(), is_sealed: false, return_type: None, param_types: vec![None] },
                 MethodInfo { selector: "addField:default:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "ClassBuilder".into(), is_sealed: false, return_type: None, param_types: vec![None, None] },
-                MethodInfo { selector: "addMethod:body:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "ClassBuilder".into(), is_sealed: false, return_type: None, param_types: vec![None, None] },
                 MethodInfo { selector: "modifier:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ClassBuilder".into(), is_sealed: false, return_type: None, param_types: vec![None] },
                 MethodInfo { selector: "register".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ClassBuilder".into(), is_sealed: false, return_type: None, param_types: vec![] },
             ],
