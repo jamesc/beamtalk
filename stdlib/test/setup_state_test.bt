@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-900: Tests that setUp state flows into test methods.
+// Value objects are immutable maps — setUp returns a new Self with fields set.
+// The BUnit runner must use that return value as the receiver for test methods.
+
+TestCase subclass: SetupStateTest
+  state: value = 0
+
+  setUp =>
+    self.value := 42
+
+  testFieldFromSetUp =>
+    self assert: self.value equals: 42
+
+  testFieldFromSetUpAgain =>
+    // Each test gets a fresh setUp instance — verify isolation
+    self assert: self.value equals: 42

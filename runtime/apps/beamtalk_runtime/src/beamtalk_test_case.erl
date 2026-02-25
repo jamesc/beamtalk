@@ -380,13 +380,16 @@ run_test_method(ClassName, Module, MethodName, FlatMethods) ->
     try
         Instance = Module:new(),
         {HasSetUp, HasTearDown} = check_lifecycle_methods(Module, FlatMethods),
-        case HasSetUp of
-            true -> Module:dispatch(setUp, [], Instance);
-            false -> ok
-        end,
+        %% BT-900: Value objects are immutable maps — setUp returns a new instance
+        %% with fields set. We must use that return value, not the original Instance.
+        SetUpInstance =
+            case HasSetUp of
+                true -> Module:dispatch(setUp, [], Instance);
+                false -> Instance
+            end,
         TestResult =
             try
-                Module:dispatch(MethodName, [], Instance),
+                Module:dispatch(MethodName, [], SetUpInstance),
                 {pass, MethodName}
             catch
                 error:#beamtalk_error{kind = assertion_failed, message = AssertMsg} ->
@@ -413,7 +416,7 @@ run_test_method(ClassName, Module, MethodName, FlatMethods) ->
                 case HasTearDown of
                     true ->
                         try
-                            Module:dispatch(tearDown, [], Instance)
+                            Module:dispatch(tearDown, [], SetUpInstance)
                             % Don't mask the original test failure
                         catch
                             _:_ -> ok

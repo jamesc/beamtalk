@@ -499,11 +499,24 @@ impl CoreErlangGenerator {
             }
 
             if is_last {
-                let expr_code = self.capture_expression(expr)?;
-                if i > 0 {
-                    body_parts.push(Document::Str("    "));
+                // BT-900: When the last expression is a field assignment, the method
+                // should return the updated Self (not the assigned value). This allows
+                // setUp to return the modified instance. The field assignment expression
+                // itself still evaluates to the assigned value (preserving `(self.x := 5) + 1`
+                // semantics), but we generate it as a non-last open let chain and then
+                // close with Self{N} as the method return value.
+                if Self::is_field_assignment(expr) {
+                    let doc = self.generate_vt_field_assignment_open(expr)?;
+                    body_parts.push(doc);
+                    let final_self = self.current_self_var();
+                    body_parts.push(Document::String(format!("    {final_self}\n")));
+                } else {
+                    let expr_code = self.capture_expression(expr)?;
+                    if i > 0 {
+                        body_parts.push(Document::Str("    "));
+                    }
+                    body_parts.push(Document::String(expr_code));
                 }
-                body_parts.push(Document::String(expr_code));
             } else if Self::is_field_assignment(expr) {
                 // BT-833: Value type field assignment (non-last) — generate an open
                 // Self-threading let chain so Self{N} stays in scope for subsequent exprs.
