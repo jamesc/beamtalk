@@ -42,14 +42,18 @@ const TCP_CONNECT_TIMEOUT_MS: u64 = 2000;
 const TCP_READ_TIMEOUT_MS: u64 = 5000;
 
 /// Initial delay before first PID discovery attempt in milliseconds.
-const PID_DISCOVERY_INITIAL_DELAY_MS: u64 = 2000;
+///
+/// With PID-file discovery (vs the old sysinfo process-list scanning), the file
+/// appears as soon as the BEAM VM starts its eval command — before OTP apps load.
+/// 500ms is enough for `-detached` fork + exec + VM boot on most systems.
+const PID_DISCOVERY_INITIAL_DELAY_MS: u64 = 500;
 
 /// Delay between PID discovery retry attempts in milliseconds.
 const PID_DISCOVERY_RETRY_DELAY_MS: u64 = 500;
 
 /// Maximum number of PID discovery attempts.
-/// Total worst-case: 2s initial + 20 × 500ms = 12s.
-const PID_DISCOVERY_MAX_RETRIES: usize = 20;
+/// Total worst-case: 500ms initial + 30 × 500ms = 15.5s.
+const PID_DISCOVERY_MAX_RETRIES: usize = 30;
 
 /// Delay between port file read attempts in milliseconds.
 const PORT_DISCOVERY_DELAY_MS: u64 = 500;
