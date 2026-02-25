@@ -274,14 +274,15 @@ has_method_returns_true_for_new_selectors_test() ->
     ?assert(beamtalk_workspace_interface:has_method(classes)),
     ?assert(beamtalk_workspace_interface:has_method('load:')).
 
-has_method_returns_false_for_beamtalk_facade_selectors_test() ->
-    %% These are Beamtalk facades — gen_server does not handle them as primitives
-    ?assertNot(beamtalk_workspace_interface:has_method('actorsOf:')),
-    ?assertNot(beamtalk_workspace_interface:has_method(testClasses)),
-    ?assertNot(beamtalk_workspace_interface:has_method(globals)),
-    ?assertNot(beamtalk_workspace_interface:has_method(clear)),
-    ?assertNot(beamtalk_workspace_interface:has_method(test)),
-    ?assertNot(beamtalk_workspace_interface:has_method('test:')).
+has_method_returns_true_for_formerly_facade_selectors_test() ->
+    %% These were Beamtalk facades but are now Erlang primitives
+    ?assert(beamtalk_workspace_interface:has_method('actorsOf:')),
+    ?assert(beamtalk_workspace_interface:has_method(testClasses)),
+    ?assert(beamtalk_workspace_interface:has_method(globals)),
+    ?assert(beamtalk_workspace_interface:has_method(test)),
+    ?assert(beamtalk_workspace_interface:has_method('test:')),
+    %% clear is not implemented
+    ?assertNot(beamtalk_workspace_interface:has_method(clear)).
 
 %%% ===========================================================================
 %%% class_info Tests — new methods
