@@ -9,7 +9,7 @@
 //! and reply tuples, and the `register_class/0` on-load function.
 
 use super::super::document::{Document, INDENT, line, nest};
-use super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
+use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, ClassDefinition, Expression, MethodDefinition, MethodKind, Module};
 use crate::docvec;
 
@@ -301,23 +301,26 @@ impl CoreErlangGenerator {
                         ") in {'reply', _Result, _NewState}",
                     ];
                     docs.push(doc);
-                } else if let Some(tier2_args) = Self::detect_tier2_self_send(expr) {
-                    // BT-853: Last expression is a Tier 2 self-send.
-                    // generate_tier2_self_send_open produces an open chain; close
-                    // it with {'reply', Result, FinalState}.
-                    let open_chain = self.generate_tier2_self_send_open(expr, &tier2_args)?;
-                    let sd_fallback = self.fresh_temp_var("SDFallback");
-                    let dispatch_var = self.last_dispatch_var.take().unwrap_or(sd_fallback);
+                } else if let Some(tier2_args) = self.detect_tier2_self_send(expr) {
+                    // BT-870: Last expression is a Tier 2 self-send (or promoted Tier 1 at
+                    // a known Tier 2 HOM position). generate_tier2_self_send_open emits the
+                    // dispatch + state extraction as an open let chain; close with reply tuple.
+                    let doc = self.generate_tier2_self_send_open(expr, &tier2_args)?;
+                    docs.push(doc);
+                    let dispatch_var = self.last_dispatch_var.clone().ok_or_else(|| {
+                        CodeGenError::Internal(
+                            "invariant violation: missing dispatch var after Tier 2 self-send"
+                                .to_string(),
+                        )
+                    })?;
                     let final_state = self.current_state_var();
-                    let doc = docvec![
-                        open_chain,
-                        "let _Result = call 'erlang':'element'(1, ",
+                    docs.push(docvec![
+                        "{'reply', call 'erlang':'element'(1, ",
                         Document::String(dispatch_var),
-                        ") in {'reply', _Result, ",
+                        "), ",
                         Document::String(final_state),
                         "}",
-                    ];
-                    docs.push(doc);
+                    ]);
                 } else {
                     // Regular last expression: bind to Result and reply
                     // BT-851: Get state AFTER expression generation, since Tier 2
@@ -453,7 +456,7 @@ impl CoreErlangGenerator {
                     Document::String(tuple_var),
                     ") in ",
                 ]);
-            } else if let Some(tier2_args) = Self::detect_tier2_self_send(expr) {
+            } else if let Some(tier2_args) = self.detect_tier2_self_send(expr) {
                 // BT-851: Tier 2 self-send with stateful block arguments.
                 // Pack captured locals into State, send, extract locals from returned State.
                 let doc = self.generate_tier2_self_send_open(expr, &tier2_args)?;
@@ -628,23 +631,26 @@ impl CoreErlangGenerator {
                         ") in {'reply', _Result, _NewState}",
                     ];
                     docs.push(doc);
-                } else if let Some(tier2_args) = Self::detect_tier2_self_send(expr) {
-                    // BT-853: Last expression is a Tier 2 self-send.
-                    // generate_tier2_self_send_open produces an open chain; close
-                    // it with {'reply', Result, FinalState}.
-                    let open_chain = self.generate_tier2_self_send_open(expr, &tier2_args)?;
-                    let sd_fallback = self.fresh_temp_var("SDFallback");
-                    let dispatch_var = self.last_dispatch_var.take().unwrap_or(sd_fallback);
+                } else if let Some(tier2_args) = self.detect_tier2_self_send(expr) {
+                    // BT-870: Last expression is a Tier 2 self-send (or promoted Tier 1 at
+                    // a known Tier 2 HOM position). generate_tier2_self_send_open emits the
+                    // dispatch + state extraction as an open let chain; close with reply tuple.
+                    let doc = self.generate_tier2_self_send_open(expr, &tier2_args)?;
+                    docs.push(doc);
+                    let dispatch_var = self.last_dispatch_var.clone().ok_or_else(|| {
+                        CodeGenError::Internal(
+                            "invariant violation: missing dispatch var after Tier 2 self-send"
+                                .to_string(),
+                        )
+                    })?;
                     let final_state = self.current_state_var();
-                    let doc = docvec![
-                        open_chain,
-                        "let _Result = call 'erlang':'element'(1, ",
+                    docs.push(docvec![
+                        "{'reply', call 'erlang':'element'(1, ",
                         Document::String(dispatch_var),
-                        ") in {'reply', _Result, ",
+                        "), ",
                         Document::String(final_state),
                         "}",
-                    ];
-                    docs.push(doc);
+                    ]);
                 } else {
                     // Regular last expression: bind to Result and reply
                     // BT-851: Get state AFTER expression generation, since Tier 2
@@ -886,7 +892,7 @@ impl CoreErlangGenerator {
                     Document::String(tuple_var),
                     ") in ",
                 ]);
-            } else if let Some(tier2_args) = Self::detect_tier2_self_send(expr) {
+            } else if let Some(tier2_args) = self.detect_tier2_self_send(expr) {
                 // BT-851: Tier 2 self-send with stateful block arguments.
                 let doc = self.generate_tier2_self_send_open(expr, &tier2_args)?;
                 docs.push(doc);
