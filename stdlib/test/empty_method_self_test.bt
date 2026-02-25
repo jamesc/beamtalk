@@ -1,15 +1,15 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-631: Tests that an empty actor method body returns self (the actor reference)
-// rather than nil, and that the returned reference is usable for further messages.
+// BT-631/BT-859: Tests that an actor method explicitly returning self
+// returns the actor reference and that reference is usable for further messages.
 
 
 TestCase subclass: EmptyMethodSelfTest
 
-  testEmptyMethodReturnsSelf =>
+  testDoNothingReturnsSelf =>
     a := EmptyMethodActor spawn.
-    // Call empty method — should return self (the actor), not nil
+    // Call method that explicitly returns self
     ref := a doNothing await.
     // Returned reference should be the same actor
     self assert: (ref =:= a).

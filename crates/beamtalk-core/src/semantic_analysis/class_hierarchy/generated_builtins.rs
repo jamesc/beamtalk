@@ -993,6 +993,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "perform:withArguments:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: true, return_type: None, param_types: vec![Some("Symbol".into()), Some("List".into())] },
                 MethodInfo { selector: "->".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, return_type: None, param_types: vec![None] },
                 MethodInfo { selector: "subclassResponsibility".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "notImplemented".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, return_type: None, param_types: vec![] },
                 MethodInfo { selector: "error:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, return_type: None, param_types: vec![Some("String".into())] },
             ],
             class_methods: vec![],

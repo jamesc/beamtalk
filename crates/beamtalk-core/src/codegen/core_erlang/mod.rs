@@ -693,6 +693,18 @@ pub(super) struct CoreErlangGenerator {
     /// BT-845/BT-860: Source file path to embed as `beamtalk_source` module attribute.
     /// Set from `CodegenOptions::source_path` before generation begins.
     source_path: Option<String>,
+    /// BT-851: Tier 2 block parameters for the current method being compiled.
+    ///
+    /// When a method parameter name is in this set, `value:` / `value:value:` calls
+    /// on that parameter use the stateful Tier 2 protocol:
+    /// `apply _Fun(Args..., State) → {Result, NewState}`.
+    tier2_block_params: std::collections::HashSet<String>,
+    /// BT-851: Pre-scanned Tier 2 block info for the current class.
+    ///
+    /// Maps method selector → list of parameter indices that receive Tier 2 blocks
+    /// from self-sends within the same class. Populated by `scan_class_for_tier2_blocks`
+    /// before method body generation.
+    tier2_method_info: std::collections::HashMap<String, Vec<usize>>,
 }
 
 impl CoreErlangGenerator {
@@ -723,6 +735,8 @@ impl CoreErlangGenerator {
             self_version: 0,
             class_module_index: std::collections::HashMap::new(),
             source_path: None,
+            tier2_block_params: std::collections::HashSet::new(),
+            tier2_method_info: std::collections::HashMap::new(),
         }
     }
 
@@ -753,6 +767,8 @@ impl CoreErlangGenerator {
             self_version: 0,
             class_module_index: std::collections::HashMap::new(),
             source_path: None,
+            tier2_block_params: std::collections::HashSet::new(),
+            tier2_method_info: std::collections::HashMap::new(),
         }
     }
 

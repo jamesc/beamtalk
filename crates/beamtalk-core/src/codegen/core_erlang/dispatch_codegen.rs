@@ -1306,6 +1306,406 @@ impl CoreErlangGenerator {
 
         Ok(doc)
     }
+
+    /// BT-851: Pre-scans a class for self-sends that pass Tier 2 (stateful) block arguments.
+    ///
+    /// Walks all method bodies looking for `self <selector>: args` where an argument
+    /// is a literal block with captured mutations (`captured_reads ∩ local_writes` non-empty).
+    /// Records the target method selector and parameter position in `tier2_method_info`.
+    pub(super) fn scan_class_for_tier2_blocks(&mut self, class: &crate::ast::ClassDefinition) {
+        use super::block_analysis::analyze_block;
+
+        // Clear previous class's info to avoid cross-class pollution in multi-class modules
+        self.tier2_method_info.clear();
+
+        for method in &class.methods {
+            for expr in &method.body {
+                self.scan_expr_for_tier2(expr, &analyze_block);
+            }
+        }
+    }
+
+    /// BT-851: Recursively scans an expression for Tier 2 block arguments in self-sends.
+    fn scan_expr_for_tier2(
+        &mut self,
+        expr: &Expression,
+        analyze: &dyn Fn(&crate::ast::Block) -> super::block_analysis::BlockMutationAnalysis,
+    ) {
+        match expr {
+            Expression::MessageSend {
+                receiver,
+                selector,
+                arguments,
+                ..
+            } => {
+                // Check for self-sends
+                if let Expression::Identifier(id) = receiver.as_ref() {
+                    if id.name == "self" {
+                        let sel_name = selector.name().to_string();
+                        for (i, arg) in arguments.iter().enumerate() {
+                            if let Expression::Block(block) = arg {
+                                let analysis = analyze(block);
+                                let has_captured_mutations = analysis
+                                    .local_writes
+                                    .intersection(&analysis.captured_reads)
+                                    .next()
+                                    .is_some();
+                                if has_captured_mutations {
+                                    self.tier2_method_info
+                                        .entry(sel_name.clone())
+                                        .or_default()
+                                        .push(i);
+                                }
+                            }
+                        }
+                    }
+                }
+                // Recurse into receiver and arguments
+                self.scan_expr_for_tier2(receiver, analyze);
+                for arg in arguments {
+                    self.scan_expr_for_tier2(arg, analyze);
+                }
+            }
+            Expression::Assignment { target, value, .. } => {
+                self.scan_expr_for_tier2(target, analyze);
+                self.scan_expr_for_tier2(value, analyze);
+            }
+            Expression::Block(block) => {
+                for body_expr in &block.body {
+                    self.scan_expr_for_tier2(body_expr, analyze);
+                }
+            }
+            Expression::Return { value, .. } => {
+                self.scan_expr_for_tier2(value, analyze);
+            }
+            Expression::Parenthesized { expression, .. } => {
+                self.scan_expr_for_tier2(expression, analyze);
+            }
+            Expression::Cascade {
+                receiver, messages, ..
+            } => {
+                // Detect cascaded self-sends as Tier 2 call sites
+                if let Expression::Identifier(id) = receiver.as_ref() {
+                    if id.name == "self" {
+                        for msg in messages {
+                            let sel_name = msg.selector.name().to_string();
+                            for (i, arg) in msg.arguments.iter().enumerate() {
+                                if let Expression::Block(block) = arg {
+                                    let analysis = analyze(block);
+                                    let has_captured_mutations = analysis
+                                        .local_writes
+                                        .intersection(&analysis.captured_reads)
+                                        .next()
+                                        .is_some();
+                                    if has_captured_mutations {
+                                        self.tier2_method_info
+                                            .entry(sel_name.clone())
+                                            .or_default()
+                                            .push(i);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // Recurse into receiver and arguments
+                self.scan_expr_for_tier2(receiver, analyze);
+                for msg in messages {
+                    for arg in &msg.arguments {
+                        self.scan_expr_for_tier2(arg, analyze);
+                    }
+                }
+            }
+            Expression::Match { value, arms, .. } => {
+                self.scan_expr_for_tier2(value, analyze);
+                for arm in arms {
+                    if let Some(guard) = &arm.guard {
+                        self.scan_expr_for_tier2(guard, analyze);
+                    }
+                    self.scan_expr_for_tier2(&arm.body, analyze);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// BT-851: Checks if an expression is a self-send with Tier 2 block arguments.
+    ///
+    /// Returns the captured-mutated variable names for each Tier 2 block argument
+    /// if this is a Tier 2 self-send, or `None` if it's a regular self-send.
+    pub(super) fn detect_tier2_self_send(expr: &Expression) -> Option<Vec<(usize, Vec<String>)>> {
+        use super::block_analysis::analyze_block;
+
+        if let Expression::MessageSend {
+            receiver,
+            arguments,
+            ..
+        } = expr
+        {
+            if let Expression::Identifier(id) = receiver.as_ref() {
+                if id.name == "self" {
+                    let mut tier2_args = Vec::new();
+                    for (i, arg) in arguments.iter().enumerate() {
+                        if let Expression::Block(block) = arg {
+                            let analysis = analyze_block(block);
+                            let captured_mutations: Vec<String> = analysis
+                                .local_writes
+                                .intersection(&analysis.captured_reads)
+                                .cloned()
+                                .collect::<std::collections::BTreeSet<_>>()
+                                .into_iter()
+                                .collect();
+                            if !captured_mutations.is_empty() {
+                                tier2_args.push((i, captured_mutations));
+                            }
+                            // Note: field_writes-only blocks are NOT yet supported
+                            // for Tier 2 (requires different key scheme). See BT-852.
+                        }
+                    }
+                    if !tier2_args.is_empty() {
+                        return Some(tier2_args);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// BT-851: Generates a self-dispatch with Tier 2 block arguments and state threading.
+    ///
+    /// Before the self-send:
+    /// 1. Packs captured-mutated locals into State
+    /// 2. Generates block arguments with Tier 2 stateful signature
+    ///
+    /// After the self-send:
+    /// 1. Extracts captured-mutated locals from the returned State
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// let State1 = call 'maps':'put'('__local__count', Count, State) in
+    /// let _SD0 = case call 'module':'safe_dispatch'('applyBlock:to:',
+    ///     [fun (X, StateAcc) -> ... {Result, StateAcc1} end, 5], State1) of
+    ///   <{'reply', R, S}> when 'true' -> {R, S}
+    ///   <{'error', E, _}> when 'true' -> call 'beamtalk_error':'raise'(E)
+    /// end in let State2 = call 'erlang':'element'(2, _SD0) in
+    /// let Count = call 'maps':'get'('__local__count', State2) in
+    /// ```
+    pub(super) fn generate_tier2_self_send_open(
+        &mut self,
+        expr: &Expression,
+        tier2_args: &[(usize, Vec<String>)],
+    ) -> Result<Document<'static>> {
+        if let Expression::MessageSend {
+            selector,
+            arguments,
+            ..
+        } = expr
+        {
+            let mut docs: Vec<Document<'static>> = Vec::new();
+
+            // Step 1: Pack captured-mutated locals into State
+            for (_pos, captured_vars) in tier2_args {
+                for var_name in captured_vars {
+                    let core_var = self
+                        .lookup_var(var_name)
+                        .cloned()
+                        .unwrap_or_else(|| Self::to_core_erlang_var(var_name));
+                    let key = Self::local_state_key(var_name);
+                    let current_state = self.current_state_var();
+                    let new_state = self.next_state_var();
+                    docs.push(docvec![
+                        "let ",
+                        Document::String(new_state),
+                        " = call 'maps':'put'('",
+                        Document::String(key),
+                        "', ",
+                        Document::String(core_var),
+                        ", ",
+                        Document::String(current_state),
+                        ") in "
+                    ]);
+                }
+            }
+
+            // Step 2: Generate argument list with Tier 2 blocks
+            let selector_atom = selector.to_erlang_atom();
+            let dispatch_var = self.fresh_temp_var("SD");
+            let result_var = self.fresh_var("SDResult");
+            let state_var = self.fresh_var("SDState");
+            let error_var = self.fresh_var("SDError");
+            let current_state = self.current_state_var();
+            let module = self.module_name.clone();
+            let args_doc = self.generate_tier2_args(arguments, tier2_args)?;
+
+            // Step 3: Generate the self-dispatch (using safe_dispatch or sealed path)
+            let call_doc = self.generate_tier2_dispatch_call(
+                selector,
+                arguments.is_empty(),
+                &selector_atom,
+                &dispatch_var,
+                &current_state,
+                &module,
+                args_doc,
+            );
+
+            // Result/error clauses + state extraction
+            let new_state = self.next_state_var();
+            docs.push(docvec![
+                call_doc,
+                "<{'reply', ",
+                Document::String(result_var.clone()),
+                ", ",
+                Document::String(state_var.clone()),
+                "}> when 'true' -> {",
+                Document::String(result_var),
+                ", ",
+                Document::String(state_var),
+                "} <{'error', ",
+                Document::String(error_var.clone()),
+                ", _}> when 'true' -> call 'beamtalk_error':'raise'(",
+                Document::String(error_var),
+                ") end in let ",
+                Document::String(new_state),
+                " = call 'erlang':'element'(2, ",
+                Document::String(dispatch_var.clone()),
+                ") in "
+            ]);
+
+            // Step 4: Extract captured-mutated locals from the returned State
+            let final_state = self.current_state_var();
+            for (_pos, captured_vars) in tier2_args {
+                for var_name in captured_vars {
+                    let core_var = self
+                        .lookup_var(var_name)
+                        .cloned()
+                        .unwrap_or_else(|| Self::to_core_erlang_var(var_name));
+                    let key = Self::local_state_key(var_name);
+                    docs.push(docvec![
+                        "let ",
+                        Document::String(core_var),
+                        " = call 'maps':'get'('",
+                        Document::String(key),
+                        "', ",
+                        Document::String(final_state.clone()),
+                        ") in "
+                    ]);
+                }
+            }
+
+            self.last_dispatch_var = Some(dispatch_var);
+            return Ok(Document::Vec(docs));
+        }
+        self.generate_expression(expr)
+    }
+
+    /// BT-851: Builds argument list for a Tier 2 self-send, using stateful block
+    /// generation for marked positions.
+    fn generate_tier2_args(
+        &mut self,
+        arguments: &[Expression],
+        tier2_args: &[(usize, Vec<String>)],
+    ) -> Result<Document<'static>> {
+        let tier2_positions: std::collections::HashSet<usize> =
+            tier2_args.iter().map(|(pos, _)| *pos).collect();
+        let tier2_vars_by_pos: std::collections::HashMap<usize, &Vec<String>> =
+            tier2_args.iter().map(|(pos, vars)| (*pos, vars)).collect();
+
+        let mut arg_parts: Vec<Document<'static>> = Vec::new();
+        for (i, arg) in arguments.iter().enumerate() {
+            if i > 0 {
+                arg_parts.push(Document::Str(", "));
+            }
+            if tier2_positions.contains(&i) {
+                if let Expression::Block(block) = arg {
+                    let captured_vars = tier2_vars_by_pos[&i];
+                    arg_parts.push(self.generate_block_stateful(block, captured_vars)?);
+                } else {
+                    arg_parts.push(self.expression_doc(arg)?);
+                }
+            } else {
+                arg_parts.push(self.expression_doc(arg)?);
+            }
+        }
+        Ok(Document::Vec(arg_parts))
+    }
+
+    /// BT-851: Generates the dispatch call for a Tier 2 self-send.
+    ///
+    /// Handles sealed (direct/dispatch) and non-sealed (`safe_dispatch`) paths.
+    #[allow(clippy::too_many_arguments)]
+    fn generate_tier2_dispatch_call(
+        &mut self,
+        selector: &MessageSelector,
+        no_args: bool,
+        selector_atom: &str,
+        dispatch_var: &str,
+        current_state: &str,
+        module: &str,
+        args_doc: Document<'static>,
+    ) -> Document<'static> {
+        if self.is_class_sealed() {
+            let selector_name = selector.name().to_string();
+            if self.sealed_method_selectors.contains(&selector_name) {
+                let self_var = self.fresh_temp_var("SealedSelf");
+                let comma = if no_args { "" } else { ", " };
+                docvec![
+                    "let ",
+                    Document::String(self_var.clone()),
+                    " = call 'beamtalk_actor':'make_self'(",
+                    Document::String(current_state.to_string()),
+                    ") in let ",
+                    Document::String(dispatch_var.to_string()),
+                    " = case call '",
+                    Document::String(module.to_string()),
+                    "':'__sealed_",
+                    Document::String(selector_name),
+                    "'(",
+                    args_doc,
+                    comma,
+                    Document::String(self_var),
+                    ", ",
+                    Document::String(current_state.to_string()),
+                    ") of "
+                ]
+            } else {
+                let self_var = self.fresh_temp_var("SealedSelf");
+                docvec![
+                    "let ",
+                    Document::String(self_var.clone()),
+                    " = call 'beamtalk_actor':'make_self'(",
+                    Document::String(current_state.to_string()),
+                    ") in let ",
+                    Document::String(dispatch_var.to_string()),
+                    " = case call '",
+                    Document::String(module.to_string()),
+                    "':'dispatch'('",
+                    Document::String(selector_atom.to_string()),
+                    "', [",
+                    args_doc,
+                    "], ",
+                    Document::String(self_var),
+                    ", ",
+                    Document::String(current_state.to_string()),
+                    ") of "
+                ]
+            }
+        } else {
+            docvec![
+                "let ",
+                Document::String(dispatch_var.to_string()),
+                " = case call '",
+                Document::String(module.to_string()),
+                "':'safe_dispatch'('",
+                Document::String(selector_atom.to_string()),
+                "', [",
+                args_doc,
+                "], ",
+                Document::String(current_state.to_string()),
+                ") of "
+            ]
+        }
+    }
 }
 
 // NOTE: class_method_module_name and related helpers (is_primitive_stdlib_class,

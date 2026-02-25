@@ -4,7 +4,7 @@
 
 > **tl;dr** — Beamtalk is Smalltalk-**like**, not Smalltalk-**compatible**. We use Smalltalk's message-passing syntax with modern pragmatic improvements: `//` comments, standard math precedence, optional statement terminators, field access, and string interpolation. This makes Beamtalk familiar to Smalltalkers while removing friction for modern developers.
 
-This document explains the syntax choices for Beamtalk: why we keep certain Smalltalk conventions and why we diverge from others.
+This document explains the syntax choices for Beamtalk: why we keep certain Smalltalk conventions and why we diverge from others. For the formal architectural decision record with steelman analysis and consequences, see [ADR 0039](ADR/0039-syntax-pragmatism-vs-smalltalk.md).
 
 See [beamtalk-language-features.md](beamtalk-language-features.md) for the complete syntax specification.
 
@@ -147,14 +147,17 @@ count := 0
 count := count + 1
 self doSomething
 
-// Semicolons optional for multiple statements on one line
-count := 0; count := count + 1
+// Periods still work as explicit separators (useful inside blocks)
+[count := 0. count := count + 1]
 ```
 
 **Why change:**
 - Period-as-terminator feels archaic
 - Newlines naturally end statements in most modern languages
 - Less visual noise
+- Periods remain available as explicit separators where newlines are impractical (e.g., single-line blocks)
+
+**Note:** Semicolons (`;`) are **not** statement separators — they are cascade operators (see [Cascades](#cascades) above).
 
 ### Return: `^value` → `^value` (Keep, But Implicit at End)
 
@@ -255,16 +258,9 @@ c1 == c2           // => false (different processes)
 
 ### Control Flow Mutations: Make Them Work
 
-**Smalltalk-80 problem:** Blocks capture variables by value, so mutations inside blocks don't affect outer scope:
+**BEAM constraint:** Smalltalk-80 blocks capture variables by reference (shared mutable cells), so `whileTrue:` with mutations works naturally in Pharo and Squeak. But BEAM enforces single-assignment variables — there are no heap-allocated mutable cells. Without compiler support, mutations inside blocks would not propagate to the outer scope.
 
-```smalltalk
-"Smalltalk-80"
-count := 0.
-[count < 10] whileTrue: [count := count + 1].
-"count is still 0! whileTrue: doesn't see the updates"
-```
-
-**Beamtalk solution:** Literal blocks in control flow positions CAN mutate:
+**Beamtalk solution:** The compiler detects literal blocks in control-flow positions and generates tail-recursive loops with explicit state threading, restoring the Smalltalk mutation semantics that developers expect:
 
 ```
 // ✅ Works!
@@ -367,7 +363,7 @@ In Beamtalk, `Object subclass: Counter` is **parsed as syntax**, not a message s
 | Symbol | `#name` | `#ok`, `#error` |
 | Tuple | `{a, b, c}` | `{1, "two", 3}` |
 | List | `#(a, b, c)` | `#(1, 2, 3)` |
-| Statement separator | newline or `;` | implicit |
+| Statement separator | newline or `.` | implicit |
 
 ---
 
