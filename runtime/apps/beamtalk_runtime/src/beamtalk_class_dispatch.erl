@@ -405,14 +405,16 @@ handle_async_dispatch(_Msg, _ClassName, _InstanceMethods, _Superclass, _Module) 
 handle_self_instantiation(Type, Selector, Args) ->
     ClassName = get(beamtalk_class_name),
     Module = get(beamtalk_class_module),
-    IsAbstract = get(beamtalk_class_is_abstract) =:= true,
-    case {ClassName, Module} of
-        {undefined, _} ->
+    IsAbstract0 = get(beamtalk_class_is_abstract),
+    case {ClassName, Module, IsAbstract0} of
+        {undefined, _, _} ->
             %% Fallback: process dictionary not set — called from non-class process.
             handle_self_instantiation_error(Selector);
-        {_, undefined} ->
+        {_, undefined, _} ->
             handle_self_instantiation_error(Selector);
-        {CN, Mod} ->
+        {_, _, undefined} ->
+            handle_self_instantiation_error(Selector);
+        {CN, Mod, IsAbstract} when is_boolean(IsAbstract) ->
             case Type of
                 new ->
                     beamtalk_class_instantiation:class_self_new(CN, Mod, Args);
