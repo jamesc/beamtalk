@@ -254,6 +254,13 @@ pub struct CodegenOptions {
     /// correctly by all files in the package, regardless of where the caller
     /// lives in the directory tree.
     class_module_index: std::collections::HashMap<String, String>,
+    /// BT-894: Class name → direct superclass name for all classes across all files.
+    ///
+    /// Populated during Pass 1 of package compilation alongside `class_module_index`.
+    /// Used to enrich the per-file `ClassHierarchy` with cross-file inheritance
+    /// information so that `is_actor_class` can resolve the full superclass chain
+    /// even when the parent class is defined in another file.
+    class_superclass_index: std::collections::HashMap<String, String>,
     /// Source file path to embed as `beamtalk_source` module attribute (BT-845/BT-860).
     ///
     /// When set, the generated Core Erlang module includes:
@@ -272,6 +279,7 @@ impl CodegenOptions {
             bindings: None,
             workspace_mode: false,
             class_module_index: std::collections::HashMap::new(),
+            class_superclass_index: std::collections::HashMap::new(),
             source_path: None,
         }
     }
@@ -316,6 +324,20 @@ impl CodegenOptions {
         index: std::collections::HashMap<String, String>,
     ) -> Self {
         self.class_module_index = index;
+        self
+    }
+
+    /// BT-894: Sets the class superclass index for resolving cross-file inheritance.
+    ///
+    /// Maps Beamtalk class names to their direct superclass names. Used to
+    /// enrich the per-file hierarchy so that `is_actor_class` can determine
+    /// the correct codegen context for classes whose parents are in other files.
+    #[must_use]
+    pub fn with_class_superclass_index(
+        mut self,
+        index: std::collections::HashMap<String, String>,
+    ) -> Self {
+        self.class_superclass_index = index;
         self
     }
 
@@ -378,8 +400,13 @@ pub fn generate_module(module: &Module, options: CodegenOptions) -> Result<Strin
     // Build hierarchy once for the entire generation (ADR 0006)
     let (hierarchy_result, _) =
         crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module);
-    let hierarchy =
+    let mut hierarchy =
         hierarchy_result.map_err(|e| CodeGenError::Internal(format!("hierarchy: {e:?}")))?;
+
+    // BT-894: Enrich hierarchy with cross-file superclass information so that
+    // is_actor_class can resolve the full inheritance chain for classes whose
+    // parents are defined in other files.
+    hierarchy.add_external_superclasses(&options.class_superclass_index);
 
     // BT-213: Route based on whether class is actor or value type
     let doc = if CoreErlangGenerator::is_actor_class(module, &hierarchy) {

@@ -264,6 +264,7 @@ fn compile_fixture(
         &options,
         &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
         class_module_index,
+        &std::collections::HashMap::new(),
     )
     .wrap_err_with(|| format!("Failed to compile fixture '{fixture_path}'"))?;
 
@@ -343,6 +344,7 @@ fn compile_test_file(
         &options,
         &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
         class_module_index,
+        &std::collections::HashMap::new(),
     )
     .wrap_err_with(|| format!("Failed to compile test file '{source_path}'"))?;
 
@@ -877,7 +879,10 @@ pub fn run_tests(path: &str) -> Result<()> {
     // references to package classes in subdirectories.
     let project_root_for_index = Utf8PathBuf::from(".");
     let pkg_for_index = manifest::find_manifest(&project_root_for_index)?;
-    let mut class_module_index: HashMap<String, String> = if let Some(ref pkg) = pkg_for_index {
+    let (mut class_module_index, _class_superclass_index): (
+        HashMap<String, String>,
+        HashMap<String, String>,
+    ) = if let Some(ref pkg) = pkg_for_index {
         let src_dir = project_root_for_index.join("src");
         let source_root = if src_dir.exists() {
             Some(src_dir.clone())
@@ -888,10 +893,10 @@ pub fn run_tests(path: &str) -> Result<()> {
             super::build::build_class_module_index(&src_files, source_root.as_deref(), &pkg.name)
                 .unwrap_or_default()
         } else {
-            HashMap::new()
+            (HashMap::new(), HashMap::new())
         }
     } else {
-        HashMap::new()
+        (HashMap::new(), HashMap::new())
     };
 
     // Phase 0: Pre-compile all fixtures in the fixtures/ subdirectory.
