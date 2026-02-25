@@ -3,30 +3,19 @@
 
 /// ClassBuilder — Fluent builder for creating and registering Beamtalk classes.
 ///
-/// Used by the compiler for all compiled class definitions (Path 1, ADR 0038)
-/// and directly for dynamic class creation at runtime (Path 2).
-///
 /// ClassBuilder is an Actor subclass — each builder instance is a short-lived
 /// gen_server process that accumulates configuration via cascaded messages.
 /// The `register` method is a terminal operation: it registers the class with
 /// the runtime, stops the builder process, and returns the new class object.
 ///
-/// ## Compiled use (conceptual — codegen emits Core Erlang, not Beamtalk):
+/// Codegen emits Core Erlang that calls ClassBuilder directly — the Beamtalk
+/// snippet below is conceptual:
 /// ```beamtalk
 /// Object classBuilder
 ///   name: #Counter;
 ///   fields: #{ #count => 0 };
 ///   methods: #{ #increment => [...], #value => [...] };
 ///   register
-/// ```
-///
-/// ## Dynamic use (REPL, frameworks, metaprogramming):
-/// ```beamtalk
-/// cls := Object classBuilder
-///   name: #Greeter;
-///   addMethod: #greet body: [ 'Hello!' ];
-///   register.
-/// Greeter new greet   // => Hello!
 /// ```
 ///
 /// ## References
@@ -76,7 +65,7 @@ Actor subclass: ClassBuilder
   methods: aDict =>
     self.methodSpecs := aDict
 
-  /// Add a single field with a default value (fluent API for dynamic use).
+  /// Add a single field with a default value.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -84,16 +73,6 @@ Actor subclass: ClassBuilder
   /// ```
   addField: aName default: aValue =>
     self.fieldSpecs := self.fieldSpecs at: aName put: aValue
-
-  /// Add a single method as a block (fluent API for dynamic use).
-  /// The block receives self as first argument.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// builder addMethod: #greet body: [ 'Hello!' ]
-  /// ```
-  addMethod: aSelector body: aBlock =>
-    self.methodSpecs := self.methodSpecs at: aSelector put: aBlock
 
   /// Apply a class modifier (#abstract, #sealed, #typed).
   ///
@@ -108,12 +87,9 @@ Actor subclass: ClassBuilder
   /// Stops the builder process after registration — the builder is
   /// single-use and should not be retained.
   ///
-  /// For compiled classes (Path 1): called from module init, wires the
-  /// BEAM module's pre-compiled methods into the class gen_server.
-  /// If the class already exists (hot reload), updates the existing
-  /// gen_server state via `update_class/2` rather than failing.
-  ///
-  /// For dynamic classes (Path 2): creates a class gen_server with
-  /// closure-based methods, no BEAM module required.
+  /// Called from compiled module init, wires the BEAM module's pre-compiled
+  /// methods into the class gen_server. If the class already exists (hot
+  /// reload), updates the existing gen_server state via `update_class/2`
+  /// rather than failing.
   register =>
     @intrinsic classBuilderRegister

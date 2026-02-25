@@ -29,6 +29,7 @@ use crate::commands::protocol::ProtocolClient;
 use super::storage::read_proc_start_time;
 use super::storage::{
     NodeInfo, get_workspace_metadata, read_port_file, read_workspace_cookie, save_node_info,
+    workspace_dir,
 };
 
 /// Default idle timeout in seconds (4 hours)
@@ -41,14 +42,18 @@ const TCP_CONNECT_TIMEOUT_MS: u64 = 2000;
 const TCP_READ_TIMEOUT_MS: u64 = 5000;
 
 /// Initial delay before first PID discovery attempt in milliseconds.
-const PID_DISCOVERY_INITIAL_DELAY_MS: u64 = 2000;
+///
+/// With PID-file discovery (vs the old sysinfo process-list scanning), the file
+/// appears as soon as the BEAM VM starts its eval command — before OTP apps load.
+/// 500ms is enough for `-detached` fork + exec + VM boot on most systems.
+const PID_DISCOVERY_INITIAL_DELAY_MS: u64 = 500;
 
 /// Delay between PID discovery retry attempts in milliseconds.
 const PID_DISCOVERY_RETRY_DELAY_MS: u64 = 500;
 
 /// Maximum number of PID discovery attempts.
-/// Total worst-case: 2s initial + 20 × 500ms = 12s.
-const PID_DISCOVERY_MAX_RETRIES: usize = 20;
+/// Total worst-case: 500ms initial + 30 × 500ms = 15.5s.
+const PID_DISCOVERY_MAX_RETRIES: usize = 30;
 
 /// Delay between port file read attempts in milliseconds.
 const PORT_DISCOVERY_DELAY_MS: u64 = 500;
@@ -240,6 +245,28 @@ pub fn start_detached_node(
     #[cfg(windows)]
     let project_path_str = project_path_str.replace('\\', "\\\\");
 
+    // Compute the PID file path so the BEAM node can write its own PID for reliable discovery.
+    // This avoids flaky process-list scanning via sysinfo (which can miss newly-forked processes
+    // on loaded CI runners). The workspace dir is guaranteed to exist before we start the node.
+    let pid_file_path = workspace_dir(workspace_id)?.join("pid");
+    // Remove any stale PID file from a previous run.
+    // Ignore NotFound (expected first run); propagate other errors (e.g. permissions)
+    // so we don't proceed and later accept a stale PID as valid.
+    if let Err(err) = std::fs::remove_file(&pid_file_path) {
+        if err.kind() != std::io::ErrorKind::NotFound {
+            return Err(miette!(
+                "Failed to remove stale PID file {}: {err}",
+                pid_file_path.display()
+            ));
+        }
+    }
+    let pid_file_path_str = pid_file_path
+        .to_str()
+        .ok_or_else(|| miette!("PID file path contains invalid UTF-8: {:?}", pid_file_path))?
+        .to_owned();
+    #[cfg(windows)]
+    let pid_file_path_str = pid_file_path_str.replace('\\', "\\\\");
+
     // Format bind address as Erlang tuple for cowboy socket_opts
     let bind_addr_erl = beamtalk_cli::repl_startup::format_bind_addr_erl(bind_addr);
 
@@ -250,7 +277,8 @@ pub fn start_detached_node(
     };
 
     let eval_cmd = format!(
-        "application:set_env(beamtalk_runtime, workspace_id, <<\"{workspace_id}\">>), \
+        "ok = file:write_file(\"{pid_file_path_str}\", os:getpid()), \
+         application:set_env(beamtalk_runtime, workspace_id, <<\"{workspace_id}\">>), \
          application:set_env(beamtalk_runtime, project_path, <<\"{project_path_str}\">>), \
          application:set_env(beamtalk_runtime, tcp_port, {port}), \
          application:set_env(beamtalk_runtime, web_port, {web_port_erl}), \
@@ -309,9 +337,12 @@ pub fn start_detached_node(
     // immediately and the real BEAM node runs independently. We need to wait for it to start up.
     // The compiler app (ADR 0022) adds ~500ms to startup, and under load
     // (e.g., parallel integration tests) it can take longer.
-    // Retry PID discovery instead of a single fixed sleep.
-    let mut last_err = None;
-    let pid_found = 'retry: {
+    //
+    // Reliable PID discovery via PID file: the eval command writes the BEAM node's own PID to
+    // {workspace_dir}/pid immediately on startup. This avoids flaky sysinfo process-list scanning
+    // which can miss newly-forked -detached processes on loaded CI runners (the double-fork in
+    // Erlang's daemon mode means the final process PID is not predictable from the outside).
+    let pid = 'retry: {
         for attempt in 0..PID_DISCOVERY_MAX_RETRIES {
             if attempt > 0 {
                 std::thread::sleep(Duration::from_millis(PID_DISCOVERY_RETRY_DELAY_MS));
@@ -319,14 +350,20 @@ pub fn start_detached_node(
                 // Initial delay before first attempt
                 std::thread::sleep(Duration::from_millis(PID_DISCOVERY_INITIAL_DELAY_MS));
             }
-            match find_beam_pid_by_node(&node_name) {
-                Ok(result) => break 'retry result,
-                Err(e) => last_err = Some(e),
+            if let Some(pid) = read_pid_file(workspace_id)? {
+                break 'retry pid;
             }
         }
-        return Err(last_err.unwrap_or_else(|| miette!("PID discovery failed")));
+        return Err(miette!(
+            "BEAM node did not write PID file within timeout.\n\
+             The workspace may have failed to start. Check Erlang/OTP is installed."
+        ));
     };
-    let (pid, start_time) = pid_found;
+
+    #[cfg(target_os = "linux")]
+    let start_time = read_proc_start_time(pid);
+    #[cfg(not(target_os = "linux"))]
+    let start_time = None;
 
     // Read actual port from port file (written by beamtalk_repl_server after binding).
     // This is essential when port=0 is used (OS assigns ephemeral port).
@@ -619,44 +656,33 @@ fn build_detached_node_command(
     cmd
 }
 
-/// Find the PID of a BEAM process by its node name.
+/// Read the PID written by the BEAM node to its workspace PID file.
 ///
-/// Uses `sysinfo` crate for cross-platform process scanning (ADR 0027).
-/// Only needed for force-kill fallback — normal operation uses TCP probes
-/// for liveness/shutdown.
-fn find_beam_pid_by_node(node_name: &str) -> Result<(u32, Option<u64>)> {
-    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
-
-    let mut system = System::new();
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::All,
-        true,
-        ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always),
-    );
-
-    for (pid, process) in system.processes() {
-        let cmd = process.cmd();
-        // Match "erl", "erl.exe", or "beam.smp" in command and node name in arguments
-        let is_beam = cmd.iter().any(|arg| {
-            let arg_str = arg.to_string_lossy();
-            arg_str.contains("erl") || arg_str.contains("beam.smp")
-        });
-        let has_node = cmd
-            .iter()
-            .any(|arg| arg.to_string_lossy().contains(node_name));
-
-        if is_beam && has_node {
-            // On Linux, try to read /proc start time for stale detection
-            #[cfg(target_os = "linux")]
-            let start_time = read_proc_start_time(pid.as_u32());
-            #[cfg(not(target_os = "linux"))]
-            let start_time = None;
-
-            return Ok((pid.as_u32(), start_time));
+/// The BEAM node writes its own OS PID (via `os:getpid()`) to `{workspace_dir}/pid`
+/// as the very first step of its eval command. This is the primary PID discovery
+/// mechanism — it is more reliable than sysinfo process-list scanning, which can
+/// miss newly-forked `-detached` processes on loaded CI runners.
+///
+/// Returns `Ok(None)` if the file does not yet exist (node still starting up).
+/// Returns `Err` for permission or other unexpected IO failures so the caller
+/// surfaces a precise error rather than a generic timeout message.
+fn read_pid_file(workspace_id: &str) -> Result<Option<u32>> {
+    let pid_path = workspace_dir(workspace_id)?.join("pid");
+    let content = match std::fs::read_to_string(&pid_path) {
+        Ok(c) => c,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => {
+            return Err(miette!(
+                "Failed to read PID file {}: {err}",
+                pid_path.display()
+            ));
         }
-    }
-
-    Err(miette!("Could not find BEAM process for node {node_name}"))
+    };
+    // Treat 0 as invalid: it is the "PID unavailable" sentinel used in force-kill flows.
+    Ok(match content.trim().parse::<u32>().ok() {
+        Some(0) | None => None,
+        Some(pid) => Some(pid),
+    })
 }
 
 /// Poll until a workspace exits or timeout is reached.
