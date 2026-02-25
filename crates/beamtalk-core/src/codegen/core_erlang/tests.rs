@@ -2311,6 +2311,157 @@ fn test_cascade_repl_expression() {
     );
 }
 
+// BT-884: Cascade with field-assignment arguments must hoist state bindings
+// so that StateN remains in scope for subsequent cascade messages.
+#[test]
+fn test_cascade_field_assignment_arg_hoisted() {
+    // obj msg1: (self.x := 5); msg2
+    //
+    // Before fix, `let State1 = maps:put(...)` was nested inside the first
+    // send call's argument list and went out of scope. After fix, the binding
+    // is hoisted before the send call.
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.push_scope();
+
+    let obj_ident = Expression::Identifier(Identifier::new("obj", Span::new(0, 3)));
+
+    // First message: msg1: (self.x := 5)
+    let field_assignment = Expression::Assignment {
+        target: Box::new(Expression::FieldAccess {
+            receiver: Box::new(Expression::Identifier(Identifier::new(
+                "self",
+                Span::new(10, 14),
+            ))),
+            field: Identifier::new("x", Span::new(15, 16)),
+            span: Span::new(10, 16),
+        }),
+        value: Box::new(Expression::Literal(Literal::Integer(5), Span::new(20, 21))),
+        span: Span::new(10, 21),
+    };
+
+    let first_msg = Expression::MessageSend {
+        receiver: Box::new(obj_ident),
+        selector: MessageSelector::Keyword(vec![KeywordPart::new("msg1:", Span::new(4, 9))]),
+        arguments: vec![field_assignment],
+        span: Span::new(0, 22),
+    };
+
+    // Second message: msg2 (unary, no args)
+    let cascade = Expression::Cascade {
+        receiver: Box::new(first_msg),
+        messages: vec![CascadeMessage::new(
+            MessageSelector::Unary("msg2".into()),
+            vec![],
+            Span::new(24, 28),
+        )],
+        span: Span::new(0, 28),
+    };
+
+    let doc = generator.generate_expression(&cascade).unwrap();
+    let output = doc.to_pretty_string();
+
+    // The state binding must appear BEFORE the send call, not inside it.
+    // _Receiver1 takes temp var 1, so the val var is _Val2.
+    // Correct pattern:
+    //   let _Val2 = 5 in let State1 = call 'maps':'put'('x', _Val2, State) in
+    //   let _ = call 'beamtalk_message_dispatch':'send'(..., [_Val2]) in ...
+    assert!(
+        output.contains("let _Val2 = 5 in let State1 = call 'maps':'put'('x', _Val2, State) in"),
+        "State binding should be hoisted before send call. Got:\n{output}"
+    );
+
+    // The argument to the send call should be the val var, not the full assignment
+    assert!(
+        output.contains("'msg1:', [_Val2]"),
+        "Argument should be the val var _Val2. Got:\n{output}"
+    );
+
+    // The second message should be able to reference State1 (it's in scope)
+    // Just verify the second message is generated
+    assert!(
+        output.contains("'msg2'"),
+        "Should have second message. Got:\n{output}"
+    );
+
+    generator.pop_scope();
+}
+
+// BT-884: Cascade with field assignments in multiple messages threads state correctly.
+#[test]
+fn test_cascade_multiple_field_assignments_state_threading() {
+    // obj msg1: (self.x := 5); msg2: (self.y := 10)
+    //
+    // The second field assignment should reference State1 (from the first),
+    // and produce State2.
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.push_scope();
+
+    let obj_ident = Expression::Identifier(Identifier::new("obj", Span::new(0, 3)));
+
+    // First message: msg1: (self.x := 5)
+    let field_assign_x = Expression::Assignment {
+        target: Box::new(Expression::FieldAccess {
+            receiver: Box::new(Expression::Identifier(Identifier::new(
+                "self",
+                Span::new(10, 14),
+            ))),
+            field: Identifier::new("x", Span::new(15, 16)),
+            span: Span::new(10, 16),
+        }),
+        value: Box::new(Expression::Literal(Literal::Integer(5), Span::new(20, 21))),
+        span: Span::new(10, 21),
+    };
+
+    let first_msg = Expression::MessageSend {
+        receiver: Box::new(obj_ident),
+        selector: MessageSelector::Keyword(vec![KeywordPart::new("msg1:", Span::new(4, 9))]),
+        arguments: vec![field_assign_x],
+        span: Span::new(0, 22),
+    };
+
+    // Second message: msg2: (self.y := 10)
+    let field_assign_y = Expression::Assignment {
+        target: Box::new(Expression::FieldAccess {
+            receiver: Box::new(Expression::Identifier(Identifier::new(
+                "self",
+                Span::new(30, 34),
+            ))),
+            field: Identifier::new("y", Span::new(35, 36)),
+            span: Span::new(30, 36),
+        }),
+        value: Box::new(Expression::Literal(Literal::Integer(10), Span::new(40, 42))),
+        span: Span::new(30, 42),
+    };
+
+    let cascade = Expression::Cascade {
+        receiver: Box::new(first_msg),
+        messages: vec![CascadeMessage::new(
+            MessageSelector::Keyword(vec![KeywordPart::new("msg2:", Span::new(24, 29))]),
+            vec![field_assign_y],
+            Span::new(24, 43),
+        )],
+        span: Span::new(0, 43),
+    };
+
+    let doc = generator.generate_expression(&cascade).unwrap();
+    let output = doc.to_pretty_string();
+
+    // _Receiver1 takes temp var 1, so val vars are _Val2 and _Val3.
+    // First field assignment: State → State1
+    assert!(
+        output.contains("let State1 = call 'maps':'put'('x', _Val2, State) in"),
+        "First assignment should produce State1. Got:\n{output}"
+    );
+
+    // Second field assignment: State1 → State2
+    assert!(
+        output.contains("let State2 = call 'maps':'put'('y', _Val3, State1) in"),
+        "Second assignment should reference State1 and produce State2. Got:\n{output}"
+    );
+
+    generator.pop_scope();
+}
+
 #[test]
 fn test_validate_stored_closure_empty_block() {
     // Empty block should not trigger errors
