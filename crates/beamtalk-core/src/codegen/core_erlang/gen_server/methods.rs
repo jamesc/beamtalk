@@ -76,6 +76,8 @@ impl CoreErlangGenerator {
         // any parameter invoked with value:/value:value: is a block parameter.
         // This enables HOMs called from external sites (not just pre-scanned self-sends)
         // to correctly use the Tier 2 stateful protocol when Tier 2 blocks are passed.
+        // TODO BT-870: This unconditionally marks all value:-called params as Tier 2,
+        // which will crash if a Tier 1 (plain-value) block is passed at runtime.
         for param in &method.parameters {
             let param_name = &param.name.name;
             if Self::method_body_has_value_call_on(param_name, &method.body) {
@@ -282,10 +284,8 @@ impl CoreErlangGenerator {
                     // generate_tier2_self_send_open produces an open chain; close
                     // it with {'reply', Result, FinalState}.
                     let open_chain = self.generate_tier2_self_send_open(expr, &tier2_args)?;
-                    let dispatch_var = self
-                        .last_dispatch_var
-                        .take()
-                        .unwrap_or_else(|| "_SD".to_string());
+                    let sd_fallback = self.fresh_temp_var("SDFallback");
+                    let dispatch_var = self.last_dispatch_var.take().unwrap_or(sd_fallback);
                     let final_state = self.current_state_var();
                     let doc = docvec![
                         open_chain,
@@ -565,10 +565,8 @@ impl CoreErlangGenerator {
                     // generate_tier2_self_send_open produces an open chain; close
                     // it with {'reply', Result, FinalState}.
                     let open_chain = self.generate_tier2_self_send_open(expr, &tier2_args)?;
-                    let dispatch_var = self
-                        .last_dispatch_var
-                        .take()
-                        .unwrap_or_else(|| "_SD".to_string());
+                    let sd_fallback = self.fresh_temp_var("SDFallback");
+                    let dispatch_var = self.last_dispatch_var.take().unwrap_or(sd_fallback);
                     let final_state = self.current_state_var();
                     let doc = docvec![
                         open_chain,
@@ -1469,7 +1467,9 @@ impl CoreErlangGenerator {
                     .iter()
                     .any(|a| Self::expr_has_value_call_on(param_name, a))
             }
-            Expression::Assignment { value, .. } => Self::expr_has_value_call_on(param_name, value),
+            Expression::Assignment { value, .. } | Expression::Return { value, .. } => {
+                Self::expr_has_value_call_on(param_name, value)
+            }
             Expression::Block(block) => block
                 .body
                 .iter()

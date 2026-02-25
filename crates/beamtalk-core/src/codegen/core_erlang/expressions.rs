@@ -462,9 +462,10 @@ impl CoreErlangGenerator {
     ///   `fun(Params...) -> Result` — zero overhead path unchanged
     ///
     /// Captured mutations = variables written inside the block that were also
-    /// read from the outer scope (i.e. `local_writes ∩ captured_reads`), or when
-    /// the block contains field writes (`self.x := ...`) that must be threaded back.
-    /// Self-sends are handled by the BT-851 pre-scanning (`generate_tier2_self_send_open`).
+    /// read from the outer scope (i.e. `local_writes ∩ captured_reads`).
+    /// Field writes (`self.x := ...`) and self-sends are handled separately:
+    /// - Field writes are threaded via `gen_server` State at the method level (BT-860 for Tier 2).
+    /// - Self-sends are pre-scanned via `generate_tier2_self_send_open` (BT-851).
     ///
     /// Tier 1 blocks handled by dedicated generators (whileTrue:, do:, collect:, etc.)
     /// never reach this function — they call `generate_block_body()` directly.
@@ -482,10 +483,12 @@ impl CoreErlangGenerator {
             .into_iter()
             .collect();
 
-        // BT-852: Tier 2 is required whenever the block must return updated state.
-        // Captured-local mutations and field writes both need state threading.
-        let needs_tier2 = !captured_mutations.is_empty() || !analysis.field_writes.is_empty();
-        if needs_tier2 {
+        // BT-852: Blocks with captured local mutations use Tier 2 stateful calling convention.
+        // Field-write-only blocks (self.x := ...) are NOT yet promoted to Tier 2 here because
+        // the caller side (detect_tier2_self_send, HOM dispatch) does not yet detect them as
+        // Tier 2 — promoting them would emit {Result, NewState} tuples that callers unpack as
+        // plain values, causing a runtime crash. Field-write Tier 2 support is tracked in BT-860.
+        if !captured_mutations.is_empty() {
             return self.generate_block_stateful(block, &captured_mutations);
         }
 
