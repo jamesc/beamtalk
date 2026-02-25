@@ -16,7 +16,7 @@ module 'sealed_class_violation' ['new'/0, 'new'/1, 'doubled'/1, 'dispatch'/3, 'd
 
 
 'doubled'/1 = fun (Self) ->
-call 'erlang':'*'(Self, 2)
+call 'erlang':'*'(call 'beamtalk_future':'maybe_await'(Self), call 'beamtalk_future':'maybe_await'(2))
 
 'dispatch'/3 = fun (Selector, Args, Self) ->
     case Selector of

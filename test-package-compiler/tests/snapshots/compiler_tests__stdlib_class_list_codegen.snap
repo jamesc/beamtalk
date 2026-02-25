@@ -101,7 +101,7 @@ call 'beamtalk_list_ops':'from_to'(Self, _start20, _end21)
 'indexOf:'/2 = fun (Self, _item22) ->
     let _NlrToken23 = call 'erlang':'make_ref'() in
     try
-    let _seq24 = call 'beamtalk_collection_ops':'inject_into'(Self, 0, fun (_i25, _each26) -> let NewI = call 'erlang':'+'(_i25, 1) in let _Unit = call 'beamtalk_message_dispatch':'send'(call 'erlang':'=:='(_each26, _item22), 'ifTrue:', [fun () -> call 'erlang':'throw'({'$bt_nlr', _NlrToken23, NewI})]) in NewI) in
+    let _seq24 = call 'beamtalk_collection_ops':'inject_into'(Self, 0, fun (_i25, _each26) -> let NewI = call 'erlang':'+'(call 'beamtalk_future':'maybe_await'(_i25), call 'beamtalk_future':'maybe_await'(1)) in let _Unit = call 'beamtalk_message_dispatch':'send'(call 'erlang':'=:='(call 'beamtalk_future':'maybe_await'(_each26), call 'beamtalk_future':'maybe_await'(_item22)), 'ifTrue:', [fun () -> call 'erlang':'throw'({'$bt_nlr', _NlrToken23, NewI})]) in NewI) in
     'nil'
     of _NlrResult27 -> _NlrResult27
     catch <_NlrCls28, _NlrErr29, _NlrStk30> ->
@@ -111,7 +111,7 @@ call 'beamtalk_list_ops':'from_to'(Self, _start20, _end21)
       end
 
 'eachWithIndex:'/2 = fun (Self, _block34) ->
-    let _seq35 = call 'beamtalk_collection_ops':'inject_into'(Self, 0, fun (_i36, _each37) -> let NewI = call 'erlang':'+'(_i36, 1) in let _Unit = let _Fun38 = _block34 in apply _Fun38 (_each37, NewI) in NewI) in
+    let _seq35 = call 'beamtalk_collection_ops':'inject_into'(Self, 0, fun (_i36, _each37) -> let NewI = call 'erlang':'+'(call 'beamtalk_future':'maybe_await'(_i36), call 'beamtalk_future':'maybe_await'(1)) in let _Unit = let _Fun38 = _block34 in apply _Fun38 (_each37, NewI) in NewI) in
     'nil'
 
 'zip:'/2 = fun (Self, _other39) ->

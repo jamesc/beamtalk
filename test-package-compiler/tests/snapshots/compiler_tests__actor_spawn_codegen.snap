@@ -123,7 +123,7 @@ module 'actor_spawn' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3
 'dispatch'/4 = fun (Selector, Args, Self, State) ->
     case Selector of
         <'increment'> when 'true' ->
-            let _Val1 = call 'erlang':'+'(call 'maps':'get'('value', State), 1) in let State1 = call 'maps':'put'('value', _Val1, State) in {'reply', _Val1, State1}
+            let _Val1 = call 'erlang':'+'(call 'beamtalk_future':'maybe_await'(call 'maps':'get'('value', State)), call 'beamtalk_future':'maybe_await'(1)) in let State1 = call 'maps':'put'('value', _Val1, State) in {'reply', _Val1, State1}
         <OtherSelector> when 'true' ->
             %% BT-229/ADR 0005: Check extension registry before hierarchy walk
             let ExtLookup = try call 'beamtalk_extensions':'lookup'('ActorSpawn', OtherSelector)

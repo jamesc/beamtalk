@@ -128,17 +128,17 @@ module 'ws_stdlib_block' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_cal
         <'increment'> when 'true' ->
             case Args of
                 <[_x1]> when 'true' ->
-                    let _Result = call 'erlang':'+'(_x1, 1) in {'reply', _Result, State}
+                    let _Result = call 'erlang':'+'(call 'beamtalk_future':'maybe_await'(_x1), call 'beamtalk_future':'maybe_await'(1)) in {'reply', _Result, State}
                 <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
             end
         <'add'> when 'true' ->
             case Args of
                 <[_x2, _y3]> when 'true' ->
-                    let _Result = call 'erlang':'+'(_x2, _y3) in {'reply', _Result, State}
+                    let _Result = call 'erlang':'+'(call 'beamtalk_future':'maybe_await'(_x2), call 'beamtalk_future':'maybe_await'(_y3)) in {'reply', _Result, State}
                 <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
             end
         <'captureBlock'> when 'true' ->
-            let _Result = call 'erlang':'+'(call 'maps':'get'('outer', State), 5) in {'reply', _Result, State}
+            let _Result = call 'erlang':'+'(call 'beamtalk_future':'maybe_await'(call 'maps':'get'('outer', State)), call 'beamtalk_future':'maybe_await'(5)) in {'reply', _Result, State}
         <OtherSelector> when 'true' ->
             %% BT-229/ADR 0005: Check extension registry before hierarchy walk
             let ExtLookup = try call 'beamtalk_extensions':'lookup'('WsStdlibBlock', OtherSelector)

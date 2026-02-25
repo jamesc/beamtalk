@@ -67,7 +67,7 @@ fn test_generate_binary_op_addition() {
     let right = vec![Expression::Literal(Literal::Integer(4), Span::new(4, 5))];
     let doc = generator.generate_binary_op("+", &left, &right).unwrap();
     let output = doc.to_pretty_string();
-    assert!(output.contains("call 'erlang':'+'(3, 4)"));
+    assert!(output.contains("call 'erlang':'+'(call 'beamtalk_future':'maybe_await'(3), call 'beamtalk_future':'maybe_await'(4))"));
 }
 
 #[test]
@@ -127,7 +127,10 @@ fn test_generate_loose_equality_operator() {
         output.contains("call 'erlang':'=='"),
         "Should use loose equality ==. Got: {output}",
     );
-    assert_eq!(output, "call 'erlang':'=='(5, 5)");
+    assert_eq!(
+        output,
+        "call 'erlang':'=='(call 'beamtalk_future':'maybe_await'(5), call 'beamtalk_future':'maybe_await'(5))"
+    );
 }
 
 #[test]
@@ -1589,9 +1592,10 @@ fn test_block_value_message_one_arg() {
         output.contains("(5)"),
         "Should pass argument 5 to the block. Got: {output}"
     );
+    // Binary ops inside block bodies are wrapped with maybe_await (BT-899)
     assert!(
-        !output.contains("beamtalk_future"),
-        "value: message should NOT create futures. Got: {output}"
+        output.contains("beamtalk_future"),
+        "value: binary ops should wrap operands with maybe_await. Got: {output}"
     );
 }
 
@@ -1684,9 +1688,10 @@ fn test_block_while_true_loop() {
         output.contains("<'false'> when 'true' -> 'nil'"),
         "whileTrue: should return nil when condition is false. Got: {output}"
     );
+    // Binary ops inside condition blocks are wrapped with maybe_await (BT-899)
     assert!(
-        !output.contains("beamtalk_future"),
-        "whileTrue: should NOT create futures. Got: {output}"
+        output.contains("beamtalk_future"),
+        "whileTrue: binary ops should wrap operands with maybe_await. Got: {output}"
     );
 }
 

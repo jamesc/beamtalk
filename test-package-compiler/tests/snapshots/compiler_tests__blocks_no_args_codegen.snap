@@ -125,9 +125,9 @@ module 'blocks_no_args' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call
         <'noArgs'> when 'true' ->
             let _Result = 42 in {'reply', _Result, State}
         <'captureBlock'> when 'true' ->
-            let _Result = call 'erlang':'+'(call 'maps':'get'('outer', State), 5) in {'reply', _Result, State}
+            let _Result = call 'erlang':'+'(call 'beamtalk_future':'maybe_await'(call 'maps':'get'('outer', State)), call 'beamtalk_future':'maybe_await'(5)) in {'reply', _Result, State}
         <'condition'> when 'true' ->
-            let _Result = call 'erlang':'>'(call 'maps':'get'('counter', State), 0) in {'reply', _Result, State}
+            let _Result = call 'erlang':'>'(call 'beamtalk_future':'maybe_await'(call 'maps':'get'('counter', State)), call 'beamtalk_future':'maybe_await'(0)) in {'reply', _Result, State}
         <'block1'> when 'true' ->
             let _Result = 1 in {'reply', _Result, State}
         <'block2'> when 'true' ->
