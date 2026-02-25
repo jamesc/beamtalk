@@ -1594,7 +1594,6 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "testClasses".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![] },
                 MethodInfo { selector: "globals".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("Dictionary".into()), param_types: vec![] },
                 MethodInfo { selector: "load:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("Object".into()), param_types: vec![Some("String".into())] },
-                MethodInfo { selector: "clear".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![] },
                 MethodInfo { selector: "test".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("Object".into()), param_types: vec![] },
                 MethodInfo { selector: "test:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("Object".into()), param_types: vec![Some("Object".into())] },
             ],

@@ -83,14 +83,8 @@ start_link(ServerName) ->
 -spec has_method(selector()) -> boolean().
 has_method(actors) -> true;
 has_method('actorAt:') -> true;
-has_method('actorsOf:') -> true;
 has_method(classes) -> true;
-has_method(testClasses) -> true;
-has_method(globals) -> true;
 has_method('load:') -> true;
-has_method(clear) -> true;
-has_method(test) -> true;
-has_method('test:') -> true;
 has_method(_) -> false.
 
 %% @doc Return class registration metadata for Workspace.
@@ -103,14 +97,8 @@ class_info() ->
         instance_methods => #{
             actors => #{arity => 0},
             'actorAt:' => #{arity => 1},
-            'actorsOf:' => #{arity => 1},
             classes => #{arity => 0},
-            testClasses => #{arity => 0},
-            globals => #{arity => 0},
-            'load:' => #{arity => 1},
-            clear => #{arity => 0},
-            test => #{arity => 0},
-            'test:' => #{arity => 1}
+            'load:' => #{arity => 1}
         },
         class_methods => #{},
         fields => []
@@ -140,29 +128,11 @@ handle_call({actors, []}, _From, State) ->
 handle_call({'actorAt:', [PidStr]}, _From, State) ->
     Result = handle_actor_at(PidStr),
     {reply, Result, State};
-handle_call({'actorsOf:', [ClassName]}, _From, State) ->
-    Result = handle_actors_of(ClassName),
-    {reply, Result, State};
 handle_call({classes, []}, _From, State) ->
     Result = handle_classes(),
     {reply, Result, State};
-handle_call({testClasses, []}, _From, State) ->
-    Result = handle_test_classes(),
-    {reply, Result, State};
-handle_call({globals, []}, _From, State) ->
-    Result = handle_globals(),
-    {reply, Result, State};
 handle_call({'load:', [Path]}, _From, State) ->
     Result = handle_load(Path),
-    {reply, Result, State};
-handle_call({clear, []}, {FromPid, _}, State) ->
-    Result = handle_clear(FromPid),
-    {reply, Result, State};
-handle_call({test, []}, _From, State) ->
-    Result = handle_test(),
-    {reply, Result, State};
-handle_call({'test:', [TestClass]}, _From, State) ->
-    Result = handle_test_class(TestClass),
     {reply, Result, State};
 handle_call({UnknownSelector, _Args}, _From, State) ->
     Error0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
@@ -191,47 +161,12 @@ handle_cast({'actorAt:', [PidStr], FuturePid}, State) when is_pid(FuturePid) ->
     Result = handle_actor_at(PidStr),
     beamtalk_future:resolve(FuturePid, Result),
     {noreply, State};
-handle_cast({'actorsOf:', [ClassName], FuturePid}, State) when is_pid(FuturePid) ->
-    Result = handle_actors_of(ClassName),
-    beamtalk_future:resolve(FuturePid, Result),
-    {noreply, State};
 handle_cast({classes, [], FuturePid}, State) when is_pid(FuturePid) ->
     Result = handle_classes(),
     beamtalk_future:resolve(FuturePid, Result),
     {noreply, State};
-handle_cast({testClasses, [], FuturePid}, State) when is_pid(FuturePid) ->
-    Result = handle_test_classes(),
-    beamtalk_future:resolve(FuturePid, Result),
-    {noreply, State};
-handle_cast({globals, [], FuturePid}, State) when is_pid(FuturePid) ->
-    Result = handle_globals(),
-    beamtalk_future:resolve(FuturePid, Result),
-    {noreply, State};
 handle_cast({'load:', [Path], FuturePid}, State) when is_pid(FuturePid) ->
     case handle_load(Path) of
-        {error, Err} ->
-            beamtalk_future:reject(FuturePid, Err);
-        Result ->
-            beamtalk_future:resolve(FuturePid, Result)
-    end,
-    {noreply, State};
-handle_cast({clear, [], FuturePid}, State) when is_pid(FuturePid) ->
-    %% BT-872: Async clear cannot locate the session — reject explicitly rather
-    %% than silently succeeding with nil while leaving bindings untouched.
-    Err0 = beamtalk_error:new(session_error, 'WorkspaceInterface'),
-    Err1 = beamtalk_error:with_selector(Err0, clear),
-    Err2 = beamtalk_error:with_message(
-        Err1,
-        <<"Workspace clear is not available via async dispatch (BT-872)">>
-    ),
-    beamtalk_future:reject(FuturePid, Err2),
-    {noreply, State};
-handle_cast({test, [], FuturePid}, State) when is_pid(FuturePid) ->
-    Result = handle_test(),
-    beamtalk_future:resolve(FuturePid, Result),
-    {noreply, State};
-handle_cast({'test:', [TestClass], FuturePid}, State) when is_pid(FuturePid) ->
-    case handle_test_class(TestClass) of
         {error, Err} ->
             beamtalk_future:reject(FuturePid, Err);
         Result ->
@@ -313,43 +248,6 @@ handle_actor_at(PidStr) when is_list(PidStr) ->
 handle_actor_at(_) ->
     nil.
 
-%% @doc Get all actors of a given class.
-%% Accepts a class name atom, binary, or a class object tuple.
--spec handle_actors_of(atom() | binary() | tuple()) -> [tuple()].
-handle_actors_of({beamtalk_object, _ClassTag, _Module, ClassPid}) when is_pid(ClassPid) ->
-    %% Class object reference — extract the actual class name
-    try
-        ClassName = beamtalk_object_class:class_name(ClassPid),
-        handle_actors_of(ClassName)
-    catch
-        _:_ -> []
-    end;
-handle_actors_of(ClassName) when is_binary(ClassName) ->
-    try
-        ClassAtom = binary_to_existing_atom(ClassName, utf8),
-        handle_actors_of(ClassAtom)
-    catch
-        error:badarg -> []
-    end;
-handle_actors_of(ClassName) when is_atom(ClassName) ->
-    case whereis(beamtalk_actor_registry) of
-        undefined ->
-            [];
-        RegistryPid ->
-            Actors = beamtalk_repl_actors:list_actors(RegistryPid),
-            lists:filtermap(
-                fun
-                    (#{class := Class} = Meta) when Class =:= ClassName ->
-                        wrap_actor(Meta);
-                    (_) ->
-                        false
-                end,
-                Actors
-            )
-    end;
-handle_actors_of(_) ->
-    [].
-
 %% @doc Return all loaded user classes (those with a source file recorded).
 %% Excludes stdlib and ClassBuilder-created classes (they have no source file).
 -spec handle_classes() -> [tuple()].
@@ -378,65 +276,6 @@ handle_classes() ->
     catch
         exit:{noproc, _} ->
             []
-    end.
-
-%% @doc Return TestCase subclasses as class object tuples.
--spec handle_test_classes() -> [tuple()].
-handle_test_classes() ->
-    try
-        ClassNames = beamtalk_test_case:find_test_classes(),
-        lists:filtermap(fun class_name_to_object/1, ClassNames)
-    catch
-        _:_ -> []
-    end.
-
-%% @doc Return an immutable snapshot of workspace-level globals.
-%% Includes workspace singletons (Transcript, Beamtalk, Workspace) and
-%% user-loaded classes (those with a beamtalk_source module attribute).
--spec handle_globals() -> map().
-handle_globals() ->
-    %% Start with workspace singletons
-    Singletons = beamtalk_workspace_config:singletons(),
-    Base = lists:foldl(
-        fun(#{binding_name := BindingName, class_name := ClassName, module := Module}, Acc) ->
-            case whereis(BindingName) of
-                undefined ->
-                    Acc;
-                Pid ->
-                    Key = atom_to_binary(BindingName, utf8),
-                    Acc#{Key => {beamtalk_object, ClassName, Module, Pid}}
-            end
-        end,
-        #{},
-        Singletons
-    ),
-    %% Add user-loaded classes
-    try
-        ClassPids = beamtalk_class_registry:all_classes(),
-        lists:foldl(
-            fun(Pid, Acc) ->
-                try
-                    ClassName = beamtalk_object_class:class_name(Pid),
-                    ModuleName = beamtalk_object_class:module_name(Pid),
-                    case source_file_from_module(ModuleName) of
-                        nil ->
-                            Acc;
-                        _SourceFile ->
-                            Key = atom_to_binary(ClassName, utf8),
-                            ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-                            Acc#{Key => {beamtalk_object, ClassTag, ModuleName, Pid}}
-                    end
-                catch
-                    exit:{noproc, _} -> Acc;
-                    exit:{timeout, _} -> Acc
-                end
-            end,
-            Base,
-            ClassPids
-        )
-    catch
-        exit:{noproc, _} ->
-            Base
     end.
 
 %% @doc Load a .bt file, compiling and registering the class.
@@ -475,91 +314,6 @@ handle_load(Other) ->
         iolist_to_binary([<<"load: expects a String path, got ">>, TypeName])
     ),
     {error, Err2}.
-
-%% @doc Clear session variable bindings for the calling REPL session.
-%% Uses the bt_session_pid process dictionary key set by beamtalk_repl_shell
-%% in the eval worker to find the session PID.
--spec handle_clear(pid()) -> nil.
-handle_clear(FromPid) ->
-    SessionPid =
-        case erlang:process_info(FromPid, dictionary) of
-            {dictionary, Dict} ->
-                proplists:get_value(bt_session_pid, Dict, undefined);
-            _ ->
-                undefined
-        end,
-    case SessionPid of
-        undefined ->
-            nil;
-        Pid when is_pid(Pid) ->
-            try
-                ok = beamtalk_repl_shell:clear_bindings(Pid)
-            catch
-                _:_ -> ok
-            end,
-            nil
-    end.
-
-%% @doc Run all loaded TestCase subclasses and return a TestResult.
--spec handle_test() -> map().
-handle_test() ->
-    beamtalk_test_runner:run_all().
-
-%% @doc Run a specific test class and return a TestResult.
-%% Accepts a class object tuple or a class name atom/binary.
--spec handle_test_class(tuple() | atom() | binary()) -> map() | {error, #beamtalk_error{}}.
-handle_test_class({beamtalk_object, _, _, _} = ClassRef) ->
-    beamtalk_test_runner:run_class(ClassRef);
-handle_test_class(ClassName) when is_atom(ClassName) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined ->
-            Err0 = beamtalk_error:new(class_not_found, 'WorkspaceInterface'),
-            Err1 = beamtalk_error:with_selector(Err0, 'test:'),
-            {error,
-                beamtalk_error:with_message(
-                    Err1,
-                    iolist_to_binary([<<"Unknown class: ">>, atom_to_binary(ClassName, utf8)])
-                )};
-        Pid ->
-            ModuleName = beamtalk_object_class:module_name(Pid),
-            ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-            beamtalk_test_runner:run_class({beamtalk_object, ClassTag, ModuleName, Pid})
-    end;
-handle_test_class(ClassName) when is_binary(ClassName) ->
-    try
-        ClassAtom = binary_to_existing_atom(ClassName, utf8),
-        handle_test_class(ClassAtom)
-    catch
-        error:badarg ->
-            Err0 = beamtalk_error:new(class_not_found, 'WorkspaceInterface'),
-            Err1 = beamtalk_error:with_selector(Err0, 'test:'),
-            {error,
-                beamtalk_error:with_message(
-                    Err1,
-                    iolist_to_binary([<<"Unknown class: ">>, ClassName])
-                )}
-    end;
-handle_test_class(Other) ->
-    TypeName = value_type_name(Other),
-    Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
-    Err1 = beamtalk_error:with_selector(Err0, 'test:'),
-    {error,
-        beamtalk_error:with_message(
-            Err1,
-            iolist_to_binary([<<"test: expects a class, got ">>, TypeName])
-        )}.
-
-%% @doc Convert a class name atom to a beamtalk_object class tuple.
--spec class_name_to_object(atom()) -> {true, tuple()} | false.
-class_name_to_object(ClassName) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined ->
-            false;
-        Pid ->
-            ModuleName = beamtalk_object_class:module_name(Pid),
-            ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-            {true, {beamtalk_object, ClassTag, ModuleName, Pid}}
-    end.
 
 %% @doc Read beamtalk_source attribute from a module's module_info(attributes).
 %% Returns nil for stdlib/bootstrap/ClassBuilder-created classes.

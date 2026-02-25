@@ -48,7 +48,7 @@ Actor subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace actorsOf: Counter
   /// ```
-  actorsOf: className: Object -> List => @primitive "actorsOf:"
+  actorsOf: aClass: Object -> List => self actors select: [:a | a class includesBehaviour: aClass]
 
   /// Return a list of loaded user classes with source file info.
   ///
@@ -64,15 +64,20 @@ Actor subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace testClasses
   /// ```
-  testClasses -> List => @primitive "testClasses"
+  testClasses -> List => self classes select: [:c | c inheritsFrom: TestCase]
 
   /// Return an immutable Dictionary snapshot of the project namespace.
+  ///
+  /// Includes workspace singletons (Transcript, Beamtalk, Workspace) and
+  /// all user-loaded classes (those with a recorded source file).
   ///
   /// ## Examples
   /// ```beamtalk
   /// Workspace globals
   /// ```
-  globals -> Dictionary => @primitive "globals"
+  globals -> Dictionary =>
+    base := ((Dictionary new at: "Transcript" put: TranscriptStream current) at: "Beamtalk" put: BeamtalkInterface current) at: "Workspace" put: self
+    self classes inject: base into: [:acc :c | acc at: c name asString put: c]
 
   /// Compile and load a .bt file, registering the class.
   /// Returns a structured error if path is not a String.
@@ -83,21 +88,13 @@ Actor subclass: WorkspaceInterface
   /// ```
   load: path: String -> Object => @primitive "load:"
 
-  /// Reset session variable bindings.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// Workspace clear
-  /// ```
-  clear -> Nil => @primitive "clear"
-
   /// Run all loaded test classes and return a TestResult.
   ///
   /// ## Examples
   /// ```beamtalk
   /// Workspace test
   /// ```
-  test -> Object => @primitive "test"
+  test -> Object => TestRunner runAll
 
   /// Run a specific test class and return a TestResult.
   ///
@@ -105,4 +102,4 @@ Actor subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace test: CounterTest
   /// ```
-  test: testClass: Object -> Object => @primitive "test:"
+  test: testClass: Object -> Object => TestRunner run: testClass

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // E2E tests for WorkspaceInterface phase 3 methods (BT-846 / ADR 0040 Phase 3):
-// classes, testClasses, globals, load:, clear, test, test:
+// classes, testClasses, globals, load:, test, test:
 //
 // These tests require E2E because WorkspaceInterface is a singleton actor that
 // only exists in the live REPL process. Workspace variable persistence across
@@ -26,10 +26,6 @@ Workspace respondsTo: #globals
 
 // Workspace respondsTo: #load:
 Workspace respondsTo: #load:
-// => true
-
-// Workspace respondsTo: #clear
-Workspace respondsTo: #clear
 // => true
 
 // Workspace respondsTo: #test
@@ -114,9 +110,3 @@ allResult := (Workspace test) await
 allResult total >= 2
 // => true
 
-// ===========================================================================
-// WORKSPACE CLEAR — respondsTo: only
-// ===========================================================================
-// NOTE: Workspace clear via async dispatch is a known no-op (BT-872).
-// The async cast path lacks caller context needed to find the session.
-// Full clear E2E test deferred until BT-872 is resolved.

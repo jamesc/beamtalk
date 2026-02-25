@@ -99,8 +99,9 @@ The project facade. Loaded classes, actors, project operations. Mutable.
 | Classes | `classes`, `testClasses` |
 | Actors | `actors`, `actorAt:`, `actorsOf:` |
 | Testing | `test`, `test: aTestClass` |
-| Session | `clear` |
 | Dictionary | `globals` → `Dictionary` (project namespace: Transcript, loaded classes) |
+
+> **Implementation note (Phase 3):** `clear` was dropped during implementation. Session-local variable bindings are a per-shell concern, not a workspace concern — and the only way to locate the correct session was via a process dictionary side-channel (`bt_session_pid`), making it inherently non-composable and broken under async dispatch. The `:clear` REPL shortcut remains as a direct shell operation. Additionally, `testClasses`, `globals`, `test`, `test:`, and `actorsOf:` are implemented as Beamtalk facades rather than Erlang primitives — they delegate to `classes`, `TestRunner`, and `Behaviour>>includesBehaviour:` respectively, reducing the primitive surface area in the gen_server.
 
 Removed from current API:
 - `sessions` — returned opaque pid strings with no useful operations; not worth promoting
@@ -234,7 +235,7 @@ increment -> Nil
 | `:reload` | `(Workspace classes last) reload` |
 | `:reload Counter` | `Counter reload` |
 | `:modules` | `Workspace classes` |
-| `:clear` | `Workspace clear` |
+| `:clear` | *(stays REPL-only — session bindings are shell-scoped)* |
 | `:test` | `Workspace test` |
 | `:test CounterTest` | `Workspace test: CounterTest` |
 | `:help Counter` | `Beamtalk help: Counter` |
@@ -592,7 +593,7 @@ Add BUnit tests for all new facade and Behaviour methods. Add e2e tests exercisi
 | `:modules` | `Workspace classes` | Yes |
 | `:help Counter` | `Beamtalk help: Counter` | Yes |
 | `:bindings` | *(stays REPL-only — session locals are implicit)* | Yes |
-| `:clear` | `Workspace clear` | Yes |
+| `:clear` | *(stays REPL-only — session bindings are shell-scoped)* | Yes |
 | `:test CounterTest` | `Workspace test: CounterTest` | Yes |
 
 ### For SystemDictionary Users
