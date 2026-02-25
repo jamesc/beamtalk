@@ -254,29 +254,11 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% @doc Get all registered class names.
 %%
-%% Delegates to beamtalk_class_registry:all_classes/0 which returns a list
-%% of class process pids, then extracts the class name from each pid.
-%% Guards against pg not running and filters dead processes.
+%% Delegates to live_class_entries/0 to get live class pid entries,
+%% then extracts just the class names.
 -spec handle_all_classes() -> [atom()].
 handle_all_classes() ->
-    try
-        ClassPids = beamtalk_class_registry:all_classes(),
-        lists:filtermap(
-            fun(Pid) ->
-                try
-                    {true, beamtalk_object_class:class_name(Pid)}
-                catch
-                    exit:{noproc, _} -> false;
-                    exit:{timeout, _} -> false
-                end
-            end,
-            ClassPids
-        )
-    catch
-        exit:{noproc, _} ->
-            ?LOG_WARNING("pg not started when fetching all classes", #{module => ?MODULE}),
-            []
-    end.
+    [Name || {Name, _Mod, _Pid} <- live_class_entries()].
 
 %% @doc Look up a class by name.
 %%
@@ -318,27 +300,42 @@ handle_class_named(_ClassName) ->
 %% This provides read-only access to the class namespace at the moment of the call.
 -spec handle_globals() -> map().
 handle_globals() ->
+    lists:foldl(
+        fun({Name, ModuleName, Pid}, Acc) ->
+            BinName = atom_to_binary(Name, utf8),
+            ClassTag = beamtalk_class_registry:class_object_tag(Name),
+            ClassObj = {beamtalk_object, ClassTag, ModuleName, Pid},
+            maps:put(BinName, ClassObj, Acc)
+        end,
+        #{},
+        live_class_entries()
+    ).
+
+%% @private Fetch all live class entries from the registry.
+%%
+%% Returns a list of {Name, ModuleName, Pid} tuples for all registered class
+%% processes that are still alive. Dead processes (noproc, timeout) are silently
+%% filtered out. Returns [] if the pg process group is not running.
+-type class_entry() :: {atom(), module(), pid()}.
+-spec live_class_entries() -> [class_entry()].
+live_class_entries() ->
     try
         ClassPids = beamtalk_class_registry:all_classes(),
-        lists:foldl(
-            fun(Pid, Acc) ->
+        lists:filtermap(
+            fun(Pid) ->
                 try
                     Name = beamtalk_object_class:class_name(Pid),
-                    BinName = atom_to_binary(Name, utf8),
-                    ModuleName = beamtalk_object_class:module_name(Pid),
-                    ClassTag = beamtalk_class_registry:class_object_tag(Name),
-                    ClassObj = {beamtalk_object, ClassTag, ModuleName, Pid},
-                    maps:put(BinName, ClassObj, Acc)
+                    Mod = beamtalk_object_class:module_name(Pid),
+                    {true, {Name, Mod, Pid}}
                 catch
-                    exit:{noproc, _} -> Acc;
-                    exit:{timeout, _} -> Acc
+                    exit:{noproc, _} -> false;
+                    exit:{timeout, _} -> false
                 end
             end,
-            #{},
             ClassPids
         )
     catch
         exit:{noproc, _} ->
-            ?LOG_WARNING("pg not started when building globals snapshot", #{module => ?MODULE}),
-            #{}
+            ?LOG_WARNING("pg not started when fetching class entries", #{module => ?MODULE}),
+            []
     end.
