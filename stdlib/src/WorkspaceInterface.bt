@@ -94,7 +94,7 @@ Actor subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace test
   /// ```
-  test -> Object => TestRunner runAll
+  test -> TestResult => TestRunner runAll
 
   /// Run a specific test class and return a TestResult.
   ///
@@ -102,4 +102,4 @@ Actor subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace test: CounterTest
   /// ```
-  test: testClass: Object -> Object => TestRunner run: testClass
+  test: testClass: Object -> TestResult => TestRunner run: testClass

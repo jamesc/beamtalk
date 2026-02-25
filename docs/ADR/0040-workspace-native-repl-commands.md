@@ -520,7 +520,7 @@ Add `sourceFile` and `reload` methods to `Behaviour`. Implement backing primitiv
 
 ### Phase 3: Expand WorkspaceInterface with project operations
 
-Rename `WorkspaceEnvironment` to `WorkspaceInterface` (matching `BeamtalkInterface` naming convention). Add `classes`, `testClasses`, `globals`, `load:`, `clear`, `test`, `test:`. Remove `sessions`. `testClasses` filters `classes` to `TestCase` subclasses; `test` runs all `testClasses` internally. The `globals` method returns a plain `Dictionary`.
+Rename `WorkspaceEnvironment` to `WorkspaceInterface` (matching `BeamtalkInterface` naming convention). Add `classes`, `testClasses`, `globals`, `load:`, `test`, `test:`. Remove `sessions`. `testClasses`, `globals`, `test`, `test:`, and `actorsOf:` are implemented as Beamtalk facades rather than primitives. `clear` was dropped (see implementation note above). The `globals` method returns a plain `Dictionary`.
 
 Implement backing primitives in `beamtalk_workspace_environment.erl` (rename to `beamtalk_workspace_interface.erl`), extracting logic from existing `beamtalk_repl_ops_load.erl` and `beamtalk_repl_ops_eval.erl`.
 
@@ -528,7 +528,6 @@ Implement backing primitives in `beamtalk_workspace_environment.erl` (rename to 
 - `stdlib/src/WorkspaceInterface.bt` — add/remove method declarations
 - `runtime/apps/beamtalk_workspace/src/beamtalk_workspace_environment.erl` — add primitive handlers
 - `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_load.erl` — extract shared logic
-- `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_eval.erl` — extract clear logic
 
 ### Phase 4: Add documentation API to BeamtalkInterface
 
@@ -567,7 +566,7 @@ Add BUnit tests for all new facade and Behaviour methods. Add e2e tests exercisi
 | Component | Change |
 |-----------|--------|
 | `stdlib/src/SystemDictionary.bt` | Rename to `BeamtalkInterface.bt` |
-| `stdlib/src/WorkspaceInterface.bt` | Add `classes`, `testClasses`, `globals`, `load:`, `clear`, `test`, `test:`; remove `sessions` |
+| `stdlib/src/WorkspaceInterface.bt` | Add `classes`, `testClasses`, `globals`, `load:`, `test`, `test:`; remove `sessions`; `clear` dropped |
 | `stdlib/src/Behaviour.bt` | Add `sourceFile`, `reload` |
 | `beamtalk_system_dictionary.erl` | Rename to `beamtalk_interface.erl`; add `help:`, `help:selector:` |
 | `beamtalk_workspace_environment.erl` | New primitive handlers for project ops + `globals` |
@@ -575,7 +574,7 @@ Add BUnit tests for all new facade and Behaviour methods. Add e2e tests exercisi
 | `beamtalk_object_class.erl` | Store source file in class metadata |
 | `beamtalk_repl_ops_load.erl` | Record source file; extract shared logic |
 | `beamtalk_repl_ops_dev.erl` | Extract doc logic |
-| `beamtalk_repl_ops_eval.erl` | Extract clear logic |
+| `beamtalk_repl_ops_eval.erl` | *(clear logic not extracted — clear was dropped)* |
 | `mod.rs` (REPL loop) | Translate `:` commands to eval of message sends |
 | `beamtalk_repl_server.erl` | Deprecation routing for old protocol ops |
 
