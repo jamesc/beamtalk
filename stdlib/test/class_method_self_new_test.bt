@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-893: Class method self-sends (self new:) should not deadlock.
+// Tests the factory pattern where class methods create instances via self new:.
+
+TestCase subclass: ClassMethodSelfNewTest
+
+  testFactoryMethodSelfNewTriangle =>
+    // Class method calling self new: with field overrides
+    self assert: (Shape triangle) kind equals: #triangle
+
+  testFactoryMethodSelfNewTriangleSides =>
+    self assert: (Shape triangle) sides equals: 3
+
+  testFactoryMethodSelfNewSquare =>
+    self assert: (Shape square) kind equals: #square
+
+  testFactoryMethodSelfNewSquareSides =>
+    self assert: (Shape square) sides equals: 4
+
+  testFactoryMethodKeywordNew =>
+    // Multi-keyword class method calling self new:
+    self assert: (Shape named: #hexagon sides: 6) sides equals: 6

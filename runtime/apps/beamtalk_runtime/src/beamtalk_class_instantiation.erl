@@ -25,6 +25,9 @@
 -export([
     handle_spawn/4,
     handle_new/4,
+    class_self_new/3,
+    class_self_spawn/3,
+    class_self_spawn/4,
     ensure_is_constructible/3,
     compute_is_constructible/2,
     abstract_class_error/2
@@ -136,6 +139,45 @@ handle_new_compiled(Args, ClassName, Module, IsConstructible0) ->
     catch
         error:Error ->
             {error, Error, IsConstructible}
+    end.
+
+%%====================================================================
+%% Class Method Self-Send (BT-893)
+%%====================================================================
+
+%% @doc Create a new instance from within a class method (bypasses gen_server).
+%%
+%% BT-893: When a class method calls `self new` or `self new:`, the codegen
+%% routes here instead of through `module:new()` → `gen_server:call()` which
+%% would deadlock since the class method is already executing inside handle_call.
+-spec class_self_new(class_name(), atom(), list()) -> term().
+class_self_new(ClassName, Module, Args) ->
+    case handle_new(Args, ClassName, Module, undefined) of
+        {ok, Result, _IsConstructible} ->
+            Result;
+        {error, Error, _IsConstructible} ->
+            Wrapped = beamtalk_exception_handler:ensure_wrapped(Error),
+            error(Wrapped)
+    end.
+
+%% @doc Spawn an actor from within a class method (bypasses gen_server).
+%%
+%% BT-893: When a class method calls `self spawn` or `self spawnWith:`, the
+%% codegen routes here instead of through `module:spawn()` → `gen_server:call()`
+%% which would deadlock.
+-spec class_self_spawn(class_name(), atom(), list()) -> term().
+class_self_spawn(ClassName, Module, Args) ->
+    class_self_spawn(ClassName, Module, false, Args).
+
+%% @doc Spawn with explicit abstract class flag (used by runtime self-instantiation).
+-spec class_self_spawn(class_name(), atom(), boolean(), list()) -> term().
+class_self_spawn(ClassName, Module, IsAbstract, Args) ->
+    case handle_spawn(Args, ClassName, Module, IsAbstract) of
+        {ok, Result} ->
+            Result;
+        {error, Error} ->
+            Wrapped = beamtalk_exception_handler:ensure_wrapped(Error),
+            error(Wrapped)
     end.
 
 %%====================================================================
