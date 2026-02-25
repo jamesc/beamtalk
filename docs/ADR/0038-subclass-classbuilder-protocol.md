@@ -85,8 +85,8 @@ The compiler generates the full BEAM module (method functions, dispatch tables, 
 // stdlib/src/ClassBuilder.bt
 /// Fluent builder for creating and registering Beamtalk classes.
 ///
-/// Used by the compiler for all compiled class definitions (Path 1)
-/// and directly for dynamic class creation at runtime (Path 2).
+/// Fluent builder for creating and registering Beamtalk classes.
+/// All class creation goes through the compiled path (BT-873).
 ///
 /// ## Compiled use (conceptual — codegen emits Core Erlang, not Beamtalk):
 /// ```
@@ -95,15 +95,6 @@ The compiler generates the full BEAM module (method functions, dispatch tables, 
 ///   fields: #{ count => 0 };
 ///   methods: #{ increment => [...], value => [...] };
 ///   register
-/// ```
-///
-/// ## Dynamic use (REPL, frameworks, metaprogramming):
-/// ```beamtalk
-/// cls := Object classBuilder
-///   name: #Greeter;
-///   addMethod: #greet body: [ 'Hello!' printNl ];
-///   register.
-/// Greeter new greet   // => Hello!
 /// ```
 Actor subclass: ClassBuilder
   state: className     = nil
@@ -145,13 +136,10 @@ Actor subclass: ClassBuilder
   /// Stops the builder process after registration — the builder is
   /// single-use and should not be retained.
   ///
-  /// For compiled classes (Path 1): called from module init, wires the
-  /// BEAM module's pre-compiled methods into the class gen_server.
-  /// If the class already exists (hot reload), updates the existing
-  /// gen_server state via `update_class/2` rather than failing.
-  ///
-  /// For dynamic classes (Path 2): creates a class gen_server with
-  /// closure-based methods, no BEAM module required.
+  /// Called from compiled module init, wires the BEAM module's
+  /// pre-compiled methods into the class gen_server. If the class
+  /// already exists (hot reload), updates the existing gen_server
+  /// state via `update_class/2` rather than failing.
   register =>
     @intrinsic classBuilderRegister
 ```
@@ -194,16 +182,17 @@ register_class() ->
     beamtalk_primitive:send(CB, 'register', []).
 ```
 
-The BEAM module still provides the compiled method functions (`increment/1`, `value/1`). ClassBuilder wires them into the class gen_server. Dynamic classes pass closures instead of function references — the class gen_server stores and dispatches either form.
+The BEAM module still provides the compiled method functions (`increment/1`, `value/1`). ClassBuilder wires them into the class gen_server.
 
 ### REPL Self-Hosting Design
 
-When the Beamtalk REPL is ported to pure Beamtalk, the two paths map cleanly to two user experiences:
+> **Note (BT-873):** Path 2 (dynamic/closure-based) was removed. The REPL now
+> uses the compile-and-load path (BT-869). The subsection below is historical.
 
-**Interactive / prototyping** — Path 2 (dynamic, no compiler):
+When the Beamtalk REPL is ported to pure Beamtalk, class definitions go through the compile-and-load path:
 
 ```beamtalk
-// User types in REPL — live, no compiler round-trip:
+// User types in REPL — compiled via BT-869 handle_class_definition:
 Object subclass: Point
   state: x = 0
   state: y = 0
@@ -213,17 +202,7 @@ p := Point new
 // => a Point (x: 0, y: 0)
 ```
 
-The REPL desugars the class definition to a cascade on the ClassBuilder: `Object classBuilder name: ...; addField: ...; register`. The builder is an Actor — each cascaded message mutates its state. `register` creates the class and stops the builder process. The class is live immediately. Methods are interpreted closures.
-
-**Compile and save** — Path 1 (compiled, via compiler port ADR 0022):
-
-```beamtalk
-// User explicitly compiles for performance/persistence:
-Compiler compileFile: 'Point.bt'.
-// => bt@point.beam generated, loaded, ClassBuilder called in module init
-```
-
-The REPL self-hosting story requires both paths but does not require them simultaneously. Path 2 unblocks interactive development; Path 1 is needed for performance-critical and persistent classes. This ADR delivers Path 2. Path 1 is already partially in place — the codegen change (emitting ClassBuilder calls) is the only new piece.
+The REPL compiles the class definition to a BEAM module, loads it, and calls the module's init which invokes ClassBuilder to register the class. This uses the same compiled path as file-based classes (Path 1).
 
 ### Bootstrap Sequence
 
