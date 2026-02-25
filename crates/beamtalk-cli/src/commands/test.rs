@@ -132,9 +132,9 @@ fn discover_test_classes(source_path: &Utf8Path) -> Result<(Vec<TestCaseClass>, 
 ///
 /// Each `test*` method becomes an `EUnit` test function:
 /// 1. Create fresh instance via `Module:new()`
-/// 2. Call `Module:dispatch(setUp, [], Instance)` if defined
-/// 3. Call `Module:dispatch(testMethod, [], Instance)`
-/// 4. Call `Module:dispatch(tearDown, [], Instance)` if defined
+/// 2. Call `Module:dispatch(setUp, [], Instance)` and capture return value if defined
+/// 3. Call `Module:dispatch(testMethod, [], SetUpInstance)`
+/// 4. Call `Module:dispatch(tearDown, [], SetUpInstance)` if defined
 fn generate_eunit_wrapper(test_class: &TestCaseClass, source_file: &str) -> String {
     let eunit_module = format!("{}_tests", test_class.module_name);
     let bt_module = &test_class.module_name;
@@ -158,27 +158,35 @@ fn generate_eunit_wrapper(test_class: &TestCaseClass, source_file: &str) -> Stri
         let _ = writeln!(erl, "    Instance = '{bt_module}':new(),");
 
         // setUp (if defined)
-        if test_class.has_setup {
-            let _ = writeln!(erl, "    '{bt_module}':dispatch('setUp', [], Instance),");
-        }
+        // For value objects (immutable maps), setUp returns a new instance with modified fields.
+        // We must capture that return value and use it for the test method.
+        let instance_var = if test_class.has_setup {
+            let _ = writeln!(
+                erl,
+                "    Instance1 = '{bt_module}':dispatch('setUp', [], Instance),"
+            );
+            "Instance1"
+        } else {
+            "Instance"
+        };
 
         // Run test method inside try/after for tearDown
         if test_class.has_teardown {
             let _ = writeln!(erl, "    try");
             let _ = writeln!(
                 erl,
-                "        '{bt_module}':dispatch('{method_name}', [], Instance)"
+                "        '{bt_module}':dispatch('{method_name}', [], {instance_var})"
             );
             let _ = writeln!(erl, "    after");
             let _ = writeln!(
                 erl,
-                "        '{bt_module}':dispatch('tearDown', [], Instance)"
+                "        '{bt_module}':dispatch('tearDown', [], {instance_var})"
             );
             let _ = writeln!(erl, "    end.");
         } else {
             let _ = writeln!(
                 erl,
-                "    '{bt_module}':dispatch('{method_name}', [], Instance)."
+                "    '{bt_module}':dispatch('{method_name}', [], {instance_var})."
             );
         }
 
@@ -1333,10 +1341,10 @@ mod tests {
         };
 
         let wrapper = generate_eunit_wrapper(&test_class, "test/my_test.bt");
-        assert!(wrapper.contains("dispatch('setUp', [], Instance)"));
+        assert!(wrapper.contains("Instance1 = 'bt@my_test':dispatch('setUp', [], Instance)"));
         assert!(wrapper.contains("try"));
         assert!(wrapper.contains("after"));
-        assert!(wrapper.contains("dispatch('tearDown', [], Instance)"));
+        assert!(wrapper.contains("dispatch('tearDown', [], Instance1)"));
         // Both test methods present
         assert!(wrapper.contains("'testA_test'()"));
         assert!(wrapper.contains("'testB_test'()"));

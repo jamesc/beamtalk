@@ -1,21 +1,22 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// LifecycleTest — TestCase subclass with setUp/tearDown (BT-440)
-// Verifies that setUp and tearDown are called without error.
-// setUp and tearDown are no-ops here; their presence exercises
-// the lifecycle dispatch code path in run_test_method.
+// LifecycleTest — TestCase subclass with setUp/tearDown (BT-440, BT-900)
+// Verifies that setUp state flows into test methods.
+// setUp assigns a field; tests verify the field is accessible.
+// Value objects are immutable maps, so the runner must use setUp's return value.
 
 TestCase subclass: LifecycleTest
+  state: log = "init"
 
   setUp =>
-    nil
+    self.log := "S"
 
   tearDown =>
     nil
 
   testFirst =>
-    self assert: true
+    self assert: self.log equals: "S"
 
   testSecond =>
-    self assert: 1 equals: 1
+    self assert: self.log equals: "S"
