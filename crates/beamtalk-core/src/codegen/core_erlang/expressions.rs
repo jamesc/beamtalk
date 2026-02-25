@@ -893,6 +893,12 @@ impl CoreErlangGenerator {
                 ]);
 
                 // Arguments
+                // TODO(BT-884): If any argument is a field assignment, its state binding
+                // (let StateN = maps:put(...)) is nested inside the argument expression and
+                // goes out of scope after `call send(...)`. The generator's state_version
+                // counter still advances, so subsequent cascade messages may reference a
+                // StateN that is unbound. Fix: use generate_field_assignment_open for
+                // field-assignment args and hoist the binding before the send call.
                 for (j, arg) in arguments.iter().enumerate() {
                     if j > 0 {
                         docs.push(Document::Str(", "));
@@ -948,6 +954,8 @@ impl CoreErlangGenerator {
                 ]);
 
                 // Arguments
+                // TODO(BT-884): Same state-threading scope issue as in the MessageSend
+                // branch above — field-assignment args must be hoisted to outer scope.
                 for (j, arg) in message.arguments.iter().enumerate() {
                     if j > 0 {
                         docs.push(Document::Str(", "));
