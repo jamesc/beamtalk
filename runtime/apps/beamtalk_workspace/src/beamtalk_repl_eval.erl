@@ -34,7 +34,7 @@
     activate_module/2,
     register_classes/2,
     trigger_hot_reload/2,
-    handle_class_definition/6,
+    handle_class_definition/7,
     handle_method_definition/4,
     compile_expression_via_port/3,
     compile_file_via_port/4
@@ -42,6 +42,7 @@
 -endif.
 
 -define(INTERNAL_REGISTRY_KEY, '__repl_actor_registry__').
+-define(WORKSPACE_BINDINGS_KEY, '__workspace_user_bindings__').
 
 %%% Public API
 
@@ -67,7 +68,18 @@ do_eval(Expression, State, Subscriber) ->
     ModuleName = list_to_atom("beamtalk_repl_eval_" ++ integer_to_list(Counter)),
     NewState = beamtalk_repl_state:increment_eval_counter(State),
 
-    Bindings = beamtalk_repl_state:get_bindings(State),
+    SessionBindings = beamtalk_repl_state:get_bindings(State),
+
+    %% BT-881: Merge workspace user bindings (from bind:as:) into session bindings.
+    %% Session bindings take priority — workspace bindings are "below" session locals.
+    %% These are merged for compilation/execution but stripped from the result.
+    WorkspaceUserBindings = beamtalk_workspace_interface:get_user_bindings(),
+    %% Track workspace-only bindings (key + original value) so they can be stripped after eval.
+    %% Only keys whose value is unchanged are stripped — if the user explicitly assigns to a
+    %% workspace-injected name during eval, that assignment is preserved as a session binding.
+    WorkspaceOnlyBindings = maps:without(maps:keys(SessionBindings), WorkspaceUserBindings),
+    Bindings0 = maps:merge(WorkspaceUserBindings, SessionBindings),
+    Bindings = maps:put(?WORKSPACE_BINDINGS_KEY, WorkspaceOnlyBindings, Bindings0),
 
     %% Get actor registry PID to pass to eval context
     RegistryPid = beamtalk_repl_state:get_actor_registry(State),
@@ -78,7 +90,7 @@ do_eval(Expression, State, Subscriber) ->
         %% BT-885: trailing expressions in ClassInfo are evaluated after class load
         {ok, class_definition, ClassInfo, Warnings} ->
             handle_class_definition(
-                ClassInfo, Warnings, Expression, NewState, RegistryPid, Subscriber
+                ClassInfo, Warnings, Expression, Bindings, NewState, RegistryPid, Subscriber
             );
         %% BT-571: Standalone method definition — add/replace method on existing class
         {ok, method_definition, MethodInfo, Warnings} ->
@@ -210,7 +222,10 @@ cleanup_module(ModuleName, RegistryPid) ->
 do_show_codegen(Expression, State) ->
     Counter = beamtalk_repl_state:get_eval_counter(State),
     NewState = beamtalk_repl_state:increment_eval_counter(State),
-    Bindings = beamtalk_repl_state:get_bindings(State),
+    SessionBindings = beamtalk_repl_state:get_bindings(State),
+    %% BT-881: Include workspace user bindings for codegen display
+    WorkspaceUserBindings = beamtalk_workspace_interface:get_user_bindings(),
+    Bindings = maps:merge(WorkspaceUserBindings, SessionBindings),
     SourceBin = list_to_binary(Expression),
     ModNameBin = iolist_to_binary(["beamtalk_repl_codegen_", integer_to_list(Counter)]),
     KnownVars = [
@@ -368,7 +383,9 @@ load_compiled_module(Binary, ClassNames, ModuleName, Source, SourcePath, State) 
 %% BT-571: Handle inline class definition result.
 %% Loads the compiled class module, registers its classes, and stores source.
 %% BT-885: Evaluates any trailing expressions from ClassInfo after loading the class.
-handle_class_definition(ClassInfo, Warnings, Expression, State, RegistryPid, Subscriber) ->
+handle_class_definition(
+    ClassInfo, Warnings, Expression, MergedBindings, State, RegistryPid, Subscriber
+) ->
     #{binary := Binary, module_name := ClassModName, classes := Classes} = ClassInfo,
     case code:load_binary(ClassModName, "", Binary) of
         {module, ClassModName} ->
@@ -402,7 +419,9 @@ handle_class_definition(ClassInfo, Warnings, Expression, State, RegistryPid, Sub
             case maps:find(trailing_binary, ClassInfo) of
                 {ok, TrailingBinary} ->
                     TrailingModName = maps:get(trailing_module_name, ClassInfo),
-                    Bindings = beamtalk_repl_state:get_bindings(NewState2),
+                    %% BT-881: Use merged bindings (includes workspace user bindings)
+                    %% instead of just session bindings from state
+                    Bindings = MergedBindings,
                     case code:load_binary(TrailingModName, "", TrailingBinary) of
                         {module, TrailingModName} ->
                             eval_loaded_module(
@@ -991,7 +1010,32 @@ should_purge_module(ModuleName, RegistryPid) ->
 %% but should not be visible to users or persisted in REPL state.
 -spec strip_internal_bindings(map()) -> map().
 strip_internal_bindings(Bindings) ->
-    maps:remove(?INTERNAL_REGISTRY_KEY, Bindings).
+    %% BT-881: Strip workspace-only binding keys injected by do_eval.
+    %% Only strip keys whose value is unchanged from the original workspace injection.
+    %% If the user explicitly assigned to a workspace-injected name (e.g., MyValue := 42),
+    %% the new value is kept as a session binding.
+    Stripped0 =
+        case maps:find(?WORKSPACE_BINDINGS_KEY, Bindings) of
+            {ok, WorkspaceOnlyBindings} when is_map(WorkspaceOnlyBindings) ->
+                WithoutMeta = maps:remove(?WORKSPACE_BINDINGS_KEY, Bindings),
+                maps:fold(
+                    fun(Key, OriginalValue, Acc) ->
+                        case maps:find(Key, Acc) of
+                            {ok, OriginalValue} ->
+                                %% Value unchanged — strip it (came from workspace, not user)
+                                maps:remove(Key, Acc);
+                            _ ->
+                                %% Value changed or key removed — keep user's assignment
+                                Acc
+                        end
+                    end,
+                    WithoutMeta,
+                    WorkspaceOnlyBindings
+                );
+            _ ->
+                Bindings
+        end,
+    maps:remove(?INTERNAL_REGISTRY_KEY, Stripped0).
 
 %%% IO Capture delegation (BT-706: extracted to beamtalk_io_capture.erl)
 %%% See beamtalk_io_capture module for start/stop/capture logic.

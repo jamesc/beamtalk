@@ -741,7 +741,7 @@ handle_class_definition_load_error_test() ->
     },
     State = beamtalk_repl_state:new(undefined, 0),
     Result = beamtalk_repl_eval:handle_class_definition(
-        ClassInfo, [], "test", State, undefined, undefined
+        ClassInfo, [], "test", #{}, State, undefined, undefined
     ),
     ?assertMatch({error, {load_error, _}, <<>>, [], _}, Result).
 
@@ -757,7 +757,7 @@ handle_class_definition_empty_classes_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
     %% Load will fail, hitting the error branch
     Result = beamtalk_repl_eval:handle_class_definition(
-        ClassInfo, [<<"warn">>], "test", State, undefined, undefined
+        ClassInfo, [<<"warn">>], "test", #{}, State, undefined, undefined
     ),
     ?assertMatch({error, {load_error, _}, <<>>, [<<"warn">>], _}, Result).
 
