@@ -216,8 +216,15 @@ handle_cast({'load:', [Path], FuturePid}, State) when is_pid(FuturePid) ->
     end,
     {noreply, State};
 handle_cast({clear, [], FuturePid}, State) when is_pid(FuturePid) ->
-    %% For async clear, no session context available — resolve with nil
-    beamtalk_future:resolve(FuturePid, nil),
+    %% BT-872: Async clear cannot locate the session — reject explicitly rather
+    %% than silently succeeding with nil while leaving bindings untouched.
+    Err0 = beamtalk_error:new(session_error, 'WorkspaceInterface'),
+    Err1 = beamtalk_error:with_selector(Err0, clear),
+    Err2 = beamtalk_error:with_message(
+        Err1,
+        <<"Workspace clear is not available via async dispatch (BT-872)">>
+    ),
+    beamtalk_future:reject(FuturePid, Err2),
     {noreply, State};
 handle_cast({test, [], FuturePid}, State) when is_pid(FuturePid) ->
     Result = handle_test(),
