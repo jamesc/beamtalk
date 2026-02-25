@@ -477,27 +477,25 @@ impl Token {
     /// starts at column 0 after a newline, it is outside the class body.
     #[must_use]
     pub fn indentation_after_newline(&self) -> Option<usize> {
-        // Walk backwards through trivia to find the last piece containing a newline,
-        // then count chars after the final newline in that piece plus any subsequent
-        // whitespace-only trivia.
+        // Find the last newline in leading trivia and compute the column offset
+        // from that newline to the token start, counting all trivia (whitespace,
+        // comments, etc.) that appears between the newline and the token.
         let mut found_newline = false;
-        let mut indent = 0;
+        let mut column = 0;
 
         for trivia in &self.leading_trivia {
             let s = trivia.as_str();
             if let Some(pos) = s.rfind('\n') {
                 // Reset — this newline is the most recent
                 found_newline = true;
-                indent = s[pos + 1..].len();
-            } else if found_newline && trivia.is_whitespace() {
-                indent += s.len();
+                column = s[pos + 1..].len();
             } else if found_newline {
-                // Non-whitespace trivia (comment) after the newline — reset indent
-                indent = 0;
+                // All trivia after the last newline contributes to the column
+                column += s.len();
             }
         }
 
-        if found_newline { Some(indent) } else { None }
+        if found_newline { Some(column) } else { None }
     }
 }
 
@@ -629,6 +627,19 @@ mod tests {
             vec![],
         );
         assert_eq!(multi_newline.indentation_after_newline(), Some(4));
+
+        // Comment trivia after newline should NOT reset to column 0
+        let with_comment = Token::with_trivia(
+            TokenKind::Identifier("x".into()),
+            Span::new(0, 1),
+            vec![
+                Trivia::Whitespace("\n  ".into()),
+                Trivia::BlockComment("/*note*/".into()),
+            ],
+            vec![],
+        );
+        assert_ne!(with_comment.indentation_after_newline(), Some(0));
+        assert_eq!(with_comment.indentation_after_newline(), Some(10)); // 2 spaces + 8 char comment
     }
 
     #[test]
