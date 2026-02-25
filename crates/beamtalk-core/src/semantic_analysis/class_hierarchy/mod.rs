@@ -415,11 +415,13 @@ impl ClassHierarchy {
     pub fn resolves_selector(&self, class_name: &str, selector: &str) -> bool {
         let mut current = Some(class_name.to_string());
         let mut visited = HashSet::new();
+        let mut traversed_known = false;
         while let Some(name) = current {
             if !visited.insert(name.clone()) {
                 break; // Cycle detected
             }
             if let Some(info) = self.classes.get(name.as_str()) {
+                traversed_known = true;
                 if info.methods.iter().any(|m| m.selector.as_str() == selector) {
                     return true;
                 }
@@ -432,7 +434,14 @@ impl ClassHierarchy {
                 // defined in a separately-compiled file.  Since all Beamtalk classes
                 // ultimately inherit from Object, fall through to the Object chain so
                 // that Object-level methods (e.g. subclassResponsibility) are visible.
-                current = Some("Object".to_string());
+                // Guard: only fall through if we already traversed at least one known
+                // class, so that a completely-unknown root class does not incorrectly
+                // resolve Object methods (BT-889).
+                current = if traversed_known {
+                    Some("Object".to_string())
+                } else {
+                    None
+                };
             }
         }
         false
@@ -448,11 +457,13 @@ impl ClassHierarchy {
     pub fn find_method(&self, class_name: &str, selector: &str) -> Option<MethodInfo> {
         let mut current = Some(class_name.to_string());
         let mut visited = HashSet::new();
+        let mut traversed_known = false;
         while let Some(name) = current {
             if !visited.insert(name.clone()) {
                 break;
             }
             if let Some(info) = self.classes.get(name.as_str()) {
+                traversed_known = true;
                 if let Some(method) = info
                     .methods
                     .iter()
@@ -466,7 +477,12 @@ impl ClassHierarchy {
                     .map(std::string::ToString::to_string);
             } else {
                 // Unknown class in the superclass chain — fall through to Object (BT-889).
-                current = Some("Object".to_string());
+                // Guard: only when at least one known class was already traversed.
+                current = if traversed_known {
+                    Some("Object".to_string())
+                } else {
+                    None
+                };
             }
         }
         None
@@ -480,11 +496,13 @@ impl ClassHierarchy {
     pub fn find_class_method(&self, class_name: &str, selector: &str) -> Option<MethodInfo> {
         let mut current = Some(class_name.to_string());
         let mut visited = HashSet::new();
+        let mut traversed_known = false;
         while let Some(name) = current {
             if !visited.insert(name.clone()) {
                 break;
             }
             if let Some(info) = self.classes.get(name.as_str()) {
+                traversed_known = true;
                 if let Some(method) = info
                     .class_methods
                     .iter()
@@ -498,7 +516,12 @@ impl ClassHierarchy {
                     .map(std::string::ToString::to_string);
             } else {
                 // Unknown class in the superclass chain — fall through to Object (BT-889).
-                current = Some("Object".to_string());
+                // Guard: only when at least one known class was already traversed.
+                current = if traversed_known {
+                    Some("Object".to_string())
+                } else {
+                    None
+                };
             }
         }
         None
@@ -1016,6 +1039,9 @@ mod tests {
     fn resolves_selector_unknown_class_returns_false() {
         let h = ClassHierarchy::with_builtins();
         assert!(!h.resolves_selector("Nope", "anything"));
+        // Guard: Object methods must NOT resolve for a completely-unknown root class.
+        assert!(!h.resolves_selector("Nope", "isNil"));
+        assert!(!h.resolves_selector("Nope", "subclassResponsibility"));
     }
 
     /// BT-889: When a class inherits from an external class (defined in a
