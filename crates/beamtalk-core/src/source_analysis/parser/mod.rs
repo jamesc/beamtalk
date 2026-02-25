@@ -1111,6 +1111,22 @@ mod tests {
     }
 
     #[test]
+    fn parse_multiline_keyword_does_not_consume_method_def() {
+        // In a class body, a keyword method on the next line should NOT
+        // be consumed as a continuation of the keyword message above.
+        let module = parse_ok(
+            "Actor subclass: Counter
+  state: count = 0
+  value => count
+  increment: n => n + 1",
+        );
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+        assert_eq!(class.state.len(), 1);
+        assert_eq!(class.methods.len(), 2);
+    }
+
+    #[test]
     fn parse_block_no_params() {
         let module = parse_ok("[42]");
         assert_eq!(module.expressions.len(), 1);

@@ -239,7 +239,9 @@ impl Parser {
         let mut arguments = Vec::new();
 
         while let TokenKind::Keyword(keyword) = self.current_kind() {
-            // Stop if the keyword is on a new line (start of new statement)
+            // Stop if the keyword is on a new line AND looks like a method
+            // definition (keyword arg =>). Otherwise allow multi-line keyword
+            // messages like `ifTrue: [...]\n  ifFalse: [...]` (BT-890).
             if self.current_token().has_leading_newline()
                 && !keywords.is_empty()
                 && self.is_at_method_definition()
