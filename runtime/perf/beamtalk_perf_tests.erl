@@ -110,9 +110,7 @@ all_benchmarks() ->
     bench_actor_async_call(),
     bench_gen_server_call_vs_cast_future(),
     bench_throughput(),
-    bench_concurrent_callers(),
-    bench_dynamic_class_call(),
-    bench_class_creation().
+    bench_concurrent_callers().
 
 %% --- 1. Raw message send/receive (baseline) ---
 
@@ -279,74 +277,3 @@ bench_concurrent_callers() ->
     %% Sanity: concurrent throughput should still be at least 10k calls/sec
     ?assert(CallsPerSec > 10000).
 
-%% --- 8. Dynamic class method calls vs compiled class ---
-
-bench_dynamic_class_call() ->
-    %% Create a dynamic counter class with unique name to avoid collisions
-    ClassName = list_to_atom("PerfCounter_" ++ integer_to_list(erlang:unique_integer([positive]))),
-    {ok, ClassPid} = beamtalk_object_class:create_subclass('Actor', ClassName, #{
-        instance_variables => [value],
-        instance_methods => #{
-            increment => fun(_Self, [], State) ->
-                Value = maps:get(value, State, 0),
-                {reply, Value + 1, maps:put(value, Value + 1, State)}
-            end,
-            getValue => fun(_Self, [], State) ->
-                {reply, maps:get(value, State, 0), State}
-            end
-        }
-    }),
-    {ok, #beamtalk_object{pid = DynPid}} = beamtalk_object_class:new(ClassPid, [#{value => 0}]),
-
-    %% Also start a compiled counter for comparison
-    {ok, CompiledPid} = test_counter:start_link(0),
-
-    %% Benchmark dynamic class
-    DynTimings = run_benchmark(fun() ->
-        gen_server:call(DynPid, {getValue, []})
-    end, ?ITERATIONS, ?WARMUP),
-
-    %% Benchmark compiled class
-    CompiledTimings = run_benchmark(fun() ->
-        gen_server:call(CompiledPid, {getValue, []})
-    end, ?ITERATIONS, ?WARMUP),
-
-    gen_server:stop(DynPid),
-    gen_server:stop(CompiledPid),
-    gen_server:stop(ClassPid, normal, 5000),
-
-    DynStats = stats(DynTimings),
-    CompiledStats = stats(CompiledTimings),
-    report("dynamic_class_call", DynStats, ?ITERATIONS),
-    report("compiled_class_call", CompiledStats, ?ITERATIONS),
-
-    DynMedian = maps:get(median, DynStats),
-    CompiledMedian = maps:get(median, CompiledStats),
-    Ratio = case CompiledMedian of
-        0 -> 0.0;
-        _ -> DynMedian / CompiledMedian
-    end,
-    io:format(standard_error, "PERF: dynamic_vs_compiled_ratio ~.2fx~n", [Ratio]).
-
-%% --- 9. Class creation overhead ---
-
-bench_class_creation() ->
-    NumClasses = 50,
-    %% Note: list_to_atom creates permanent atoms (55 total including warmup).
-    %% Acceptable for on-demand perf tests; would need list_to_existing_atom
-    %% or a cleanup mechanism for continuous/CI use.
-    Timings = run_benchmark(fun() ->
-        ClassName = list_to_atom("PerfTestClass_" ++ integer_to_list(erlang:unique_integer([positive]))),
-        {ok, Pid} = beamtalk_object_class:create_subclass('Actor', ClassName, #{
-            instance_variables => [x],
-            instance_methods => #{
-                getX => fun(_Self, [], State) -> {reply, maps:get(x, State, 0), State} end
-            }
-        }),
-        gen_server:stop(Pid, normal, 5000),
-        ok
-    end, NumClasses, 5),
-    S = stats(Timings),
-    report("class_creation", S, NumClasses),
-    %% Sanity: class creation should be under 10ms
-    ?assert(maps:get(median, S) < 10000).

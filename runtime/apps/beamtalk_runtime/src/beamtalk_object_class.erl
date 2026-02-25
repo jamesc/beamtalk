@@ -41,7 +41,6 @@
     is_constructible/1,
     class_name/1,
     module_name/1,
-    create_subclass/3,
     class_send/3,
     set_class_var/3,
     update_class/2,
@@ -76,10 +75,8 @@
     instance_methods = #{} :: #{selector() => method_info()},
     class_methods = #{} :: #{selector() => method_info()},
     fields = [] :: [atom()],
-    field_defaults = #{} :: #{atom() => term()},
     class_state = #{} :: map(),
     method_source = #{} :: #{selector() => binary()},
-    dynamic_methods = #{} :: #{selector() => fun()},
     %% ADR 0033: Runtime-embedded documentation
     doc = none :: binary() | none,
     method_docs = #{} :: #{selector() => binary()}
@@ -236,12 +233,6 @@ is_abstract(ClassPid) ->
 is_constructible(ClassPid) ->
     gen_server:call(ClassPid, is_constructible).
 
-%% @doc Create a dynamic subclass at runtime.
-%% Delegates to beamtalk_class_instantiation (BT-704).
--spec create_subclass(atom(), atom(), map()) -> {ok, pid()} | {error, term()}.
-create_subclass(SuperclassName, ClassName, ClassSpec) ->
-    beamtalk_class_instantiation:create_subclass(SuperclassName, ClassName, ClassSpec).
-
 %%====================================================================
 %% gen_server callbacks
 %%====================================================================
@@ -270,10 +261,8 @@ init({ClassName, ClassInfo}) ->
         instance_methods = InstanceMethods,
         class_methods = ClassMethods,
         fields = maps:get(fields, ClassInfo, []),
-        field_defaults = maps:get(field_defaults, ClassInfo, #{}),
         class_state = maps:get(class_state, ClassInfo, #{}),
         method_source = maps:get(method_source, ClassInfo, #{}),
-        dynamic_methods = maps:get(dynamic_methods, ClassInfo, #{}),
         doc = maps:get(doc, ClassInfo, none),
         method_docs = maps:get(method_docs, ClassInfo, #{})
     },
@@ -303,9 +292,6 @@ handle_call(
     #class_state{
         name = ClassName,
         module = Module,
-        dynamic_methods = DynamicMethods,
-        fields = InstanceVars,
-        field_defaults = FieldDefaults,
         is_constructible = IsConstructible0
     } = State
 ) ->
@@ -314,11 +300,7 @@ handle_call(
             Args,
             ClassName,
             Module,
-            DynamicMethods,
-            InstanceVars,
-            FieldDefaults,
-            IsConstructible0,
-            self()
+            IsConstructible0
         )
     of
         {ok, Result, IsConstructible} ->
@@ -426,10 +408,6 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
                 instance_methods = NewInstanceMethods,
                 class_methods = NewClassMethods,
                 fields = NewIVars,
-                %% BT-838: Refresh field_defaults so hot-reload picks up new defaults.
-                field_defaults = maps:get(
-                    field_defaults, ClassInfo, State#class_state.field_defaults
-                ),
                 method_source = maps:get(method_source, ClassInfo, State#class_state.method_source),
                 is_constructible = undefined,
                 doc = maps:get(doc, ClassInfo, State#class_state.doc),

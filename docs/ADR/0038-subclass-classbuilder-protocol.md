@@ -1,7 +1,7 @@
 # ADR 0038: `subclass:` Grammar Desugaring to ClassBuilder Protocol
 
 ## Status
-Accepted (2026-02-24)
+Accepted (2026-02-24) — Path 2 (dynamic/closure-based) removed (BT-873, 2026-02-25)
 
 ## Context
 
@@ -46,7 +46,22 @@ Keep `Object subclass: Counter` as **grammar** — no syntax change, no pre-pass
 
 What changes is what **codegen emits** for a class definition. Instead of hardcoded Erlang registration calls, every class definition compiles to a `ClassBuilder` protocol invocation. `ClassBuilder` is a real Beamtalk stdlib class — bootstrapped early, inspectable, and callable directly at runtime.
 
-### Two Paths to Class Creation
+### Single Path to Class Creation (BT-873)
+
+> **Path 2 (dynamic/closure-based) was removed in BT-873** (2026-02-25). The
+> `beamtalk_dynamic_object` module, `build_dynamic_class_info/7`,
+> `wrap_method_for_dispatch/1`, `generate_field_accessors/1`, and the
+> `IsDynamic` branch in `beamtalk_class_builder` have all been deleted.
+> `beamtalk_class_instantiation:create_subclass/3` was also removed.
+>
+> All class creation goes through the compiled path (Path 1). The REPL uses
+> the compile-and-load path established by BT-869 (`handle_class_definition`),
+> not the closure-based dynamic path. Path 2 was fundamentally broken: state
+> mutation silently dropped, `super` calls did not work, and self-sends were
+> broken. The desugaring phase (BT-839) that would have fixed these issues was
+> too complex and was not merged.
+
+### Path 1 — Compiled (the only path)
 
 **Path 1 — Compiled (file-based, production)**
 
@@ -60,17 +75,9 @@ What changes is what **codegen emits** for a class definition. Instead of hardco
 
 The compiler generates the full BEAM module (method functions, dispatch tables, OTP callbacks for actors). `ClassBuilder` handles *registration* — wiring the new class into the runtime class system. The BEAM module provides the performance-optimised method implementations.
 
-**Path 2 — Dynamic (REPL / runtime, interpreted)**
+~~**Path 2 — Dynamic (REPL / runtime, interpreted)**~~ **(Removed — BT-873)**
 
-```text
-ClassBuilder called directly at runtime
-→ new class gen_server created with name, superclass, fields
-→ methods stored as closures in gen_server state
-→ class registered with runtime, dynamic dispatch active
-→ no BEAM module, no compiler round-trip
-```
-
-Dynamic classes work fully with the existing message dispatch system. Methods are closures rather than compiled BEAM functions, so performance is lower — this is the trade-off for interactive speed. Dynamic classes can be redefined freely. Their gen_server processes are long-lived — they persist until explicitly stopped via `removeFromSystem` or node shutdown, consistent with compiled class lifecycle.
+~~Dynamic classes stored closures in a class gen_server and dispatched via `beamtalk_dynamic_object`. This path had fundamental correctness issues (state mutation silently dropped, `super` calls broken, self-sends broken) and was removed in BT-873. The REPL now uses the compile-and-load path (BT-869).~~
 
 ### ClassBuilder.bt
 
@@ -498,16 +505,16 @@ Keep compiled class `on_load` calling `beamtalk_object_class:start/2` directly (
 ## Implementation Tracking
 
 **Epic:** [BT-834](https://linear.app/beamtalk/issue/BT-834)
-**Issues:** [BT-835](https://linear.app/beamtalk/issue/BT-835), [BT-836](https://linear.app/beamtalk/issue/BT-836), [BT-837](https://linear.app/beamtalk/issue/BT-837), [BT-838](https://linear.app/beamtalk/issue/BT-838), [BT-839](https://linear.app/beamtalk/issue/BT-839)
-**Status:** Planned
+**Issues:** [BT-835](https://linear.app/beamtalk/issue/BT-835), [BT-836](https://linear.app/beamtalk/issue/BT-836), [BT-837](https://linear.app/beamtalk/issue/BT-837), [BT-838](https://linear.app/beamtalk/issue/BT-838), [BT-839](https://linear.app/beamtalk/issue/BT-839), [BT-873](https://linear.app/beamtalk/issue/BT-873)
 
-| Issue | Phase | Description |
-|-------|-------|-------------|
-| BT-835 | Phase 1 — Runtime foundation | `beamtalk_class_builder.erl` + bootstrap stub + sequence update |
-| BT-836 | Phase 1 — Stdlib + intrinsic | `ClassBuilder.bt`, `Class#classBuilder`, `classBuilderRegister` intrinsic |
-| BT-837 | Phase 1 — Codegen | `generate_register_class` emits ClassBuilder cascade; snapshot updates |
-| BT-838 | Phase 2 — Dynamic dispatch | Path 2 closure-based dynamic class creation + tests |
-| BT-839 | Phase 3 — REPL integration | REPL evaluator desugaring + E2E tests |
+| Issue | Phase | Description | Status |
+|-------|-------|-------------|--------|
+| BT-835 | Phase 1 — Runtime foundation | `beamtalk_class_builder.erl` + bootstrap stub + sequence update | Done |
+| BT-836 | Phase 1 — Stdlib + intrinsic | `ClassBuilder.bt`, `Class#classBuilder`, `classBuilderRegister` intrinsic | Done |
+| BT-837 | Phase 1 — Codegen | `generate_register_class` emits ClassBuilder cascade; snapshot updates | Done |
+| BT-838 | Phase 2 — Dynamic dispatch | Path 2 closure-based dynamic class creation + tests | **Reverted (BT-873)** |
+| BT-839 | Phase 3 — REPL integration | REPL evaluator desugaring + E2E tests | Not merged (too complex) |
+| BT-873 | Cleanup — Remove dynamic path | Delete Path 2: `beamtalk_dynamic_object`, closure dispatch, wrapper functions | Done |
 
 ## References
 - Related ADRs: [ADR 0005](0005-beam-object-model-pragmatic-hybrid.md) (Object Model), [ADR 0006](0006-unified-method-dispatch.md) (Unified Dispatch), [ADR 0013](0013-class-variables-class-methods-instantiation.md) (Instantiation Protocol), [ADR 0022](0022-embedded-compiler-via-otp-port.md) (Compiler Port), [ADR 0024](0024-static-first-live-augmented-ide-tooling.md) (Static-First Tooling), [ADR 0032](0032-early-class-protocol.md) (Early Class Protocol), [ADR 0034](0034-stdlib-self-hosting-in-beamtalk.md) (Stdlib Self-Hosting), [ADR 0036](0036-full-metaclass-tower.md) (Full Metaclass Tower)
