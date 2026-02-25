@@ -68,8 +68,8 @@ initialClasses := (Workspace classes) await
 afterLoadClasses := (Workspace classes) await
 // => _
 
-afterLoadClasses isEmpty
-// => false
+afterLoadClasses includes: Counter
+// => true
 
 // Load the CounterTest fixture
 (Workspace load: "tests/e2e/fixtures/counter_test.bt") await
@@ -83,8 +83,8 @@ afterLoadClasses isEmpty
 testClasses := (Workspace testClasses) await
 // => _
 
-testClasses isEmpty
-// => false
+testClasses includes: CounterTest
+// => true
 
 // ===========================================================================
 // WORKSPACE TEST: — RUN SPECIFIC TEST CLASS
