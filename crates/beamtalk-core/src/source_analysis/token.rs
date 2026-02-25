@@ -469,6 +469,29 @@ impl Token {
     pub fn has_leading_newline(&self) -> bool {
         self.leading_trivia.iter().any(Trivia::contains_newline)
     }
+
+    /// Returns the number of characters after the last newline across all leading
+    /// trivia. Returns `None` if there is no leading newline.
+    ///
+    /// This is useful for detecting tokens at column 0 (no indentation) to
+    /// distinguish class body members from trailing top-level expressions.
+    #[must_use]
+    pub fn leading_indent(&self) -> Option<usize> {
+        // Walk characters in reverse across all trivia to find the last newline.
+        // The number of characters between that newline and the token is the indent.
+        let mut indent = 0usize;
+
+        for trivia in self.leading_trivia.iter().rev() {
+            for ch in trivia.as_str().chars().rev() {
+                if ch == '\n' {
+                    return Some(indent);
+                }
+                indent += 1;
+            }
+        }
+
+        None
+    }
 }
 
 #[cfg(test)]
