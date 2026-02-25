@@ -250,7 +250,16 @@ pub fn start_detached_node(
     // on loaded CI runners). The workspace dir is guaranteed to exist before we start the node.
     let pid_file_path = workspace_dir(workspace_id)?.join("pid");
     // Remove any stale PID file from a previous run.
-    let _ = std::fs::remove_file(&pid_file_path);
+    // Ignore NotFound (expected first run); propagate other errors (e.g. permissions)
+    // so we don't proceed and later accept a stale PID as valid.
+    if let Err(err) = std::fs::remove_file(&pid_file_path) {
+        if err.kind() != std::io::ErrorKind::NotFound {
+            return Err(miette!(
+                "Failed to remove stale PID file {}: {err}",
+                pid_file_path.display()
+            ));
+        }
+    }
     let pid_file_path_str = pid_file_path
         .to_str()
         .ok_or_else(|| miette!("PID file path contains invalid UTF-8: {:?}", pid_file_path))?
@@ -658,7 +667,11 @@ fn build_detached_node_command(
 fn read_pid_file(workspace_id: &str) -> Option<u32> {
     let pid_path = workspace_dir(workspace_id).ok()?.join("pid");
     let content = std::fs::read_to_string(pid_path).ok()?;
-    content.trim().parse::<u32>().ok()
+    // Treat 0 as invalid: it is the "PID unavailable" sentinel used in force-kill flows.
+    match content.trim().parse::<u32>().ok() {
+        Some(0) | None => None,
+        Some(pid) => Some(pid),
+    }
 }
 
 /// Poll until a workspace exits or timeout is reached.
