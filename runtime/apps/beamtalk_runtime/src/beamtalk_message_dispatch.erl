@@ -63,9 +63,24 @@ send(Receiver, Selector, Args) ->
                             beamtalk_object_class:class_send(ClassPid, Selector, Args);
                         false ->
                             Pid = element(4, Receiver),
-                            {beamtalk_future, FuturePid} = beamtalk_future:new(),
-                            beamtalk_actor:async_send(Pid, Selector, Args, FuturePid),
-                            {beamtalk_future, FuturePid}
+                            %% BT-886: Validate PID before creating a future.
+                            %% When class registration is incomplete, the actor
+                            %% record may contain an invalid PID (e.g., undefined).
+                            case is_pid(Pid) of
+                                true ->
+                                    {beamtalk_future, FuturePid} = beamtalk_future:new(),
+                                    beamtalk_actor:async_send(Pid, Selector, Args, FuturePid),
+                                    {beamtalk_future, FuturePid};
+                                false ->
+                                    ClassName = element(2, Receiver),
+                                    Error = beamtalk_error:new(
+                                        actor_dead,
+                                        ClassName,
+                                        Selector,
+                                        <<"Actor process is not available — class may not be fully registered">>
+                                    ),
+                                    error(beamtalk_exception_handler:ensure_wrapped(Error))
+                            end
                     end
             end;
         false ->

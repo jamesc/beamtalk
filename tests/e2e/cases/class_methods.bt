@@ -12,6 +12,7 @@
 // Class methods run on the class process, not instances.
 
 // @load tests/e2e/fixtures/class_methods_fixture.bt
+// @load tests/e2e/fixtures/class_methods_delegator_fixture.bt
 
 // ===========================================================================
 // BASIC CLASS METHOD DISPATCH
@@ -25,3 +26,19 @@ cls defaultValue
 
 cls add: 10 to: 20
 // => 30
+
+// ===========================================================================
+// CLASS METHOD TO CLASS METHOD DELEGATION (BT-891)
+// ===========================================================================
+
+del := (Beamtalk classNamed: #Delegator) await
+// => Delegator
+
+del helper: 5
+// => 10
+
+del delegateHelper: 5
+// => 10
+
+del chained: 5
+// => 10

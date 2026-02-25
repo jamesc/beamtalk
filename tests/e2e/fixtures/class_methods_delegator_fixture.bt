@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-891: Class method delegating to another class method via self
+Actor subclass: Delegator
+
+  class helper: x => x * 2
+
+  class delegateHelper: x => self helper: x
+
+  class chained: x => self delegateHelper: x
