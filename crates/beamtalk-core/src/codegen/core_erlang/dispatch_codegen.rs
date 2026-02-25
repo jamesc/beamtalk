@@ -546,12 +546,38 @@ impl CoreErlangGenerator {
             self.last_open_scope_result = Some(result);
             return Ok(doc);
         }
-        // Built-in export (spawn, new, superclass, etc.)
-        let fun_name = match selector_atom.as_str() {
-            "spawnWith:" => "spawn".to_string(),
-            _ => selector_atom.replace(':', ""),
-        };
+        // BT-893: Instantiation selectors (new, new:, spawn, spawnWith:) must bypass
+        // gen_server to avoid deadlock — route through class_self_new/class_self_spawn.
+        let class_name = self.class_name();
         let module = self.module_name.clone();
+        match selector_atom.as_str() {
+            "new" | "new:" => {
+                let args_doc = self.capture_argument_list_doc(arguments)?;
+                let doc = docvec![
+                    Document::String(format!(
+                        "call 'beamtalk_class_instantiation':'class_self_new'('{class_name}', '{module}', ["
+                    )),
+                    args_doc,
+                    "])"
+                ];
+                return Ok(doc);
+            }
+            "spawn" | "spawnWith:" => {
+                let args_doc = self.capture_argument_list_doc(arguments)?;
+                let doc = docvec![
+                    Document::String(format!(
+                        "call 'beamtalk_class_instantiation':'class_self_spawn'('{class_name}', '{module}', ["
+                    )),
+                    args_doc,
+                    "])"
+                ];
+                return Ok(doc);
+            }
+            _ => {}
+        }
+
+        // Other built-in exports (superclass, methods, etc.)
+        let fun_name = selector_atom.replace(':', "");
         let args_doc = self.capture_argument_list_doc(arguments)?;
 
         let doc = docvec![

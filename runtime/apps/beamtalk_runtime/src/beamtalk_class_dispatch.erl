@@ -41,18 +41,18 @@
 class_send(undefined, Selector, _Args) ->
     Error = beamtalk_error:new(class_not_found, unknown, Selector),
     beamtalk_error:raise(Error);
-%% BT-755: Detect gen_server self-call before it deadlocks.
-%% A class method sending new/new:/spawn/spawnWith: to its own class (ClassPid == self())
-%% would cause gen_server:call(self(), ...) to deadlock — OTP raises {calling_self,...}.
-%% Guard all four instantiation selectors and raise a clean Beamtalk error instead.
-class_send(ClassPid, 'new', _Args) when ClassPid =:= self() ->
-    handle_calling_self_error(ClassPid, 'new');
-class_send(ClassPid, 'new:', _Args) when ClassPid =:= self() ->
-    handle_calling_self_error(ClassPid, 'new:');
-class_send(ClassPid, spawn, _Args) when ClassPid =:= self() ->
-    handle_calling_self_error(ClassPid, spawn);
-class_send(ClassPid, 'spawnWith:', _Args) when ClassPid =:= self() ->
-    handle_calling_self_error(ClassPid, 'spawnWith:');
+%% BT-893: Self-call for instantiation selectors — bypass gen_server to avoid deadlock.
+%% When a class method sends new/new:/spawn/spawnWith: to its own class (ClassPid == self()),
+%% gen_server:call(self(), ...) would deadlock. Instead, perform instantiation directly
+%% using class metadata from the process dictionary (set during init).
+class_send(ClassPid, 'new', Args) when ClassPid =:= self() ->
+    handle_self_instantiation(new, 'new', Args);
+class_send(ClassPid, 'new:', Args) when ClassPid =:= self() ->
+    handle_self_instantiation(new, 'new:', Args);
+class_send(ClassPid, spawn, Args) when ClassPid =:= self() ->
+    handle_self_instantiation(spawn, spawn, Args);
+class_send(ClassPid, 'spawnWith:', Args) when ClassPid =:= self() ->
+    handle_self_instantiation(spawn, 'spawnWith:', Args);
 class_send(ClassPid, 'new', []) ->
     unwrap_class_call(gen_server:call(ClassPid, {new, []}));
 class_send(ClassPid, 'new:', [Map]) ->
@@ -391,18 +391,43 @@ handle_async_dispatch(_Msg, _ClassName, _InstanceMethods, _Superclass, _Module) 
     ok.
 
 %%% ============================================================================
-%%% Internal Functions — BT-755
+%%% Internal Functions — BT-893 (Self-Instantiation)
 %%% ============================================================================
 
 %% @private
-%% @doc Raise a clean error when a class method sends an instantiation message to its own class.
+%% @doc Perform instantiation directly when a class method self-sends new/spawn.
 %%
-%% BT-755: A class method running inside gen_server handle_call cannot call
-%% gen_server:call(self(), ...) — OTP detects the self-call and crashes with
-%% {calling_self,...}. Detect this upfront and surface a helpful Beamtalk error.
--spec handle_calling_self_error(pid(), atom()) -> no_return().
-handle_calling_self_error(ClassPid, Selector) ->
-    ClassName = class_name_from_pid(ClassPid),
+%% BT-893: Replaces BT-755's error-raising approach. Instead of raising an error
+%% when a class method sends new/spawn to itself, we bypass gen_server and call
+%% beamtalk_class_instantiation directly. Class name and module are read from the
+%% process dictionary (set during beamtalk_object_class:init/1).
+-spec handle_self_instantiation(new | spawn, atom(), list()) -> term().
+handle_self_instantiation(Type, Selector, Args) ->
+    ClassName = get(beamtalk_class_name),
+    Module = get(beamtalk_class_module),
+    case {ClassName, Module} of
+        {undefined, _} ->
+            %% Fallback: process dictionary not set — called from non-class process.
+            handle_self_instantiation_error(Selector);
+        {_, undefined} ->
+            handle_self_instantiation_error(Selector);
+        {CN, Mod} ->
+            case Type of
+                new ->
+                    beamtalk_class_instantiation:class_self_new(CN, Mod, Args);
+                spawn ->
+                    beamtalk_class_instantiation:class_self_spawn(CN, Mod, Args)
+            end
+    end.
+
+%% @private
+%% @doc Fallback error when process dictionary metadata is missing.
+%%
+%% Preserves the original selector and attempts to extract the class name from
+%% the process's registered name for diagnostic purposes.
+-spec handle_self_instantiation_error(atom()) -> no_return().
+handle_self_instantiation_error(Selector) ->
+    ClassName = class_name_from_pid(self()),
     Error0 = beamtalk_error:new(instantiation_error, ClassName, Selector),
     Error1 = beamtalk_error:with_hint(
         Error0,

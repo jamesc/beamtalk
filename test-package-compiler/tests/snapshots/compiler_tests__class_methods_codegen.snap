@@ -172,7 +172,7 @@ module 'class_methods' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'
 
 
 'class_create'/2 = fun (ClassSelf, ClassVars) ->
-    let _Val2 = call 'erlang':'+'(call 'maps':'get'('instanceCount', ClassVars), 1) in let ClassVars1 = call 'maps':'put'('instanceCount', _Val2, ClassVars) in let _Ret3 = call 'class_methods':'spawn'() in {'class_var_result', _Ret3, ClassVars1}
+    let _Val2 = call 'erlang':'+'(call 'maps':'get'('instanceCount', ClassVars), 1) in let ClassVars1 = call 'maps':'put'('instanceCount', _Val2, ClassVars) in let _Ret3 = call 'beamtalk_class_instantiation':'class_self_spawn'('ClassVarCounter', 'class_methods', []) in {'class_var_result', _Ret3, ClassVars1}
 
 'class_getCount'/2 = fun (ClassSelf, ClassVars) ->
     let _Ret4 = call 'maps':'get'('instanceCount', ClassVars) in _Ret4

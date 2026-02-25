@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-893: Test fixture for class method self-sends (new/new:/spawn).
+// Factory pattern: class methods that call self new: to create instances.
+Object subclass: Shape
+  state: kind = #unknown
+  state: sides = 0
+
+  class triangle => self new: #{#kind => #triangle, #sides => 3}
+
+  class square => self new: #{#kind => #square, #sides => 4}
+
+  class named: k sides: n => self new: #{#kind => k, #sides => n}
+
+  kind => self.kind
+
+  sides => self.sides

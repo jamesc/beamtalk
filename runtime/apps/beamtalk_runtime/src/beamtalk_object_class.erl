@@ -250,6 +250,11 @@ init({ClassName, ClassInfo}) ->
 
     ets:insert(beamtalk_class_hierarchy, {ClassName, Superclass}),
 
+    %% BT-893: Store class metadata in process dictionary so class_send can
+    %% bypass gen_server for self-calls (new/spawn from within class methods).
+    put(beamtalk_class_name, ClassName),
+    put(beamtalk_class_module, Module),
+
     %% BT-474: is_constructible starts undefined — computed lazily on first new call
     %% ADR 0032 Phase 1: No flattened method tables — dispatch walks the chain directly.
     State = #class_state{
