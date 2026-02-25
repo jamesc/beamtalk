@@ -1046,6 +1046,87 @@ mod tests {
     }
 
     #[test]
+    fn parse_keyword_message_multiline_iftrue_iffalse() {
+        let module =
+            parse_ok("acc isEmpty ifTrue: [cell]\n            ifFalse: [\"{acc},{cell}\"]");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MessageSend {
+                selector: MessageSelector::Keyword(parts),
+                arguments,
+                ..
+            } => {
+                assert_eq!(parts.len(), 2);
+                assert_eq!(parts[0].keyword.as_str(), "ifTrue:");
+                assert_eq!(parts[1].keyword.as_str(), "ifFalse:");
+                assert_eq!(arguments.len(), 2);
+            }
+            _ => panic!("Expected keyword message send"),
+        }
+    }
+
+    #[test]
+    fn parse_keyword_message_multiline_inject_into() {
+        let module = parse_ok("collection inject: 0\n             into: [:acc :each | acc + each]");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MessageSend {
+                selector: MessageSelector::Keyword(parts),
+                arguments,
+                ..
+            } => {
+                assert_eq!(parts.len(), 2);
+                assert_eq!(parts[0].keyword.as_str(), "inject:");
+                assert_eq!(parts[1].keyword.as_str(), "into:");
+                assert_eq!(arguments.len(), 2);
+            }
+            _ => panic!("Expected keyword message send"),
+        }
+    }
+
+    #[test]
+    fn parse_keyword_message_multiline_to_do() {
+        let module = parse_ok("1 to: 10\n  do: [:i | i]");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MessageSend {
+                selector: MessageSelector::Keyword(parts),
+                arguments,
+                ..
+            } => {
+                assert_eq!(parts.len(), 2);
+                assert_eq!(parts[0].keyword.as_str(), "to:");
+                assert_eq!(parts[1].keyword.as_str(), "do:");
+                assert_eq!(arguments.len(), 2);
+            }
+            _ => panic!("Expected keyword message send"),
+        }
+    }
+
+    #[test]
+    fn parse_keyword_message_dot_terminates_not_newline() {
+        // Two separate statements: `a foo: 1` then `b bar: 2`
+        let module = parse_ok("a foo: 1.\nb bar: 2");
+        assert_eq!(module.expressions.len(), 2);
+    }
+
+    #[test]
+    fn parse_multiline_keyword_does_not_consume_method_def() {
+        // In a class body, a keyword method on the next line should NOT
+        // be consumed as a continuation of the keyword message above.
+        let module = parse_ok(
+            "Actor subclass: Counter
+  state: count = 0
+  value => count
+  increment: n => n + 1",
+        );
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+        assert_eq!(class.state.len(), 1);
+        assert_eq!(class.methods.len(), 2);
+    }
+
+    #[test]
     fn parse_block_no_params() {
         let module = parse_ok("[42]");
         assert_eq!(module.expressions.len(), 1);
