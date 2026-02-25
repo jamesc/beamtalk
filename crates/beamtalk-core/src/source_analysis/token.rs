@@ -470,8 +470,8 @@ impl Token {
         self.leading_trivia.iter().any(Trivia::contains_newline)
     }
 
-    /// Returns the indentation level (number of spaces/tabs after the last newline
-    /// in leading trivia). Returns `None` if there is no leading newline.
+    /// Returns the number of characters after the last newline across all leading
+    /// trivia. Returns `None` if there is no leading newline.
     ///
     /// This is useful for detecting tokens at column 0 (no indentation) to
     /// distinguish class body members from trailing top-level expressions.
