@@ -75,10 +75,10 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
     // This allows later files to resolve cross-file class references (including
     // classes in package subdirectories) during code generation.
     let mut file_module_pairs: Vec<(Utf8PathBuf, String, Utf8PathBuf)> = Vec::new();
-    let class_module_index = if let Some(ref pkg) = pkg_manifest {
+    let (class_module_index, class_superclass_index) = if let Some(ref pkg) = pkg_manifest {
         build_class_module_index(&source_files, source_root.as_deref(), &pkg.name)?
     } else {
-        HashMap::new()
+        (HashMap::new(), HashMap::new())
     };
 
     for file in &source_files {
@@ -113,7 +113,14 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
     let mut core_files = Vec::new();
     let mut module_names = Vec::new();
     for (file, module_name, core_file) in &file_module_pairs {
-        compile_file(file, module_name, core_file, options, &class_module_index)?;
+        compile_file(
+            file,
+            module_name,
+            core_file,
+            options,
+            &class_module_index,
+            &class_superclass_index,
+        )?;
         core_files.push(core_file.clone());
         module_names.push(module_name.clone());
     }
@@ -254,6 +261,7 @@ fn compile_file(
     core_file: &Utf8Path,
     options: &beamtalk_core::CompilerOptions,
     class_module_index: &HashMap<String, String>,
+    class_superclass_index: &HashMap<String, String>,
 ) -> Result<()> {
     debug!("Compiling {path}");
 
@@ -264,6 +272,7 @@ fn compile_file(
         options,
         &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
         class_module_index,
+        class_superclass_index,
     )?;
 
     debug!("Generated Core Erlang: {core_file}");
@@ -271,19 +280,21 @@ fn compile_file(
     Ok(())
 }
 
-/// Build a class → compiled module name index from a set of source files.
+/// Build class indexes from a set of source files.
 ///
-/// Parses each file to extract class names, then maps each class name to its
-/// package-qualified module name (e.g. `"SchemeEnv"` → `"bt@sicp_example@scheme@env"`).
-///
-/// This index is used during code generation so that cross-file references to
-/// classes in package subdirectories produce the correct Erlang module call.
+/// Returns two indexes:
+/// 1. **Class module index:** Maps class names to compiled module names
+///    (e.g. `"SchemeEnv"` → `"bt@sicp_example@scheme@env"`).
+/// 2. **Class superclass index:** Maps class names to their direct superclass names
+///    (e.g. `"MyChild"` → `"MyParent"`). Used by BT-894 to resolve cross-file
+///    inheritance so the compiler can determine value-object vs actor codegen.
 pub fn build_class_module_index(
     source_files: &[Utf8PathBuf],
     source_root: Option<&Utf8Path>,
     pkg_name: &str,
-) -> Result<HashMap<String, String>> {
-    let mut index = HashMap::new();
+) -> Result<(HashMap<String, String>, HashMap<String, String>)> {
+    let mut module_index = HashMap::new();
+    let mut superclass_index = HashMap::new();
 
     for file in source_files {
         let relative_module = compute_relative_module(file, source_root)?;
@@ -312,7 +323,7 @@ pub fn build_class_module_index(
 
         for class in &module.classes {
             let class_name = class.name.name.to_string();
-            if let Some(existing) = index.get(&class_name) {
+            if let Some(existing) = module_index.get(&class_name) {
                 if existing != &module_name {
                     eprintln!(
                         "Warning: class '{class_name}' is defined in both '{existing}' and \
@@ -320,11 +331,20 @@ pub fn build_class_module_index(
                     );
                 }
             }
-            index.insert(class_name, module_name.clone());
+            module_index.insert(class_name.clone(), module_name.clone());
+            // BT-894: Record direct superclass for cross-file hierarchy resolution.
+            // When a duplicate class overwrites a prior entry, keep the superclass
+            // index consistent by removing any stale mapping if the new definition
+            // has no explicit superclass.
+            if let Some(ref superclass) = class.superclass {
+                superclass_index.insert(class_name.clone(), superclass.name.to_string());
+            } else {
+                superclass_index.remove(&class_name);
+            }
         }
     }
 
-    Ok(index)
+    Ok((module_index, superclass_index))
 }
 
 #[cfg(test)]
@@ -419,6 +439,7 @@ mod tests {
             &core_file,
             &default_options(),
             &HashMap::new(),
+            &HashMap::new(),
         );
         assert!(result.is_ok());
         assert!(core_file.exists());
@@ -437,6 +458,7 @@ mod tests {
             "test",
             &core_file,
             &default_options(),
+            &HashMap::new(),
             &HashMap::new(),
         );
         assert!(result.is_err());
@@ -801,7 +823,9 @@ mod tests {
         let nonexistent = Utf8PathBuf::from("/nonexistent/no_such_file.bt");
         let result = build_class_module_index(&[nonexistent], None, "my_app");
         assert!(result.is_ok());
-        assert!(result.unwrap().is_empty());
+        let (module_index, superclass_index) = result.unwrap();
+        assert!(module_index.is_empty());
+        assert!(superclass_index.is_empty());
     }
 
     #[test]

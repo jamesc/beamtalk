@@ -195,6 +195,34 @@ impl ClassHierarchy {
         })
     }
 
+    /// BT-894: Add minimal class entries from a cross-file superclass index.
+    ///
+    /// For each class in the index that isn't already in the hierarchy, adds a
+    /// stub `ClassInfo` with just the name and superclass. This allows
+    /// `superclass_chain` to resolve the full inheritance chain for classes
+    /// whose parents are defined in other files.
+    pub fn add_external_superclasses(&mut self, index: &std::collections::HashMap<String, String>) {
+        for (class_name, superclass_name) in index {
+            if !self.classes.contains_key(class_name.as_str()) {
+                self.classes.insert(
+                    EcoString::from(class_name.as_str()),
+                    ClassInfo {
+                        name: EcoString::from(class_name.as_str()),
+                        superclass: Some(EcoString::from(superclass_name.as_str())),
+                        is_sealed: false,
+                        is_abstract: false,
+                        is_typed: false,
+                        state: Vec::new(),
+                        state_types: HashMap::new(),
+                        methods: Vec::new(),
+                        class_methods: Vec::new(),
+                        class_variables: Vec::new(),
+                    },
+                );
+            }
+        }
+    }
+
     /// Returns the ordered superclass chain for a class (excluding the class itself).
     ///
     /// Example: `superclass_chain("Counter")` → `["Actor", "Object", "ProtoObject"]`
@@ -2222,5 +2250,55 @@ mod tests {
             !h.has_class_dnu_override("Integer"),
             "Integer should not have class DNU override"
         );
+    }
+
+    // --- BT-894: Cross-file superclass enrichment tests ---
+
+    #[test]
+    fn add_external_superclasses_resolves_value_object_chain() {
+        let mut h = ClassHierarchy::with_builtins();
+        // Simulate: File A defines "MyParent" as Object subclass
+        // File B defines "MyChild" as MyParent subclass
+        // When compiling File B, only MyChild is in the hierarchy.
+        // The external superclass index provides the missing link.
+        let mut index = HashMap::new();
+        index.insert("MyParent".to_string(), "Object".to_string());
+        h.add_external_superclasses(&index);
+
+        // MyParent should now resolve through to Object
+        let chain = h.superclass_chain("MyParent");
+        assert_eq!(
+            chain,
+            vec![EcoString::from("Object"), EcoString::from("ProtoObject")]
+        );
+
+        // A child class added to the hierarchy should now resolve through MyParent → Object
+        assert!(!h.is_actor_subclass("MyParent"));
+    }
+
+    #[test]
+    fn add_external_superclasses_resolves_actor_chain() {
+        let mut h = ClassHierarchy::with_builtins();
+        // Simulate: File A defines "MyActor" as Actor subclass
+        // File B defines "MySpecialActor" as MyActor subclass
+        let mut index = HashMap::new();
+        index.insert("MyActor".to_string(), "Actor".to_string());
+        h.add_external_superclasses(&index);
+
+        // MyActor should resolve through to Actor
+        assert!(h.is_actor_subclass("MyActor"));
+    }
+
+    #[test]
+    fn add_external_superclasses_does_not_overwrite_existing() {
+        let mut h = ClassHierarchy::with_builtins();
+        // Object is already in the hierarchy — external index should not overwrite it
+        let mut index = HashMap::new();
+        index.insert("Object".to_string(), "SomethingElse".to_string());
+        h.add_external_superclasses(&index);
+
+        // Object should still resolve to ProtoObject (built-in), not SomethingElse
+        let chain = h.superclass_chain("Object");
+        assert_eq!(chain, vec![EcoString::from("ProtoObject")]);
     }
 }

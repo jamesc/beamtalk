@@ -4045,3 +4045,66 @@ fn test_erlang_interop_protocol_selectors_not_optimized() {
         "printString should use runtime dispatch or proxy. Got: {output}"
     );
 }
+
+// --- BT-894: Cross-file value-object subclassing ---
+
+#[test]
+fn test_cross_file_value_object_subclass_without_index() {
+    // Without the superclass index, a class whose parent is not in the hierarchy
+    // defaults to actor codegen (the old broken behavior).
+    let src = "MyParent subclass: MyChild\n  getValue => 42";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(&module, CodegenOptions::new("my_child"));
+    assert!(result.is_ok());
+    let code = result.unwrap();
+    // Without index, defaults to actor (gen_server)
+    assert!(
+        code.contains("'gen_server'"),
+        "Without superclass index, unknown parent should default to actor. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_cross_file_value_object_subclass_with_index() {
+    // BT-894: With the superclass index providing the chain MyParent → Object,
+    // the compiler should generate value-type code (no gen_server).
+    let src = "MyParent subclass: MyChild\n  getValue => 42";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let mut superclass_index = std::collections::HashMap::new();
+    superclass_index.insert("MyParent".to_string(), "Object".to_string());
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("my_child").with_class_superclass_index(superclass_index),
+    );
+    assert!(result.is_ok());
+    let code = result.unwrap();
+    // With index, should be value-type (no gen_server)
+    assert!(
+        !code.contains("'gen_server'"),
+        "With superclass index showing MyParent → Object, should generate value-type code. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_cross_file_actor_subclass_with_index() {
+    // BT-894: With the superclass index providing the chain MyActor → Actor,
+    // the compiler should still generate actor code (gen_server).
+    let src = "MyActor subclass: MySpecialActor\n  getValue => 42";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let mut superclass_index = std::collections::HashMap::new();
+    superclass_index.insert("MyActor".to_string(), "Actor".to_string());
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("my_special_actor").with_class_superclass_index(superclass_index),
+    );
+    assert!(result.is_ok());
+    let code = result.unwrap();
+    // With index showing MyActor → Actor, should still be actor
+    assert!(
+        code.contains("'gen_server'"),
+        "With superclass index showing MyActor → Actor, should generate actor code. Got:\n{code}"
+    );
+}

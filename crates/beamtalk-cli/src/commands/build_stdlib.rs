@@ -317,6 +317,7 @@ fn compile_stdlib_file(
         options,
         bindings,
         &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
     )
 }
 

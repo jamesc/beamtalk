@@ -624,6 +624,7 @@ pub fn write_core_erlang_with_bindings(
     source_text: Option<&str>,
     workspace_mode: bool,
     class_module_index: &std::collections::HashMap<String, String>,
+    class_superclass_index: &std::collections::HashMap<String, String>,
     source_path: Option<&str>,
 ) -> Result<()> {
     if !is_valid_module_name(module_name) {
@@ -640,6 +641,7 @@ pub fn write_core_erlang_with_bindings(
             .with_source_opt(source_text)
             .with_workspace_mode(workspace_mode)
             .with_class_module_index(class_module_index.clone())
+            .with_class_superclass_index(class_superclass_index.clone())
             .with_source_path_opt(source_path),
     )
     .into_diagnostic()
@@ -683,6 +685,7 @@ pub fn compile_source(
         options,
         &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
         &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
     )
 }
 
@@ -704,6 +707,7 @@ pub fn compile_source_with_bindings(
     options: &beamtalk_core::CompilerOptions,
     bindings: &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable,
     class_module_index: &std::collections::HashMap<String, String>,
+    class_superclass_index: &std::collections::HashMap<String, String>,
 ) -> Result<()> {
     use crate::diagnostic::CompileDiagnostic;
 
@@ -804,6 +808,7 @@ pub fn compile_source_with_bindings(
         Some(&source),
         options.workspace_mode,
         class_module_index,
+        class_superclass_index,
         embed_source_path,
     )
     .wrap_err_with(|| format!("Failed to generate Core Erlang for '{source_path}'"))?;
