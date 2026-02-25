@@ -213,8 +213,7 @@ is_project_beam_file(File) ->
     case filename:extension(File) of
         ".beam" ->
             ModName = filename:rootname(filename:basename(File)),
-            lists:prefix("bt@", ModName) andalso
-                not lists:prefix("bt@stdlib@", ModName) andalso
+            is_user_class_module(ModName) andalso
                 is_valid_module_name(ModName);
         _ ->
             false
@@ -235,9 +234,7 @@ beam_file_to_project_module(File) ->
     case filename:extension(File) of
         ".beam" ->
             ModName = filename:rootname(filename:basename(File)),
-            IsProject =
-                lists:prefix("bt@", ModName) andalso
-                    not lists:prefix("bt@stdlib@", ModName),
+            IsProject = is_user_class_module(ModName),
             case IsProject of
                 true ->
                     case is_valid_module_name(ModName) of
@@ -256,6 +253,12 @@ beam_file_to_project_module(File) ->
         _ ->
             false
     end.
+
+%% @private Returns true if ModName is a user-defined class module.
+%% User class modules have the bt@* prefix but exclude bt@stdlib@* stdlib modules.
+-spec is_user_class_module(string()) -> boolean().
+is_user_class_module(ModName) ->
+    lists:prefix("bt@", ModName) andalso not lists:prefix("bt@stdlib@", ModName).
 
 %% @doc Validate that a module name contains only characters valid in Beamtalk
 %% module names: alphanumeric (a-z, A-Z, 0-9), @, and _.
