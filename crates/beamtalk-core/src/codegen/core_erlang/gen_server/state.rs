@@ -42,7 +42,11 @@ impl CoreErlangGenerator {
                 };
                 fields.push(docvec![
                     line(),
-                    format!(", '{}' => ", state.name.name),
+                    docvec![
+                        ", '",
+                        Document::String(state.name.name.to_string()),
+                        "' => "
+                    ],
                     value_code,
                 ]);
             }
@@ -72,7 +76,11 @@ impl CoreErlangGenerator {
                 if let Expression::Identifier(id) = target.as_ref() {
                     if matches!(value.as_ref(), Expression::Literal(..)) {
                         let value_code = self.expression_doc(value)?;
-                        fields.push(docvec![line(), format!(", '{}' => ", id.name), value_code,]);
+                        fields.push(docvec![
+                            line(),
+                            docvec![", '", Document::String(id.name.to_string()), "' => "],
+                            value_code,
+                        ]);
                     }
                 }
             }
@@ -91,7 +99,11 @@ impl CoreErlangGenerator {
             // Emit inherited fields first
             for (field_name, default_value) in inherited_fields {
                 let value_code = self.expression_doc(&default_value)?;
-                fields.push(docvec![line(), format!(", '{field_name}' => "), value_code,]);
+                fields.push(docvec![
+                    line(),
+                    docvec![", '", Document::String(field_name.clone()), "' => "],
+                    value_code,
+                ]);
             }
 
             // Then emit this class's own fields (can override parent defaults)
@@ -103,7 +115,11 @@ impl CoreErlangGenerator {
                 };
                 fields.push(docvec![
                     line(),
-                    format!(", '{}' => ", state.name.name),
+                    docvec![
+                        ", '",
+                        Document::String(state.name.name.to_string()),
+                        "' => "
+                    ],
                     value_code,
                 ]);
             }
@@ -118,7 +134,11 @@ impl CoreErlangGenerator {
                     };
                     fields.push(docvec![
                         line(),
-                        format!(", '{}' => ", state.name.name),
+                        docvec![
+                            ", '",
+                            Document::String(state.name.name.to_string()),
+                            "' => "
+                        ],
                         value_code,
                     ]);
                 }

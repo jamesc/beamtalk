@@ -24,7 +24,6 @@ use crate::ast::{
     Pattern, StringSegment,
 };
 use crate::docvec;
-use std::fmt::Write; // For write!() on local String buffers (not self.output)
 
 impl CoreErlangGenerator {
     /// Generates code for a literal value.
@@ -39,14 +38,14 @@ impl CoreErlangGenerator {
     #[allow(clippy::self_only_used_in_recursion)] // &self needed for method resolution
     pub(super) fn generate_literal(&self, lit: &Literal) -> Result<Document<'static>> {
         match lit {
-            Literal::Integer(n) => Ok(Document::String(format!("{n}"))),
-            Literal::Float(f) => Ok(Document::String(format!("{f}"))),
+            Literal::Integer(n) => Ok(Document::String(n.to_string())),
+            Literal::Float(f) => Ok(Document::String(f.to_string())),
             Literal::String(s) => {
                 let result = Self::binary_string_literal(s);
                 Ok(docvec![result])
             }
-            Literal::Symbol(s) => Ok(Document::String(format!("'{s}'"))),
-            Literal::Character(c) => Ok(Document::String(format!("{}", *c as u32))),
+            Literal::Symbol(s) => Ok(docvec!["'", Document::String(s.to_string()), "'"]),
+            Literal::Character(c) => Ok(Document::String((*c as u32).to_string())),
             Literal::List(elements) => {
                 let mut parts: Vec<Document<'static>> = vec![Document::Str("[")];
                 for (i, elem) in elements.iter().enumerate() {
@@ -85,13 +84,13 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         // Collect let-bindings for expression segments and binary segments
         let mut let_bindings: Vec<Document<'static>> = Vec::new();
-        let mut binary_parts: Vec<String> = Vec::new();
+        let mut binary_parts: Vec<Document<'static>> = Vec::new();
 
         for segment in segments {
             match segment {
                 StringSegment::Literal(s) => {
                     if !s.is_empty() {
-                        binary_parts.push(Self::binary_byte_segments(s));
+                        binary_parts.push(Document::String(Self::binary_byte_segments(s)));
                     }
                 }
                 StringSegment::Interpolation(expr) => {
@@ -101,12 +100,22 @@ impl CoreErlangGenerator {
                     let str_var = self.fresh_temp_var("interpStr");
 
                     // Evaluate the expression
-                    let_bindings.push(docvec![format!("let {interp_var} = "), expr_doc, " in ",]);
+                    let_bindings.push(docvec![
+                        "let ",
+                        Document::String(interp_var.clone()),
+                        " = ",
+                        expr_doc,
+                        " in ",
+                    ]);
 
                     // Dispatch printString to convert to binary string
-                    let_bindings.push(docvec![format!(
-                        "let {raw_str_var} = call 'beamtalk_message_dispatch':'send'({interp_var}, 'printString', []) in "
-                    )]);
+                    let_bindings.push(docvec![
+                        "let ",
+                        Document::String(raw_str_var.clone()),
+                        " = call 'beamtalk_message_dispatch':'send'(",
+                        Document::String(interp_var.clone()),
+                        ", 'printString', []) in ",
+                    ]);
 
                     // Auto-await if the result is a tagged future (actor dispatch returns {beamtalk_future, Pid})
                     let_bindings.push(docvec![
@@ -122,16 +131,25 @@ impl CoreErlangGenerator {
                     ]);
 
                     // Add as binary segment: #<Var>('all',8,'binary',['unsigned'|['big']])
-                    binary_parts.push(format!(
-                        "#<{str_var}>('all',8,'binary',['unsigned'|['big']])"
-                    ));
+                    binary_parts.push(docvec![
+                        "#<",
+                        Document::String(str_var),
+                        ">('all',8,'binary',['unsigned'|['big']])",
+                    ]);
                 }
             }
         }
 
         // Build the binary literal: #{seg1,seg2,...}#
-        let binary_content = binary_parts.join(",");
-        let binary_doc = docvec![format!("#{{{binary_content}}}#")];
+        let mut binary_doc_parts: Vec<Document<'static>> = vec![Document::Str("#{")];
+        for (i, part) in binary_parts.into_iter().enumerate() {
+            if i > 0 {
+                binary_doc_parts.push(Document::Str(","));
+            }
+            binary_doc_parts.push(part);
+        }
+        binary_doc_parts.push(Document::Str("}#"));
+        let binary_doc = Document::Vec(binary_doc_parts);
 
         // Wrap with let-bindings
         let mut doc = Document::Vec(Vec::new());
@@ -217,10 +235,13 @@ impl CoreErlangGenerator {
                             }
                         }
                     };
-                    Ok(Document::String(format!(
-                        "call 'maps':'get'('{}', {state_var})",
-                        id.name
-                    )))
+                    Ok(docvec![
+                        "call 'maps':'get'('",
+                        Document::String(id.name.to_string()),
+                        "', ",
+                        Document::String(state_var),
+                        ")",
+                    ])
                 }
             }
         }
@@ -321,10 +342,13 @@ impl CoreErlangGenerator {
             if let Expression::Identifier(recv_id) = receiver {
                 if recv_id.name == "self" && self.class_var_names.contains(field.name.as_str()) {
                     let cv = self.current_class_var();
-                    return Ok(Document::String(format!(
-                        "call 'maps':'get'('{}', {cv})",
-                        field.name
-                    )));
+                    return Ok(docvec![
+                        "call 'maps':'get'('",
+                        Document::String(field.name.to_string()),
+                        "', ",
+                        Document::String(cv),
+                        ")",
+                    ]);
                 }
             }
             return Err(CodeGenError::UnsupportedFeature {
@@ -344,10 +368,13 @@ impl CoreErlangGenerator {
                     super::CodeGenContext::Actor => self.current_state_var(),
                     super::CodeGenContext::Repl => "State".to_string(),
                 };
-                return Ok(Document::String(format!(
-                    "call 'maps':'get'('{}', {state_var})",
-                    field.name
-                )));
+                return Ok(docvec![
+                    "call 'maps':'get'('",
+                    Document::String(field.name.to_string()),
+                    "', ",
+                    Document::String(state_var),
+                    ")",
+                ]);
             }
         }
 
@@ -388,11 +415,19 @@ impl CoreErlangGenerator {
                 let val_doc = self.expression_doc(value)?;
                 let new_cv = self.next_class_var();
                 let doc = docvec![
-                    format!("let {val_var} = "),
+                    "let ",
+                    Document::String(val_var.clone()),
+                    " = ",
                     val_doc,
-                    format!(
-                        " in let {new_cv} = call 'maps':'put'('{field_name}', {val_var}, {current_cv}) in "
-                    )
+                    " in let ",
+                    Document::String(new_cv.clone()),
+                    " = call 'maps':'put'('",
+                    Document::String(field_name.to_string()),
+                    "', ",
+                    Document::String(val_var.clone()),
+                    ", ",
+                    Document::String(current_cv),
+                    ") in ",
                 ];
                 // Store result var name for callers that need to reference it
                 self.last_open_scope_result = Some(val_var);
@@ -418,12 +453,20 @@ impl CoreErlangGenerator {
             let val_doc = self.expression_doc(value)?;
             let new_self = self.next_self_var();
             let doc = docvec![
-                format!("let {val_var} = "),
+                "let ",
+                Document::String(val_var.clone()),
+                " = ",
                 val_doc,
-                format!(
-                    " in let {new_self} = call 'maps':'put'('{field_name}', {val_var}, {current_self}) in "
-                ),
-                val_var
+                " in let ",
+                Document::String(new_self),
+                " = call 'maps':'put'('",
+                Document::String(field_name.to_string()),
+                "', ",
+                Document::String(val_var.clone()),
+                ", ",
+                Document::String(current_self),
+                ") in ",
+                Document::String(val_var),
             ];
             return Ok(doc);
         }
@@ -441,12 +484,20 @@ impl CoreErlangGenerator {
         let new_state = self.next_state_var();
 
         let doc = docvec![
-            format!("let {val_var} = "),
+            "let ",
+            Document::String(val_var.clone()),
+            " = ",
             val_doc,
-            format!(
-                " in let {new_state} = call 'maps':'put'('{field_name}', {val_var}, {current_state}) in "
-            ),
-            val_var
+            " in let ",
+            Document::String(new_state),
+            " = call 'maps':'put'('",
+            Document::String(field_name.to_string()),
+            "', ",
+            Document::String(val_var.clone()),
+            ", ",
+            Document::String(current_state),
+            ") in ",
+            Document::String(val_var),
         ];
         Ok(doc)
     }
@@ -495,15 +546,15 @@ impl CoreErlangGenerator {
         // Pure block: plain fun (Tier 1 optimization)
         self.push_scope();
 
-        let mut params = String::new();
+        let mut param_parts: Vec<Document<'static>> = Vec::new();
         for (i, param) in block.parameters.iter().enumerate() {
             if i > 0 {
-                params.push_str(", ");
+                param_parts.push(Document::Str(", "));
             }
             let var_name = self.fresh_var(&param.name);
-            params.push_str(&var_name);
+            param_parts.push(Document::String(var_name));
         }
-        let header = docvec!["fun (", params, ") -> "];
+        let header = docvec!["fun (", Document::Vec(param_parts), ") -> "];
 
         // Generate block body as Document
         let body_doc = self.generate_block_body(block)?;
@@ -794,16 +845,15 @@ impl CoreErlangGenerator {
             ..
         } = receiver
         {
-            let mut result = String::new();
-            let receiver_var = {
-                // Bind the underlying receiver once
-                let receiver_var = self.fresh_temp_var("Receiver");
-                let recv_str = self.capture_expression(underlying_receiver)?;
-                write!(result, "let {receiver_var} = ").unwrap();
-                result.push_str(&recv_str);
-                result.push_str(" in ");
-                receiver_var
-            };
+            let receiver_var = self.fresh_temp_var("Receiver");
+            let recv_doc = self.expression_doc(underlying_receiver)?;
+            let mut docs: Vec<Document<'static>> = vec![docvec![
+                "let ",
+                Document::String(receiver_var.clone()),
+                " = ",
+                recv_doc,
+                " in "
+            ]];
 
             // Total number of messages in the cascade: first + remaining
             let total_messages = messages.len() + 1;
@@ -813,7 +863,7 @@ impl CoreErlangGenerator {
 
                 if !is_last {
                     // For all but the last message, discard the result
-                    result.push_str("let _ = ");
+                    docs.push(Document::Str("let _ = "));
                 }
 
                 // Determine which selector/arguments to use:
@@ -834,38 +884,49 @@ impl CoreErlangGenerator {
                         location: "cascade message with binary selector".to_string(),
                     });
                 }
-                write!(
-                    result,
-                    "call 'beamtalk_message_dispatch':'send'({receiver_var}, '{selector_atom}', ["
-                )
-                .unwrap();
+                docs.push(docvec![
+                    "call 'beamtalk_message_dispatch':'send'(",
+                    Document::String(receiver_var.clone()),
+                    ", '",
+                    Document::String(selector_atom),
+                    "', [",
+                ]);
 
                 // Arguments
+                // TODO(BT-884): If any argument is a field assignment, its state binding
+                // (let StateN = maps:put(...)) is nested inside the argument expression and
+                // goes out of scope after `call send(...)`. The generator's state_version
+                // counter still advances, so subsequent cascade messages may reference a
+                // StateN that is unbound. Fix: use generate_field_assignment_open for
+                // field-assignment args and hoist the binding before the send call.
                 for (j, arg) in arguments.iter().enumerate() {
                     if j > 0 {
-                        result.push_str(", ");
+                        docs.push(Document::Str(", "));
                     }
-                    result.push_str(&self.capture_expression(arg)?);
+                    docs.push(self.expression_doc(arg)?);
                 }
 
-                result.push_str("])");
+                docs.push(Document::Str("])"));
 
                 if !is_last {
-                    result.push_str(" in ");
+                    docs.push(Document::Str(" in "));
                 }
             }
 
-            Ok(Document::String(result))
+            Ok(Document::Vec(docs))
         } else {
             // Fallback: if the receiver is not a MessageSend (which should not
             // happen for well-formed cascades), preserve the previous behavior:
             // evaluate the receiver once and send all cascade messages to it.
-            let mut result = String::new();
             let receiver_var = self.fresh_temp_var("Receiver");
-            let recv_str = self.capture_expression(receiver)?;
-            write!(result, "let {receiver_var} = ").unwrap();
-            result.push_str(&recv_str);
-            result.push_str(" in ");
+            let recv_doc = self.expression_doc(receiver)?;
+            let mut docs: Vec<Document<'static>> = vec![docvec![
+                "let ",
+                Document::String(receiver_var.clone()),
+                " = ",
+                recv_doc,
+                " in "
+            ]];
 
             // Generate each message send, discarding intermediate results
             for (i, message) in messages.iter().enumerate() {
@@ -873,7 +934,7 @@ impl CoreErlangGenerator {
 
                 if !is_last {
                     // For all but the last message, discard the result
-                    result.push_str("let _ = ");
+                    docs.push(Document::Str("let _ = "));
                 }
 
                 // Unified message dispatch to the bound receiver
@@ -884,28 +945,32 @@ impl CoreErlangGenerator {
                         location: "cascade message with binary selector".to_string(),
                     });
                 }
-                write!(
-                    result,
-                    "call 'beamtalk_message_dispatch':'send'({receiver_var}, '{selector_atom}', ["
-                )
-                .unwrap();
+                docs.push(docvec![
+                    "call 'beamtalk_message_dispatch':'send'(",
+                    Document::String(receiver_var.clone()),
+                    ", '",
+                    Document::String(selector_atom),
+                    "', [",
+                ]);
 
                 // Arguments
+                // TODO(BT-884): Same state-threading scope issue as in the MessageSend
+                // branch above — field-assignment args must be hoisted to outer scope.
                 for (j, arg) in message.arguments.iter().enumerate() {
                     if j > 0 {
-                        result.push_str(", ");
+                        docs.push(Document::Str(", "));
                     }
-                    result.push_str(&self.capture_expression(arg)?);
+                    docs.push(self.expression_doc(arg)?);
                 }
 
-                result.push_str("])");
+                docs.push(Document::Str("])"));
 
                 if !is_last {
-                    result.push_str(" in ");
+                    docs.push(Document::Str(" in "));
                 }
             }
 
-            Ok(Document::String(result))
+            Ok(Document::Vec(docs))
         }
     }
 
@@ -977,7 +1042,13 @@ impl CoreErlangGenerator {
                         let val_doc = self.expression_doc(value)?;
                         // Now update the mapping so subsequent expressions see this binding.
                         self.bind_var(var_name, &core_var);
-                        docs.push(docvec![format!("let {core_var} = "), val_doc, " in "]);
+                        docs.push(docvec![
+                            "let ",
+                            Document::String(core_var.clone()),
+                            " = ",
+                            val_doc,
+                            " in "
+                        ]);
                     }
                 }
             } else if let Some(threaded_vars) = Self::get_control_flow_threaded_vars(expr) {
@@ -991,7 +1062,13 @@ impl CoreErlangGenerator {
                         .lookup_var(var)
                         .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
                     let expr_doc = self.expression_doc(expr)?;
-                    docs.push(docvec![format!("let {core_var} = "), expr_doc, " in "]);
+                    docs.push(docvec![
+                        "let ",
+                        Document::String(core_var.clone()),
+                        " = ",
+                        expr_doc,
+                        " in "
+                    ]);
                 } else {
                     // Multi-var case not supported yet
                     return Err(CodeGenError::UnsupportedFeature {
@@ -1029,9 +1106,9 @@ impl CoreErlangGenerator {
         let value_doc = self.expression_doc(value)?;
 
         let mut parts: Vec<Document<'static>> = Vec::new();
-        parts.push(Document::String(format!("let {match_var} = ")));
+        parts.push(docvec!["let ", Document::String(match_var.clone()), " = "]);
         parts.push(value_doc);
-        parts.push(Document::String(format!(" in case {match_var} of ")));
+        parts.push(docvec![" in case ", Document::String(match_var), " of "]);
 
         for (i, arm) in arms.iter().enumerate() {
             if i > 0 {
@@ -1165,7 +1242,9 @@ impl CoreErlangGenerator {
                     }
                 };
                 Ok(docvec![
-                    format!("call 'erlang':'{erlang_op}'("),
+                    "call 'erlang':'",
+                    Document::String(erlang_op.to_string()),
+                    "'(",
                     left,
                     ", ",
                     right,
