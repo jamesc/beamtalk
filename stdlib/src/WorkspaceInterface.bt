@@ -49,3 +49,60 @@ Actor subclass: WorkspaceInterface
   /// Workspace actorsOf: Counter
   /// ```
   actorsOf: className: Object -> List => @primitive "actorsOf:"
+
+  /// Return a list of loaded user classes with source file info.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace classes
+  /// ```
+  classes -> List => @primitive "classes"
+
+  /// Return classes that are TestCase subclasses.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace testClasses
+  /// ```
+  testClasses -> List => @primitive "testClasses"
+
+  /// Return an immutable Dictionary snapshot of the project namespace.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace globals
+  /// ```
+  globals -> Dictionary => @primitive "globals"
+
+  /// Compile and load a .bt file, registering the class.
+  /// Returns a structured error if path is not a String.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace load: "examples/counter.bt"
+  /// ```
+  load: path: String -> Object => @primitive "load:"
+
+  /// Reset session variable bindings.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace clear
+  /// ```
+  clear -> Nil => @primitive "clear"
+
+  /// Run all loaded test classes and return a TestResult.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace test
+  /// ```
+  test -> Object => @primitive "test"
+
+  /// Run a specific test class and return a TestResult.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace test: CounterTest
+  /// ```
+  test: testClass: Object -> Object => @primitive "test:"

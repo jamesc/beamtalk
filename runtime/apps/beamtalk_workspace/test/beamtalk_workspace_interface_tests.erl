@@ -382,3 +382,156 @@ non_named_terminate_test() ->
     gen_server:stop(Pid),
     %% Should not crash
     ok.
+
+%%% ===========================================================================
+%%% has_method Tests — new methods
+%%% ===========================================================================
+
+has_method_returns_true_for_new_selectors_test() ->
+    ?assert(beamtalk_workspace_interface:has_method(classes)),
+    ?assert(beamtalk_workspace_interface:has_method(testClasses)),
+    ?assert(beamtalk_workspace_interface:has_method(globals)),
+    ?assert(beamtalk_workspace_interface:has_method('load:')),
+    ?assert(beamtalk_workspace_interface:has_method(clear)),
+    ?assert(beamtalk_workspace_interface:has_method(test)),
+    ?assert(beamtalk_workspace_interface:has_method('test:')).
+
+%%% ===========================================================================
+%%% class_info Tests — new methods
+%%% ===========================================================================
+
+class_info_includes_new_methods_test() ->
+    Info = beamtalk_workspace_interface:class_info(),
+    Methods = maps:get(instance_methods, Info),
+    ?assert(maps:is_key(classes, Methods)),
+    ?assert(maps:is_key(testClasses, Methods)),
+    ?assert(maps:is_key(globals, Methods)),
+    ?assert(maps:is_key('load:', Methods)),
+    ?assert(maps:is_key(clear, Methods)),
+    ?assert(maps:is_key(test, Methods)),
+    ?assert(maps:is_key('test:', Methods)).
+
+%%% ===========================================================================
+%%% classes Tests
+%%% ===========================================================================
+
+classes_returns_list_test() ->
+    {ok, Pid} = beamtalk_workspace_interface:start_link(),
+    Result = gen_server:call(Pid, {classes, []}),
+    ?assert(is_list(Result)),
+    gen_server:stop(Pid).
+
+%%% ===========================================================================
+%%% testClasses Tests
+%%% ===========================================================================
+
+test_classes_returns_list_test() ->
+    {ok, Pid} = beamtalk_workspace_interface:start_link(),
+    Result = gen_server:call(Pid, {testClasses, []}),
+    ?assert(is_list(Result)),
+    gen_server:stop(Pid).
+
+%%% ===========================================================================
+%%% globals Tests
+%%% ===========================================================================
+
+globals_returns_map_test() ->
+    {ok, Pid} = beamtalk_workspace_interface:start_link(),
+    Result = gen_server:call(Pid, {globals, []}),
+    ?assert(is_map(Result)),
+    gen_server:stop(Pid).
+
+%%% ===========================================================================
+%%% load: Tests
+%%% ===========================================================================
+
+load_returns_type_error_for_integer_test() ->
+    {ok, Pid} = beamtalk_workspace_interface:start_link(),
+    {error, Error} = gen_server:call(Pid, {'load:', [42]}),
+    ?assertMatch(#beamtalk_error{kind = type_error, class = 'WorkspaceInterface'}, Error),
+    %% Verify error message mentions Integer
+    Msg = Error#beamtalk_error.message,
+    ?assert(binary:match(Msg, <<"Integer">>) =/= nomatch),
+    gen_server:stop(Pid).
+
+load_returns_file_not_found_for_missing_file_test() ->
+    {ok, Pid} = beamtalk_workspace_interface:start_link(),
+    {error, Error} = gen_server:call(Pid, {'load:', [<<"/nonexistent/path/file.bt">>]}),
+    ?assertMatch(#beamtalk_error{kind = file_not_found, class = 'WorkspaceInterface'}, Error),
+    gen_server:stop(Pid).
+
+%%% ===========================================================================
+%%% clear Tests
+%%% ===========================================================================
+
+clear_returns_nil_without_session_test() ->
+    {ok, Pid} = beamtalk_workspace_interface:start_link(),
+    %% Without bt_session_pid in process dict, clear is a no-op returning nil
+    Result = gen_server:call(Pid, {clear, []}),
+    ?assertEqual(nil, Result),
+    gen_server:stop(Pid).
+
+%%% ===========================================================================
+%%% test Tests
+%%% ===========================================================================
+
+test_returns_test_result_test() ->
+    {ok, Pid} = beamtalk_workspace_interface:start_link(),
+    Result = gen_server:call(Pid, {test, []}),
+    %% TestResult is a tagged map
+    ?assert(is_map(Result)),
+    ?assert(maps:is_key('$beamtalk_class', Result)),
+    ?assertEqual('TestResult', maps:get('$beamtalk_class', Result)),
+    gen_server:stop(Pid).
+
+%%% ===========================================================================
+%%% test: Tests
+%%% ===========================================================================
+
+test_class_returns_error_for_unknown_class_test() ->
+    {ok, Pid} = beamtalk_workspace_interface:start_link(),
+    {error, Error} = gen_server:call(Pid, {'test:', ['NonExistentTestClass12345']}),
+    ?assertMatch(#beamtalk_error{kind = class_not_found, class = 'WorkspaceInterface'}, Error),
+    gen_server:stop(Pid).
+
+test_class_returns_type_error_for_non_class_test() ->
+    {ok, Pid} = beamtalk_workspace_interface:start_link(),
+    {error, Error} = gen_server:call(Pid, {'test:', [42]}),
+    ?assertMatch(#beamtalk_error{kind = type_error, class = 'WorkspaceInterface'}, Error),
+    gen_server:stop(Pid).
+
+%%% ===========================================================================
+%%% Async (handle_cast) Tests — new methods
+%%% ===========================================================================
+
+async_classes_resolves_future_test() ->
+    {ok, Pid} = beamtalk_workspace_interface:start_link(),
+    Future = beamtalk_future:new(),
+    gen_server:cast(Pid, {classes, [], beamtalk_future:pid(Future)}),
+    Result = beamtalk_future:await(Future, 1000),
+    ?assert(is_list(Result)),
+    gen_server:stop(Pid).
+
+async_globals_resolves_future_test() ->
+    {ok, Pid} = beamtalk_workspace_interface:start_link(),
+    Future = beamtalk_future:new(),
+    gen_server:cast(Pid, {globals, [], beamtalk_future:pid(Future)}),
+    Result = beamtalk_future:await(Future, 1000),
+    ?assert(is_map(Result)),
+    gen_server:stop(Pid).
+
+async_load_rejects_future_for_type_error_test() ->
+    {ok, Pid} = beamtalk_workspace_interface:start_link(),
+    Future = beamtalk_future:new(),
+    gen_server:cast(Pid, {'load:', [42], beamtalk_future:pid(Future)}),
+    ?assertException(throw, {future_rejected, _}, beamtalk_future:await(Future, 1000)),
+    gen_server:stop(Pid).
+
+async_test_resolves_future_test() ->
+    {ok, Pid} = beamtalk_workspace_interface:start_link(),
+    Future = beamtalk_future:new(),
+    gen_server:cast(Pid, {test, [], beamtalk_future:pid(Future)}),
+    Result = beamtalk_future:await(Future, 5000),
+    ?assert(is_map(Result)),
+    ?assertEqual('TestResult', maps:get('$beamtalk_class', Result)),
+    gen_server:stop(Pid).

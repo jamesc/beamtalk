@@ -144,6 +144,8 @@ handle_call({eval, Expression}, From, {SessionId, State, undefined}) ->
     %% Spawn eval in a monitored worker process so it can be interrupted (BT-666)
     Self = self(),
     {WorkerPid, MonRef} = spawn_monitor(fun() ->
+        %% BT-846: Store session PID so WorkspaceInterface can find it for `clear`.
+        put(bt_session_pid, Self),
         Result = beamtalk_repl_eval:do_eval(Expression, State),
         Self ! {eval_result, self(), Result}
     end),
@@ -245,6 +247,8 @@ handle_call(_Request, _From, State) ->
 handle_cast({eval_async, Expression, Subscriber}, {SessionId, State, undefined}) ->
     Self = self(),
     {WorkerPid, MonRef} = spawn_monitor(fun() ->
+        %% BT-846: Store session PID so WorkspaceInterface can find it for `clear`.
+        put(bt_session_pid, Self),
         Result = beamtalk_repl_eval:do_eval(Expression, State, Subscriber),
         Self ! {eval_result, self(), Result}
     end),

@@ -84,6 +84,13 @@ start_link(ServerName) ->
 has_method(actors) -> true;
 has_method('actorAt:') -> true;
 has_method('actorsOf:') -> true;
+has_method(classes) -> true;
+has_method(testClasses) -> true;
+has_method(globals) -> true;
+has_method('load:') -> true;
+has_method(clear) -> true;
+has_method(test) -> true;
+has_method('test:') -> true;
 has_method(_) -> false.
 
 %% @doc Return class registration metadata for Workspace.
@@ -96,7 +103,14 @@ class_info() ->
         instance_methods => #{
             actors => #{arity => 0},
             'actorAt:' => #{arity => 1},
-            'actorsOf:' => #{arity => 1}
+            'actorsOf:' => #{arity => 1},
+            classes => #{arity => 0},
+            testClasses => #{arity => 0},
+            globals => #{arity => 0},
+            'load:' => #{arity => 1},
+            clear => #{arity => 0},
+            test => #{arity => 0},
+            'test:' => #{arity => 1}
         },
         class_methods => #{},
         fields => []
@@ -129,6 +143,27 @@ handle_call({'actorAt:', [PidStr]}, _From, State) ->
 handle_call({'actorsOf:', [ClassName]}, _From, State) ->
     Result = handle_actors_of(ClassName),
     {reply, Result, State};
+handle_call({classes, []}, _From, State) ->
+    Result = handle_classes(),
+    {reply, Result, State};
+handle_call({testClasses, []}, _From, State) ->
+    Result = handle_test_classes(),
+    {reply, Result, State};
+handle_call({globals, []}, _From, State) ->
+    Result = handle_globals(),
+    {reply, Result, State};
+handle_call({'load:', [Path]}, _From, State) ->
+    Result = handle_load(Path),
+    {reply, Result, State};
+handle_call({clear, []}, {FromPid, _}, State) ->
+    Result = handle_clear(FromPid),
+    {reply, Result, State};
+handle_call({test, []}, _From, State) ->
+    Result = handle_test(),
+    {reply, Result, State};
+handle_call({'test:', [TestClass]}, _From, State) ->
+    Result = handle_test_class(TestClass),
+    {reply, Result, State};
 handle_call({UnknownSelector, _Args}, _From, State) ->
     Error0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
     Error1 = beamtalk_error:with_selector(Error0, UnknownSelector),
@@ -159,6 +194,42 @@ handle_cast({'actorAt:', [PidStr], FuturePid}, State) when is_pid(FuturePid) ->
 handle_cast({'actorsOf:', [ClassName], FuturePid}, State) when is_pid(FuturePid) ->
     Result = handle_actors_of(ClassName),
     beamtalk_future:resolve(FuturePid, Result),
+    {noreply, State};
+handle_cast({classes, [], FuturePid}, State) when is_pid(FuturePid) ->
+    Result = handle_classes(),
+    beamtalk_future:resolve(FuturePid, Result),
+    {noreply, State};
+handle_cast({testClasses, [], FuturePid}, State) when is_pid(FuturePid) ->
+    Result = handle_test_classes(),
+    beamtalk_future:resolve(FuturePid, Result),
+    {noreply, State};
+handle_cast({globals, [], FuturePid}, State) when is_pid(FuturePid) ->
+    Result = handle_globals(),
+    beamtalk_future:resolve(FuturePid, Result),
+    {noreply, State};
+handle_cast({'load:', [Path], FuturePid}, State) when is_pid(FuturePid) ->
+    case handle_load(Path) of
+        {error, Err} ->
+            beamtalk_future:reject(FuturePid, Err);
+        Result ->
+            beamtalk_future:resolve(FuturePid, Result)
+    end,
+    {noreply, State};
+handle_cast({clear, [], FuturePid}, State) when is_pid(FuturePid) ->
+    %% For async clear, no session context available — resolve with nil
+    beamtalk_future:resolve(FuturePid, nil),
+    {noreply, State};
+handle_cast({test, [], FuturePid}, State) when is_pid(FuturePid) ->
+    Result = handle_test(),
+    beamtalk_future:resolve(FuturePid, Result),
+    {noreply, State};
+handle_cast({'test:', [TestClass], FuturePid}, State) when is_pid(FuturePid) ->
+    case handle_test_class(TestClass) of
+        {error, Err} ->
+            beamtalk_future:reject(FuturePid, Err);
+        Result ->
+            beamtalk_future:resolve(FuturePid, Result)
+    end,
     {noreply, State};
 handle_cast({UnknownSelector, _Args, FuturePid}, State) when
     is_pid(FuturePid), is_atom(UnknownSelector)
@@ -271,6 +342,244 @@ handle_actors_of(ClassName) when is_atom(ClassName) ->
     end;
 handle_actors_of(_) ->
     [].
+
+%% @doc Return all loaded user classes (those with a source file recorded).
+%% Excludes stdlib and ClassBuilder-created classes (they have no source file).
+-spec handle_classes() -> [tuple()].
+handle_classes() ->
+    try
+        ClassPids = beamtalk_class_registry:all_classes(),
+        lists:filtermap(
+            fun(Pid) ->
+                try
+                    ClassName = beamtalk_object_class:class_name(Pid),
+                    ModuleName = beamtalk_object_class:module_name(Pid),
+                    case source_file_from_module(ModuleName) of
+                        nil ->
+                            false;
+                        _SourceFile ->
+                            ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
+                            {true, {beamtalk_object, ClassTag, ModuleName, Pid}}
+                    end
+                catch
+                    exit:{noproc, _} -> false;
+                    exit:{timeout, _} -> false
+                end
+            end,
+            ClassPids
+        )
+    catch
+        exit:{noproc, _} ->
+            []
+    end.
+
+%% @doc Return TestCase subclasses as class object tuples.
+-spec handle_test_classes() -> [tuple()].
+handle_test_classes() ->
+    try
+        ClassNames = beamtalk_test_case:find_test_classes(),
+        lists:filtermap(fun class_name_to_object/1, ClassNames)
+    catch
+        _:_ -> []
+    end.
+
+%% @doc Return an immutable snapshot of workspace-level globals.
+%% Includes workspace singletons (Transcript, Beamtalk, Workspace) and
+%% user-loaded classes (those with a beamtalk_source module attribute).
+-spec handle_globals() -> map().
+handle_globals() ->
+    %% Start with workspace singletons
+    Singletons = beamtalk_workspace_config:singletons(),
+    Base = lists:foldl(
+        fun(#{binding_name := BindingName, class_name := ClassName, module := Module}, Acc) ->
+            case whereis(BindingName) of
+                undefined ->
+                    Acc;
+                Pid ->
+                    Key = atom_to_binary(BindingName, utf8),
+                    Acc#{Key => {beamtalk_object, ClassName, Module, Pid}}
+            end
+        end,
+        #{},
+        Singletons
+    ),
+    %% Add user-loaded classes
+    try
+        ClassPids = beamtalk_class_registry:all_classes(),
+        lists:foldl(
+            fun(Pid, Acc) ->
+                try
+                    ClassName = beamtalk_object_class:class_name(Pid),
+                    ModuleName = beamtalk_object_class:module_name(Pid),
+                    case source_file_from_module(ModuleName) of
+                        nil ->
+                            Acc;
+                        _SourceFile ->
+                            Key = atom_to_binary(ClassName, utf8),
+                            ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
+                            Acc#{Key => {beamtalk_object, ClassTag, ModuleName, Pid}}
+                    end
+                catch
+                    exit:{noproc, _} -> Acc;
+                    exit:{timeout, _} -> Acc
+                end
+            end,
+            Base,
+            ClassPids
+        )
+    catch
+        exit:{noproc, _} ->
+            Base
+    end.
+
+%% @doc Load a .bt file, compiling and registering the class.
+%% Path must be a binary or list string. Non-string arguments return a typed error.
+-spec handle_load(term()) -> nil | {error, #beamtalk_error{}}.
+handle_load(Path) when is_binary(Path) ->
+    handle_load(binary_to_list(Path));
+handle_load(Path) when is_list(Path) ->
+    case beamtalk_repl_eval:reload_class_file(Path) of
+        ok ->
+            nil;
+        {error, {file_not_found, _}} ->
+            Err0 = beamtalk_error:new(file_not_found, 'WorkspaceInterface'),
+            Err1 = beamtalk_error:with_selector(Err0, 'load:'),
+            {error,
+                beamtalk_error:with_message(
+                    Err1,
+                    iolist_to_binary([<<"File not found: ">>, Path])
+                )};
+        {error, Reason} ->
+            Err0 = beamtalk_error:new(load_error, 'WorkspaceInterface'),
+            Err1 = beamtalk_error:with_selector(Err0, 'load:'),
+            Err2 = beamtalk_error:with_message(
+                Err1,
+                iolist_to_binary([<<"Failed to load: ">>, Path])
+            ),
+            Err3 = beamtalk_error:with_details(Err2, #{reason => Reason}),
+            {error, Err3}
+    end;
+handle_load(Other) ->
+    TypeName = value_type_name(Other),
+    Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
+    Err1 = beamtalk_error:with_selector(Err0, 'load:'),
+    Err2 = beamtalk_error:with_message(
+        Err1,
+        iolist_to_binary([<<"load: expects a String path, got ">>, TypeName])
+    ),
+    {error, Err2}.
+
+%% @doc Clear session variable bindings for the calling REPL session.
+%% Uses the bt_session_pid process dictionary key set by beamtalk_repl_shell
+%% in the eval worker to find the session PID.
+-spec handle_clear(pid()) -> nil.
+handle_clear(FromPid) ->
+    SessionPid =
+        case erlang:process_info(FromPid, dictionary) of
+            {dictionary, Dict} ->
+                proplists:get_value(bt_session_pid, Dict, undefined);
+            _ ->
+                undefined
+        end,
+    case SessionPid of
+        undefined ->
+            nil;
+        Pid when is_pid(Pid) ->
+            try
+                ok = beamtalk_repl_shell:clear_bindings(Pid)
+            catch
+                _:_ -> ok
+            end,
+            nil
+    end.
+
+%% @doc Run all loaded TestCase subclasses and return a TestResult.
+-spec handle_test() -> map().
+handle_test() ->
+    beamtalk_test_runner:run_all().
+
+%% @doc Run a specific test class and return a TestResult.
+%% Accepts a class object tuple or a class name atom/binary.
+-spec handle_test_class(tuple() | atom() | binary()) -> map() | {error, #beamtalk_error{}}.
+handle_test_class({beamtalk_object, _, _, _} = ClassRef) ->
+    beamtalk_test_runner:run_class(ClassRef);
+handle_test_class(ClassName) when is_atom(ClassName) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined ->
+            Err0 = beamtalk_error:new(class_not_found, 'WorkspaceInterface'),
+            Err1 = beamtalk_error:with_selector(Err0, 'test:'),
+            {error,
+                beamtalk_error:with_message(
+                    Err1,
+                    iolist_to_binary([<<"Unknown class: ">>, atom_to_binary(ClassName, utf8)])
+                )};
+        Pid ->
+            ModuleName = beamtalk_object_class:module_name(Pid),
+            ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
+            beamtalk_test_runner:run_class({beamtalk_object, ClassTag, ModuleName, Pid})
+    end;
+handle_test_class(ClassName) when is_binary(ClassName) ->
+    try
+        ClassAtom = binary_to_existing_atom(ClassName, utf8),
+        handle_test_class(ClassAtom)
+    catch
+        error:badarg ->
+            Err0 = beamtalk_error:new(class_not_found, 'WorkspaceInterface'),
+            Err1 = beamtalk_error:with_selector(Err0, 'test:'),
+            {error,
+                beamtalk_error:with_message(
+                    Err1,
+                    iolist_to_binary([<<"Unknown class: ">>, ClassName])
+                )}
+    end;
+handle_test_class(Other) ->
+    TypeName = value_type_name(Other),
+    Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
+    Err1 = beamtalk_error:with_selector(Err0, 'test:'),
+    {error,
+        beamtalk_error:with_message(
+            Err1,
+            iolist_to_binary([<<"test: expects a class, got ">>, TypeName])
+        )}.
+
+%% @doc Convert a class name atom to a beamtalk_object class tuple.
+-spec class_name_to_object(atom()) -> {true, tuple()} | false.
+class_name_to_object(ClassName) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined ->
+            false;
+        Pid ->
+            ModuleName = beamtalk_object_class:module_name(Pid),
+            ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
+            {true, {beamtalk_object, ClassTag, ModuleName, Pid}}
+    end.
+
+%% @doc Read beamtalk_source attribute from a module's module_info(attributes).
+%% Returns nil for stdlib/bootstrap/ClassBuilder-created classes.
+-spec source_file_from_module(atom()) -> binary() | 'nil'.
+source_file_from_module(ModuleName) ->
+    try erlang:get_module_info(ModuleName, attributes) of
+        Attrs ->
+            case lists:keyfind(beamtalk_source, 1, Attrs) of
+                {beamtalk_source, [Path]} when is_binary(Path) -> Path;
+                {beamtalk_source, [Path]} when is_list(Path) -> list_to_binary(Path);
+                _ -> nil
+            end
+    catch
+        error:undef -> nil
+    end.
+
+%% @doc Return a human-readable type name for an Erlang/Beamtalk value.
+-spec value_type_name(term()) -> binary().
+value_type_name(V) when is_integer(V) -> <<"Integer">>;
+value_type_name(V) when is_float(V) -> <<"Float">>;
+value_type_name(V) when is_boolean(V) -> <<"Boolean">>;
+value_type_name(nil) -> <<"nil">>;
+value_type_name(V) when is_atom(V) -> <<"Symbol">>;
+value_type_name(V) when is_list(V) -> <<"List">>;
+value_type_name(V) when is_map(V) -> <<"Dictionary">>;
+value_type_name({beamtalk_object, _, _, _}) -> <<"Object">>;
+value_type_name(_) -> <<"Unknown">>.
 
 %% @doc Wrap actor metadata into a #beamtalk_object{} tuple.
 %% Filters out dead actors.
