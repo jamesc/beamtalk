@@ -5,23 +5,16 @@
 %%%
 %%% **DDD Context:** Workspace
 %%%
-%%% This gen_server implements the WorkspaceInterface that provides
-%%% actor introspection API for the live environment. It exposes
-%%% the actor registry as Beamtalk-level methods:
+%%% This gen_server implements the WorkspaceInterface primitive methods.
+%%% Higher-level methods (actorsOf:, testClasses, globals, test, test:)
+%%% are implemented as Beamtalk facades in stdlib/src/WorkspaceInterface.bt.
+%%%
+%%% ## Primitives (handled by this gen_server)
+%%%
 %%% - `actors` - List all live actors as usable object references
 %%% - `actorAt:` - Look up a specific actor by pid string
-%%% - `actorsOf:` - Get all actors of a given class
-%%%
-%%% This is the Beamtalk equivalent of Smalltalk's `Process allInstances` -
-%%% introspecting the live environment. Workspace is the right home because
-%%% actors are workspace-scoped (per ADR 0004).
-%%%
-%%% ## Message Protocol
-%%%
-%%% Workspace responds to these selectors:
-%%% - `actors` - Returns list of #beamtalk_object{} for all live actors
-%%% - `actorAt:` - Returns #beamtalk_object{} for actor at pid, or nil
-%%% - `actorsOf:` - Returns list of #beamtalk_object{} for class
+%%% - `classes` - List all loaded user classes (those with source files)
+%%% - `load:` - Compile and load a .bt file
 %%%
 %%% ## Example Usage
 %%%
@@ -31,9 +24,6 @@
 %%%
 %%% Workspace actorAt: '<0.132.0>'
 %%% // => #Actor<Counter,0.132.0>
-%%%
-%%% Workspace actorsOf: Counter
-%%% // => [#Actor<Counter,0.132.0>]
 %%% ```
 
 -module(beamtalk_workspace_interface).

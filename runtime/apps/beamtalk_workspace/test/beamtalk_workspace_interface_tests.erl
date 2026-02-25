@@ -3,8 +3,8 @@
 
 %%% @doc Tests for WorkspaceInterface singleton.
 %%%
-%%% Tests the beamtalk_workspace_interface gen_server which provides
-%%% actor introspection API (actors, actorAt:, actorsOf:).
+%%% Tests the beamtalk_workspace_interface gen_server primitives
+%%% (actors, actorAt:, classes, load:).
 
 -module(beamtalk_workspace_interface_tests).
 -include_lib("eunit/include/eunit.hrl").
