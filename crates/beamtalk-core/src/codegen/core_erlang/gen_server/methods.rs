@@ -190,16 +190,36 @@ impl CoreErlangGenerator {
 
             // Check for early return
             if let Expression::Return { value, .. } = expr {
-                let final_state = self.current_state_var();
-                let value_str = self.expression_doc(value)?;
-                let doc = docvec![
-                    "let _ReturnValue = ",
-                    value_str,
-                    " in {'reply', _ReturnValue, ",
-                    Document::String(final_state),
-                    "}",
-                ];
-                docs.push(doc);
+                // BT-904: If the returned value is a state-threading control flow
+                // (e.g., collect: with self-sends), it returns {Result, State} tuple.
+                // Unpack it instead of wrapping it again.
+                if self.control_flow_has_mutations(value) {
+                    let tuple_var = self.fresh_temp_var("Tuple");
+                    let value_str = self.expression_doc(value)?;
+                    let doc = docvec![
+                        "let ",
+                        Document::String(tuple_var.clone()),
+                        " = ",
+                        value_str,
+                        " in let _Result = call 'erlang':'element'(1, ",
+                        Document::String(tuple_var.clone()),
+                        ") in let _NewState = call 'erlang':'element'(2, ",
+                        Document::String(tuple_var),
+                        ") in {'reply', _Result, _NewState}",
+                    ];
+                    docs.push(doc);
+                } else {
+                    let final_state = self.current_state_var();
+                    let value_str = self.expression_doc(value)?;
+                    let doc = docvec![
+                        "let _ReturnValue = ",
+                        value_str,
+                        " in {'reply', _ReturnValue, ",
+                        Document::String(final_state),
+                        "}",
+                    ];
+                    docs.push(doc);
+                }
                 return Ok(Document::Vec(docs));
             }
 

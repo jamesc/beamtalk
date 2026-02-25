@@ -1,0 +1,54 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-904: Actor fixture for testing self-sends inside collect:/select:/reject:
+// blocks. Self-sends in actor blocks need state threading because they may
+// mutate actor state.
+
+Actor subclass: ActorCollectCounter
+  state: count = 0
+
+  getCount => ^self.count
+
+  // Helper: increments count and returns formatted item
+  processItem: item =>
+    self.count := self.count + 1.
+    ^item * 2
+
+  // collect: with self-send — needs state threading
+  doubleAll: items =>
+    ^items collect: [:item | self processItem: item]
+
+  // select: with self-send — needs state threading
+  selectPositive: items =>
+    ^items select: [:item | self checkPositive: item]
+
+  // reject: with self-send — needs state threading
+  rejectNegative: items =>
+    ^items reject: [:item | self checkNegative: item]
+
+  // collect: with field assignment in block — direct field mutation
+  doubleAllWithFieldMutation: items =>
+    ^items collect: [:item |
+      self.count := self.count + 1.
+      item * 2
+    ]
+
+  // collect: as last expression (no ^) — uses last-expression handler
+  doubleAllImplicit: items =>
+    items collect: [:item | self processItem: item]
+
+  // do: with self-send — already works (has state threading)
+  countAll: items =>
+    items do: [:item | self processItem: item].
+    ^self.count
+
+  // Helper for select:
+  checkPositive: item =>
+    self.count := self.count + 1.
+    ^item > 0
+
+  // Helper for reject:
+  checkNegative: item =>
+    self.count := self.count + 1.
+    ^item < 0
