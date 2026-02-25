@@ -754,7 +754,7 @@ compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride) ->
     %% Only set source_path when the path looks like a real filesystem path (contains
     %% a directory separator or has a .bt extension). This prevents bogus sourceFile
     %% metadata when handle_load_source/3 is called with a non-file label.
-    Options =
+    Options2 =
         case Path of
             undefined ->
                 Options1;
@@ -769,6 +769,15 @@ compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride) ->
                 end;
             _ ->
                 Options1
+        end,
+    %% BT-905: Pass class superclass index so the compiler can resolve cross-file
+    %% value-object inheritance chains. Without this, a child class whose parent is
+    %% defined in another already-loaded file defaults to Actor codegen.
+    SuperclassIndex = build_class_superclass_index(),
+    Options =
+        case map_size(SuperclassIndex) of
+            0 -> Options2;
+            _ -> Options2#{class_superclass_index => SuperclassIndex}
         end,
     wrap_compiler_errors(
         fun() ->
@@ -1123,6 +1132,37 @@ verify_class_present(ExpectedClassName, ClassNames, Path) ->
     case lists:member(ExpectedName, DefinedNames) of
         true -> ok;
         false -> {error, {class_not_found, ExpectedClassName, Path, DefinedNames}}
+    end.
+
+%% @private
+%% @doc Build a class→superclass index from the Beamtalk class hierarchy ETS table.
+%%
+%% BT-905: Used when compiling a new file via the REPL to inform the compiler
+%% which already-loaded classes are value objects vs actors. Without this index,
+%% a child class whose parent is defined in another loaded file defaults to Actor
+%% codegen because the compiler cannot see the parent's own superclass.
+%%
+%% The ETS table stores {ClassName :: atom(), Superclass :: atom() | none} pairs.
+%% We convert to #{binary() => binary()} for the compiler port protocol, skipping
+%% entries with no superclass (those are roots like Object and Actor).
+-spec build_class_superclass_index() -> #{binary() => binary()}.
+build_class_superclass_index() ->
+    case ets:info(beamtalk_class_hierarchy) of
+        undefined ->
+            #{};
+        _ ->
+            lists:foldl(
+                fun
+                    ({_Class, none}, Acc) ->
+                        Acc;
+                    ({Class, Superclass}, Acc) when is_atom(Class), is_atom(Superclass) ->
+                        Acc#{atom_to_binary(Class) => atom_to_binary(Superclass)};
+                    (_, Acc) ->
+                        Acc
+                end,
+                #{},
+                ets:tab2list(beamtalk_class_hierarchy)
+            )
     end.
 
 %% @private

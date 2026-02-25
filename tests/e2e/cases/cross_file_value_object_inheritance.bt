@@ -1,0 +1,68 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for cross-file value-object inheritance (BT-905).
+//
+// These tests require E2E because the bug manifests at REPL file-load time:
+// when Shape is defined in one file and Circle is defined in another, the
+// compiler port does not receive the class-superclass index for already-loaded
+// classes, so Circle is incorrectly compiled as an Actor.
+//
+// Tests:
+// - Circle (loaded after Shape) is a value object, not an Actor
+// - Class-side factory method withRadius: works (new:, not spawnWith:)
+// - Value-object field access works after cross-file instantiation
+// - Rectangle (second subclass) also compiles as a value object
+// - Both subclasses can override methods inherited from Shape
+
+// @load tests/e2e/fixtures/shape.bt
+// @load tests/e2e/fixtures/circle.bt
+// @load tests/e2e/fixtures/rectangle.bt
+
+// ===========================================================================
+// CIRCLE — CROSS-FILE VALUE-OBJECT SUBCLASS
+// ===========================================================================
+
+// Class-side factory method must use `new:` (value-object), not `spawnWith:`
+// (Actor). Before the fix this raised: Cannot call 'new:' on Actor.
+c := Circle withRadius: 5.0
+// => _
+
+// The returned value is a map (value object), not an Actor reference
+c class name
+// => Circle
+
+// Field access works on the value object
+c radius
+// => _
+
+// Inherited area method computes correctly
+c area
+// => _
+
+// Inherited perimeter method computes correctly
+c perimeter
+// => _
+
+// ===========================================================================
+// RECTANGLE — SECOND CROSS-FILE VALUE-OBJECT SUBCLASS
+// ===========================================================================
+
+// Ensure a second subclass in a separate file also compiles as a value object
+r := Rectangle withWidth: 4.0 height: 3.0
+// => _
+
+r class name
+// => Rectangle
+
+r width
+// => _
+
+r height
+// => _
+
+r area
+// => _
+
+r perimeter
+// => _
