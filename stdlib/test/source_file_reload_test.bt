@@ -52,6 +52,6 @@ TestCase subclass: SourceFileReloadTest
     // reload is a sealed method defined in Behaviour (class protocol)
     self assert: (Behaviour includesSelector: #reload).
     // => _
-    // Sending sourceFile to Behaviour itself also returns nil (it's a stdlib class)
-    self assert: Behaviour sourceFile isNil
+    // Reloading a stdlib class (Behaviour itself) raises no_source_file
+    self should: [Behaviour reload] raise: #no_source_file
     // => _

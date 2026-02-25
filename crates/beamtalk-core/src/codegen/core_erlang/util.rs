@@ -175,7 +175,11 @@ impl CoreErlangGenerator {
         match &self.source_path {
             Some(path) => {
                 let escaped = path.replace('\\', "\\\\").replace('"', "\\\"");
-                Document::String(format!(", 'beamtalk_source' = [\"{escaped}\"]"))
+                docvec![
+                    ", 'beamtalk_source' = [\"",
+                    Document::String(escaped),
+                    "\"]"
+                ]
             }
             None => Document::Nil,
         }

@@ -8,4 +8,4 @@ Actor subclass: ReloadCounter
   state: value = 0
 
   increment => self.value := self.value + 1
-  getValue => ^self.value
+  getValue => self.value

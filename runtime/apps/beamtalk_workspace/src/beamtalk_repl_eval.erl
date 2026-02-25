@@ -669,14 +669,22 @@ compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride) ->
             _ -> Options0#{module_name => ModuleNameOverride}
         end,
     %% BT-845/BT-860: Pass source file path so compiler embeds beamtalk_source attribute.
-    %% BT-845 fix: Always pass the path if it's a list (don't check filelib:is_file,
-    %% since that can fail for relative paths depending on the REPL's working directory).
+    %% Only set source_path when the path looks like a real filesystem path (contains
+    %% a directory separator or has a .bt extension). This prevents bogus sourceFile
+    %% metadata when handle_load_source/3 is called with a non-file label.
     Options =
         case Path of
             undefined ->
                 Options1;
             L when is_list(L) ->
-                Options1#{source_path => list_to_binary(L)};
+                IsFilePath =
+                    lists:member($/, L) orelse
+                        lists:member($\\, L) orelse
+                        filename:extension(L) =:= ".bt",
+                case IsFilePath of
+                    true -> Options1#{source_path => list_to_binary(L)};
+                    false -> Options1
+                end;
             _ ->
                 Options1
         end,

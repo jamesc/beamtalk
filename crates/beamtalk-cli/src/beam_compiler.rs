@@ -786,8 +786,16 @@ pub fn compile_source_with_bindings(
     let embed_source_path = if options.stdlib_mode {
         None
     } else {
-        Some(source_path.as_str())
+        // BT-845: Use an absolute path so reload works regardless of the
+        // working directory at reload time.
+        Some(
+            std::fs::canonicalize(source_path)
+                .ok()
+                .and_then(|p| p.into_os_string().into_string().ok())
+                .unwrap_or_else(|| source_path.as_str().to_string()),
+        )
     };
+    let embed_source_path = embed_source_path.as_deref();
     write_core_erlang_with_bindings(
         &module,
         module_name,
