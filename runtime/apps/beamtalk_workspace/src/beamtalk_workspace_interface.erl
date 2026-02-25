@@ -55,7 +55,8 @@
     has_method/1,
     class_info/0,
     dispatch/4,
-    get_user_bindings/0
+    get_user_bindings/0,
+    get_session_bindings/0
 ]).
 
 %% gen_server callbacks
@@ -99,6 +100,23 @@ get_user_bindings() ->
         Pid ->
             try
                 gen_server:call(Pid, get_user_bindings, 1000)
+            catch
+                _:_ -> #{}
+            end
+    end.
+
+%% @doc Return non-class workspace globals for session binding injection (BT-883).
+%% Includes singletons (Transcript, Beamtalk, Workspace) and user-registered
+%% bindings (bind:as:), but NOT class objects. Called by beamtalk_repl_shell
+%% at session start to seed session bindings from Workspace globals.
+-spec get_session_bindings() -> #{atom() => term()}.
+get_session_bindings() ->
+    case whereis('Workspace') of
+        undefined ->
+            #{};
+        Pid ->
+            try
+                gen_server:call(Pid, get_session_bindings, 1000)
             catch
                 _:_ -> #{}
             end
@@ -284,6 +302,10 @@ handle_call({'unbind:', [Name]}, _From, State) ->
     end;
 handle_call(get_user_bindings, _From, State) ->
     {reply, State#workspace_interface_state.user_bindings, State};
+handle_call(get_session_bindings, _From, State) ->
+    GenServerPid = self(),
+    UserBindings = State#workspace_interface_state.user_bindings,
+    {reply, handle_session_bindings(GenServerPid, UserBindings), State};
 handle_call({'load:', [Path]}, _From, State) ->
     {reply, handle_load(Path), State};
 handle_call({test, []}, From, State) ->
@@ -632,9 +654,31 @@ handle_test_classes() ->
 %% all user-loaded classes, and user-registered bindings via bind:as:.
 -spec handle_globals(pid(), map()) -> map().
 handle_globals(GenServerPid, UserBindings) ->
+    %% Start with non-class globals (singletons + bind:as: entries)
+    Base = handle_session_bindings(GenServerPid, UserBindings),
+    %% Add all user classes (highest priority — overrides same-name bind:as: entries)
+    Classes = handle_classes(),
+    lists:foldl(
+        fun
+            ({beamtalk_object, ClassTag, _Mod, _Pid} = ClassObj, Acc) ->
+                ClassName = base_class_name(ClassTag),
+                maps:put(ClassName, ClassObj, Acc);
+            (_, Acc) ->
+                Acc
+        end,
+        Base,
+        Classes
+    ).
+
+%% @doc Return non-class entries from workspace globals for session binding injection (BT-883).
+%% Includes singletons (Transcript, Beamtalk, Workspace) and user-registered
+%% bind:as: names. Class objects are excluded — class name resolution continues
+%% via beamtalk_class_registry (see dispatch_codegen.rs:1207).
+-spec handle_session_bindings(pid(), map()) -> map().
+handle_session_bindings(GenServerPid, UserBindings) ->
     WorkspaceSelf =
         {beamtalk_object, 'WorkspaceInterface', ?MODULE, GenServerPid},
-    %% Start with user-registered bindings (lowest priority — overridden by singletons/classes)
+    %% Start with user-registered bindings (lowest priority — overridden by singletons)
     Base0 = UserBindings,
     Base1 =
         case resolve_singleton('TranscriptStream') of
@@ -646,20 +690,7 @@ handle_globals(GenServerPid, UserBindings) ->
             nil -> Base1;
             BeamtalkObj -> maps:put('Beamtalk', BeamtalkObj, Base1)
         end,
-    Base3 = maps:put('Workspace', WorkspaceSelf, Base2),
-    %% Add all user classes
-    Classes = handle_classes(),
-    lists:foldl(
-        fun
-            ({beamtalk_object, ClassTag, _Mod, _Pid} = ClassObj, Acc) ->
-                ClassName = base_class_name(ClassTag),
-                maps:put(ClassName, ClassObj, Acc);
-            (_, Acc) ->
-                Acc
-        end,
-        Base3,
-        Classes
-    ).
+    maps:put('Workspace', WorkspaceSelf, Base2).
 
 %% @doc Load a .bt file, compiling and registering the class.
 -spec handle_load(term()) -> nil | {error, #beamtalk_error{}}.
