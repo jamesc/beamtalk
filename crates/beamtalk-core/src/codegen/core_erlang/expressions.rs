@@ -817,6 +817,7 @@ impl CoreErlangGenerator {
     /// ```
     ///
     /// The cascade returns the result of the final message.
+    #[allow(clippy::too_many_lines)]
     pub(super) fn generate_cascade(
         &mut self,
         receiver: &Expression,
@@ -861,11 +862,6 @@ impl CoreErlangGenerator {
             for index in 0..total_messages {
                 let is_last = index == total_messages - 1;
 
-                if !is_last {
-                    // For all but the last message, discard the result
-                    docs.push(Document::Str("let _ = "));
-                }
-
                 // Determine which selector/arguments to use:
                 // index 0 -> first message from the initial MessageSend
                 // index > 0 -> messages[index - 1]
@@ -884,6 +880,16 @@ impl CoreErlangGenerator {
                         location: "cascade message with binary selector".to_string(),
                     });
                 }
+
+                // BT-884: Hoist field-assignment arg bindings BEFORE the `let _ =`
+                // wrapper so that StateN remains in scope for subsequent messages.
+                let arg_docs = self.generate_cascade_args(arguments, &mut docs)?;
+
+                if !is_last {
+                    // For all but the last message, discard the result
+                    docs.push(Document::Str("let _ = "));
+                }
+
                 docs.push(docvec![
                     "call 'beamtalk_message_dispatch':'send'(",
                     Document::String(receiver_var.clone()),
@@ -891,19 +897,11 @@ impl CoreErlangGenerator {
                     Document::String(selector_atom),
                     "', [",
                 ]);
-
-                // Arguments
-                // TODO(BT-884): If any argument is a field assignment, its state binding
-                // (let StateN = maps:put(...)) is nested inside the argument expression and
-                // goes out of scope after `call send(...)`. The generator's state_version
-                // counter still advances, so subsequent cascade messages may reference a
-                // StateN that is unbound. Fix: use generate_field_assignment_open for
-                // field-assignment args and hoist the binding before the send call.
-                for (j, arg) in arguments.iter().enumerate() {
+                for (j, arg_doc) in arg_docs.into_iter().enumerate() {
                     if j > 0 {
                         docs.push(Document::Str(", "));
                     }
-                    docs.push(self.expression_doc(arg)?);
+                    docs.push(arg_doc);
                 }
 
                 docs.push(Document::Str("])"));
@@ -932,11 +930,6 @@ impl CoreErlangGenerator {
             for (i, message) in messages.iter().enumerate() {
                 let is_last = i == messages.len() - 1;
 
-                if !is_last {
-                    // For all but the last message, discard the result
-                    docs.push(Document::Str("let _ = "));
-                }
-
                 // Unified message dispatch to the bound receiver
                 let selector_atom = message.selector.to_erlang_atom();
                 if matches!(message.selector, MessageSelector::Binary(_)) {
@@ -945,6 +938,15 @@ impl CoreErlangGenerator {
                         location: "cascade message with binary selector".to_string(),
                     });
                 }
+
+                // BT-884: Hoist field-assignment arg bindings BEFORE `let _ =`.
+                let arg_docs = self.generate_cascade_args(&message.arguments, &mut docs)?;
+
+                if !is_last {
+                    // For all but the last message, discard the result
+                    docs.push(Document::Str("let _ = "));
+                }
+
                 docs.push(docvec![
                     "call 'beamtalk_message_dispatch':'send'(",
                     Document::String(receiver_var.clone()),
@@ -952,15 +954,11 @@ impl CoreErlangGenerator {
                     Document::String(selector_atom),
                     "', [",
                 ]);
-
-                // Arguments
-                // TODO(BT-884): Same state-threading scope issue as in the MessageSend
-                // branch above — field-assignment args must be hoisted to outer scope.
-                for (j, arg) in message.arguments.iter().enumerate() {
+                for (j, arg_doc) in arg_docs.into_iter().enumerate() {
                     if j > 0 {
                         docs.push(Document::Str(", "));
                     }
-                    docs.push(self.expression_doc(arg)?);
+                    docs.push(arg_doc);
                 }
 
                 docs.push(Document::Str("])"));
@@ -1084,6 +1082,35 @@ impl CoreErlangGenerator {
         }
 
         Ok(Document::Vec(docs))
+    }
+
+    /// Generates cascade arguments, hoisting field-assignment bindings to outer scope.
+    ///
+    /// BT-884: This is a helper to avoid duplicating the hoisting logic across the
+    /// `MessageSend` and fallback branches of `generate_cascade`.
+    fn generate_cascade_args(
+        &mut self,
+        arguments: &[Expression],
+        docs: &mut Vec<Document<'static>>,
+    ) -> Result<Vec<Document<'static>>> {
+        let mut hoisted_docs: Vec<Document<'static>> = Vec::new();
+        let mut arg_docs: Vec<Document<'static>> = Vec::new();
+        for arg in arguments {
+            if Self::is_field_assignment(arg) {
+                hoisted_docs.push(self.generate_field_assignment_open(arg)?);
+                let val_var = self
+                    .last_open_scope_result
+                    .take()
+                    .expect("generate_field_assignment_open should set last_open_scope_result");
+                arg_docs.push(Document::String(val_var));
+            } else {
+                arg_docs.push(self.expression_doc(arg)?);
+            }
+        }
+        for hoisted in hoisted_docs {
+            docs.push(hoisted);
+        }
+        Ok(arg_docs)
     }
 
     /// Generates code for a match expression.
