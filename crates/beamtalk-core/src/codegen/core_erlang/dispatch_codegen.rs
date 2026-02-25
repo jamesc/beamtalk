@@ -1433,17 +1433,34 @@ impl CoreErlangGenerator {
     ///
     /// Returns the captured-mutated variable names for each Tier 2 block argument
     /// if this is a Tier 2 self-send, or `None` if it's a regular self-send.
-    pub(super) fn detect_tier2_self_send(expr: &Expression) -> Option<Vec<(usize, Vec<String>)>> {
+    ///
+    /// BT-870: Also promotes literal Tier 1 blocks at call sites where the target
+    /// method is a known Tier 2 HOM (present in `tier2_method_info`). A promoted
+    /// block is compiled with the Tier 2 signature (`fun(Args, StateAcc) -> {Result, StateAcc}`)
+    /// even though it has no captured mutations, ensuring the callee's arity expectation is met.
+    pub(super) fn detect_tier2_self_send(
+        &self,
+        expr: &Expression,
+    ) -> Option<Vec<(usize, Vec<String>)>> {
         use super::block_analysis::analyze_block;
 
         if let Expression::MessageSend {
             receiver,
+            selector,
             arguments,
             ..
         } = expr
         {
             if let Expression::Identifier(id) = receiver.as_ref() {
                 if id.name == "self" {
+                    let sel_name = selector.name().to_string();
+                    // BT-870: Collect positions the scanner identified as Tier 2 for this selector.
+                    let hom_positions: std::collections::HashSet<usize> = self
+                        .tier2_method_info
+                        .get(&sel_name)
+                        .map(|positions| positions.iter().copied().collect())
+                        .unwrap_or_default();
+
                     let mut tier2_args = Vec::new();
                     for (i, arg) in arguments.iter().enumerate() {
                         if let Expression::Block(block) = arg {
@@ -1457,6 +1474,12 @@ impl CoreErlangGenerator {
                                 .collect();
                             if !captured_mutations.is_empty() {
                                 tier2_args.push((i, captured_mutations));
+                            } else if hom_positions.contains(&i) {
+                                // BT-870: Block has no mutations but this position is a known
+                                // Tier 2 HOM param. Promote to Tier 2 with empty captured vars
+                                // so it gets `fun(Args, StateAcc) -> {Result, StateAcc}` signature
+                                // (StateAcc passthrough), matching the callee's arity expectation.
+                                tier2_args.push((i, vec![]));
                             }
                             // Note: field_writes-only blocks are NOT yet supported
                             // for Tier 2 (requires different key scheme). See BT-852.

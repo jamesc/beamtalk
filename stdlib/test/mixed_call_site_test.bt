@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-870: Mixed Tier 1/Tier 2 call site test (ADR 0041).
+// Verifies that a HOM called from one method with a plain Tier 1 block and from
+// another method with a Tier 2 (captured-mutation) block works correctly for both.
+//
+// The Tier 1 call site was previously a runtime crash: the Tier 2 method body
+// calls blocks with arity 2 but the un-promoted block had arity 1.
+
+TestCase subclass: MixedCallSiteTest
+
+  testTier1BlockAtTier2HOM =>
+    // A plain block (no captured mutations) at a known Tier 2 HOM position.
+    // BT-870: Must not crash. Result should be 10 + 1 = 11.
+    actor := MixedCallSiteActor spawn.
+    self assert: ((actor testTier1CallSite) await) equals: 11
+
+  testTier2BlockAtTier2HOM =>
+    // A captured-mutation block at a Tier 2 HOM position.
+    // State threading must still work: total should be 0 + 7 = 7.
+    actor := MixedCallSiteActor spawn.
+    self assert: ((actor testTier2CallSite) await) equals: 7

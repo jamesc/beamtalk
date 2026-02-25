@@ -266,6 +266,24 @@ impl CoreErlangGenerator {
                         " in {'reply', _Result, _NewState}",
                     ];
                     docs.push(doc);
+                } else if let Some(tier2_args) = self.detect_tier2_self_send(expr) {
+                    // BT-870: Last expression is a Tier 2 self-send (or promoted Tier 1 at
+                    // a known Tier 2 HOM position). generate_tier2_self_send_open emits the
+                    // dispatch + state extraction as an open let chain; close with reply tuple.
+                    let doc = self.generate_tier2_self_send_open(expr, &tier2_args)?;
+                    docs.push(doc);
+                    let dispatch_var = self
+                        .last_dispatch_var
+                        .clone()
+                        .expect("generate_tier2_self_send_open always sets last_dispatch_var");
+                    let final_state = self.current_state_var();
+                    docs.push(docvec![
+                        "{'reply', call 'erlang':'element'(1, ",
+                        Document::String(dispatch_var),
+                        "), ",
+                        Document::String(final_state),
+                        "}",
+                    ]);
                 } else {
                     // Regular last expression: bind to Result and reply
                     // BT-851: Get state AFTER expression generation, since Tier 2
@@ -353,7 +371,7 @@ impl CoreErlangGenerator {
                         .to_string(),
                     location: "actor method body".to_string(),
                 });
-            } else if let Some(tier2_args) = Self::detect_tier2_self_send(expr) {
+            } else if let Some(tier2_args) = self.detect_tier2_self_send(expr) {
                 // BT-851: Tier 2 self-send with stateful block arguments.
                 // Pack captured locals into State, send, extract locals from returned State.
                 let doc = self.generate_tier2_self_send_open(expr, &tier2_args)?;
@@ -503,6 +521,24 @@ impl CoreErlangGenerator {
                         " in {'reply', _Result, _NewState}",
                     ];
                     docs.push(doc);
+                } else if let Some(tier2_args) = self.detect_tier2_self_send(expr) {
+                    // BT-870: Last expression is a Tier 2 self-send (or promoted Tier 1 at
+                    // a known Tier 2 HOM position). generate_tier2_self_send_open emits the
+                    // dispatch + state extraction as an open let chain; close with reply tuple.
+                    let doc = self.generate_tier2_self_send_open(expr, &tier2_args)?;
+                    docs.push(doc);
+                    let dispatch_var = self
+                        .last_dispatch_var
+                        .clone()
+                        .expect("generate_tier2_self_send_open always sets last_dispatch_var");
+                    let final_state = self.current_state_var();
+                    docs.push(docvec![
+                        "{'reply', call 'erlang':'element'(1, ",
+                        Document::String(dispatch_var),
+                        "), ",
+                        Document::String(final_state),
+                        "}",
+                    ]);
                 } else {
                     // Regular last expression: bind to Result and reply
                     // BT-851: Get state AFTER expression generation, since Tier 2
@@ -677,7 +713,7 @@ impl CoreErlangGenerator {
                         .to_string(),
                     location: "actor method body".to_string(),
                 });
-            } else if let Some(tier2_args) = Self::detect_tier2_self_send(expr) {
+            } else if let Some(tier2_args) = self.detect_tier2_self_send(expr) {
                 // BT-851: Tier 2 self-send with stateful block arguments.
                 let doc = self.generate_tier2_self_send_open(expr, &tier2_args)?;
                 docs.push(doc);
