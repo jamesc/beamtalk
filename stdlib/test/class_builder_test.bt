@@ -1,43 +1,18 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-838: Dynamic class creation via ClassBuilder (ADR 0038 Phase 4)
+// BT-838: ClassBuilder validation tests (ADR 0038)
 //
-// Tests closure-based dynamic class creation through the ClassBuilder protocol.
-// Note: ClassBuilder and dynamic objects are Actors, so results must be awaited.
-//
-// tearDown removes any dynamically registered class, ensuring cleanup runs even
-// when assertions fail mid-test.
+// Tests ClassBuilder error cases that are path-independent: validation
+// failures are caught before class registration regardless of compiled vs
+// dynamic path. The dynamic closure path (Path 2) has been removed (BT-873);
+// these tests exercise the validate/2 logic in beamtalk_class_builder.erl.
 
 TestCase subclass: ClassBuilderTest
   state: cls = nil
 
   tearDown =>
     self.cls isNil ifFalse: [self.cls removeFromSystem]
-
-  testDynamicClassCreateAndSend =>
-    self.cls := (Object classBuilder name: #CBTestGreeter; addMethod: #greet body: ["Hello!"]; register) await.
-    obj := CBTestGreeter new.
-    self assert: (obj greet await) equals: "Hello!"
-
-  testDynamicFieldDefault =>
-    self.cls := (Object classBuilder name: #CBTestFieldDog; addField: #name default: "Rex"; register) await.
-    obj := CBTestFieldDog new.
-    self assert: (obj name await) equals: "Rex"
-
-  testDynamicMethodReceivesSelf =>
-    speakBody := [:s | (s at: #name) ++ " says Woof!"].
-    self.cls := (Object classBuilder name: #CBTestSpeaker; addField: #name default: "Rex"; addMethod: #speak body: speakBody; register) await.
-    obj := CBTestSpeaker new.
-    self assert: (obj speak await) equals: "Rex says Woof!"
-
-  testDynamicSuperclass =>
-    self.cls := (Object classBuilder name: #CBTestSuperCheck; register) await.
-    self assert: (CBTestSuperCheck superclass) equals: Object
-
-  testDynamicCanUnderstand =>
-    self.cls := (Object classBuilder name: #CBTestCanUnder; addMethod: #speak body: ["Hi"]; register) await.
-    self assert: (CBTestCanUnder canUnderstand: #speak) equals: true
 
   testSealedClassRejected =>
     self should: [(Object classBuilder name: #CBBadSeal; superclass: Float; register) await] raise: #instantiation_error

@@ -38,21 +38,6 @@ The async call path (cast + future + await) adds ~4-5x overhead compared to a di
 | Serial sync calls | ~300k+ | Single caller, sequential gen_server:call |
 | Concurrent (10 callers) | ~390k+ | 10 processes calling same actor |
 
-### Dynamic vs Compiled Classes
-
-| Method | Median | Ratio |
-|--------|--------|-------|
-| Compiled class call | ~2 µs | 1.0x (baseline) |
-| Dynamic class call | ~2 µs | ~1.0x |
-
-Dynamic classes (BT-219) achieve near-parity with compiled classes for method dispatch. Both use closure-based dispatch through `gen_server`.
-
-### Class Creation
-
-| Operation | Median | Notes |
-|-----------|--------|-------|
-| Dynamic class creation | ~90 µs | `beamtalk_object_class:create_subclass/3` |
-
 ## Sanity Thresholds
 
 The performance tests include sanity checks (not strict thresholds) to catch severe regressions:
@@ -63,8 +48,6 @@ The performance tests include sanity checks (not strict thresholds) to catch sev
 - Async actor call: < 500 µs
 - Serial throughput: > 10,000 calls/sec
 - Concurrent throughput: > 10,000 calls/sec
-- Class creation: < 10 ms
-
 These thresholds are intentionally generous to avoid CI flakiness across different hardware.
 
 ## Optimization Opportunities
@@ -84,7 +67,6 @@ Benchmark results are printed to stderr in a machine-readable format:
 PERF: <name> <median>us (mean: <mean>us, min: <min>us, max: <max>us, p95: <p95>us, p99: <p99>us, n: <iterations>)
 PERF: throughput_sync_serial <calls_per_sec> calls/sec (<calls> calls in <elapsed>ms)
 PERF: future_overhead_ratio <ratio>x
-PERF: dynamic_vs_compiled_ratio <ratio>x
 ```
 
 This format can be parsed by CI scripts for trend tracking.
