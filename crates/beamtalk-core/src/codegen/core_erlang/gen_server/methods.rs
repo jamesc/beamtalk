@@ -289,10 +289,11 @@ impl CoreErlangGenerator {
                     let final_state = self.current_state_var();
                     let doc = docvec![
                         open_chain,
-                        Document::String(format!(
-                            "let _Result = call 'erlang':'element'(1, {dispatch_var}) \
-                             in {{'reply', _Result, {final_state}}}"
-                        )),
+                        "let _Result = call 'erlang':'element'(1, ",
+                        Document::String(dispatch_var),
+                        ") in {'reply', _Result, ",
+                        Document::String(final_state),
+                        "}",
                     ];
                     docs.push(doc);
                 } else {
@@ -558,10 +559,11 @@ impl CoreErlangGenerator {
                     let final_state = self.current_state_var();
                     let doc = docvec![
                         open_chain,
-                        Document::String(format!(
-                            "let _Result = call 'erlang':'element'(1, {dispatch_var}) \
-                             in {{'reply', _Result, {final_state}}}"
-                        )),
+                        "let _Result = call 'erlang':'element'(1, ",
+                        Document::String(dispatch_var),
+                        ") in {'reply', _Result, ",
+                        Document::String(final_state),
+                        "}",
                     ];
                     docs.push(doc);
                 } else {
