@@ -175,10 +175,10 @@ A bounded context is an explicit boundary within which a domain model is defined
 │  │  - Binding Management: Per-session variable state             │  │
 │  │  - Protocol: WebSocket JSON (nREPL-inspired)                  │  │
 │  └───────────────────────────────────────────────────────────────┘  │
-│                              ▲                                        │
-│                              │ exposes via                            │
-│  ┌───────────────────────────┴───────────────────────────────────┐  │
+│                                                                       │
+│  ┌───────────────────────────────────────────────────────────────┐  │
 │  │              BEAMTALK GLOBAL CONTEXT (Erlang)                  │  │
+│  │  - Façade over Workspace + Object System for user code        │  │
 │  │  - Runtime introspection: actors, modules, sessions           │  │
 │  │  - Project metadata: version, nodeName, projectPath           │  │
 │  └───────────────────────────────────────────────────────────────┘  │
@@ -211,6 +211,7 @@ The context map shows how bounded contexts relate and communicate:
 - **Published Language:** Well-defined intermediate format (Core Erlang)
 - **Conformist:** Downstream accepts upstream's model wholesale
 - **Anti-Corruption Layer:** Downstream protects itself with translation layer
+- **Façade:** Upstream provides a simplified, unified interface over multiple downstream contexts
 
 ---
 
