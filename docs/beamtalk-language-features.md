@@ -599,6 +599,8 @@ col eventCount          // => 1 (now correctly reflects the event)
 
 Any query that forces a round-trip on the actor works as a barrier — the key is that BEAM mailboxes are ordered, so once a reply comes back, all prior messages have been handled.
 
+> **Future work:** A dedicated `waitFor:` or `barrier` primitive could make this pattern more explicit, but the manual round-trip approach is idiomatic in actor systems and maps directly to BEAM semantics. Adding sugar would risk hiding the inherent asynchrony that programmers need to reason about. If coordination patterns become common enough to warrant it, a higher-level construct (e.g., `Actor flush` or a `Barrier` value object) could be introduced without changing the underlying model.
+
 ---
 
 ## Pattern Matching
