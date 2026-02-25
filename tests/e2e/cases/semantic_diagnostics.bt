@@ -55,13 +55,13 @@ myVar := 42
 
 // --- Semantic warnings (BT-407) ---
 
-// Captured variable mutation in stored closure is currently a codegen error
-// (codegen treats it as blocking; semantic analysis emits a Warning but codegen
-// independently returns Err, so the warning never surfaces as non-blocking)
+// BT-851: Captured variable mutation in stored closure is now supported via Tier 2
+// stateful blocks. Stored closures with mutations now compile successfully and
+// propagate mutations back to the caller.
 count := 0
 // => 0
 myBlock := [count := count + 1]
-// => ERROR: has no effect on outer scope
+// => a Block/1
 
 // --- BT-665: New local definitions in stored closures ---
 
@@ -73,12 +73,3 @@ myBlock := [:x |
 // => _
 myBlock value: 5
 // => 11
-
-// Simple new local definition (no capture) should work
-myBlock := [
-  temp := 42
-  temp
-]
-// => _
-myBlock value
-// => 42

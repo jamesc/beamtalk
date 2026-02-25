@@ -9,7 +9,7 @@
 //! and reply tuples, and the `register_class/0` on-load function.
 
 use super::super::document::{Document, INDENT, line, nest};
-use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
+use super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, ClassDefinition, Expression, MethodDefinition, MethodKind, Module};
 use crate::docvec;
 
@@ -72,6 +72,19 @@ impl CoreErlangGenerator {
             }
         }
 
+        // BT-853: Also detect HOM parameters from the method body:
+        // any parameter invoked with value:/value:value: is a block parameter.
+        // This enables HOMs called from external sites (not just pre-scanned self-sends)
+        // to correctly use the Tier 2 stateful protocol when Tier 2 blocks are passed.
+        // TODO BT-870: This unconditionally marks all value:-called params as Tier 2,
+        // which will crash if a Tier 1 (plain-value) block is passed at runtime.
+        for param in &method.parameters {
+            let param_name = &param.name.name;
+            if Self::method_body_has_value_call_on(param_name, &method.body) {
+                self.tier2_block_params.insert(param_name.to_string());
+            }
+        }
+
         // BT-761: Detect whether any block argument in this method body contains ^.
         // If so, set up a non-local return token so ^ inside blocks can throw to escape
         // the closure and return from the enclosing actor method.
@@ -109,7 +122,9 @@ impl CoreErlangGenerator {
         let body_doc: Document = if has_params {
             let params_pattern = param_vars.join(", ");
             docvec![
-                format!("<'{selector_name}'> when 'true' ->"),
+                "<'",
+                Document::String(selector_name.to_string()),
+                "'> when 'true' ->",
                 nest(
                     INDENT,
                     docvec![
@@ -119,7 +134,9 @@ impl CoreErlangGenerator {
                             INDENT,
                             docvec![
                                 line(),
-                                format!("<[{params_pattern}]> when 'true' ->"),
+                                "<[",
+                                Document::String(params_pattern),
+                                "]> when 'true' ->",
                                 nest(INDENT, docvec![line(), method_body_doc,]),
                                 line(),
                                 "<_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}",
@@ -133,7 +150,9 @@ impl CoreErlangGenerator {
             ]
         } else {
             docvec![
-                format!("<'{selector_name}'> when 'true' ->"),
+                "<'",
+                Document::String(selector_name.to_string()),
+                "'> when 'true' ->",
                 nest(INDENT, docvec![line(), method_body_doc,]),
                 "\n",
             ]
@@ -189,7 +208,9 @@ impl CoreErlangGenerator {
                 let doc = docvec![
                     "let _ReturnValue = ",
                     value_str,
-                    format!(" in {{'reply', _ReturnValue, {final_state}}}"),
+                    " in {'reply', _ReturnValue, ",
+                    Document::String(final_state),
+                    "}",
                 ];
                 docs.push(doc);
                 return Ok(Document::Vec(docs));
@@ -209,13 +230,23 @@ impl CoreErlangGenerator {
 
                             let new_state = self.next_state_var();
                             let doc = docvec![
-                                format!("let {val_var} = "),
+                                "let ",
+                                Document::String(val_var.clone()),
+                                " = ",
                                 value_str,
-                                format!(
-                                    " in let {new_state} = call 'maps':'put'('{}', {val_var}, {current_state}) in ",
-                                    field.name
-                                ),
-                                format!("{{'reply', {val_var}, {new_state}}}"),
+                                " in let ",
+                                Document::String(new_state.clone()),
+                                " = call 'maps':'put'('",
+                                Document::String(field.name.to_string()),
+                                "', ",
+                                Document::String(val_var.clone()),
+                                ", ",
+                                Document::String(current_state),
+                                ") in {'reply', ",
+                                Document::String(val_var),
+                                ", ",
+                                Document::String(new_state),
+                                "}",
                             ];
                             docs.push(doc);
                         }
@@ -259,11 +290,15 @@ impl CoreErlangGenerator {
                     let tuple_var = self.fresh_temp_var("Tuple");
                     let expr_str = self.expression_doc(expr)?;
                     let doc = docvec![
-                        format!("let {tuple_var} = "),
+                        "let ",
+                        Document::String(tuple_var.clone()),
+                        " = ",
                         expr_str,
-                        format!(" in let _Result = call 'erlang':'element'(1, {tuple_var})"),
-                        format!(" in let _NewState = call 'erlang':'element'(2, {tuple_var})"),
-                        " in {'reply', _Result, _NewState}",
+                        " in let _Result = call 'erlang':'element'(1, ",
+                        Document::String(tuple_var.clone()),
+                        ") in let _NewState = call 'erlang':'element'(2, ",
+                        Document::String(tuple_var),
+                        ") in {'reply', _Result, _NewState}",
                     ];
                     docs.push(doc);
                 } else if let Some(tier2_args) = self.detect_tier2_self_send(expr) {
@@ -306,18 +341,37 @@ impl CoreErlangGenerator {
             } else if is_local_assignment {
                 // BT-598: Local variable assignment in method body
                 if let Expression::Assignment { target, value, .. } = expr {
-                    if let Expression::Block(block) = value.as_ref() {
-                        Self::validate_stored_closure(block, format!("{:?}", expr.span()))?;
-                    }
                     if let Expression::Identifier(id) = target.as_ref() {
                         let var_name = &id.name;
                         let core_var = self
                             .lookup_var(var_name)
                             .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
 
+                        // BT-853: If RHS is a Tier 2 value: call, it returns
+                        // {Result, NewState} — unpack result and thread NewState.
+                        if self.is_tier2_value_call(value) {
+                            let tuple_var = self.fresh_temp_var("T2Tuple");
+                            let value_str = self.expression_doc(value)?;
+                            self.bind_var(var_name, &core_var);
+                            let new_state = self.next_state_var();
+                            docs.push(docvec![
+                                "let ",
+                                Document::String(tuple_var.clone()),
+                                " = ",
+                                value_str,
+                                " in let ",
+                                Document::String(core_var),
+                                " = call 'erlang':'element'(1, ",
+                                Document::String(tuple_var.clone()),
+                                ")\n in let ",
+                                Document::String(new_state),
+                                " = call 'erlang':'element'(2, ",
+                                Document::String(tuple_var),
+                                ") in ",
+                            ]);
                         // BT-598: If RHS is control flow with mutations, it returns
                         // {Result, State} — unpack and update state variable.
-                        if self.control_flow_has_mutations(value) {
+                        } else if self.control_flow_has_mutations(value) {
                             let tuple_var = self.fresh_temp_var("Tuple");
                             let next_version = self.state_version() + 1;
                             let new_state = if next_version == 1 {
@@ -327,12 +381,19 @@ impl CoreErlangGenerator {
                             };
                             let value_str = self.expression_doc(value)?;
                             let mut doc_parts: Vec<Document<'static>> = vec![docvec![
-                                format!("let {tuple_var} = "),
+                                "let ",
+                                Document::String(tuple_var.clone()),
+                                " = ",
                                 value_str,
-                                format!(
-                                    " in let {core_var} = call 'erlang':'element'(1, {tuple_var}) \
-                                     in let {new_state} = call 'erlang':'element'(2, {tuple_var}) in "
-                                ),
+                                " in let ",
+                                Document::String(core_var.clone()),
+                                " = call 'erlang':'element'(1, ",
+                                Document::String(tuple_var.clone()),
+                                ") in let ",
+                                Document::String(new_state.clone()),
+                                " = call 'erlang':'element'(2, ",
+                                Document::String(tuple_var),
+                                ") in ",
                             ]];
                             let _ = self.next_state_var();
                             self.bind_var(var_name, &core_var);
@@ -345,32 +406,54 @@ impl CoreErlangGenerator {
                                         || Self::to_core_erlang_var(var),
                                         String::clone,
                                     );
-                                    doc_parts.push(Document::String(format!(
-                                        "let {tv_core} = call 'maps':'get'('{}', {new_state}) in ",
-                                        Self::local_state_key(var)
-                                    )));
+                                    doc_parts.push(docvec![
+                                        "let ",
+                                        Document::String(tv_core),
+                                        " = call 'maps':'get'('",
+                                        Document::String(Self::local_state_key(var)),
+                                        "', ",
+                                        Document::String(new_state.clone()),
+                                        ") in ",
+                                    ]);
                                 }
                             }
                             docs.push(Document::Vec(doc_parts));
                         } else {
                             let value_str = self.expression_doc(value)?;
                             self.bind_var(var_name, &core_var);
-                            let doc = docvec![format!("let {core_var} = "), value_str, " in ",];
+                            let doc = docvec![
+                                "let ",
+                                Document::String(core_var),
+                                " = ",
+                                value_str,
+                                " in ",
+                            ];
                             docs.push(doc);
                         }
                     }
                 }
-            } else if self.expr_contains_tier2_value_call(expr) {
-                // BT-851: Tier 2 value: calls in non-last positions silently lose
-                // state updates. Reject at compile time until Phase 1 adds chaining.
-                // Checks both top-level value: calls and value: calls nested in
-                // assignment RHS (e.g., `result := aBlock value: x`).
-                return Err(CodeGenError::UnsupportedFeature {
-                    feature: "Tier 2 stateful block value: call in non-last position \
-                              (state updates would be lost)"
-                        .to_string(),
-                    location: "actor method body".to_string(),
-                });
+            } else if self.is_tier2_value_call(expr) {
+                // BT-853: Tier 2 value: call in non-last position.
+                // Returns {Result, NewState} — discard Result, thread NewState.
+                let tuple_var = self.fresh_temp_var("T2Tuple");
+                let discard_var = self.fresh_temp_var("T2Discard");
+                let expr_str = self.expression_doc(expr)?;
+                let new_state = self.next_state_var();
+                docs.push(docvec![
+                    "let ",
+                    Document::String(tuple_var.clone()),
+                    " = ",
+                    expr_str,
+                    " in let ",
+                    Document::String(discard_var),
+                    " = call 'erlang':'element'(1, ",
+                    Document::String(tuple_var.clone()),
+                    ")\n in let ",
+                    Document::String(new_state),
+                    " = call 'erlang':'element'(2, ",
+                    Document::String(tuple_var),
+                    ") in ",
+                ]);
             } else if let Some(tier2_args) = self.detect_tier2_self_send(expr) {
                 // BT-851: Tier 2 self-send with stateful block arguments.
                 // Pack captured locals into State, send, extract locals from returned State.
@@ -388,9 +471,15 @@ impl CoreErlangGenerator {
                 };
                 let expr_str = self.expression_doc(expr)?;
                 let mut doc_parts: Vec<Document<'static>> = vec![docvec![
-                    format!("let {tuple_var} = "),
+                    "let ",
+                    Document::String(tuple_var.clone()),
+                    " = ",
                     expr_str,
-                    format!(" in let {new_state} = call 'erlang':'element'(2, {tuple_var}) in "),
+                    " in let ",
+                    Document::String(new_state.clone()),
+                    " = call 'erlang':'element'(2, ",
+                    Document::String(tuple_var),
+                    ") in ",
                 ]];
                 let _ = self.next_state_var();
 
@@ -400,10 +489,15 @@ impl CoreErlangGenerator {
                         let core_var = self
                             .lookup_var(var)
                             .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                        doc_parts.push(Document::String(format!(
-                            "let {core_var} = call 'maps':'get'('{}', {new_state}) in ",
-                            Self::local_state_key(var)
-                        )));
+                        doc_parts.push(docvec![
+                            "let ",
+                            Document::String(core_var),
+                            " = call 'maps':'get'('",
+                            Document::String(Self::local_state_key(var)),
+                            "', ",
+                            Document::String(new_state.clone()),
+                            ") in ",
+                        ]);
                     }
                 }
                 docs.push(Document::Vec(doc_parts));
@@ -411,7 +505,7 @@ impl CoreErlangGenerator {
                 // Regular intermediate expression: wrap in let to discard value
                 let tmp_var = self.fresh_temp_var("seq");
                 let expr_str = self.expression_doc(expr)?;
-                let doc = docvec![format!("let {tmp_var} = "), expr_str, " in ",];
+                let doc = docvec!["let ", Document::String(tmp_var), " = ", expr_str, " in ",];
                 docs.push(doc);
             }
         }
@@ -464,13 +558,23 @@ impl CoreErlangGenerator {
 
                             let new_state = self.next_state_var();
                             let doc = docvec![
-                                format!("let {val_var} = "),
+                                "let ",
+                                Document::String(val_var.clone()),
+                                " = ",
                                 value_str,
-                                format!(
-                                    " in let {new_state} = call 'maps':'put'('{}', {val_var}, {current_state}) in ",
-                                    field.name
-                                ),
-                                format!("{{'reply', {val_var}, {new_state}}}"),
+                                " in let ",
+                                Document::String(new_state.clone()),
+                                " = call 'maps':'put'('",
+                                Document::String(field.name.to_string()),
+                                "', ",
+                                Document::String(val_var.clone()),
+                                ", ",
+                                Document::String(current_state),
+                                ") in {'reply', ",
+                                Document::String(val_var),
+                                ", ",
+                                Document::String(new_state),
+                                "}",
                             ];
                             docs.push(doc);
                         }
@@ -514,11 +618,15 @@ impl CoreErlangGenerator {
                     let tuple_var = self.fresh_temp_var("Tuple");
                     let expr_str = self.expression_doc(expr)?;
                     let doc = docvec![
-                        format!("let {tuple_var} = "),
+                        "let ",
+                        Document::String(tuple_var.clone()),
+                        " = ",
                         expr_str,
-                        format!(" in let _Result = call 'erlang':'element'(1, {tuple_var})"),
-                        format!(" in let _NewState = call 'erlang':'element'(2, {tuple_var})"),
-                        " in {'reply', _Result, _NewState}",
+                        " in let _Result = call 'erlang':'element'(1, ",
+                        Document::String(tuple_var.clone()),
+                        ") in let _NewState = call 'erlang':'element'(2, ",
+                        Document::String(tuple_var),
+                        ") in {'reply', _Result, _NewState}",
                     ];
                     docs.push(doc);
                 } else if let Some(tier2_args) = self.detect_tier2_self_send(expr) {
@@ -561,20 +669,37 @@ impl CoreErlangGenerator {
             } else if is_local_assignment {
                 // Local variable assignment: generate with proper binding
                 if let Expression::Assignment { target, value, .. } = expr {
-                    // Check if we're storing a block with mutations (ERROR)
-                    if let Expression::Block(block) = value.as_ref() {
-                        Self::validate_stored_closure(block, format!("{:?}", expr.span()))?;
-                    }
-
                     if let Expression::Identifier(id) = target.as_ref() {
                         let var_name = &id.name;
                         let core_var = self
                             .lookup_var(var_name)
                             .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
 
+                        // BT-853: If RHS is a Tier 2 value: call, it returns
+                        // {Result, NewState} — unpack result and thread NewState.
+                        if self.is_tier2_value_call(value) {
+                            let tuple_var = self.fresh_temp_var("T2Tuple");
+                            let value_str = self.expression_doc(value)?;
+                            self.bind_var(var_name, &core_var);
+                            let new_state = self.next_state_var();
+                            docs.push(docvec![
+                                "let ",
+                                Document::String(tuple_var.clone()),
+                                " = ",
+                                value_str,
+                                " in let ",
+                                Document::String(core_var),
+                                " = call 'erlang':'element'(1, ",
+                                Document::String(tuple_var.clone()),
+                                ")\n in let ",
+                                Document::String(new_state),
+                                " = call 'erlang':'element'(2, ",
+                                Document::String(tuple_var),
+                                ") in ",
+                            ]);
                         // BT-598: If RHS is control flow with mutations, it returns
                         // {Result, State} — unpack and update state variable.
-                        if self.control_flow_has_mutations(value) {
+                        } else if self.control_flow_has_mutations(value) {
                             let tuple_var = self.fresh_temp_var("Tuple");
                             let next_version = self.state_version() + 1;
                             let new_state = if next_version == 1 {
@@ -584,12 +709,19 @@ impl CoreErlangGenerator {
                             };
                             let value_str = self.expression_doc(value)?;
                             let mut doc_parts: Vec<Document<'static>> = vec![docvec![
-                                format!("let {tuple_var} = "),
+                                "let ",
+                                Document::String(tuple_var.clone()),
+                                " = ",
                                 value_str,
-                                format!(
-                                    " in let {core_var} = call 'erlang':'element'(1, {tuple_var}) \
-                                     in let {new_state} = call 'erlang':'element'(2, {tuple_var}) in "
-                                ),
+                                " in let ",
+                                Document::String(core_var.clone()),
+                                " = call 'erlang':'element'(1, ",
+                                Document::String(tuple_var.clone()),
+                                ") in let ",
+                                Document::String(new_state.clone()),
+                                " = call 'erlang':'element'(2, ",
+                                Document::String(tuple_var),
+                                ") in ",
                             ]];
                             let _ = self.next_state_var();
                             self.bind_var(var_name, &core_var);
@@ -602,17 +734,28 @@ impl CoreErlangGenerator {
                                         || Self::to_core_erlang_var(var),
                                         String::clone,
                                     );
-                                    doc_parts.push(Document::String(format!(
-                                        "let {tv_core} = call 'maps':'get'('{}', {new_state}) in ",
-                                        Self::local_state_key(var)
-                                    )));
+                                    doc_parts.push(docvec![
+                                        "let ",
+                                        Document::String(tv_core),
+                                        " = call 'maps':'get'('",
+                                        Document::String(Self::local_state_key(var)),
+                                        "', ",
+                                        Document::String(new_state.clone()),
+                                        ") in ",
+                                    ]);
                                 }
                             }
                             docs.push(Document::Vec(doc_parts));
                         } else {
                             let value_str = self.expression_doc(value)?;
                             self.bind_var(var_name, &core_var);
-                            let doc = docvec![format!("let {core_var} = "), value_str, " in ",];
+                            let doc = docvec![
+                                "let ",
+                                Document::String(core_var),
+                                " = ",
+                                value_str,
+                                " in ",
+                            ];
                             docs.push(doc);
                         }
                     }
@@ -632,11 +775,15 @@ impl CoreErlangGenerator {
                     };
                     let expr_str = self.expression_doc(expr)?;
                     let mut doc_parts: Vec<Document<'static>> = vec![docvec![
-                        format!("let {tuple_var} = "),
+                        "let ",
+                        Document::String(tuple_var.clone()),
+                        " = ",
                         expr_str,
-                        format!(
-                            " in let {new_state} = call 'erlang':'element'(2, {tuple_var}) in "
-                        ),
+                        " in let ",
+                        Document::String(new_state.clone()),
+                        " = call 'erlang':'element'(2, ",
+                        Document::String(tuple_var),
+                        ") in ",
                     ]];
                     let _ = self.next_state_var();
 
@@ -645,10 +792,15 @@ impl CoreErlangGenerator {
                         let core_var = self
                             .lookup_var(var)
                             .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                        doc_parts.push(Document::String(format!(
-                            "let {core_var} = call 'maps':'get'('{}', {new_state}) in ",
-                            Self::local_state_key(var)
-                        )));
+                        doc_parts.push(docvec![
+                            "let ",
+                            Document::String(core_var),
+                            " = call 'maps':'get'('",
+                            Document::String(Self::local_state_key(var)),
+                            "', ",
+                            Document::String(new_state.clone()),
+                            ") in ",
+                        ]);
                     }
                     docs.push(Document::Vec(doc_parts));
                 } else if threaded_vars.len() == 1 {
@@ -657,13 +809,13 @@ impl CoreErlangGenerator {
                         .lookup_var(var)
                         .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
                     let expr_str = self.expression_doc(expr)?;
-                    let doc = docvec![format!("let {core_var} = "), expr_str, " in ",];
+                    let doc = docvec!["let ", Document::String(core_var), " = ", expr_str, " in ",];
                     docs.push(doc);
                 } else {
                     // Multiple threaded vars - fall back for now
                     let tmp_var = self.fresh_temp_var("seq");
                     let expr_str = self.expression_doc(expr)?;
-                    let doc = docvec![format!("let {tmp_var} = "), expr_str, " in ",];
+                    let doc = docvec!["let ", Document::String(tmp_var), " = ", expr_str, " in ",];
                     docs.push(doc);
                 }
             } else if Self::is_super_message_send(expr) {
@@ -690,29 +842,52 @@ impl CoreErlangGenerator {
                         arg_docs.push(self.expression_doc(arg)?);
                     }
                     let doc = docvec![
-                        format!(
-                            "let {super_result_var} = call 'beamtalk_dispatch':'super'('{selector_atom}', ["
-                        ),
+                        "let ",
+                        Document::String(super_result_var.clone()),
+                        " = call 'beamtalk_dispatch':'super'('",
+                        Document::String(selector_atom),
+                        "', [",
                         Document::Vec(arg_docs),
-                        format!("], Self, {current_state}, '{class_name}')"),
+                        "], Self, ",
+                        Document::String(current_state),
+                        ", '",
+                        Document::String(class_name),
+                        "')",
                     ];
                     docs.push(doc);
                 }
 
                 // Extract state from the {reply, Result, NewState} tuple using element/2
-                let doc = Document::String(format!(
-                    " in let {new_state} = call 'erlang':'element'(3, {super_result_var}) in "
-                ));
+                let doc = docvec![
+                    " in let ",
+                    Document::String(new_state),
+                    " = call 'erlang':'element'(3, ",
+                    Document::String(super_result_var),
+                    ") in ",
+                ];
                 docs.push(doc);
-            } else if self.expr_contains_tier2_value_call(expr) {
-                // BT-851: Tier 2 value: calls in non-last positions silently lose
-                // state updates. Reject at compile time until Phase 1 adds chaining.
-                return Err(CodeGenError::UnsupportedFeature {
-                    feature: "Tier 2 stateful block value: call in non-last position \
-                              (state updates would be lost)"
-                        .to_string(),
-                    location: "actor method body".to_string(),
-                });
+            } else if self.is_tier2_value_call(expr) {
+                // BT-853: Tier 2 value: call in non-last position.
+                // Returns {Result, NewState} — discard Result, thread NewState.
+                let tuple_var = self.fresh_temp_var("T2Tuple");
+                let discard_var = self.fresh_temp_var("T2Discard");
+                let expr_str = self.expression_doc(expr)?;
+                let new_state = self.next_state_var();
+                docs.push(docvec![
+                    "let ",
+                    Document::String(tuple_var.clone()),
+                    " = ",
+                    expr_str,
+                    " in let ",
+                    Document::String(discard_var),
+                    " = call 'erlang':'element'(1, ",
+                    Document::String(tuple_var.clone()),
+                    ")\n in let ",
+                    Document::String(new_state),
+                    " = call 'erlang':'element'(2, ",
+                    Document::String(tuple_var),
+                    ") in ",
+                ]);
             } else if let Some(tier2_args) = self.detect_tier2_self_send(expr) {
                 // BT-851: Tier 2 self-send with stateful block arguments.
                 let doc = self.generate_tier2_self_send_open(expr, &tier2_args)?;
@@ -729,9 +904,15 @@ impl CoreErlangGenerator {
                 };
                 let expr_str = self.expression_doc(expr)?;
                 let doc = docvec![
-                    format!("let {tuple_var} = "),
+                    "let ",
+                    Document::String(tuple_var.clone()),
+                    " = ",
                     expr_str,
-                    format!(" in let {new_state} = call 'erlang':'element'(2, {tuple_var}) in "),
+                    " in let ",
+                    Document::String(new_state),
+                    " = call 'erlang':'element'(2, ",
+                    Document::String(tuple_var),
+                    ") in ",
                 ];
                 docs.push(doc);
                 let _ = self.next_state_var();
@@ -739,7 +920,7 @@ impl CoreErlangGenerator {
                 // Non-assignment intermediate expression: wrap in let
                 let tmp_var = self.fresh_temp_var("seq");
                 let expr_str = self.expression_doc(expr)?;
-                let doc = docvec![format!("let {tmp_var} = "), expr_str, " in ",];
+                let doc = docvec!["let ", Document::String(tmp_var), " = ", expr_str, " in ",];
                 docs.push(doc);
             }
         }
@@ -1168,9 +1349,13 @@ impl CoreErlangGenerator {
 
             let doc = docvec![
                 "\n",
-                format!(
-                    "'class_{selector_name}'/{arity} = fun (ClassSelf, ClassVars{params_suffix}) ->"
-                ),
+                "'class_",
+                Document::String(selector_name.to_string()),
+                "'/",
+                Document::String(arity.to_string()),
+                " = fun (ClassSelf, ClassVars",
+                Document::String(params_suffix),
+                ") ->",
                 nest(INDENT, docvec![line(), body_str,]),
                 "\n",
             ];
@@ -1216,16 +1401,25 @@ impl CoreErlangGenerator {
                     if self.class_var_mutated {
                         let final_cv = self.current_class_var();
                         let doc = docvec![
-                            format!("let {result_var} = "),
+                            "let ",
+                            Document::String(result_var.clone()),
+                            " = ",
                             value_str,
-                            format!(" in {{'class_var_result', {result_var}, {final_cv}}}"),
+                            " in {'class_var_result', ",
+                            Document::String(result_var),
+                            ", ",
+                            Document::String(final_cv),
+                            "}",
                         ];
                         docs.push(doc);
                     } else {
                         let doc = docvec![
-                            format!("let {result_var} = "),
+                            "let ",
+                            Document::String(result_var.clone()),
+                            " = ",
                             value_str,
-                            format!(" in {result_var}"),
+                            " in ",
+                            Document::String(result_var),
                         ];
                         docs.push(doc);
                     }
@@ -1247,14 +1441,20 @@ impl CoreErlangGenerator {
                         if let Some(result_var) = &self.last_open_scope_result.clone() {
                             let doc = docvec![
                                 expr_str,
-                                format!("{{'class_var_result', {result_var}, {final_cv}}}"),
+                                "{'class_var_result', ",
+                                Document::String(result_var.clone()),
+                                ", ",
+                                Document::String(final_cv),
+                                "}",
                             ];
                             docs.push(doc);
                         } else {
                             // Fallback: shouldn't happen
                             let doc = docvec![
                                 expr_str,
-                                format!("{{'class_var_result', 'nil', {final_cv}}}"),
+                                "{'class_var_result', 'nil', ",
+                                Document::String(final_cv),
+                                "}",
                             ];
                             docs.push(doc);
                         }
@@ -1264,16 +1464,25 @@ impl CoreErlangGenerator {
                         if self.class_var_mutated {
                             let final_cv = self.current_class_var();
                             let doc = docvec![
-                                format!("let {result_var} = "),
+                                "let ",
+                                Document::String(result_var.clone()),
+                                " = ",
                                 expr_str,
-                                format!(" in {{'class_var_result', {result_var}, {final_cv}}}"),
+                                " in {'class_var_result', ",
+                                Document::String(result_var),
+                                ", ",
+                                Document::String(final_cv),
+                                "}",
                             ];
                             docs.push(doc);
                         } else {
                             let doc = docvec![
-                                format!("let {result_var} = "),
+                                "let ",
+                                Document::String(result_var.clone()),
+                                " = ",
                                 expr_str,
-                                format!(" in {result_var}"),
+                                " in ",
+                                Document::String(result_var),
                             ];
                             docs.push(doc);
                         }
@@ -1294,9 +1503,6 @@ impl CoreErlangGenerator {
                 // `generate_identifier`, which generates `call 'maps':'get'('d', State)`.
                 // Class methods have no State parameter, causing {unbound_var, 'State', ...}.
                 if let Expression::Assignment { target, value, .. } = expr {
-                    if let Expression::Block(block) = value.as_ref() {
-                        Self::validate_stored_closure(block, format!("{:?}", expr.span()))?;
-                    }
                     if let Expression::Identifier(id) = target.as_ref() {
                         let var_name = &id.name;
                         let core_var = self
@@ -1304,13 +1510,19 @@ impl CoreErlangGenerator {
                             .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
                         let val_doc = self.expression_doc(value)?;
                         self.bind_var(var_name, &core_var);
-                        docs.push(docvec![format!("let {core_var} = "), val_doc, " in "]);
+                        docs.push(docvec![
+                            "let ",
+                            Document::String(core_var),
+                            " = ",
+                            val_doc,
+                            " in "
+                        ]);
                     }
                 }
             } else {
                 let tmp_var = self.fresh_temp_var("seq");
                 let expr_str = self.expression_doc(expr)?;
-                let doc = docvec![format!("let {tmp_var} = "), expr_str, " in ",];
+                let doc = docvec!["let ", Document::String(tmp_var), " = ", expr_str, " in ",];
                 docs.push(doc);
             }
         }
@@ -1328,21 +1540,6 @@ impl CoreErlangGenerator {
         }
         // Fallback: use selector name
         method.selector.name().to_string()
-    }
-
-    /// BT-851: Checks if an expression contains a Tier 2 `value:` call, either at
-    /// the top level or nested inside an assignment RHS.
-    ///
-    /// This catches both `aBlock value: x` and `result := aBlock value: x` where
-    /// the `{Result, NewState}` tuple would be silently mishandled.
-    fn expr_contains_tier2_value_call(&self, expr: &Expression) -> bool {
-        if self.is_tier2_value_call(expr) {
-            return true;
-        }
-        if let Expression::Assignment { value, .. } = expr {
-            return self.is_tier2_value_call(value);
-        }
-        false
     }
 
     /// BT-851: Checks if an expression is a `value:` call on a Tier 2 block parameter.
@@ -1372,6 +1569,102 @@ impl CoreErlangGenerator {
             }
         }
         false
+    }
+
+    /// BT-853: Checks if any expression in a method body invokes `param_name` with
+    /// `value`, `value:`, `value:value:`, or `value:value:value:`.
+    ///
+    /// Used to detect HOM (higher-order method) parameters: if a parameter is invoked
+    /// as a block inside the method body, it is a block parameter and should use the
+    /// Tier 2 stateful calling convention when a Tier 2 block is passed.
+    fn method_body_has_value_call_on(param_name: &str, body: &[Expression]) -> bool {
+        body.iter()
+            .any(|expr| Self::expr_has_value_call_on(param_name, expr))
+    }
+
+    /// Recursively checks if an expression contains a `value`/`value:`/... call on `param_name`.
+    fn expr_has_value_call_on(param_name: &str, expr: &Expression) -> bool {
+        match expr {
+            Expression::MessageSend {
+                receiver,
+                selector,
+                arguments,
+                ..
+            } => {
+                let is_value_selector = match selector {
+                    crate::ast::MessageSelector::Unary(name) => name == "value",
+                    crate::ast::MessageSelector::Keyword(parts) => {
+                        let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+                        matches!(
+                            sel.as_str(),
+                            "value:" | "value:value:" | "value:value:value:"
+                        )
+                    }
+                    crate::ast::MessageSelector::Binary(_) => false,
+                };
+                if is_value_selector {
+                    if let Expression::Identifier(id) = receiver.as_ref() {
+                        if id.name == param_name {
+                            return true;
+                        }
+                    }
+                }
+                // Also check sub-expressions
+                if Self::expr_has_value_call_on(param_name, receiver) {
+                    return true;
+                }
+                arguments
+                    .iter()
+                    .any(|a| Self::expr_has_value_call_on(param_name, a))
+            }
+            Expression::Assignment { value, .. } | Expression::Return { value, .. } => {
+                Self::expr_has_value_call_on(param_name, value)
+            }
+            Expression::Block(block) => block
+                .body
+                .iter()
+                .any(|e| Self::expr_has_value_call_on(param_name, e)),
+            Expression::Cascade {
+                receiver, messages, ..
+            } => {
+                // Check if receiver IS param_name and any cascade message has value: selector.
+                // E.g. `aBlock msg1; value: x` — receiver=aBlock, messages=[msg1, {value:, [x]}]
+                if let Expression::Identifier(id) = receiver.as_ref() {
+                    if id.name == param_name {
+                        let has_value_send = messages.iter().any(|m| {
+                            let sel: String = match &m.selector {
+                                crate::ast::MessageSelector::Unary(n) => n.to_string(),
+                                crate::ast::MessageSelector::Keyword(parts) => {
+                                    parts.iter().map(|p| p.keyword.as_str()).collect()
+                                }
+                                crate::ast::MessageSelector::Binary(_) => String::new(),
+                            };
+                            matches!(
+                                sel.as_str(),
+                                "value" | "value:" | "value:value:" | "value:value:value:"
+                            )
+                        });
+                        if has_value_send {
+                            return true;
+                        }
+                    }
+                }
+                // Recurse into receiver and message arguments
+                Self::expr_has_value_call_on(param_name, receiver)
+                    || messages.iter().any(|m| {
+                        m.arguments
+                            .iter()
+                            .any(|a| Self::expr_has_value_call_on(param_name, a))
+                    })
+            }
+            Expression::Match { value, arms, .. } => {
+                Self::expr_has_value_call_on(param_name, value)
+                    || arms
+                        .iter()
+                        .any(|arm| Self::expr_has_value_call_on(param_name, &arm.body))
+            }
+            _ => false,
+        }
     }
 
     /// Checks if a control flow expression actually threads state through mutations.
@@ -1422,5 +1715,139 @@ impl CoreErlangGenerator {
         // If we can't analyze (e.g., block isn't a literal), conservatively return false
         // to avoid binding non-state values to StateN
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{CascadeMessage, Expression, Identifier, MatchArm, MessageSelector, Pattern};
+    use crate::source_analysis::Span;
+
+    fn make_id(name: &str) -> Expression {
+        Expression::Identifier(Identifier::new(
+            name,
+            Span::new(0, name.len().try_into().unwrap()),
+        ))
+    }
+
+    fn make_value_send(receiver: &str, arg: &str) -> Expression {
+        Expression::MessageSend {
+            receiver: Box::new(make_id(receiver)),
+            selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+                "value:",
+                Span::new(0, 6),
+            )]),
+            arguments: vec![make_id(arg)],
+            span: Span::new(0, 20),
+        }
+    }
+
+    // BT-852/BT-853: expr_has_value_call_on — Cascade detection
+
+    #[test]
+    fn test_expr_has_value_call_on_cascade_direct() {
+        // `aBlock someMsg; value: x` — cascade where receiver is the param
+        // and one of the cascade messages has value: selector.
+        // Before the fix, this fell through to _ => false.
+        let cascade = Expression::Cascade {
+            receiver: Box::new(make_id("aBlock")),
+            messages: vec![
+                CascadeMessage::new(
+                    MessageSelector::Unary("someMsg".into()),
+                    vec![],
+                    Span::new(0, 7),
+                ),
+                CascadeMessage::new(
+                    MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+                        "value:",
+                        Span::new(0, 6),
+                    )]),
+                    vec![make_id("x")],
+                    Span::new(0, 10),
+                ),
+            ],
+            span: Span::new(0, 30),
+        };
+        assert!(
+            CoreErlangGenerator::expr_has_value_call_on("aBlock", &cascade),
+            "Should detect value: send in cascade to named param"
+        );
+        assert!(
+            !CoreErlangGenerator::expr_has_value_call_on("otherBlock", &cascade),
+            "Should not detect value: send to a different param name"
+        );
+    }
+
+    #[test]
+    fn test_expr_has_value_call_on_cascade_in_arg() {
+        // `someObj msg: (aBlock value: x)` — value: call nested inside a cascade message arg.
+        // Before the fix, this fell through to _ => false.
+        let cascade = Expression::Cascade {
+            receiver: Box::new(make_id("someObj")),
+            messages: vec![CascadeMessage::new(
+                MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+                    "msg:",
+                    Span::new(0, 4),
+                )]),
+                vec![make_value_send("aBlock", "x")],
+                Span::new(0, 20),
+            )],
+            span: Span::new(0, 30),
+        };
+        assert!(
+            CoreErlangGenerator::expr_has_value_call_on("aBlock", &cascade),
+            "Should detect value: send nested in cascade message argument"
+        );
+    }
+
+    // BT-852/BT-853: expr_has_value_call_on — Match detection
+
+    #[test]
+    fn test_expr_has_value_call_on_match_in_arm_body() {
+        // `someVal match: [_ -> aBlock value: x; _ -> nil]`
+        // Before the fix, this fell through to _ => false.
+        let match_expr = Expression::Match {
+            value: Box::new(make_id("someVal")),
+            arms: vec![
+                MatchArm::new(
+                    Pattern::Wildcard(Span::new(0, 1)),
+                    make_value_send("aBlock", "x"),
+                    Span::new(0, 20),
+                ),
+                MatchArm::new(
+                    Pattern::Wildcard(Span::new(0, 1)),
+                    make_id("nil"),
+                    Span::new(0, 3),
+                ),
+            ],
+            span: Span::new(0, 50),
+        };
+        assert!(
+            CoreErlangGenerator::expr_has_value_call_on("aBlock", &match_expr),
+            "Should detect value: send in match arm body"
+        );
+        assert!(
+            !CoreErlangGenerator::expr_has_value_call_on("otherBlock", &match_expr),
+            "Should not detect value: send for a different param name"
+        );
+    }
+
+    #[test]
+    fn test_expr_has_value_call_on_match_not_detected_without_value_call() {
+        // match expression where param appears as a value but is never called with value:
+        let match_expr = Expression::Match {
+            value: Box::new(make_id("someVal")),
+            arms: vec![MatchArm::new(
+                Pattern::Wildcard(Span::new(0, 1)),
+                make_id("aBlock"),
+                Span::new(0, 10),
+            )],
+            span: Span::new(0, 20),
+        };
+        assert!(
+            !CoreErlangGenerator::expr_has_value_call_on("aBlock", &match_expr),
+            "Should not trigger for mere reference to param (not a value: call)"
+        );
     }
 }

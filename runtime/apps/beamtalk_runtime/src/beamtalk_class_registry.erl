@@ -22,6 +22,7 @@
 -module(beamtalk_class_registry).
 
 -include("beamtalk.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 -export([
     whereis_class/1,
@@ -34,6 +35,8 @@
     drain_class_warnings_by_names/1,
     record_pending_load_error/2,
     drain_pending_load_errors_by_names/1,
+    validate_class_update/3,
+    is_stdlib_module/1,
     inherits_from/2,
     direct_subclasses/1,
     all_subclasses/1,
@@ -184,6 +187,53 @@ drain_pending_load_errors_by_names(ClassNames) ->
                 ClassNames
             )
     end.
+
+%% @doc Validate a class update for stdlib shadowing and cross-module redefinition.
+%% BT-738: Rejects updates where a user module tries to shadow a stdlib class.
+%% BT-737: Emits a warning when a class is redefined from a different module.
+%% Returns ok if the update is permitted, {error, Error} if it must be rejected.
+-spec validate_class_update(atom(), atom(), map()) -> ok | {error, #beamtalk_error{}}.
+validate_class_update(ClassName, OldModule, ClassInfo) ->
+    NewModule = maps:get(module, ClassInfo, OldModule),
+    case is_stdlib_module(OldModule) andalso not is_stdlib_module(NewModule) of
+        true ->
+            Error0 = beamtalk_error:new(stdlib_shadowing, ClassName),
+            Error1 = beamtalk_error:with_hint(
+                Error0,
+                <<"Choose a different class name. Stdlib class names are protected.">>
+            ),
+            ?LOG_WARNING("Rejected stdlib class shadowing attempt", #{
+                class => ClassName,
+                stdlib_module => OldModule,
+                user_module => NewModule
+            }),
+            record_pending_load_error(ClassName, Error1),
+            {error, Error1};
+        false ->
+            case OldModule =:= NewModule of
+                false ->
+                    ?LOG_WARNING("Class redefined from different module", #{
+                        class => ClassName,
+                        old_module => OldModule,
+                        new_module => NewModule
+                    }),
+                    record_class_collision_warning(ClassName, OldModule, NewModule);
+                true ->
+                    ok
+            end,
+            ok
+    end.
+
+%% @doc Returns true if the given module atom belongs to the Beamtalk stdlib.
+%% BT-738: Stdlib modules have the prefix 'bt@stdlib@'.
+-spec is_stdlib_module(atom()) -> boolean().
+is_stdlib_module(Module) when is_atom(Module) ->
+    case atom_to_binary(Module, utf8) of
+        <<"bt@stdlib@", _/binary>> -> true;
+        _ -> false
+    end;
+is_stdlib_module(_) ->
+    false.
 
 %% @private Ensure the pending load errors ETS table exists.
 -spec ensure_pending_errors_table() -> ok.

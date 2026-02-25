@@ -1148,16 +1148,9 @@ impl CoreErlangGenerator {
                 arguments,
                 ..
             } => self.generate_message_send(receiver, selector, arguments),
-            Expression::Assignment {
-                target,
-                value,
-                span,
-            } => {
-                // Check if we're storing a block with mutations (ERROR)
-                // Per BT-90: only literal blocks in control flow can mutate
-                if let Expression::Block(block) = value.as_ref() {
-                    Self::validate_stored_closure(block, format!("{span:?}"))?;
-                }
+            Expression::Assignment { target, value, .. } => {
+                // BT-852: Stored blocks with mutations are now supported via Tier 2.
+                // generate_block() handles stateful emission; no validation needed here.
 
                 // Check if this is a field assignment (self.field := value)
                 if let Expression::FieldAccess {
@@ -1534,7 +1527,10 @@ impl CoreErlangGenerator {
     /// Returns an error for both field assignments and local mutations; the local-mutation
     /// error is phrased as a warning in its message.
     ///
-    /// Per BT-90 design: only literal blocks in control flow positions can mutate.
+    /// BT-852: This function is retained for unit tests. Production call sites have been
+    /// removed since stored closures with mutations are now supported via the Tier 2
+    /// stateful block protocol (ADR 0041).
+    #[allow(dead_code)]
     fn validate_stored_closure(block: &Block, span_str: String) -> Result<()> {
         use crate::codegen::core_erlang::block_analysis::analyze_block;
 
