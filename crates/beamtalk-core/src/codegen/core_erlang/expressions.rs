@@ -453,12 +453,46 @@ impl CoreErlangGenerator {
 
     /// Generates code for a block (closure).
     ///
-    /// Blocks are Core Erlang funs with parameters:
-    /// ```erlang
-    /// fun (Param1, Param2) -> <body> end
-    /// ```
+    /// BT-852: Automatically selects Tier 1 (plain) or Tier 2 (stateful) codegen
+    /// based on `BlockMutationAnalysis`:
+    ///
+    /// - **Tier 2 (stateful):** blocks with captured variable mutations emit
+    ///   `fun(Params..., StateAcc) -> {Result, NewStateAcc}`
+    /// - **Tier 1 (plain):** pure blocks (no captured mutations) emit
+    ///   `fun(Params...) -> Result` — zero overhead path unchanged
+    ///
+    /// Captured mutations = variables written inside the block that were also
+    /// read from the outer scope (i.e. `local_writes ∩ captured_reads`).
+    /// Field writes (`self.x := ...`) and self-sends are handled separately:
+    /// - Field writes are threaded via `gen_server` State at the method level (BT-860 for Tier 2).
+    /// - Self-sends are pre-scanned via `generate_tier2_self_send_open` (BT-851).
+    ///
+    /// Tier 1 blocks handled by dedicated generators (whileTrue:, do:, collect:, etc.)
+    /// never reach this function — they call `generate_block_body()` directly.
     pub(super) fn generate_block(&mut self, block: &Block) -> Result<Document<'static>> {
-        // Push a new scope for block parameters
+        use crate::codegen::core_erlang::block_analysis::analyze_block;
+
+        let analysis = analyze_block(block);
+
+        // Captured mutations: variables read from outer scope AND written in block
+        let captured_mutations: Vec<String> = analysis
+            .local_writes
+            .intersection(&analysis.captured_reads)
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+
+        // BT-852: Blocks with captured local mutations use Tier 2 stateful calling convention.
+        // Field-write-only blocks (self.x := ...) are NOT yet promoted to Tier 2 here because
+        // the caller side (detect_tier2_self_send, HOM dispatch) does not yet detect them as
+        // Tier 2 — promoting them would emit {Result, NewState} tuples that callers unpack as
+        // plain values, causing a runtime crash. Field-write Tier 2 support is tracked in BT-860.
+        if !captured_mutations.is_empty() {
+            return self.generate_block_stateful(block, &captured_mutations);
+        }
+
+        // Pure block: plain fun (Tier 1 optimization)
         self.push_scope();
 
         let mut params = String::new();
@@ -595,21 +629,35 @@ impl CoreErlangGenerator {
             } else if Self::is_local_var_assignment(expr) {
                 let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
                 docs.push(assign_doc);
-                if is_last {
-                    // Last expression is an assignment — result is the assigned value.
-                    // Read it from the updated state map (the _Val was put there).
-                    if let Expression::Assignment { target, .. } = expr {
-                        if let Expression::Identifier(id) = target.as_ref() {
-                            let state = self.current_state_var();
-                            let key = Self::local_state_key(&id.name);
+                if let Expression::Assignment { target, .. } = expr {
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        let state = self.current_state_var();
+                        let key = Self::local_state_key(&id.name);
+                        if is_last {
+                            // Last expression is an assignment — result is the assigned value.
+                            // Read it from the updated state map (the _Val was put there).
                             docs.push(docvec![
                                 "{call 'maps':'get'('",
-                                Document::String(key),
+                                Document::String(key.clone()),
                                 "', ",
                                 Document::String(state.clone()),
                                 "), ",
                                 Document::String(state),
                                 "}"
+                            ]);
+                        } else {
+                            // Non-last assignment: refresh scope binding so subsequent reads
+                            // of this variable see the updated value (not the initial unpack).
+                            let fresh = self.fresh_temp_var("Refreshed");
+                            self.bind_var(&id.name, &fresh);
+                            docs.push(docvec![
+                                "let ",
+                                Document::String(fresh),
+                                " = call 'maps':'get'('",
+                                Document::String(key),
+                                "', ",
+                                Document::String(state),
+                                ") in "
                             ]);
                         }
                     }
@@ -912,10 +960,8 @@ impl CoreErlangGenerator {
             } else if is_local_assignment {
                 // Local variable assignment: generate with proper binding
                 if let Expression::Assignment { target, value, .. } = expr {
-                    // Check if we're storing a block with mutations (ERROR)
-                    if let Expression::Block(block) = value.as_ref() {
-                        Self::validate_stored_closure(block, format!("{:?}", expr.span()))?;
-                    }
+                    // BT-852: Stored blocks with mutations are now supported via Tier 2.
+                    // generate_block() handles stateful emission; no validation needed here.
 
                     if let Expression::Identifier(id) = target.as_ref() {
                         let var_name = &id.name;

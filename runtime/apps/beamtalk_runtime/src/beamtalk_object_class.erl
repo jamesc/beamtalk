@@ -271,14 +271,9 @@ init({ClassName, ClassInfo}) ->
 handle_call(
     {spawn, Args},
     _From,
-    #class_state{
-        name = ClassName,
-        module = Module,
-        is_abstract = IsAbstract
-    } = State
+    #class_state{name = ClassName, module = Module, is_abstract = IsAbstract} = State
 ) ->
-    Result = beamtalk_class_instantiation:handle_spawn(Args, ClassName, Module, IsAbstract),
-    {reply, Result, State};
+    {reply, beamtalk_class_instantiation:handle_spawn(Args, ClassName, Module, IsAbstract), State};
 handle_call({new, Args}, _From, #class_state{name = ClassName, is_abstract = true} = State) ->
     Selector =
         case Args of
@@ -321,99 +316,44 @@ handle_call(module_name, _From, #class_state{module = Module} = State) ->
 handle_call(
     {method, Selector},
     _From,
-    #class_state{
-        instance_methods = Methods,
-        method_source = Source,
-        method_docs = MethodDocs
-    } = State
+    #class_state{instance_methods = Methods, method_source = Source, method_docs = MethodDocs} =
+        State
 ) ->
-    case maps:find(Selector, Methods) of
-        {ok, MethodInfo} ->
-            Src = maps:get(Selector, Source, <<"">>),
-            Doc = maps:get(Selector, MethodDocs, nil),
-            MethodObj = #{
-                '$beamtalk_class' => 'CompiledMethod',
-                '__selector__' => Selector,
-                '__source__' => Src,
-                '__method_info__' => MethodInfo,
-                '__doc__' => Doc
-            },
-            {reply, MethodObj, State};
-        error ->
-            {reply, nil, State}
-    end;
+    Result =
+        case maps:find(Selector, Methods) of
+            {ok, MethodInfo} ->
+                #{
+                    '$beamtalk_class' => 'CompiledMethod',
+                    '__selector__' => Selector,
+                    '__source__' => maps:get(Selector, Source, <<"">>),
+                    '__method_info__' => MethodInfo,
+                    '__doc__' => maps:get(Selector, MethodDocs, nil)
+                };
+            error ->
+                nil
+        end,
+    {reply, Result, State};
 handle_call({put_method, Selector, Fun, Source}, _From, State) ->
     {arity, Arity} = erlang:fun_info(Fun, arity),
     MethodInfo = #{block => Fun, arity => Arity},
-    NewMethods = maps:put(Selector, MethodInfo, State#class_state.instance_methods),
-    NewSource = maps:put(Selector, Source, State#class_state.method_source),
     %% ADR 0032 Phase 1: No flattened table to rebuild or invalidate.
     %% Dispatch finds the new method via chain walk on the next call.
-    NewState = State#class_state{instance_methods = NewMethods, method_source = NewSource},
-    notify_instances(State#class_state.name, NewMethods),
+    NewState = State#class_state{
+        instance_methods = maps:put(Selector, MethodInfo, State#class_state.instance_methods),
+        method_source = maps:put(Selector, Source, State#class_state.method_source)
+    },
     {reply, ok, NewState};
 %% BT-572: Update class metadata after redefinition (hot reload).
-%% BT-737: Emits a collision warning when a class is redefined from a different module.
-%% BT-738: Rejects redefinition that would shadow a stdlib class.
-%% Returns {ok, InstanceVars} with the new instance variable list for state migration.
+%% BT-737/BT-738: Validation (shadowing + collision) delegated to beamtalk_class_registry.
 %% ADR 0032 Phase 1: No flattened tables to rebuild or invalidate.
 handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = State) ->
     OldModule = State#class_state.module,
-    NewModule = maps:get(module, ClassInfo, OldModule),
-    %% BT-738: Stdlib classes cannot be shadowed by user code.
-    %% If the existing class belongs to the stdlib (bt@stdlib@*) and the incoming
-    %% module does NOT, reject the redefinition with a structured error.
-    case is_stdlib_module(OldModule) andalso not is_stdlib_module(NewModule) of
-        true ->
-            Error0 = beamtalk_error:new(stdlib_shadowing, ClassName),
-            Error1 = beamtalk_error:with_hint(
-                Error0,
-                <<"Choose a different class name. Stdlib class names are protected.">>
-            ),
-            ?LOG_WARNING("Rejected stdlib class shadowing attempt", #{
-                class => ClassName,
-                stdlib_module => OldModule,
-                user_module => NewModule
-            }),
-            %% Store in ETS so the REPL load handler can retrieve the structured error
-            %% after code:load_binary returns {error, on_load_failure}.
-            beamtalk_class_registry:record_pending_load_error(ClassName, Error1),
-            {reply, {error, Error1}, State};
-        false ->
-            %% BT-737: Detect cross-package class redefinition (different BEAM module).
-            %% Same-module reload (hot reload of the same file) does NOT produce a warning.
-            case OldModule =:= NewModule of
-                false ->
-                    ?LOG_WARNING("Class redefined from different module", #{
-                        class => ClassName,
-                        old_module => OldModule,
-                        new_module => NewModule
-                    }),
-                    beamtalk_class_registry:record_class_collision_warning(
-                        ClassName, OldModule, NewModule
-                    );
-                true ->
-                    ok
-            end,
-            %% ADR 0032 Phase 1: No flattened tables to rebuild or invalidate.
-            NewInstanceMethods = maps:get(
-                instance_methods, ClassInfo, State#class_state.instance_methods
-            ),
-            NewClassMethods = maps:get(class_methods, ClassInfo, State#class_state.class_methods),
-            NewIVars = maps:get(
-                fields, ClassInfo, State#class_state.fields
-            ),
-            NewState = State#class_state{
-                module = maps:get(module, ClassInfo, State#class_state.module),
-                instance_methods = NewInstanceMethods,
-                class_methods = NewClassMethods,
-                fields = NewIVars,
-                method_source = maps:get(method_source, ClassInfo, State#class_state.method_source),
-                is_constructible = undefined,
-                doc = maps:get(doc, ClassInfo, State#class_state.doc),
-                method_docs = maps:get(method_docs, ClassInfo, State#class_state.method_docs)
-            },
-            {reply, {ok, NewIVars}, NewState}
+    case beamtalk_class_registry:validate_class_update(ClassName, OldModule, ClassInfo) of
+        {error, Error} ->
+            {reply, {error, Error}, State};
+        ok ->
+            NewState = apply_class_info(State, ClassInfo),
+            {reply, {ok, NewState#class_state.fields}, NewState}
     end;
 handle_call(instance_variables, _From, #class_state{fields = IVars} = State) ->
     {reply, IVars, State};
@@ -434,10 +374,9 @@ handle_call(
         IsConstructible0, Module, IsAbstract
     ),
     {reply, IsConstructible, State#class_state{is_constructible = IsConstructible}};
-%% ADR 0032 Phase 1: Returns local class_methods for chain walk queries.
+%% ADR 0032 Phase 1: Returns local methods for chain walk queries.
 handle_call(get_local_class_methods, _From, #class_state{class_methods = ClassMethods} = State) ->
     {reply, ClassMethods, State};
-%% ADR 0032 Phase 1: Returns local instance_methods for chain walk queries.
 handle_call(get_instance_methods, _From, #class_state{instance_methods = InstanceMethods} = State) ->
     {reply, {ok, InstanceMethods}, State};
 %% ADR 0033: Runtime-embedded documentation — class doc accessors.
@@ -448,12 +387,11 @@ handle_call({set_doc, DocBinary}, _From, State) ->
 handle_call({set_method_doc, Selector, DocBinary}, _From, State) ->
     NewMethodDocs = maps:put(Selector, DocBinary, State#class_state.method_docs),
     {reply, ok, State#class_state{method_docs = NewMethodDocs}};
-%% ADR 0036 Phase 2 (BT-823): Metaclass method dispatch.
-%% Dispatches to user-defined class-side methods via handle_class_method_call,
-%% exactly like {class_method_call, ...}, so that metaclass_send/4 can use
-%% this handler instead of falling back to the BT-822 workaround.
+%% BT-411/BT-412/BT-440: Class method dispatch (BT-704).
+%% ADR 0036 Phase 2 (BT-823): Also handles metaclass_method_call with identical logic.
+%% ADR 0032 Phase 1: Passes local class_methods; dispatch walks superclass chain.
 handle_call(
-    {metaclass_method_call, Selector, Args},
+    {MethodCallType, Selector, Args},
     From,
     #class_state{
         class_methods = ClassMethods,
@@ -462,37 +400,7 @@ handle_call(
         module = Module,
         class_state = ClassVars
     } = State
-) ->
-    case
-        beamtalk_class_dispatch:handle_class_method_call(
-            Selector, Args, ClassName, Module, ClassMethods, ClassVars
-        )
-    of
-        {reply, Result, NewClassVars} ->
-            {reply, Result, State#class_state{class_state = NewClassVars}};
-        test_spawn ->
-            beamtalk_test_case:spawn_test_execution(
-                Selector, Args, ClassName, Module, InstanceMethods, From
-            ),
-            {noreply, State};
-        {error, not_found} ->
-            {reply, {error, not_found}, State}
-    end;
-%% BT-411/BT-412/BT-440: Class method dispatch.
-%% Delegates to beamtalk_class_dispatch (BT-704).
-%% ADR 0032 Phase 1: Passes local class_methods (no flattened table).
-%% beamtalk_class_dispatch walks the superclass chain if not found locally.
-handle_call(
-    {class_method_call, Selector, Args},
-    From,
-    #class_state{
-        class_methods = ClassMethods,
-        instance_methods = InstanceMethods,
-        name = ClassName,
-        module = Module,
-        class_state = ClassVars
-    } = State
-) ->
+) when MethodCallType =:= class_method_call; MethodCallType =:= metaclass_method_call ->
     case
         beamtalk_class_dispatch:handle_class_method_call(
             Selector, Args, ClassName, Module, ClassMethods, ClassVars
@@ -532,8 +440,6 @@ handle_cast(
     ),
     {noreply, State}.
 
-%% ADR 0032 Phase 1: {rebuild_flattened, _} messages are no longer sent
-%% (invalidate_subclass_flattened_tables removed from beamtalk_class_registry).
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -555,18 +461,20 @@ code_change(OldVsn, State, Extra) ->
 %% Internal functions
 %%====================================================================
 
-notify_instances(_ClassName, _NewMethods) ->
-    ok.
-
-%% @private
-%% @doc Returns true if the given module atom belongs to the Beamtalk stdlib.
-%% BT-738: Stdlib modules have the prefix 'bt@stdlib@'. This is the canonical
-%% way to identify stdlib-owned classes at runtime.
--spec is_stdlib_module(atom()) -> boolean().
-is_stdlib_module(Module) when is_atom(Module) ->
-    case atom_to_binary(Module, utf8) of
-        <<"bt@stdlib@", _/binary>> -> true;
-        _ -> false
-    end;
-is_stdlib_module(_) ->
-    false.
+%% @private Apply ClassInfo map to existing State, returning updated State.
+%% ADR 0032 Phase 1: No flattened tables to rebuild.
+%% ADR 0032 Phase 1: No flattened tables to rebuild or invalidate.
+-spec apply_class_info(#class_state{}, map()) -> #class_state{}.
+apply_class_info(State, ClassInfo) ->
+    State#class_state{
+        module = maps:get(module, ClassInfo, State#class_state.module),
+        instance_methods = maps:get(
+            instance_methods, ClassInfo, State#class_state.instance_methods
+        ),
+        class_methods = maps:get(class_methods, ClassInfo, State#class_state.class_methods),
+        fields = maps:get(fields, ClassInfo, State#class_state.fields),
+        method_source = maps:get(method_source, ClassInfo, State#class_state.method_source),
+        is_constructible = undefined,
+        doc = maps:get(doc, ClassInfo, State#class_state.doc),
+        method_docs = maps:get(method_docs, ClassInfo, State#class_state.method_docs)
+    }.
