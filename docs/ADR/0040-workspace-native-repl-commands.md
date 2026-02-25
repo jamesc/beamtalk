@@ -629,6 +629,54 @@ Actor subclass: BuildScript
 - Related: ADR 0038 (Subclass ClassBuilder Protocol) — ClassBuilder-created classes have `sourceFile => nil`
 - Related: BT-842 / ADR 0041 (Universal State-Threading Block Protocol) — the REPL eval function is the outermost "block" in BT-842's `fun(StateAcc) -> {Result, NewStateAcc}` protocol. Today the REPL's session `Bindings` map and codegen's `StateAcc` are already the same map (`let State = Bindings` in `repl_codegen.rs`). BT-842's universal protocol should preserve this: one map, not two. If Session ever becomes a first-class object (left open by this ADR), its bindings must be the same `StateAcc` that blocks thread.
 - Future work: **Per-session services.** `Workspace` is a shared singleton — all connected REPLs see the same state. A per-session `Terminal` actor (spawned on connect, injected into session locals) could route output to the correct connection, avoiding the interleaving problem with the shared `Transcript`. This requires no new language concept — the REPL shell already manages per-session bindings, so a pre-populated `Terminal` binding is just an automatic session local. See Alternative B for the broader `Session`-as-facade discussion.
+## Amendment: Mutable Workspace Globals — bind:as: / unbind: (BT-881)
+
+**Date:** 2026-02-25
+
+### Context
+
+ADR-40 established `Workspace globals` as a read-only snapshot with no write path. In Smalltalk (Pharo/GemStone), globals are read/write — `Smalltalk globals at: #X put: y` or `UserGlobals at: #X put: y` are standard patterns. Beamtalk needed an explicit, typed write path for registering named objects into the workspace namespace.
+
+### Decision
+
+Add `bind:as:` and `unbind:` methods to `WorkspaceInterface`:
+
+```beamtalk
+Workspace bind: myActor as: #MyTool     // registers, with checks
+Workspace unbind: #MyTool               // removes, errors if not found
+Workspace globals                        // R/O snapshot now includes user bindings
+Workspace globals at: #MyTool           // read a registered value
+```
+
+**Design choices:**
+
+- `Workspace globals` stays R/O (snapshot) — unchanged from ADR-40
+- Write path is explicit typed methods: `bind:as:` and `unbind:`
+- Any value allowed (not just actors)
+- `bind:as:` errors if name exists in Beamtalk globals (system name conflict — fail loud, fail early)
+- `bind:as:` warns (via Transcript) if name is an existing loaded class (use `reload` instead)
+- `unbind:` errors if name not found in user bindings
+- No persistence — registrations are lost on workspace restart
+- Workspace user bindings are stored in the `WorkspaceInterface` gen_server state and merged into REPL session bindings before each eval
+- Business logic (conflict checks, warnings) implemented in Erlang primitives due to compiler limitations with block variable capture in actor methods
+
+**Name resolution order** (updated from Section 4):
+
+```text
+Session locals (implicit)  →  Workspace user bindings  →  Workspace globals  →  Beamtalk globals
+   x = 42                     MyTool = <actor>            Transcript = ...       Integer = <class>
+   counter = #Actor<...>                                   Counter = <class>      String = <class>
+```
+
+Session locals override workspace user bindings, which override workspace globals and Beamtalk globals. The codegen's `maps:find(Name, State)` lookup handles this naturally since workspace user bindings are merged into the session bindings map before each eval.
+
+### Implementation
+
+- `beamtalk_workspace_interface.erl`: Added `user_bindings` field to gen_server state, `bind:as:` and `unbind:` dispatch with conflict checking
+- `beamtalk_repl_eval.erl`: Merges workspace user bindings into session bindings before each eval; strips them from result to prevent session state accumulation
+- `WorkspaceInterface.bt`: Added `bind:as:` and `unbind:` as `@primitive` methods
+- `handle_globals/2`: Updated to include user bindings in the snapshot
+
 - Prior art: Pharo `SmalltalkImage` facade + `Smalltalk globals` (SystemDictionary) — facade/dictionary split
 - Prior art: GemStone/S SymbolList and multiple SymbolDictionaries — plain dictionaries, intelligence in resolution
 - Prior art: Elixir `Code` module + IEx helpers, `r/1` class-based reload

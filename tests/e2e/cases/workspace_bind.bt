@@ -1,0 +1,94 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Workspace bind:as: and unbind: (BT-881).
+//
+// These tests require E2E because bind:as: and unbind: are
+// WorkspaceInterface methods that modify workspace-level state
+// and require REPL session binding injection to verify name resolution.
+
+// ===========================================================================
+// BIND:AS: — HAPPY PATH
+// ===========================================================================
+
+// Register a simple value in the workspace namespace
+(Workspace bind: 42 as: #MyValue) await
+// => nil
+
+// Registered name resolves in subsequent eval
+MyValue
+// => 42
+
+// Workspace globals includes the registered name
+globals := (Workspace globals) await
+// => _
+
+globals includesKey: #MyValue
+// => true
+
+globals at: #MyValue
+// => 42
+
+// ===========================================================================
+// BIND:AS: — OVERWRITE EXISTING USER BINDING
+// ===========================================================================
+
+// Re-binding an existing user binding updates the value
+(Workspace bind: 99 as: #MyValue) await
+// => nil
+
+MyValue
+// => 99
+
+// ===========================================================================
+// UNBIND: — HAPPY PATH
+// ===========================================================================
+
+// Unbind removes the registration
+(Workspace unbind: #MyValue) await
+// => nil
+
+// Workspace globals no longer includes the unbound name
+globals2 := (Workspace globals) await
+// => _
+
+globals2 includesKey: #MyValue
+// => false
+
+// ===========================================================================
+// BIND:AS: — SYSTEM NAME CONFLICT
+// ===========================================================================
+
+// Binding a name that exists in Beamtalk globals (system class) raises error
+[(Workspace bind: 42 as: #Integer) await] on: Error do: [:e | e message]
+// => Integer is a system name and cannot be shadowed
+
+// ===========================================================================
+// UNBIND: — NAME NOT FOUND ERROR
+// ===========================================================================
+
+// Unbinding a name that was never registered raises error
+[(Workspace unbind: #NoSuchBinding) await] on: Error do: [:e | e message]
+// => NoSuchBinding is not a registered workspace name
+
+// ===========================================================================
+// BIND:AS: — ACTOR VALUE
+// ===========================================================================
+
+// Register an actor reference
+counter := Counter spawn
+// => _
+
+(Workspace bind: counter as: #SharedCounter) await
+// => nil
+
+// Registered actor resolves and can receive messages
+SharedCounter increment await
+// => 1
+
+SharedCounter getValue await
+// => 1
+
+// Clean up
+(Workspace unbind: #SharedCounter) await
+// => nil

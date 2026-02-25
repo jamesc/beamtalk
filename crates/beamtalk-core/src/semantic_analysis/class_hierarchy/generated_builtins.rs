@@ -1596,6 +1596,8 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "load:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("Object".into()), param_types: vec![Some("String".into())] },
                 MethodInfo { selector: "test".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("TestResult".into()), param_types: vec![] },
                 MethodInfo { selector: "test:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("TestResult".into()), param_types: vec![Some("Object".into())] },
+                MethodInfo { selector: "bind:as:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![None, Some("Symbol".into())] },
+                MethodInfo { selector: "unbind:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![Some("Symbol".into())] },
             ],
             class_methods: vec![
                 MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("WorkspaceInterface".into()), param_types: vec![] },

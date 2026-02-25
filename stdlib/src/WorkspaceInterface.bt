@@ -103,3 +103,23 @@ Actor subclass: WorkspaceInterface
   /// Workspace test: CounterTest
   /// ```
   test: testClass: Object -> TestResult => TestRunner run: testClass
+
+  /// Register a value in the workspace namespace under a given name.
+  /// Subsequent REPL evals can reference the value by name.
+  /// Raises an error if name exists in Beamtalk globals (system name conflict).
+  /// Warns if name is an existing loaded class (use reload instead).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace bind: myActor as: #MyTool
+  /// ```
+  bind: value as: bindingName: Symbol -> Nil => @primitive "bind:as:"
+
+  /// Remove a registered name from the workspace namespace.
+  /// Raises an error if name is not found.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace unbind: #MyTool
+  /// ```
+  unbind: bindingName: Symbol -> Nil => @primitive "unbind:"

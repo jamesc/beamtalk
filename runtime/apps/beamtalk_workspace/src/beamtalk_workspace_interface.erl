@@ -54,7 +54,8 @@
     start_link/1,
     has_method/1,
     class_info/0,
-    dispatch/4
+    dispatch/4,
+    get_user_bindings/0
 ]).
 
 %% gen_server callbacks
@@ -69,7 +70,9 @@
 
 -type selector() :: atom().
 
--record(workspace_interface_state, {}).
+-record(workspace_interface_state, {
+    user_bindings = #{} :: #{atom() => term()}
+}).
 
 %%====================================================================
 %% API
@@ -86,6 +89,21 @@ start_link() ->
 start_link(ServerName) ->
     gen_server:start_link(ServerName, ?MODULE, [true], []).
 
+%% @doc Return workspace-level user bindings (for REPL session injection).
+%% Called before each eval to merge workspace bindings into session bindings.
+-spec get_user_bindings() -> #{atom() => term()}.
+get_user_bindings() ->
+    case whereis('Workspace') of
+        undefined ->
+            #{};
+        Pid ->
+            try
+                gen_server:call(Pid, get_user_bindings, 1000)
+            catch
+                _:_ -> #{}
+            end
+    end.
+
 %% @doc Check if Workspace supports a given method selector.
 -spec has_method(selector()) -> boolean().
 has_method(actors) -> true;
@@ -97,6 +115,8 @@ has_method(globals) -> true;
 has_method(testClasses) -> true;
 has_method(test) -> true;
 has_method('test:') -> true;
+has_method('bind:as:') -> true;
+has_method('unbind:') -> true;
 has_method(_) -> false.
 
 %% @doc Return class registration metadata for Workspace.
@@ -115,7 +135,9 @@ class_info() ->
             globals => #{arity => 0},
             testClasses => #{arity => 0},
             test => #{arity => 0},
-            'test:' => #{arity => 1}
+            'test:' => #{arity => 1},
+            'bind:as:' => #{arity => 2},
+            'unbind:' => #{arity => 1}
         },
         class_methods => #{},
         fields => []
@@ -141,13 +163,31 @@ dispatch('actorsOf:', [AClass], _Self, State) ->
     {reply, handle_actors_of(AClass), State};
 dispatch(globals, [], Self, State) ->
     GenServerPid = erlang:element(4, Self),
-    {reply, handle_globals(GenServerPid), State};
+    UserBindings =
+        try
+            gen_server:call(GenServerPid, get_user_bindings, 1000)
+        catch
+            _:_ -> #{}
+        end,
+    {reply, handle_globals(GenServerPid, UserBindings), State};
 dispatch(testClasses, [], _Self, State) ->
     {reply, handle_test_classes(), State};
 dispatch(test, [], _Self, State) ->
     {reply, handle_test(), State};
 dispatch('test:', [TestClass], _Self, State) ->
     {reply, handle_test_class(TestClass), State};
+dispatch('bind:as:', [Value, Name], Self, State) ->
+    GenServerPid = erlang:element(4, Self),
+    case handle_bind(Value, Name, GenServerPid) of
+        {error, Err} -> {error, Err, State};
+        Result -> {reply, Result, State}
+    end;
+dispatch('unbind:', [Name], Self, State) ->
+    GenServerPid = erlang:element(4, Self),
+    case handle_unbind(Name, GenServerPid) of
+        {error, Err} -> {error, Err, State};
+        Result -> {reply, Result, State}
+    end;
 dispatch(Selector, _Args, _Self, State) ->
     Err0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
     Err1 = beamtalk_error:with_selector(Err0, Selector),
@@ -186,8 +226,9 @@ handle_call({globals, []}, From, State) ->
     %% globals may call handle_actors which is fast, but spawn to avoid
     %% any risk of deadlock from singleton resolution
     GenServerPid = self(),
+    UserBindings = State#workspace_interface_state.user_bindings,
     spawn(fun() ->
-        try handle_globals(GenServerPid) of
+        try handle_globals(GenServerPid, UserBindings) of
             Result -> gen_server:reply(From, Result)
         catch
             Class:Reason:Stack ->
@@ -201,6 +242,48 @@ handle_call({globals, []}, From, State) ->
         end
     end),
     {noreply, State};
+handle_call({'bind:as:', [Value, Name]}, _From, State) ->
+    case to_atom_name(Name) of
+        {error, Err} ->
+            {reply, {error, Err}, State};
+        AtomName ->
+            case check_bind_conflicts(AtomName) of
+                ok ->
+                    UserBindings = State#workspace_interface_state.user_bindings,
+                    NewBindings = maps:put(AtomName, Value, UserBindings),
+                    NewState = State#workspace_interface_state{user_bindings = NewBindings},
+                    spawn(fun() -> maybe_warn_loaded_class(AtomName) end),
+                    {reply, nil, NewState};
+                {error, Err} ->
+                    {reply, {error, Err}, State}
+            end
+    end;
+handle_call({'unbind:', [Name]}, _From, State) ->
+    case to_atom_name(Name) of
+        {error, Err} ->
+            {reply, {error, Err}, State};
+        AtomName ->
+            UserBindings = State#workspace_interface_state.user_bindings,
+            case maps:is_key(AtomName, UserBindings) of
+                true ->
+                    NewBindings = maps:remove(AtomName, UserBindings),
+                    NewState = State#workspace_interface_state{user_bindings = NewBindings},
+                    {reply, nil, NewState};
+                false ->
+                    Err0 = beamtalk_error:new(name_not_found, 'WorkspaceInterface'),
+                    Err1 = beamtalk_error:with_selector(Err0, 'unbind:'),
+                    Err2 = beamtalk_error:with_message(
+                        Err1,
+                        iolist_to_binary([
+                            atom_to_binary(AtomName, utf8),
+                            <<" is not a registered workspace name">>
+                        ])
+                    ),
+                    {reply, {error, Err2}, State}
+            end
+    end;
+handle_call(get_user_bindings, _From, State) ->
+    {reply, State#workspace_interface_state.user_bindings, State};
 handle_call({'load:', [Path]}, _From, State) ->
     {reply, handle_load(Path), State};
 handle_call({test, []}, From, State) ->
@@ -289,8 +372,9 @@ handle_cast({testClasses, [], FuturePid}, State) when is_pid(FuturePid) ->
     {noreply, State};
 handle_cast({globals, [], FuturePid}, State) when is_pid(FuturePid) ->
     GenServerPid = self(),
+    UserBindings = State#workspace_interface_state.user_bindings,
     spawn(fun() ->
-        try handle_globals(GenServerPid) of
+        try handle_globals(GenServerPid, UserBindings) of
             Result -> beamtalk_future:resolve(FuturePid, Result)
         catch
             Class:Reason:Stack ->
@@ -304,6 +388,52 @@ handle_cast({globals, [], FuturePid}, State) when is_pid(FuturePid) ->
         end
     end),
     {noreply, State};
+handle_cast({'bind:as:', [Value, Name], FuturePid}, State) when is_pid(FuturePid) ->
+    case to_atom_name(Name) of
+        {error, Err} ->
+            beamtalk_future:reject(FuturePid, Err),
+            {noreply, State};
+        AtomName ->
+            case check_bind_conflicts(AtomName) of
+                ok ->
+                    UserBindings = State#workspace_interface_state.user_bindings,
+                    NewBindings = maps:put(AtomName, Value, UserBindings),
+                    NewState = State#workspace_interface_state{user_bindings = NewBindings},
+                    spawn(fun() -> maybe_warn_loaded_class(AtomName) end),
+                    beamtalk_future:resolve(FuturePid, nil),
+                    {noreply, NewState};
+                {error, Err} ->
+                    beamtalk_future:reject(FuturePid, Err),
+                    {noreply, State}
+            end
+    end;
+handle_cast({'unbind:', [Name], FuturePid}, State) when is_pid(FuturePid) ->
+    case to_atom_name(Name) of
+        {error, Err} ->
+            beamtalk_future:reject(FuturePid, Err),
+            {noreply, State};
+        AtomName ->
+            UserBindings = State#workspace_interface_state.user_bindings,
+            case maps:is_key(AtomName, UserBindings) of
+                true ->
+                    NewBindings = maps:remove(AtomName, UserBindings),
+                    NewState = State#workspace_interface_state{user_bindings = NewBindings},
+                    beamtalk_future:resolve(FuturePid, nil),
+                    {noreply, NewState};
+                false ->
+                    Err0 = beamtalk_error:new(name_not_found, 'WorkspaceInterface'),
+                    Err1 = beamtalk_error:with_selector(Err0, 'unbind:'),
+                    Err2 = beamtalk_error:with_message(
+                        Err1,
+                        iolist_to_binary([
+                            atom_to_binary(AtomName, utf8),
+                            <<" is not a registered workspace name">>
+                        ])
+                    ),
+                    beamtalk_future:reject(FuturePid, Err2),
+                    {noreply, State}
+            end
+    end;
 handle_cast({'load:', [Path], FuturePid}, State) when is_pid(FuturePid) ->
     case handle_load(Path) of
         {error, Err} ->
@@ -498,14 +628,14 @@ handle_test_classes() ->
     ).
 
 %% @doc Return an immutable Dictionary snapshot of the project namespace.
-%% Includes workspace singletons (Transcript, Beamtalk, Workspace) and
-%% all user-loaded classes (those with a recorded source file).
--spec handle_globals(pid()) -> map().
-handle_globals(GenServerPid) ->
+%% Includes workspace singletons (Transcript, Beamtalk, Workspace),
+%% all user-loaded classes, and user-registered bindings via bind:as:.
+-spec handle_globals(pid(), map()) -> map().
+handle_globals(GenServerPid, UserBindings) ->
     WorkspaceSelf =
         {beamtalk_object, 'WorkspaceInterface', ?MODULE, GenServerPid},
-    %% Start with workspace singletons
-    Base0 = #{},
+    %% Start with user-registered bindings (lowest priority — overridden by singletons/classes)
+    Base0 = UserBindings,
     Base1 =
         case resolve_singleton('TranscriptStream') of
             nil -> Base0;
@@ -595,9 +725,97 @@ handle_test_class(TestClass) ->
             beamtalk_class_dispatch:class_send(ClassPid, 'run:', [TestClass])
     end.
 
+%% @doc Handle bind:as: — forward to gen_server to validate and update state.
+-spec handle_bind(term(), term(), pid()) -> 'nil' | {error, #beamtalk_error{}}.
+handle_bind(Value, Name, GenServerPid) ->
+    gen_server:call(GenServerPid, {'bind:as:', [Value, Name]}, 5000).
+
+%% @doc Handle unbind: — forward to gen_server to validate and update state.
+-spec handle_unbind(term(), pid()) -> 'nil' | {error, #beamtalk_error{}}.
+handle_unbind(Name, GenServerPid) ->
+    gen_server:call(GenServerPid, {'unbind:', [Name]}, 5000).
+
 %%====================================================================
 %% Internal helpers
 %%====================================================================
+
+%% @doc Convert a name argument (binary, atom, or symbol) to an atom.
+%% Returns {error, Error} for non-string/non-atom arguments.
+-spec to_atom_name(term()) -> atom() | {error, #beamtalk_error{}}.
+to_atom_name(Name) when is_atom(Name) -> Name;
+to_atom_name(Name) when is_binary(Name) -> binary_to_atom(Name, utf8);
+to_atom_name(Name) when is_list(Name) -> list_to_atom(Name);
+to_atom_name(Other) ->
+    TypeName = value_type_name(Other),
+    Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
+    Err1 = beamtalk_error:with_message(
+        Err0,
+        iolist_to_binary([<<"Expected a Symbol name, got ">>, TypeName])
+    ),
+    {error, Err1}.
+
+%% @doc Check if a name conflicts with Beamtalk system globals or workspace singletons.
+%% Returns ok if no conflict, or {error, Error} if the name is protected.
+-spec check_bind_conflicts(atom()) -> ok | {error, #beamtalk_error{}}.
+check_bind_conflicts(AtomName) ->
+    case is_protected_name(AtomName) of
+        true ->
+            Err0 = beamtalk_error:new(name_conflict, 'WorkspaceInterface'),
+            Err1 = beamtalk_error:with_selector(Err0, 'bind:as:'),
+            Err2 = beamtalk_error:with_message(
+                Err1,
+                iolist_to_binary([
+                    atom_to_binary(AtomName, utf8),
+                    <<" is a system name and cannot be shadowed">>
+                ])
+            ),
+            {error, Err2};
+        false ->
+            ok
+    end.
+
+%% @doc Check if a name is protected (class registry or workspace singleton).
+-spec is_protected_name(atom()) -> boolean().
+is_protected_name('Transcript') -> true;
+is_protected_name('Beamtalk') -> true;
+is_protected_name('Workspace') -> true;
+is_protected_name(AtomName) -> beamtalk_class_registry:whereis_class(AtomName) =/= undefined.
+
+%% @doc Warn if name is an existing loaded class (has source file).
+-spec maybe_warn_loaded_class(atom()) -> ok.
+maybe_warn_loaded_class(AtomName) ->
+    Classes = handle_classes(),
+    IsLoadedClass = lists:any(
+        fun
+            ({beamtalk_object, ClassTag, _Mod, _Pid}) ->
+                base_class_name(ClassTag) =:= AtomName;
+            (_) ->
+                false
+        end,
+        Classes
+    ),
+    case IsLoadedClass of
+        true ->
+            WarningMsg = iolist_to_binary([
+                <<"Warning: ">>,
+                atom_to_binary(AtomName, utf8),
+                <<" is a loaded class. Use reload instead.">>
+            ]),
+            ?LOG_WARNING("~s", [WarningMsg]),
+            %% Also output to Transcript if available
+            case resolve_singleton('TranscriptStream') of
+                nil ->
+                    ok;
+                TranscriptObj ->
+                    try
+                        beamtalk_message_dispatch:send(TranscriptObj, 'show:', [WarningMsg])
+                    catch
+                        _:_ -> ok
+                    end
+            end;
+        false ->
+            ok
+    end.
 
 %% @doc Read beamtalk_source attribute from a module's attributes.
 %% Uses erlang:get_module_info/2 BIF instead of Mod:module_info/1 because
