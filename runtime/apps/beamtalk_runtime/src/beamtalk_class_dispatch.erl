@@ -433,9 +433,9 @@ handle_self_instantiation_error(Selector) ->
     Error1 = beamtalk_error:with_hint(
         Error0,
         <<
-            "A class method cannot send 'new', 'new:', 'spawn', or 'spawnWith:' "
-            "to its own class (would deadlock the class process). "
-            "Delegate to a helper class method or use a factory on a superclass."
+            "Self-instantiation requires class metadata in the process dictionary "
+            "(set during class process init). This error indicates the call "
+            "originated from a non-class process or the class was not initialized correctly."
         >>
     ),
     beamtalk_error:raise(Error1).

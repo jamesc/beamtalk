@@ -475,8 +475,10 @@ apply_class_info(State, ClassInfo) ->
     %% BT-893: Keep process dictionary in sync with state for self-instantiation.
     NewModule = maps:get(module, ClassInfo, State#class_state.module),
     put(beamtalk_class_module, NewModule),
+    NewIsAbstract = maps:get(is_abstract, ClassInfo, State#class_state.is_abstract),
+    put(beamtalk_class_is_abstract, NewIsAbstract),
     State#class_state{
-        module = maps:get(module, ClassInfo, State#class_state.module),
+        module = NewModule,
         instance_methods = maps:get(
             instance_methods, ClassInfo, State#class_state.instance_methods
         ),
