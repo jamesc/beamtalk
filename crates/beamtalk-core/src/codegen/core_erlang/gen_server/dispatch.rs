@@ -61,22 +61,23 @@ impl CoreErlangGenerator {
         // fieldAt:, fieldAt:put:, perform:, perform:withArguments:) are now
         // inherited from Object via hierarchy walking.
 
-        let entries: Vec<String> = methods
-            .iter()
-            .enumerate()
-            .map(|(i, (name, arity))| {
-                if i > 0 {
-                    format!(", '{name}' => {arity}")
-                } else {
-                    format!("'{name}' => {arity}")
-                }
-            })
-            .collect();
-        let entries_str = entries.join("");
+        let mut entry_docs: Vec<Document<'static>> = Vec::new();
+        for (i, (name, arity)) in methods.iter().enumerate() {
+            if i > 0 {
+                entry_docs.push(Document::Str(", "));
+            }
+            entry_docs.push(docvec![
+                "'",
+                Document::String(name.clone()),
+                "' => ",
+                Document::String(arity.to_string()),
+            ]);
+        }
+        let entries_doc = Document::Vec(entry_docs);
 
         let doc = docvec![
             "'method_table'/0 = fun () ->",
-            nest(INDENT, docvec![line(), format!("~{{{entries_str}}}~"),]),
+            nest(INDENT, docvec![line(), "~{", entries_doc, "}~"]),
             "\n\n",
         ];
 
@@ -129,18 +130,14 @@ impl CoreErlangGenerator {
 
         // ADR 0006 Phase 1b: Reflection methods are inherited from Object.
 
-        let method_list: Vec<String> = methods
-            .iter()
-            .enumerate()
-            .map(|(i, name)| {
-                if i > 0 {
-                    format!(", '{name}'")
-                } else {
-                    format!("'{name}'")
-                }
-            })
-            .collect();
-        let method_list_str = method_list.join("");
+        let mut method_list_docs: Vec<Document<'static>> = Vec::new();
+        for (i, name) in methods.iter().enumerate() {
+            if i > 0 {
+                method_list_docs.push(Document::Str(", "));
+            }
+            method_list_docs.push(docvec!["'", Document::String(name.clone()), "'"]);
+        }
+        let method_list_doc = Document::Vec(method_list_docs);
 
         let doc = docvec![
             "'has_method'/1 = fun (Selector) ->",
@@ -148,7 +145,9 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
-                    format!("call 'lists':'member'(Selector, [{method_list_str}])"),
+                    "call 'lists':'member'(Selector, [",
+                    method_list_doc,
+                    "])",
                 ]
             ),
             "\n\n",
@@ -191,7 +190,11 @@ impl CoreErlangGenerator {
                     "let Self = call 'beamtalk_actor':'make_self'(State) in",
                     line(),
                     // Core Erlang try uses simple variable patterns in of/catch, not case-style
-                    format!("try call '{module_name}':'dispatch'(Selector, Args, Self, State)"),
+                    docvec![
+                        "try call '",
+                        Document::String(module_name.clone()),
+                        "':'dispatch'(Selector, Args, Self, State)"
+                    ],
                     line(),
                     "of Result -> Result",
                     line(),
@@ -280,7 +283,9 @@ impl CoreErlangGenerator {
                     // Build method clause as Document tree
                     let clause_doc = if param_vars.is_empty() {
                         docvec![
-                            format!("<'{}'> when 'true' ->", id.name),
+                            "<'",
+                            Document::String(id.name.to_string()),
+                            "'> when 'true' ->",
                             nest(INDENT, docvec![line(), body_doc,]),
                             "\n",
                         ]
@@ -288,7 +293,9 @@ impl CoreErlangGenerator {
                         let params_str = param_vars.join(", ");
 
                         docvec![
-                            format!("<'{}'> when 'true' ->", id.name),
+                            "<'",
+                            Document::String(id.name.to_string()),
+                            "'> when 'true' ->",
                             nest(
                                 INDENT,
                                 docvec![
@@ -298,7 +305,9 @@ impl CoreErlangGenerator {
                                         INDENT,
                                         docvec![
                                             line(),
-                                            format!("<[{params_str}]> when 'true' ->"),
+                                            "<[",
+                                            Document::String(params_str),
+                                            "]> when 'true' ->",
                                             nest(INDENT, docvec![line(), body_doc,]),
                                             line(),
                                             "<_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}",
@@ -347,9 +356,11 @@ impl CoreErlangGenerator {
                     line(),
                     "%% BT-229/ADR 0005: Check extension registry before hierarchy walk",
                     line(),
-                    format!(
-                        "let ExtLookup = try call 'beamtalk_extensions':'lookup'('{class_name}', OtherSelector)"
-                    ),
+                    docvec![
+                        "let ExtLookup = try call 'beamtalk_extensions':'lookup'('",
+                        Document::String(class_name.clone()),
+                        "', OtherSelector)"
+                    ],
                     nest(
                         INDENT,
                         docvec![
@@ -385,9 +396,11 @@ impl CoreErlangGenerator {
                                     line(),
                                     "%% ADR 0006: Try hierarchy walk before DNU",
                                     line(),
-                                    format!(
-                                        "case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, '{class_name}') of"
-                                    ),
+                                    docvec![
+                                        "case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, '",
+                                        Document::String(class_name.clone()),
+                                        "') of"
+                                    ],
                                     nest(
                                         INDENT,
                                         docvec![
@@ -422,9 +435,13 @@ impl CoreErlangGenerator {
                                                                 INDENT,
                                                                 docvec![
                                                                     line(),
-                                                                    format!(
-                                                                        "call '{module_name}':'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)"
-                                                                    ),
+                                                                    docvec![
+                                                                        "call '",
+                                                                        Document::String(
+                                                                            module_name.clone()
+                                                                        ),
+                                                                        "':'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)"
+                                                                    ],
                                                                 ]
                                                             ),
                                                             line(),
@@ -441,9 +458,13 @@ impl CoreErlangGenerator {
                                                                     line(),
                                                                     "let Error1 = call 'beamtalk_error':'with_selector'(Error0, OtherSelector) in",
                                                                     line(),
-                                                                    format!(
-                                                                        "let HintMsg = {hint_binary} in"
-                                                                    ),
+                                                                    docvec![
+                                                                        "let HintMsg = ",
+                                                                        Document::String(
+                                                                            hint_binary
+                                                                        ),
+                                                                        " in"
+                                                                    ],
                                                                     line(),
                                                                     "let Error = call 'beamtalk_error':'with_hint'(Error1, HintMsg) in",
                                                                     line(),

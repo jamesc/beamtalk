@@ -19,9 +19,11 @@ impl CoreErlangGenerator {
     /// running (e.g., stdlib tests).
     fn instance_registration_doc(class_name: &str) -> Document<'static> {
         docvec![
-            format!(
-                "let _InstReg = try call 'beamtalk_object_instances':'register'('{class_name}', Pid)"
-            ),
+            docvec![
+                "let _InstReg = try call 'beamtalk_object_instances':'register'('",
+                Document::String(class_name.to_string()),
+                "', Pid)",
+            ],
             nest(
                 INDENT,
                 docvec![
@@ -74,9 +76,13 @@ impl CoreErlangGenerator {
         let ok_body = if has_initialize {
             Self::spawn_initialize_block_doc(&class_name, &module_name)
         } else {
-            Document::String(format!(
-                "{{'beamtalk_object', '{class_name}', '{module_name}', Pid}}"
-            ))
+            docvec![
+                "{'beamtalk_object', '",
+                Document::String(class_name.clone()),
+                "', '",
+                Document::String(module_name.clone()),
+                "', Pid}",
+            ]
         };
 
         let doc = docvec![
@@ -85,7 +91,11 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
-                    format!("case call 'gen_server':'start_link'('{module_name}', ~{{}}~, []) of"),
+                    docvec![
+                        "case call 'gen_server':'start_link'('",
+                        Document::String(module_name.clone()),
+                        "', ~{}~, []) of",
+                    ],
                     nest(
                         INDENT,
                         docvec![
@@ -107,9 +117,11 @@ impl CoreErlangGenerator {
                                 INDENT,
                                 docvec![
                                     line(),
-                                    format!(
-                                        "let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', '{class_name}') in"
-                                    ),
+                                    docvec![
+                                        "let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', '",
+                                        Document::String(class_name.clone()),
+                                        "') in",
+                                    ],
                                     line(),
                                     "let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawn') in",
                                     line(),
@@ -137,7 +149,13 @@ impl CoreErlangGenerator {
         module_name: &str,
     ) -> crate::codegen::core_erlang::document::Document<'static> {
         docvec![
-            format!("let _Obj = {{'beamtalk_object', '{class_name}', '{module_name}', Pid}} in"),
+            docvec![
+                "let _Obj = {'beamtalk_object', '",
+                Document::String(class_name.to_string()),
+                "', '",
+                Document::String(module_name.to_string()),
+                "', Pid} in",
+            ],
             line(),
             "try call 'gen_server':'call'(Pid, {'initialize', []})",
             line(),
@@ -181,6 +199,10 @@ impl CoreErlangGenerator {
     ///     end
     /// ```
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
+    #[expect(
+        clippy::too_many_lines,
+        reason = "spawn-with-args codegen handles initialize, arg mapping, and instance registration"
+    )]
     pub(in crate::codegen::core_erlang) fn generate_spawn_with_args_function(
         &mut self,
         module: &Module,
@@ -197,9 +219,13 @@ impl CoreErlangGenerator {
         let ok_body = if has_initialize {
             Self::spawn_initialize_block_doc(&class_name, &module_name)
         } else {
-            Document::String(format!(
-                "{{'beamtalk_object', '{class_name}', '{module_name}', Pid}}"
-            ))
+            docvec![
+                "{'beamtalk_object', '",
+                Document::String(class_name.clone()),
+                "', '",
+                Document::String(module_name.clone()),
+                "', Pid}",
+            ]
         };
 
         // BT-473: Validate InitArgs is a map before passing to gen_server
@@ -223,15 +249,19 @@ impl CoreErlangGenerator {
                                 INDENT,
                                 docvec![
                                     line(),
-                                    format!(
-                                        "let TypeErr0 = call 'beamtalk_error':'new'('type_error', '{class_name}') in"
-                                    ),
+                                    docvec![
+                                        "let TypeErr0 = call 'beamtalk_error':'new'('type_error', '",
+                                        Document::String(class_name.clone()),
+                                        "') in",
+                                    ],
                                     line(),
                                     "let TypeErr1 = call 'beamtalk_error':'with_selector'(TypeErr0, 'spawnWith:') in",
                                     line(),
-                                    format!(
-                                        "let TypeErr2 = call 'beamtalk_error':'with_hint'(TypeErr1, {hint_binary}) in"
-                                    ),
+                                    docvec![
+                                        "let TypeErr2 = call 'beamtalk_error':'with_hint'(TypeErr1, ",
+                                        Document::String(hint_binary.clone()),
+                                        ") in",
+                                    ],
                                     line(),
                                     "call 'beamtalk_error':'raise'(TypeErr2)",
                                 ]
@@ -242,9 +272,11 @@ impl CoreErlangGenerator {
                                 INDENT,
                                 docvec![
                                     line(),
-                                    format!(
-                                        "case call 'gen_server':'start_link'('{module_name}', InitArgs, []) of"
-                                    ),
+                                    docvec![
+                                        "case call 'gen_server':'start_link'('",
+                                        Document::String(module_name.clone()),
+                                        "', InitArgs, []) of",
+                                    ],
                                     nest(
                                         INDENT,
                                         docvec![
@@ -266,9 +298,11 @@ impl CoreErlangGenerator {
                                                 INDENT,
                                                 docvec![
                                                     line(),
-                                                    format!(
-                                                        "let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', '{class_name}') in"
-                                                    ),
+                                                    docvec![
+                                                        "let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', '",
+                                                        Document::String(class_name.clone()),
+                                                        "') in",
+                                                    ],
                                                     line(),
                                                     "let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawnWith:') in",
                                                     line(),
@@ -324,9 +358,11 @@ impl CoreErlangGenerator {
                     line(),
                     "let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new') in",
                     line(),
-                    format!(
-                        "let Error2 = call 'beamtalk_error':'with_hint'(Error1, {hint_binary}) in"
-                    ),
+                    docvec![
+                        "let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
+                        Document::String(hint_binary.clone()),
+                        ") in",
+                    ],
                     line(),
                     "call 'beamtalk_error':'raise'(Error2)",
                 ]
@@ -367,9 +403,11 @@ impl CoreErlangGenerator {
                     line(),
                     "let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new:') in",
                     line(),
-                    format!(
-                        "let Error2 = call 'beamtalk_error':'with_hint'(Error1, {hint_binary}) in"
-                    ),
+                    docvec![
+                        "let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
+                        Document::String(hint_binary.clone()),
+                        ") in",
+                    ],
                     line(),
                     "call 'beamtalk_error':'raise'(Error2)",
                 ]
@@ -398,15 +436,19 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
-                    format!(
-                        "let Error0 = call 'beamtalk_error':'new'('instantiation_error', '{class_name}') in"
-                    ),
+                    docvec![
+                        "let Error0 = call 'beamtalk_error':'new'('instantiation_error', '",
+                        Document::String(class_name.clone()),
+                        "') in",
+                    ],
                     line(),
                     "let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'spawn') in",
                     line(),
-                    format!(
-                        "let Error2 = call 'beamtalk_error':'with_hint'(Error1, {hint_binary}) in"
-                    ),
+                    docvec![
+                        "let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
+                        Document::String(hint_binary.clone()),
+                        ") in",
+                    ],
                     line(),
                     "call 'beamtalk_error':'raise'(Error2)",
                 ]
@@ -431,15 +473,19 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
-                    format!(
-                        "let Error0 = call 'beamtalk_error':'new'('instantiation_error', '{class_name}') in"
-                    ),
+                    docvec![
+                        "let Error0 = call 'beamtalk_error':'new'('instantiation_error', '",
+                        Document::String(class_name.clone()),
+                        "') in",
+                    ],
                     line(),
                     "let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'spawnWith:') in",
                     line(),
-                    format!(
-                        "let Error2 = call 'beamtalk_error':'with_hint'(Error1, {hint_binary}) in"
-                    ),
+                    docvec![
+                        "let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
+                        Document::String(hint_binary.clone()),
+                        ") in",
+                    ],
                     line(),
                     "call 'beamtalk_error':'raise'(Error2)",
                 ]
@@ -497,7 +543,11 @@ impl CoreErlangGenerator {
             .map_or("nil", |s| s.name.as_str());
 
         let doc = docvec![
-            format!("'superclass'/0 = fun () -> '{superclass_atom}'"),
+            docvec![
+                "'superclass'/0 = fun () -> '",
+                Document::String(superclass_atom.to_string()),
+                "'",
+            ],
             "\n",
             "\n",
         ];

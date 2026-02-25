@@ -438,7 +438,7 @@ classSourceFile(Self) ->
 %% @private Read beamtalk_source attribute from a module's module_info(attributes).
 -spec source_file_from_module(atom()) -> binary() | 'nil'.
 source_file_from_module(ModuleName) ->
-    try erlang:get_module_info(ModuleName, attributes) of
+    try ModuleName:module_info(attributes) of
         Attrs ->
             case lists:keyfind(beamtalk_source, 1, Attrs) of
                 {beamtalk_source, [Path]} when is_binary(Path) -> Path;

@@ -5,23 +5,16 @@
 %%%
 %%% **DDD Context:** Workspace
 %%%
-%%% This gen_server implements the WorkspaceInterface that provides
-%%% actor introspection API for the live environment. It exposes
-%%% the actor registry as Beamtalk-level methods:
+%%% This gen_server implements the WorkspaceInterface primitive methods.
+%%% Higher-level methods (actorsOf:, testClasses, globals, test, test:)
+%%% are implemented as Beamtalk facades in stdlib/src/WorkspaceInterface.bt.
+%%%
+%%% ## Primitives (handled by this gen_server)
+%%%
 %%% - `actors` - List all live actors as usable object references
 %%% - `actorAt:` - Look up a specific actor by pid string
-%%% - `actorsOf:` - Get all actors of a given class
-%%%
-%%% This is the Beamtalk equivalent of Smalltalk's `Process allInstances` -
-%%% introspecting the live environment. Workspace is the right home because
-%%% actors are workspace-scoped (per ADR 0004).
-%%%
-%%% ## Message Protocol
-%%%
-%%% Workspace responds to these selectors:
-%%% - `actors` - Returns list of #beamtalk_object{} for all live actors
-%%% - `actorAt:` - Returns #beamtalk_object{} for actor at pid, or nil
-%%% - `actorsOf:` - Returns list of #beamtalk_object{} for class
+%%% - `classes` - List all loaded user classes (those with source files)
+%%% - `load:` - Compile and load a .bt file
 %%%
 %%% ## Example Usage
 %%%
@@ -31,12 +24,11 @@
 %%%
 %%% Workspace actorAt: '<0.132.0>'
 %%% // => #Actor<Counter,0.132.0>
-%%%
-%%% Workspace actorsOf: Counter
-%%% // => [#Actor<Counter,0.132.0>]
 %%% ```
 
 -module(beamtalk_workspace_interface).
+%% Suppress dialyzer warnings about dynamically loaded compiled Beamtalk module
+
 -behaviour(gen_server).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -47,7 +39,8 @@
     start_link/0,
     start_link/1,
     has_method/1,
-    class_info/0
+    class_info/0,
+    dispatch/4
 ]).
 
 %% gen_server callbacks
@@ -83,7 +76,8 @@ start_link(ServerName) ->
 -spec has_method(selector()) -> boolean().
 has_method(actors) -> true;
 has_method('actorAt:') -> true;
-has_method('actorsOf:') -> true;
+has_method(classes) -> true;
+has_method('load:') -> true;
 has_method(_) -> false.
 
 %% @doc Return class registration metadata for Workspace.
@@ -96,11 +90,76 @@ class_info() ->
         instance_methods => #{
             actors => #{arity => 0},
             'actorAt:' => #{arity => 1},
-            'actorsOf:' => #{arity => 1}
+            classes => #{arity => 0},
+            'load:' => #{arity => 1},
+            'actorsOf:' => #{arity => 1},
+            globals => #{arity => 0},
+            testClasses => #{arity => 0},
+            test => #{arity => 0},
+            'test:' => #{arity => 1}
         },
         class_methods => #{},
         fields => []
     }.
+
+%%====================================================================
+%% dispatch/4 for beamtalk_dispatch to delegate to compiled Beamtalk methods
+%%====================================================================
+
+%% @doc Dispatch compiled Beamtalk methods.
+%% Handles both primitive methods and Beamtalk-defined methods
+%% (by delegating to the compiled bt@stdlib@workspace_interface module).
+-spec dispatch(atom(), list(), term(), map()) ->
+    {reply, term(), map()} | {error, term(), map()}.
+
+%% Primitive methods: handle directly
+dispatch(actors, [], _Self, _State) ->
+    Result = handle_actors(),
+    {reply, Result, _State};
+dispatch('actorAt:', [PidStr], _Self, _State) ->
+    Result = handle_actor_at(PidStr),
+    {reply, Result, _State};
+dispatch(classes, [], _Self, _State) ->
+    Result = handle_classes(),
+    {reply, Result, _State};
+dispatch('load:', [Path], _Self, _State) ->
+    Result = handle_load(Path),
+    {reply, Result, _State};
+%% Beamtalk-defined methods: delegate to compiled module
+dispatch(Selector, Args, Self, State) ->
+    CompiledModule = 'bt@stdlib@workspace_interface',
+    try apply(CompiledModule, dispatch, [Selector, Args, Self, State]) of
+        {reply, Result, NewState} ->
+            {reply, Result, NewState};
+        {error, Error, NewState} ->
+            {error, Error, NewState};
+        _Other ->
+            %% Unexpected return from delegate — treat as does_not_understand
+            Err0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
+            Err1 = beamtalk_error:with_selector(Err0, Selector),
+            Err2 = beamtalk_error:with_hint(
+                Err1, <<"To list available selectors, use: Workspace methods">>
+            ),
+            {error, Err2, State}
+    catch
+        error:undef ->
+            %% Missing module or function — selector not implemented
+            Error0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
+            Error1 = beamtalk_error:with_selector(Error0, Selector),
+            Error2 = beamtalk_error:with_hint(
+                Error1, <<"To list available selectors, use: Workspace methods">>
+            ),
+            {error, Error2, State};
+        throw:#beamtalk_error{} = Err ->
+            %% Beamtalk method threw a structured error — propagate it
+            {error, Err, State};
+        Class:Reason ->
+            %% Unexpected runtime error — preserve actual error info
+            Err0 = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+            Err1 = beamtalk_error:with_selector(Err0, Selector),
+            Err2 = beamtalk_error:with_details(Err1, #{class => Class, reason => Reason}),
+            {error, Err2, State}
+    end.
 
 %%====================================================================
 %% gen_server callbacks
@@ -126,8 +185,11 @@ handle_call({actors, []}, _From, State) ->
 handle_call({'actorAt:', [PidStr]}, _From, State) ->
     Result = handle_actor_at(PidStr),
     {reply, Result, State};
-handle_call({'actorsOf:', [ClassName]}, _From, State) ->
-    Result = handle_actors_of(ClassName),
+handle_call({classes, []}, _From, State) ->
+    Result = handle_classes(),
+    {reply, Result, State};
+handle_call({'load:', [Path]}, _From, State) ->
+    Result = handle_load(Path),
     {reply, Result, State};
 handle_call({UnknownSelector, _Args}, _From, State) ->
     Error0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
@@ -156,19 +218,28 @@ handle_cast({'actorAt:', [PidStr], FuturePid}, State) when is_pid(FuturePid) ->
     Result = handle_actor_at(PidStr),
     beamtalk_future:resolve(FuturePid, Result),
     {noreply, State};
-handle_cast({'actorsOf:', [ClassName], FuturePid}, State) when is_pid(FuturePid) ->
-    Result = handle_actors_of(ClassName),
+handle_cast({classes, [], FuturePid}, State) when is_pid(FuturePid) ->
+    Result = handle_classes(),
     beamtalk_future:resolve(FuturePid, Result),
     {noreply, State};
-handle_cast({UnknownSelector, _Args, FuturePid}, State) when
-    is_pid(FuturePid), is_atom(UnknownSelector)
+handle_cast({'load:', [Path], FuturePid}, State) when is_pid(FuturePid) ->
+    case handle_load(Path) of
+        {error, Err} ->
+            beamtalk_future:reject(FuturePid, Err);
+        Result ->
+            beamtalk_future:resolve(FuturePid, Result)
+    end,
+    {noreply, State};
+handle_cast({Selector, Args, FuturePid}, State) when
+    is_pid(FuturePid), is_atom(Selector)
 ->
-    Error0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
-    Error1 = beamtalk_error:with_selector(Error0, UnknownSelector),
-    Error2 = beamtalk_error:with_hint(
-        Error1, <<"To list available selectors, use: Workspace methods">>
-    ),
-    beamtalk_future:reject(FuturePid, Error2),
+    Self = {beamtalk_object, 'WorkspaceInterface', ?MODULE, self()},
+    case dispatch(Selector, Args, Self, #{}) of
+        {reply, Result, _} ->
+            beamtalk_future:resolve(FuturePid, Result);
+        {error, Error, _} ->
+            beamtalk_future:reject(FuturePid, Error)
+    end,
     {noreply, State};
 handle_cast(Msg, State) ->
     ?LOG_WARNING("WorkspaceInterface received unexpected cast", #{message => Msg}),
@@ -235,42 +306,99 @@ handle_actor_at(PidStr) when is_list(PidStr) ->
 handle_actor_at(_) ->
     nil.
 
-%% @doc Get all actors of a given class.
-%% Accepts a class name atom, binary, or a class object tuple.
--spec handle_actors_of(atom() | binary() | tuple()) -> [tuple()].
-handle_actors_of({beamtalk_object, _ClassTag, _Module, ClassPid}) when is_pid(ClassPid) ->
-    %% Class object reference — extract the actual class name
+%% @doc Return all loaded user classes (those with a source file recorded).
+%% Excludes stdlib and ClassBuilder-created classes (they have no source file).
+-spec handle_classes() -> [tuple()].
+handle_classes() ->
     try
-        ClassName = beamtalk_object_class:class_name(ClassPid),
-        handle_actors_of(ClassName)
+        ClassPids = beamtalk_class_registry:all_classes(),
+        lists:filtermap(
+            fun(Pid) ->
+                try
+                    ClassName = beamtalk_object_class:class_name(Pid),
+                    ModuleName = beamtalk_object_class:module_name(Pid),
+                    case source_file_from_module(ModuleName) of
+                        nil ->
+                            false;
+                        _SourceFile ->
+                            ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
+                            {true, {beamtalk_object, ClassTag, ModuleName, Pid}}
+                    end
+                catch
+                    exit:{noproc, _} -> false;
+                    exit:{timeout, _} -> false
+                end
+            end,
+            ClassPids
+        )
     catch
-        _:_ -> []
+        exit:{noproc, _} ->
+            []
+    end.
+
+%% @doc Load a .bt file, compiling and registering the class.
+%% Path must be a binary or list string. Non-string arguments return a typed error.
+-spec handle_load(term()) -> nil | {error, #beamtalk_error{}}.
+handle_load(Path) when is_binary(Path) ->
+    handle_load(binary_to_list(Path));
+handle_load(Path) when is_list(Path) ->
+    case beamtalk_repl_eval:reload_class_file(Path) of
+        ok ->
+            nil;
+        {error, {file_not_found, _}} ->
+            Err0 = beamtalk_error:new(file_not_found, 'WorkspaceInterface'),
+            Err1 = beamtalk_error:with_selector(Err0, 'load:'),
+            {error,
+                beamtalk_error:with_message(
+                    Err1,
+                    iolist_to_binary([<<"File not found: ">>, Path])
+                )};
+        {error, Reason} ->
+            Err0 = beamtalk_error:new(load_error, 'WorkspaceInterface'),
+            Err1 = beamtalk_error:with_selector(Err0, 'load:'),
+            Err2 = beamtalk_error:with_message(
+                Err1,
+                iolist_to_binary([<<"Failed to load: ">>, Path])
+            ),
+            Err3 = beamtalk_error:with_details(Err2, #{reason => Reason}),
+            {error, Err3}
     end;
-handle_actors_of(ClassName) when is_binary(ClassName) ->
-    try
-        ClassAtom = binary_to_existing_atom(ClassName, utf8),
-        handle_actors_of(ClassAtom)
+handle_load(Other) ->
+    TypeName = value_type_name(Other),
+    Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
+    Err1 = beamtalk_error:with_selector(Err0, 'load:'),
+    Err2 = beamtalk_error:with_message(
+        Err1,
+        iolist_to_binary([<<"load: expects a String path, got ">>, TypeName])
+    ),
+    {error, Err2}.
+
+%% @doc Read beamtalk_source attribute from a module's module_info(attributes).
+%% Returns nil for stdlib/bootstrap/ClassBuilder-created classes.
+-spec source_file_from_module(atom()) -> binary() | 'nil'.
+source_file_from_module(ModuleName) ->
+    try ModuleName:module_info(attributes) of
+        Attrs ->
+            case lists:keyfind(beamtalk_source, 1, Attrs) of
+                {beamtalk_source, [Path]} when is_binary(Path) -> Path;
+                {beamtalk_source, [Path]} when is_list(Path) -> list_to_binary(Path);
+                _ -> nil
+            end
     catch
-        error:badarg -> []
-    end;
-handle_actors_of(ClassName) when is_atom(ClassName) ->
-    case whereis(beamtalk_actor_registry) of
-        undefined ->
-            [];
-        RegistryPid ->
-            Actors = beamtalk_repl_actors:list_actors(RegistryPid),
-            lists:filtermap(
-                fun
-                    (#{class := Class} = Meta) when Class =:= ClassName ->
-                        wrap_actor(Meta);
-                    (_) ->
-                        false
-                end,
-                Actors
-            )
-    end;
-handle_actors_of(_) ->
-    [].
+        error:undef -> nil
+    end.
+
+%% @doc Return a human-readable type name for an Erlang/Beamtalk value.
+-spec value_type_name(term()) -> binary().
+value_type_name(V) when is_integer(V) -> <<"Integer">>;
+value_type_name(V) when is_float(V) -> <<"Float">>;
+value_type_name(V) when is_boolean(V) -> <<"Boolean">>;
+value_type_name(nil) -> <<"nil">>;
+value_type_name(V) when is_atom(V) -> <<"Symbol">>;
+value_type_name(V) when is_list(V) -> <<"List">>;
+value_type_name(V) when is_map(V) -> <<"Dictionary">>;
+value_type_name({beamtalk_object, _, _, _}) -> <<"Object">>;
+value_type_name(_) -> <<"Unknown">>.
 
 %% @doc Wrap actor metadata into a #beamtalk_object{} tuple.
 %% Filters out dead actors.

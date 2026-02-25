@@ -1590,6 +1590,12 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "actors".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![] },
                 MethodInfo { selector: "actorAt:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("Object".into()), param_types: vec![Some("String".into())] },
                 MethodInfo { selector: "actorsOf:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![Some("Object".into())] },
+                MethodInfo { selector: "classes".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![] },
+                MethodInfo { selector: "testClasses".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![] },
+                MethodInfo { selector: "globals".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("Dictionary".into()), param_types: vec![] },
+                MethodInfo { selector: "load:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("Object".into()), param_types: vec![Some("String".into())] },
+                MethodInfo { selector: "test".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("TestResult".into()), param_types: vec![] },
+                MethodInfo { selector: "test:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("TestResult".into()), param_types: vec![Some("Object".into())] },
             ],
             class_methods: vec![
                 MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("WorkspaceInterface".into()), param_types: vec![] },

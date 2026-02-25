@@ -72,19 +72,6 @@ impl CoreErlangGenerator {
             }
         }
 
-        // BT-853: Also detect HOM parameters from the method body:
-        // any parameter invoked with value:/value:value: is a block parameter.
-        // This enables HOMs called from external sites (not just pre-scanned self-sends)
-        // to correctly use the Tier 2 stateful protocol when Tier 2 blocks are passed.
-        // TODO BT-870: This unconditionally marks all value:-called params as Tier 2,
-        // which will crash if a Tier 1 (plain-value) block is passed at runtime.
-        for param in &method.parameters {
-            let param_name = &param.name.name;
-            if Self::method_body_has_value_call_on(param_name, &method.body) {
-                self.tier2_block_params.insert(param_name.to_string());
-            }
-        }
-
         // BT-761: Detect whether any block argument in this method body contains ^.
         // If so, set up a non-local return token so ^ inside blocks can throw to escape
         // the closure and return from the enclosing actor method.
@@ -995,12 +982,15 @@ impl CoreErlangGenerator {
                 } else {
                     "'false'"
                 };
-                method_spec_docs.push(Document::String(format!(
-                    "'{}' => ~{{'arity' => {}, 'is_sealed' => {}}}~",
-                    method.selector.name(),
-                    method.selector.arity(),
-                    is_sealed
-                )));
+                method_spec_docs.push(docvec![
+                    "'",
+                    Document::String(method.selector.name().to_string()),
+                    "' => ~{'arity' => ",
+                    Document::String(method.selector.arity().to_string()),
+                    ", 'is_sealed' => ",
+                    Document::String(is_sealed.to_string()),
+                    "}~",
+                ]);
             }
             let method_specs_doc = Document::Vec(method_spec_docs);
 
@@ -1016,7 +1006,9 @@ impl CoreErlangGenerator {
                     Document::Str("'nil'")
                 };
                 field_spec_docs.push(docvec![
-                    Document::String(format!("'{}' => ", s.name.name)),
+                    "'",
+                    Document::String(s.name.name.to_string()),
+                    "' => ",
                     default_val,
                 ]);
             }
@@ -1030,7 +1022,14 @@ impl CoreErlangGenerator {
             if class.is_abstract {
                 modifiers.push("'abstract'");
             }
-            let modifiers_doc = Document::String(format!("[{}]", modifiers.join(", ")));
+            let mut modifier_docs: Vec<Document<'static>> = Vec::new();
+            for (i, modifier) in modifiers.iter().enumerate() {
+                if i > 0 {
+                    modifier_docs.push(Document::Str(", "));
+                }
+                modifier_docs.push(Document::String((*modifier).to_string()));
+            }
+            let modifiers_doc = docvec!["[", Document::Vec(modifier_docs), "]"];
 
             // classMethods: class method specs (spawn/new + user-defined)
             let mut class_method_entries: Vec<Document<'static>> = Vec::new();
@@ -1081,10 +1080,12 @@ impl CoreErlangGenerator {
                 }
                 let source_str = self.extract_method_source(method);
                 let binary = Self::binary_string_literal(&source_str);
-                method_source_docs.push(Document::String(format!(
-                    "'{}' => {binary}",
-                    method.selector.name()
-                )));
+                method_source_docs.push(docvec![
+                    "'",
+                    Document::String(method.selector.name().to_string()),
+                    "' => ",
+                    Document::String(binary),
+                ]);
             }
             let method_source_doc = Document::Vec(method_source_docs);
 
@@ -1099,7 +1100,12 @@ impl CoreErlangGenerator {
                 } else {
                     Document::Str("'nil'")
                 };
-                class_var_parts.push(docvec![format!("'{}' => ", cv.name.name), val]);
+                class_var_parts.push(docvec![
+                    "'",
+                    Document::String(cv.name.name.to_string()),
+                    "' => ",
+                    val,
+                ]);
             }
             let class_vars_doc = Document::Vec(class_var_parts);
 
@@ -1118,10 +1124,12 @@ impl CoreErlangGenerator {
                         method_docs_parts.push(Document::Str(", "));
                     }
                     let binary = Self::binary_string_literal(doc);
-                    method_docs_parts.push(Document::String(format!(
-                        "'{}' => {binary}",
-                        method.selector.name()
-                    )));
+                    method_docs_parts.push(docvec![
+                        "'",
+                        Document::String(method.selector.name().to_string()),
+                        "' => ",
+                        Document::String(binary),
+                    ]);
                 }
             }
             let method_docs_doc = Document::Vec(method_docs_parts);
@@ -1136,9 +1144,17 @@ impl CoreErlangGenerator {
                     INDENT,
                     docvec![
                         line(),
-                        format!("'className' => '{}',", class.name.name),
+                        docvec![
+                            "'className' => '",
+                            Document::String(class.name.name.to_string()),
+                            "',"
+                        ],
                         line(),
-                        format!("'superclassRef' => '{}',", class.superclass_name()),
+                        docvec![
+                            "'superclassRef' => '",
+                            Document::String(class.superclass_name().to_string()),
+                            "',"
+                        ],
                         line(),
                         "'fieldSpecs' => ~{",
                         field_specs_doc,
@@ -1152,7 +1168,11 @@ impl CoreErlangGenerator {
                         modifiers_doc,
                         ",",
                         line(),
-                        format!("'moduleName' => '{}',", self.module_name),
+                        docvec![
+                            "'moduleName' => '",
+                            Document::String(self.module_name.clone()),
+                            "',"
+                        ],
                         line(),
                         class_methods_doc,
                         line(),
@@ -1575,102 +1595,6 @@ impl CoreErlangGenerator {
         false
     }
 
-    /// BT-853: Checks if any expression in a method body invokes `param_name` with
-    /// `value`, `value:`, `value:value:`, or `value:value:value:`.
-    ///
-    /// Used to detect HOM (higher-order method) parameters: if a parameter is invoked
-    /// as a block inside the method body, it is a block parameter and should use the
-    /// Tier 2 stateful calling convention when a Tier 2 block is passed.
-    fn method_body_has_value_call_on(param_name: &str, body: &[Expression]) -> bool {
-        body.iter()
-            .any(|expr| Self::expr_has_value_call_on(param_name, expr))
-    }
-
-    /// Recursively checks if an expression contains a `value`/`value:`/... call on `param_name`.
-    fn expr_has_value_call_on(param_name: &str, expr: &Expression) -> bool {
-        match expr {
-            Expression::MessageSend {
-                receiver,
-                selector,
-                arguments,
-                ..
-            } => {
-                let is_value_selector = match selector {
-                    crate::ast::MessageSelector::Unary(name) => name == "value",
-                    crate::ast::MessageSelector::Keyword(parts) => {
-                        let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-                        matches!(
-                            sel.as_str(),
-                            "value:" | "value:value:" | "value:value:value:"
-                        )
-                    }
-                    crate::ast::MessageSelector::Binary(_) => false,
-                };
-                if is_value_selector {
-                    if let Expression::Identifier(id) = receiver.as_ref() {
-                        if id.name == param_name {
-                            return true;
-                        }
-                    }
-                }
-                // Also check sub-expressions
-                if Self::expr_has_value_call_on(param_name, receiver) {
-                    return true;
-                }
-                arguments
-                    .iter()
-                    .any(|a| Self::expr_has_value_call_on(param_name, a))
-            }
-            Expression::Assignment { value, .. } | Expression::Return { value, .. } => {
-                Self::expr_has_value_call_on(param_name, value)
-            }
-            Expression::Block(block) => block
-                .body
-                .iter()
-                .any(|e| Self::expr_has_value_call_on(param_name, e)),
-            Expression::Cascade {
-                receiver, messages, ..
-            } => {
-                // Check if receiver IS param_name and any cascade message has value: selector.
-                // E.g. `aBlock msg1; value: x` — receiver=aBlock, messages=[msg1, {value:, [x]}]
-                if let Expression::Identifier(id) = receiver.as_ref() {
-                    if id.name == param_name {
-                        let has_value_send = messages.iter().any(|m| {
-                            let sel: String = match &m.selector {
-                                crate::ast::MessageSelector::Unary(n) => n.to_string(),
-                                crate::ast::MessageSelector::Keyword(parts) => {
-                                    parts.iter().map(|p| p.keyword.as_str()).collect()
-                                }
-                                crate::ast::MessageSelector::Binary(_) => String::new(),
-                            };
-                            matches!(
-                                sel.as_str(),
-                                "value" | "value:" | "value:value:" | "value:value:value:"
-                            )
-                        });
-                        if has_value_send {
-                            return true;
-                        }
-                    }
-                }
-                // Recurse into receiver and message arguments
-                Self::expr_has_value_call_on(param_name, receiver)
-                    || messages.iter().any(|m| {
-                        m.arguments
-                            .iter()
-                            .any(|a| Self::expr_has_value_call_on(param_name, a))
-                    })
-            }
-            Expression::Match { value, arms, .. } => {
-                Self::expr_has_value_call_on(param_name, value)
-                    || arms
-                        .iter()
-                        .any(|arm| Self::expr_has_value_call_on(param_name, &arm.body))
-            }
-            _ => false,
-        }
-    }
-
     /// Checks if a control flow expression actually threads state through mutations.
     ///
     /// This goes beyond `is_state_threading_control_flow` by analyzing whether
@@ -1719,139 +1643,5 @@ impl CoreErlangGenerator {
         // If we can't analyze (e.g., block isn't a literal), conservatively return false
         // to avoid binding non-state values to StateN
         false
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ast::{CascadeMessage, Expression, Identifier, MatchArm, MessageSelector, Pattern};
-    use crate::source_analysis::Span;
-
-    fn make_id(name: &str) -> Expression {
-        Expression::Identifier(Identifier::new(
-            name,
-            Span::new(0, name.len().try_into().unwrap()),
-        ))
-    }
-
-    fn make_value_send(receiver: &str, arg: &str) -> Expression {
-        Expression::MessageSend {
-            receiver: Box::new(make_id(receiver)),
-            selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
-                "value:",
-                Span::new(0, 6),
-            )]),
-            arguments: vec![make_id(arg)],
-            span: Span::new(0, 20),
-        }
-    }
-
-    // BT-852/BT-853: expr_has_value_call_on — Cascade detection
-
-    #[test]
-    fn test_expr_has_value_call_on_cascade_direct() {
-        // `aBlock someMsg; value: x` — cascade where receiver is the param
-        // and one of the cascade messages has value: selector.
-        // Before the fix, this fell through to _ => false.
-        let cascade = Expression::Cascade {
-            receiver: Box::new(make_id("aBlock")),
-            messages: vec![
-                CascadeMessage::new(
-                    MessageSelector::Unary("someMsg".into()),
-                    vec![],
-                    Span::new(0, 7),
-                ),
-                CascadeMessage::new(
-                    MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
-                        "value:",
-                        Span::new(0, 6),
-                    )]),
-                    vec![make_id("x")],
-                    Span::new(0, 10),
-                ),
-            ],
-            span: Span::new(0, 30),
-        };
-        assert!(
-            CoreErlangGenerator::expr_has_value_call_on("aBlock", &cascade),
-            "Should detect value: send in cascade to named param"
-        );
-        assert!(
-            !CoreErlangGenerator::expr_has_value_call_on("otherBlock", &cascade),
-            "Should not detect value: send to a different param name"
-        );
-    }
-
-    #[test]
-    fn test_expr_has_value_call_on_cascade_in_arg() {
-        // `someObj msg: (aBlock value: x)` — value: call nested inside a cascade message arg.
-        // Before the fix, this fell through to _ => false.
-        let cascade = Expression::Cascade {
-            receiver: Box::new(make_id("someObj")),
-            messages: vec![CascadeMessage::new(
-                MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
-                    "msg:",
-                    Span::new(0, 4),
-                )]),
-                vec![make_value_send("aBlock", "x")],
-                Span::new(0, 20),
-            )],
-            span: Span::new(0, 30),
-        };
-        assert!(
-            CoreErlangGenerator::expr_has_value_call_on("aBlock", &cascade),
-            "Should detect value: send nested in cascade message argument"
-        );
-    }
-
-    // BT-852/BT-853: expr_has_value_call_on — Match detection
-
-    #[test]
-    fn test_expr_has_value_call_on_match_in_arm_body() {
-        // `someVal match: [_ -> aBlock value: x; _ -> nil]`
-        // Before the fix, this fell through to _ => false.
-        let match_expr = Expression::Match {
-            value: Box::new(make_id("someVal")),
-            arms: vec![
-                MatchArm::new(
-                    Pattern::Wildcard(Span::new(0, 1)),
-                    make_value_send("aBlock", "x"),
-                    Span::new(0, 20),
-                ),
-                MatchArm::new(
-                    Pattern::Wildcard(Span::new(0, 1)),
-                    make_id("nil"),
-                    Span::new(0, 3),
-                ),
-            ],
-            span: Span::new(0, 50),
-        };
-        assert!(
-            CoreErlangGenerator::expr_has_value_call_on("aBlock", &match_expr),
-            "Should detect value: send in match arm body"
-        );
-        assert!(
-            !CoreErlangGenerator::expr_has_value_call_on("otherBlock", &match_expr),
-            "Should not detect value: send for a different param name"
-        );
-    }
-
-    #[test]
-    fn test_expr_has_value_call_on_match_not_detected_without_value_call() {
-        // match expression where param appears as a value but is never called with value:
-        let match_expr = Expression::Match {
-            value: Box::new(make_id("someVal")),
-            arms: vec![MatchArm::new(
-                Pattern::Wildcard(Span::new(0, 1)),
-                make_id("aBlock"),
-                Span::new(0, 10),
-            )],
-            span: Span::new(0, 20),
-        };
-        assert!(
-            !CoreErlangGenerator::expr_has_value_call_on("aBlock", &match_expr),
-            "Should not trigger for mere reference to param (not a value: call)"
-        );
     }
 }

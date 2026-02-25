@@ -24,6 +24,9 @@ This document presents a domain-driven design (DDD) analysis of the Beamtalk com
   - [Concurrency Context](#concurrency-context)
   - [Object System Context](#object-system-context)
   - [Hot Reload Context](#hot-reload-context)
+  - [Workspace Context](#workspace-context)
+  - [REPL Session Context](#repl-session-context)
+  - [Beamtalk Global Context](#beamtalk-global-context)
 - [Cross-Cutting Concerns](#cross-cutting-concerns)
 - [Domain Events](#domain-events)
 - [Architecture Decision Records](#architecture-decision-records)
@@ -159,10 +162,25 @@ A bounded context is an explicit boundary within which a domain model is defined
 │  └───────────────────────────────────────────────────────────────┘  │
 │                                                                       │
 │  ┌───────────────────────────────────────────────────────────────┐  │
-│  │              REPL CONTEXT (Erlang)                             │  │
+│  │              WORKSPACE CONTEXT (Erlang)                        │  │
+│  │  - Lifecycle: detached BEAM node, idle cleanup                │  │
+│  │  - Supervision: ActorSupervisor, SessionSupervisor            │  │
+│  │  - Metadata: workspace_id, project_path, last_activity        │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+│                              ▲                                        │
+│                              │ hosts                                  │
+│  ┌───────────────────────────┴───────────────────────────────────┐  │
+│  │              REPL SESSION CONTEXT (Erlang)                     │  │
 │  │  - Expression Evaluation: On-demand compilation               │  │
-│  │  - Binding Management: Persistent variable state              │  │
-│  │  - Result Formatting: Pretty printing                         │  │
+│  │  - Binding Management: Per-session variable state             │  │
+│  │  - Protocol: WebSocket JSON (nREPL-inspired)                  │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+│                                                                       │
+│  ┌───────────────────────────────────────────────────────────────┐  │
+│  │              BEAMTALK GLOBAL CONTEXT (Erlang)                  │  │
+│  │  - Façade over Workspace + Object System for user code        │  │
+│  │  - Runtime introspection: actors, modules, sessions           │  │
+│  │  - Project metadata: version, nodeName, projectPath           │  │
 │  └───────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -180,7 +198,10 @@ The context map shows how bounded contexts relate and communicate:
 | OBJECT SYSTEM | ACTOR SYSTEM | Conformist | Calls class registry APIs |
 | CONCURRENCY | ACTOR SYSTEM | Partnership | Bidirectional dependencies |
 | HOT RELOAD | ACTOR SYSTEM | Customer-Supplier | Triggers state migration |
-| ACTOR SYSTEM | REPL | Anti-Corruption Layer | REPL wraps raw gen_server |
+| ACTOR SYSTEM | REPL SESSION | Anti-Corruption Layer | REPL wraps raw gen_server |
+| WORKSPACE | REPL SESSION | Customer-Supplier | Workspace provides actor sup, module registry |
+| WORKSPACE | HOT RELOAD | Customer-Supplier | Workspace triggers code upgrades via loader |
+| BEAMTALK GLOBAL | WORKSPACE | Façade | Single entry point exposing workspace state to user code |
 
 **Key relationships:**
 
@@ -190,6 +211,7 @@ The context map shows how bounded contexts relate and communicate:
 - **Published Language:** Well-defined intermediate format (Core Erlang)
 - **Conformist:** Downstream accepts upstream's model wholesale
 - **Anti-Corruption Layer:** Downstream protects itself with translation layer
+- **Façade:** Upstream provides a simplified, unified interface over multiple downstream contexts
 
 ---
 
@@ -244,9 +266,19 @@ A shared vocabulary used consistently across team, code, and documentation. Term
 | **Code Upgrade** | BEAM's hot swap mechanism | HOT RELOAD |
 | **State Migration** | Transforming state for new code version | HOT RELOAD |
 | **code_change/3** | OTP callback for state migration | HOT RELOAD |
-| **REPL** | Read-Eval-Print Loop | REPL |
-| **Binding** | REPL variable (persists across expressions) | REPL |
-| **Evaluation** | Execute compiled expression in REPL | REPL |
+| **REPL** | Read-Eval-Print Loop | REPL SESSION |
+| **Binding** | Variable name to value association (session-local, not persisted across reconnects) | REPL SESSION |
+| **Evaluation** | Compile + load + execute expression in REPL session | REPL SESSION |
+| **Session** | Single REPL connection with its own bindings and eval counter; ephemeral | REPL SESSION |
+| **EvalRequest** | Protocol message requesting expression evaluation | REPL SESSION |
+| **EvalResponse** | Protocol message with result value, stdout output, warnings, status | REPL SESSION |
+| **ProtocolMessage** | JSON WebSocket frame following nREPL-inspired op/id/session schema | REPL SESSION |
+| **Workspace** | Long-lived detached BEAM node providing shared actors, modules, metadata | WORKSPACE |
+| **WorkspaceId** | Unique identifier for a workspace (SHA256 of project path or explicit name) | WORKSPACE |
+| **ProjectPath** | Filesystem path of the project this workspace belongs to | WORKSPACE |
+| **IdleTimeout** | Inactivity period after which a workspace self-terminates (default 4 hours) | WORKSPACE |
+| **ActivityTimestamp** | Unix timestamp of last REPL, actor, or code-reload activity in the workspace | WORKSPACE |
+| **Beamtalk Global** | Runtime global object (analogous to `Smalltalk`) accessible in all sessions | BEAMTALK GLOBAL |
 
 ### Shared Terms (Cross-Context)
 
@@ -844,6 +876,215 @@ code_change(OldVsn, OldState, Extra) ->
 %%     end.
 ```
 
+### Workspace Context
+
+**Purpose:** Manage the lifecycle and shared state of a long-lived detached BEAM node (the "workspace") that survives REPL disconnects, providing persistent actors, loaded modules, and project metadata to all connected sessions.
+
+**Aggregates:**
+
+#### 1. WorkspaceMeta (Aggregate Root)
+
+**Invariants:**
+- Workspace ID is immutable once assigned (SHA256 of project path or explicit name)
+- `last_activity` must be updated on every user interaction (session connect, actor spawn, code reload)
+- `supervised_actors` tracks only live PIDs (dead PIDs are unregistered via process monitors)
+- `loaded_modules` tracks only modules loaded through the workspace bootstrap or REPL load ops
+
+**Entities:**
+- `WorkspaceMeta`: gen_server holding workspace identity, timestamps, actor PIDs, loaded module list
+
+**Value Objects:**
+- `WorkspaceId`: binary identifier (e.g. `<<"my-feature">>` or SHA256 hex digest of project path)
+- `ProjectPath`: absolute filesystem path for the project
+- `ActivityTimestamp`: Unix timestamp (integer seconds) of last observed activity
+- `NodeName`: Erlang atom identifying this workspace's BEAM node
+
+**Repositories:**
+- `WorkspaceMetaServer`: gen_server (`beamtalk_workspace_meta`) holding state; persists to `~/.beamtalk/workspaces/{id}/metadata.json` with debounced writes
+
+**Domain Services:**
+- `IdleMonitor` (`beamtalk_idle_monitor`): Periodic timer; calls `init:stop/0` if idle time exceeds `max_idle_seconds`. Disabled for persistent/production nodes.
+- `ActorSupervisor` (`beamtalk_actor_sup`): `simple_one_for_one` supervisor for all user actors in the workspace; actors are `temporary` (no restart on crash by default)
+- `SessionSupervisor` (`beamtalk_session_sup`): `simple_one_for_one` supervisor for REPL session shell processes; sessions are `temporary`
+- `WorkspaceBootstrap` (`beamtalk_workspace_bootstrap`): Startup logic — reads config, starts stdlib, initialises metadata
+- `WorkspaceInterface` (`beamtalk_workspace_interface`): Public API façade used by the REPL ops handlers
+
+**Key Patterns:**
+- **Node-per-Workspace:** Each workspace is a separate BEAM node (isolated code path, separate port/cookie)
+- **Self-Terminating Idle Monitor:** No external daemon needed; each node watches itself and calls `init:stop/0` when idle
+- **Process Monitors for Actor Tracking:** `WorkspaceMeta` monitors each supervised actor PID; cleans up registry on `DOWN` messages
+- **Debounced Metadata Persistence:** Disk writes are coalesced with a 2-second timer to avoid write storms during high-activity periods
+
+**Example Domain Logic:**
+
+```erlang
+%% Domain service: beamtalk_idle_monitor
+%% Periodically checks idle time and self-terminates
+handle_info(check_idle, #state{enabled = true, max_idle_seconds = Max} = State) ->
+    LastActivity = beamtalk_workspace_meta:get_last_activity(),
+    IdleSeconds = erlang:system_time(second) - LastActivity,
+    case IdleSeconds > Max of
+        true ->
+            ?LOG_INFO("Workspace idle for ~p seconds, shutting down", [IdleSeconds]),
+            init:stop();
+        false ->
+            ok
+    end,
+    TRef = erlang:send_after(?CHECK_INTERVAL, self(), check_idle),
+    {noreply, State#state{timer_ref = TRef}}.
+
+%% Aggregate root: beamtalk_workspace_meta
+%% Tracks supervised actors via process monitors for automatic cleanup
+register_actor(Pid) ->
+    MonRef = erlang:monitor(process, Pid),
+    gen_server:call(?MODULE, {register_actor, Pid, MonRef}).
+
+handle_info({'DOWN', _MonRef, process, Pid, _Reason}, State) ->
+    NewActors = lists:delete(Pid, State#state.supervised_actors),
+    {noreply, State#state{supervised_actors = NewActors}}.
+```
+
+### REPL Session Context
+
+**Purpose:** Manage a single REPL client connection — evaluate expressions, maintain per-session variable bindings, and translate protocol messages to/from runtime operations.
+
+**Aggregates:**
+
+#### 1. Session (Aggregate Root)
+
+**Invariants:**
+- Each session has a unique session ID assigned at connection time
+- Bindings map is consistent: variable names map to live values (dead PIDs are not automatically removed — this is intentional, matching Erlang shell semantics)
+- `eval_counter` is monotonically increasing; used to generate unique temp module names (`beamtalk_repl_eval_{N}`)
+- Sessions are ephemeral: when the WebSocket closes, the session process terminates and bindings are lost
+
+**Entities:**
+- `SessionProcess` (`beamtalk_repl_shell`): gen_server owning session bindings, eval counter, module tracker, class source cache
+
+**Value Objects:**
+- `Binding`: `{Name :: atom(), Value :: term()}` — variable name to runtime value
+- `SessionId`: binary identifier, assigned at connection (e.g. `<<"session_1234_5678">>`)
+- `EvalRequest`: `{expression: string(), subscriber: pid() | undefined}` — expression to evaluate with optional streaming subscriber
+- `EvalResponse`: `{ok | error, Value, StdoutCapture :: binary(), Warnings :: [binary()], NewState}` — structured result
+- `ProtocolMessage`: JSON map with `op`, `id`, `session` fields following the nREPL-inspired schema
+- `ClassSource`: `{ClassName :: binary(), Source :: string()}` — cached inline class source for method patching (BT-571)
+
+**Repositories:**
+- (None — sessions are ephemeral processes; bindings live only in process memory)
+
+**Domain Services:**
+- `Evaluator` (`beamtalk_repl_eval`): Core domain service. Compiles expression via compiler port, loads bytecode, executes, captures stdout. Handles class definitions, method patches, and module lifecycle separately from plain expression evaluation.
+- `BindingManager` (`beamtalk_repl_state`, `beamtalk_repl_ops_session`): Get/set/clear bindings. Injects bindings into compiled module before execution; extracts new bindings after.
+- `ProtocolHandler` (`beamtalk_repl_protocol`): Encodes/decodes JSON WebSocket frames. Detects legacy vs. nREPL-style format. Routes ops to operation handlers.
+- `IoCapture` (`beamtalk_io_capture`): Intercepts `io:format` and `io:put_chars` calls during evaluation; forwards chunks to streaming subscriber for real-time output delivery (BT-696).
+- `ModuleTracker` (`beamtalk_repl_modules`): Tracks which modules were loaded in this session, their source files, and load timestamps. Used by `modules` and `unload` ops.
+- `ActorRegistry` (`beamtalk_repl_actors`): Per-session registry of spawned actors (pid → class mapping). Used by `actors`, `inspect`, `kill` ops.
+
+**Operation Handlers (Domain Services):**
+- `OpsEval` (`beamtalk_repl_ops_eval`): `eval`, `show-codegen`, `stdin`
+- `OpsSession` (`beamtalk_repl_ops_session`): `bindings`, `clear`, `clone`, `close`, `sessions`
+- `OpsLoad` (`beamtalk_repl_ops_load`): `load-file`, `load-source`, `reload`
+- `OpsActors` (`beamtalk_repl_ops_actors`): `actors`, `inspect`, `kill`
+- `OpsDev` (`beamtalk_repl_ops_dev`): `test`, `test-all`, `describe`, `health`, `shutdown`
+- `Docs` (`beamtalk_repl_docs`): `info`, `complete`, `docs`
+
+**Key Patterns:**
+- **Ephemeral Sessions:** Session process dies when WebSocket closes; actors spawned during session continue in `ActorSupervisor`
+- **Eval Counter Isolation:** Each expression compiles to a unique temp module name, preventing collisions across concurrent sessions
+- **Streaming Output:** IoCapture intercepts stdout during eval and forwards chunks to the WebSocket handler before the final response (BT-696)
+- **Stdin Blocking:** Eval can suspend waiting for `stdin` op from client; handled via process mailbox (BT-698)
+- **Anti-Corruption Layer:** REPL never calls `gen_server:cast/call` on actor PIDs directly; routes through workspace-level ActorSupervisor and class registry APIs
+
+**Example Domain Logic:**
+
+```erlang
+%% Domain service: beamtalk_repl_eval
+%% Core evaluation pipeline: compile → load → execute → capture result
+do_eval(Expression, State, Subscriber) ->
+    Counter = beamtalk_repl_state:get_eval_counter(State),
+    ModuleName = list_to_atom("beamtalk_repl_eval_" ++ integer_to_list(Counter)),
+    NewState = beamtalk_repl_state:increment_eval_counter(State),
+    Bindings = beamtalk_repl_state:get_bindings(State),
+    case compile_expression(Expression, ModuleName, Bindings) of
+        {ok, class_definition, ClassInfo, Warnings} ->
+            handle_class_definition(ClassInfo, Warnings, Expression, NewState);
+        {ok, Beam, NewBindings, Warnings} ->
+            {Output, Result} = beamtalk_io_capture:capture(Subscriber, fun() ->
+                activate_module(ModuleName, Beam),
+                ModuleName:eval()
+            end),
+            FinalState = beamtalk_repl_state:set_bindings(NewState, NewBindings),
+            {ok, Result, Output, Warnings, FinalState};
+        {error, Reason, Warnings} ->
+            {error, Reason, <<>>, Warnings, NewState}
+    end.
+```
+
+### Beamtalk Global Context
+
+**Purpose:** Expose a stable, Smalltalk-inspired global object (`Beamtalk`) that gives user code and REPL sessions a single entry point for runtime introspection — listing actors, modules, classes, and sessions — without exposing raw Erlang APIs.
+
+**Analogy:** `Beamtalk` is to Beamtalk what `Smalltalk` is to Pharo: a globally accessible system dictionary and runtime façade.
+
+**Aggregates:**
+
+#### 1. BeamtalkGlobal (Singleton Façade)
+
+**Invariants:**
+- Always available in every REPL session (no import needed)
+- Delegates to `beamtalk_workspace_meta`, `beamtalk_class_registry`, and `beamtalk_object_instances` — never holds state itself
+- Read-only introspection API; mutation is done via normal actor message sends
+
+**Entities:**
+- (None — stateless façade, no mutable entities)
+
+**Value Objects:**
+- `ClassList`: Ordered list of all registered class names
+- `ActorList`: List of `{pid, class, spawned_at}` tuples for all supervised actors
+- `SessionList`: List of active REPL session IDs
+- `ModuleList`: List of loaded Beamtalk module atoms
+
+**Domain Services:**
+- `BeamtalkSystemDictionary` (`stdlib/src/SystemDictionary.bt`, `beamtalk_stdlib.erl`): Implements `Beamtalk allClasses`, `Beamtalk classNamed:`, `Beamtalk globals`, and delegates to runtime for actors/sessions/modules
+
+**Key Operations (available in all REPL sessions):**
+
+| Message | Return | Delegates To |
+|---------|--------|-------------|
+| `Beamtalk allClasses` | List of class names | `beamtalk_class_registry` |
+| `Beamtalk classNamed: #Counter` | Class metadata | `beamtalk_class_registry` |
+| `Beamtalk actors` | List of running actors | `beamtalk_workspace_meta` |
+| `Beamtalk modules` | List of loaded modules | `beamtalk_workspace_meta` |
+| `Beamtalk version` | Version string | Runtime app env |
+| `Beamtalk nodeName` | BEAM node atom | `erlang:node()` |
+| `Beamtalk projectPath` | Project path binary | `beamtalk_workspace_meta` |
+
+**Key Patterns:**
+- **Façade over Multiple Contexts:** Beamtalk Global hides the Workspace, Object System, and Actor System contexts behind a single object; callers don't need to know which gen_server to query
+- **Read-Only:** No mutating operations — actors are spawned via `ClassName spawn`, not via `Beamtalk spawn:`
+- **Always Available:** Implemented as a globally registered class in `beamtalk_class_registry`; available before any user code loads
+
+**Example Domain Logic:**
+
+```beamtalk
+// User code in any REPL session
+Beamtalk allClasses          // => #('Counter', 'Logger', 'Actor', 'Object', ...)
+Beamtalk classNamed: #Counter // => <ClassInfo for Counter>
+Beamtalk actors               // => #(<0.123.0> Counter, <0.124.0> Logger)
+Beamtalk version              // => '0.1.0'
+```
+
+```erlang
+%% Erlang implementation delegates to workspace context
+beamtalk_actors() ->
+    case beamtalk_workspace_meta:supervised_actors() of
+        Pids when is_list(Pids) ->
+            [{Pid, beamtalk_class_registry:class_of(Pid)} || Pid <- Pids, is_process_alive(Pid)];
+        _ ->
+            []
+    end.
+```
+
 ---
 
 ## Cross-Cutting Concerns
@@ -931,6 +1172,13 @@ Domain events represent significant occurrences in the system. They enable loose
 | `CodeUpgradeStarted` | Module, Version | Hot reload begins | Actor instances |
 | `CodeUpgradeCompleted` | Module, Stats | Hot reload succeeds | Monitoring |
 | `StateMigrationFailed` | Pid, Reason | code_change/3 fails | Supervision |
+| `SessionStarted` | SessionId, Pid | WebSocket authenticated | WORKSPACE (update activity) |
+| `SessionClosed` | SessionId, Reason | WebSocket closes | WORKSPACE (cleanup session sup) |
+| `WorkspaceStarted` | WorkspaceId, ProjectPath, Port | Node startup complete | Monitoring |
+| `WorkspaceStopped` | WorkspaceId, Reason | `init:stop/0` called | Monitoring |
+| `WorkspaceIdleTimeout` | WorkspaceId, IdleSeconds | Idle limit exceeded | (triggers WorkspaceStopped) |
+| `ModuleLoaded` | ModuleName, SourcePath | `load-file` or `load-source` op | WORKSPACE (register module) |
+| `ModuleUnloaded` | ModuleName | `unload` op or class redefinition | WORKSPACE (deregister module) |
 
 **Event Flow Example: File Save → Hot Reload**
 
