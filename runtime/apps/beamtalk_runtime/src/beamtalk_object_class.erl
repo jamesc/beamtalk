@@ -250,6 +250,12 @@ init({ClassName, ClassInfo}) ->
 
     ets:insert(beamtalk_class_hierarchy, {ClassName, Superclass}),
 
+    %% BT-893: Store class metadata in process dictionary so class_send can
+    %% bypass gen_server for self-calls (new/spawn from within class methods).
+    put(beamtalk_class_name, ClassName),
+    put(beamtalk_class_module, Module),
+    put(beamtalk_class_is_abstract, IsAbstract),
+
     %% BT-474: is_constructible starts undefined — computed lazily on first new call
     %% ADR 0032 Phase 1: No flattened method tables — dispatch walks the chain directly.
     State = #class_state{
@@ -466,8 +472,13 @@ code_change(OldVsn, State, Extra) ->
 %% ADR 0032 Phase 1: No flattened tables to rebuild or invalidate.
 -spec apply_class_info(#class_state{}, map()) -> #class_state{}.
 apply_class_info(State, ClassInfo) ->
+    %% BT-893: Keep process dictionary in sync with state for self-instantiation.
+    NewModule = maps:get(module, ClassInfo, State#class_state.module),
+    put(beamtalk_class_module, NewModule),
+    NewIsAbstract = maps:get(is_abstract, ClassInfo, State#class_state.is_abstract),
+    put(beamtalk_class_is_abstract, NewIsAbstract),
     State#class_state{
-        module = maps:get(module, ClassInfo, State#class_state.module),
+        module = NewModule,
         instance_methods = maps:get(
             instance_methods, ClassInfo, State#class_state.instance_methods
         ),
