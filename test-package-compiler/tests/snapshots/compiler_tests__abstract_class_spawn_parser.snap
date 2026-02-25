@@ -52,29 +52,6 @@ Module {
                                 end: 213,
                             },
                         },
-                        MessageSend {
-                            receiver: ClassReference {
-                                name: Identifier {
-                                    name: "Shape",
-                                    span: Span {
-                                        start: 215,
-                                        end: 220,
-                                    },
-                                },
-                                span: Span {
-                                    start: 215,
-                                    end: 220,
-                                },
-                            },
-                            selector: Unary(
-                                "spawn",
-                            ),
-                            arguments: [],
-                            span: Span {
-                                start: 215,
-                                end: 226,
-                            },
-                        },
                     ],
                     return_type: None,
                     is_sealed: false,
@@ -82,7 +59,7 @@ Module {
                     doc_comment: None,
                     span: Span {
                         start: 178,
-                        end: 226,
+                        end: 213,
                     },
                 },
             ],
@@ -91,12 +68,36 @@ Module {
             doc_comment: None,
             span: Span {
                 start: 145,
-                end: 226,
+                end: 213,
             },
         },
     ],
     method_definitions: [],
-    expressions: [],
+    expressions: [
+        MessageSend {
+            receiver: ClassReference {
+                name: Identifier {
+                    name: "Shape",
+                    span: Span {
+                        start: 215,
+                        end: 220,
+                    },
+                },
+                span: Span {
+                    start: 215,
+                    end: 220,
+                },
+            },
+            selector: Unary(
+                "spawn",
+            ),
+            arguments: [],
+            span: Span {
+                start: 215,
+                end: 226,
+            },
+        },
+    ],
     span: Span {
         start: 145,
         end: 226,
