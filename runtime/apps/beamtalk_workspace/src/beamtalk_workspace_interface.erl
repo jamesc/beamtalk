@@ -139,8 +139,9 @@ dispatch('load:', [Path], _Self, State) ->
     {reply, handle_load(Path), State};
 dispatch('actorsOf:', [AClass], _Self, State) ->
     {reply, handle_actors_of(AClass), State};
-dispatch(globals, [], _Self, State) ->
-    {reply, handle_globals(self()), State};
+dispatch(globals, [], Self, State) ->
+    GenServerPid = erlang:element(4, Self),
+    {reply, handle_globals(GenServerPid), State};
 dispatch(testClasses, [], _Self, State) ->
     {reply, handle_test_classes(), State};
 dispatch(test, [], _Self, State) ->
@@ -186,8 +187,18 @@ handle_call({globals, []}, From, State) ->
     %% any risk of deadlock from singleton resolution
     GenServerPid = self(),
     spawn(fun() ->
-        Result = handle_globals(GenServerPid),
-        gen_server:reply(From, Result)
+        try handle_globals(GenServerPid) of
+            Result -> gen_server:reply(From, Result)
+        catch
+            Class:Reason:Stack ->
+                ?LOG_ERROR("globals handler crashed", #{
+                    class => Class, reason => Reason, stacktrace => Stack
+                }),
+                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+                gen_server:reply(
+                    From, {error, beamtalk_error:with_message(Err, <<"Internal error in globals">>)}
+                )
+        end
     end),
     {noreply, State};
 handle_call({'load:', [Path]}, _From, State) ->
@@ -195,14 +206,34 @@ handle_call({'load:', [Path]}, _From, State) ->
 handle_call({test, []}, From, State) ->
     %% test may take a long time — spawn to avoid blocking
     spawn(fun() ->
-        Result = handle_test(),
-        gen_server:reply(From, Result)
+        try handle_test() of
+            Result -> gen_server:reply(From, Result)
+        catch
+            Class:Reason:Stack ->
+                ?LOG_ERROR("test handler crashed", #{
+                    class => Class, reason => Reason, stacktrace => Stack
+                }),
+                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+                gen_server:reply(
+                    From, {error, beamtalk_error:with_message(Err, <<"Internal error in test">>)}
+                )
+        end
     end),
     {noreply, State};
 handle_call({'test:', [TestClass]}, From, State) ->
     spawn(fun() ->
-        Result = handle_test_class(TestClass),
-        gen_server:reply(From, Result)
+        try handle_test_class(TestClass) of
+            Result -> gen_server:reply(From, Result)
+        catch
+            Class:Reason:Stack ->
+                ?LOG_ERROR("test: handler crashed", #{
+                    class => Class, reason => Reason, stacktrace => Stack
+                }),
+                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+                gen_server:reply(
+                    From, {error, beamtalk_error:with_message(Err, <<"Internal error in test:">>)}
+                )
+        end
     end),
     {noreply, State};
 handle_call({Selector, Args}, From, State) when is_atom(Selector) ->
@@ -211,12 +242,24 @@ handle_call({Selector, Args}, From, State) when is_atom(Selector) ->
     GenServerPid = self(),
     spawn(fun() ->
         Self = {beamtalk_object, 'WorkspaceInterface', ?MODULE, GenServerPid},
-        Result = beamtalk_dispatch:lookup(Selector, Args, Self, #{}, 'WorkspaceInterface'),
-        case Result of
+        try beamtalk_dispatch:lookup(Selector, Args, Self, #{}, 'WorkspaceInterface') of
             {reply, Value, _NewState} ->
                 gen_server:reply(From, Value);
             {error, Error} ->
                 gen_server:reply(From, {error, Error})
+        catch
+            Class:Reason:Stack ->
+                ?LOG_ERROR("dispatch handler crashed", #{
+                    selector => Selector, class => Class, reason => Reason, stacktrace => Stack
+                }),
+                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+                gen_server:reply(
+                    From,
+                    {error,
+                        beamtalk_error:with_selector(
+                            beamtalk_error:with_message(Err, <<"Internal error">>), Selector
+                        )}
+                )
         end
     end),
     {noreply, State};
@@ -247,8 +290,18 @@ handle_cast({testClasses, [], FuturePid}, State) when is_pid(FuturePid) ->
 handle_cast({globals, [], FuturePid}, State) when is_pid(FuturePid) ->
     GenServerPid = self(),
     spawn(fun() ->
-        Result = handle_globals(GenServerPid),
-        beamtalk_future:resolve(FuturePid, Result)
+        try handle_globals(GenServerPid) of
+            Result -> beamtalk_future:resolve(FuturePid, Result)
+        catch
+            Class:Reason:Stack ->
+                ?LOG_ERROR("globals handler crashed", #{
+                    class => Class, reason => Reason, stacktrace => Stack
+                }),
+                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+                beamtalk_future:reject(
+                    FuturePid, beamtalk_error:with_message(Err, <<"Internal error in globals">>)
+                )
+        end
     end),
     {noreply, State};
 handle_cast({'load:', [Path], FuturePid}, State) when is_pid(FuturePid) ->
@@ -261,14 +314,34 @@ handle_cast({'load:', [Path], FuturePid}, State) when is_pid(FuturePid) ->
     {noreply, State};
 handle_cast({test, [], FuturePid}, State) when is_pid(FuturePid) ->
     spawn(fun() ->
-        Result = handle_test(),
-        beamtalk_future:resolve(FuturePid, Result)
+        try handle_test() of
+            Result -> beamtalk_future:resolve(FuturePid, Result)
+        catch
+            Class:Reason:Stack ->
+                ?LOG_ERROR("test handler crashed", #{
+                    class => Class, reason => Reason, stacktrace => Stack
+                }),
+                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+                beamtalk_future:reject(
+                    FuturePid, beamtalk_error:with_message(Err, <<"Internal error in test">>)
+                )
+        end
     end),
     {noreply, State};
 handle_cast({'test:', [TestClass], FuturePid}, State) when is_pid(FuturePid) ->
     spawn(fun() ->
-        Result = handle_test_class(TestClass),
-        beamtalk_future:resolve(FuturePid, Result)
+        try handle_test_class(TestClass) of
+            Result -> beamtalk_future:resolve(FuturePid, Result)
+        catch
+            Class:Reason:Stack ->
+                ?LOG_ERROR("test: handler crashed", #{
+                    class => Class, reason => Reason, stacktrace => Stack
+                }),
+                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+                beamtalk_future:reject(
+                    FuturePid, beamtalk_error:with_message(Err, <<"Internal error in test:">>)
+                )
+        end
     end),
     {noreply, State};
 handle_cast({Selector, Args, FuturePid}, State) when
@@ -278,11 +351,23 @@ handle_cast({Selector, Args, FuturePid}, State) when
     GenServerPid = self(),
     spawn(fun() ->
         Self = {beamtalk_object, 'WorkspaceInterface', ?MODULE, GenServerPid},
-        case beamtalk_dispatch:lookup(Selector, Args, Self, #{}, 'WorkspaceInterface') of
+        try beamtalk_dispatch:lookup(Selector, Args, Self, #{}, 'WorkspaceInterface') of
             {reply, Value, _NewState} ->
                 beamtalk_future:resolve(FuturePid, Value);
             {error, Error} ->
                 beamtalk_future:reject(FuturePid, Error)
+        catch
+            Class:Reason:Stack ->
+                ?LOG_ERROR("dispatch handler crashed", #{
+                    selector => Selector, class => Class, reason => Reason, stacktrace => Stack
+                }),
+                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+                beamtalk_future:reject(
+                    FuturePid,
+                    beamtalk_error:with_selector(
+                        beamtalk_error:with_message(Err, <<"Internal error">>), Selector
+                    )
+                )
         end
     end),
     {noreply, State};
