@@ -1486,6 +1486,38 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
 /// Beamtalk files and run escript, which can conflict with shared build artifacts.
 ///
 /// Note: Ignored by default due to slow execution (~50s for 316 test cases).
+/// BT-885: Class definition + trailing expressions in one eval block.
+///
+/// When a class definition and method calls are submitted as a single `evaluate` call
+/// (as happens with MCP/REPL multi-line submission), the trailing expressions must be
+/// evaluated and their result returned — not the class name.
+///
+/// Run explicitly with: `cargo test --test e2e -- --ignored` or `just test-e2e`
+#[test]
+#[ignore = "slow test - run with `just test-e2e`"]
+#[serial(e2e)]
+fn e2e_inline_class_trailing_expressions() {
+    let _manager = ProcessManager::start();
+    let mut client = ReplClient::connect().expect("Failed to connect to REPL");
+
+    // Class definition followed by an expression in one eval call.
+    // Before the fix, this returned the class name ('BT885Counter').
+    // After the fix, it should return the result of 'BT885Counter new count' (0).
+    let result = client
+        .eval("Object subclass: BT885Counter\n  state: count = 0\n  count => self.count\nBT885Counter new count")
+        .expect("Eval failed");
+    assert_eq!(
+        result, "0",
+        "Expected trailing expression result (0), got class name or error: {result}"
+    );
+
+    // Verify class was also registered (can still use it in subsequent evals).
+    let result2 = client
+        .eval("BT885Counter new count")
+        .expect("Second eval failed");
+    assert_eq!(result2, "0", "Class should still be registered: {result2}");
+}
+
 /// Run explicitly with: `cargo test --test e2e -- --ignored` or `just test-e2e`
 #[test]
 #[ignore = "slow test - run with `just test-e2e`"]

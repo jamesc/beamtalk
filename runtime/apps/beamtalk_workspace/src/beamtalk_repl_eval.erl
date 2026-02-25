@@ -34,7 +34,7 @@
     activate_module/2,
     register_classes/2,
     trigger_hot_reload/2,
-    handle_class_definition/4,
+    handle_class_definition/6,
     handle_method_definition/4,
     compile_expression_via_port/3,
     compile_file_via_port/4
@@ -75,8 +75,11 @@ do_eval(Expression, State, Subscriber) ->
     %% Compile expression
     case compile_expression(Expression, ModuleName, Bindings) of
         %% BT-571: Inline class definition — load module, register class
+        %% BT-885: trailing expressions in ClassInfo are evaluated after class load
         {ok, class_definition, ClassInfo, Warnings} ->
-            handle_class_definition(ClassInfo, Warnings, Expression, NewState);
+            handle_class_definition(
+                ClassInfo, Warnings, Expression, NewState, RegistryPid, Subscriber
+            );
         %% BT-571: Standalone method definition — add/replace method on existing class
         {ok, method_definition, MethodInfo, Warnings} ->
             handle_method_definition(MethodInfo, Warnings, Expression, NewState);
@@ -364,7 +367,8 @@ load_compiled_module(Binary, ClassNames, ModuleName, Source, SourcePath, State) 
 
 %% BT-571: Handle inline class definition result.
 %% Loads the compiled class module, registers its classes, and stores source.
-handle_class_definition(ClassInfo, Warnings, Expression, State) ->
+%% BT-885: Evaluates any trailing expressions from ClassInfo after loading the class.
+handle_class_definition(ClassInfo, Warnings, Expression, State, RegistryPid, Subscriber) ->
     #{binary := Binary, module_name := ClassModName, classes := Classes} = ClassInfo,
     case code:load_binary(ClassModName, "", Binary) of
         {module, ClassModName} ->
@@ -394,7 +398,28 @@ handle_class_definition(ClassInfo, Warnings, Expression, State) ->
                                 FallbackName, Expression, NewState1
                             )}
                 end,
-            {ok, ClassName, <<>>, Warnings, NewState2};
+            %% BT-885: Evaluate trailing expressions if present
+            case maps:find(trailing_binary, ClassInfo) of
+                {ok, TrailingBinary} ->
+                    TrailingModName = maps:get(trailing_module_name, ClassInfo),
+                    Bindings = beamtalk_repl_state:get_bindings(NewState2),
+                    case code:load_binary(TrailingModName, "", TrailingBinary) of
+                        {module, TrailingModName} ->
+                            eval_loaded_module(
+                                TrailingModName,
+                                Expression,
+                                Bindings,
+                                RegistryPid,
+                                Subscriber,
+                                Warnings,
+                                NewState2
+                            );
+                        {error, LoadReason} ->
+                            {error, {load_error, LoadReason}, <<>>, Warnings, NewState2}
+                    end;
+                error ->
+                    {ok, ClassName, <<>>, Warnings, NewState2}
+            end;
         {error, Reason} ->
             %% BT-738: Check for a structured stdlib_shadowing error stored in the
             %% pending errors table by update_class before on_load failed.
@@ -604,13 +629,39 @@ compile_expression_via_port(Expression, ModuleName, Bindings) ->
                     ClassModName = binary_to_atom(ClassModNameBin, utf8),
                     case beamtalk_compiler:compile_core_erlang(CoreErlang) of
                         {ok, _CompiledMod, Binary} ->
-                            {ok, class_definition,
-                                #{
-                                    binary => Binary,
-                                    module_name => ClassModName,
-                                    classes => Classes
-                                },
-                                Warnings};
+                            %% BT-885: Compile trailing expressions if present
+                            TrailingResult =
+                                case maps:find(trailing_core_erlang, ClassInfo) of
+                                    {ok, TrailingCoreErlang} ->
+                                        case
+                                            beamtalk_compiler:compile_core_erlang(
+                                                TrailingCoreErlang
+                                            )
+                                        of
+                                            {ok, _TCompiledMod, TBinary} ->
+                                                {ok, TBinary, ModuleName};
+                                            {error, _} ->
+                                                none
+                                        end;
+                                    error ->
+                                        none
+                                end,
+                            BaseInfo = #{
+                                binary => Binary,
+                                module_name => ClassModName,
+                                classes => Classes
+                            },
+                            ClassInfo2 =
+                                case TrailingResult of
+                                    {ok, TrailingBinary, TrailingModName} ->
+                                        BaseInfo#{
+                                            trailing_binary => TrailingBinary,
+                                            trailing_module_name => TrailingModName
+                                        };
+                                    none ->
+                                        BaseInfo
+                                end,
+                            {ok, class_definition, ClassInfo2, Warnings};
                         {error, Reason} ->
                             {error,
                                 iolist_to_binary(

@@ -27,6 +27,8 @@
 %%% ```
 
 -module(beamtalk_workspace_interface).
+%% Suppress dialyzer warnings about dynamically loaded compiled Beamtalk module
+
 -behaviour(gen_server).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -37,7 +39,8 @@
     start_link/0,
     start_link/1,
     has_method/1,
-    class_info/0
+    class_info/0,
+    dispatch/4
 ]).
 
 %% gen_server callbacks
@@ -88,11 +91,64 @@ class_info() ->
             actors => #{arity => 0},
             'actorAt:' => #{arity => 1},
             classes => #{arity => 0},
-            'load:' => #{arity => 1}
+            'load:' => #{arity => 1},
+            'actorsOf:' => #{arity => 1},
+            globals => #{arity => 0},
+            testClasses => #{arity => 0},
+            test => #{arity => 0},
+            'test:' => #{arity => 1}
         },
         class_methods => #{},
         fields => []
     }.
+
+%%====================================================================
+%% dispatch/4 for beamtalk_dispatch to delegate to compiled Beamtalk methods
+%%====================================================================
+
+%% @doc Dispatch compiled Beamtalk methods.
+%% Handles both primitive methods and Beamtalk-defined methods
+%% (by delegating to the compiled bt@stdlib@workspace_interface module).
+-spec dispatch(atom(), list(), term(), map()) ->
+    {reply, term(), map()} | {error, term(), map()}.
+
+%% Primitive methods: handle directly
+dispatch(actors, [], _Self, _State) ->
+    Result = handle_actors(),
+    {reply, Result, _State};
+dispatch('actorAt:', [PidStr], _Self, _State) ->
+    Result = handle_actor_at(PidStr),
+    {reply, Result, _State};
+dispatch(classes, [], _Self, _State) ->
+    Result = handle_classes(),
+    {reply, Result, _State};
+dispatch('load:', [Path], _Self, _State) ->
+    Result = handle_load(Path),
+    {reply, Result, _State};
+%% Beamtalk-defined methods: delegate to compiled module
+dispatch(Selector, Args, Self, State) ->
+    CompiledModule = 'bt@stdlib@workspace_interface',
+    case catch apply(CompiledModule, dispatch, [Selector, Args, Self, State]) of
+        {reply, Result, NewState} ->
+            {reply, Result, NewState};
+        {error, Error, NewState} ->
+            {error, Error, NewState};
+        {'EXIT', _Reason} ->
+            Err0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
+            Err1 = beamtalk_error:with_selector(Err0, Selector),
+            Err2 = beamtalk_error:with_hint(
+                Err1, <<"To list available selectors, use: Workspace methods">>
+            ),
+            {error, Err2, State};
+        _ ->
+            %% Unknown method
+            Error0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
+            Error1 = beamtalk_error:with_selector(Error0, Selector),
+            Error2 = beamtalk_error:with_hint(
+                Error1, <<"To list available selectors, use: Workspace methods">>
+            ),
+            {error, Error2, State}
+    end.
 
 %%====================================================================
 %% gen_server callbacks
@@ -163,15 +219,16 @@ handle_cast({'load:', [Path], FuturePid}, State) when is_pid(FuturePid) ->
             beamtalk_future:resolve(FuturePid, Result)
     end,
     {noreply, State};
-handle_cast({UnknownSelector, _Args, FuturePid}, State) when
-    is_pid(FuturePid), is_atom(UnknownSelector)
+handle_cast({Selector, Args, FuturePid}, State) when
+    is_pid(FuturePid), is_atom(Selector)
 ->
-    Error0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
-    Error1 = beamtalk_error:with_selector(Error0, UnknownSelector),
-    Error2 = beamtalk_error:with_hint(
-        Error1, <<"To list available selectors, use: Workspace methods">>
-    ),
-    beamtalk_future:reject(FuturePid, Error2),
+    Self = {beamtalk_object, 'WorkspaceInterface', ?MODULE, self()},
+    case dispatch(Selector, Args, Self, #{}) of
+        {reply, Result, _} ->
+            beamtalk_future:resolve(FuturePid, Result);
+        {error, Error, _} ->
+            beamtalk_future:reject(FuturePid, Error)
+    end,
     {noreply, State};
 handle_cast(Msg, State) ->
     ?LOG_WARNING("WorkspaceInterface received unexpected cast", #{message => Msg}),

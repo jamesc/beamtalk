@@ -150,10 +150,12 @@ fn ok_response(core_erlang: &str, warnings: &[String]) -> Term {
 }
 
 /// Build a response map for a successful inline class definition in REPL.
+/// BT-885: `trailing_core_erlang` is Some when trailing expressions follow the class body.
 fn class_definition_ok_response(
     core_erlang: &str,
     module_name: &str,
     classes: &[(String, String)],
+    trailing_core_erlang: Option<&str>,
     warnings: &[String],
 ) -> Term {
     let warning_terms: Vec<Term> = warnings.iter().map(|w| binary(w)).collect();
@@ -166,14 +168,18 @@ fn class_definition_ok_response(
             ]))
         })
         .collect();
-    Term::from(Map::from([
+    let mut map: std::collections::HashMap<Term, Term> = std::collections::HashMap::from([
         (atom("status"), atom("ok")),
         (atom("kind"), atom("class_definition")),
         (atom("core_erlang"), binary(core_erlang)),
         (atom("module_name"), binary(module_name)),
         (atom("classes"), Term::from(List::from(class_terms))),
         (atom("warnings"), Term::from(List::from(warning_terms))),
-    ]))
+    ]);
+    if let Some(trailing) = trailing_core_erlang {
+        map.insert(atom("trailing_core_erlang"), binary(trailing));
+    }
+    Term::from(Map::from(map))
 }
 
 /// Build a response map for a successful standalone method definition in REPL.
@@ -376,7 +382,7 @@ fn handle_compile_expression(request: &Map) -> Term {
 
     // BT-571: If the parsed module contains class definitions, use compile path
     if !module.classes.is_empty() {
-        return handle_inline_class_definition(module, &source, &warnings);
+        return handle_inline_class_definition(module, &source, &module_name, &warnings);
     }
 
     // BT-571: If the parsed module contains standalone method definitions, return method info
@@ -414,9 +420,11 @@ fn handle_compile_expression(request: &Map) -> Term {
 /// BT-571: Handle inline class definition in REPL expression context.
 /// Merges any standalone method definitions into the class, generates code,
 /// and returns a `class_definition` response.
+/// BT-885: Also compiles any trailing expressions and includes them in the response.
 fn handle_inline_class_definition(
     module: beamtalk_core::ast::Module,
     source: &str,
+    expr_module_name: &str,
     warnings: &[String],
 ) -> Term {
     let mut module = module;
@@ -453,13 +461,27 @@ fn handle_inline_class_definition(
         .map(|c| (c.name.name.to_string(), c.superclass_name().to_string()))
         .collect();
 
+    // BT-885: Compile trailing expressions (after class body) so the Erlang side
+    // can evaluate them and return their result instead of the class name.
+    let trailing_core_erlang = if module.expressions.is_empty() {
+        None
+    } else {
+        beamtalk_core::erlang::generate_repl_expressions(&module.expressions, expr_module_name).ok()
+    };
+
     match beamtalk_core::erlang::generate_module(
         &module,
         beamtalk_core::erlang::CodegenOptions::new(&class_module_name)
             .with_workspace_mode(true)
             .with_source(source),
     ) {
-        Ok(code) => class_definition_ok_response(&code, &class_module_name, &classes, &warnings),
+        Ok(code) => class_definition_ok_response(
+            &code,
+            &class_module_name,
+            &classes,
+            trailing_core_erlang.as_deref(),
+            &warnings,
+        ),
         Err(e) => error_response(&[format!("Code generation failed: {e}")]),
     }
 }
