@@ -279,8 +279,234 @@ impl CoreErlangGenerator {
              \x20 list collect: [:item | item * 2]",
         )?;
 
-        // list collect: is map
+        // BT-904: Check if body has state-affecting operations (self-sends, field writes)
+        if let Expression::Block(body_block) = body {
+            let analysis = block_analysis::analyze_block(body_block);
+            if self.needs_mutation_threading(&analysis) {
+                return self.generate_list_collect_with_mutations(receiver, body_block);
+            }
+        }
+
+        // Simple case: no mutations, use standard lists:map
         self.generate_simple_list_op(receiver, body, "map")
+    }
+
+    /// BT-904: Generates stateful `collect:` using `lists:foldl` with state threading.
+    ///
+    /// Accumulator is `{ResultList, StateAcc}`. Each iteration runs the body
+    /// with state threading (for self-sends, field writes), prepends the result
+    /// to the list, and threads the new state. After foldl, reverses the list.
+    pub(in crate::codegen::core_erlang) fn generate_list_collect_with_mutations(
+        &mut self,
+        receiver: &Expression,
+        body: &Block,
+    ) -> Result<Document<'static>> {
+        if self.is_repl_mode {
+            self.repl_loop_mutated = true;
+        }
+
+        let threaded_locals = self.compute_threaded_locals_for_loop(body, None);
+
+        let list_var = self.fresh_temp_var("temp");
+        let recv_code = self.expression_doc(receiver)?;
+        let safe_list_var = self.fresh_temp_var("temp");
+        let lambda_var = self.fresh_temp_var("temp");
+        let item_param = body.parameters.first().map_or("_", |p| p.name.as_str());
+        let item_var = Self::to_core_erlang_var(item_param);
+
+        let initial_state = self.current_state_var();
+        let mut init_state_code = initial_state.clone();
+        let mut pack_prefix = String::new();
+        if !threaded_locals.is_empty() && !self.is_repl_mode {
+            let mut current = initial_state.clone();
+            for var_name in &threaded_locals {
+                let packed_var = self.fresh_temp_var("Packed");
+                let core_var = self
+                    .lookup_var(var_name)
+                    .cloned()
+                    .unwrap_or_else(|| Self::to_core_erlang_var(var_name));
+                let key = Self::local_state_key(var_name);
+                let _ = write!(
+                    pack_prefix,
+                    "let {packed_var} = call 'maps':'put'('{key}', {core_var}, {current}) in "
+                );
+                current = packed_var;
+            }
+            init_state_code = current;
+        }
+
+        // Accumulator is {ResultList, StateAcc}
+        let acc_state_var = self.fresh_temp_var("AccSt");
+        let mut docs: Vec<Document<'static>> = vec![
+            Document::String(pack_prefix),
+            docvec![
+                format!("let {list_var} = "),
+                recv_code,
+                format!(
+                    " in let {safe_list_var} = case call 'erlang':'is_list'({list_var}) of \
+                     <'true'> when 'true' -> {list_var} \
+                     <'false'> when 'true' -> \
+                     call 'beamtalk_collection_ops':'to_list'({list_var}) end \
+                     in let {lambda_var} = fun ({item_var}, {acc_state_var}) -> \
+                     let AccList = call 'erlang':'element'(1, {acc_state_var}) in \
+                     let StateAcc = call 'erlang':'element'(2, {acc_state_var}) in "
+                ),
+            ],
+        ];
+
+        // Generate body with state threading (reuses do: body threading)
+        let body_doc = self.generate_list_collect_body_with_threading(body, &item_var)?;
+        docs.push(body_doc);
+
+        // After foldl: extract result list and reverse it, extract final state
+        let fold_result = self.fresh_temp_var("FoldResult");
+        let rev_list = self.fresh_temp_var("RevList");
+        let final_list = self.fresh_temp_var("FinalList");
+        let state_out = self.fresh_temp_var("StOut");
+
+        let mut post_code = format!(
+            " in let {fold_result} = call 'lists':'foldl'({lambda_var}, {{[], {init_state_code}}}, {safe_list_var}) \
+             in let {rev_list} = call 'erlang':'element'(1, {fold_result}) \
+             in let {final_list} = call 'lists':'reverse'({rev_list}) \
+             in let {state_out} = call 'erlang':'element'(2, {fold_result}) in "
+        );
+
+        // Extract threaded locals from the final state
+        if !threaded_locals.is_empty() && !self.is_repl_mode {
+            for var_name in &threaded_locals {
+                let core_var = self
+                    .lookup_var(var_name)
+                    .cloned()
+                    .unwrap_or_else(|| Self::to_core_erlang_var(var_name));
+                let key = Self::local_state_key(var_name);
+                let _ = write!(
+                    post_code,
+                    "let {core_var} = call 'maps':'get'('{key}', {state_out}) in "
+                );
+            }
+        }
+
+        let _ = write!(post_code, "{{{final_list}, {state_out}}}");
+        docs.push(Document::String(post_code));
+
+        Ok(Document::Vec(docs))
+    }
+
+    /// BT-904: Generate body expressions for stateful `collect:`, threading state
+    /// through self-sends and field assignments. Returns `{[Result | AccList], NewState}`.
+    pub(in crate::codegen::core_erlang) fn generate_list_collect_body_with_threading(
+        &mut self,
+        body: &Block,
+        item_var: &str,
+    ) -> Result<Document<'static>> {
+        self.push_scope();
+        if let Some(param) = body.parameters.first() {
+            self.bind_var(&param.name, item_var);
+        }
+
+        let saved_state_version = self.state_version();
+        self.set_state_version(0);
+
+        let previous_in_loop_body = self.in_loop_body;
+        self.in_loop_body = true;
+
+        let mut docs: Vec<Document<'static>> = Vec::new();
+
+        // Read threaded locals from StateAcc at start of each iteration
+        let threaded = self.compute_threaded_locals_for_loop(body, None);
+        for var_name in &threaded {
+            let core_var = Self::to_core_erlang_var(var_name);
+            let key = Self::local_state_key(var_name);
+            self.bind_var(var_name, &core_var);
+            docs.push(Document::String(format!(
+                "let {core_var} = call 'maps':'get'('{key}', StateAcc) in "
+            )));
+        }
+
+        // Generate body expressions with state threading
+        let filtered_body: Vec<&Expression> = body
+            .body
+            .iter()
+            .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
+            .collect();
+        let mut has_mutations = false;
+        for (i, expr) in filtered_body.iter().enumerate() {
+            let is_last = i == filtered_body.len() - 1;
+
+            if Self::is_field_assignment(expr) {
+                has_mutations = true;
+                let doc = self.generate_field_assignment_open(expr)?;
+                docs.push(doc);
+
+                if is_last {
+                    let final_state = self.current_state_var();
+                    docs.push(Document::String(format!(
+                        "{{[_Val | AccList], {final_state}}}"
+                    )));
+                }
+            } else if self.is_actor_self_send(expr) {
+                has_mutations = true;
+                let doc = self.generate_self_dispatch_open(expr)?;
+                docs.push(doc);
+
+                if is_last {
+                    let final_state = self.current_state_var();
+                    if let Some(dv) = self.last_dispatch_var.clone() {
+                        let item_result = self.fresh_temp_var("ItemResult");
+                        docs.push(Document::String(format!(
+                            "let {item_result} = call 'erlang':'element'(1, {dv}) in \
+                             {{[{item_result} | AccList], {final_state}}}"
+                        )));
+                    } else {
+                        docs.push(Document::String(format!(
+                            "{{['nil' | AccList], {final_state}}}"
+                        )));
+                    }
+                }
+            } else if Self::is_local_var_assignment(expr) {
+                has_mutations = true;
+                let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
+                docs.push(assign_doc);
+
+                if is_last {
+                    let final_state = self.current_state_var();
+                    docs.push(Document::String(format!(
+                        " {{[_Val | AccList], {final_state}}}"
+                    )));
+                }
+            } else {
+                // Non-assignment expression
+                if i > 0 && !is_last {
+                    // Previous expression left scope open, wrap to discard value
+                    docs.push(Document::Str("let _ = "));
+                }
+
+                if is_last {
+                    let result_var = self.fresh_temp_var("CollectItem");
+                    let expr_code = self.expression_doc(expr)?;
+                    let final_state = if has_mutations {
+                        self.current_state_var()
+                    } else {
+                        "StateAcc".to_string()
+                    };
+                    docs.push(docvec![
+                        format!("let {result_var} = "),
+                        expr_code,
+                        format!(" in {{[{result_var} | AccList], {final_state}}}"),
+                    ]);
+                } else {
+                    let doc = self.generate_expression(expr)?;
+                    docs.push(doc);
+                    docs.push(Document::Str(" in "));
+                }
+            }
+        }
+
+        self.set_state_version(saved_state_version);
+        self.in_loop_body = previous_in_loop_body;
+        self.pop_scope();
+
+        Ok(Document::Vec(docs))
     }
 
     pub(in crate::codegen::core_erlang) fn generate_list_select(
@@ -297,7 +523,15 @@ impl CoreErlangGenerator {
              \x20 list select: [:item | item > 0]",
         )?;
 
-        // list select: is filter
+        // BT-904: Check if body has state-affecting operations
+        if let Expression::Block(body_block) = body {
+            let analysis = block_analysis::analyze_block(body_block);
+            if self.needs_mutation_threading(&analysis) {
+                return self.generate_list_filter_with_mutations(receiver, body_block, false);
+            }
+        }
+
+        // Simple case: no mutations, use standard lists:filter
         self.generate_simple_list_op(receiver, body, "filter")
     }
 
@@ -314,6 +548,14 @@ impl CoreErlangGenerator {
             "Fix: The body block must take one argument (each element):\n\
              \x20 list reject: [:item | item < 0]",
         )?;
+
+        // BT-904: Check if body has state-affecting operations
+        if let Expression::Block(body_block) = body {
+            let analysis = block_analysis::analyze_block(body_block);
+            if self.needs_mutation_threading(&analysis) {
+                return self.generate_list_filter_with_mutations(receiver, body_block, true);
+            }
+        }
 
         // list reject: is opposite of filter - we need to negate the predicate
         // BT-416: Add runtime is_list guard for non-list receivers
@@ -337,6 +579,227 @@ impl CoreErlangGenerator {
                  call 'beamtalk_primitive':'send'({list_var}, 'reject:', [{body_var}]) end"
             ),
         ])
+    }
+
+    /// BT-904: Generates stateful `select:`/`reject:` using `lists:foldl` with state threading.
+    ///
+    /// Uses foldl with `{ResultList, StateAcc}` accumulator. Each iteration runs the body
+    /// with state threading, then conditionally includes the item based on the block result.
+    /// For `reject:` (negate=true), the condition is inverted.
+    pub(in crate::codegen::core_erlang) fn generate_list_filter_with_mutations(
+        &mut self,
+        receiver: &Expression,
+        body: &Block,
+        negate: bool,
+    ) -> Result<Document<'static>> {
+        if self.is_repl_mode {
+            self.repl_loop_mutated = true;
+        }
+
+        let threaded_locals = self.compute_threaded_locals_for_loop(body, None);
+
+        let list_var = self.fresh_temp_var("temp");
+        let recv_code = self.expression_doc(receiver)?;
+        let safe_list_var = self.fresh_temp_var("temp");
+        let lambda_var = self.fresh_temp_var("temp");
+        let item_param = body.parameters.first().map_or("_", |p| p.name.as_str());
+        let item_var = Self::to_core_erlang_var(item_param);
+
+        let initial_state = self.current_state_var();
+        let mut init_state_code = initial_state.clone();
+        let mut pack_prefix = String::new();
+        if !threaded_locals.is_empty() && !self.is_repl_mode {
+            let mut current = initial_state.clone();
+            for var_name in &threaded_locals {
+                let packed_var = self.fresh_temp_var("Packed");
+                let core_var = self
+                    .lookup_var(var_name)
+                    .cloned()
+                    .unwrap_or_else(|| Self::to_core_erlang_var(var_name));
+                let key = Self::local_state_key(var_name);
+                let _ = write!(
+                    pack_prefix,
+                    "let {packed_var} = call 'maps':'put'('{key}', {core_var}, {current}) in "
+                );
+                current = packed_var;
+            }
+            init_state_code = current;
+        }
+
+        // Accumulator is {ResultList, StateAcc}
+        let acc_state_var = self.fresh_temp_var("AccSt");
+        let mut docs: Vec<Document<'static>> = vec![
+            Document::String(pack_prefix),
+            docvec![
+                format!("let {list_var} = "),
+                recv_code,
+                format!(
+                    " in let {safe_list_var} = case call 'erlang':'is_list'({list_var}) of \
+                     <'true'> when 'true' -> {list_var} \
+                     <'false'> when 'true' -> \
+                     call 'beamtalk_collection_ops':'to_list'({list_var}) end \
+                     in let {lambda_var} = fun ({item_var}, {acc_state_var}) -> \
+                     let AccList = call 'erlang':'element'(1, {acc_state_var}) in \
+                     let StateAcc = call 'erlang':'element'(2, {acc_state_var}) in "
+                ),
+            ],
+        ];
+
+        // Generate body with state threading — result is the filter predicate
+        let body_doc = self.generate_list_filter_body_with_threading(body, &item_var, negate)?;
+        docs.push(body_doc);
+
+        // After foldl: reverse result list, extract final state
+        let fold_result = self.fresh_temp_var("FoldResult");
+        let rev_list = self.fresh_temp_var("RevList");
+        let final_list = self.fresh_temp_var("FinalList");
+        let state_out = self.fresh_temp_var("StOut");
+
+        let mut post_code = format!(
+            " in let {fold_result} = call 'lists':'foldl'({lambda_var}, {{[], {init_state_code}}}, {safe_list_var}) \
+             in let {rev_list} = call 'erlang':'element'(1, {fold_result}) \
+             in let {final_list} = call 'lists':'reverse'({rev_list}) \
+             in let {state_out} = call 'erlang':'element'(2, {fold_result}) in "
+        );
+
+        if !threaded_locals.is_empty() && !self.is_repl_mode {
+            for var_name in &threaded_locals {
+                let core_var = self
+                    .lookup_var(var_name)
+                    .cloned()
+                    .unwrap_or_else(|| Self::to_core_erlang_var(var_name));
+                let key = Self::local_state_key(var_name);
+                let _ = write!(
+                    post_code,
+                    "let {core_var} = call 'maps':'get'('{key}', {state_out}) in "
+                );
+            }
+        }
+
+        let _ = write!(post_code, "{{{final_list}, {state_out}}}");
+        docs.push(Document::String(post_code));
+
+        Ok(Document::Vec(docs))
+    }
+
+    /// BT-904: Generate body for stateful `select:`/`reject:`, threading state through
+    /// self-sends and field assignments. Returns `{NewAccList, NewState}` where
+    /// the item is conditionally appended based on the block predicate result.
+    pub(in crate::codegen::core_erlang) fn generate_list_filter_body_with_threading(
+        &mut self,
+        body: &Block,
+        item_var: &str,
+        negate: bool,
+    ) -> Result<Document<'static>> {
+        self.push_scope();
+        if let Some(param) = body.parameters.first() {
+            self.bind_var(&param.name, item_var);
+        }
+
+        let saved_state_version = self.state_version();
+        self.set_state_version(0);
+
+        let previous_in_loop_body = self.in_loop_body;
+        self.in_loop_body = true;
+
+        let mut docs: Vec<Document<'static>> = Vec::new();
+
+        // Read threaded locals from StateAcc
+        let threaded = self.compute_threaded_locals_for_loop(body, None);
+        for var_name in &threaded {
+            let core_var = Self::to_core_erlang_var(var_name);
+            let key = Self::local_state_key(var_name);
+            self.bind_var(var_name, &core_var);
+            docs.push(Document::String(format!(
+                "let {core_var} = call 'maps':'get'('{key}', StateAcc) in "
+            )));
+        }
+
+        // Generate body expressions — we need to capture the predicate result
+        // Use generate_list_do_body_with_threading pattern but capture last expression value
+        let filtered_body: Vec<&Expression> = body
+            .body
+            .iter()
+            .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
+            .collect();
+        let mut has_mutations = false;
+        let pred_var = self.fresh_temp_var("Pred");
+
+        for (i, expr) in filtered_body.iter().enumerate() {
+            let is_last = i == filtered_body.len() - 1;
+
+            if Self::is_field_assignment(expr) {
+                has_mutations = true;
+                let doc = self.generate_field_assignment_open(expr)?;
+                docs.push(doc);
+
+                if is_last {
+                    // Field assignment result (_Val) is the predicate
+                    docs.push(Document::String(format!("let {pred_var} = _Val in ")));
+                }
+            } else if self.is_actor_self_send(expr) {
+                has_mutations = true;
+                let doc = self.generate_self_dispatch_open(expr)?;
+                docs.push(doc);
+
+                if is_last {
+                    if let Some(dv) = self.last_dispatch_var.clone() {
+                        docs.push(Document::String(format!(
+                            "let {pred_var} = call 'erlang':'element'(1, {dv}) in "
+                        )));
+                    } else {
+                        docs.push(Document::String(format!("let {pred_var} = 'nil' in ")));
+                    }
+                }
+            } else if Self::is_local_var_assignment(expr) {
+                has_mutations = true;
+                let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
+                docs.push(assign_doc);
+
+                if is_last {
+                    docs.push(Document::String(format!(" let {pred_var} = _Val in ")));
+                }
+            } else {
+                if i > 0 && !is_last {
+                    // Previous expression left scope open, wrap to discard value
+                    docs.push(Document::Str("let _ = "));
+                }
+
+                if is_last {
+                    let expr_code = self.expression_doc(expr)?;
+                    docs.push(docvec![format!("let {pred_var} = "), expr_code, " in ",]);
+                } else {
+                    let doc = self.generate_expression(expr)?;
+                    docs.push(doc);
+                    docs.push(Document::Str(" in "));
+                }
+            }
+        }
+
+        // Now conditionally include the item based on predicate
+        let final_state = if has_mutations {
+            self.current_state_var()
+        } else {
+            "StateAcc".to_string()
+        };
+
+        let condition = if negate {
+            format!("call 'erlang':'not'({pred_var})")
+        } else {
+            pred_var.clone()
+        };
+
+        docs.push(Document::String(format!(
+            "case {condition} of \
+             <'true'> when 'true' -> {{[{item_var} | AccList], {final_state}}} \
+             <'false'> when 'true' -> {{AccList, {final_state}}} end"
+        )));
+
+        self.set_state_version(saved_state_version);
+        self.in_loop_body = previous_in_loop_body;
+        self.pop_scope();
+
+        Ok(Document::Vec(docs))
     }
 
     pub(in crate::codegen::core_erlang) fn generate_simple_list_op(
