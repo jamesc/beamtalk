@@ -280,6 +280,11 @@ pub fn cleanup_stale_node_info(workspace_id: &str) -> Result<()> {
     if port_file_path.exists() {
         let _ = fs::remove_file(port_file_path);
     }
+    // Also clean up PID file (written by BEAM eval command for PID discovery)
+    let pid_file_path = ws_dir.join("pid");
+    if pid_file_path.exists() {
+        let _ = fs::remove_file(pid_file_path);
+    }
     Ok(())
 }
 
