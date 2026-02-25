@@ -44,8 +44,8 @@ Workspace respondsTo: #test:
 wsGlobals := (Workspace globals) await
 // => _
 
-// globals includes workspace singletons (binary key "Workspace")
-wsGlobals includesKey: "Workspace"
+// globals includes workspace singletons (symbol key #Workspace)
+wsGlobals includesKey: #Workspace
 // => true
 
 // ===========================================================================

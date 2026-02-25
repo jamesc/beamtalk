@@ -76,8 +76,8 @@ Actor subclass: WorkspaceInterface
   /// Workspace globals
   /// ```
   globals -> Dictionary =>
-    base := ((Dictionary new at: "Transcript" put: TranscriptStream current) at: "Beamtalk" put: BeamtalkInterface current) at: "Workspace" put: self
-    self classes inject: base into: [:acc :c | acc at: c name asString put: c]
+    base := ((Dictionary new at: #Transcript put: TranscriptStream current) at: #Beamtalk put: BeamtalkInterface current) at: #Workspace put: self
+    self classes inject: base into: [:acc :c | acc at: c name put: c]
 
   /// Compile and load a .bt file, registering the class.
   /// Returns a structured error if path is not a String.
