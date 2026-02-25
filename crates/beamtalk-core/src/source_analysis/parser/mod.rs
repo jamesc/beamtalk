@@ -430,6 +430,9 @@ pub(super) struct Parser {
     pub(super) diagnostics: Vec<Diagnostic>,
     /// Whether the parser is currently inside a method body.
     pub(super) in_method_body: bool,
+    /// Whether the parser is currently inside a class body.
+    /// Used to detect trailing expressions via indentation (BT-903).
+    pub(super) in_class_body: bool,
     /// Current expression nesting depth (guards against stack overflow).
     nesting_depth: usize,
 }
@@ -442,6 +445,7 @@ impl Parser {
             current: 0,
             diagnostics: Vec::new(),
             in_method_body: false,
+            in_class_body: false,
             nesting_depth: 0,
         }
     }
@@ -2495,6 +2499,45 @@ mod tests {
         // Check method kinds
         assert_eq!(class.methods[0].kind, crate::ast::MethodKind::Primary);
         assert_eq!(class.methods[1].kind, crate::ast::MethodKind::Primary);
+    }
+
+    #[test]
+    fn parse_class_with_trailing_expression() {
+        let module = parse_ok(
+            "Object subclass: Foo
+  state: count = 0
+  count => self.count
+Foo new count",
+        );
+        assert_eq!(module.classes.len(), 1, "Should have 1 class");
+        assert_eq!(
+            module.expressions.len(),
+            1,
+            "Should have 1 trailing expression, got {}",
+            module.expressions.len()
+        );
+    }
+
+    #[test]
+    fn parse_class_multiline_method_body_no_false_break() {
+        // Ensure indented multi-line method bodies are NOT broken prematurely
+        let module = parse_ok(
+            "Object subclass: Bar
+  doStuff =>
+    x := 1
+    x + 2",
+        );
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+        assert_eq!(class.methods.len(), 1);
+        // Method body should have both statements (x := 1 and x + 2)
+        assert_eq!(
+            class.methods[0].body.len(),
+            2,
+            "Multi-line indented method body should have 2 statements"
+        );
+        // No trailing expressions
+        assert_eq!(module.expressions.len(), 0);
     }
 
     #[test]

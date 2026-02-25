@@ -470,11 +470,42 @@ impl Token {
         self.leading_trivia.iter().any(Trivia::contains_newline)
     }
 
+    /// Returns the indentation level (number of characters after the last
+    /// newline in the leading trivia). Returns `None` if there is no leading newline.
+    ///
+    /// Used by the parser to detect class body boundaries (BT-903): when a token
+    /// starts at column 0 after a newline, it is outside the class body.
+    ///
+    /// All trivia (whitespace, comments, etc.) after the newline contributes to
+    /// the column count, ensuring comments don't incorrectly reset indentation to 0.
+    #[must_use]
+    pub fn indentation_after_newline(&self) -> Option<usize> {
+        // Find the last newline in leading trivia and compute the column offset
+        // from that newline to the token start, counting all trivia (whitespace,
+        // comments, etc.) that appears between the newline and the token.
+        let mut found_newline = false;
+        let mut column = 0;
+
+        for trivia in &self.leading_trivia {
+            let s = trivia.as_str();
+            if let Some(pos) = s.rfind('\n') {
+                // Reset — this newline is the most recent
+                found_newline = true;
+                column = s[pos + 1..].len();
+            } else if found_newline {
+                // All trivia after the last newline contributes to the column
+                column += s.len();
+            }
+        }
+
+        if found_newline { Some(column) } else { None }
+    }
+
     /// Returns the number of characters after the last newline across all leading
     /// trivia. Returns `None` if there is no leading newline.
     ///
     /// This is useful for detecting tokens at column 0 (no indentation) to
-    /// distinguish class body members from trailing top-level expressions.
+    /// distinguish class body members from trailing top-level expressions (BT-885).
     #[must_use]
     pub fn leading_indent(&self) -> Option<usize> {
         // Walk characters in reverse across all trivia to find the last newline.
@@ -583,6 +614,58 @@ mod tests {
         assert!(!comment.is_whitespace());
         assert!(comment.is_comment());
         assert!(!comment.contains_newline());
+    }
+
+    #[test]
+    fn token_indentation_after_newline() {
+        // No newline → None
+        let no_newline = Token::with_trivia(
+            TokenKind::Identifier("x".into()),
+            Span::new(2, 3),
+            vec![Trivia::Whitespace("  ".into())],
+            vec![],
+        );
+        assert_eq!(no_newline.indentation_after_newline(), None);
+
+        // Newline then column 0 → Some(0)
+        let at_col_0 = Token::with_trivia(
+            TokenKind::Identifier("Foo".into()),
+            Span::new(10, 13),
+            vec![Trivia::Whitespace("\n".into())],
+            vec![],
+        );
+        assert_eq!(at_col_0.indentation_after_newline(), Some(0));
+
+        // Newline then 2 spaces → Some(2)
+        let indented = Token::with_trivia(
+            TokenKind::Identifier("count".into()),
+            Span::new(20, 25),
+            vec![Trivia::Whitespace("\n  ".into())],
+            vec![],
+        );
+        assert_eq!(indented.indentation_after_newline(), Some(2));
+
+        // Multiple newlines — uses last one
+        let multi_newline = Token::with_trivia(
+            TokenKind::Identifier("x".into()),
+            Span::new(0, 1),
+            vec![Trivia::Whitespace("\n\n    ".into())],
+            vec![],
+        );
+        assert_eq!(multi_newline.indentation_after_newline(), Some(4));
+
+        // Comment trivia after newline should NOT reset to column 0
+        let with_comment = Token::with_trivia(
+            TokenKind::Identifier("x".into()),
+            Span::new(0, 1),
+            vec![
+                Trivia::Whitespace("\n  ".into()),
+                Trivia::BlockComment("/*note*/".into()),
+            ],
+            vec![],
+        );
+        assert_ne!(with_comment.indentation_after_newline(), Some(0));
+        assert_eq!(with_comment.indentation_after_newline(), Some(10)); // 2 spaces + 8 char comment
     }
 
     #[test]
