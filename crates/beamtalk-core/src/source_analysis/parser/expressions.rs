@@ -240,7 +240,10 @@ impl Parser {
 
         while let TokenKind::Keyword(keyword) = self.current_kind() {
             // Stop if the keyword is on a new line (start of new statement)
-            if self.current_token().has_leading_newline() && !keywords.is_empty() {
+            if self.current_token().has_leading_newline()
+                && !keywords.is_empty()
+                && self.is_at_method_definition()
+            {
                 break;
             }
             let span = self.current_token().span();
