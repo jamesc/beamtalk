@@ -1221,7 +1221,7 @@ verify_class_present_not_found_test() ->
         'Counter', ClassNames, "/some/path.bt"
     ),
     ?assertEqual(
-        {error, {class_not_found, 'Counter', "/some/path.bt", ['OtherClass']}},
+        {error, {class_not_found, 'Counter', "/some/path.bt", ["OtherClass"]}},
         Result
     ).
 

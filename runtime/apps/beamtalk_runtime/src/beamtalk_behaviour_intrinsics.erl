@@ -480,7 +480,7 @@ classReload(Self) ->
                     Self;
                 {error, {class_not_found, _, Path, Defined}} ->
                     Error0 = beamtalk_error:new(reload_failed, ClassName),
-                    DefinedStr = lists:join(<<", ">>, [atom_to_binary(D, utf8) || D <- Defined]),
+                    DefinedStr = lists:join(<<", ">>, [list_to_binary(D) || D <- Defined]),
                     Msg = iolist_to_binary([
                         atom_to_binary(ClassName, utf8),
                         <<" is no longer defined in ">>,

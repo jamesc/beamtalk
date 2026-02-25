@@ -1074,8 +1074,9 @@ reload_class_file_impl(Path, ExpectedClassName) ->
 verify_class_present(undefined, _ClassNames, _Path) ->
     ok;
 verify_class_present(ExpectedClassName, ClassNames, Path) ->
-    DefinedNames = [list_to_atom(N) || #{name := N} <- ClassNames],
-    case lists:member(ExpectedClassName, DefinedNames) of
+    ExpectedName = atom_to_list(ExpectedClassName),
+    DefinedNames = [N || #{name := N} <- ClassNames],
+    case lists:member(ExpectedName, DefinedNames) of
         true -> ok;
         false -> {error, {class_not_found, ExpectedClassName, Path, DefinedNames}}
     end.
