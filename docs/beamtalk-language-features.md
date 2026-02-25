@@ -579,6 +579,26 @@ Outside the REPL (in compiled code), you must explicitly `await` or use continua
 | `await` | `receive` block or `gen_server:call` |
 | Future | Lightweight process holding a result |
 
+### Actor-to-Actor Coordination
+
+When one actor sends a message to another actor internally (e.g., a `notify:` method that forwards to a collector), the caller never holds a future for that internal message. This means reading state from the second actor immediately after calling the first may return stale values — the internal message hasn't been processed yet.
+
+This is **expected actor semantics**, consistent with Erlang, Akka, and other actor systems. The solution is the **sync barrier pattern**: force a round-trip on each actor in the chain to ensure all pending messages have been processed before asserting.
+
+```beamtalk
+// Wrong — reads stale state because internal message is still in flight
+bus notify: "hello".
+col eventCount          // => 0 (not yet processed!)
+
+// Correct — sync barriers force message processing
+bus notify: "hello".
+bus subscriberCount.    // barrier: ensures bus handler completed
+col events.             // barrier: ensures col processed the forwarded message
+col eventCount          // => 1 (now correctly reflects the event)
+```
+
+Any query that forces a round-trip on the actor works as a barrier — the key is that BEAM mailboxes are ordered, so once a reply comes back, all prior messages have been handled.
+
 ---
 
 ## Pattern Matching
