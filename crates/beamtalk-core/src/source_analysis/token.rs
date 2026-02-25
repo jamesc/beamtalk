@@ -470,11 +470,14 @@ impl Token {
         self.leading_trivia.iter().any(Trivia::contains_newline)
     }
 
-    /// Returns the indentation level (number of whitespace chars after the last
+    /// Returns the indentation level (number of characters after the last
     /// newline in the leading trivia). Returns `None` if there is no leading newline.
     ///
     /// Used by the parser to detect class body boundaries (BT-903): when a token
     /// starts at column 0 after a newline, it is outside the class body.
+    ///
+    /// All trivia (whitespace, comments, etc.) after the newline contributes to
+    /// the column count, ensuring comments don't incorrectly reset indentation to 0.
     #[must_use]
     pub fn indentation_after_newline(&self) -> Option<usize> {
         // Find the last newline in leading trivia and compute the column offset
@@ -496,6 +499,29 @@ impl Token {
         }
 
         if found_newline { Some(column) } else { None }
+    }
+
+    /// Returns the number of characters after the last newline across all leading
+    /// trivia. Returns `None` if there is no leading newline.
+    ///
+    /// This is useful for detecting tokens at column 0 (no indentation) to
+    /// distinguish class body members from trailing top-level expressions (BT-885).
+    #[must_use]
+    pub fn leading_indent(&self) -> Option<usize> {
+        // Walk characters in reverse across all trivia to find the last newline.
+        // The number of characters between that newline and the token is the indent.
+        let mut indent = 0usize;
+
+        for trivia in self.leading_trivia.iter().rev() {
+            for ch in trivia.as_str().chars().rev() {
+                if ch == '\n' {
+                    return Some(indent);
+                }
+                indent += 1;
+            }
+        }
+
+        None
     }
 }
 

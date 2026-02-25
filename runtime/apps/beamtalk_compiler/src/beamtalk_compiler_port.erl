@@ -116,7 +116,7 @@ handle_response(
         classes => Classes,
         warnings => Warnings
     },
-    %% BT-903: Forward trailing_core_erlang when present (BT-885 trailing expressions)
+    %% BT-903: Forward trailing_core_erlang when present (inline class + trailing expressions)
     ClassInfo =
         case maps:find(trailing_core_erlang, Response) of
             {ok, TrailingCoreErlang} ->
