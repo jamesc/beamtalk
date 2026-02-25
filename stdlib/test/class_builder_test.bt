@@ -1,12 +1,10 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-838: ClassBuilder validation tests (ADR 0038)
+// ClassBuilder validation tests (ADR 0038)
 //
-// Tests ClassBuilder error cases that are path-independent: validation
-// failures are caught before class registration regardless of compiled vs
-// dynamic path. The dynamic closure path (Path 2) has been removed (BT-873);
-// these tests exercise the validate/2 logic in beamtalk_class_builder.erl.
+// Tests ClassBuilder error cases: validation failures caught before class
+// registration. Exercises the validate/2 logic in beamtalk_class_builder.erl.
 
 TestCase subclass: ClassBuilderTest
   state: cls = nil

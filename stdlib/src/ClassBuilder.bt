@@ -3,16 +3,13 @@
 
 /// ClassBuilder — Fluent builder for creating and registering Beamtalk classes.
 ///
-/// Used by the compiler for all compiled class definitions (ADR 0038).
-/// All class creation goes through the compiled path (BT-873 removed the
-/// closure-based dynamic path).
-///
 /// ClassBuilder is an Actor subclass — each builder instance is a short-lived
 /// gen_server process that accumulates configuration via cascaded messages.
 /// The `register` method is a terminal operation: it registers the class with
 /// the runtime, stops the builder process, and returns the new class object.
 ///
-/// ## Compiled use (conceptual — codegen emits Core Erlang, not Beamtalk):
+/// Codegen emits Core Erlang that calls ClassBuilder directly — the Beamtalk
+/// snippet below is conceptual:
 /// ```beamtalk
 /// Object classBuilder
 ///   name: #Counter;
@@ -68,7 +65,7 @@ Actor subclass: ClassBuilder
   methods: aDict =>
     self.methodSpecs := aDict
 
-  /// Add a single field with a default value (fluent API for dynamic use).
+  /// Add a single field with a default value.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -76,16 +73,6 @@ Actor subclass: ClassBuilder
   /// ```
   addField: aName default: aValue =>
     self.fieldSpecs := self.fieldSpecs at: aName put: aValue
-
-  /// Add a single method as a block (fluent API for dynamic use).
-  /// The block receives self as first argument.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// builder addMethod: #greet body: [ 'Hello!' ]
-  /// ```
-  addMethod: aSelector body: aBlock =>
-    self.methodSpecs := self.methodSpecs at: aSelector put: aBlock
 
   /// Apply a class modifier (#abstract, #sealed, #typed).
   ///
