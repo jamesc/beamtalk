@@ -151,7 +151,7 @@ Session locals (implicit)  →  Workspace user bindings  →  Workspace globals 
                                                            project singletons     Object = <class>
 ```
 
-This is a **conceptual model for users**, not an implementation change. The compiler continues to resolve names through its existing mechanisms (session binding maps, `beamtalk_class_registry`, workspace binding injection). The model describes the *effective* resolution order that users experience:
+Since BT-883, this is partially implemented: session startup walks Workspace globals (via `beamtalk_workspace_interface:get_session_bindings/0`) to inject singletons and `bind:as:` registered names into session bindings. Class names continue to resolve via `beamtalk_class_registry` (not injected into bindings). The model describes the *effective* resolution order that users experience:
 
 1. **Session locals** — per-connection variable bindings (`x := 42`), implicit scope
 2. **Workspace user bindings** — workspace-level bindings registered via `bind:as:`

@@ -10,8 +10,7 @@
 %%% Used by:
 %%% - beamtalk_workspace_sup — to build supervisor child specs
 %%% - beamtalk_workspace_bootstrap — to wire class variables
-%%% - beamtalk_repl_shell — to inject REPL convenience bindings
-%%% - beamtalk_repl_server — to filter workspace binding names
+%%% - beamtalk_repl_ops_eval / beamtalk_repl_ops_dev — to filter workspace binding names
 %%%
 %%% **DDD Context:** Workspace
 
