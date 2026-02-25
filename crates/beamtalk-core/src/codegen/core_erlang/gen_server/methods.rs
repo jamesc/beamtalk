@@ -1511,6 +1511,17 @@ impl CoreErlangGenerator {
                             docs.push(doc);
                         }
                     }
+                } else if self.is_class_method_self_send(expr) {
+                    // BT-891: Class method self-send as last expression with no class vars.
+                    // The generated code leaves an open scope ending with `in ` — we must
+                    // close it with the unwrapped result variable.
+                    self.last_open_scope_result = None;
+                    let expr_str = self.expression_doc(expr)?;
+                    if let Some(result_var) = &self.last_open_scope_result.clone() {
+                        docs.push(docvec![expr_str, Document::String(result_var.clone()),]);
+                    } else {
+                        docs.push(docvec![expr_str]);
+                    }
                 } else {
                     let expr_str = self.expression_doc(expr)?;
                     docs.push(docvec![expr_str]);
