@@ -26,3 +26,12 @@ TestCase subclass: Tier2BlockRoundTripTest
   testTier2ResultCaptureInHOM =>
     actor := Tier2BlockTestActor spawn.
     self assert: ((actor testTier2ResultCapture) await) equals: 14
+
+  // BT-852/BT-853: Two sequential Tier 2 assignment calls in a HOM.
+  // Verifies new_state is computed AFTER expression_doc to avoid duplicate
+  // Core Erlang state bindings across multiple Tier 2 assignments.
+  // Block1: increments count by x, returns count. Block2: multiplies count by x.
+  // testTwoBlocks: count starts at 0, after block1(2): count=2, r1=2; after block2(r1=2): count=4, r2=4.
+  testTwoSequentialTier2Assignments =>
+    actor := Tier2BlockTestActor spawn.
+    self assert: ((actor testTwoBlocks) await) equals: 4

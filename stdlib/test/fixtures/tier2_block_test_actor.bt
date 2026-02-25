@@ -26,6 +26,15 @@ Actor subclass: Tier2BlockTestActor
     result := aBlock value: anItem.
     result + extra
 
+  // BT-852/BT-853 new_state ordering: HOM with TWO sequential Tier 2 assignment calls.
+  // Verifies state is correctly threaded across multiple Tier 2 assignments.
+  // If new_state were pre-computed before expression_doc, duplicate StateN bindings
+  // in generated Core Erlang would cause an Erlang compile-time failure.
+  applyTwoBlocks: aBlock1 and: aBlock2 to: anItem =>
+    r1 := aBlock1 value: anItem.
+    r2 := aBlock2 value: r1.
+    r2
+
   // BT-851: Self-sends applyBlock:to: with a Tier 2 block.
   // The block `[:x | count := count + x]` captures and mutates `count`.
   // After the self-send, `count` should reflect the mutation.
@@ -46,3 +55,11 @@ Actor subclass: Tier2BlockTestActor
   testTier2ResultCapture =>
     count := 0.
     self applyBlockGetResult: [:x | count := count + x. count] to: 4 addend: 10
+
+  // BT-852/BT-853 new_state ordering: Two sequential Tier 2 assignments in HOM.
+  // block1 adds x to count, block2 multiplies count by x.
+  // applyTwoBlocks:and:to: passes r1 as arg to block2.
+  // count=0 -> block1(2) -> count=2, r1=2 -> block2(2) -> count=4, r2=4
+  testTwoBlocks =>
+    count := 0.
+    self applyTwoBlocks: [:x | count := count + x. count] and: [:x | count := count * x. count] to: 2

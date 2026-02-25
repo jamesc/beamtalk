@@ -327,15 +327,9 @@ impl CoreErlangGenerator {
                         // {Result, NewState} — unpack result and thread NewState.
                         if self.is_tier2_value_call(value) {
                             let tuple_var = self.fresh_temp_var("T2Tuple");
-                            let next_version = self.state_version() + 1;
-                            let new_state = if next_version == 1 {
-                                "State1".to_string()
-                            } else {
-                                format!("State{next_version}")
-                            };
                             let value_str = self.expression_doc(value)?;
                             self.bind_var(var_name, &core_var);
-                            let _ = self.next_state_var();
+                            let new_state = self.next_state_var();
                             docs.push(docvec![
                                 format!("let {tuple_var} = "),
                                 value_str,
@@ -394,14 +388,8 @@ impl CoreErlangGenerator {
                 // Returns {Result, NewState} — discard Result, thread NewState.
                 let tuple_var = self.fresh_temp_var("T2Tuple");
                 let discard_var = self.fresh_temp_var("T2Discard");
-                let next_version = self.state_version() + 1;
-                let new_state = if next_version == 1 {
-                    "State1".to_string()
-                } else {
-                    format!("State{next_version}")
-                };
                 let expr_str = self.expression_doc(expr)?;
-                let _ = self.next_state_var();
+                let new_state = self.next_state_var();
                 docs.push(docvec![
                     format!("let {tuple_var} = "),
                     expr_str,
@@ -608,15 +596,9 @@ impl CoreErlangGenerator {
                         // {Result, NewState} — unpack result and thread NewState.
                         if self.is_tier2_value_call(value) {
                             let tuple_var = self.fresh_temp_var("T2Tuple");
-                            let next_version = self.state_version() + 1;
-                            let new_state = if next_version == 1 {
-                                "State1".to_string()
-                            } else {
-                                format!("State{next_version}")
-                            };
                             let value_str = self.expression_doc(value)?;
                             self.bind_var(var_name, &core_var);
-                            let _ = self.next_state_var();
+                            let new_state = self.next_state_var();
                             docs.push(docvec![
                                 format!("let {tuple_var} = "),
                                 value_str,
@@ -762,14 +744,8 @@ impl CoreErlangGenerator {
                 // Returns {Result, NewState} — discard Result, thread NewState.
                 let tuple_var = self.fresh_temp_var("T2Tuple");
                 let discard_var = self.fresh_temp_var("T2Discard");
-                let next_version = self.state_version() + 1;
-                let new_state = if next_version == 1 {
-                    "State1".to_string()
-                } else {
-                    format!("State{next_version}")
-                };
                 let expr_str = self.expression_doc(expr)?;
-                let _ = self.next_state_var();
+                let new_state = self.next_state_var();
                 docs.push(docvec![
                     format!("let {tuple_var} = "),
                     expr_str,
@@ -1474,6 +1450,45 @@ impl CoreErlangGenerator {
                 .body
                 .iter()
                 .any(|e| Self::expr_has_value_call_on(param_name, e)),
+            Expression::Cascade {
+                receiver, messages, ..
+            } => {
+                // Check if receiver IS param_name and any cascade message has value: selector.
+                // E.g. `aBlock msg1; value: x` — receiver=aBlock, messages=[msg1, {value:, [x]}]
+                if let Expression::Identifier(id) = receiver.as_ref() {
+                    if id.name == param_name {
+                        let has_value_send = messages.iter().any(|m| {
+                            let sel: String = match &m.selector {
+                                crate::ast::MessageSelector::Unary(n) => n.to_string(),
+                                crate::ast::MessageSelector::Keyword(parts) => {
+                                    parts.iter().map(|p| p.keyword.as_str()).collect()
+                                }
+                                crate::ast::MessageSelector::Binary(_) => String::new(),
+                            };
+                            matches!(
+                                sel.as_str(),
+                                "value" | "value:" | "value:value:" | "value:value:value:"
+                            )
+                        });
+                        if has_value_send {
+                            return true;
+                        }
+                    }
+                }
+                // Recurse into receiver and message arguments
+                Self::expr_has_value_call_on(param_name, receiver)
+                    || messages.iter().any(|m| {
+                        m.arguments
+                            .iter()
+                            .any(|a| Self::expr_has_value_call_on(param_name, a))
+                    })
+            }
+            Expression::Match { value, arms, .. } => {
+                Self::expr_has_value_call_on(param_name, value)
+                    || arms
+                        .iter()
+                        .any(|arm| Self::expr_has_value_call_on(param_name, &arm.body))
+            }
             _ => false,
         }
     }
@@ -1526,5 +1541,139 @@ impl CoreErlangGenerator {
         // If we can't analyze (e.g., block isn't a literal), conservatively return false
         // to avoid binding non-state values to StateN
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{CascadeMessage, Expression, Identifier, MatchArm, MessageSelector, Pattern};
+    use crate::source_analysis::Span;
+
+    fn make_id(name: &str) -> Expression {
+        Expression::Identifier(Identifier::new(
+            name,
+            Span::new(0, name.len().try_into().unwrap()),
+        ))
+    }
+
+    fn make_value_send(receiver: &str, arg: &str) -> Expression {
+        Expression::MessageSend {
+            receiver: Box::new(make_id(receiver)),
+            selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+                "value:",
+                Span::new(0, 6),
+            )]),
+            arguments: vec![make_id(arg)],
+            span: Span::new(0, 20),
+        }
+    }
+
+    // BT-852/BT-853: expr_has_value_call_on — Cascade detection
+
+    #[test]
+    fn test_expr_has_value_call_on_cascade_direct() {
+        // `aBlock someMsg; value: x` — cascade where receiver is the param
+        // and one of the cascade messages has value: selector.
+        // Before the fix, this fell through to _ => false.
+        let cascade = Expression::Cascade {
+            receiver: Box::new(make_id("aBlock")),
+            messages: vec![
+                CascadeMessage::new(
+                    MessageSelector::Unary("someMsg".into()),
+                    vec![],
+                    Span::new(0, 7),
+                ),
+                CascadeMessage::new(
+                    MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+                        "value:",
+                        Span::new(0, 6),
+                    )]),
+                    vec![make_id("x")],
+                    Span::new(0, 10),
+                ),
+            ],
+            span: Span::new(0, 30),
+        };
+        assert!(
+            CoreErlangGenerator::expr_has_value_call_on("aBlock", &cascade),
+            "Should detect value: send in cascade to named param"
+        );
+        assert!(
+            !CoreErlangGenerator::expr_has_value_call_on("otherBlock", &cascade),
+            "Should not detect value: send to a different param name"
+        );
+    }
+
+    #[test]
+    fn test_expr_has_value_call_on_cascade_in_arg() {
+        // `someObj msg: (aBlock value: x)` — value: call nested inside a cascade message arg.
+        // Before the fix, this fell through to _ => false.
+        let cascade = Expression::Cascade {
+            receiver: Box::new(make_id("someObj")),
+            messages: vec![CascadeMessage::new(
+                MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+                    "msg:",
+                    Span::new(0, 4),
+                )]),
+                vec![make_value_send("aBlock", "x")],
+                Span::new(0, 20),
+            )],
+            span: Span::new(0, 30),
+        };
+        assert!(
+            CoreErlangGenerator::expr_has_value_call_on("aBlock", &cascade),
+            "Should detect value: send nested in cascade message argument"
+        );
+    }
+
+    // BT-852/BT-853: expr_has_value_call_on — Match detection
+
+    #[test]
+    fn test_expr_has_value_call_on_match_in_arm_body() {
+        // `someVal match: [_ -> aBlock value: x; _ -> nil]`
+        // Before the fix, this fell through to _ => false.
+        let match_expr = Expression::Match {
+            value: Box::new(make_id("someVal")),
+            arms: vec![
+                MatchArm::new(
+                    Pattern::Wildcard(Span::new(0, 1)),
+                    make_value_send("aBlock", "x"),
+                    Span::new(0, 20),
+                ),
+                MatchArm::new(
+                    Pattern::Wildcard(Span::new(0, 1)),
+                    make_id("nil"),
+                    Span::new(0, 3),
+                ),
+            ],
+            span: Span::new(0, 50),
+        };
+        assert!(
+            CoreErlangGenerator::expr_has_value_call_on("aBlock", &match_expr),
+            "Should detect value: send in match arm body"
+        );
+        assert!(
+            !CoreErlangGenerator::expr_has_value_call_on("otherBlock", &match_expr),
+            "Should not detect value: send for a different param name"
+        );
+    }
+
+    #[test]
+    fn test_expr_has_value_call_on_match_not_detected_without_value_call() {
+        // match expression where param appears as a value but is never called with value:
+        let match_expr = Expression::Match {
+            value: Box::new(make_id("someVal")),
+            arms: vec![MatchArm::new(
+                Pattern::Wildcard(Span::new(0, 1)),
+                make_id("aBlock"),
+                Span::new(0, 10),
+            )],
+            span: Span::new(0, 20),
+        };
+        assert!(
+            !CoreErlangGenerator::expr_has_value_call_on("aBlock", &match_expr),
+            "Should not trigger for mere reference to param (not a value: call)"
+        );
     }
 }
