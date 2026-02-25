@@ -393,6 +393,7 @@ impl CoreErlangGenerator {
                 // BT-853: Tier 2 value: call in non-last position.
                 // Returns {Result, NewState} — discard Result, thread NewState.
                 let tuple_var = self.fresh_temp_var("T2Tuple");
+                let discard_var = self.fresh_temp_var("T2Discard");
                 let next_version = self.state_version() + 1;
                 let new_state = if next_version == 1 {
                     "State1".to_string()
@@ -405,7 +406,7 @@ impl CoreErlangGenerator {
                     format!("let {tuple_var} = "),
                     expr_str,
                     format!(
-                        " in let _T2Discard = call 'erlang':'element'(1, {tuple_var})\
+                        " in let {discard_var} = call 'erlang':'element'(1, {tuple_var})\
                          \n in let {new_state} = call 'erlang':'element'(2, {tuple_var}) in "
                     ),
                 ]);
@@ -762,6 +763,7 @@ impl CoreErlangGenerator {
                 // BT-853: Tier 2 value: call in non-last position.
                 // Returns {Result, NewState} — discard Result, thread NewState.
                 let tuple_var = self.fresh_temp_var("T2Tuple");
+                let discard_var = self.fresh_temp_var("T2Discard");
                 let next_version = self.state_version() + 1;
                 let new_state = if next_version == 1 {
                     "State1".to_string()
@@ -774,7 +776,7 @@ impl CoreErlangGenerator {
                     format!("let {tuple_var} = "),
                     expr_str,
                     format!(
-                        " in let _T2Discard = call 'erlang':'element'(1, {tuple_var})\
+                        " in let {discard_var} = call 'erlang':'element'(1, {tuple_var})\
                          \n in let {new_state} = call 'erlang':'element'(2, {tuple_var}) in "
                     ),
                 ]);
@@ -1390,22 +1392,6 @@ impl CoreErlangGenerator {
         }
         // Fallback: use selector name
         method.selector.name().to_string()
-    }
-
-    /// BT-851: Checks if an expression contains a Tier 2 `value:` call, either at
-    /// the top level or nested inside an assignment RHS.
-    ///
-    /// This catches both `aBlock value: x` and `result := aBlock value: x` where
-    /// the `{Result, NewState}` tuple would be silently mishandled.
-    #[allow(dead_code)]
-    fn expr_contains_tier2_value_call(&self, expr: &Expression) -> bool {
-        if self.is_tier2_value_call(expr) {
-            return true;
-        }
-        if let Expression::Assignment { value, .. } = expr {
-            return self.is_tier2_value_call(value);
-        }
-        false
     }
 
     /// BT-851: Checks if an expression is a `value:` call on a Tier 2 block parameter.
