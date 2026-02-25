@@ -513,9 +513,6 @@ impl CoreErlangGenerator {
                 // BT-744: Local variable assignment — create a proper Core Erlang
                 // let binding so the variable is accessible in subsequent expressions.
                 if let Expression::Assignment { target, value, .. } = expr {
-                    if let Expression::Block(block) = value.as_ref() {
-                        Self::validate_stored_closure(block, format!("{:?}", expr.span()))?;
-                    }
                     if let Expression::Identifier(id) = target.as_ref() {
                         let var_name = &id.name;
                         let core_var = self
