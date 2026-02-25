@@ -420,7 +420,10 @@ handle_self_instantiation(Type, Selector, Args) ->
                     beamtalk_class_instantiation:class_self_new(CN, Mod, Args);
                 spawn ->
                     beamtalk_class_instantiation:class_self_spawn(CN, Mod, IsAbstract, Args)
-            end
+            end;
+        {_, _, _} ->
+            %% Corrupt/invalid is_abstract metadata — fail fast with structured error.
+            handle_self_instantiation_error(Selector)
     end.
 
 %% @private
