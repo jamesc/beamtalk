@@ -171,6 +171,8 @@ do_compile(Port, Source, Options) ->
     ModuleName = maps:get(module_name, Options, undefined),
     %% BT-845/BT-860: Optional source file path for beamtalk_source attribute
     SourcePath = maps:get(source_path, Options, undefined),
+    %% BT-905: Optional class superclass index for cross-file value-object inheritance
+    ClassSuperclassIndex = maps:get(class_superclass_index, Options, #{}),
     Request0 = #{
         command => compile,
         source => Source,
@@ -182,10 +184,15 @@ do_compile(Port, Source, Options) ->
             undefined -> Request0;
             _ -> Request0#{module_name => ModuleName}
         end,
-    Request =
+    Request2 =
         case SourcePath of
             undefined -> Request1;
             _ -> Request1#{source_path => SourcePath}
+        end,
+    Request =
+        case map_size(ClassSuperclassIndex) of
+            0 -> Request2;
+            _ -> Request2#{class_superclass_index => ClassSuperclassIndex}
         end,
     RequestBin = term_to_binary(Request),
     try port_command(Port, RequestBin) of
