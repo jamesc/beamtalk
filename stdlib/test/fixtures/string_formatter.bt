@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-892: Value object fixture for testing inject:into: with self sends.
+// Self sends in value-object blocks should NOT trigger state threading.
+
+Object subclass: StringFormatter
+  state: prefix = ""
+  state: suffix = ""
+
+  prefix => self.prefix
+  suffix => self.suffix
+
+  // Helper method called via self send in blocks
+  formatItem: item => "[" ++ item printString ++ "]"
+
+  // BT-892: inject:into: with self send in block — must not generate State threading
+  joinFormatted: items =>
+    items inject: "" into: [:acc :item | acc ++ (self formatItem: item)]
+
+  // collect: with self send in block — should use simple path
+  collectFormatted: items =>
+    items collect: [:item | self formatItem: item]
