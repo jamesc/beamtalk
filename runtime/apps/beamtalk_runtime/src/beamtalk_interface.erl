@@ -302,10 +302,9 @@ handle_class_named(_ClassName) ->
 handle_globals() ->
     lists:foldl(
         fun({Name, ModuleName, Pid}, Acc) ->
-            BinName = atom_to_binary(Name, utf8),
             ClassTag = beamtalk_class_registry:class_object_tag(Name),
             ClassObj = {beamtalk_object, ClassTag, ModuleName, Pid},
-            maps:put(BinName, ClassObj, Acc)
+            maps:put(Name, ClassObj, Acc)
         end,
         #{},
         live_class_entries()
