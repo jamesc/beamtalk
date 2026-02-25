@@ -743,8 +743,6 @@ handle_unbind(Name, GenServerPid) ->
 %% Returns {error, Error} for non-string/non-atom arguments.
 -spec to_atom_name(term()) -> atom() | {error, #beamtalk_error{}}.
 to_atom_name(Name) when is_atom(Name) -> Name;
-to_atom_name(Name) when is_binary(Name) -> binary_to_atom(Name, utf8);
-to_atom_name(Name) when is_list(Name) -> list_to_atom(Name);
 to_atom_name(Other) ->
     TypeName = value_type_name(Other),
     Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
@@ -779,7 +777,7 @@ check_bind_conflicts(AtomName) ->
 is_protected_name('Transcript') -> true;
 is_protected_name('Beamtalk') -> true;
 is_protected_name('Workspace') -> true;
-is_protected_name(AtomName) -> beamtalk_class_registry:whereis_class(AtomName) =/= undefined.
+is_protected_name(_) -> false.
 
 %% @doc Warn if name is an existing loaded class (has source file).
 -spec maybe_warn_loaded_class(atom()) -> ok.

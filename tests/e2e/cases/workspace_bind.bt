@@ -59,9 +59,9 @@ globals2 includesKey: #MyValue
 // BIND:AS: — SYSTEM NAME CONFLICT
 // ===========================================================================
 
-// Binding a name that exists in Beamtalk globals (system class) raises error
-[(Workspace bind: 42 as: #Integer) await] on: Error do: [:e | e message]
-// => Integer is a system name and cannot be shadowed
+// Binding a name that is a workspace singleton raises error
+[(Workspace bind: 42 as: #Transcript) await] on: Error do: [:e | e message]
+// => Transcript is a system name and cannot be shadowed
 
 // ===========================================================================
 // UNBIND: — NAME NOT FOUND ERROR
@@ -74,6 +74,8 @@ globals2 includesKey: #MyValue
 // ===========================================================================
 // BIND:AS: — ACTOR VALUE
 // ===========================================================================
+
+// @load tests/e2e/fixtures/counter.bt
 
 // Register an actor reference
 counter := Counter spawn

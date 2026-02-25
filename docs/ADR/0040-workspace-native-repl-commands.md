@@ -145,17 +145,18 @@ When modules/imports exist in the future, stdlib classes could track their `.bt`
 Beamtalk's name resolution can be understood as a scoped resolution order inspired by GemStone/S's SymbolList:
 
 ```text
-Session locals (implicit)  →  Workspace globals  →  Beamtalk globals
-   x = 42                     Transcript = ...       Integer = <class>
-   counter = #Actor<...>      Counter = <class>      String = <class>
-                               project singletons     Object = <class>
+Session locals (implicit)  →  Workspace user bindings  →  Workspace globals  →  Beamtalk globals
+   x = 42                     MyTool = <actor>            Transcript = ...       Integer = <class>
+   counter = #Actor<...>                                   Counter = <class>      String = <class>
+                                                           project singletons     Object = <class>
 ```
 
 This is a **conceptual model for users**, not an implementation change. The compiler continues to resolve names through its existing mechanisms (session binding maps, `beamtalk_class_registry`, workspace binding injection). The model describes the *effective* resolution order that users experience:
 
 1. **Session locals** — per-connection variable bindings (`x := 42`), implicit scope
-2. **Workspace globals** — project-level entries (Transcript, loaded classes, singletons)
-3. **Beamtalk globals** — system-level entries (all registered classes, version)
+2. **Workspace user bindings** — workspace-level bindings registered via `bind:as:`
+3. **Workspace globals** — project-level entries (Transcript, loaded classes, singletons)
+4. **Beamtalk globals** — system-level entries (all registered classes, version)
 
 Session locals are implicit scope (like method-local variables) — not a named object. `Workspace` and `Beamtalk` are the two named facades with their backing dictionaries.
 
@@ -655,6 +656,7 @@ Workspace globals at: #MyTool           // read a registered value
 - Any value allowed (not just actors)
 - `bind:as:` errors if name exists in Beamtalk globals (system name conflict — fail loud, fail early)
 - `bind:as:` warns (via Transcript) if name is an existing loaded class (use `reload` instead)
+- `bind:as:` silently overwrites if name already exists in user bindings (last writer wins)
 - `unbind:` errors if name not found in user bindings
 - No persistence — registrations are lost on workspace restart
 - Workspace user bindings are stored in the `WorkspaceInterface` gen_server state and merged into REPL session bindings before each eval
