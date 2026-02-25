@@ -1,0 +1,40 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-898: Tests actor-to-actor coordination and the sync barrier pattern.
+// When one actor sends a message to another internally, the caller never
+// holds a future for that internal message. A sync barrier (round-trip
+// query on each actor) ensures messages have been processed.
+
+
+TestCase subclass: ActorCoordinationTest
+
+  // Sync barrier pattern: force round-trips to ensure internal messages
+  // between actors have been processed before asserting.
+  testSyncBarrierEnsuresEventDelivery =>
+    col := EventCollector spawn.
+    bus := EventBus spawn.
+    bus subscribe: col.
+    // notify: sends a message to col internally — caller has no future for it
+    bus notify: "hello".
+    // Barrier: round-trip on bus ensures its handler completed
+    bus subscriberCount await.
+    // Barrier: round-trip on col ensures it processed the forwarded message
+    col events await.
+    // Now safe to assert
+    self assert: (col eventCount await) equals: 1
+
+  // Multiple events with sync barriers
+  testMultipleEventsWithBarrier =>
+    col := EventCollector spawn.
+    bus := EventBus spawn.
+    bus subscribe: col.
+    bus notify: "first".
+    bus notify: "second".
+    bus notify: "third".
+    // Barrier on bus: ensures all three notify: handlers completed
+    bus subscriberCount await.
+    // Barrier on col: ensures all forwarded messages processed
+    col events await.
+    self assert: (col eventCount await) equals: 3.
+    self assert: (col events await) equals: #("first", "second", "third")

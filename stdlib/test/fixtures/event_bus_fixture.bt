@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-898: Fixture actor for actor-to-actor coordination tests.
+// EventBus forwards notifications to a subscribed EventCollector.
+
+Actor subclass: EventBus
+  state: collector = nil
+
+  subscribe: aCollector =>
+    self.collector := aCollector
+
+  notify: event =>
+    self.collector isNil ifFalse: [self.collector receive: event]
+
+  subscriberCount =>
+    self.collector isNil ifTrue: [0] ifFalse: [1]
