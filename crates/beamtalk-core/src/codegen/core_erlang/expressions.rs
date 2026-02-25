@@ -1093,22 +1093,21 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
         docs: &mut Vec<Document<'static>>,
     ) -> Result<Vec<Document<'static>>> {
-        let mut hoisted_docs: Vec<Document<'static>> = Vec::new();
         let mut arg_docs: Vec<Document<'static>> = Vec::new();
         for arg in arguments {
             if Self::is_field_assignment(arg) {
-                hoisted_docs.push(self.generate_field_assignment_open(arg)?);
-                let val_var = self
-                    .last_open_scope_result
-                    .take()
-                    .expect("generate_field_assignment_open should set last_open_scope_result");
+                // Push hoisted binding directly to docs (preserves source order).
+                docs.push(self.generate_field_assignment_open(arg)?);
+                let val_var = self.last_open_scope_result.take().ok_or_else(|| {
+                    CodeGenError::Internal(
+                        "generate_field_assignment_open did not set last_open_scope_result"
+                            .to_string(),
+                    )
+                })?;
                 arg_docs.push(Document::String(val_var));
             } else {
                 arg_docs.push(self.expression_doc(arg)?);
             }
-        }
-        for hoisted in hoisted_docs {
-            docs.push(hoisted);
         }
         Ok(arg_docs)
     }
