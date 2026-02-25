@@ -350,7 +350,7 @@ pub fn start_detached_node(
                 // Initial delay before first attempt
                 std::thread::sleep(Duration::from_millis(PID_DISCOVERY_INITIAL_DELAY_MS));
             }
-            if let Some(pid) = read_pid_file(workspace_id) {
+            if let Some(pid) = read_pid_file(workspace_id)? {
                 break 'retry pid;
             }
         }
@@ -663,15 +663,26 @@ fn build_detached_node_command(
 /// mechanism — it is more reliable than sysinfo process-list scanning, which can
 /// miss newly-forked `-detached` processes on loaded CI runners.
 ///
-/// Returns `None` if the file does not yet exist or cannot be parsed.
-fn read_pid_file(workspace_id: &str) -> Option<u32> {
-    let pid_path = workspace_dir(workspace_id).ok()?.join("pid");
-    let content = std::fs::read_to_string(pid_path).ok()?;
+/// Returns `Ok(None)` if the file does not yet exist (node still starting up).
+/// Returns `Err` for permission or other unexpected IO failures so the caller
+/// surfaces a precise error rather than a generic timeout message.
+fn read_pid_file(workspace_id: &str) -> Result<Option<u32>> {
+    let pid_path = workspace_dir(workspace_id)?.join("pid");
+    let content = match std::fs::read_to_string(&pid_path) {
+        Ok(c) => c,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => {
+            return Err(miette!(
+                "Failed to read PID file {}: {err}",
+                pid_path.display()
+            ));
+        }
+    };
     // Treat 0 as invalid: it is the "PID unavailable" sentinel used in force-kill flows.
-    match content.trim().parse::<u32>().ok() {
+    Ok(match content.trim().parse::<u32>().ok() {
         Some(0) | None => None,
         Some(pid) => Some(pid),
-    }
+    })
 }
 
 /// Poll until a workspace exits or timeout is reached.
