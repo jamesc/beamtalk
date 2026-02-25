@@ -1019,7 +1019,10 @@ reload_class_file(Path) ->
                     {error, {read_error, Reason}};
                 {ok, SourceBin} ->
                     Source = binary_to_list(SourceBin),
-                    case compile_file(Source, Path, false, undefined) of
+                    %% BT-897: Compute package module name for subdirectory files,
+                    %% matching handle_load/2 behavior.
+                    ModuleNameOverride = compute_package_module_name(Path),
+                    case compile_file(Source, Path, false, ModuleNameOverride) of
                         {ok, Binary, ClassNames, ModuleName} ->
                             case code:load_binary(ModuleName, Path, Binary) of
                                 {module, ModuleName} ->

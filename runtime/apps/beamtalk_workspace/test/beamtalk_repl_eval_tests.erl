@@ -1166,3 +1166,29 @@ io_capture_stdin_no_subscriber_test() ->
         ?assert(false)
     end,
     _Output = beamtalk_io_capture:stop({CapturePid, OldGL}).
+
+%% ===================================================================
+%% reload_class_file (BT-897)
+%% ===================================================================
+
+reload_class_file_not_found_test() ->
+    %% Non-existent file returns file_not_found
+    Result = beamtalk_repl_eval:reload_class_file("/nonexistent/file.bt"),
+    ?assertEqual({error, {file_not_found, "/nonexistent/file.bt"}}, Result).
+
+reload_class_file_no_compiler_test() ->
+    %% BT-897: reload_class_file with a real file but no compiler available.
+    %% This exercises the code path that now includes compute_package_module_name.
+    UniqueId = erlang:unique_integer([positive]),
+    TempFile = filename:join(
+        temp_dir(),
+        io_lib:format("test_reload_~p.bt", [UniqueId])
+    ),
+    ok = file:write_file(TempFile, <<"Actor subclass: TestActor [\n]\n">>),
+    Result = beamtalk_repl_eval:reload_class_file(TempFile),
+    file:delete(TempFile),
+    %% Compiler not started — should fail gracefully
+    case Result of
+        {error, _} -> ok;
+        Other -> error({unexpected_result, Other})
+    end.

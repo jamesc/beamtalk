@@ -574,6 +574,91 @@ fn test_generate_spawn_function() {
 }
 
 #[test]
+fn test_bt897_subdirectory_module_name_consistency() {
+    // BT-897: Actor classes from subdirectory file paths must use the full
+    // module name consistently — module declaration, gen_server:start_link,
+    // register_class, init method_table call, and all self-dispatch calls.
+    use crate::ast::*;
+
+    let class = ClassDefinition {
+        name: Identifier::new("EventBus", Span::new(0, 8)),
+        superclass: Some(Identifier::new("Actor", Span::new(0, 5))),
+        is_abstract: false,
+        is_sealed: false,
+        is_typed: false,
+        state: vec![StateDeclaration {
+            name: Identifier::new("listeners", Span::new(0, 9)),
+            default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 1))),
+            type_annotation: None,
+            span: Span::new(0, 10),
+        }],
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![],
+        span: Span::new(0, 50),
+        doc_comment: None,
+    };
+
+    let module = Module {
+        classes: vec![class],
+        expressions: vec![],
+        method_definitions: vec![],
+        span: Span::new(0, 50),
+        leading_comments: vec![],
+    };
+
+    // Use a subdirectory-qualified module name (package mode with subdirectories)
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@gang_of_four@observer@event_bus"),
+    )
+    .expect("codegen should succeed");
+
+    let full_name = "bt@gang_of_four@observer@event_bus";
+    let simplified_name = "bt@event_bus";
+
+    // Module declaration must use the full name
+    assert!(
+        code.contains(&format!("module '{full_name}'")),
+        "Module declaration should use full path-qualified name. Got:\n{code}"
+    );
+
+    // gen_server:start_link must use the full name
+    assert!(
+        code.contains(&format!(
+            "call 'gen_server':'start_link'('{full_name}', ~{{}}~, [])"
+        )),
+        "gen_server:start_link in spawn/0 should use full module name, not '{simplified_name}'. Got:\n{code}"
+    );
+
+    // gen_server:start_link in spawn/1 must also use full name
+    assert!(
+        code.contains(&format!(
+            "call 'gen_server':'start_link'('{full_name}', InitArgs, [])"
+        )),
+        "gen_server:start_link in spawn/1 should use full module name. Got:\n{code}"
+    );
+
+    // init/1 method_table call must use the full name
+    assert!(
+        code.contains(&format!("call '{full_name}':'method_table'()")),
+        "method_table call in init should use full module name. Got:\n{code}"
+    );
+
+    // register_class moduleName must use the full name
+    assert!(
+        code.contains(&format!("'moduleName' => '{full_name}'")),
+        "register_class moduleName should use full module name. Got:\n{code}"
+    );
+
+    // The simplified name should NOT appear anywhere
+    assert!(
+        !code.contains(&format!("'{simplified_name}'")),
+        "The simplified module name '{simplified_name}' should NOT appear in generated code. Got:\n{code}"
+    );
+}
+
+#[test]
 fn test_generate_actor_new_error_methods() {
     // BT-217: Actor classes must export and generate new/0 and new/1 error methods
     // using structured #beamtalk_error{} records
