@@ -1,0 +1,120 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for REPL inline class redefinition and hot reload (BT-869 / ADR 0038 Phase 5)
+//
+// Verifies that typing `Object subclass: Foo` at the REPL a second time goes
+// through the compile-and-load path (register_class/0 fires →
+// beamtalk_class_builder:register/1 → update_class/2) rather than crashing
+// or creating a duplicate. This is the same path as :load.
+//
+// The BT-839 approach (generating a ClassBuilder cascade string) was deferred.
+// The correct path is already in handle_class_definition in beamtalk_repl_eval.erl.
+//
+// Note: inline class bodies support one method per definition; additional methods
+// are added with >>.
+
+// ===========================================================================
+// INLINE CLASS REDEFINITION — ACTOR HOT RELOAD
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Define initial version: bump adds 1
+// ---------------------------------------------------------------------------
+
+Actor subclass: InlineRedefActor
+  state: count = 0
+  bump => self.count := self.count + 1
+// => _
+
+ir := InlineRedefActor spawn
+// => #Actor<InlineRedefActor,_>
+
+ir bump
+// => 1
+
+ir bump
+// => 2
+
+// ---------------------------------------------------------------------------
+// Retype the full class definition — bump now adds 10
+// Hot reload: existing actor picks up the new bump implementation
+// ---------------------------------------------------------------------------
+
+Actor subclass: InlineRedefActor
+  state: count = 0
+  bump => self.count := self.count + 10
+// => _
+
+// Existing actor picks up new bump (adds 10). Count preserved at 2.
+ir bump
+// => 12
+
+// ---------------------------------------------------------------------------
+// Fresh spawn after redefinition uses new code from the start
+// ---------------------------------------------------------------------------
+
+ir2 := InlineRedefActor spawn
+// => #Actor<InlineRedefActor,_>
+
+ir2 bump
+// => 10
+
+// ===========================================================================
+// REMOVED METHOD BECOMES doesNotUnderstand:
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Define an actor class, add a second method via >>
+// Then redefine the class (without the >> method) to trigger update_class/2,
+// which replaces the full instance_methods map — removing the >> method.
+// ---------------------------------------------------------------------------
+
+Actor subclass: MethodDropActor
+  state: x = 0
+  setX => self.x := self.x + 1
+// => _
+
+MethodDropActor >> secret => "visible"
+// => _
+
+md := MethodDropActor spawn
+// => #Actor<MethodDropActor,_>
+
+md setX
+// => 1
+
+md secret
+// => visible
+
+// Redefine — setX only. update_class/2 replaces instance_methods, removing secret.
+Actor subclass: MethodDropActor
+  state: x = 0
+  setX => self.x := self.x + 1
+// => _
+
+// setX still works on existing actor after hot reload
+md setX
+// => 2
+
+// secret is now doesNotUnderstand: on a fresh instance
+// Actor message sends return Futures; await inside the block to surface the error
+// on: RuntimeError do: catches only RuntimeError kinds (does_not_understand is RuntimeError)
+[(MethodDropActor spawn secret) await] on: RuntimeError do: [:e | e kind]
+// => does_not_understand
+
+// ===========================================================================
+// CLASSBUILDER REGISTRATION PATH — REFLECTION ASSERTIONS
+// ===========================================================================
+
+// Inline-defined class is in the class registry
+(Object allSubclasses includes: InlineRedefActor)
+// => true
+
+// Inline-defined class has correct superclass
+InlineRedefActor superclass
+// => Actor
+
+// canUnderstand reflects post-redefine state
+InlineRedefActor canUnderstand: #bump
+// => true

@@ -276,15 +276,23 @@ ensure_wrapped(exit, Reason, Stacktrace) ->
     Wrapped = wrap(Error),
     Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)};
 ensure_wrapped(throw, Reason, Stacktrace) ->
-    Error = #beamtalk_error{
-        kind = erlang_throw,
-        class = undefined,
-        selector = undefined,
-        message = iolist_to_binary(io_lib:format("~p", [Reason])),
-        hint = undefined,
-        details = #{reason => Reason}
-    },
-    Wrapped = wrap(Error),
+    %% BT-869: Unwrap future_rejected errors (thrown from beamtalk_future:await/*)
+    %% Future rejects with {future_rejected, ActualError} where ActualError is #beamtalk_error{}
+    %% We need to unwrap it so the actual error can be caught properly
+    case Reason of
+        {future_rejected, #beamtalk_error{} = InnerError} ->
+            Wrapped = wrap(InnerError);
+        _ ->
+            Error = #beamtalk_error{
+                kind = erlang_throw,
+                class = undefined,
+                selector = undefined,
+                message = iolist_to_binary(io_lib:format("~p", [Reason])),
+                hint = undefined,
+                details = #{reason => Reason}
+            },
+            Wrapped = wrap(Error)
+    end,
     Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)};
 ensure_wrapped(_Type, Other, Stacktrace) ->
     Wrapped = wrap(Other),
@@ -347,10 +355,10 @@ has_method('signal') -> true;
 has_method('signal:') -> true;
 has_method(_) -> false.
 
-%% @doc Raise a new exception with a message string.
+%% @doc Raise an exception.
 %%
-%% Usage: `Exception signal: 'something went wrong'`
--spec signal(atom() | binary()) -> no_return().
+%% Used internally for various error signaling scenarios.
+-spec signal(Kind :: atom()) -> no_return().
 signal(Kind) when is_atom(Kind) ->
     Error = beamtalk_error:new(Kind, 'Exception'),
     beamtalk_error:raise(Error).
