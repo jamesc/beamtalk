@@ -10,7 +10,10 @@
 
 use super::super::document::{Document, INDENT, line, nest};
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
-use crate::ast::{Block, ClassDefinition, Expression, MethodDefinition, MethodKind, Module};
+use crate::ast::{
+    Block, ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, MethodKind,
+    Module,
+};
 use crate::docvec;
 
 impl CoreErlangGenerator {
@@ -938,6 +941,38 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 
+    /// BT-877: Detect the `new => self error: "..."` pattern that indicates a class
+    /// is not constructible via `new`. Returns `true` if any method named `new` (unary)
+    /// has a single-expression body that is `self error: <StringLiteral>`.
+    fn has_raising_new(class: &ClassDefinition) -> bool {
+        class
+            .methods
+            .iter()
+            .filter(|m| m.kind == MethodKind::Primary)
+            .filter(|m| m.selector == MessageSelector::Unary("new".into()))
+            .any(|m| Self::is_self_error_body(&m.body))
+    }
+
+    /// Check if a method body is a single `self error: <StringLiteral>` expression.
+    fn is_self_error_body(body: &[Expression]) -> bool {
+        if body.len() != 1 {
+            return false;
+        }
+        matches!(
+            &body[0],
+            Expression::MessageSend {
+                receiver,
+                selector: MessageSelector::Keyword(parts),
+                arguments,
+                ..
+            } if matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
+                && parts.len() == 1
+                && parts[0].keyword == "error:"
+                && arguments.len() == 1
+                && matches!(&arguments[0], Expression::Literal(Literal::String(_), _))
+        )
+    }
+
     /// Generates the `register_class/0` on-load function using the `ClassBuilder`
     /// protocol (ADR 0038 Phase 3 / BT-837).
     ///
@@ -1154,6 +1189,12 @@ impl CoreErlangGenerator {
             }
             let method_docs_doc = Document::Vec(method_docs_parts);
 
+            // BT-877: Detect raising `new` pattern to emit isConstructible.
+            // Only emit `false` — omit the key for constructible classes so the
+            // runtime can fall back to lazy computation (which also checks
+            // whether the class exports spawn/0, etc.).
+            let has_raising_new = Self::has_raising_new(class);
+
             // BT-837: Build ClassBuilder state map and call register/1
             let class_doc = docvec![
                 line(),
@@ -1211,6 +1252,11 @@ impl CoreErlangGenerator {
                         "'methodDocs' => ~{",
                         method_docs_doc,
                         "}~",
+                        if has_raising_new {
+                            docvec![",", line(), "'isConstructible' => 'false'"]
+                        } else {
+                            Document::Nil
+                        },
                     ]
                 ),
                 line(),

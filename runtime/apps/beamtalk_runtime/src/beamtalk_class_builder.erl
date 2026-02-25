@@ -276,6 +276,10 @@ build_compiled_class_info(
     InstanceMethods = build_method_map(MethodSpecs),
     Module = maps:get(moduleName, BuilderState, ClassName),
     ClassMethods = maps:get(classMethods, BuilderState, #{}),
+    %% BT-877: Read is_constructible from compiler inference.
+    %% The compiler emits isConstructible based on the `new => self error:` pattern.
+    %% Superclass inheritance is handled at init/query time via the class hierarchy.
+    IsConstructible = maps:get(isConstructible, BuilderState, undefined),
     Base = #{
         name => ClassName,
         superclass => SuperclassName,
@@ -288,18 +292,22 @@ build_compiled_class_info(
     },
     %% BT-837: Pass through optional compiler metadata if present
     maybe_put(
-        method_source,
-        maps:get(methodSource, BuilderState, undefined),
+        is_constructible,
+        IsConstructible,
         maybe_put(
-            class_state,
-            maps:get(classState, BuilderState, undefined),
+            method_source,
+            maps:get(methodSource, BuilderState, undefined),
             maybe_put(
-                doc,
-                maps:get(classDoc, BuilderState, undefined),
+                class_state,
+                maps:get(classState, BuilderState, undefined),
                 maybe_put(
-                    method_docs,
-                    maps:get(methodDocs, BuilderState, undefined),
-                    Base
+                    doc,
+                    maps:get(classDoc, BuilderState, undefined),
+                    maybe_put(
+                        method_docs,
+                        maps:get(methodDocs, BuilderState, undefined),
+                        Base
+                    )
                 )
             )
         )
