@@ -95,3 +95,21 @@ c2 add
 
 c2 getTotal await
 // => 10
+
+// ===========================================================================
+// ERROR CASES — VALIDATION (BT-873)
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Attempting to subclass a sealed class raises an error
+// ---------------------------------------------------------------------------
+
+[(Object classBuilder name: #CBBadSeal; superclass: Float; register) await] on: Error do: [:e | "sealed rejected"]
+// => sealed rejected
+
+// ---------------------------------------------------------------------------
+// Registering without a name raises missing_parameter
+// ---------------------------------------------------------------------------
+
+[(Object classBuilder register) await] on: Error do: [:e | "no name"]
+// => no name
