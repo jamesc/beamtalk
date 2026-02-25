@@ -67,6 +67,9 @@ impl CoreErlangGenerator {
         // BT-745: Build beamtalk_class attribute for dependency-ordered bootstrap
         let beamtalk_class_attr = super::util::beamtalk_class_attribute(&module.classes);
 
+        // BT-845/BT-860: Build beamtalk_source attribute when source_path is set.
+        let source_path_attr = self.source_path_attr();
+
         // Module header with exports and attributes
         let module_header = if has_classes {
             docvec![
@@ -78,6 +81,7 @@ impl CoreErlangGenerator {
                 "  attributes ['behaviour' = ['gen_server'], \
                  'on_load' = [{'register_class', 0}]",
                 beamtalk_class_attr,
+                source_path_attr,
                 spec_suffix,
                 "]\n",
             ]
@@ -89,6 +93,7 @@ impl CoreErlangGenerator {
                 ),
                 "\n",
                 "  attributes ['behaviour' = ['gen_server']",
+                source_path_attr,
                 spec_suffix,
                 "]\n",
             ]

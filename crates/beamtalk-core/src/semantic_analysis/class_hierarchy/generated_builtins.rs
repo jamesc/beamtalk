@@ -228,6 +228,8 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "isBehaviour".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
                 MethodInfo { selector: "isMeta".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
                 MethodInfo { selector: "isMetaclass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "sourceFile".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "reload".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
                 MethodInfo { selector: "removeFromSystem".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
             ],
             class_methods: vec![],
