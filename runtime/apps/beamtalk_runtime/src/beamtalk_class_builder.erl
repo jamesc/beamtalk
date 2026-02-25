@@ -321,7 +321,7 @@ maybe_put(Key, Value, Map) ->
 %% @doc Convert a methodSpecs map to the instance_methods format expected by the class gen_server.
 %%
 %% Each entry in methodSpecs is either:
-%%   - `selector => fun()`: dynamic method (closure-based, Phase 2)
+%%   - `selector => fun()`: closure (converted to #{block, arity} format)
 %%   - `selector => #{arity => N}`: compiled method reference (already in the right format)
 -spec build_method_map(map()) -> map().
 build_method_map(MethodSpecs) when is_map(MethodSpecs) ->
