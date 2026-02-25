@@ -940,8 +940,12 @@ trigger_hot_reload(ModuleName, Classes) ->
 
 %% @doc Auto-await a Future if the result is a tagged future tuple (BT-840).
 %% This provides a synchronous REPL experience for async message sends.
-%% Returns the awaited value if resolved, `{future_timeout, Future}' on timeout,
-%% `{future_rejected, Reason}' on rejection, or the original value if not a future.
+%% Returns the awaited value if resolved, `{future_rejected, Reason}' on
+%% rejection or timeout, or the original value if not a future.
+%%
+%% BT-886: Both timeout and rejection are now returned as {future_rejected, Error}
+%% so that process_eval_result surfaces them as structured errors to the user,
+%% rather than displaying raw tuples.
 -spec maybe_await_future(term()) -> term().
 maybe_await_future({beamtalk_future, _} = Future) ->
     %% Tagged future — await with a generous timeout for REPL use.
@@ -949,8 +953,12 @@ maybe_await_future({beamtalk_future, _} = Future) ->
         AwaitedValue ->
             AwaitedValue
     catch
-        throw:#beamtalk_error{kind = timeout} ->
-            {future_timeout, Future};
+        throw:#beamtalk_error{kind = timeout} = TimeoutError ->
+            %% BT-886: Surface timeout as a structured error, not a raw tuple.
+            {future_rejected, TimeoutError};
+        throw:{future_rejected, #beamtalk_error{} = Reason} ->
+            %% Structured error from rejected future (e.g., actor_dead from watcher).
+            {future_rejected, Reason};
         throw:{future_rejected, Reason} ->
             %% Return error tuple for REPL inspection instead of throwing.
             %% REPL should be forgiving and allow users to inspect errors.
