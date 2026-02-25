@@ -125,3 +125,15 @@ TestCase subclass: CollectionsTest
     self assert: a equals: #(1, 2, 3).
     // Direct index assertion not possible in E2E since blocks can't accumulate results.
     self assert: (a ++ #(4, 5)) equals: #(1, 2, 3, 4, 5)
+
+  testJoin =>
+    // BT-895: join and join: caused infinite dispatch loop
+    // --- join (no separator) ---
+    self assert: (#("hello", "world") join) equals: "helloworld".
+    self assert: (#("a", "b", "c") join) equals: "abc".
+    self assert: (#() join) equals: "".
+    // --- join: (with separator) ---
+    self assert: (#("a", "b", "c") join: ", ") equals: "a, b, c".
+    self assert: (#("hello", "world") join: " ") equals: "hello world".
+    self assert: (#("x") join: ", ") equals: "x".
+    self assert: (#() join: ", ") equals: ""
