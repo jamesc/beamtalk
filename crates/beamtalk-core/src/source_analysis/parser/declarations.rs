@@ -806,6 +806,12 @@ impl Parser {
                 }
                 // Otherwise continue parsing more expressions
             } else if !self.is_at_end() && self.current_token().has_leading_newline() {
+                // BT-885: If the next token is at column 0 (no indentation), it's a
+                // top-level expression, not part of this method body. This allows
+                // trailing expressions after inline class definitions.
+                if self.current_token().leading_indent() == Some(0) {
+                    break;
+                }
                 // Newline acts as implicit statement separator (BT-360)
                 // Continue parsing — the while-loop guard handles method/class boundaries
             } else {
