@@ -11,6 +11,15 @@ use crate::ast::Expression;
 use crate::docvec;
 
 impl CoreErlangGenerator {
+    /// Wraps a Core Erlang expression with `beamtalk_future:maybe_await/1`.
+    ///
+    /// If the operand is a future (e.g. from an actor method call), it will be
+    /// awaited before use. Non-future values pass through with negligible overhead
+    /// (one failed pattern match).
+    fn wrap_maybe_await(doc: Document<'static>) -> Document<'static> {
+        docvec!["call 'beamtalk_future':'maybe_await'(", doc, ")"]
+    }
+
     /// Generates code for binary operators.
     ///
     /// Maps Beamtalk binary operators to Erlang's built-in operators:
@@ -71,8 +80,8 @@ impl CoreErlangGenerator {
             }
         };
 
-        let left_code = self.expression_doc(left)?;
-        let right_code = self.expression_doc(&arguments[0])?;
+        let left_code = Self::wrap_maybe_await(self.expression_doc(left)?);
+        let right_code = Self::wrap_maybe_await(self.expression_doc(&arguments[0])?);
 
         Ok(docvec![
             format!("call 'erlang':'{erlang_op}'("),
@@ -96,8 +105,8 @@ impl CoreErlangGenerator {
         left: &Expression,
         right: &Expression,
     ) -> Result<Document<'static>> {
-        let left_code = self.expression_doc(left)?;
-        let right_code = self.expression_doc(right)?;
+        let left_code = Self::wrap_maybe_await(self.expression_doc(left)?);
+        let right_code = Self::wrap_maybe_await(self.expression_doc(right)?);
         Ok(docvec![
             "call 'erlang':'round'(call 'math':'pow'(call 'erlang':'float'(",
             left_code,
@@ -128,8 +137,8 @@ impl CoreErlangGenerator {
 
         if is_list {
             // List concatenation: erlang:'++'
-            let left_code = self.expression_doc(left)?;
-            let right_code = self.expression_doc(right)?;
+            let left_code = Self::wrap_maybe_await(self.expression_doc(left)?);
+            let right_code = Self::wrap_maybe_await(self.expression_doc(right)?);
             Ok(docvec![
                 "call 'erlang':'++'(",
                 left_code,
@@ -139,8 +148,8 @@ impl CoreErlangGenerator {
             ])
         } else if is_string {
             // String concatenation: iolist_to_binary
-            let left_code = self.expression_doc(left)?;
-            let right_code = self.expression_doc(right)?;
+            let left_code = Self::wrap_maybe_await(self.expression_doc(left)?);
+            let right_code = Self::wrap_maybe_await(self.expression_doc(right)?);
             Ok(docvec![
                 "call 'erlang':'iolist_to_binary'([call 'erlang':'binary_to_list'(",
                 left_code,
@@ -152,8 +161,8 @@ impl CoreErlangGenerator {
             // Runtime dispatch: check is_list at runtime
             let left_var = self.fresh_temp_var("ConcatLeft");
             let right_var = self.fresh_temp_var("ConcatRight");
-            let left_code = self.expression_doc(left)?;
-            let right_code = self.expression_doc(right)?;
+            let left_code = Self::wrap_maybe_await(self.expression_doc(left)?);
+            let right_code = Self::wrap_maybe_await(self.expression_doc(right)?);
             Ok(docvec![
                 format!("let {left_var} = "),
                 left_code,

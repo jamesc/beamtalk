@@ -75,6 +75,7 @@
     when_resolved/2,
     when_rejected/2,
     is_future/1,
+    maybe_await/1,
     pid/1
 ]).
 
@@ -175,6 +176,12 @@ when_rejected({beamtalk_future, Pid}, Callback) ->
 when_rejected(Pid, Callback) when is_pid(Pid) ->
     Pid ! {add_callback, rejected, Callback},
     ok.
+
+%% @doc If the value is a future, await it; otherwise return as-is.
+%% Used by codegen to auto-await binary op operands.
+-spec maybe_await(term()) -> term().
+maybe_await({beamtalk_future, _} = Future) -> await(Future);
+maybe_await(Value) -> Value.
 
 %%% Internal helpers
 

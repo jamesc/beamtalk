@@ -126,7 +126,7 @@ module 'binary_operators' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_ca
         <'blockWithOp'> when 'true' ->
             case Args of
                 <[_x1, _y2]> when 'true' ->
-                    let _Result = call 'erlang':'+'(_x1, call 'erlang':'*'(_y2, 2)) in {'reply', _Result, State}
+                    let _Result = call 'erlang':'+'(call 'beamtalk_future':'maybe_await'(_x1), call 'beamtalk_future':'maybe_await'(call 'erlang':'*'(call 'beamtalk_future':'maybe_await'(_y2), call 'beamtalk_future':'maybe_await'(2)))) in {'reply', _Result, State}
                 <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
             end
         <OtherSelector> when 'true' ->
