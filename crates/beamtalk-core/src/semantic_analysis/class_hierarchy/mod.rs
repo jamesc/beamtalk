@@ -404,6 +404,13 @@ impl ClassHierarchy {
     /// Check if a class can respond to a given selector (local or inherited).
     ///
     /// Handles cycles gracefully by tracking visited classes.
+    ///
+    /// When an intermediate class in the superclass chain is not found in the
+    /// hierarchy (e.g. it is defined in a separately-compiled file), the walk
+    /// falls through to `Object`.  All Beamtalk classes ultimately inherit from
+    /// `Object`, so this correctly exposes Object-level methods (e.g.
+    /// `subclassResponsibility`) without producing false-positive DNU warnings
+    /// for cross-file class hierarchies (BT-889).
     #[must_use]
     pub fn resolves_selector(&self, class_name: &str, selector: &str) -> bool {
         let mut current = Some(class_name.to_string());
@@ -421,7 +428,11 @@ impl ClassHierarchy {
                     .as_ref()
                     .map(std::string::ToString::to_string);
             } else {
-                break;
+                // Unknown class in the superclass chain — likely an external class
+                // defined in a separately-compiled file.  Since all Beamtalk classes
+                // ultimately inherit from Object, fall through to the Object chain so
+                // that Object-level methods (e.g. subclassResponsibility) are visible.
+                current = Some("Object".to_string());
             }
         }
         false
@@ -430,6 +441,9 @@ impl ClassHierarchy {
     /// Find a method by selector in a class (including inherited methods).
     ///
     /// Returns the first matching primary method found in MRO order.
+    ///
+    /// When an intermediate class in the superclass chain is not found in the
+    /// hierarchy, the walk falls through to `Object` (BT-889).
     #[must_use]
     pub fn find_method(&self, class_name: &str, selector: &str) -> Option<MethodInfo> {
         let mut current = Some(class_name.to_string());
@@ -451,13 +465,17 @@ impl ClassHierarchy {
                     .as_ref()
                     .map(std::string::ToString::to_string);
             } else {
-                break;
+                // Unknown class in the superclass chain — fall through to Object (BT-889).
+                current = Some("Object".to_string());
             }
         }
         None
     }
 
     /// Find a class-side method by selector (including inherited class methods).
+    ///
+    /// When an intermediate class in the superclass chain is not found in the
+    /// hierarchy, the walk falls through to `Object` (BT-889).
     #[must_use]
     pub fn find_class_method(&self, class_name: &str, selector: &str) -> Option<MethodInfo> {
         let mut current = Some(class_name.to_string());
@@ -479,7 +497,8 @@ impl ClassHierarchy {
                     .as_ref()
                     .map(std::string::ToString::to_string);
             } else {
-                break;
+                // Unknown class in the superclass chain — fall through to Object (BT-889).
+                current = Some("Object".to_string());
             }
         }
         None
@@ -997,6 +1016,48 @@ mod tests {
     fn resolves_selector_unknown_class_returns_false() {
         let h = ClassHierarchy::with_builtins();
         assert!(!h.resolves_selector("Nope", "anything"));
+    }
+
+    /// BT-889: When a class inherits from an external class (defined in a
+    /// separately-compiled file and therefore absent from the hierarchy), the
+    /// walk must fall through to Object so that Object-level methods are
+    /// still visible.
+    #[test]
+    fn resolves_selector_through_unknown_external_parent_to_object() {
+        // Simulate file 2 compiling CondimentDecorator (extends Beverage from file 1).
+        // Beverage is NOT in the hierarchy — only CondimentDecorator is.
+        // subclassResponsibility lives on Object, two hops above CondimentDecorator.
+        let module = Module {
+            classes: vec![make_user_class("CondimentDecorator", "Beverage")],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (h, _diags) = ClassHierarchy::build(&module);
+        let h = h.unwrap();
+
+        // Object method must be reachable even though Beverage is unknown.
+        assert!(
+            h.resolves_selector("CondimentDecorator", "subclassResponsibility"),
+            "subclassResponsibility (on Object) should resolve through unknown Beverage parent"
+        );
+        assert!(
+            h.resolves_selector("CondimentDecorator", "isNil"),
+            "isNil (on Object) should resolve through unknown Beverage parent"
+        );
+        // A genuinely non-existent method must still return false.
+        assert!(
+            !h.resolves_selector("CondimentDecorator", "totallyBogusMethod"),
+            "unknown selector should still return false"
+        );
+        // find_method must also traverse through the unknown parent.
+        let method = h.find_method("CondimentDecorator", "subclassResponsibility");
+        assert!(
+            method.is_some(),
+            "find_method should locate subclassResponsibility via Object"
+        );
+        assert_eq!(method.unwrap().defined_in.as_str(), "Object");
     }
 
     // --- User-defined class tests ---
