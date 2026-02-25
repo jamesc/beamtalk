@@ -11,7 +11,7 @@ Actor subclass: EventBus
     self.collector := aCollector
 
   notify: event =>
-    self.collector receive: event
+    self.collector isNil ifFalse: [self.collector receive: event]
 
   subscriberCount =>
     self.collector isNil ifTrue: [0] ifFalse: [1]
