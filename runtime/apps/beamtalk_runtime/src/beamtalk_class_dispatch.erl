@@ -405,6 +405,7 @@ handle_async_dispatch(_Msg, _ClassName, _InstanceMethods, _Superclass, _Module) 
 handle_self_instantiation(Type, Selector, Args) ->
     ClassName = get(beamtalk_class_name),
     Module = get(beamtalk_class_module),
+    IsAbstract = get(beamtalk_class_is_abstract) =:= true,
     case {ClassName, Module} of
         {undefined, _} ->
             %% Fallback: process dictionary not set — called from non-class process.
@@ -416,7 +417,7 @@ handle_self_instantiation(Type, Selector, Args) ->
                 new ->
                     beamtalk_class_instantiation:class_self_new(CN, Mod, Args);
                 spawn ->
-                    beamtalk_class_instantiation:class_self_spawn(CN, Mod, Args)
+                    beamtalk_class_instantiation:class_self_spawn(CN, Mod, IsAbstract, Args)
             end
     end.
 

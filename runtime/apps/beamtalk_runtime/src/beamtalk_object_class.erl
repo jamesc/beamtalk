@@ -254,6 +254,7 @@ init({ClassName, ClassInfo}) ->
     %% bypass gen_server for self-calls (new/spawn from within class methods).
     put(beamtalk_class_name, ClassName),
     put(beamtalk_class_module, Module),
+    put(beamtalk_class_is_abstract, IsAbstract),
 
     %% BT-474: is_constructible starts undefined — computed lazily on first new call
     %% ADR 0032 Phase 1: No flattened method tables — dispatch walks the chain directly.
@@ -471,6 +472,9 @@ code_change(OldVsn, State, Extra) ->
 %% ADR 0032 Phase 1: No flattened tables to rebuild or invalidate.
 -spec apply_class_info(#class_state{}, map()) -> #class_state{}.
 apply_class_info(State, ClassInfo) ->
+    %% BT-893: Keep process dictionary in sync with state for self-instantiation.
+    NewModule = maps:get(module, ClassInfo, State#class_state.module),
+    put(beamtalk_class_module, NewModule),
     State#class_state{
         module = maps:get(module, ClassInfo, State#class_state.module),
         instance_methods = maps:get(

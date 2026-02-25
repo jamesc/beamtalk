@@ -27,6 +27,7 @@
     handle_new/4,
     class_self_new/3,
     class_self_spawn/3,
+    class_self_spawn/4,
     ensure_is_constructible/3,
     compute_is_constructible/2,
     abstract_class_error/2
@@ -166,7 +167,12 @@ class_self_new(ClassName, Module, Args) ->
 %% which would deadlock.
 -spec class_self_spawn(class_name(), atom(), list()) -> term().
 class_self_spawn(ClassName, Module, Args) ->
-    case handle_spawn(Args, ClassName, Module, false) of
+    class_self_spawn(ClassName, Module, false, Args).
+
+%% @doc Spawn with explicit abstract class flag (used by runtime self-instantiation).
+-spec class_self_spawn(class_name(), atom(), boolean(), list()) -> term().
+class_self_spawn(ClassName, Module, IsAbstract, Args) ->
+    case handle_spawn(Args, ClassName, Module, IsAbstract) of
         {ok, Result} ->
             Result;
         {error, Error} ->
