@@ -16,7 +16,7 @@
 
 -export([do_eval/2, do_eval/3, do_show_codegen/2, handle_load/2, handle_load_source/3]).
 %% BT-845: ADR 0040 Phase 2 — stateless class reload (called via erlang:apply from beamtalk_runtime)
--export([reload_class_file/1]).
+-export([reload_class_file/1, reload_class_file/2]).
 
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
@@ -37,7 +37,8 @@
     handle_class_definition/7,
     handle_method_definition/4,
     compile_expression_via_port/3,
-    compile_file_via_port/4
+    compile_file_via_port/4,
+    verify_class_present/3
 ]).
 -endif.
 
@@ -1052,8 +1053,20 @@ inject_output({error, Reason, State}, Output, Warnings) ->
 %% BT-845: ADR 0040 Phase 2 — stateless reload for the `Counter reload` primitive.
 %% Called from `beamtalk_behaviour_intrinsics:classReload/1` via `erlang:apply/3`
 %% to avoid a compile-time dependency from beamtalk_runtime to beamtalk_workspace.
+%%
 -spec reload_class_file(string()) -> ok | {error, term()}.
 reload_class_file(Path) ->
+    reload_class_file_impl(Path, undefined).
+
+%% BT-868: ExpectedClassName (atom) is verified against the compiled class list.
+%% Returns `{error, {class_not_found, ...}}` if the file no longer defines that class.
+-spec reload_class_file(string(), atom()) -> ok | {error, term()}.
+reload_class_file(Path, ExpectedClassName) ->
+    reload_class_file_impl(Path, ExpectedClassName).
+
+-spec reload_class_file_impl(string(), atom() | undefined) ->
+    ok | {error, term()}.
+reload_class_file_impl(Path, ExpectedClassName) ->
     case filelib:is_file(Path) of
         false ->
             {error, {file_not_found, Path}};
@@ -1068,17 +1081,48 @@ reload_class_file(Path) ->
                     ModuleNameOverride = compute_package_module_name(Path),
                     case compile_file(Source, Path, false, ModuleNameOverride) of
                         {ok, Binary, ClassNames, ModuleName} ->
-                            case code:load_binary(ModuleName, Path, Binary) of
-                                {module, ModuleName} ->
-                                    activate_module(ModuleName, ClassNames),
-                                    ok;
-                                {error, Reason} ->
-                                    {error, {load_error, Reason}}
+                            %% BT-868: Verify the expected class is still defined
+                            case
+                                verify_class_present(
+                                    ExpectedClassName, ClassNames, Path
+                                )
+                            of
+                                ok ->
+                                    case
+                                        code:load_binary(
+                                            ModuleName, Path, Binary
+                                        )
+                                    of
+                                        {module, ModuleName} ->
+                                            activate_module(
+                                                ModuleName, ClassNames
+                                            ),
+                                            ok;
+                                        {error, Reason} ->
+                                            {error, {load_error, Reason}}
+                                    end;
+                                {error, _} = Err ->
+                                    Err
                             end;
                         {error, Reason} ->
                             {error, Reason}
                     end
             end
+    end.
+
+%% @private
+%% BT-868: Check that the expected class name appears in the compiled class list.
+-spec verify_class_present(
+    atom() | undefined, [#{name := string()}], string()
+) -> ok | {error, term()}.
+verify_class_present(undefined, _ClassNames, _Path) ->
+    ok;
+verify_class_present(ExpectedClassName, ClassNames, Path) ->
+    ExpectedName = atom_to_list(ExpectedClassName),
+    DefinedNames = [N || #{name := N} <- ClassNames],
+    case lists:member(ExpectedName, DefinedNames) of
+        true -> ok;
+        false -> {error, {class_not_found, ExpectedClassName, Path, DefinedNames}}
     end.
 
 %% @private

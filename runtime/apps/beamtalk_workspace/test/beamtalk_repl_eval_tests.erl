@@ -1168,12 +1168,12 @@ io_capture_stdin_no_subscriber_test() ->
     _Output = beamtalk_io_capture:stop({CapturePid, OldGL}).
 
 %% ===================================================================
-%% reload_class_file (BT-897)
+%% reload_class_file (BT-897, BT-868)
 %% ===================================================================
 
 reload_class_file_not_found_test() ->
     %% Non-existent file returns file_not_found
-    Result = beamtalk_repl_eval:reload_class_file("/nonexistent/file.bt"),
+    Result = beamtalk_repl_eval:reload_class_file("/nonexistent/file.bt", 'SomeClass'),
     ?assertEqual({error, {file_not_found, "/nonexistent/file.bt"}}, Result).
 
 reload_class_file_no_compiler_test() ->
@@ -1185,10 +1185,51 @@ reload_class_file_no_compiler_test() ->
         io_lib:format("test_reload_~p.bt", [UniqueId])
     ),
     ok = file:write_file(TempFile, <<"Actor subclass: TestActor [\n]\n">>),
-    Result = beamtalk_repl_eval:reload_class_file(TempFile),
+    Result = beamtalk_repl_eval:reload_class_file(TempFile, 'TestActor'),
     file:delete(TempFile),
     %% Compiler not started — should fail gracefully
     case Result of
         {error, _} -> ok;
         Other -> error({unexpected_result, Other})
     end.
+
+%% ===================================================================
+%% verify_class_present (BT-868)
+%% ===================================================================
+
+verify_class_present_undefined_skips_check_test() ->
+    %% undefined means no verification needed (e.g., handle_load path)
+    ?assertEqual(
+        ok,
+        beamtalk_repl_eval:verify_class_present(
+            undefined, [#{name => "Foo"}], "/some/path.bt"
+        )
+    ).
+
+verify_class_present_found_test() ->
+    ClassNames = [#{name => "Counter"}, #{name => "Timer"}],
+    ?assertEqual(
+        ok,
+        beamtalk_repl_eval:verify_class_present(
+            'Counter', ClassNames, "/some/path.bt"
+        )
+    ).
+
+verify_class_present_not_found_test() ->
+    ClassNames = [#{name => "OtherClass"}],
+    Result = beamtalk_repl_eval:verify_class_present(
+        'Counter', ClassNames, "/some/path.bt"
+    ),
+    ?assertEqual(
+        {error, {class_not_found, 'Counter', "/some/path.bt", ["OtherClass"]}},
+        Result
+    ).
+
+verify_class_present_empty_classes_test() ->
+    Result = beamtalk_repl_eval:verify_class_present(
+        'Counter', [], "/some/path.bt"
+    ),
+    ?assertEqual(
+        {error, {class_not_found, 'Counter', "/some/path.bt", []}},
+        Result
+    ).

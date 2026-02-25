@@ -475,9 +475,23 @@ classReload(Self) ->
             beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg));
         SourcePath ->
             SourcePathStr = binary_to_list(SourcePath),
-            try erlang:apply(beamtalk_repl_eval, reload_class_file, [SourcePathStr]) of
+            try erlang:apply(beamtalk_repl_eval, reload_class_file, [SourcePathStr, ClassName]) of
                 ok ->
                     Self;
+                {error, {class_not_found, _, Path, Defined}} ->
+                    Error0 = beamtalk_error:new(reload_failed, ClassName),
+                    DefinedStr = lists:join(<<", ">>, [list_to_binary(D) || D <- Defined]),
+                    Msg = iolist_to_binary([
+                        atom_to_binary(ClassName, utf8),
+                        <<" is no longer defined in ">>,
+                        list_to_binary(Path),
+                        <<" (found: ">>,
+                        DefinedStr,
+                        <<")">>
+                    ]),
+                    beamtalk_error:raise(
+                        beamtalk_error:with_message(Error0, Msg)
+                    );
                 {error, Reason} ->
                     Error0 = beamtalk_error:new(reload_failed, ClassName),
                     Msg = iolist_to_binary(
