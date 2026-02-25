@@ -9,7 +9,7 @@
 //! and reply tuples, and the `register_class/0` on-load function.
 
 use super::super::document::{Document, INDENT, line, nest};
-use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
+use super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, ClassDefinition, Expression, MethodDefinition, MethodKind, Module};
 use crate::docvec;
 
@@ -69,6 +69,17 @@ impl CoreErlangGenerator {
                     self.tier2_block_params
                         .insert(method.parameters[*pos].name.name.to_string());
                 }
+            }
+        }
+
+        // BT-853: Also detect HOM parameters from the method body:
+        // any parameter invoked with value:/value:value: is a block parameter.
+        // This enables HOMs called from external sites (not just pre-scanned self-sends)
+        // to correctly use the Tier 2 stateful protocol when Tier 2 blocks are passed.
+        for param in &method.parameters {
+            let param_name = &param.name.name;
+            if Self::method_body_has_value_call_on(param_name, &method.body) {
+                self.tier2_block_params.insert(param_name.to_string());
             }
         }
 
@@ -266,6 +277,24 @@ impl CoreErlangGenerator {
                         " in {'reply', _Result, _NewState}",
                     ];
                     docs.push(doc);
+                } else if let Some(tier2_args) = Self::detect_tier2_self_send(expr) {
+                    // BT-853: Last expression is a Tier 2 self-send.
+                    // generate_tier2_self_send_open produces an open chain; close
+                    // it with {'reply', Result, FinalState}.
+                    let open_chain = self.generate_tier2_self_send_open(expr, &tier2_args)?;
+                    let dispatch_var = self
+                        .last_dispatch_var
+                        .take()
+                        .unwrap_or_else(|| "_SD".to_string());
+                    let final_state = self.current_state_var();
+                    let doc = docvec![
+                        open_chain,
+                        Document::String(format!(
+                            "let _Result = call 'erlang':'element'(1, {dispatch_var}) \
+                             in {{'reply', _Result, {final_state}}}"
+                        )),
+                    ];
+                    docs.push(doc);
                 } else {
                     // Regular last expression: bind to Result and reply
                     // BT-851: Get state AFTER expression generation, since Tier 2
@@ -288,18 +317,36 @@ impl CoreErlangGenerator {
             } else if is_local_assignment {
                 // BT-598: Local variable assignment in method body
                 if let Expression::Assignment { target, value, .. } = expr {
-                    if let Expression::Block(block) = value.as_ref() {
-                        Self::validate_stored_closure(block, format!("{:?}", expr.span()))?;
-                    }
                     if let Expression::Identifier(id) = target.as_ref() {
                         let var_name = &id.name;
                         let core_var = self
                             .lookup_var(var_name)
                             .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
 
+                        // BT-853: If RHS is a Tier 2 value: call, it returns
+                        // {Result, NewState} — unpack result and thread NewState.
+                        if self.is_tier2_value_call(value) {
+                            let tuple_var = self.fresh_temp_var("T2Tuple");
+                            let next_version = self.state_version() + 1;
+                            let new_state = if next_version == 1 {
+                                "State1".to_string()
+                            } else {
+                                format!("State{next_version}")
+                            };
+                            let value_str = self.expression_doc(value)?;
+                            self.bind_var(var_name, &core_var);
+                            let _ = self.next_state_var();
+                            docs.push(docvec![
+                                format!("let {tuple_var} = "),
+                                value_str,
+                                format!(
+                                    " in let {core_var} = call 'erlang':'element'(1, {tuple_var})\
+                                     \n in let {new_state} = call 'erlang':'element'(2, {tuple_var}) in "
+                                ),
+                            ]);
                         // BT-598: If RHS is control flow with mutations, it returns
                         // {Result, State} — unpack and update state variable.
-                        if self.control_flow_has_mutations(value) {
+                        } else if self.control_flow_has_mutations(value) {
                             let tuple_var = self.fresh_temp_var("Tuple");
                             let next_version = self.state_version() + 1;
                             let new_state = if next_version == 1 {
@@ -342,17 +389,26 @@ impl CoreErlangGenerator {
                         }
                     }
                 }
-            } else if self.expr_contains_tier2_value_call(expr) {
-                // BT-851: Tier 2 value: calls in non-last positions silently lose
-                // state updates. Reject at compile time until Phase 1 adds chaining.
-                // Checks both top-level value: calls and value: calls nested in
-                // assignment RHS (e.g., `result := aBlock value: x`).
-                return Err(CodeGenError::UnsupportedFeature {
-                    feature: "Tier 2 stateful block value: call in non-last position \
-                              (state updates would be lost)"
-                        .to_string(),
-                    location: "actor method body".to_string(),
-                });
+            } else if self.is_tier2_value_call(expr) {
+                // BT-853: Tier 2 value: call in non-last position.
+                // Returns {Result, NewState} — discard Result, thread NewState.
+                let tuple_var = self.fresh_temp_var("T2Tuple");
+                let next_version = self.state_version() + 1;
+                let new_state = if next_version == 1 {
+                    "State1".to_string()
+                } else {
+                    format!("State{next_version}")
+                };
+                let expr_str = self.expression_doc(expr)?;
+                let _ = self.next_state_var();
+                docs.push(docvec![
+                    format!("let {tuple_var} = "),
+                    expr_str,
+                    format!(
+                        " in let _T2Discard = call 'erlang':'element'(1, {tuple_var})\
+                         \n in let {new_state} = call 'erlang':'element'(2, {tuple_var}) in "
+                    ),
+                ]);
             } else if let Some(tier2_args) = Self::detect_tier2_self_send(expr) {
                 // BT-851: Tier 2 self-send with stateful block arguments.
                 // Pack captured locals into State, send, extract locals from returned State.
@@ -503,6 +559,24 @@ impl CoreErlangGenerator {
                         " in {'reply', _Result, _NewState}",
                     ];
                     docs.push(doc);
+                } else if let Some(tier2_args) = Self::detect_tier2_self_send(expr) {
+                    // BT-853: Last expression is a Tier 2 self-send.
+                    // generate_tier2_self_send_open produces an open chain; close
+                    // it with {'reply', Result, FinalState}.
+                    let open_chain = self.generate_tier2_self_send_open(expr, &tier2_args)?;
+                    let dispatch_var = self
+                        .last_dispatch_var
+                        .take()
+                        .unwrap_or_else(|| "_SD".to_string());
+                    let final_state = self.current_state_var();
+                    let doc = docvec![
+                        open_chain,
+                        Document::String(format!(
+                            "let _Result = call 'erlang':'element'(1, {dispatch_var}) \
+                             in {{'reply', _Result, {final_state}}}"
+                        )),
+                    ];
+                    docs.push(doc);
                 } else {
                     // Regular last expression: bind to Result and reply
                     // BT-851: Get state AFTER expression generation, since Tier 2
@@ -525,20 +599,36 @@ impl CoreErlangGenerator {
             } else if is_local_assignment {
                 // Local variable assignment: generate with proper binding
                 if let Expression::Assignment { target, value, .. } = expr {
-                    // Check if we're storing a block with mutations (ERROR)
-                    if let Expression::Block(block) = value.as_ref() {
-                        Self::validate_stored_closure(block, format!("{:?}", expr.span()))?;
-                    }
-
                     if let Expression::Identifier(id) = target.as_ref() {
                         let var_name = &id.name;
                         let core_var = self
                             .lookup_var(var_name)
                             .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
 
+                        // BT-853: If RHS is a Tier 2 value: call, it returns
+                        // {Result, NewState} — unpack result and thread NewState.
+                        if self.is_tier2_value_call(value) {
+                            let tuple_var = self.fresh_temp_var("T2Tuple");
+                            let next_version = self.state_version() + 1;
+                            let new_state = if next_version == 1 {
+                                "State1".to_string()
+                            } else {
+                                format!("State{next_version}")
+                            };
+                            let value_str = self.expression_doc(value)?;
+                            self.bind_var(var_name, &core_var);
+                            let _ = self.next_state_var();
+                            docs.push(docvec![
+                                format!("let {tuple_var} = "),
+                                value_str,
+                                format!(
+                                    " in let {core_var} = call 'erlang':'element'(1, {tuple_var})\
+                                     \n in let {new_state} = call 'erlang':'element'(2, {tuple_var}) in "
+                                ),
+                            ]);
                         // BT-598: If RHS is control flow with mutations, it returns
                         // {Result, State} — unpack and update state variable.
-                        if self.control_flow_has_mutations(value) {
+                        } else if self.control_flow_has_mutations(value) {
                             let tuple_var = self.fresh_temp_var("Tuple");
                             let next_version = self.state_version() + 1;
                             let new_state = if next_version == 1 {
@@ -668,15 +758,26 @@ impl CoreErlangGenerator {
                     " in let {new_state} = call 'erlang':'element'(3, {super_result_var}) in "
                 ));
                 docs.push(doc);
-            } else if self.expr_contains_tier2_value_call(expr) {
-                // BT-851: Tier 2 value: calls in non-last positions silently lose
-                // state updates. Reject at compile time until Phase 1 adds chaining.
-                return Err(CodeGenError::UnsupportedFeature {
-                    feature: "Tier 2 stateful block value: call in non-last position \
-                              (state updates would be lost)"
-                        .to_string(),
-                    location: "actor method body".to_string(),
-                });
+            } else if self.is_tier2_value_call(expr) {
+                // BT-853: Tier 2 value: call in non-last position.
+                // Returns {Result, NewState} — discard Result, thread NewState.
+                let tuple_var = self.fresh_temp_var("T2Tuple");
+                let next_version = self.state_version() + 1;
+                let new_state = if next_version == 1 {
+                    "State1".to_string()
+                } else {
+                    format!("State{next_version}")
+                };
+                let expr_str = self.expression_doc(expr)?;
+                let _ = self.next_state_var();
+                docs.push(docvec![
+                    format!("let {tuple_var} = "),
+                    expr_str,
+                    format!(
+                        " in let _T2Discard = call 'erlang':'element'(1, {tuple_var})\
+                         \n in let {new_state} = call 'erlang':'element'(2, {tuple_var}) in "
+                    ),
+                ]);
             } else if let Some(tier2_args) = Self::detect_tier2_self_send(expr) {
                 // BT-851: Tier 2 self-send with stateful block arguments.
                 let doc = self.generate_tier2_self_send_open(expr, &tier2_args)?;
@@ -1258,9 +1359,6 @@ impl CoreErlangGenerator {
                 // `generate_identifier`, which generates `call 'maps':'get'('d', State)`.
                 // Class methods have no State parameter, causing {unbound_var, 'State', ...}.
                 if let Expression::Assignment { target, value, .. } = expr {
-                    if let Expression::Block(block) = value.as_ref() {
-                        Self::validate_stored_closure(block, format!("{:?}", expr.span()))?;
-                    }
                     if let Expression::Identifier(id) = target.as_ref() {
                         let var_name = &id.name;
                         let core_var = self
@@ -1299,6 +1397,7 @@ impl CoreErlangGenerator {
     ///
     /// This catches both `aBlock value: x` and `result := aBlock value: x` where
     /// the `{Result, NewState}` tuple would be silently mishandled.
+    #[allow(dead_code)]
     fn expr_contains_tier2_value_call(&self, expr: &Expression) -> bool {
         if self.is_tier2_value_call(expr) {
             return true;
@@ -1336,6 +1435,61 @@ impl CoreErlangGenerator {
             }
         }
         false
+    }
+
+    /// BT-853: Checks if any expression in a method body invokes `param_name` with
+    /// `value`, `value:`, `value:value:`, or `value:value:value:`.
+    ///
+    /// Used to detect HOM (higher-order method) parameters: if a parameter is invoked
+    /// as a block inside the method body, it is a block parameter and should use the
+    /// Tier 2 stateful calling convention when a Tier 2 block is passed.
+    fn method_body_has_value_call_on(param_name: &str, body: &[Expression]) -> bool {
+        body.iter()
+            .any(|expr| Self::expr_has_value_call_on(param_name, expr))
+    }
+
+    /// Recursively checks if an expression contains a `value`/`value:`/... call on `param_name`.
+    fn expr_has_value_call_on(param_name: &str, expr: &Expression) -> bool {
+        match expr {
+            Expression::MessageSend {
+                receiver,
+                selector,
+                arguments,
+                ..
+            } => {
+                let is_value_selector = match selector {
+                    crate::ast::MessageSelector::Unary(name) => name == "value",
+                    crate::ast::MessageSelector::Keyword(parts) => {
+                        let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+                        matches!(
+                            sel.as_str(),
+                            "value:" | "value:value:" | "value:value:value:"
+                        )
+                    }
+                    crate::ast::MessageSelector::Binary(_) => false,
+                };
+                if is_value_selector {
+                    if let Expression::Identifier(id) = receiver.as_ref() {
+                        if id.name == param_name {
+                            return true;
+                        }
+                    }
+                }
+                // Also check sub-expressions
+                if Self::expr_has_value_call_on(param_name, receiver) {
+                    return true;
+                }
+                arguments
+                    .iter()
+                    .any(|a| Self::expr_has_value_call_on(param_name, a))
+            }
+            Expression::Assignment { value, .. } => Self::expr_has_value_call_on(param_name, value),
+            Expression::Block(block) => block
+                .body
+                .iter()
+                .any(|e| Self::expr_has_value_call_on(param_name, e)),
+            _ => false,
+        }
     }
 
     /// Checks if a control flow expression actually threads state through mutations.

@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-851: Tier 2 block round-trip test (ADR 0041 Phase 0).
+// BT-851/BT-852/BT-853: Tier 2 block round-trip tests (ADR 0041 Phase 1).
 // Verifies the stateful block calling convention works end-to-end:
 // a block with captured mutations is passed via self-send to a HOM,
 // the HOM calls `value:` with the Tier 2 protocol, and the mutation
@@ -9,6 +9,20 @@
 
 TestCase subclass: Tier2BlockRoundTripTest
 
+  // BT-851: Basic round-trip: block mutates count, HOM is last expression.
   testStatefulBlockViaHOM =>
     actor := Tier2BlockTestActor spawn.
     self assert: ((actor testRoundTrip) await) equals: 5
+
+  // BT-853: Non-last Tier 2 value: call in HOM body.
+  // The block mutates count (via StateAcc), the HOM continues and returns 99,
+  // but the state update (count=3) must still propagate back to the caller.
+  testNonLastTier2ValueCallPropagates =>
+    actor := Tier2BlockTestActor spawn.
+    self assert: ((actor testNonLastTier2ValueCall) await) equals: 3
+
+  // BT-853: Tier 2 block result captured in local variable in HOM body.
+  // Block returns count (=4 after mutation), HOM adds 10, returns 14.
+  testTier2ResultCaptureInHOM =>
+    actor := Tier2BlockTestActor spawn.
+    self assert: ((actor testTier2ResultCapture) await) equals: 14

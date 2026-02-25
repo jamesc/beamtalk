@@ -230,17 +230,8 @@ impl CoreErlangGenerator {
         expr: &Expression,
         result_var: &str,
     ) -> Result<Document<'static>> {
-        if let Expression::Assignment {
-            target,
-            value,
-            span,
-        } = expr
-        {
+        if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::Identifier(id) = target.as_ref() {
-                // Validate stored closures (same guard as block_body)
-                if let Expression::Block(block) = value.as_ref() {
-                    Self::validate_stored_closure(block, format!("{span:?}"))?;
-                }
                 let var_name = id.name.clone();
                 let current_state = self.current_state_var();
                 let val_doc = self.expression_doc(value)?;
@@ -294,16 +285,8 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<(Document<'static>, Document<'static>)> {
-        if let Expression::Assignment {
-            target,
-            value,
-            span,
-        } = expr
-        {
+        if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::Identifier(id) = target.as_ref() {
-                if let Expression::Block(block) = value.as_ref() {
-                    Self::validate_stored_closure(block, format!("{span:?}"))?;
-                }
                 let var_name = id.name.clone();
                 let current_state = self.current_state_var();
                 let val_doc = self.expression_doc(value)?;

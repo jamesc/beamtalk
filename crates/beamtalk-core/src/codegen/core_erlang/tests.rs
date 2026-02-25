@@ -2471,17 +2471,12 @@ fn test_codegen_rejects_stored_closure_with_field_assignment() {
         leading_comments: vec![],
     };
 
+    // BT-852: Stored closures with field assignments are now allowed via Tier 2 protocol.
     let result = generate(&module);
     assert!(
-        result.is_err(),
-        "Should reject field assignment in stored closure"
+        result.is_ok(),
+        "Field assignment in stored closure should now be allowed via Tier 2 protocol. Got: {result:?}"
     );
-
-    if let Err(CodeGenError::FieldAssignmentInStoredClosure { field, .. }) = result {
-        assert_eq!(field, "value", "Should report the correct field name");
-    } else {
-        panic!("Expected FieldAssignmentInStoredClosure error, got: {result:?}");
-    }
 }
 
 #[test]
@@ -2552,17 +2547,12 @@ fn test_codegen_rejects_stored_closure_with_local_mutation() {
         leading_comments: vec![],
     };
 
+    // BT-852: Stored closures with local mutations are now allowed via Tier 2 protocol.
     let result = generate(&module);
     assert!(
-        result.is_err(),
-        "Should reject local mutation in stored closure"
+        result.is_ok(),
+        "Local mutation in stored closure should now be allowed via Tier 2 protocol. Got: {result:?}"
     );
-
-    if let Err(CodeGenError::LocalMutationInStoredClosure { variable, .. }) = result {
-        assert_eq!(variable, "count", "Should report the correct variable name");
-    } else {
-        panic!("Expected LocalMutationInStoredClosure error, got: {result:?}");
-    }
 }
 
 #[test]
