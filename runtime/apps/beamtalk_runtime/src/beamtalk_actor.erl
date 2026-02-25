@@ -300,26 +300,16 @@ async_send(ActorPid, monitor, [], FuturePid) ->
     beamtalk_future:resolve(FuturePid, Ref),
     ok;
 async_send(ActorPid, Selector, Args, FuturePid) ->
-    %% Monitor the actor to detect death during the send window.
-    %% This narrows the TOCTOU race: if the actor dies between the
-    %% is_process_alive check and when gen_server processes the cast,
-    %% the DOWN message is already in our mailbox and we catch it.
-    MonRef = erlang:monitor(process, ActorPid),
+    %% BT-886: Check liveness before sending, and spawn a watcher to detect
+    %% actor death during message processing. The watcher monitors both the
+    %% actor and future processes: if the actor dies before the future is
+    %% resolved, the watcher rejects the future with a structured error.
     case is_process_alive(ActorPid) of
         true ->
             gen_server:cast(ActorPid, {Selector, Args, FuturePid}),
-            %% Non-blocking check: did actor die between cast and now?
-            receive
-                {'DOWN', MonRef, process, ActorPid, _Reason} ->
-                    %% Actor died - reject Future (no-op if already resolved)
-                    {error, Error} = actor_dead_error(Selector),
-                    beamtalk_future:reject(FuturePid, Error)
-            after 0 ->
-                erlang:demonitor(MonRef, [flush])
-            end,
+            spawn_future_watcher(ActorPid, FuturePid, Selector),
             ok;
         false ->
-            erlang:demonitor(MonRef, [flush]),
             {error, Error} = actor_dead_error(Selector),
             beamtalk_future:reject(FuturePid, Error),
             ok
@@ -387,6 +377,33 @@ actor_dead_error(Selector) ->
         <<"Use 'isAlive' to check, or use monitors for lifecycle events">>
     ),
     {error, Error}.
+
+%% @doc Spawn a lightweight watcher that monitors both the actor and future.
+%% BT-886: Closes the TOCTOU race in async_send — if the actor dies during
+%% message processing (after the cast but before the future is resolved),
+%% the watcher rejects the future with a structured actor_dead error.
+%% The watcher also monitors the future process so it can clean up promptly
+%% when the future completes normally. Times out after 30s as a safety net.
+-spec spawn_future_watcher(pid(), pid(), atom()) -> pid().
+spawn_future_watcher(ActorPid, FuturePid, Selector) ->
+    spawn(fun() ->
+        ActorRef = erlang:monitor(process, ActorPid),
+        FutureRef = erlang:monitor(process, FuturePid),
+        receive
+            {'DOWN', ActorRef, process, ActorPid, _Reason} ->
+                %% Actor died — reject future (no-op if already resolved)
+                {error, Error} = actor_dead_error(Selector),
+                beamtalk_future:reject(FuturePid, Error),
+                erlang:demonitor(FutureRef, [flush]);
+            {'DOWN', FutureRef, process, FuturePid, _Reason} ->
+                %% Future completed and its process ended — clean up
+                erlang:demonitor(ActorRef, [flush])
+        after 30000 ->
+            %% Safety cleanup: stop watching after 30s
+            erlang:demonitor(ActorRef, [flush]),
+            erlang:demonitor(FutureRef, [flush])
+        end
+    end).
 
 %%% gen_server callbacks
 
