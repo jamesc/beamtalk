@@ -435,10 +435,13 @@ classSourceFile(Self) ->
     ModuleName = beamtalk_object_class:module_name(ClassPid),
     source_file_from_module(ModuleName).
 
-%% @private Read beamtalk_source attribute from a module's module_info(attributes).
+%% @private Read beamtalk_source attribute from a module's attributes.
+%% Uses erlang:get_module_info/2 BIF instead of Mod:module_info/1 because
+%% Beamtalk modules compiled from Core Erlang via compile:forms(_, [from_core])
+%% do not export module_info/0,1. The BIF works regardless of exports.
 -spec source_file_from_module(atom()) -> binary() | 'nil'.
 source_file_from_module(ModuleName) ->
-    try ModuleName:module_info(attributes) of
+    try erlang:get_module_info(ModuleName, attributes) of
         Attrs ->
             case lists:keyfind(beamtalk_source, 1, Attrs) of
                 {beamtalk_source, [Path]} when is_binary(Path) -> Path;
@@ -446,7 +449,7 @@ source_file_from_module(ModuleName) ->
                 _ -> nil
             end
     catch
-        error:undef -> nil
+        error:badarg -> nil
     end.
 
 %% @doc Recompile from sourceFile and hot-swap the BEAM module.

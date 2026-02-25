@@ -5,16 +5,31 @@
 %%%
 %%% **DDD Context:** Workspace
 %%%
-%%% This gen_server implements the WorkspaceInterface primitive methods.
-%%% Higher-level methods (actorsOf:, testClasses, globals, test, test:)
-%%% are implemented as Beamtalk facades in stdlib/src/WorkspaceInterface.bt.
+%%% This gen_server implements all WorkspaceInterface methods as Erlang
+%%% primitives. The Beamtalk source in stdlib/src/WorkspaceInterface.bt
+%%% defines the class interface and documentation; this module provides
+%%% the runtime implementation.
 %%%
-%%% ## Primitives (handled by this gen_server)
+%%% ## Why Erlang primitives (not compiled Beamtalk dispatch)?
+%%%
+%%% The compiled bt@stdlib@workspace_interface:dispatch/4 internally calls
+%%% beamtalk_actor:make_self(State) which uses self() — the calling process
+%%% pid. Methods like actorsOf: call `self actors` which sends a message
+%%% back to the gen_server. If dispatch/4 is called from the gen_server
+%%% directly, this deadlocks. If called from a spawned process, make_self
+%%% uses the wrong pid. Implementing methods in Erlang avoids both issues.
+%%%
+%%% ## Methods
 %%%
 %%% - `actors` - List all live actors as usable object references
 %%% - `actorAt:` - Look up a specific actor by pid string
 %%% - `classes` - List all loaded user classes (those with source files)
 %%% - `load:` - Compile and load a .bt file
+%%% - `actorsOf:` - Filter actors by class (walks inheritance)
+%%% - `globals` - Dictionary snapshot of project namespace
+%%% - `testClasses` - Filter classes by TestCase inheritance
+%%% - `test` - Run all test classes via TestRunner
+%%% - `test:` - Run a specific test class via TestRunner
 %%%
 %%% ## Example Usage
 %%%
@@ -27,7 +42,6 @@
 %%% ```
 
 -module(beamtalk_workspace_interface).
-%% Suppress dialyzer warnings about dynamically loaded compiled Beamtalk module
 
 -behaviour(gen_server).
 
@@ -78,6 +92,11 @@ has_method(actors) -> true;
 has_method('actorAt:') -> true;
 has_method(classes) -> true;
 has_method('load:') -> true;
+has_method('actorsOf:') -> true;
+has_method(globals) -> true;
+has_method(testClasses) -> true;
+has_method(test) -> true;
+has_method('test:') -> true;
 has_method(_) -> false.
 
 %% @doc Return class registration metadata for Workspace.
@@ -103,63 +122,39 @@ class_info() ->
     }.
 
 %%====================================================================
-%% dispatch/4 for beamtalk_dispatch to delegate to compiled Beamtalk methods
+%% dispatch/4 — called by beamtalk_dispatch when walking the hierarchy
 %%====================================================================
 
-%% @doc Dispatch compiled Beamtalk methods.
-%% Handles both primitive methods and Beamtalk-defined methods
-%% (by delegating to the compiled bt@stdlib@workspace_interface module).
+%% @doc Dispatch methods for WorkspaceInterface.
+%% All methods are implemented as Erlang primitives.
 -spec dispatch(atom(), list(), term(), map()) ->
     {reply, term(), map()} | {error, term(), map()}.
-
-%% Primitive methods: handle directly
-dispatch(actors, [], _Self, _State) ->
-    Result = handle_actors(),
-    {reply, Result, _State};
-dispatch('actorAt:', [PidStr], _Self, _State) ->
-    Result = handle_actor_at(PidStr),
-    {reply, Result, _State};
-dispatch(classes, [], _Self, _State) ->
-    Result = handle_classes(),
-    {reply, Result, _State};
-dispatch('load:', [Path], _Self, _State) ->
-    Result = handle_load(Path),
-    {reply, Result, _State};
-%% Beamtalk-defined methods: delegate to compiled module
-dispatch(Selector, Args, Self, State) ->
-    CompiledModule = 'bt@stdlib@workspace_interface',
-    try apply(CompiledModule, dispatch, [Selector, Args, Self, State]) of
-        {reply, Result, NewState} ->
-            {reply, Result, NewState};
-        {error, Error, NewState} ->
-            {error, Error, NewState};
-        _Other ->
-            %% Unexpected return from delegate — treat as does_not_understand
-            Err0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
-            Err1 = beamtalk_error:with_selector(Err0, Selector),
-            Err2 = beamtalk_error:with_hint(
-                Err1, <<"To list available selectors, use: Workspace methods">>
-            ),
-            {error, Err2, State}
-    catch
-        error:undef ->
-            %% Missing module or function — selector not implemented
-            Error0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
-            Error1 = beamtalk_error:with_selector(Error0, Selector),
-            Error2 = beamtalk_error:with_hint(
-                Error1, <<"To list available selectors, use: Workspace methods">>
-            ),
-            {error, Error2, State};
-        throw:#beamtalk_error{} = Err ->
-            %% Beamtalk method threw a structured error — propagate it
-            {error, Err, State};
-        Class:Reason ->
-            %% Unexpected runtime error — preserve actual error info
-            Err0 = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
-            Err1 = beamtalk_error:with_selector(Err0, Selector),
-            Err2 = beamtalk_error:with_details(Err1, #{class => Class, reason => Reason}),
-            {error, Err2, State}
-    end.
+dispatch(actors, [], _Self, State) ->
+    {reply, handle_actors(), State};
+dispatch('actorAt:', [PidStr], _Self, State) ->
+    {reply, handle_actor_at(PidStr), State};
+dispatch(classes, [], _Self, State) ->
+    {reply, handle_classes(), State};
+dispatch('load:', [Path], _Self, State) ->
+    {reply, handle_load(Path), State};
+dispatch('actorsOf:', [AClass], _Self, State) ->
+    {reply, handle_actors_of(AClass), State};
+dispatch(globals, [], Self, State) ->
+    GenServerPid = erlang:element(4, Self),
+    {reply, handle_globals(GenServerPid), State};
+dispatch(testClasses, [], _Self, State) ->
+    {reply, handle_test_classes(), State};
+dispatch(test, [], _Self, State) ->
+    {reply, handle_test(), State};
+dispatch('test:', [TestClass], _Self, State) ->
+    {reply, handle_test_class(TestClass), State};
+dispatch(Selector, _Args, _Self, State) ->
+    Err0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
+    Err1 = beamtalk_error:with_selector(Err0, Selector),
+    Err2 = beamtalk_error:with_hint(
+        Err1, <<"To list available selectors, use: Workspace methods">>
+    ),
+    {error, Err2, State}.
 
 %%====================================================================
 %% gen_server callbacks
@@ -168,8 +163,6 @@ dispatch(Selector, Args, Self, State) ->
 %% @doc Initialize the Workspace interface state.
 -spec init([boolean()]) -> {ok, #workspace_interface_state{}}.
 init([true]) ->
-    %% Named instances self-register class since we're in beamtalk_workspace app
-    %% (beamtalk_stdlib in beamtalk_runtime can't reference us)
     register_class(),
     {ok, #workspace_interface_state{}};
 init([false]) ->
@@ -177,50 +170,139 @@ init([false]) ->
 
 %% @doc Handle synchronous method calls.
 -spec handle_call(term(), {pid(), term()}, #workspace_interface_state{}) ->
-    {reply, term(), #workspace_interface_state{}}.
-
+    {reply, term(), #workspace_interface_state{}}
+    | {noreply, #workspace_interface_state{}}.
 handle_call({actors, []}, _From, State) ->
-    Result = handle_actors(),
-    {reply, Result, State};
+    {reply, handle_actors(), State};
 handle_call({'actorAt:', [PidStr]}, _From, State) ->
-    Result = handle_actor_at(PidStr),
-    {reply, Result, State};
+    {reply, handle_actor_at(PidStr), State};
 handle_call({classes, []}, _From, State) ->
-    Result = handle_classes(),
-    {reply, Result, State};
+    {reply, handle_classes(), State};
+handle_call({'actorsOf:', [AClass]}, _From, State) ->
+    {reply, handle_actors_of(AClass), State};
+handle_call({testClasses, []}, _From, State) ->
+    {reply, handle_test_classes(), State};
+handle_call({globals, []}, From, State) ->
+    %% globals may call handle_actors which is fast, but spawn to avoid
+    %% any risk of deadlock from singleton resolution
+    GenServerPid = self(),
+    spawn(fun() ->
+        try handle_globals(GenServerPid) of
+            Result -> gen_server:reply(From, Result)
+        catch
+            Class:Reason:Stack ->
+                ?LOG_ERROR("globals handler crashed", #{
+                    class => Class, reason => Reason, stacktrace => Stack
+                }),
+                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+                gen_server:reply(
+                    From, {error, beamtalk_error:with_message(Err, <<"Internal error in globals">>)}
+                )
+        end
+    end),
+    {noreply, State};
 handle_call({'load:', [Path]}, _From, State) ->
-    Result = handle_load(Path),
-    {reply, Result, State};
-handle_call({UnknownSelector, _Args}, _From, State) ->
-    Error0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
-    Error1 = beamtalk_error:with_selector(Error0, UnknownSelector),
-    Error2 = beamtalk_error:with_hint(
-        Error1, <<"To list available selectors, use: Workspace methods">>
-    ),
-    {reply, {error, Error2}, State};
+    {reply, handle_load(Path), State};
+handle_call({test, []}, From, State) ->
+    %% test may take a long time — spawn to avoid blocking
+    spawn(fun() ->
+        try handle_test() of
+            Result -> gen_server:reply(From, Result)
+        catch
+            Class:Reason:Stack ->
+                ?LOG_ERROR("test handler crashed", #{
+                    class => Class, reason => Reason, stacktrace => Stack
+                }),
+                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+                gen_server:reply(
+                    From, {error, beamtalk_error:with_message(Err, <<"Internal error in test">>)}
+                )
+        end
+    end),
+    {noreply, State};
+handle_call({'test:', [TestClass]}, From, State) ->
+    spawn(fun() ->
+        try handle_test_class(TestClass) of
+            Result -> gen_server:reply(From, Result)
+        catch
+            Class:Reason:Stack ->
+                ?LOG_ERROR("test: handler crashed", #{
+                    class => Class, reason => Reason, stacktrace => Stack
+                }),
+                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+                gen_server:reply(
+                    From, {error, beamtalk_error:with_message(Err, <<"Internal error in test:">>)}
+                )
+        end
+    end),
+    {noreply, State};
+handle_call({Selector, Args}, From, State) when is_atom(Selector) ->
+    %% Unknown selector — try hierarchy walk for inherited methods
+    %% (e.g. class, respondsTo:, methods from Object/Actor)
+    GenServerPid = self(),
+    spawn(fun() ->
+        Self = {beamtalk_object, 'WorkspaceInterface', ?MODULE, GenServerPid},
+        try beamtalk_dispatch:lookup(Selector, Args, Self, #{}, 'WorkspaceInterface') of
+            {reply, Value, _NewState} ->
+                gen_server:reply(From, Value);
+            {error, Error} ->
+                gen_server:reply(From, {error, Error})
+        catch
+            Class:Reason:Stack ->
+                ?LOG_ERROR("dispatch handler crashed", #{
+                    selector => Selector, class => Class, reason => Reason, stacktrace => Stack
+                }),
+                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+                gen_server:reply(
+                    From,
+                    {error,
+                        beamtalk_error:with_selector(
+                            beamtalk_error:with_message(Err, <<"Internal error">>), Selector
+                        )}
+                )
+        end
+    end),
+    {noreply, State};
 handle_call(Request, _From, State) ->
     Error0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
     Error1 = beamtalk_error:with_hint(Error0, <<"Expected {Selector, Args} format">>),
     Error2 = beamtalk_error:with_details(Error1, #{request => Request}),
     {reply, {error, Error2}, State}.
 
-%% @doc Handle asynchronous messages.
-%% Workspace binding dispatch uses beamtalk_actor:async_send/4 which
-%% sends {Selector, Args, FuturePid} as a cast.
+%% @doc Handle asynchronous messages (future-based dispatch).
 -spec handle_cast(term(), #workspace_interface_state{}) ->
     {noreply, #workspace_interface_state{}}.
-
 handle_cast({actors, [], FuturePid}, State) when is_pid(FuturePid) ->
-    Result = handle_actors(),
-    beamtalk_future:resolve(FuturePid, Result),
+    beamtalk_future:resolve(FuturePid, handle_actors()),
     {noreply, State};
 handle_cast({'actorAt:', [PidStr], FuturePid}, State) when is_pid(FuturePid) ->
-    Result = handle_actor_at(PidStr),
-    beamtalk_future:resolve(FuturePid, Result),
+    beamtalk_future:resolve(FuturePid, handle_actor_at(PidStr)),
     {noreply, State};
 handle_cast({classes, [], FuturePid}, State) when is_pid(FuturePid) ->
-    Result = handle_classes(),
-    beamtalk_future:resolve(FuturePid, Result),
+    beamtalk_future:resolve(FuturePid, handle_classes()),
+    {noreply, State};
+handle_cast({'actorsOf:', [AClass], FuturePid}, State) when is_pid(FuturePid) ->
+    beamtalk_future:resolve(FuturePid, handle_actors_of(AClass)),
+    {noreply, State};
+handle_cast({testClasses, [], FuturePid}, State) when is_pid(FuturePid) ->
+    beamtalk_future:resolve(FuturePid, handle_test_classes()),
+    {noreply, State};
+handle_cast({globals, [], FuturePid}, State) when is_pid(FuturePid) ->
+    GenServerPid = self(),
+    spawn(fun() ->
+        try handle_globals(GenServerPid) of
+            Result -> beamtalk_future:resolve(FuturePid, Result)
+        catch
+            Class:Reason:Stack ->
+                ?LOG_ERROR("globals handler crashed", #{
+                    class => Class, reason => Reason, stacktrace => Stack
+                }),
+                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+                beamtalk_future:reject(
+                    FuturePid, beamtalk_error:with_message(Err, <<"Internal error in globals">>)
+                )
+        end
+    end),
     {noreply, State};
 handle_cast({'load:', [Path], FuturePid}, State) when is_pid(FuturePid) ->
     case handle_load(Path) of
@@ -230,16 +312,64 @@ handle_cast({'load:', [Path], FuturePid}, State) when is_pid(FuturePid) ->
             beamtalk_future:resolve(FuturePid, Result)
     end,
     {noreply, State};
+handle_cast({test, [], FuturePid}, State) when is_pid(FuturePid) ->
+    spawn(fun() ->
+        try handle_test() of
+            Result -> beamtalk_future:resolve(FuturePid, Result)
+        catch
+            Class:Reason:Stack ->
+                ?LOG_ERROR("test handler crashed", #{
+                    class => Class, reason => Reason, stacktrace => Stack
+                }),
+                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+                beamtalk_future:reject(
+                    FuturePid, beamtalk_error:with_message(Err, <<"Internal error in test">>)
+                )
+        end
+    end),
+    {noreply, State};
+handle_cast({'test:', [TestClass], FuturePid}, State) when is_pid(FuturePid) ->
+    spawn(fun() ->
+        try handle_test_class(TestClass) of
+            Result -> beamtalk_future:resolve(FuturePid, Result)
+        catch
+            Class:Reason:Stack ->
+                ?LOG_ERROR("test: handler crashed", #{
+                    class => Class, reason => Reason, stacktrace => Stack
+                }),
+                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+                beamtalk_future:reject(
+                    FuturePid, beamtalk_error:with_message(Err, <<"Internal error in test:">>)
+                )
+        end
+    end),
+    {noreply, State};
 handle_cast({Selector, Args, FuturePid}, State) when
     is_pid(FuturePid), is_atom(Selector)
 ->
-    Self = {beamtalk_object, 'WorkspaceInterface', ?MODULE, self()},
-    case dispatch(Selector, Args, Self, #{}) of
-        {reply, Result, _} ->
-            beamtalk_future:resolve(FuturePid, Result);
-        {error, Error, _} ->
-            beamtalk_future:reject(FuturePid, Error)
-    end,
+    %% Unknown selector — try hierarchy walk (Object/Actor methods)
+    GenServerPid = self(),
+    spawn(fun() ->
+        Self = {beamtalk_object, 'WorkspaceInterface', ?MODULE, GenServerPid},
+        try beamtalk_dispatch:lookup(Selector, Args, Self, #{}, 'WorkspaceInterface') of
+            {reply, Value, _NewState} ->
+                beamtalk_future:resolve(FuturePid, Value);
+            {error, Error} ->
+                beamtalk_future:reject(FuturePid, Error)
+        catch
+            Class:Reason:Stack ->
+                ?LOG_ERROR("dispatch handler crashed", #{
+                    selector => Selector, class => Class, reason => Reason, stacktrace => Stack
+                }),
+                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+                beamtalk_future:reject(
+                    FuturePid,
+                    beamtalk_error:with_selector(
+                        beamtalk_error:with_message(Err, <<"Internal error">>), Selector
+                    )
+                )
+        end
+    end),
     {noreply, State};
 handle_cast(Msg, State) ->
     ?LOG_WARNING("WorkspaceInterface received unexpected cast", #{message => Msg}),
@@ -279,7 +409,6 @@ handle_actors() ->
     end.
 
 %% @doc Look up a specific actor by pid string.
-%% Returns beamtalk_object or nil if not found.
 -spec handle_actor_at(binary() | list()) -> tuple() | 'nil'.
 handle_actor_at(PidStr) when is_binary(PidStr) ->
     handle_actor_at(binary_to_list(PidStr));
@@ -305,6 +434,22 @@ handle_actor_at(PidStr) when is_list(PidStr) ->
     end;
 handle_actor_at(_) ->
     nil.
+
+%% @doc Filter actors by class, walking inheritance.
+%% Equivalent to: self actors select: [:a | a class includesBehaviour: aClass]
+-spec handle_actors_of(term()) -> [tuple()].
+handle_actors_of(AClass) ->
+    AClassName = class_name_from_arg(AClass),
+    Actors = handle_actors(),
+    lists:filter(
+        fun
+            ({beamtalk_object, ActorClass, _Mod, _Pid}) ->
+                beamtalk_class_registry:inherits_from(ActorClass, AClassName);
+            (_) ->
+                false
+        end,
+        Actors
+    ).
 
 %% @doc Return all loaded user classes (those with a source file recorded).
 %% Excludes stdlib and ClassBuilder-created classes (they have no source file).
@@ -336,8 +481,57 @@ handle_classes() ->
             []
     end.
 
+%% @doc Return classes that are TestCase subclasses.
+%% Equivalent to: self classes select: [:c | c inheritsFrom: TestCase]
+-spec handle_test_classes() -> [tuple()].
+handle_test_classes() ->
+    Classes = handle_classes(),
+    lists:filter(
+        fun
+            ({beamtalk_object, ClassTag, _Mod, _Pid}) ->
+                ClassName = base_class_name(ClassTag),
+                beamtalk_class_registry:inherits_from(ClassName, 'TestCase');
+            (_) ->
+                false
+        end,
+        Classes
+    ).
+
+%% @doc Return an immutable Dictionary snapshot of the project namespace.
+%% Includes workspace singletons (Transcript, Beamtalk, Workspace) and
+%% all user-loaded classes (those with a recorded source file).
+-spec handle_globals(pid()) -> map().
+handle_globals(GenServerPid) ->
+    WorkspaceSelf =
+        {beamtalk_object, 'WorkspaceInterface', ?MODULE, GenServerPid},
+    %% Start with workspace singletons
+    Base0 = #{},
+    Base1 =
+        case resolve_singleton('TranscriptStream') of
+            nil -> Base0;
+            TranscriptObj -> maps:put('Transcript', TranscriptObj, Base0)
+        end,
+    Base2 =
+        case resolve_singleton('BeamtalkInterface') of
+            nil -> Base1;
+            BeamtalkObj -> maps:put('Beamtalk', BeamtalkObj, Base1)
+        end,
+    Base3 = maps:put('Workspace', WorkspaceSelf, Base2),
+    %% Add all user classes
+    Classes = handle_classes(),
+    lists:foldl(
+        fun
+            ({beamtalk_object, ClassTag, _Mod, _Pid} = ClassObj, Acc) ->
+                ClassName = base_class_name(ClassTag),
+                maps:put(ClassName, ClassObj, Acc);
+            (_, Acc) ->
+                Acc
+        end,
+        Base3,
+        Classes
+    ).
+
 %% @doc Load a .bt file, compiling and registering the class.
-%% Path must be a binary or list string. Non-string arguments return a typed error.
 -spec handle_load(term()) -> nil | {error, #beamtalk_error{}}.
 handle_load(Path) when is_binary(Path) ->
     handle_load(binary_to_list(Path));
@@ -373,11 +567,45 @@ handle_load(Other) ->
     ),
     {error, Err2}.
 
-%% @doc Read beamtalk_source attribute from a module's module_info(attributes).
+%% @doc Run all test classes via TestRunner.
+-spec handle_test() -> term().
+handle_test() ->
+    case beamtalk_class_registry:whereis_class('TestRunner') of
+        undefined ->
+            {error,
+                beamtalk_error:with_message(
+                    beamtalk_error:new(class_not_found, 'WorkspaceInterface'),
+                    <<"TestRunner class not found">>
+                )};
+        ClassPid ->
+            beamtalk_class_dispatch:class_send(ClassPid, runAll, [])
+    end.
+
+%% @doc Run a specific test class via TestRunner.
+-spec handle_test_class(term()) -> term().
+handle_test_class(TestClass) ->
+    case beamtalk_class_registry:whereis_class('TestRunner') of
+        undefined ->
+            {error,
+                beamtalk_error:with_message(
+                    beamtalk_error:new(class_not_found, 'WorkspaceInterface'),
+                    <<"TestRunner class not found">>
+                )};
+        ClassPid ->
+            beamtalk_class_dispatch:class_send(ClassPid, 'run:', [TestClass])
+    end.
+
+%%====================================================================
+%% Internal helpers
+%%====================================================================
+
+%% @doc Read beamtalk_source attribute from a module's attributes.
+%% Uses erlang:get_module_info/2 BIF instead of Mod:module_info/1 because
+%% Beamtalk modules compiled from Core Erlang do not export module_info.
 %% Returns nil for stdlib/bootstrap/ClassBuilder-created classes.
 -spec source_file_from_module(atom()) -> binary() | 'nil'.
 source_file_from_module(ModuleName) ->
-    try ModuleName:module_info(attributes) of
+    try erlang:get_module_info(ModuleName, attributes) of
         Attrs ->
             case lists:keyfind(beamtalk_source, 1, Attrs) of
                 {beamtalk_source, [Path]} when is_binary(Path) -> Path;
@@ -385,7 +613,7 @@ source_file_from_module(ModuleName) ->
                 _ -> nil
             end
     catch
-        error:undef -> nil
+        error:badarg -> nil
     end.
 
 %% @doc Return a human-readable type name for an Erlang/Beamtalk value.
@@ -411,11 +639,40 @@ wrap_actor(#{pid := Pid, class := Class, module := Module}) ->
             false
     end.
 
+%% @doc Extract the base class name from a class argument.
+-spec class_name_from_arg(term()) -> atom().
+class_name_from_arg({beamtalk_object, ClassTag, _Mod, _Pid}) ->
+    base_class_name(ClassTag);
+class_name_from_arg(ClassName) when is_atom(ClassName) ->
+    ClassName;
+class_name_from_arg(_) ->
+    undefined.
+
+%% @doc Extract the base class name from a class tag (e.g. 'Counter class' -> 'Counter').
+-spec base_class_name(atom()) -> atom().
+base_class_name(Tag) ->
+    Bin = beamtalk_class_registry:class_display_name(Tag),
+    try
+        binary_to_existing_atom(Bin, utf8)
+    catch
+        error:badarg -> Tag
+    end.
+
+%% @doc Resolve a singleton class instance (e.g. TranscriptStream current).
+-spec resolve_singleton(atom()) -> tuple() | 'nil'.
+resolve_singleton(ClassName) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined ->
+            nil;
+        ClassPid ->
+            try
+                beamtalk_class_dispatch:class_send(ClassPid, current, [])
+            catch
+                _:_ -> nil
+            end
+    end.
+
 %% @doc Register the WorkspaceInterface class with the class registry.
-%% Uses start_link which creates a link to the class process.
-%% Wrapped in try/catch to handle startup failures gracefully.
-%% Note: post-start crashes of the linked class process will propagate,
-%% but this matches how all other classes are registered (beamtalk_stdlib pattern).
 -spec register_class() -> ok.
 register_class() ->
     try
