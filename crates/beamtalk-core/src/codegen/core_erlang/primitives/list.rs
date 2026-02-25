@@ -244,6 +244,15 @@ fn generate_list_misc_bif(selector: &str, params: &[String]) -> Option<Document<
         )),
         "stream" => Some(Document::Str("call 'beamtalk_stream':'on'(Self)")),
         "atRandom" => Some(Document::Str("call 'beamtalk_random':'atRandom'(Self)")),
+        "join" => Some(Document::Str("call 'erlang':'iolist_to_binary'(Self)")),
+        "join:" => {
+            let p0 = params.first().map_or("_Sep", String::as_str);
+            Some(docvec![
+                "call 'erlang':'iolist_to_binary'(call 'lists':'join'(",
+                p0.to_string(),
+                ", Self))"
+            ])
+        }
         // Class-side factory: List class withAll: list is identity (list is already a List)
         "withAll:" => {
             let p0 = params.first().map_or("_List", String::as_str);
