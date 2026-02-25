@@ -38,6 +38,8 @@
 %%% | classSetDoc/2               | Set class doc string (ADR 0033)                           |
 %%% | classSetMethodDoc/3         | Set method doc string for a selector (ADR 0033)           |
 %%% | classRemoveFromSystem/1     | Remove class and cleanup runtime state                    |
+%%% | classSourceFile/1           | Source file path from beamtalk_source module attr (BT-845)|
+%%% | classReload/1               | Recompile from sourceFile + hot-swap (BT-845)             |
 
 -module(beamtalk_behaviour_intrinsics).
 
@@ -73,7 +75,10 @@
     classSetDoc/2,
     classSetMethodDoc/3,
     %% BT-785: Class removal
-    classRemoveFromSystem/1
+    classRemoveFromSystem/1,
+    %% BT-845: ADR 0040 Phase 2 — class-based reload
+    classSourceFile/1,
+    classReload/1
 ]).
 
 %%% ============================================================================
@@ -416,6 +421,75 @@ classRemoveFromSystem(Self) ->
                         iolist_to_binary([<<"Remove subclasses first: ">>, NamesStr])
                     ),
                     beamtalk_error:raise(Error2)
+            end
+    end.
+
+%% @doc Return the source file path for this class, or nil if not set.
+%%
+%% BT-845/BT-860: Reads `beamtalk_source` module attribute embedded at compile time.
+%% This is the definitive source-of-truth (survives workspace restarts).
+%% Returns nil for stdlib/bootstrap/ClassBuilder-created classes.
+-spec classSourceFile(#beamtalk_object{}) -> binary() | 'nil'.
+classSourceFile(Self) ->
+    ClassPid = erlang:element(4, Self),
+    ModuleName = beamtalk_object_class:module_name(ClassPid),
+    source_file_from_module(ModuleName).
+
+%% @private Read beamtalk_source attribute from a module's module_info(attributes).
+-spec source_file_from_module(atom()) -> binary() | 'nil'.
+source_file_from_module(ModuleName) ->
+    try erlang:get_module_info(ModuleName, attributes) of
+        Attrs ->
+            case lists:keyfind(beamtalk_source, 1, Attrs) of
+                {beamtalk_source, [Path]} when is_binary(Path) -> Path;
+                {beamtalk_source, [Path]} when is_list(Path) -> list_to_binary(Path);
+                _ -> nil
+            end
+    catch
+        error:undef -> nil
+    end.
+
+%% @doc Recompile from sourceFile and hot-swap the BEAM module.
+%%
+%% BT-845: ADR 0040 Phase 2.
+%% Raises an error if sourceFile is nil (stdlib / dynamic class).
+%% Delegates compilation to beamtalk_repl_eval:reload_class_file/1 via
+%% erlang:apply/3 to avoid a compile-time dep from beamtalk_runtime to
+%% beamtalk_workspace (follows the beamtalk_actor_registry registered-name pattern).
+-spec classReload(#beamtalk_object{}) -> #beamtalk_object{}.
+classReload(Self) ->
+    ClassPid = erlang:element(4, Self),
+    ClassName = gen_server:call(ClassPid, class_name),
+    ModuleName = beamtalk_object_class:module_name(ClassPid),
+    SourceFile = source_file_from_module(ModuleName),
+    case SourceFile of
+        nil ->
+            Error0 = beamtalk_error:new(no_source_file, ClassName),
+            Msg = iolist_to_binary([
+                atom_to_binary(ClassName, utf8),
+                <<" has no source file — stdlib classes cannot be reloaded">>
+            ]),
+            beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg));
+        SourcePath ->
+            SourcePathStr = binary_to_list(SourcePath),
+            try erlang:apply(beamtalk_repl_eval, reload_class_file, [SourcePathStr]) of
+                ok ->
+                    Self;
+                {error, Reason} ->
+                    Error0 = beamtalk_error:new(reload_failed, ClassName),
+                    Msg = iolist_to_binary(
+                        io_lib:format("Reload failed: ~p", [Reason])
+                    ),
+                    beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg))
+            catch
+                error:undef ->
+                    Error0 = beamtalk_error:new(runtime_error, ClassName),
+                    beamtalk_error:raise(
+                        beamtalk_error:with_message(
+                            Error0,
+                            <<"Workspace not available — reload requires a running workspace">>
+                        )
+                    )
             end
     end.
 

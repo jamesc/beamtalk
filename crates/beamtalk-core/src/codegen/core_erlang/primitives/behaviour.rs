@@ -86,6 +86,13 @@ pub fn generate_behaviour_bif(selector: &str, params: &[String]) -> Option<Docum
         "classRemoveFromSystem" => Some(docvec![
             "call 'beamtalk_behaviour_intrinsics':'classRemoveFromSystem'(Self)"
         ]),
+        // BT-845 / ADR 0040 Phase 2: source file and reload
+        "classSourceFile" => Some(docvec![
+            "call 'beamtalk_behaviour_intrinsics':'classSourceFile'(Self)"
+        ]),
+        "classReload" => Some(docvec![
+            "call 'beamtalk_behaviour_intrinsics':'classReload'(Self)"
+        ]),
         // ADR 0033: Runtime-embedded documentation
         "classDoc" => Some(docvec![
             "call 'beamtalk_behaviour_intrinsics':'classDoc'(Self)"
@@ -256,6 +263,24 @@ mod tests {
         assert_eq!(
             result,
             Some("call 'beamtalk_behaviour_intrinsics':'classRemoveFromSystem'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_class_source_file() {
+        let result = doc_to_string(generate_behaviour_bif("classSourceFile", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_behaviour_intrinsics':'classSourceFile'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_class_reload() {
+        let result = doc_to_string(generate_behaviour_bif("classReload", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_behaviour_intrinsics':'classReload'(Self)".to_string())
         );
     }
 

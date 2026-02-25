@@ -169,16 +169,23 @@ do_compile(Port, Source, Options) ->
     WorkspaceMode = maps:get(workspace_mode, Options, true),
     %% BT-775: Optional module_name override for package-qualified naming
     ModuleName = maps:get(module_name, Options, undefined),
+    %% BT-845/BT-860: Optional source file path for beamtalk_source attribute
+    SourcePath = maps:get(source_path, Options, undefined),
     Request0 = #{
         command => compile,
         source => Source,
         stdlib_mode => StdlibMode,
         workspace_mode => WorkspaceMode
     },
-    Request =
+    Request1 =
         case ModuleName of
             undefined -> Request0;
             _ -> Request0#{module_name => ModuleName}
+        end,
+    Request =
+        case SourcePath of
+            undefined -> Request1;
+            _ -> Request1#{source_path => SourcePath}
         end,
     RequestBin = term_to_binary(Request),
     try port_command(Port, RequestBin) of

@@ -1005,9 +1005,10 @@ impl ReplClient {
         if full_path.is_dir() {
             self.load_directory_and_report(&full_path, path, "Loaded")
         } else {
-            let full_path_str = full_path.to_string_lossy().to_string();
-            let classes = self.load_file(&full_path_str)?;
-            self.last_loaded_path = Some(LastLoadedPath::File(full_path_str));
+            // BT-845: Store the original relative path for :reload consistency.
+            // Using full_path for reload would break if the CWD changes.
+            let classes = self.load_file(path)?;
+            self.last_loaded_path = Some(LastLoadedPath::File(path.to_string()));
             if classes.is_empty() {
                 Ok("Loaded".to_string())
             } else {

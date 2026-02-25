@@ -1,0 +1,68 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Behaviour >> sourceFile and Behaviour >> reload (BT-845, ADR 0040 Phase 2).
+//
+// Tests:
+// 1. Stdlib class sourceFile returns nil
+// 2. After :load, sourceFile returns the loaded file path
+// 3. reload recompiles and hot-swaps the BEAM module; actor picks up new code
+// 4. reload on a stdlib class raises an error
+
+// ===========================================================================
+// STDLIB CLASS sourceFile RETURNS NIL
+// ===========================================================================
+
+Integer sourceFile
+// => nil
+
+String sourceFile
+// => nil
+
+// ===========================================================================
+// LOAD A FILE AND CHECK sourceFile
+// ===========================================================================
+
+:load tests/e2e/fixtures/reload_counter.bt
+// => Loaded: ReloadCounter
+
+// After loading, sourceFile returns the path
+ReloadCounter sourceFile
+// => tests/e2e/fixtures/reload_counter.bt
+
+// ===========================================================================
+// RELOAD THE CLASS (recompiles from sourceFile — idempotent)
+// ===========================================================================
+
+rc := ReloadCounter spawn
+// => #Actor<ReloadCounter,_>
+
+rc increment
+// => 1
+
+rc increment
+// => 2
+
+rc getValue
+// => 2
+
+// Reload: recompiles from the same file, hot-swaps module
+ReloadCounter reload
+// => ReloadCounter
+
+// Actor still works after reload
+rc getValue
+// => 2
+
+rc increment
+// => 3
+
+rc getValue
+// => 3
+
+// ===========================================================================
+// RELOAD A STDLIB CLASS RAISES AN ERROR
+// ===========================================================================
+
+Integer reload
+// => ERROR: Integer has no source file

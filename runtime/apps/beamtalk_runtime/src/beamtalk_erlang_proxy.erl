@@ -36,7 +36,7 @@
 
 -module(beamtalk_erlang_proxy).
 
--export([dispatch/3, new/1]).
+-export([dispatch/3, has_method/1, new/1]).
 
 -include("beamtalk.hrl").
 
@@ -129,6 +129,13 @@ dispatch(Selector, Args, Self) ->
                     beamtalk_error:raise(Error3)
             end
     end.
+
+%% @doc Check if an ErlangModule responds to the given selector.
+%%
+%% Always returns true — any selector may map to an Erlang function call.
+%% Actual validation (arity, existence) happens at dispatch time.
+-spec has_method(atom()) -> boolean().
+has_method(_Selector) -> true.
 
 %%% ============================================================================
 %%% Internal helpers

@@ -197,46 +197,16 @@ send(X, Selector, Args) ->
     %% All other primitives: route through module_for_value/1
     dispatch_via_module(X, Selector, Args).
 
-%% @private Tagged map dispatch — handles special-cased tagged maps, then falls
-%% back to module_for_value/1 for types with compiled stdlib modules.
+%% @private Tagged map dispatch — routes through module_for_value/1 for all
+%% tagged-map types, falling back to send_tagged_map_fallback/4 if unregistered.
 -spec send_map(map(), atom(), list()) -> term().
 send_map(X, Selector, Args) ->
-    Class = beamtalk_tagged_map:class_of(X),
-    case Class of
-        'FileHandle' ->
-            send_file_handle(X, Selector, Args);
-        'StackFrame' ->
-            beamtalk_stack_frame:dispatch(Selector, Args, X);
-        'ErlangModule' ->
-            beamtalk_erlang_proxy:dispatch(Selector, Args, X);
-        'Erlang' ->
-            erlang_class_dispatch(X, Selector, Args);
-        _ ->
-            case module_for_value(X) of
-                undefined ->
-                    send_tagged_map_fallback(X, Class, Selector, Args);
-                Mod ->
-                    Mod:dispatch(Selector, Args, X)
-            end
-    end.
-
-%% @private FileHandle dispatch (BT-513).
--spec send_file_handle(map(), atom(), list()) -> term().
-send_file_handle(X, 'lines', _Args) ->
-    beamtalk_file:handle_lines(X);
-send_file_handle(X, Selector, Args) ->
-    case try_object_ops(Selector, Args, X) of
-        {ok, Result} ->
-            Result;
-        false ->
-            beamtalk_error:raise(
-                beamtalk_error:new(
-                    does_not_understand,
-                    'FileHandle',
-                    Selector,
-                    <<"FileHandle does not understand this message">>
-                )
-            )
+    case module_for_value(X) of
+        undefined ->
+            Class = beamtalk_tagged_map:class_of(X),
+            send_tagged_map_fallback(X, Class, Selector, Args);
+        Mod ->
+            Mod:dispatch(Selector, Args, X)
     end.
 
 %% @private Dispatch messages to a pid value.
@@ -324,30 +294,19 @@ responds_to(X, Selector) ->
     %% All other primitives: route through module_for_value/1
     responds_via_module(X, Selector).
 
-%% @private Tagged map responds_to — handles special-cased tagged maps.
+%% @private Tagged map responds_to — routes through module_for_value/1 for all
+%% tagged-map types, falling back to exception/value-type checks if unregistered.
 -spec responds_to_map(map(), atom()) -> boolean().
 responds_to_map(X, Selector) ->
-    Class = beamtalk_tagged_map:class_of(X),
-    case Class of
-        'StackFrame' ->
-            beamtalk_stack_frame:has_method(Selector);
-        'ErlangModule' ->
-            true;
-        'Erlang' ->
-            true;
-        'FileHandle' ->
-            beamtalk_file:handle_has_method(Selector) orelse
-                beamtalk_object_ops:has_method(Selector);
-        _ ->
-            case module_for_value(X) of
-                undefined ->
-                    case beamtalk_exception_handler:is_exception_class(Class) of
-                        true -> beamtalk_exception_handler:has_method(Selector);
-                        false -> value_type_responds_to(Class, Selector)
-                    end;
-                Mod ->
-                    Mod:has_method(Selector)
-            end
+    case module_for_value(X) of
+        undefined ->
+            Class = beamtalk_tagged_map:class_of(X),
+            case beamtalk_exception_handler:is_exception_class(Class) of
+                true -> beamtalk_exception_handler:has_method(Selector);
+                false -> value_type_responds_to(Class, Selector)
+            end;
+        Mod ->
+            Mod:has_method(Selector)
     end.
 
 %% @private Dispatch a value using its mapped stdlib module.
@@ -404,6 +363,10 @@ module_for_value(X) when is_map(X) ->
         'Regex' -> 'bt@stdlib@regex';
         'DateTime' -> 'bt@stdlib@date_time';
         'TestResult' -> 'bt@stdlib@test_result';
+        'StackFrame' -> beamtalk_stack_frame;
+        'ErlangModule' -> beamtalk_erlang_proxy;
+        'FileHandle' -> beamtalk_file_handle;
+        'Erlang' -> beamtalk_erlang_class;
         undefined -> 'bt@stdlib@dictionary';
         _ -> undefined
     end;
@@ -468,41 +431,6 @@ is_ivar_method('fieldAt:') ->
     {true, <<"Value types have no fields">>};
 is_ivar_method(_) ->
     false.
-
-%% @private Dispatch messages to the Erlang class-side proxy (BT-676).
--spec erlang_class_dispatch(map(), atom(), list()) -> term().
-erlang_class_dispatch(_Self, 'class', _Args) ->
-    'Erlang';
-erlang_class_dispatch(_Self, 'printString', _Args) ->
-    <<"Erlang">>;
-erlang_class_dispatch(Self, Selector, Args) ->
-    case try_object_ops(Selector, Args, Self) of
-        {ok, Result} ->
-            Result;
-        false ->
-            case lists:member($:, atom_to_list(Selector)) of
-                true ->
-                    beamtalk_error:raise(
-                        beamtalk_error:new(
-                            does_not_understand,
-                            'Erlang',
-                            Selector,
-                            <<"Use unary message for module name: Erlang moduleName">>
-                        )
-                    );
-                false when Args =/= [] ->
-                    beamtalk_error:raise(
-                        beamtalk_error:new(
-                            arity_mismatch,
-                            'Erlang',
-                            Selector,
-                            <<"Module lookup takes no arguments: Erlang moduleName">>
-                        )
-                    );
-                false ->
-                    beamtalk_erlang_proxy:new(Selector)
-            end
-    end.
 
 %% @private Check if a value type responds to a selector (BT-354).
 -spec value_type_responds_to(atom(), atom()) -> boolean().

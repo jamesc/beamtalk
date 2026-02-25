@@ -591,6 +591,9 @@ fn handle_compile(request: &Map) -> Term {
         },
     };
 
+    // BT-845/BT-860: Extract optional source file path to embed as beamtalk_source attribute.
+    let source_path = map_get(request, "source_path").and_then(term_to_string);
+
     // Generate Core Erlang
     let warning_msgs: Vec<String> = warnings.iter().map(|w| w.message.clone()).collect();
     match beamtalk_core::erlang::generate_module(
@@ -598,7 +601,8 @@ fn handle_compile(request: &Map) -> Term {
         beamtalk_core::erlang::CodegenOptions::new(&module_name)
             .with_workspace_mode(workspace_mode)
             .with_source(&source)
-            .with_class_module_index(class_module_index),
+            .with_class_module_index(class_module_index)
+            .with_source_path_opt(source_path.as_deref()),
     ) {
         Ok(code) => compile_ok_response(&code, &module_name, &classes, &warning_msgs),
         Err(e) => error_response(&[format!("Code generation failed: {e}")]),
