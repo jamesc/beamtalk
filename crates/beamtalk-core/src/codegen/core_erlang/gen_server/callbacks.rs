@@ -109,7 +109,11 @@ impl CoreErlangGenerator {
                         line(),
                         "%% Call parent init to get inherited state fields",
                         line(),
-                        format!("case call '{parent_module}':'init'(InitArgs) of"),
+                        docvec![
+                            "case call '",
+                            Document::String(parent_module.clone()),
+                            "':'init'(InitArgs) of"
+                        ],
                         nest(
                             INDENT,
                             docvec![
@@ -126,13 +130,23 @@ impl CoreErlangGenerator {
                                             INDENT,
                                             docvec![
                                                 line(),
-                                                format!("'$beamtalk_class' => '{class_name}',"),
+                                                docvec![
+                                                    "'$beamtalk_class' => '",
+                                                    Document::String(class_name.clone()),
+                                                    "',"
+                                                ],
                                                 line(),
-                                                format!("'__class_mod__' => '{module_name}',"),
+                                                docvec![
+                                                    "'__class_mod__' => '",
+                                                    Document::String(module_name.clone()),
+                                                    "',"
+                                                ],
                                                 line(),
-                                                format!(
-                                                    "'__methods__' => call '{module_name}':'method_table'()"
-                                                ),
+                                                docvec![
+                                                    "'__methods__' => call '",
+                                                    Document::String(module_name.clone()),
+                                                    "':'method_table'()"
+                                                ],
                                                 Document::Vec(own_state_fields),
                                             ]
                                         ),
@@ -184,11 +198,23 @@ impl CoreErlangGenerator {
                             INDENT,
                             docvec![
                                 line(),
-                                format!("'$beamtalk_class' => '{class_name}',"),
+                                docvec![
+                                    "'$beamtalk_class' => '",
+                                    Document::String(class_name.clone()),
+                                    "',"
+                                ],
                                 line(),
-                                format!("'__class_mod__' => '{module_name}',"),
+                                docvec![
+                                    "'__class_mod__' => '",
+                                    Document::String(module_name.clone()),
+                                    "',"
+                                ],
                                 line(),
-                                format!("'__methods__' => call '{module_name}':'method_table'()"),
+                                docvec![
+                                    "'__methods__' => call '",
+                                    Document::String(module_name.clone()),
+                                    "':'method_table'()"
+                                ],
                                 Document::Vec(initial_state_fields),
                             ]
                         ),
@@ -234,9 +260,11 @@ impl CoreErlangGenerator {
                                 docvec![
                                     line(),
                                     // Use safe_dispatch for error isolation per BT-29
-                                    format!(
-                                        "case call '{module_name}':'safe_dispatch'(Selector, Args, State) of"
-                                    ),
+                                    docvec![
+                                        "case call '",
+                                        Document::String(module_name.clone()),
+                                        "':'safe_dispatch'(Selector, Args, State) of"
+                                    ],
                                     nest(
                                         INDENT,
                                         docvec![
@@ -310,9 +338,11 @@ impl CoreErlangGenerator {
                                 docvec![
                                     line(),
                                     // Use safe_dispatch for error isolation per BT-29
-                                    format!(
-                                        "case call '{module_name}':'safe_dispatch'(Selector, Args, State) of"
-                                    ),
+                                    docvec![
+                                        "case call '",
+                                        Document::String(module_name.clone()),
+                                        "':'safe_dispatch'(Selector, Args, State) of"
+                                    ],
                                     nest(
                                         INDENT,
                                         docvec![
@@ -412,9 +442,11 @@ impl CoreErlangGenerator {
                     line(),
                     "let Self = call 'beamtalk_actor':'make_self'(State) in",
                     line(),
-                    format!(
-                        "case call '{module_name}':'dispatch'('terminate', [Reason], Self, State) of"
-                    ),
+                    docvec![
+                        "case call '",
+                        Document::String(module_name.clone()),
+                        "':'dispatch'('terminate', [Reason], Self, State) of"
+                    ],
                     nest(
                         INDENT,
                         docvec![

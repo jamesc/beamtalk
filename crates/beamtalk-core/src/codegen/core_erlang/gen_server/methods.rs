@@ -995,12 +995,15 @@ impl CoreErlangGenerator {
                 } else {
                     "'false'"
                 };
-                method_spec_docs.push(Document::String(format!(
-                    "'{}' => ~{{'arity' => {}, 'is_sealed' => {}}}~",
-                    method.selector.name(),
-                    method.selector.arity(),
-                    is_sealed
-                )));
+                method_spec_docs.push(docvec![
+                    "'",
+                    Document::String(method.selector.name().to_string()),
+                    "' => ~{'arity' => ",
+                    Document::String(method.selector.arity().to_string()),
+                    ", 'is_sealed' => ",
+                    Document::String(is_sealed.to_string()),
+                    "}~",
+                ]);
             }
             let method_specs_doc = Document::Vec(method_spec_docs);
 
@@ -1016,7 +1019,9 @@ impl CoreErlangGenerator {
                     Document::Str("'nil'")
                 };
                 field_spec_docs.push(docvec![
-                    Document::String(format!("'{}' => ", s.name.name)),
+                    "'",
+                    Document::String(s.name.name.to_string()),
+                    "' => ",
                     default_val,
                 ]);
             }
@@ -1030,7 +1035,8 @@ impl CoreErlangGenerator {
             if class.is_abstract {
                 modifiers.push("'abstract'");
             }
-            let modifiers_doc = Document::String(format!("[{}]", modifiers.join(", ")));
+            let modifiers_str = modifiers.join(", ");
+            let modifiers_doc = docvec!["[", Document::String(modifiers_str), "]"];
 
             // classMethods: class method specs (spawn/new + user-defined)
             let mut class_method_entries: Vec<Document<'static>> = Vec::new();
@@ -1081,10 +1087,12 @@ impl CoreErlangGenerator {
                 }
                 let source_str = self.extract_method_source(method);
                 let binary = Self::binary_string_literal(&source_str);
-                method_source_docs.push(Document::String(format!(
-                    "'{}' => {binary}",
-                    method.selector.name()
-                )));
+                method_source_docs.push(docvec![
+                    "'",
+                    Document::String(method.selector.name().to_string()),
+                    "' => ",
+                    Document::String(binary),
+                ]);
             }
             let method_source_doc = Document::Vec(method_source_docs);
 
@@ -1099,7 +1107,12 @@ impl CoreErlangGenerator {
                 } else {
                     Document::Str("'nil'")
                 };
-                class_var_parts.push(docvec![format!("'{}' => ", cv.name.name), val]);
+                class_var_parts.push(docvec![
+                    "'",
+                    Document::String(cv.name.name.to_string()),
+                    "' => ",
+                    val,
+                ]);
             }
             let class_vars_doc = Document::Vec(class_var_parts);
 
@@ -1118,10 +1131,12 @@ impl CoreErlangGenerator {
                         method_docs_parts.push(Document::Str(", "));
                     }
                     let binary = Self::binary_string_literal(doc);
-                    method_docs_parts.push(Document::String(format!(
-                        "'{}' => {binary}",
-                        method.selector.name()
-                    )));
+                    method_docs_parts.push(docvec![
+                        "'",
+                        Document::String(method.selector.name().to_string()),
+                        "' => ",
+                        Document::String(binary),
+                    ]);
                 }
             }
             let method_docs_doc = Document::Vec(method_docs_parts);
@@ -1136,9 +1151,17 @@ impl CoreErlangGenerator {
                     INDENT,
                     docvec![
                         line(),
-                        format!("'className' => '{}',", class.name.name),
+                        docvec![
+                            "'className' => '",
+                            Document::String(class.name.name.to_string()),
+                            "',"
+                        ],
                         line(),
-                        format!("'superclassRef' => '{}',", class.superclass_name()),
+                        docvec![
+                            "'superclassRef' => '",
+                            Document::String(class.superclass_name().to_string()),
+                            "',"
+                        ],
                         line(),
                         "'fieldSpecs' => ~{",
                         field_specs_doc,
@@ -1152,7 +1175,11 @@ impl CoreErlangGenerator {
                         modifiers_doc,
                         ",",
                         line(),
-                        format!("'moduleName' => '{}',", self.module_name),
+                        docvec![
+                            "'moduleName' => '",
+                            Document::String(self.module_name.clone()),
+                            "',"
+                        ],
                         line(),
                         class_methods_doc,
                         line(),

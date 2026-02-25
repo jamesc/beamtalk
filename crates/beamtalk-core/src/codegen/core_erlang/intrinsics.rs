@@ -122,9 +122,15 @@ fn validate_if_not_nil_block(expr: &Expression, selector: &str) -> Result<bool> 
 /// For 0-arg blocks: `apply BlockVar ()`, for 1-arg blocks: `apply BlockVar (RecvVar)`.
 fn not_nil_apply(block_var: &str, recv_var: &str, block_takes_arg: bool) -> Document<'static> {
     if block_takes_arg {
-        Document::String(format!("apply {block_var} ({recv_var})"))
+        docvec![
+            "apply ",
+            Document::String(block_var.to_string()),
+            " (",
+            Document::String(recv_var.to_string()),
+            ")"
+        ]
     } else {
-        Document::String(format!("apply {block_var} ()"))
+        docvec!["apply ", Document::String(block_var.to_string()), " ()"]
     }
 }
 
@@ -178,14 +184,17 @@ impl CoreErlangGenerator {
                     let recv_var = self.fresh_temp_var("ValRecv");
                     let recv_code = self.expression_doc(receiver)?;
                     docvec![
-                        format!("let {recv_var} = "),
+                        "let ",
+                        Document::String(recv_var.clone()),
+                        " = ",
                         recv_code,
-                        format!(
-                            " in case call 'erlang':'is_function'({recv_var}) of \
-                             'true' when 'true' -> apply {recv_var} () \
-                             'false' when 'true' -> \
-                             call 'beamtalk_primitive':'send'({recv_var}, 'value', []) end"
-                        ),
+                        " in case call 'erlang':'is_function'(",
+                        Document::String(recv_var.clone()),
+                        ") of 'true' when 'true' -> apply ",
+                        Document::String(recv_var.clone()),
+                        " () 'false' when 'true' -> call 'beamtalk_primitive':'send'(",
+                        Document::String(recv_var),
+                        ", 'value', []) end",
                     ]
                 };
                 Ok(Some(doc))
@@ -384,9 +393,13 @@ impl CoreErlangGenerator {
         let args_doc = Document::Vec(arg_parts);
 
         let doc = docvec![
-            format!("let {fun_var} = "),
+            "let ",
+            Document::String(fun_var.clone()),
+            " = ",
             recv_code,
-            format!(" in apply {fun_var} ("),
+            " in apply ",
+            Document::String(fun_var),
+            " (",
             args_doc,
             ")",
         ];
@@ -503,9 +516,13 @@ impl CoreErlangGenerator {
                     let recv_var = self.fresh_temp_var("Obj");
                     let recv_code = self.expression_doc(receiver)?;
                     let doc = docvec![
-                        format!("let {recv_var} = "),
+                        "let ",
+                        Document::String(recv_var.clone()),
+                        " = ",
                         recv_code,
-                        format!(" in call 'beamtalk_primitive':'class_of_object'({recv_var})"),
+                        " in call 'beamtalk_primitive':'class_of_object'(",
+                        Document::String(recv_var),
+                        ")",
                     ];
                     Ok(Some(doc))
                 }
@@ -525,15 +542,25 @@ impl CoreErlangGenerator {
                         let args_code = self.expression_doc(&arguments[1])?;
 
                         let doc = docvec![
-                            format!("let {receiver_var} = "),
+                            "let ",
+                            Document::String(receiver_var.clone()),
+                            " = ",
                             recv_code,
-                            format!(" in let {selector_var} = "),
+                            " in let ",
+                            Document::String(selector_var.clone()),
+                            " = ",
                             sel_code,
-                            format!(" in let {args_var} = "),
+                            " in let ",
+                            Document::String(args_var.clone()),
+                            " = ",
                             args_code,
-                            format!(
-                                " in call 'beamtalk_message_dispatch':'send'({receiver_var}, {selector_var}, {args_var})"
-                            ),
+                            " in call 'beamtalk_message_dispatch':'send'(",
+                            Document::String(receiver_var),
+                            ", ",
+                            Document::String(selector_var),
+                            ", ",
+                            Document::String(args_var),
+                            ")",
                         ];
                         Ok(Some(doc))
                     }
@@ -545,13 +572,19 @@ impl CoreErlangGenerator {
                         let sel_code = self.expression_doc(&arguments[0])?;
 
                         let doc = docvec![
-                            format!("let {receiver_var} = "),
+                            "let ",
+                            Document::String(receiver_var.clone()),
+                            " = ",
                             recv_code,
-                            format!(" in let {selector_var} = "),
+                            " in let ",
+                            Document::String(selector_var.clone()),
+                            " = ",
                             sel_code,
-                            format!(
-                                " in call 'beamtalk_message_dispatch':'send'({receiver_var}, {selector_var}, [])"
-                            ),
+                            " in call 'beamtalk_message_dispatch':'send'(",
+                            Document::String(receiver_var),
+                            ", ",
+                            Document::String(selector_var),
+                            ", [])",
                         ];
                         Ok(Some(doc))
                     }
@@ -621,11 +654,13 @@ impl CoreErlangGenerator {
                     let recv_var = self.fresh_temp_var("Obj");
                     let recv_code = self.expression_doc(receiver)?;
                     let doc = docvec![
-                        format!("let {recv_var} = "),
+                        "let ",
+                        Document::String(recv_var.clone()),
+                        " = ",
                         recv_code,
-                        format!(
-                            " in case {recv_var} of <'nil'> when 'true' -> 'true' <_> when 'true' -> 'false' end"
-                        ),
+                        " in case ",
+                        Document::String(recv_var),
+                        " of <'nil'> when 'true' -> 'true' <_> when 'true' -> 'false' end",
                     ];
                     Ok(Some(doc))
                 }
@@ -633,11 +668,13 @@ impl CoreErlangGenerator {
                     let recv_var = self.fresh_temp_var("Obj");
                     let recv_code = self.expression_doc(receiver)?;
                     let doc = docvec![
-                        format!("let {recv_var} = "),
+                        "let ",
+                        Document::String(recv_var.clone()),
+                        " = ",
                         recv_code,
-                        format!(
-                            " in case {recv_var} of <'nil'> when 'true' -> 'false' <_> when 'true' -> 'true' end"
-                        ),
+                        " in case ",
+                        Document::String(recv_var),
+                        " of <'nil'> when 'true' -> 'false' <_> when 'true' -> 'true' end",
                     ];
                     Ok(Some(doc))
                 }
@@ -653,13 +690,21 @@ impl CoreErlangGenerator {
                         let recv_code = self.expression_doc(receiver)?;
                         let block_code = self.expression_doc(&arguments[0])?;
                         let doc = docvec![
-                            format!("let {recv_var} = "),
+                            "let ",
+                            Document::String(recv_var.clone()),
+                            " = ",
                             recv_code,
-                            format!(" in let {block_var} = "),
+                            " in let ",
+                            Document::String(block_var.clone()),
+                            " = ",
                             block_code,
-                            format!(
-                                " in case {recv_var} of <'nil'> when 'true' -> apply {block_var} () <_> when 'true' -> {recv_var} end"
-                            ),
+                            " in case ",
+                            Document::String(recv_var.clone()),
+                            " of <'nil'> when 'true' -> apply ",
+                            Document::String(block_var),
+                            " () <_> when 'true' -> ",
+                            Document::String(recv_var),
+                            " end",
                         ];
                         Ok(Some(doc))
                     }
@@ -673,13 +718,17 @@ impl CoreErlangGenerator {
                         let block_code = self.expression_doc(&arguments[0])?;
                         let apply = not_nil_apply(&block_var, &recv_var, block_takes_arg);
                         let doc = docvec![
-                            format!("let {recv_var} = "),
+                            "let ",
+                            Document::String(recv_var.clone()),
+                            " = ",
                             recv_code,
-                            format!(" in let {block_var} = "),
+                            " in let ",
+                            Document::String(block_var),
+                            " = ",
                             block_code,
-                            format!(
-                                " in case {recv_var} of <'nil'> when 'true' -> 'nil' <_> when 'true' -> "
-                            ),
+                            " in case ",
+                            Document::String(recv_var),
+                            " of <'nil'> when 'true' -> 'nil' <_> when 'true' -> ",
                             apply,
                             " end",
                         ];
@@ -697,15 +746,23 @@ impl CoreErlangGenerator {
                         let not_nil_code = self.expression_doc(&arguments[1])?;
                         let apply = not_nil_apply(&not_nil_var, &recv_var, block_takes_arg);
                         let doc = docvec![
-                            format!("let {recv_var} = "),
+                            "let ",
+                            Document::String(recv_var.clone()),
+                            " = ",
                             recv_code,
-                            format!(" in let {nil_var} = "),
+                            " in let ",
+                            Document::String(nil_var.clone()),
+                            " = ",
                             nil_code,
-                            format!(" in let {not_nil_var} = "),
+                            " in let ",
+                            Document::String(not_nil_var),
+                            " = ",
                             not_nil_code,
-                            format!(
-                                " in case {recv_var} of <'nil'> when 'true' -> apply {nil_var} () <_> when 'true' -> "
-                            ),
+                            " in case ",
+                            Document::String(recv_var),
+                            " of <'nil'> when 'true' -> apply ",
+                            Document::String(nil_var),
+                            " () <_> when 'true' -> ",
                             apply,
                             " end",
                         ];
@@ -723,15 +780,23 @@ impl CoreErlangGenerator {
                         let nil_code = self.expression_doc(&arguments[1])?;
                         let apply = not_nil_apply(&not_nil_var, &recv_var, block_takes_arg);
                         let doc = docvec![
-                            format!("let {recv_var} = "),
+                            "let ",
+                            Document::String(recv_var.clone()),
+                            " = ",
                             recv_code,
-                            format!(" in let {not_nil_var} = "),
+                            " in let ",
+                            Document::String(not_nil_var.clone()),
+                            " = ",
                             not_nil_code,
-                            format!(" in let {nil_var} = "),
+                            " in let ",
+                            Document::String(nil_var.clone()),
+                            " = ",
                             nil_code,
-                            format!(
-                                " in case {recv_var} of <'nil'> when 'true' -> apply {nil_var} () <_> when 'true' -> "
-                            ),
+                            " in case ",
+                            Document::String(recv_var),
+                            " of <'nil'> when 'true' -> apply ",
+                            Document::String(nil_var),
+                            " () <_> when 'true' -> ",
                             apply,
                             " end",
                         ];
@@ -771,16 +836,31 @@ impl CoreErlangGenerator {
                         let msg_code = self.expression_doc(&arguments[0])?;
 
                         let doc = docvec![
-                            format!("let {recv_var} = "),
+                            "let ",
+                            Document::String(recv_var.clone()),
+                            " = ",
                             recv_code,
-                            format!(" in let {msg_var} = "),
+                            " in let ",
+                            Document::String(msg_var.clone()),
+                            " = ",
                             msg_code,
-                            format!(
-                                " in let {class_var} = call 'beamtalk_primitive':'class_of'({recv_var}) in \
-                                 let {err0} = call 'beamtalk_error':'new'('user_error', {class_var}) in \
-                                 let {err1} = call 'beamtalk_error':'with_message'({err0}, {msg_var}) in \
-                                 call 'beamtalk_error':'raise'({err1})"
-                            ),
+                            " in let ",
+                            Document::String(class_var.clone()),
+                            " = call 'beamtalk_primitive':'class_of'(",
+                            Document::String(recv_var),
+                            ") in let ",
+                            Document::String(err0.clone()),
+                            " = call 'beamtalk_error':'new'('user_error', ",
+                            Document::String(class_var),
+                            ") in let ",
+                            Document::String(err1.clone()),
+                            " = call 'beamtalk_error':'with_message'(",
+                            Document::String(err0),
+                            ", ",
+                            Document::String(msg_var),
+                            ") in call 'beamtalk_error':'raise'(",
+                            Document::String(err1),
+                            ")",
                         ];
                         Ok(Some(doc))
                     }
@@ -814,9 +894,13 @@ impl CoreErlangGenerator {
                     let recv_var = self.fresh_temp_var("Obj");
                     let recv_code = self.expression_doc(receiver)?;
                     let doc = docvec![
-                        format!("let {recv_var} = "),
+                        "let ",
+                        Document::String(recv_var.clone()),
+                        " = ",
                         recv_code,
-                        format!(" in call 'erlang':'phash2'({recv_var})"),
+                        " in call 'erlang':'phash2'(",
+                        Document::String(recv_var),
+                        ")",
                     ];
                     Ok(Some(doc))
                 }
@@ -857,15 +941,26 @@ impl CoreErlangGenerator {
                     let recv_code = self.expression_doc(receiver)?;
 
                     let doc = docvec![
-                        format!("let {receiver_var} = "),
+                        "let ",
+                        Document::String(receiver_var.clone()),
+                        " = ",
                         recv_code,
-                        format!(
-                            " in let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in \
-                                 let {future_var} = call 'beamtalk_future':'new'() in \
-                                 let {future_pid_var} = call 'beamtalk_future':'pid'({future_var}) in \
-                                 let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'fieldNames', [], {future_pid_var}) in \
-                                 {future_var}"
-                        ),
+                        " in let ",
+                        Document::String(pid_var.clone()),
+                        " = call 'erlang':'element'(4, ",
+                        Document::String(receiver_var),
+                        ") in let ",
+                        Document::String(future_var.clone()),
+                        " = call 'beamtalk_future':'new'() in let ",
+                        Document::String(future_pid_var.clone()),
+                        " = call 'beamtalk_future':'pid'(",
+                        Document::String(future_var.clone()),
+                        ") in let _ = call 'beamtalk_actor':'async_send'(",
+                        Document::String(pid_var),
+                        ", 'fieldNames', [], ",
+                        Document::String(future_pid_var),
+                        ") in ",
+                        Document::String(future_var),
                     ];
                     Ok(Some(doc))
                 }
@@ -883,13 +978,19 @@ impl CoreErlangGenerator {
                         let sel_code = self.expression_doc(&arguments[0])?;
 
                         let doc = docvec![
-                            format!("let {receiver_var} = "),
+                            "let ",
+                            Document::String(receiver_var.clone()),
+                            " = ",
                             recv_code,
-                            format!(" in let {selector_var} = "),
+                            " in let ",
+                            Document::String(selector_var.clone()),
+                            " = ",
                             sel_code,
-                            format!(
-                                " in call 'beamtalk_primitive':'responds_to'({receiver_var}, {selector_var})"
-                            ),
+                            " in call 'beamtalk_primitive':'responds_to'(",
+                            Document::String(receiver_var),
+                            ", ",
+                            Document::String(selector_var),
+                            ")",
                         ];
                         Ok(Some(doc))
                     }
@@ -910,36 +1011,60 @@ impl CoreErlangGenerator {
                         let name_code = self.expression_doc(&arguments[0])?;
 
                         let doc = docvec![
-                            format!("let {receiver_var} = "),
+                            "let ",
+                            Document::String(receiver_var.clone()),
+                            " = ",
                             recv_code,
-                            format!(" in let {name_var} = "),
+                            " in let ",
+                            Document::String(name_var.clone()),
+                            " = ",
                             name_code,
-                            format!(
-                                " in case case call 'erlang':'is_tuple'({receiver_var}) of \
-                                 <'true'> when 'true' -> \
-                                 case call 'erlang':'=='(call 'erlang':'tuple_size'({receiver_var}), 4) of \
-                                 <'true'> when 'true' -> \
-                                 call 'erlang':'=='(call 'erlang':'element'(1, {receiver_var}), 'beamtalk_object') \
-                                 <_> when 'true' -> 'false' end \
-                                 <_> when 'true' -> 'false' end of "
-                            ),
-                            format!(
-                                "<'true'> when 'true' -> \
-                                 let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in \
-                                 let {future_var} = call 'beamtalk_future':'new'() in \
-                                 let {future_pid_var} = call 'beamtalk_future':'pid'({future_var}) in \
-                                 let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'fieldAt:', [{name_var}], {future_pid_var}) in \
-                                 {future_var} "
-                            ),
-                            format!(
-                                "<_> when 'true' -> \
-                                 let {class_var} = call 'beamtalk_primitive':'class_of'({receiver_var}) in \
-                                 let {error_base} = call 'beamtalk_error':'new'('immutable_value', {class_var}) in \
-                                 let {error_sel} = call 'beamtalk_error':'with_selector'({error_base}, 'fieldAt:') in \
-                                 let {error_hint} = call 'beamtalk_error':'with_hint'({error_sel}, {hint}) in \
-                                 call 'beamtalk_error':'raise'({error_hint}) \
-                                 end"
-                            ),
+                            " in case case call 'erlang':'is_tuple'(",
+                            Document::String(receiver_var.clone()),
+                            ") of <'true'> when 'true' -> case call 'erlang':'=='(call 'erlang':'tuple_size'(",
+                            Document::String(receiver_var.clone()),
+                            "), 4) of <'true'> when 'true' -> call 'erlang':'=='(call 'erlang':'element'(1, ",
+                            Document::String(receiver_var.clone()),
+                            "), 'beamtalk_object') <_> when 'true' -> 'false' end <_> when 'true' -> 'false' end of ",
+                            "<'true'> when 'true' -> let ",
+                            Document::String(pid_var.clone()),
+                            " = call 'erlang':'element'(4, ",
+                            Document::String(receiver_var.clone()),
+                            ") in let ",
+                            Document::String(future_var.clone()),
+                            " = call 'beamtalk_future':'new'() in let ",
+                            Document::String(future_pid_var.clone()),
+                            " = call 'beamtalk_future':'pid'(",
+                            Document::String(future_var.clone()),
+                            ") in let _ = call 'beamtalk_actor':'async_send'(",
+                            Document::String(pid_var),
+                            ", 'fieldAt:', [",
+                            Document::String(name_var),
+                            "], ",
+                            Document::String(future_pid_var),
+                            ") in ",
+                            Document::String(future_var),
+                            " <_> when 'true' -> let ",
+                            Document::String(class_var.clone()),
+                            " = call 'beamtalk_primitive':'class_of'(",
+                            Document::String(receiver_var),
+                            ") in let ",
+                            Document::String(error_base.clone()),
+                            " = call 'beamtalk_error':'new'('immutable_value', ",
+                            Document::String(class_var),
+                            ") in let ",
+                            Document::String(error_sel.clone()),
+                            " = call 'beamtalk_error':'with_selector'(",
+                            Document::String(error_base),
+                            ", 'fieldAt:') in let ",
+                            Document::String(error_hint.clone()),
+                            " = call 'beamtalk_error':'with_hint'(",
+                            Document::String(error_sel),
+                            ", ",
+                            Document::String(hint),
+                            ") in call 'beamtalk_error':'raise'(",
+                            Document::String(error_hint),
+                            ") end",
                         ];
                         Ok(Some(doc))
                     }
@@ -963,38 +1088,66 @@ impl CoreErlangGenerator {
                         let value_code = self.expression_doc(&arguments[1])?;
 
                         let doc = docvec![
-                            format!("let {receiver_var} = "),
+                            "let ",
+                            Document::String(receiver_var.clone()),
+                            " = ",
                             recv_code,
-                            format!(" in let {name_var} = "),
+                            " in let ",
+                            Document::String(name_var.clone()),
+                            " = ",
                             name_code,
-                            format!(" in let {value_var} = "),
+                            " in let ",
+                            Document::String(value_var.clone()),
+                            " = ",
                             value_code,
-                            format!(
-                                " in case case call 'erlang':'is_tuple'({receiver_var}) of \
-                                 <'true'> when 'true' -> \
-                                 case call 'erlang':'=='(call 'erlang':'tuple_size'({receiver_var}), 4) of \
-                                 <'true'> when 'true' -> \
-                                 call 'erlang':'=='(call 'erlang':'element'(1, {receiver_var}), 'beamtalk_object') \
-                                 <_> when 'true' -> 'false' end \
-                                 <_> when 'true' -> 'false' end of "
-                            ),
-                            format!(
-                                "<'true'> when 'true' -> \
-                                 let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in \
-                                 let {future_var} = call 'beamtalk_future':'new'() in \
-                                 let {future_pid_var} = call 'beamtalk_future':'pid'({future_var}) in \
-                                 let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'fieldAt:put:', [{name_var}, {value_var}], {future_pid_var}) in \
-                                 {future_var} "
-                            ),
-                            format!(
-                                "<_> when 'true' -> \
-                                 let {class_var} = call 'beamtalk_primitive':'class_of'({receiver_var}) in \
-                                 let {error_base} = call 'beamtalk_error':'new'('immutable_value', {class_var}) in \
-                                 let {error_sel} = call 'beamtalk_error':'with_selector'({error_base}, 'fieldAt:put:') in \
-                                 let {error_hint} = call 'beamtalk_error':'with_hint'({error_sel}, {hint}) in \
-                                 call 'beamtalk_error':'raise'({error_hint}) \
-                                 end"
-                            ),
+                            " in case case call 'erlang':'is_tuple'(",
+                            Document::String(receiver_var.clone()),
+                            ") of <'true'> when 'true' -> case call 'erlang':'=='(call 'erlang':'tuple_size'(",
+                            Document::String(receiver_var.clone()),
+                            "), 4) of <'true'> when 'true' -> call 'erlang':'=='(call 'erlang':'element'(1, ",
+                            Document::String(receiver_var.clone()),
+                            "), 'beamtalk_object') <_> when 'true' -> 'false' end <_> when 'true' -> 'false' end of ",
+                            "<'true'> when 'true' -> let ",
+                            Document::String(pid_var.clone()),
+                            " = call 'erlang':'element'(4, ",
+                            Document::String(receiver_var.clone()),
+                            ") in let ",
+                            Document::String(future_var.clone()),
+                            " = call 'beamtalk_future':'new'() in let ",
+                            Document::String(future_pid_var.clone()),
+                            " = call 'beamtalk_future':'pid'(",
+                            Document::String(future_var.clone()),
+                            ") in let _ = call 'beamtalk_actor':'async_send'(",
+                            Document::String(pid_var),
+                            ", 'fieldAt:put:', [",
+                            Document::String(name_var),
+                            ", ",
+                            Document::String(value_var),
+                            "], ",
+                            Document::String(future_pid_var),
+                            ") in ",
+                            Document::String(future_var),
+                            " <_> when 'true' -> let ",
+                            Document::String(class_var.clone()),
+                            " = call 'beamtalk_primitive':'class_of'(",
+                            Document::String(receiver_var),
+                            ") in let ",
+                            Document::String(error_base.clone()),
+                            " = call 'beamtalk_error':'new'('immutable_value', ",
+                            Document::String(class_var),
+                            ") in let ",
+                            Document::String(error_sel.clone()),
+                            " = call 'beamtalk_error':'with_selector'(",
+                            Document::String(error_base),
+                            ", 'fieldAt:put:') in let ",
+                            Document::String(error_hint.clone()),
+                            " = call 'beamtalk_error':'with_hint'(",
+                            Document::String(error_sel),
+                            ", ",
+                            Document::String(hint),
+                            ") in call 'beamtalk_error':'raise'(",
+                            Document::String(error_hint),
+                            ") end",
                         ];
                         Ok(Some(doc))
                     }
