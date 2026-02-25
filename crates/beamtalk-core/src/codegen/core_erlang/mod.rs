@@ -903,8 +903,9 @@ impl CoreErlangGenerator {
             // OR local variable mutations all need threading
             analysis.has_state_effects() || !analysis.local_writes.is_empty()
         } else {
-            // Value types: field writes or self-sends only
-            analysis.has_state_effects()
+            // BT-892: Value types have no State variable, so self-sends should
+            // NOT trigger state threading. Only field writes need threading.
+            !analysis.field_writes.is_empty()
         }
     }
 
