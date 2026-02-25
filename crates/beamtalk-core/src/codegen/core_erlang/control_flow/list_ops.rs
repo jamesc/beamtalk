@@ -477,6 +477,7 @@ impl CoreErlangGenerator {
             } else {
                 // Non-assignment expression
                 if i > 0 && !is_last {
+                    // Previous expression left scope open, wrap to discard value
                     docs.push(Document::Str("let _ = "));
                 }
 
@@ -760,6 +761,7 @@ impl CoreErlangGenerator {
                 }
             } else {
                 if i > 0 && !is_last {
+                    // Previous expression left scope open, wrap to discard value
                     docs.push(Document::Str("let _ = "));
                 }
 
