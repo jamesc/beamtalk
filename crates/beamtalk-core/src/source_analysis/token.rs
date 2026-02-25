@@ -469,6 +469,36 @@ impl Token {
     pub fn has_leading_newline(&self) -> bool {
         self.leading_trivia.iter().any(Trivia::contains_newline)
     }
+
+    /// Returns the indentation level (number of whitespace chars after the last
+    /// newline in the leading trivia). Returns `None` if there is no leading newline.
+    ///
+    /// Used by the parser to detect class body boundaries (BT-903): when a token
+    /// starts at column 0 after a newline, it is outside the class body.
+    #[must_use]
+    pub fn indentation_after_newline(&self) -> Option<usize> {
+        // Walk backwards through trivia to find the last piece containing a newline,
+        // then count chars after the final newline in that piece plus any subsequent
+        // whitespace-only trivia.
+        let mut found_newline = false;
+        let mut indent = 0;
+
+        for trivia in &self.leading_trivia {
+            let s = trivia.as_str();
+            if let Some(pos) = s.rfind('\n') {
+                // Reset — this newline is the most recent
+                found_newline = true;
+                indent = s[pos + 1..].len();
+            } else if found_newline && trivia.is_whitespace() {
+                indent += s.len();
+            } else if found_newline {
+                // Non-whitespace trivia (comment) after the newline — reset indent
+                indent = 0;
+            }
+        }
+
+        if found_newline { Some(indent) } else { None }
+    }
 }
 
 #[cfg(test)]
@@ -560,6 +590,45 @@ mod tests {
         assert!(!comment.is_whitespace());
         assert!(comment.is_comment());
         assert!(!comment.contains_newline());
+    }
+
+    #[test]
+    fn token_indentation_after_newline() {
+        // No newline → None
+        let no_newline = Token::with_trivia(
+            TokenKind::Identifier("x".into()),
+            Span::new(2, 3),
+            vec![Trivia::Whitespace("  ".into())],
+            vec![],
+        );
+        assert_eq!(no_newline.indentation_after_newline(), None);
+
+        // Newline then column 0 → Some(0)
+        let at_col_0 = Token::with_trivia(
+            TokenKind::Identifier("Foo".into()),
+            Span::new(10, 13),
+            vec![Trivia::Whitespace("\n".into())],
+            vec![],
+        );
+        assert_eq!(at_col_0.indentation_after_newline(), Some(0));
+
+        // Newline then 2 spaces → Some(2)
+        let indented = Token::with_trivia(
+            TokenKind::Identifier("count".into()),
+            Span::new(20, 25),
+            vec![Trivia::Whitespace("\n  ".into())],
+            vec![],
+        );
+        assert_eq!(indented.indentation_after_newline(), Some(2));
+
+        // Multiple newlines — uses last one
+        let multi_newline = Token::with_trivia(
+            TokenKind::Identifier("x".into()),
+            Span::new(0, 1),
+            vec![Trivia::Whitespace("\n\n    ".into())],
+            vec![],
+        );
+        assert_eq!(multi_newline.indentation_after_newline(), Some(4));
     }
 
     #[test]

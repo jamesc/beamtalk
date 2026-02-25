@@ -150,6 +150,11 @@ impl Parser {
         // Skip any periods/statement terminators
         while self.match_token(&TokenKind::Period) {}
 
+        // BT-903: Set in_class_body so parse_method_body can use indentation
+        // to detect trailing expressions outside the class.
+        let was_in_class_body = self.in_class_body;
+        self.in_class_body = true;
+
         while !self.is_at_end()
             && !self.is_at_class_definition()
             && !self.is_at_standalone_method_definition()
@@ -209,6 +214,9 @@ impl Parser {
             // Skip any periods/statement terminators
             while self.match_token(&TokenKind::Period) {}
         }
+
+        // BT-903: Restore in_class_body flag
+        self.in_class_body = was_in_class_body;
 
         (state, methods, class_methods, class_variables)
     }
@@ -759,11 +767,15 @@ impl Parser {
 
         // Parse expressions until we hit something that looks like a new method,
         // state declaration, class definition, or standalone method definition
+        // BT-903: When inside a class body, a token at column 0 after a newline
+        // is outside the class body (trailing expression). Break to avoid consuming it.
+        #[allow(clippy::nonminimal_bool)]
         while !self.is_at_end()
             && !self.is_at_class_definition()
             && !self.is_at_method_definition()
             && !self.is_at_standalone_method_definition()
             && !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:")
+            && !(self.in_class_body && self.current_token().indentation_after_newline() == Some(0))
         {
             let pos_before = self.current;
             let expr = self.parse_expression();
