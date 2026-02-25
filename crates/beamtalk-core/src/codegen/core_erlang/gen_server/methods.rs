@@ -9,7 +9,7 @@
 //! and reply tuples, and the `register_class/0` on-load function.
 
 use super::super::document::{Document, INDENT, line, nest};
-use super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
+use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, ClassDefinition, Expression, MethodDefinition, MethodKind, Module};
 use crate::docvec;
 
@@ -307,10 +307,12 @@ impl CoreErlangGenerator {
                     // dispatch + state extraction as an open let chain; close with reply tuple.
                     let doc = self.generate_tier2_self_send_open(expr, &tier2_args)?;
                     docs.push(doc);
-                    let dispatch_var = self
-                        .last_dispatch_var
-                        .clone()
-                        .expect("generate_tier2_self_send_open always sets last_dispatch_var");
+                    let dispatch_var = self.last_dispatch_var.clone().ok_or_else(|| {
+                        CodeGenError::Internal(
+                            "invariant violation: missing dispatch var after Tier 2 self-send"
+                                .to_string(),
+                        )
+                    })?;
                     let final_state = self.current_state_var();
                     docs.push(docvec![
                         "{'reply', call 'erlang':'element'(1, ",
@@ -635,10 +637,12 @@ impl CoreErlangGenerator {
                     // dispatch + state extraction as an open let chain; close with reply tuple.
                     let doc = self.generate_tier2_self_send_open(expr, &tier2_args)?;
                     docs.push(doc);
-                    let dispatch_var = self
-                        .last_dispatch_var
-                        .clone()
-                        .expect("generate_tier2_self_send_open always sets last_dispatch_var");
+                    let dispatch_var = self.last_dispatch_var.clone().ok_or_else(|| {
+                        CodeGenError::Internal(
+                            "invariant violation: missing dispatch var after Tier 2 self-send"
+                                .to_string(),
+                        )
+                    })?;
                     let final_state = self.current_state_var();
                     docs.push(docvec![
                         "{'reply', call 'erlang':'element'(1, ",
