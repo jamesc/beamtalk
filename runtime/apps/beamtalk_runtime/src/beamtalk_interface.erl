@@ -324,11 +324,10 @@ handle_globals() ->
             fun(Pid, Acc) ->
                 try
                     Name = beamtalk_object_class:class_name(Pid),
-                    BinName = atom_to_binary(Name, utf8),
                     ModuleName = beamtalk_object_class:module_name(Pid),
                     ClassTag = beamtalk_class_registry:class_object_tag(Name),
                     ClassObj = {beamtalk_object, ClassTag, ModuleName, Pid},
-                    maps:put(BinName, ClassObj, Acc)
+                    maps:put(Name, ClassObj, Acc)
                 catch
                     exit:{noproc, _} -> Acc;
                     exit:{timeout, _} -> Acc

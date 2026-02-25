@@ -342,10 +342,10 @@ globals_returns_map_test_() ->
                 ?assert(is_map(Globals)),
                 ?assert(map_size(Globals) > 0),
 
-                %% Values should be beamtalk_object tuples with binary keys
+                %% Values should be beamtalk_object tuples with Symbol (atom) keys
                 maps:foreach(
                     fun(Key, Val) ->
-                        ?assert(is_binary(Key)),
+                        ?assert(is_atom(Key)),
                         ?assertMatch({beamtalk_object, _, _, _}, Val)
                     end,
                     Globals
