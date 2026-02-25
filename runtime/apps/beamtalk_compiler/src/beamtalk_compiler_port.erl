@@ -99,21 +99,32 @@ close(Port) ->
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
     | {error, [binary()]}.
-handle_response(#{
-    status := ok,
-    kind := class_definition,
-    core_erlang := CoreErlang,
-    module_name := ModuleName,
-    classes := Classes,
-    warnings := Warnings
-}) ->
+handle_response(
+    #{
+        status := ok,
+        kind := class_definition,
+        core_erlang := CoreErlang,
+        module_name := ModuleName,
+        classes := Classes,
+        warnings := Warnings
+    } = Response
+) ->
     PrettyCore = maybe_pretty_core(CoreErlang),
-    {ok, class_definition, #{
+    BaseInfo = #{
         core_erlang => PrettyCore,
         module_name => ModuleName,
         classes => Classes,
         warnings => Warnings
-    }};
+    },
+    %% BT-885: Forward trailing_core_erlang if present (inline class + trailing exprs)
+    ClassInfo =
+        case maps:find(trailing_core_erlang, Response) of
+            {ok, TrailingCoreErlang} ->
+                BaseInfo#{trailing_core_erlang => TrailingCoreErlang};
+            error ->
+                BaseInfo
+        end,
+    {ok, class_definition, ClassInfo};
 handle_response(#{
     status := ok,
     kind := method_definition,
