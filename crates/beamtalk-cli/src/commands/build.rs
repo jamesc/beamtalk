@@ -332,9 +332,14 @@ pub fn build_class_module_index(
                 }
             }
             module_index.insert(class_name.clone(), module_name.clone());
-            // BT-894: Record direct superclass for cross-file hierarchy resolution
+            // BT-894: Record direct superclass for cross-file hierarchy resolution.
+            // When a duplicate class overwrites a prior entry, keep the superclass
+            // index consistent by removing any stale mapping if the new definition
+            // has no explicit superclass.
             if let Some(ref superclass) = class.superclass {
-                superclass_index.insert(class_name, superclass.name.to_string());
+                superclass_index.insert(class_name.clone(), superclass.name.to_string());
+            } else {
+                superclass_index.remove(&class_name);
             }
         }
     }

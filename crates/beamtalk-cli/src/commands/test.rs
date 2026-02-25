@@ -202,6 +202,7 @@ fn compile_fixtures_directory(
     fixtures_dir: &Utf8Path,
     output_dir: &Utf8Path,
     class_module_index: &HashMap<String, String>,
+    class_superclass_index: &HashMap<String, String>,
 ) -> Result<Vec<String>> {
     if !fixtures_dir.is_dir() {
         return Ok(Vec::new());
@@ -233,7 +234,12 @@ fn compile_fixtures_directory(
         }
         fixtures_by_module.insert(module_name.clone(), fixture_path.clone());
 
-        let module_name = compile_fixture(fixture_path, output_dir, class_module_index)?;
+        let module_name = compile_fixture(
+            fixture_path,
+            output_dir,
+            class_module_index,
+            class_superclass_index,
+        )?;
         module_names.push(module_name);
     }
 
@@ -245,6 +251,7 @@ fn compile_fixture(
     fixture_path: &Utf8Path,
     output_dir: &Utf8Path,
     class_module_index: &HashMap<String, String>,
+    class_superclass_index: &HashMap<String, String>,
 ) -> Result<String> {
     let module_name = fixture_module_name(fixture_path)?;
 
@@ -264,7 +271,7 @@ fn compile_fixture(
         &options,
         &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
         class_module_index,
-        &std::collections::HashMap::new(),
+        class_superclass_index,
     )
     .wrap_err_with(|| format!("Failed to compile fixture '{fixture_path}'"))?;
 
@@ -327,6 +334,7 @@ fn compile_test_file(
     module_name: &str,
     output_dir: &Utf8Path,
     class_module_index: &HashMap<String, String>,
+    class_superclass_index: &HashMap<String, String>,
 ) -> Result<()> {
     let core_file = output_dir.join(format!("{module_name}.core"));
 
@@ -344,7 +352,7 @@ fn compile_test_file(
         &options,
         &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
         class_module_index,
-        &std::collections::HashMap::new(),
+        class_superclass_index,
     )
     .wrap_err_with(|| format!("Failed to compile test file '{source_path}'"))?;
 
@@ -626,6 +634,7 @@ fn discover_and_compile_doc_tests(
     source_path: &Utf8Path,
     build_dir: &Utf8Path,
     class_module_index: &HashMap<String, String>,
+    class_superclass_index: &HashMap<String, String>,
 ) -> Result<Vec<CompiledDocTestResult>> {
     let content = fs::read_to_string(source_path)
         .into_diagnostic()
@@ -640,8 +649,13 @@ fn discover_and_compile_doc_tests(
     }
 
     // Compile the containing source file so its classes are available to doc tests
-    compile_fixture(source_path, build_dir, class_module_index)
-        .wrap_err_with(|| format!("Failed to compile source file for doc tests '{source_path}'"))?;
+    compile_fixture(
+        source_path,
+        build_dir,
+        class_module_index,
+        class_superclass_index,
+    )
+    .wrap_err_with(|| format!("Failed to compile source file for doc tests '{source_path}'"))?;
 
     let mut results = Vec::new();
 
@@ -879,7 +893,7 @@ pub fn run_tests(path: &str) -> Result<()> {
     // references to package classes in subdirectories.
     let project_root_for_index = Utf8PathBuf::from(".");
     let pkg_for_index = manifest::find_manifest(&project_root_for_index)?;
-    let (mut class_module_index, _class_superclass_index): (
+    let (mut class_module_index, class_superclass_index): (
         HashMap<String, String>,
         HashMap<String, String>,
     ) = if let Some(ref pkg) = pkg_for_index {
@@ -926,7 +940,12 @@ pub fn run_tests(path: &str) -> Result<()> {
         class_module_index.extend(fixture_index);
     }
 
-    let precompiled = compile_fixtures_directory(&fixtures_dir, &build_dir, &class_module_index)?;
+    let precompiled = compile_fixtures_directory(
+        &fixtures_dir,
+        &build_dir,
+        &class_module_index,
+        &class_superclass_index,
+    )?;
     for module_name in &precompiled {
         precompiled_modules.insert(module_name.clone());
     }
@@ -989,7 +1008,12 @@ pub fn run_tests(path: &str) -> Result<()> {
                     test_file
                 );
             }
-            let module_name = compile_fixture(&fixture_path, &build_dir, &class_module_index)?;
+            let module_name = compile_fixture(
+                &fixture_path,
+                &build_dir,
+                &class_module_index,
+                &class_superclass_index,
+            )?;
             all_fixture_modules.push(module_name);
         }
 
@@ -1001,6 +1025,7 @@ pub fn run_tests(path: &str) -> Result<()> {
                 &test_class.module_name,
                 &build_dir,
                 &class_module_index,
+                &class_superclass_index,
             )?;
 
             // Generate EUnit wrapper
@@ -1021,8 +1046,12 @@ pub fn run_tests(path: &str) -> Result<()> {
         }
 
         // Discover doc tests in the same file
-        let doc_results =
-            discover_and_compile_doc_tests(test_file, &build_dir, &class_module_index)?;
+        let doc_results = discover_and_compile_doc_tests(
+            test_file,
+            &build_dir,
+            &class_module_index,
+            &class_superclass_index,
+        )?;
         for dr in doc_results {
             all_erl_files.push(dr.erl_file);
             compiled_doc_tests.push(CompiledDocTest {
