@@ -1,0 +1,112 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for WorkspaceInterface phase 3 methods (BT-846 / ADR 0040 Phase 3):
+// classes, testClasses, globals, load:, test, test:
+//
+// These tests require E2E because WorkspaceInterface is a singleton actor that
+// only exists in the live REPL process. Workspace variable persistence across
+// turns is needed for load + inspect workflows.
+
+// ===========================================================================
+// WORKSPACE CLASS INTROSPECTION
+// ===========================================================================
+
+// Workspace respondsTo: #classes
+Workspace respondsTo: #classes
+// => true
+
+// Workspace respondsTo: #testClasses
+Workspace respondsTo: #testClasses
+// => true
+
+// Workspace respondsTo: #globals
+Workspace respondsTo: #globals
+// => true
+
+// Workspace respondsTo: #load:
+Workspace respondsTo: #load:
+// => true
+
+// Workspace respondsTo: #test
+Workspace respondsTo: #test
+// => true
+
+// Workspace respondsTo: #test:
+Workspace respondsTo: #test:
+// => true
+
+// ===========================================================================
+// WORKSPACE GLOBALS
+// ===========================================================================
+
+// Workspace globals returns a map (Dictionary snapshot)
+wsGlobals := (Workspace globals) await
+// => _
+
+// globals includes workspace singletons (symbol key #Workspace)
+wsGlobals includesKey: #Workspace
+// => true
+
+// ===========================================================================
+// WORKSPACE CLASSES — INITIAL STATE
+// ===========================================================================
+
+// Workspace classes returns a list (may be empty before any user classes loaded)
+initialClasses := (Workspace classes) await
+// => _
+
+// ===========================================================================
+// WORKSPACE LOAD: + CLASSES + TEST:
+// ===========================================================================
+
+// Load counter fixture
+(Workspace load: "tests/e2e/fixtures/counter.bt") await
+// => nil
+
+// After loading, Workspace classes includes Counter
+afterLoadClasses := (Workspace classes) await
+// => _
+
+afterLoadClasses includes: Counter
+// => true
+
+// Load the CounterTest fixture
+(Workspace load: "tests/e2e/fixtures/counter_test.bt") await
+// => nil
+
+// ===========================================================================
+// WORKSPACE TEST CLASSES
+// ===========================================================================
+
+// Workspace testClasses includes CounterTest
+testClasses := (Workspace testClasses) await
+// => _
+
+testClasses includes: CounterTest
+// => true
+
+// ===========================================================================
+// WORKSPACE TEST: — RUN SPECIFIC TEST CLASS
+// ===========================================================================
+
+// Run CounterTest via test: message
+result := (Workspace test: CounterTest) await
+// => _
+
+// All counter tests pass
+result failed
+// => 0
+
+// ===========================================================================
+// WORKSPACE TEST — RUN ALL TEST CLASSES
+// ===========================================================================
+
+// Workspace test runs all test classes
+allResult := (Workspace test) await
+// => _
+
+// Total is at least 2 (CounterTest has 2 test methods)
+allResult total >= 2
+// => true
+

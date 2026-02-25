@@ -3,8 +3,8 @@
 
 %%% @doc Tests for WorkspaceInterface singleton.
 %%%
-%%% Tests the beamtalk_workspace_interface gen_server which provides
-%%% actor introspection API (actors, actorAt:, actorsOf:).
+%%% Tests the beamtalk_workspace_interface gen_server primitives
+%%% (actors, actorAt:, classes, load:).
 
 -module(beamtalk_workspace_interface_tests).
 -include_lib("eunit/include/eunit.hrl").
@@ -26,8 +26,7 @@ starts_and_stops_test() ->
 
 has_method_returns_true_for_supported_selectors_test() ->
     ?assert(beamtalk_workspace_interface:has_method(actors)),
-    ?assert(beamtalk_workspace_interface:has_method('actorAt:')),
-    ?assert(beamtalk_workspace_interface:has_method('actorsOf:')).
+    ?assert(beamtalk_workspace_interface:has_method('actorAt:')).
 
 has_method_returns_false_for_unknown_selectors_test() ->
     ?assertNot(beamtalk_workspace_interface:has_method(foo)),
@@ -45,8 +44,7 @@ class_info_returns_valid_metadata_test() ->
     ?assertEqual('Actor', maps:get(superclass, Info)),
     Methods = maps:get(instance_methods, Info),
     ?assert(maps:is_key(actors, Methods)),
-    ?assert(maps:is_key('actorAt:', Methods)),
-    ?assert(maps:is_key('actorsOf:', Methods)).
+    ?assert(maps:is_key('actorAt:', Methods)).
 
 %%% ===========================================================================
 %%% Sync (handle_call) Tests — actors
@@ -182,106 +180,6 @@ actor_at_returns_nil_when_no_registry_test() ->
     gen_server:stop(Pid).
 
 %%% ===========================================================================
-%%% Sync (handle_call) Tests — actorsOf:
-%%% ===========================================================================
-
-actors_of_filters_by_class_atom_test() ->
-    {ok, RegistryPid} = beamtalk_repl_actors:start_link(registered),
-    {ok, Pid} = beamtalk_workspace_interface:start_link(),
-    {ok, Actor1} = test_counter:start_link(0),
-    {ok, Actor2} = test_counter:start_link(10),
-    {ok, Actor3} = test_counter:start_link(20),
-
-    ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor1, 'Counter', test_counter),
-    ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor2, 'Timer', test_counter),
-    ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor3, 'Counter', test_counter),
-
-    Counters = gen_server:call(Pid, {'actorsOf:', ['Counter']}),
-    ?assertEqual(2, length(Counters)),
-
-    Timers = gen_server:call(Pid, {'actorsOf:', ['Timer']}),
-    ?assertEqual(1, length(Timers)),
-
-    gen_server:stop(Actor1),
-    gen_server:stop(Actor2),
-    gen_server:stop(Actor3),
-    gen_server:stop(Pid),
-    gen_server:stop(RegistryPid).
-
-actors_of_returns_empty_for_unknown_class_test() ->
-    {ok, RegistryPid} = beamtalk_repl_actors:start_link(registered),
-    {ok, Pid} = beamtalk_workspace_interface:start_link(),
-
-    Result = gen_server:call(Pid, {'actorsOf:', ['NonexistentClass']}),
-    ?assertEqual([], Result),
-
-    gen_server:stop(Pid),
-    gen_server:stop(RegistryPid).
-
-actors_of_accepts_binary_class_name_test() ->
-    {ok, RegistryPid} = beamtalk_repl_actors:start_link(registered),
-    {ok, Pid} = beamtalk_workspace_interface:start_link(),
-    {ok, Actor} = test_counter:start_link(0),
-    ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor, 'Counter', test_counter),
-
-    %% 'Counter' atom must already exist for binary_to_existing_atom
-    Result = gen_server:call(Pid, {'actorsOf:', [<<"Counter">>]}),
-    ?assertEqual(1, length(Result)),
-
-    gen_server:stop(Actor),
-    gen_server:stop(Pid),
-    gen_server:stop(RegistryPid).
-
-actors_of_returns_empty_for_nonexistent_binary_class_test() ->
-    {ok, Pid} = beamtalk_workspace_interface:start_link(),
-
-    %% binary_to_existing_atom will fail for non-existent atom
-    Result = gen_server:call(Pid, {'actorsOf:', [<<"TotallyFakeClassXYZ123">>]}),
-    ?assertEqual([], Result),
-
-    gen_server:stop(Pid).
-
-actors_of_accepts_class_object_tuple_test() ->
-    {ok, RegistryPid} = beamtalk_repl_actors:start_link(registered),
-    {ok, Pid} = beamtalk_workspace_interface:start_link(),
-    {ok, Actor} = test_counter:start_link(0),
-    ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor, 'Counter', test_counter),
-
-    %% Start a class process to simulate a real class object reference
-    ClassInfo = #{
-        name => 'Counter',
-        module => test_counter,
-        superclass => 'Actor',
-        instance_methods => #{},
-        class_methods => #{},
-        instance_variables => []
-    },
-    {ok, ClassPid} = beamtalk_object_class:start_link('Counter', ClassInfo),
-
-    ClassObj = {beamtalk_object, 'Counter class', test_counter, ClassPid},
-    Result = gen_server:call(Pid, {'actorsOf:', [ClassObj]}),
-    ?assertEqual(1, length(Result)),
-
-    gen_server:stop(ClassPid),
-    gen_server:stop(Actor),
-    gen_server:stop(Pid),
-    gen_server:stop(RegistryPid).
-
-actors_of_returns_empty_for_invalid_type_test() ->
-    {ok, Pid} = beamtalk_workspace_interface:start_link(),
-
-    ?assertEqual([], gen_server:call(Pid, {'actorsOf:', [42]})),
-    ?assertEqual([], gen_server:call(Pid, {'actorsOf:', [{not_a_class}]})),
-
-    gen_server:stop(Pid).
-
-actors_of_returns_empty_when_no_registry_test() ->
-    {ok, Pid} = beamtalk_workspace_interface:start_link(),
-    Result = gen_server:call(Pid, {'actorsOf:', ['Counter']}),
-    ?assertEqual([], Result),
-    gen_server:stop(Pid).
-
-%%% ===========================================================================
 %%% Sync (handle_call) Tests — unknown selectors
 %%% ===========================================================================
 
@@ -336,21 +234,6 @@ async_actor_at_resolves_future_test() ->
     gen_server:stop(Pid),
     gen_server:stop(RegistryPid).
 
-async_actors_of_resolves_future_test() ->
-    {ok, RegistryPid} = beamtalk_repl_actors:start_link(registered),
-    {ok, Pid} = beamtalk_workspace_interface:start_link(),
-    {ok, Actor} = test_counter:start_link(0),
-    ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor, 'Counter', test_counter),
-
-    Future = beamtalk_future:new(),
-    gen_server:cast(Pid, {'actorsOf:', ['Counter'], beamtalk_future:pid(Future)}),
-    Result = beamtalk_future:await(Future, 1000),
-    ?assertEqual(1, length(Result)),
-
-    gen_server:stop(Actor),
-    gen_server:stop(Pid),
-    gen_server:stop(RegistryPid).
-
 async_unknown_selector_rejects_future_test() ->
     {ok, Pid} = beamtalk_workspace_interface:start_link(),
 
@@ -382,3 +265,78 @@ non_named_terminate_test() ->
     gen_server:stop(Pid),
     %% Should not crash
     ok.
+
+%%% ===========================================================================
+%%% has_method Tests — new methods
+%%% ===========================================================================
+
+has_method_returns_true_for_new_selectors_test() ->
+    ?assert(beamtalk_workspace_interface:has_method(classes)),
+    ?assert(beamtalk_workspace_interface:has_method('load:')).
+
+has_method_returns_false_for_beamtalk_facade_selectors_test() ->
+    %% These are Beamtalk facades — gen_server does not handle them as primitives
+    ?assertNot(beamtalk_workspace_interface:has_method('actorsOf:')),
+    ?assertNot(beamtalk_workspace_interface:has_method(testClasses)),
+    ?assertNot(beamtalk_workspace_interface:has_method(globals)),
+    ?assertNot(beamtalk_workspace_interface:has_method(clear)),
+    ?assertNot(beamtalk_workspace_interface:has_method(test)),
+    ?assertNot(beamtalk_workspace_interface:has_method('test:')).
+
+%%% ===========================================================================
+%%% class_info Tests — new methods
+%%% ===========================================================================
+
+class_info_includes_new_methods_test() ->
+    Info = beamtalk_workspace_interface:class_info(),
+    Methods = maps:get(instance_methods, Info),
+    ?assert(maps:is_key(classes, Methods)),
+    ?assert(maps:is_key('load:', Methods)).
+
+%%% ===========================================================================
+%%% classes Tests
+%%% ===========================================================================
+
+classes_returns_list_test() ->
+    {ok, Pid} = beamtalk_workspace_interface:start_link(),
+    Result = gen_server:call(Pid, {classes, []}),
+    ?assert(is_list(Result)),
+    gen_server:stop(Pid).
+
+%%% ===========================================================================
+%%% load: Tests
+%%% ===========================================================================
+
+load_returns_type_error_for_integer_test() ->
+    {ok, Pid} = beamtalk_workspace_interface:start_link(),
+    {error, Error} = gen_server:call(Pid, {'load:', [42]}),
+    ?assertMatch(#beamtalk_error{kind = type_error, class = 'WorkspaceInterface'}, Error),
+    %% Verify error message mentions Integer
+    Msg = Error#beamtalk_error.message,
+    ?assert(binary:match(Msg, <<"Integer">>) =/= nomatch),
+    gen_server:stop(Pid).
+
+load_returns_file_not_found_for_missing_file_test() ->
+    {ok, Pid} = beamtalk_workspace_interface:start_link(),
+    {error, Error} = gen_server:call(Pid, {'load:', [<<"/nonexistent/path/file.bt">>]}),
+    ?assertMatch(#beamtalk_error{kind = file_not_found, class = 'WorkspaceInterface'}, Error),
+    gen_server:stop(Pid).
+
+%%% ===========================================================================
+%%% Async (handle_cast) Tests — new methods
+%%% ===========================================================================
+
+async_classes_resolves_future_test() ->
+    {ok, Pid} = beamtalk_workspace_interface:start_link(),
+    Future = beamtalk_future:new(),
+    gen_server:cast(Pid, {classes, [], beamtalk_future:pid(Future)}),
+    Result = beamtalk_future:await(Future, 1000),
+    ?assert(is_list(Result)),
+    gen_server:stop(Pid).
+
+async_load_rejects_future_for_type_error_test() ->
+    {ok, Pid} = beamtalk_workspace_interface:start_link(),
+    Future = beamtalk_future:new(),
+    gen_server:cast(Pid, {'load:', [42], beamtalk_future:pid(Future)}),
+    ?assertException(throw, {future_rejected, _}, beamtalk_future:await(Future, 1000)),
+    gen_server:stop(Pid).
