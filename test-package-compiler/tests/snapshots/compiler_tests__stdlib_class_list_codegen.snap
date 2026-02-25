@@ -101,39 +101,41 @@ call 'beamtalk_list_ops':'from_to'(Self, _start20, _end21)
 'indexOf:'/2 = fun (Self, _item22) ->
     let _NlrToken23 = call 'erlang':'make_ref'() in
     try
-    let _seq24 = call 'beamtalk_collection_ops':'inject_into'(Self, 0, fun (_i25, _each26) -> let NewI = call 'erlang':'+'(call 'beamtalk_future':'maybe_await'(_i25), call 'beamtalk_future':'maybe_await'(1)) in let _Unit = call 'beamtalk_message_dispatch':'send'(call 'erlang':'=:='(call 'beamtalk_future':'maybe_await'(_each26), call 'beamtalk_future':'maybe_await'(_item22)), 'ifTrue:', [fun () -> call 'erlang':'throw'({'$bt_nlr', _NlrToken23, NewI})]) in NewI) in
-    'nil'
-    of _NlrResult27 -> _NlrResult27
-    catch <_NlrCls28, _NlrErr29, _NlrStk30> ->
-      case {_NlrCls28, _NlrErr29} of
-        <{'throw', {'$bt_nlr', _CatchTok31, _NlrVal32}}> when call 'erlang':'=:='(_CatchTok31, _NlrToken23) -> _NlrVal32
-        <_OtherPair33> when 'true' -> primop 'raw_raise'(_NlrCls28, _NlrErr29, _NlrStk30)
+    let _seq24 = call 'beamtalk_collection_ops':'inject_into'(Self, 0, fun (_i25, _each26) -> let NewI = call 'erlang':'+'(call 'beamtalk_future':'maybe_await'(_i25), call 'beamtalk_future':'maybe_await'(1)) in let _Unit = call 'beamtalk_message_dispatch':'send'(call 'erlang':'=:='(call 'beamtalk_future':'maybe_await'(_each26), call 'beamtalk_future':'maybe_await'(_item22)), 'ifTrue:', [fun () -> call 'erlang':'throw'({'$bt_nlr', _NlrToken23, NewI, Self})]) in NewI) in
+    let _BodyResult27 = 'nil' in
+    {_BodyResult27, Self}
+
+    of _NlrResult28 -> _NlrResult28
+    catch <_NlrCls29, _NlrErr30, _NlrStk31> ->
+      case {_NlrCls29, _NlrErr30} of
+        <{'throw', {'$bt_nlr', _CatchTok32, _NlrVal33, _NlrState34}}> when call 'erlang':'=:='(_CatchTok32, _NlrToken23) -> {_NlrVal33, _NlrState34}
+        <_OtherPair35> when 'true' -> primop 'raw_raise'(_NlrCls29, _NlrErr30, _NlrStk31)
       end
 
-'eachWithIndex:'/2 = fun (Self, _block34) ->
-    let _seq35 = call 'beamtalk_collection_ops':'inject_into'(Self, 0, fun (_i36, _each37) -> let NewI = call 'erlang':'+'(call 'beamtalk_future':'maybe_await'(_i36), call 'beamtalk_future':'maybe_await'(1)) in let _Unit = let _Fun38 = _block34 in apply _Fun38 (_each37, NewI) in NewI) in
+'eachWithIndex:'/2 = fun (Self, _block36) ->
+    let _seq37 = call 'beamtalk_collection_ops':'inject_into'(Self, 0, fun (_i38, _each39) -> let NewI = call 'erlang':'+'(call 'beamtalk_future':'maybe_await'(_i38), call 'beamtalk_future':'maybe_await'(1)) in let _Unit = let _Fun40 = _block36 in apply _Fun40 (_each39, NewI) in NewI) in
     'nil'
 
-'zip:'/2 = fun (Self, _other39) ->
-call 'beamtalk_list_ops':'zip'(Self, _other39)
+'zip:'/2 = fun (Self, _other41) ->
+call 'beamtalk_list_ops':'zip'(Self, _other41)
 
-'groupBy:'/2 = fun (Self, _block40) ->
-call 'beamtalk_list_ops':'group_by'(Self, _block40)
+'groupBy:'/2 = fun (Self, _block42) ->
+call 'beamtalk_list_ops':'group_by'(Self, _block42)
 
-'partition:'/2 = fun (Self, _block41) ->
-call 'beamtalk_list_ops':'partition'(Self, _block41)
+'partition:'/2 = fun (Self, _block43) ->
+call 'beamtalk_list_ops':'partition'(Self, _block43)
 
-'takeWhile:'/2 = fun (Self, _block42) ->
-call 'lists':'takewhile'(_block42, Self)
+'takeWhile:'/2 = fun (Self, _block44) ->
+call 'lists':'takewhile'(_block44, Self)
 
-'dropWhile:'/2 = fun (Self, _block43) ->
-call 'lists':'dropwhile'(_block43, Self)
+'dropWhile:'/2 = fun (Self, _block45) ->
+call 'lists':'dropwhile'(_block45, Self)
 
-'intersperse:'/2 = fun (Self, _separator44) ->
-call 'beamtalk_list_ops':'intersperse'(Self, _separator44)
+'intersperse:'/2 = fun (Self, _separator46) ->
+call 'beamtalk_list_ops':'intersperse'(Self, _separator46)
 
-'add:'/2 = fun (Self, _item45) ->
-call 'erlang':'++'(Self, [_item45|[]])
+'add:'/2 = fun (Self, _item47) ->
+call 'erlang':'++'(Self, [_item47|[]])
 
 'dispatch'/3 = fun (Selector, Args, Self) ->
     case Selector of
@@ -240,7 +242,7 @@ call 'erlang':'++'(Self, [_item45|[]])
             call 'stdlib_class_list':'from:to:'(Self, DispArg0, DispArg1)
         <'indexOf:'> when 'true' ->
             let <DispArg0> = call 'erlang':'hd'(Args) in
-            call 'stdlib_class_list':'indexOf:'(Self, DispArg0)
+            case call 'stdlib_class_list':'indexOf:'(Self, DispArg0) of <{DispR, _DispS}> when 'true' -> DispR end
         <'eachWithIndex:'> when 'true' ->
             let <DispArg0> = call 'erlang':'hd'(Args) in
             call 'stdlib_class_list':'eachWithIndex:'(Self, DispArg0)

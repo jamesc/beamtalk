@@ -469,7 +469,10 @@ impl CoreErlangGenerator {
             self.current_nlr_token = None;
             if let Some(token_var) = nlr_token_var {
                 let catch_vars = self.wrap_value_type_body_with_nlr_catch(&token_var);
-                let body_doc = docvec!["    nil\n"];
+                // BT-854: NLR methods return {Result, Self} so the catch path
+                // (which also returns {NlrVal, NlrState}) produces a consistent shape.
+                let final_self = self.current_self_var();
+                let body_doc = docvec!["    {'nil', ", Document::String(final_self), "}\n",];
                 return Ok(docvec![
                     format!("'{}'/{} = fun ({}) ->\n", mangled, arity, params.join(", ")),
                     catch_vars.format_try_prefix(),
@@ -490,11 +493,22 @@ impl CoreErlangGenerator {
             // Early return (^) at the method body level — emit value and stop generating.
             // Note: ^ inside a block is handled via the NLR throw mechanism (BT-754).
             if let Expression::Return { value, .. } = expr {
-                let expr_code = self.capture_expression(value)?;
-                if i > 0 {
-                    body_parts.push(Document::Str("    "));
+                if nlr_token_var.is_some() {
+                    // BT-854: NLR methods return {Result, Self{N}} tuple so
+                    // the normal and NLR catch paths produce the same shape.
+                    let tmp = self.fresh_temp_var("EarlyResult");
+                    let expr_code = self.capture_expression(value)?;
+                    let final_self = self.current_self_var();
+                    body_parts.push(Document::String(format!(
+                        "    let {tmp} = {expr_code} in\n    {{{tmp}, {final_self}}}\n"
+                    )));
+                } else {
+                    let expr_code = self.capture_expression(value)?;
+                    if i > 0 {
+                        body_parts.push(Document::Str("    "));
+                    }
+                    body_parts.push(Document::String(expr_code));
                 }
-                body_parts.push(Document::String(expr_code));
                 break;
             }
 
@@ -509,7 +523,24 @@ impl CoreErlangGenerator {
                     let doc = self.generate_vt_field_assignment_open(expr)?;
                     body_parts.push(doc);
                     let final_self = self.current_self_var();
-                    body_parts.push(Document::String(format!("    {final_self}\n")));
+                    if nlr_token_var.is_some() {
+                        // BT-854: NLR methods return {Self{N}, Self{N}} tuple.
+                        // The result IS the updated Self, and the state IS the updated Self.
+                        body_parts.push(Document::String(format!(
+                            "    {{{final_self}, {final_self}}}\n"
+                        )));
+                    } else {
+                        body_parts.push(Document::String(format!("    {final_self}\n")));
+                    }
+                } else if nlr_token_var.is_some() {
+                    // BT-854: NLR methods return {Result, Self{N}} tuple so
+                    // the normal and NLR catch paths produce the same shape.
+                    let tmp = self.fresh_temp_var("BodyResult");
+                    let expr_code = self.capture_expression(expr)?;
+                    let final_self = self.current_self_var();
+                    body_parts.push(Document::String(format!(
+                        "    let {tmp} = {expr_code} in\n    {{{tmp}, {final_self}}}\n"
+                    )));
                 } else {
                     let expr_code = self.capture_expression(expr)?;
                     if i > 0 {
@@ -869,10 +900,23 @@ impl CoreErlangGenerator {
                 "        <'{mangled}'> when 'true' ->\n"
             )));
 
+            // BT-854: Methods with NLR return {Result, State} tuple — unwrap via case.
+            let has_nlr = method
+                .body
+                .iter()
+                .any(|expr| Self::expr_has_block_nlr(expr, false));
+
             if method.parameters.is_empty() {
-                method_branches.push(Document::String(format!(
-                    "            call '{mod_name}':'{mangled}'(Self)\n"
-                )));
+                if has_nlr {
+                    // Unwrap {Result, State} tuple from NLR-capable method
+                    method_branches.push(Document::String(format!(
+                        "            case call '{mod_name}':'{mangled}'(Self) of <{{DispR, _DispS}}> when 'true' -> DispR end\n"
+                    )));
+                } else {
+                    method_branches.push(Document::String(format!(
+                        "            call '{mod_name}':'{mangled}'(Self)\n"
+                    )));
+                }
             } else {
                 // Extract args from Args list: hd(Args), hd(tl(Args)), ...
                 for (i, _param) in method.parameters.iter().enumerate() {
@@ -885,13 +929,25 @@ impl CoreErlangGenerator {
                         "            let <{arg_var}> = call 'erlang':'hd'({access}) in\n"
                     )));
                 }
-                let mut call_str = format!("            call '{mod_name}':'{mangled}'(Self");
-                for i in 0..method.parameters.len() {
-                    use std::fmt::Write;
-                    let _ = write!(call_str, ", DispArg{i}");
+                if has_nlr {
+                    // Unwrap {Result, State} tuple from NLR-capable method
+                    let mut call_str =
+                        format!("            case call '{mod_name}':'{mangled}'(Self");
+                    for i in 0..method.parameters.len() {
+                        use std::fmt::Write;
+                        let _ = write!(call_str, ", DispArg{i}");
+                    }
+                    call_str.push_str(") of <{DispR, _DispS}> when 'true' -> DispR end\n");
+                    method_branches.push(Document::String(call_str));
+                } else {
+                    let mut call_str = format!("            call '{mod_name}':'{mangled}'(Self");
+                    for i in 0..method.parameters.len() {
+                        use std::fmt::Write;
+                        let _ = write!(call_str, ", DispArg{i}");
+                    }
+                    call_str.push_str(")\n");
+                    method_branches.push(Document::String(call_str));
                 }
-                call_str.push_str(")\n");
-                method_branches.push(Document::String(call_str));
             }
         }
 
