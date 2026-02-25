@@ -84,13 +84,13 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         // Collect let-bindings for expression segments and binary segments
         let mut let_bindings: Vec<Document<'static>> = Vec::new();
-        let mut binary_parts: Vec<String> = Vec::new();
+        let mut binary_parts: Vec<Document<'static>> = Vec::new();
 
         for segment in segments {
             match segment {
                 StringSegment::Literal(s) => {
                     if !s.is_empty() {
-                        binary_parts.push(Self::binary_byte_segments(s));
+                        binary_parts.push(Document::String(Self::binary_byte_segments(s)));
                     }
                 }
                 StringSegment::Interpolation(expr) => {
@@ -131,16 +131,25 @@ impl CoreErlangGenerator {
                     ]);
 
                     // Add as binary segment: #<Var>('all',8,'binary',['unsigned'|['big']])
-                    binary_parts.push(format!(
-                        "#<{str_var}>('all',8,'binary',['unsigned'|['big']])"
-                    ));
+                    binary_parts.push(docvec![
+                        "#<",
+                        Document::String(str_var),
+                        ">('all',8,'binary',['unsigned'|['big']])",
+                    ]);
                 }
             }
         }
 
         // Build the binary literal: #{seg1,seg2,...}#
-        let binary_content = binary_parts.join(",");
-        let binary_doc = docvec!["#{", Document::String(binary_content), "}#"];
+        let mut binary_doc_parts: Vec<Document<'static>> = vec![Document::Str("#{")];
+        for (i, part) in binary_parts.into_iter().enumerate() {
+            if i > 0 {
+                binary_doc_parts.push(Document::Str(","));
+            }
+            binary_doc_parts.push(part);
+        }
+        binary_doc_parts.push(Document::Str("}#"));
+        let binary_doc = Document::Vec(binary_doc_parts);
 
         // Wrap with let-bindings
         let mut doc = Document::Vec(Vec::new());
@@ -537,15 +546,15 @@ impl CoreErlangGenerator {
         // Pure block: plain fun (Tier 1 optimization)
         self.push_scope();
 
-        let mut params = String::new();
+        let mut param_parts: Vec<Document<'static>> = Vec::new();
         for (i, param) in block.parameters.iter().enumerate() {
             if i > 0 {
-                params.push_str(", ");
+                param_parts.push(Document::Str(", "));
             }
             let var_name = self.fresh_var(&param.name);
-            params.push_str(&var_name);
+            param_parts.push(Document::String(var_name));
         }
-        let header = docvec!["fun (", params, ") -> "];
+        let header = docvec!["fun (", Document::Vec(param_parts), ") -> "];
 
         // Generate block body as Document
         let body_doc = self.generate_block_body(block)?;

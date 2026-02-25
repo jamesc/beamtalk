@@ -1035,8 +1035,14 @@ impl CoreErlangGenerator {
             if class.is_abstract {
                 modifiers.push("'abstract'");
             }
-            let modifiers_str = modifiers.join(", ");
-            let modifiers_doc = docvec!["[", Document::String(modifiers_str), "]"];
+            let mut modifier_docs: Vec<Document<'static>> = Vec::new();
+            for (i, modifier) in modifiers.iter().enumerate() {
+                if i > 0 {
+                    modifier_docs.push(Document::Str(", "));
+                }
+                modifier_docs.push(Document::String((*modifier).to_string()));
+            }
+            let modifiers_doc = docvec!["[", Document::Vec(modifier_docs), "]"];
 
             // classMethods: class method specs (spawn/new + user-defined)
             let mut class_method_entries: Vec<Document<'static>> = Vec::new();
