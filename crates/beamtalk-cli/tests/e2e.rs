@@ -1500,12 +1500,22 @@ fn e2e_inline_class_trailing_expressions() {
     let _manager = ProcessManager::start();
     let mut client = ReplClient::connect().expect("Failed to connect to REPL");
 
+    // Use a unique class name per run to avoid collisions with pre-existing REPL state.
+    let class_name = format!(
+        "BT885Counter{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros()
+    );
+
     // Class definition followed by an expression in one eval call.
-    // Before the fix, this returned the class name ('BT885Counter').
-    // After the fix, it should return the result of 'BT885Counter new count' (0).
-    let result = client
-        .eval("Object subclass: BT885Counter\n  state: count = 0\n  count => self.count\nBT885Counter new count")
-        .expect("Eval failed");
+    // Before the fix, this returned the class name. After the fix, it should
+    // return the result of '{class_name} new count' (0).
+    let source = format!(
+        "Object subclass: {class_name}\n  state: count = 0\n  count => self.count\n{class_name} new count"
+    );
+    let result = client.eval(&source).expect("Eval failed");
     assert_eq!(
         result, "0",
         "Expected trailing expression result (0), got class name or error: {result}"
@@ -1513,7 +1523,7 @@ fn e2e_inline_class_trailing_expressions() {
 
     // Verify class was also registered (can still use it in subsequent evals).
     let result2 = client
-        .eval("BT885Counter new count")
+        .eval(&format!("{class_name} new count"))
         .expect("Second eval failed");
     assert_eq!(result2, "0", "Class should still be registered: {result2}");
 }

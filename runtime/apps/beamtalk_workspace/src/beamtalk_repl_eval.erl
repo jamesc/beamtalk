@@ -640,28 +640,39 @@ compile_expression_via_port(Expression, ModuleName, Bindings) ->
                                         of
                                             {ok, _TCompiledMod, TBinary} ->
                                                 {ok, TBinary, ModuleName};
-                                            {error, _} ->
-                                                none
+                                            {error, Reason} ->
+                                                {error, Reason}
                                         end;
                                     error ->
                                         none
                                 end,
-                            BaseInfo = #{
-                                binary => Binary,
-                                module_name => ClassModName,
-                                classes => Classes
-                            },
-                            ClassInfo2 =
-                                case TrailingResult of
-                                    {ok, TrailingBinary, TrailingModName} ->
-                                        BaseInfo#{
-                                            trailing_binary => TrailingBinary,
-                                            trailing_module_name => TrailingModName
-                                        };
-                                    none ->
-                                        BaseInfo
-                                end,
-                            {ok, class_definition, ClassInfo2, Warnings};
+                            case TrailingResult of
+                                {error, TrailingErr} ->
+                                    {error,
+                                        iolist_to_binary(
+                                            io_lib:format(
+                                                "Trailing expression compile error: ~p",
+                                                [TrailingErr]
+                                            )
+                                        )};
+                                _ ->
+                                    BaseInfo = #{
+                                        binary => Binary,
+                                        module_name => ClassModName,
+                                        classes => Classes
+                                    },
+                                    ClassInfo2 =
+                                        case TrailingResult of
+                                            {ok, TrailingBinary, TrailingModName} ->
+                                                BaseInfo#{
+                                                    trailing_binary => TrailingBinary,
+                                                    trailing_module_name => TrailingModName
+                                                };
+                                            none ->
+                                                BaseInfo
+                                        end,
+                                    {ok, class_definition, ClassInfo2, Warnings}
+                            end;
                         {error, Reason} ->
                             {error,
                                 iolist_to_binary(

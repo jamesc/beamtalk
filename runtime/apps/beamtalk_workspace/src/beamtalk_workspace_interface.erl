@@ -128,26 +128,37 @@ dispatch('load:', [Path], _Self, _State) ->
 %% Beamtalk-defined methods: delegate to compiled module
 dispatch(Selector, Args, Self, State) ->
     CompiledModule = 'bt@stdlib@workspace_interface',
-    case catch apply(CompiledModule, dispatch, [Selector, Args, Self, State]) of
+    try apply(CompiledModule, dispatch, [Selector, Args, Self, State]) of
         {reply, Result, NewState} ->
             {reply, Result, NewState};
         {error, Error, NewState} ->
             {error, Error, NewState};
-        {'EXIT', _Reason} ->
+        _Other ->
+            %% Unexpected return from delegate — treat as does_not_understand
             Err0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
             Err1 = beamtalk_error:with_selector(Err0, Selector),
             Err2 = beamtalk_error:with_hint(
                 Err1, <<"To list available selectors, use: Workspace methods">>
             ),
-            {error, Err2, State};
-        _ ->
-            %% Unknown method
+            {error, Err2, State}
+    catch
+        error:undef ->
+            %% Missing module or function — selector not implemented
             Error0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
             Error1 = beamtalk_error:with_selector(Error0, Selector),
             Error2 = beamtalk_error:with_hint(
                 Error1, <<"To list available selectors, use: Workspace methods">>
             ),
-            {error, Error2, State}
+            {error, Error2, State};
+        throw:#beamtalk_error{} = Err ->
+            %% Beamtalk method threw a structured error — propagate it
+            {error, Err, State};
+        Class:Reason ->
+            %% Unexpected runtime error — preserve actual error info
+            Err0 = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+            Err1 = beamtalk_error:with_selector(Err0, Selector),
+            Err2 = beamtalk_error:with_details(Err1, #{class => Class, reason => Reason}),
+            {error, Err2, State}
     end.
 
 %%====================================================================

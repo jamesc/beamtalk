@@ -466,7 +466,17 @@ fn handle_inline_class_definition(
     let trailing_core_erlang = if module.expressions.is_empty() {
         None
     } else {
-        beamtalk_core::erlang::generate_repl_expressions(&module.expressions, expr_module_name).ok()
+        match beamtalk_core::erlang::generate_repl_expressions(
+            &module.expressions,
+            expr_module_name,
+        ) {
+            Ok(code) => Some(code),
+            Err(e) => {
+                return error_response(&[format!(
+                    "Trailing expression code generation failed: {e}"
+                )]);
+            }
+        }
     };
 
     match beamtalk_core::erlang::generate_module(
