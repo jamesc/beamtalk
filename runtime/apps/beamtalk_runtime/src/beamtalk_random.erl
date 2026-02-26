@@ -28,12 +28,10 @@
 %%% |----------------------|-------------------------------------|
 %%% | `next`               | Random float, pure on instance state|
 %%% | `nextInteger:`        | Random integer, pure on instance state|
-%%% | `printString`        | String representation               |
-
 -module(beamtalk_random).
 
 -export(['next'/0, 'nextInteger:'/1, 'new'/0, 'seed:'/1]).
--export(['instanceNext'/1, 'instanceNextInteger:'/2, 'printString'/1]).
+-export(['instanceNext'/1, 'instanceNextInteger:'/2]).
 -export(['atRandom'/1]).
 -export([has_method/1]).
 
@@ -130,11 +128,6 @@
     Error2 = beamtalk_error:with_hint(Error1, <<"Receiver must be a Random instance">>),
     beamtalk_error:raise(Error2).
 
-%% @doc Return a developer-readable string representation.
--spec 'printString'(map()) -> binary().
-'printString'(#{'$beamtalk_class' := 'Random'}) ->
-    <<"a Random">>.
-
 %%% ============================================================================
 %%% Collection Integration
 %%% ============================================================================
@@ -176,5 +169,4 @@ has_method('new') -> true;
 has_method('seed:') -> true;
 has_method('instanceNext') -> true;
 has_method('instanceNextInteger:') -> true;
-has_method('printString') -> true;
 has_method(_) -> false.

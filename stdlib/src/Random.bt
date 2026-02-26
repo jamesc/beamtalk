@@ -101,12 +101,5 @@ sealed Object subclass: Random
   /// ```
   nextInteger: max: Integer -> Integer => @primitive "instanceNextInteger:"
 
-  /// Return a developer-readable string representation.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// (Random new) printString     // => "a Random"
-  /// ```
-  printString -> String => @primitive "printString"
 
 
