@@ -1,0 +1,50 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for WorkspaceInterface facade API (BT-849 / ADR 0040 Phase 6).
+//
+// Tests use class-level introspection (includesSelector:, inheritsFrom:) since
+// the Workspace singleton is not available in the BUnit test context
+// (workspace_mode: false). Live functionality tests are in E2E:
+// tests/e2e/cases/workspace_load.bt, workspace_native_api.bt
+//
+// Covers: classes, testClasses, globals, load:, test, test:, actors,
+//         actorAt:, actorsOf:, bind:as:, unbind:
+
+TestCase subclass: WorkspaceInterfaceTest
+
+  testIncludesSelectorClasses =>
+    self assert: (WorkspaceInterface includesSelector: #classes)
+
+  testIncludesSelectorTestClasses =>
+    self assert: (WorkspaceInterface includesSelector: #testClasses)
+
+  testIncludesSelectorGlobals =>
+    self assert: (WorkspaceInterface includesSelector: #globals)
+
+  testIncludesSelectorLoadColon =>
+    self assert: (WorkspaceInterface includesSelector: #load:)
+
+  testIncludesSelectorTest =>
+    self assert: (WorkspaceInterface includesSelector: #test)
+
+  testIncludesSelectorTestColon =>
+    self assert: (WorkspaceInterface includesSelector: #test:)
+
+  testIncludesSelectorActors =>
+    self assert: (WorkspaceInterface includesSelector: #actors)
+
+  testIncludesSelectorActorAt =>
+    self assert: (WorkspaceInterface includesSelector: #actorAt:)
+
+  testIncludesSelectorActorsOf =>
+    self assert: (WorkspaceInterface includesSelector: #actorsOf:)
+
+  testIncludesSelectorBindAs =>
+    self assert: (WorkspaceInterface includesSelector: #bind:as:)
+
+  testIncludesSelectorUnbind =>
+    self assert: (WorkspaceInterface includesSelector: #unbind:)
+
+  testInheritsFromActor =>
+    self assert: (WorkspaceInterface inheritsFrom: Actor)
