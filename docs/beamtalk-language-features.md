@@ -708,7 +708,7 @@ Analogous to Pharo's `Smalltalk` image facade.
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `version` | `String` | Beamtalk version string |
-| `allClasses` | `List` | All registered class objects |
+| `allClasses` | `List` | All registered class names (symbols) |
 | `classNamed: #Name` | `Object` or `nil` | Look up a class by name |
 | `globals` | `Dictionary` | Snapshot of system namespace (class names → class objects) |
 | `help: aClass` | `String` | Class documentation: name, superclass, method signatures |
@@ -718,7 +718,7 @@ Analogous to Pharo's `Smalltalk` image facade.
 Beamtalk version
 // => "0.1.0"
 
-Beamtalk allClasses includes: Integer
+Beamtalk allClasses includes: #Integer
 // => true
 
 Beamtalk classNamed: #Counter

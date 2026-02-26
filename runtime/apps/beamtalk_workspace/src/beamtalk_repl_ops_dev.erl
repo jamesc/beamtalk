@@ -491,6 +491,10 @@ builtin_keywords() ->
     ].
 
 %% @private
+%% @doc Describe available protocol operations.
+%%
+%% Deprecated ops (BT-849 / ADR 0040 Phase 6) include a `deprecated` flag
+%% and a `migrate_to` hint so WebSocket clients can discover the migration path.
 -spec describe_ops() -> map().
 describe_ops() ->
     #{
@@ -499,21 +503,39 @@ describe_ops() ->
         <<"complete">> => #{<<"params">> => [<<"code">>], <<"optional">> => [<<"cursor">>]},
         <<"docs">> => #{
             <<"params">> => [<<"class">>],
-            <<"optional">> => [<<"selector">>]
+            <<"optional">> => [<<"selector">>],
+            <<"deprecated">> => true,
+            <<"migrate_to">> => <<"eval: Beamtalk help: ClassName">>
         },
-        <<"load-file">> => #{<<"params">> => [<<"path">>]},
+        <<"load-file">> => #{
+            <<"params">> => [<<"path">>],
+            <<"deprecated">> => true,
+            <<"migrate_to">> => <<"eval: Workspace load: \"path\"">>
+        },
         <<"load-source">> => #{<<"params">> => [<<"source">>]},
         <<"reload">> => #{
             <<"params">> => [],
-            <<"optional">> => [<<"module">>, <<"path">>]
+            <<"optional">> => [<<"module">>, <<"path">>],
+            <<"deprecated">> => true,
+            <<"migrate_to">> => <<"eval: ClassName reload">>
         },
-        <<"clear">> => #{<<"params">> => []},
-        <<"bindings">> => #{<<"params">> => []},
+        <<"clear">> => #{
+            <<"params">> => [],
+            <<"deprecated">> => true
+        },
+        <<"bindings">> => #{
+            <<"params">> => [],
+            <<"deprecated">> => true
+        },
         <<"sessions">> => #{<<"params">> => []},
         <<"clone">> => #{<<"params">> => []},
         <<"close">> => #{<<"params">> => []},
         <<"interrupt">> => #{<<"params">> => []},
-        <<"modules">> => #{<<"params">> => []},
+        <<"modules">> => #{
+            <<"params">> => [],
+            <<"deprecated">> => true,
+            <<"migrate_to">> => <<"eval: Workspace classes">>
+        },
         <<"unload">> => #{<<"params">> => [<<"module">>]},
         <<"health">> => #{<<"params">> => []},
         <<"show-codegen">> => #{<<"params">> => [<<"code">>]},
@@ -532,7 +554,7 @@ make_class_not_found_error(ClassName) ->
     ),
     beamtalk_error:with_hint(
         Err1,
-        <<"Use :modules to see loaded classes.">>
+        <<"Use Workspace classes or :modules to see loaded classes.">>
     ).
 
 %% @private

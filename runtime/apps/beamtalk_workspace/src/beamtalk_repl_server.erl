@@ -334,7 +334,7 @@ handle_op(<<"eval">>, Params, Msg, SessionPid) ->
     beamtalk_repl_ops_eval:handle(<<"eval">>, Params, Msg, SessionPid);
 handle_op(Op, Params, Msg, SessionPid) when Op =:= <<"clear">>; Op =:= <<"bindings">> ->
     %% DEPRECATED: Use `:clear` and `:bindings` REPL shortcuts (session-local only).
-    ?LOG_WARNING(
+    ?LOG_NOTICE(
         "Deprecated protocol op '~s' used by WebSocket client. "
         "These ops are session-local only and cannot be replaced by "
         "Beamtalk-native message sends.",
@@ -350,7 +350,7 @@ handle_op(Op, Params, Msg, SessionPid) when
     %%   load-file → Workspace load: "path"
     %%   reload    → ClassName reload
     %%   modules   → Workspace classes
-    ?LOG_WARNING(
+    ?LOG_NOTICE(
         "Deprecated protocol op '~s' used by WebSocket client. "
         "Migrate to Beamtalk-native API: "
         "load-file → Workspace load: \"path\", "
@@ -382,7 +382,7 @@ handle_op(<<"docs">>, Params, Msg, SessionPid) ->
     %% DEPRECATED: Use Beamtalk help: instead.
     %%   docs → Beamtalk help: ClassName
     %%   docs with selector → Beamtalk help: ClassName selector: #selector
-    ?LOG_WARNING(
+    ?LOG_NOTICE(
         "Deprecated protocol op 'docs' used by WebSocket client. "
         "Migrate to: Beamtalk help: ClassName or Beamtalk help: ClassName selector: #selector.",
         []
