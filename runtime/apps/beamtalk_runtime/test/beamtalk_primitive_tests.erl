@@ -644,7 +644,7 @@ print_string_float_test() ->
     ?assert(is_binary(Result)).
 
 print_string_string_test() ->
-    ?assertEqual(<<"hello">>, beamtalk_primitive:print_string(<<"hello">>)).
+    ?assertEqual(<<"\"hello\"">>, beamtalk_primitive:print_string(<<"hello">>)).
 
 print_string_boolean_test() ->
     ?assertEqual(<<"true">>, beamtalk_primitive:print_string(true)),
@@ -670,7 +670,7 @@ print_string_empty_list_test() ->
 
 print_string_tuple_test() ->
     Result = beamtalk_primitive:print_string({1, <<"two">>, 3}),
-    ?assertEqual(<<"{1, two, 3}">>, Result).
+    ?assertEqual(<<"{1, \"two\", 3}">>, Result).
 
 print_string_empty_tuple_test() ->
     ?assertEqual(<<"{}">>, beamtalk_primitive:print_string({})).

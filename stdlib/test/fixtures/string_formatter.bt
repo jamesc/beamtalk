@@ -12,7 +12,7 @@ Object subclass: StringFormatter
   suffix => self.suffix
 
   // Helper method called via self send in blocks
-  formatItem: item => "[" ++ item printString ++ "]"
+  formatItem: item => "[" ++ item displayString ++ "]"
 
   // BT-892: inject:into: with self send in block — must not generate State threading
   joinFormatted: items =>

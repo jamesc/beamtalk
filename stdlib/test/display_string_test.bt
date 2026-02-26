@@ -1,0 +1,49 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-929: Tests for displayString / printString two-protocol distinction.
+// printString  = developer representation (unambiguous, quoted strings, #symbol)
+// displayString = user-facing representation (no quotes, no # prefix)
+
+TestCase subclass: DisplayStringTest
+
+  testStringPrintString =>
+    // printString adds surrounding quotes for developer inspection
+    self assert: ("hello" printString) equals: """hello"""
+
+  testStringDisplayString =>
+    // displayString returns the raw string (no quotes)
+    self assert: ("hello" displayString) equals: "hello"
+
+  testStringPrintStringIsDifferentFromDisplayString =>
+    // The two should differ for strings (printString adds quotes)
+    self deny: ("hello" printString =:= "hello" displayString)
+
+  testEmptyStringPrintString =>
+    self assert: ("" printString) equals: """"""
+
+  testEmptyStringDisplayString =>
+    self assert: ("" displayString) equals: ""
+
+  testSymbolPrintString =>
+    // printString includes the # prefix
+    self assert: (#hello printString) equals: "#hello"
+
+  testSymbolDisplayString =>
+    // displayString omits the # prefix
+    self assert: (#hello displayString) equals: "hello"
+
+  testSymbolPrintStringIsDifferentFromDisplayString =>
+    // The two should differ for symbols
+    self deny: (#hello printString =:= #hello displayString)
+
+  testIntegerDisplayString =>
+    // Integer inherits displayString from Object, delegates to printString
+    self assert: (42 displayString) equals: "42"
+
+  testIntegerDisplayStringNegative =>
+    self assert: (-7 displayString) equals: "-7"
+
+  testObjectDisplayStringDelegatesToPrintString =>
+    // Object.displayString delegates to printString by default
+    self assert: (42 displayString) equals: (42 printString)

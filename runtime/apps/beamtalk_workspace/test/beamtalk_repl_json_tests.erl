@@ -725,11 +725,11 @@ term_to_json_map_with_atom_keys_test() ->
     Result = beamtalk_repl_json:term_to_json(#{name => <<"test">>, count => 5}),
     ?assert(is_binary(Result)),
     ?assert(binary:match(Result, <<"#count => 5">>) =/= nomatch),
-    ?assert(binary:match(Result, <<"#name => test">>) =/= nomatch).
+    ?assert(binary:match(Result, <<"#name => \"test\"">>) =/= nomatch).
 
 term_to_json_map_with_binary_keys_test() ->
     Result = beamtalk_repl_json:term_to_json(#{<<"key">> => <<"val">>}),
-    ?assertEqual(<<"#{key => val}">>, Result).
+    ?assertEqual(<<"#{\"key\" => \"val\"}">>, Result).
 
 term_to_json_map_with_list_keys_test() ->
     %% BT-535: List keys are printed using print_string format
@@ -1243,7 +1243,7 @@ term_to_json_map_with_mixed_keys_test() ->
     Result = beamtalk_repl_json:term_to_json(#{atom_key => 1, <<"bin_key">> => 2}),
     ?assert(is_binary(Result)),
     ?assert(binary:match(Result, <<"#atom_key => 1">>) =/= nomatch),
-    ?assert(binary:match(Result, <<"bin_key => 2">>) =/= nomatch).
+    ?assert(binary:match(Result, <<"\"bin_key\" => 2">>) =/= nomatch).
 
 term_to_json_single_element_tuple_test() ->
     Result = beamtalk_repl_json:term_to_json({only}),
@@ -1258,7 +1258,7 @@ term_to_json_large_tuple_test() ->
 term_to_json_mixed_tuple_test() ->
     %% BT-536: Tuple with mixed types: integer, atom, string
     Result = beamtalk_repl_json:term_to_json({ok, 42, <<"hello">>}),
-    ?assertEqual(<<"{#ok, 42, hello}">>, Result).
+    ?assertEqual(<<"{#ok, 42, \"hello\"}">>, Result).
 
 term_to_json_empty_tuple_test() ->
     %% BT-536: Empty tuple

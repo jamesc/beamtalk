@@ -24,8 +24,9 @@
 %%%
 %%% | Selector      | Args | Description                              |
 %%% |---------------|------|------------------------------------------|
-%%% | `printString` | []   | Human-readable string representation     |
-%%% | `inspect`     | []   | Detailed inspection string               |
+%%% | `printString`   | []   | Developer representation (e.g. `a Counter`)  |
+%%% | `displayString` | []   | User-facing representation (same for actors) |
+%%% | `inspect`       | []   | Detailed inspection string                   |
 %%%
 %%% ## Utility Methods
 %%%
@@ -89,6 +90,11 @@ dispatch('fieldAt:put:', [FieldName, Value], _Self, State) ->
 %% --- Display methods ---
 
 dispatch('printString', [], Self, State) ->
+    DisplayName = class_display_name(Self, State),
+    Str = iolist_to_binary([<<"a ">>, DisplayName]),
+    {reply, Str, State};
+dispatch('displayString', [], Self, State) ->
+    %% displayString for actors delegates to printString — same result.
     DisplayName = class_display_name(Self, State),
     Str = iolist_to_binary([<<"a ">>, DisplayName]),
     {reply, Str, State};
@@ -165,6 +171,7 @@ has_method('fieldAt:put:') -> true;
 has_method('perform:') -> true;
 has_method('perform:withArguments:') -> true;
 has_method('printString') -> true;
+has_method('displayString') -> true;
 has_method(inspect) -> true;
 has_method(yourself) -> true;
 has_method(hash) -> true;

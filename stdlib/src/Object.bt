@@ -104,6 +104,19 @@ ProtoObject subclass: Object
   /// ```
   printString -> String => "a " ++ self class printString
 
+  /// Return a user-facing string representation for display purposes.
+  ///
+  /// Default implementation delegates to `printString`. Subclasses such as
+  /// String and Symbol override this to return a more readable form without
+  /// developer annotations (e.g. no surrounding quotes or `#` prefix).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// MyClass new displayString    // => "a MyClass"
+  /// 42 displayString             // => "42"
+  /// ```
+  displayString -> String => self printString
+
   /// Inspect the receiver.
   ///
   /// ## Examples
