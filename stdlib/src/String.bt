@@ -472,13 +472,21 @@ sealed Collection subclass: String
   /// ```
   splitRegex: pattern -> List => @primitive "splitRegex:"
 
-  /// Return the string itself.
+  /// Return a developer-readable string representation (with surrounding quotes).
   ///
   /// ## Examples
   /// ```beamtalk
-  /// "hello" printString         // => "hello"
+  /// "hello" printString         // => """hello"""
   /// ```
-  printString -> String => self
+  printString -> String => """" ++ self ++ """"
+
+  /// Return the string itself for user-facing display (no surrounding quotes).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// "hello" displayString       // => "hello"
+  /// ```
+  displayString -> String => self
 
   /// Create a String by joining a list of grapheme cluster strings.
   ///

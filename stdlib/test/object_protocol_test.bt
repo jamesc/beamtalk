@@ -9,9 +9,9 @@ TestCase subclass: ObjectProtocolTest
     self assert: (42 printString) equals: "42".
     self assert: (0 printString) equals: "0".
     self assert: (-7 printString) equals: "-7".
-    // --- Strings ---
-    self assert: ("hello" printString) equals: "hello".
-    self assert: ("" printString) equals: "".
+    // --- Strings (printString adds surrounding quotes) ---
+    self assert: ("hello" printString) equals: """hello""".
+    self assert: ("" printString) equals: """""".
     // --- Booleans ---
     self assert: (true printString) equals: "true".
     self assert: (false printString) equals: "false".

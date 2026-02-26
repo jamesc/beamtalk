@@ -64,18 +64,13 @@ impl CoreErlangGenerator {
     ///
     /// Compiles `StringInterpolation` to Core Erlang binary construction:
     /// - Literal segments → byte sequences in the binary
-    /// - Expression segments → evaluate, dispatch `printString`, insert as binary segment
+    /// - Expression segments → evaluate, dispatch `displayString`, insert as binary segment
     ///
     /// Example: `"Hello, {name}!"` compiles to:
     /// ```text
     /// let _interpExpr1 = Name in
-    ///   let _interpRaw2 = call 'beamtalk_message_dispatch':'send'(_interpExpr1, 'printString', []) in
-    ///     let _interpStr3 =
-    ///       case call 'beamtalk_future':'is_future'(_interpRaw2) of
-    ///         <'true'>  when 'true' -> call 'beamtalk_future':'await'(_interpRaw2)
-    ///         <'false'> when 'true' -> _interpRaw2
-    ///       end
-    ///     in
+    ///   let _interpRaw2 = call 'beamtalk_message_dispatch':'send'(_interpExpr1, 'displayString', []) in
+    ///     let _interpStr3 = call 'beamtalk_primitive':'display_string'(_interpRaw2) in
     ///       #{#<72>(8,1,...), ..., #<_interpStr3>('all',8,'binary',...), #<33>(8,1,...)}#
     /// ```
     pub(super) fn generate_string_interpolation(
@@ -108,26 +103,25 @@ impl CoreErlangGenerator {
                         " in ",
                     ]);
 
-                    // Dispatch printString to convert to binary string
+                    // Dispatch displayString to convert to binary string (user-facing representation)
                     let_bindings.push(docvec![
                         "let ",
                         Document::String(raw_str_var.clone()),
                         " = call 'beamtalk_message_dispatch':'send'(",
                         Document::String(interp_var.clone()),
-                        ", 'printString', []) in ",
+                        ", 'displayString', []) in ",
                     ]);
 
-                    // Auto-await if the result is a tagged future (actor dispatch returns {beamtalk_future, Pid})
+                    // Convert to binary string via display_string, which recursively awaits futures.
+                    // This handles both direct futures (actor displayString returns future) and
+                    // double-futures (Object.displayString delegates to self printString which is
+                    // itself async for actors, returning a nested future).
                     let_bindings.push(docvec![
                         "let ",
                         str_var.clone(),
-                        " = case call 'beamtalk_future':'is_future'(",
+                        " = call 'beamtalk_primitive':'display_string'(",
                         raw_str_var.clone(),
-                        ") of <'true'> when 'true' -> call 'beamtalk_future':'await'(",
-                        raw_str_var.clone(),
-                        ") <'false'> when 'true' -> ",
-                        raw_str_var.clone(),
-                        " end in "
+                        ") in "
                     ]);
 
                     // Add as binary segment: #<Var>('all',8,'binary',['unsigned'|['big']])

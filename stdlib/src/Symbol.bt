@@ -60,6 +60,14 @@ sealed Object subclass: Symbol
   /// ```
   /= other: Symbol -> Boolean => @primitive "/="
 
+  /// Return a user-facing string representation without the `#` prefix.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #hello displayString     // => "hello"
+  /// ```
+  displayString -> String => self asString
+
   /// Return a hash value for the symbol.
   ///
   /// ## Examples

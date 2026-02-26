@@ -22,11 +22,12 @@ TestCase subclass: AssociationTest
     self assert: (b value) equals: 2
 
   testDisplayAsstringPrintstring =>
-    self assert: ((#name -> "James") asString) equals: "#name -> James".
+    // asString uses displayString (user-facing: no # prefix, no string quotes)
+    self assert: ((#name -> "James") asString) equals: "name -> James".
     self assert: ((42 -> "answer") asString) equals: "42 -> answer".
     self assert: (("count" -> 5) asString) equals: "count -> 5".
-    // printString delegates to asString (Association.bt)
-    self assert: ((#name -> "James") printString) equals: "#name -> James"
+    // printString uses printString for each part (developer: # prefix, string quoted)
+    self assert: ((#name -> "James") printString) equals: "#name -> ""James"""
 
   testReflection =>
     self assert: ((#name -> "James") class) equals: Association.

@@ -72,7 +72,7 @@ TestCase subclass: ArrayTest
   testPrintString =>
     self assert: (#[1, 2, 3] printString) equals: "#[1, 2, 3]".
     self assert: (#[] printString) equals: "#[]".
-    self assert: (#["a", "b"] printString) equals: "#[a, b]"
+    self assert: (#["a", "b"] printString) equals: "#[""a"", ""b""]"
 
   testWithAll =>
     a := Array withAll: #(1, 2, 3).

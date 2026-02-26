@@ -28,20 +28,24 @@ sealed Object subclass: Association
   /// ```
   value -> Object => @primitive "value"
 
-  /// Convert the association to its string representation.
+  /// Convert the association to a user-facing string representation.
+  ///
+  /// Uses `displayString` for both key and value (no `#` prefix, no quotes).
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (#name -> "James") asString // => "#name -> James"
+  /// (#name -> "James") asString // => "name -> James"
   /// ```
   asString -> String => "{self key} -> {self value}"
 
   /// Return a developer-readable string representation.
   ///
+  /// Uses `printString` for both key and value (symbol with `#`, string quoted).
+  ///
   /// ## Examples
   /// ```beamtalk
-  /// (#name -> "James") printString
+  /// (#name -> "James") printString // => "#name -> ""James"""
   /// ```
-  printString -> String => self asString
+  printString -> String => self key printString ++ " -> " ++ self value printString
 
 

@@ -3896,10 +3896,10 @@ fn test_string_interpolation_simple_variable() {
         span: Span::new(0, 15),
     };
     let code = generate_test_expression(&expression, "test_interp").expect("codegen should work");
-    // Should dispatch printString via beamtalk_message_dispatch
+    // Should dispatch displayString via beamtalk_message_dispatch
     assert!(
-        code.contains("'printString'"),
-        "Should dispatch printString. Got:\n{code}"
+        code.contains("'displayString'"),
+        "Should dispatch displayString. Got:\n{code}"
     );
     assert!(
         code.contains("beamtalk_message_dispatch':'send'"),
@@ -3925,8 +3925,8 @@ fn test_string_interpolation_no_interpolation() {
     let code = doc.to_pretty_string();
     // Should be a plain binary literal, no dispatch
     assert!(
-        !code.contains("printString"),
-        "Plain string should NOT dispatch printString. Got:\n{code}"
+        !code.contains("displayString"),
+        "Plain string should NOT dispatch displayString. Got:\n{code}"
     );
     assert!(
         code.starts_with("#{"),
@@ -3955,11 +3955,11 @@ fn test_string_interpolation_multiple_expressions() {
         span: Span::new(0, 8),
     };
     let code = generate_test_expression(&expression, "test_multi").expect("codegen should work");
-    // Should have two printString dispatches
-    let dispatch_count = code.matches("'printString'").count();
+    // Should have two displayString dispatches
+    let dispatch_count = code.matches("'displayString'").count();
     assert_eq!(
         dispatch_count, 2,
-        "Should have 2 printString dispatches. Got {dispatch_count}:\n{code}"
+        "Should have 2 displayString dispatches. Got {dispatch_count}:\n{code}"
     );
 }
 
@@ -3975,8 +3975,8 @@ fn test_string_interpolation_only_expression() {
     };
     let code = generate_test_expression(&expression, "test_bare").expect("codegen should work");
     assert!(
-        code.contains("'printString'"),
-        "Should dispatch printString even for bare expression. Got:\n{code}"
+        code.contains("'displayString'"),
+        "Should dispatch displayString even for bare expression. Got:\n{code}"
     );
     // Binary should contain only the variable segment
     assert!(
@@ -3997,10 +3997,10 @@ fn test_string_interpolation_integer_expression() {
         span: Span::new(0, 4),
     };
     let code = generate_test_expression(&expression, "test_int").expect("codegen should work");
-    // Should dispatch printString on the integer
+    // Should dispatch displayString on the integer
     assert!(
-        code.contains("'printString'"),
-        "Should dispatch printString on integer. Got:\n{code}"
+        code.contains("'displayString'"),
+        "Should dispatch displayString on integer. Got:\n{code}"
     );
 }
 

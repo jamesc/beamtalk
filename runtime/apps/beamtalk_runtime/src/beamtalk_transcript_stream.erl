@@ -212,7 +212,7 @@ handle_call(Request, _From, State) ->
 handle_cast({'show:', [Value], FuturePid}, #state{self_ref = SelfRef} = State) when
     is_pid(FuturePid)
 ->
-    Text = to_string(Value),
+    Text = beamtalk_primitive:display_string(Value),
     State1 = buffer_text(Text, State),
     push_to_subscribers(Text, State1),
     beamtalk_future:resolve(FuturePid, SelfRef),
@@ -243,7 +243,7 @@ handle_cast({unsubscribe, [], FuturePid}, #state{self_ref = SelfRef} = State) wh
     {noreply, remove_subscriber(CallerPid, State)};
 %% Legacy format (direct gen_server:cast without Future)
 handle_cast({'show:', Value}, State) ->
-    Text = to_string(Value),
+    Text = beamtalk_primitive:display_string(Value),
     State1 = buffer_text(Text, State),
     push_to_subscribers(Text, State1),
     {noreply, State1};
@@ -372,32 +372,6 @@ remove_subscriber(Pid, #state{subscribers = Subs} = State) ->
         error ->
             State
     end.
-
-%% @private
-%% @doc Convert a value to its string representation for display.
--spec to_string(term()) -> binary().
-to_string(Value) when is_binary(Value) ->
-    ensure_utf8(Value);
-to_string(Value) when is_integer(Value) ->
-    integer_to_binary(Value);
-to_string(Value) when is_float(Value) ->
-    float_to_binary(Value, [{decimals, 10}, compact]);
-to_string(Value) when is_atom(Value) ->
-    atom_to_binary(Value, utf8);
-to_string(Value) when is_list(Value) ->
-    try unicode:characters_to_binary(Value) of
-        Bin when is_binary(Bin) -> Bin;
-        {error, _, _} -> list_to_binary(io_lib:format("~p", [Value]));
-        {incomplete, _, _} -> list_to_binary(io_lib:format("~p", [Value]))
-    catch
-        _:_ -> list_to_binary(io_lib:format("~p", [Value]))
-    end;
-to_string(#beamtalk_object{class = Class}) ->
-    <<"a ", (atom_to_binary(Class, utf8))/binary>>;
-to_string(Value) when is_map(Value) ->
-    beamtalk_tagged_map:format_for_display(Value);
-to_string(Value) ->
-    list_to_binary(io_lib:format("~p", [Value])).
 
 %% @doc Ensure a binary is valid UTF-8. Returns the binary unchanged if valid,
 %% or a ~p (io_lib:format("~p", ...)) representation if it contains invalid

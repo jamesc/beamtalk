@@ -20,9 +20,9 @@
 #[1, 2, 3]
 // => #[1, 2, 3]
 
-// String elements
+// String elements (printed with quotes as developer representation)
 #["a", "b", "c"]
-// => #[a, b, c]
+// => #["a", "b", "c"]
 
 // ===========================================================================
 // SIZE AND IS_EMPTY

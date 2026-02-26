@@ -983,6 +983,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "ifNil:ifNotNil:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, return_type: None, param_types: vec![Some("Block".into()), Some("Block".into())] },
                 MethodInfo { selector: "ifNotNil:ifNil:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, return_type: None, param_types: vec![Some("Block".into()), Some("Block".into())] },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "displayString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
                 MethodInfo { selector: "inspect".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
                 MethodInfo { selector: "yourself".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: true, return_type: None, param_types: vec![] },
                 MethodInfo { selector: "hash".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![] },
@@ -1310,6 +1311,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "replaceAllRegex:with:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![None, Some("String".into())] },
                 MethodInfo { selector: "splitRegex:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![None] },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "displayString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
             ],
             class_methods: vec![
                 MethodInfo { selector: "withAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![Some("List".into())] },
@@ -1334,6 +1336,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Symbol".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
                 MethodInfo { selector: "=:=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Symbol".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![Some("Symbol".into())] },
                 MethodInfo { selector: "/=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Symbol".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![Some("Symbol".into())] },
+                MethodInfo { selector: "displayString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Symbol".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
                 MethodInfo { selector: "hash".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Symbol".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![] },
             ],
             class_methods: vec![],

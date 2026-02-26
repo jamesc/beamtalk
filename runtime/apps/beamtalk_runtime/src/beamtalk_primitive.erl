@@ -18,7 +18,8 @@
     send/3,
     responds_to/2,
     class_name_to_module/1,
-    print_string/1
+    print_string/1,
+    display_string/1
 ]).
 
 -include("beamtalk.hrl").
@@ -103,10 +104,12 @@ class_of_object_by_name(ClassName) ->
     end.
 
 %% @doc Return the printString representation of any value.
+%%
+%% Strings are quoted (developer representation), symbols use the `#` prefix.
 -spec print_string(term()) -> binary().
 print_string(X) when is_integer(X) -> erlang:integer_to_binary(X);
 print_string(X) when is_float(X) -> erlang:float_to_binary(X, [short]);
-print_string(X) when is_binary(X) -> X;
+print_string(X) when is_binary(X) -> iolist_to_binary([$", X, $"]);
 print_string(true) ->
     <<"true">>;
 print_string(false) ->
@@ -168,6 +171,48 @@ print_string_map(X) ->
                     iolist_to_binary([<<"a ">>, erlang:atom_to_binary(Class, utf8)])
             end
     end.
+
+%% @doc Return the displayString representation of any value.
+%%
+%% Strings are returned as-is (no surrounding quotes), symbols without
+%% the `#` prefix. This is the user-facing representation suitable for
+%% `Transcript show:` and string interpolation.
+-spec display_string(term()) -> binary().
+display_string(X) when is_integer(X) -> erlang:integer_to_binary(X);
+display_string(X) when is_float(X) -> erlang:float_to_binary(X, [short]);
+display_string(X) when is_binary(X) ->
+    case unicode:characters_to_binary(X) of
+        Utf8 when is_binary(Utf8) -> Utf8;
+        _ -> iolist_to_binary(io_lib:format("~p", [X]))
+    end;
+display_string(true) ->
+    <<"true">>;
+display_string(false) ->
+    <<"false">>;
+display_string(nil) ->
+    <<"nil">>;
+display_string(X) when is_atom(X) -> erlang:atom_to_binary(X, utf8);
+display_string(X) when is_list(X) ->
+    try unicode:characters_to_binary(X) of
+        Bin when is_binary(Bin) -> Bin;
+        _ -> iolist_to_binary(io_lib:format("~p", [X]))
+    catch
+        _:_ -> iolist_to_binary(io_lib:format("~p", [X]))
+    end;
+display_string({beamtalk_future, _} = Future) ->
+    display_string(beamtalk_future:await(Future));
+display_string(#beamtalk_object{class = 'Metaclass', pid = Pid}) ->
+    ClassName = beamtalk_object_class:class_name(Pid),
+    iolist_to_binary([atom_to_binary(ClassName, utf8), <<" class">>]);
+display_string(#beamtalk_object{class = ClassName}) ->
+    case beamtalk_class_registry:is_class_name(ClassName) of
+        true -> beamtalk_class_registry:class_display_name(ClassName);
+        false -> iolist_to_binary([<<"a ">>, atom_to_binary(ClassName, utf8)])
+    end;
+display_string(X) when is_map(X) ->
+    beamtalk_tagged_map:format_for_display(X);
+display_string(X) ->
+    iolist_to_binary(io_lib:format("~p", [X])).
 
 %% @doc Send a message to any value (actor or primitive).
 -spec send(term(), atom(), list()) -> term().
