@@ -196,7 +196,7 @@ counter := Counter spawn.         "Spawns a gen_server process"
 
 #### Methods and State Mutation
 
-Inside actor methods, slots are updated directly with `:=`. Each assignment compiles to `maps:put` on the state map — no dispatch call, no intermediate variables:
+Inside actor methods, slots are updated directly with `:=`. This compiles to the same underlying slot-write operation that `with*:` uses (today: `maps:put` on the state map), but without a dispatch call or intermediate variables:
 
 ```smalltalk
 Actor subclass: Counter
@@ -209,9 +209,10 @@ Actor subclass: Counter
 
 The compiler auto-generates `with*:` methods as the **public API** for external callers. Inside actor methods, direct slot assignment is preferred:
 
-- **Cheaper:** `self.slot := expr` compiles to `maps:put(slot, Expr, StateN)` — a direct map operation. `self withSlot: expr` is a self-send through dispatch, requiring `{reply, Result, NewState}` tuple unpacking.
+- **No dispatch overhead:** `self.slot := expr` compiles to the slot-write operation directly (today: `maps:put(slot, Expr, StateN)`), without going through message dispatch. `self withSlot: expr` is a self-send through dispatch, requiring `{reply, Result, NewState}` tuple unpacking.
 - **Safer:** With `self.slot :=`, the state map always reflects all assignments. With `with*:` chains, forgetting to capture an intermediate variable silently loses state updates — a data-loss footgun with no compile-time or runtime error.
-- **Intentional asymmetry with `with*:`:** `self.slot :=` bypasses dispatch — the actor's own methods are trusted to maintain invariants directly. If a subclass needs validation on slot writes, it overrides `withSlot:`, which gates the *external* API. This is analogous to Erlang's direct state map manipulation inside `handle_call`, and to Swift's `mutating` methods which bypass `willSet`/`didSet` property observers. The two mechanisms serve different audiences: `self.slot :=` for internal state management, `with*:` for the public contract.
+- **Same underlying operation as `with*:`:** Both `self.slot := expr` and `withSlot:` compile to the same slot-write code (today: `maps:put`). The difference is dispatch, not the write itself. If auto-validating slots are added later (e.g., type constraints on slot values), `self.slot :=` would compile to the same validation + write that `withSlot:` uses — the compiler controls both code paths. The distinction is "no message send" vs "message send," not "validated" vs "unvalidated."
+- **`with*:` is the public API:** External callers use `with*:`, which is dispatch-mediated and overridable. If a subclass needs validation on slot writes, it overrides `withSlot:`, which gates the *external* API. This is analogous to Erlang's direct state map manipulation inside `handle_call`, and to Swift's `mutating` methods which bypass `willSet`/`didSet` property observers.
 
 ```smalltalk
 "FOOTGUN — with*: chain, uncaptured intermediate silently loses balance update:"
@@ -669,7 +670,7 @@ This would be more ergonomic than chained `with*:` calls for constructing object
 **Actor Codegen:**
 - Generate gen_server module with `handle_call`/`handle_cast` callbacks
 - Call/cast routing (`.` vs `!`) is specified in ADR 0043
-- Compile `self.slot := expr` to `StateN = maps:put(slot, Expr, StateN-1)` — direct map operation, no dispatch
+- Compile `self.slot := expr` to the same slot-write operation as `with*:` (today: `StateN = maps:put(slot, Expr, StateN-1)`), but without dispatch
 - Actor methods receive state map, return `{reply, LastExpr, FinalState}`
 - Auto-generate getters and `with*:` as public API for actor state
 - **Affected:** `actor_codegen.rs`, `mod.rs`, `beamtalk_dispatch.erl`
