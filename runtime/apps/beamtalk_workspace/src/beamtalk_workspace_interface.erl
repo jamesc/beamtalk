@@ -486,7 +486,10 @@ spawn_call_worker(From, Op, Fun, State) ->
                     From,
                     {error,
                         beamtalk_error:with_message(
-                            Err, iolist_to_binary([<<"Internal error in ">>, atom_to_binary(Op)])
+                            Err,
+                            iolist_to_binary([
+                                <<"Internal error in ">>, atom_to_binary(Op, utf8)
+                            ])
                         )}
                 )
         end
@@ -511,7 +514,10 @@ spawn_cast_worker(FuturePid, Op, Fun, State) ->
                 beamtalk_future:reject(
                     FuturePid,
                     beamtalk_error:with_message(
-                        Err, iolist_to_binary([<<"Internal error in ">>, atom_to_binary(Op)])
+                        Err,
+                        iolist_to_binary([
+                            <<"Internal error in ">>, atom_to_binary(Op, utf8)
+                        ])
                     )
                 )
         end
