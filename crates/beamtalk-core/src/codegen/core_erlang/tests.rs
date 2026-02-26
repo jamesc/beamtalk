@@ -4373,8 +4373,8 @@ fn test_bt855_erlang_interop_wrapper_stateful_block_emits_warning() {
     //
     // Beamtalk: `Erlang lists map: [:x | count := count + x] to: items`
     // Expected wrapper:
-    //   let _ErlWrapper = let _BtBlock = fun(X, StateAcc) -> ... end in
-    //                     fun(X) -> let {_WRes, _} = apply _BtBlock(X, State) in _WRes end in
+    //   let _ErlWrapper = let _BtBlock = fun(X, StateAcc) -> ... in
+    //                     fun(X) -> let _WTuple = apply _BtBlock(X, State) in call 'erlang':'element'(1, _WTuple) in
     //   call 'lists':'map'(_ErlWrapper, Items)
     let mut generator = CoreErlangGenerator::new("test");
 
@@ -4540,7 +4540,7 @@ fn test_bt855_generate_erlang_interop_wrapper_pure_returns_tier1() {
 fn test_bt855_generate_erlang_interop_wrapper_stateful_returns_wrapper() {
     // BT-855: generate_erlang_interop_wrapper on a stateful block returns (WrapperDoc, true).
     // The wrapper is:
-    //   let BtBlock = fun(X, StateAcc) -> ... end in fun(X) -> let {WRes, _} = apply BtBlock(X, State) in WRes end
+    //   let BtBlock = fun(X, StateAcc) -> ... in fun(X) -> let WTuple = apply BtBlock(X, State) in call 'erlang':'element'(1, WTuple)
     let mut generator = CoreErlangGenerator::new("test");
 
     // Stateful block: [:x | count := count + x]
@@ -4589,10 +4589,11 @@ fn test_bt855_generate_erlang_interop_wrapper_stateful_returns_wrapper() {
         output.contains("apply "),
         "Wrapper should apply the BtBlock. Got: {output}"
     );
-    // The result tuple should destructure {WRes, _}
+    // The wrapper should extract element 1 from the {Result, NewState} tuple via erlang:element/2
+    // (Core Erlang `let` only binds single variables; tuple destructuring uses erlang:element/2)
     assert!(
-        output.contains('{') && output.contains(", _}"),
-        "Wrapper should destructure {{Result, _}} from the block apply. Got: {output}"
+        output.contains("call 'erlang':'element'(1,"),
+        "Wrapper should extract result via erlang:element(1, ...). Got: {output}"
     );
     // The outer fun should NOT have StateAcc — it's a plain Erlang fun.
     // Find the last `in fun (` to locate the wrapper fun signature and confirm
